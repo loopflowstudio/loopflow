@@ -24,7 +24,6 @@ mod chapters;
 mod children;
 mod ci_incidents;
 mod durable;
-pub(crate) mod engine_orphans;
 mod flow_inventory;
 mod metrics;
 mod plan_read;

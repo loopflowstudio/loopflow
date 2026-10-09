@@ -981,7 +981,6 @@ mod tests {
                 schema_version: 1,
                 observed_at,
                 nodes: Vec::new(),
-                provider_processes: Vec::new(),
             }))
         };
         assert_eq!(

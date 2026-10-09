@@ -1097,7 +1097,7 @@ impl CodexHarness {
 
         if connection.is_none() {
             if let Some((store, session, driver)) = &self.session_attachment {
-                store.record_session_provider_launch(session, driver, true)?;
+                store.record_session_provider_launch(session, driver, command.as_std())?;
             }
         }
         let lifeline = agent_process_lifeline_path(&endpoint);

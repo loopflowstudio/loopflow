@@ -10,6 +10,9 @@ use crate::id::{ProcessLfid, TraceId, WaveId};
 pub struct Process {
     pub lfid: ProcessLfid,
     pub pid: Option<u32>,
+    pub kind: ProcessKind,
+    pub agent_session_id: Option<String>,
+    pub os_started_at: Option<i64>,
     pub trace_id: TraceId,
     pub parent_process_lfid: Option<ProcessLfid>,
     pub via_agent: Option<bool>,
@@ -24,6 +27,14 @@ pub struct Process {
     pub exit_code: Option<i32>,
     pub signal: Option<String>,
     pub error: Option<String>,
+}
+
+/// Both kinds have one durable identity and one inventory entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProcessKind {
+    Lf,
+    Agent,
 }
 
 /// Command discovery filters. Work means recorded work, never today's caller binding.
@@ -105,6 +116,7 @@ pub struct AgentCaller {
 /// Every claim gets a new token, even when the same lf process reattaches.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionAttachment {
+    pub agent_process_lfid: ProcessLfid,
     pub process_lfid: Option<ProcessLfid>,
     pub token: crate::id::AttachmentToken,
     pub provider_generation: i64,
@@ -121,21 +133,13 @@ impl SessionAttachment {
     }
 }
 
-/// Read-local ownership evidence; never a liveness or control claim.
+/// The provider OS process, including its current attachment. History survives
+/// release and replacement; attachment and parent are independent identities.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SessionProcessObservation {
-    pub id: String,
-    pub title: String,
-    pub work: Option<crate::durable::WorkRef>,
+pub(crate) struct AgentProcess {
+    pub process: Process,
     pub attached_process_lfid: Option<ProcessLfid>,
-    pub driver_trace_id: Option<String>,
-    pub provider_process_lfid: Option<ProcessLfid>,
-    pub provider_pid: Option<u32>,
-    pub provider_started_at: Option<i64>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SessionProcessOwnership {
-    pub sessions: Vec<SessionProcessObservation>,
-    pub inputs: std::collections::BTreeMap<String, String>,
+    pub attachment_token: Option<crate::id::AttachmentToken>,
+    pub provider: Option<String>,
+    pub interactive: bool,
 }

@@ -721,6 +721,9 @@ mod tests {
 
     fn row(ts: i64, event: &str) -> Process {
         Process {
+            kind: crate::process::ProcessKind::Lf,
+            agent_session_id: None,
+            os_started_at: None,
             lfid: crate::id::ProcessLfid::new(),
             pid: None,
             trace_id: crate::id::TraceId::new(),

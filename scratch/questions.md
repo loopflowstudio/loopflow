@@ -17,3 +17,11 @@ requests, not already-submitted work. Per-request correlation—not AgentProcess
 original capture—retains this snapshot across live takeover and multiple turns.
 Crash-lost correlation remains unknown; this introduces no recovery replay or
 new execution owner.
+
+2026-10-09 record-cut finding: Claude interrupt/respawn reuses a cloned attachment
+inside one capture. Each spawn needs a fresh AgentProcess, with explicit handoff
+of the new attachment to the existing capture owner and harness. A mutable shared
+snapshot must not revive stale operations. The current identity writer refuses
+PID replacement; that protects history but is not accepted interrupt/resume
+behavior. Further launch work stops at this ownership correction. No new product
+decision or additional lifecycle owner is proposed.

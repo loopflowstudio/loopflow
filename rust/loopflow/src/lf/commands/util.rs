@@ -720,7 +720,7 @@ fn session_command_status_with_env(
     // terminal owns the provider generation created by this exact Process.
     let owned = native_provider_driver(environment)?;
     if let Some((store, session, driver)) = &owned {
-        store.record_session_provider_launch(session, driver, true)?;
+        store.record_session_provider_launch(session, driver, &process)?;
     }
     tracing::debug!(
         elapsed_ms = started.elapsed().as_millis(),

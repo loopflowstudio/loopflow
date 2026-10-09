@@ -57,7 +57,11 @@ early. Direct child commands name their invoking Process. Agent-issued commands
 record the incoming agent bit plus stable Session/provider-generation provenance,
 then resolve the current matching driver once at admission.
 
-The provider and shell do not become fake Processes. After driver handoff, new
+AgentProcess rows use the same `processes` inventory, with kind `agent`, exact
+PID/birth, served Session, original parent and current attachment. Session rows
+retain the current AgentProcess reference and native thread. Detached and replaced
+rows survive until positive terminal evidence; attachment absence never removes
+them from inventory. Shell helpers do not become fake lf invocations. After handoff, new
 commands from the continuing provider name the new driver; delayed commands from
 a replaced provider retain their historical origin. A parent exiting never
 rewrites existing descendants. These causal links grant neither signaling nor
@@ -68,6 +72,12 @@ code or signal. Missing terminal evidence stays unknown. Installation/bootstrap
 commands must reach their exact-store authority checks before any logging-induced
 store open; unavailable-store coverage is reported explicitly. An inspection
 Process does not reserve agent work or mark a Task Started.
+
+The source cut is incomplete: optional/unattributed launches and native foreground
+pre-exec recording still need conversion. Claude can restart its OS process within
+one invocation; that replacement needs a fresh AgentProcess and an explicitly
+updated capture attachment, not an overwrite of the old PID. Generation-based
+caller/status wires remain until that lifecycle cut. These are publication blockers.
 
 ## Publish before spawn
 

@@ -21,6 +21,9 @@ const EVENTS_PER_WRITER: usize = 20;
 fn process() -> Process {
     let ts = 1_700_000_000;
     Process {
+        kind: loopflow::process::ProcessKind::Lf,
+        agent_session_id: None,
+        os_started_at: None,
         lfid: loopflow::id::ProcessLfid::new(),
         pid: None,
         trace_id: loopflow::id::TraceId::new(),

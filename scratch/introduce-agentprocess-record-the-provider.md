@@ -27,26 +27,29 @@ attribution survive.
   release. `SessionAttachment` is a compare-and-swap capability, not another
   process record or lifecycle owner. A → B → A cannot revive A's first token.
   This is the October 9 implementation choice, not a new approval attributed to
-  Jack Heart. The final AgentProcess retains its identity and original parent;
-  its row will own the attached LfProcess and token. The current internal slice
-  replaces the driver counter and `SessionDriver` end to end but still stores
-  attachment on the Session. Provider generation remains until the record cut.
+  Jack Heart. The AgentProcess retains identity and original parent across live takeover;
+  its row now owns the attached LfProcess and token. Numeric provider generation
+  still remains in caller/status/history wires pending the complete lifecycle cut.
 - OpenCode `start_inner` allocates a dedicated port/server per harness and creates
   or resumes exactly one native Session; stop removes that server. Codex creates
   a private socket per launch and reconnects to the same native thread. New
   AgentProcesses therefore serve one LfSession. Existing duplicate PID/birth
   observations must be retained as migration conflicts, never silently deduplicated
   into signal authority. No configured OpenCode data was queried.
-- `ProviderProcess`, `OwnedProviderProcess`, `LiveProviderProcess` in `lf/commands/top.rs`
-  currently reconstruct provider attribution from process trees/receipts and the
+- `ProviderProcess`, `OwnedProviderProcess`, `LiveProviderProcess` in the former top
+  implementation reconstructed provider attribution from process trees/receipts and the
   OpenCode JSON registry. `SessionProcessObservation`/`SessionProcessOwnership`
-  add another SQL projection of the Session's loose process columns. Replace
-  this composition with records plus a read-local OS observation, not another
-  ownership model. Unknown external processes confer no signal authority.
-- `engine_orphans` reads Session columns separately and rechecks under the Session
+  add another SQL projection of the Session's loose process columns. The record cut replaces
+  this composition with records plus a read-local OS observation. Unknown external processes confer no signal authority.
+- The former `engine_orphans` read Session columns separately and rechecked under the Session
   lock. Preserve exact PID/birth, command/group checks, takeover serialization,
   unknown-evidence refusal, and descendant cleanup in the surviving record path.
-- The post-spawn bind is deleted. `spawn_agent_process` consumes the command,
+  Its deleted `recorded_engines` query only included PID/birth groups with a non-null
+  attached LfProcess; a detached provider is omitted when no peer retains an
+  attachment. An in-memory execution of that exact SQL confirms the omission.
+  The replacement inventory must include unfinished AgentProcesses independently
+  of attachment presence. One shared table alone does not fix this reader rule.
+- The separate post-spawn lifeline bind is deleted. `spawn_agent_process` consumes the command,
   prepares the lifeline, then retains it only after successful spawn. The
   pre-exec child establishes its group and awaits watchdog readiness before exec.
   This preserves provider PID == PGID and native stdio/argv/spawn-error behavior.
@@ -54,7 +57,7 @@ attribution survive.
   `kill -s TERM -- -pgid`. Native foreground terminals need their own process
   control treatment; no headless process-group change may break their TTY.
 
-## Delete — do not maintain
+## Delete — do not maintain (record cut removes these predecessors)
 
 - Session `provider_pid`, `provider_started_at`, `provider_endpoint`,
   `provider_generation` and `provider_process_lfid`; replace with AgentProcess.
@@ -70,84 +73,95 @@ attribution survive.
 - Top's ProviderProcess/OwnedProviderProcess/LiveProviderProcess attribution
   layer; SessionProcessObservation/SessionProcessOwnership and exclusive tests.
 - Remaining provider-engine close names and messages, including `close_engine`.
-  `bind_group_to_driver` and the exposed prepare/retain lifeline type are deleted.
-  Keep `engine/` as Loopflow machinery and the surviving launch-path proofs.
+  `bind_group_to_driver`, `prepare_lifeline` and the exposed prepare/retain
+  lifeline type are deleted. Keep `engine/` as Loopflow machinery and the
+  surviving launch-path proofs.
 
-## Current implementation boundary
+## Current implementation boundary (2026-10-09 record cut)
 
-`da98efe82` and `cad03fe6d` implement only the Codex/OpenCode pre-exec
-lifeline. `spawn_agent_process` is an OS-launch function, not a record writer.
-`0f1280b80` implements fresh attachment claims, including A → B → A;
-`69f88f30d` simplifies attachment exits around their exact event identity.
-`agent_process.sql` is the Task's single draft; it currently replaces attachment
-counters and preserves exit-event references, input/native history and matching
-Waiting evidence. It must be rewritten in place for the complete record cut,
-never followed by another draft. No AgentProcess record exists yet; provider
-columns, ownership projections, registry, gate and orphan reader remain.
-The source still declares `Process` and `AgentSession`; LOO-441 integration
-remains before publication. The integrated #1512 base is `3e1e6245c`.
+The working tree now uses `processes.kind` (`lf` / `agent`). The Task's one draft
+backfills directly from the released Session shape, including original parent,
+PID/birth, endpoint, attachment token, attachment-exit reference and available
+spawn/exit evidence. It drops the Session process columns. Native thread and
+immutable history stay on the Session/history owners. Duplicate historical
+PID/birth observations remain separate, not signal permission. No installed
+store was opened with the branch binary.
 
-The history boundary now uses `SessionTurnOrigin`: per-request immutable
-attribution, captured before sending under the current attachment check.
-Claude/OpenCode keep it with their input IDs; Codex keeps it with the request
-sequence and accepts both reply/notification orders. Started insertion and
-origin assignment share one transaction; retained historical attribution is not
-rewritten. Duplicate correlated origins retain
-exact values; conflicting repeats fail without rewriting history. Uncorrelated
-broadcasts retain neither guessed Work nor the latest capture. No schema or wire
-shape changed; this does not implement AgentProcess records.
+Claims, transfer, release, connection publication and observed identity now write
+the AgentProcess row. Native launch receipts become its lifecycle fields; old
+payloads remain history. Actual argv is saved before spawn. A different PID/birth
+cannot overwrite a record. The common Process wire projection includes kind,
+served Session and OS birth; Rust/Swift mirrors and fixtures changed together.
+Provider-generation values still survive on records and caller/status/history
+wires: their removal is not implemented.
 
-Two boundaries remain distinct from the launch proof:
+Top and active-Session views now read recorded AgentProcesses, including detached
+and replaced rows, rather than inferring ownership from process trees, native
+client receipts or the OpenCode JSON registry. Task membership includes served
+Sessions independently of attachment presence; process liveness reads agent
+PID/birth. The two orphan modules, ownership projection types, registry and
+exclusive directory-watcher/attribution fixtures are deleted. Their required
+preservation and public-entry coverage is not all replaced yet. Scheduled
+settlement consumes these same rows, rechecks attachment under its lock, refuses
+duplicate/unknown signal authority and retains PID/birth after terminal evidence.
+It releases SQLite before OS termination and nested evidence reads.
 
-- `HELD_LIFELINES` retains every writer until its lf process exits. A superseded
-  but living attachment can keep the provider alive after the current attachment
-  dies. FIFO ownership is not current SQL attachment authority. The record-based
-  orphan rule must cover this order, as well as preserving takeover when the
-  original launcher dies first.
-- The throwaway tests wait up to ten seconds; the watchdog waits two seconds
-  between TERM and KILL. Neither establishes the requested two-second live-list
-  removal. No top/Task-status or scheduled-check acceptance ran.
+The existing parent-side pre-exec handshake now writes the record for attached
+Codex/OpenCode launches; attached Claude uses it too. Native foreground launches
+still record after spawn. Optional attachment branches still permit unrecorded
+launches; deleting inferred discovery does **not** prove those paths are covered.
+This internal cut must not publish before they are converted.
+
+### Counterexample that stops further launch work
+
+Claude `interrupt` calls `kill_process`, then `ensure_process` can spawn another
+OS process using the same cloned `AgentConfig.session_attachment`. One attachment
+reservation is therefore not one OS process. Simply changing its PID would erase
+history; independently claiming another record inside the harness would leave
+`SessionCapture.driver` holding a stale token and break final settlement. The
+record writer now refuses a different identity rather than overwrite it. This
+leaves Claude interrupt/resume unfinished, not an accepted new refusal behavior.
+
+Revised implementation direction: the existing invocation/capture owner must
+explicitly replace its current attachment when a harness respawns, after exact
+old-process death. The replacement commits a fresh AgentProcess and hands the
+new snapshot to both native dispatch/history and capture settlement. Pending
+operations keep their old snapshots; no shared mutable snapshot may silently
+refresh stale operations. Uncaptured launches need the same Session/process
+admission, not a second inventory or a fake lf parent. This is an implementation
+choice requiring source work, not a new approval attributed to Jack Heart.
 
 ## Remaining implementation
 
-1. Carry the implemented attachment token onto the AgentProcess row. Preserve
-   AgentProcess identity and original parent across live takeover. The focused
-   regression covers A → B → A dispatch, stop/release and Waiting writes.
-   This fencing choice is implemented, not an outstanding design decision.
-   Integrate LOO-441 before publication; no partial-slice publication.
-2. Rewrite `agent_process.sql` in place to its final shape:
-   backfill AgentProcesses before dropping Session columns. Preserve native
-   history, original parent, current attachment, conflicts and unknown outcomes;
-   migrate activity fences and caller provenance too. Test the released frontier
-   and materialized migration, not intermediate drafts. OpenCode source supports
-   one-to-one launches; configured cardinality remains unaudited.
-3. Move claim, publication, native launch/resume/exit and stream writers to the
-   record lifecycle, including Claude and native terminals. Retain pre-exec
-   protection while eliminating the separate spawn-to-record uncertainty gap.
-   Failed spawn is positive non-start evidence, not observed OS exit. Unknown
-   spawn stays unknown. Historical duplicate PID/birth evidence stays recoverable
-   without granting signal authority. Preserve history ingestion independently of
-   the attachment claim: `record_session_event` deliberately accepts observations
-   after transfer, and `record_session_turn_origin` retains correlated origin.
-   The delayed-start repair now freezes initiating Work/capture before native
-   requests; broadcasts remain unattributed until correlated. This observation
-   snapshot is not attachment authority or another process owner. Preserve it
-   when replacing provider generation with AgentProcess identity. Request
-   correlation lost in a crash stays unknown; neither the latest Session
-   capture nor AgentProcess's launch capture can recover it.
-4. Move Task gates, active Sessions, top/monitor and scheduled orphan settlement
-   to the same process inventory and delete the predecessors above. Prove both
-   takeover death orders; no live current attachment means orphan settlement,
-   not immediate invented exit. Reobserve exact death before removing live rows.
-5. Move Rust DTOs, Swift mirrors and `tests/fixtures/dto/` together; update
-   architecture and command docs. Preserve native foreground terminal behavior.
-6. Gate: fmt/Clippy, Rust tests, Swift build/DTO fixtures, Linux lifeline tests and
-   `rg -i 'provider_pid|driver_generation|SessionDriver|engine_orphans' rust/loopflow/src`
-   empty outside applied migrations. Demo: top shows AgentProcess under its
-   launcher; SIGKILL removes both live rows within two seconds, and Task status
-   has no invisible blocker. The three pre-#1512 Codex orphans on Jack Heart's
-   machine must be recorded and ended by the next scheduled check through the
-   installed path. Branch fixtures never signal them or migrate that store.
+1. Complete the launch-owner correction above. Cover every Codex/OpenCode/Claude,
+   direct/native, helper and unbound path; one row per actual spawn, including
+   Claude interrupt/respawn. Keep the attachment lock across admission/recording.
+   Failed spawn is non-start evidence; uncertain spawn remains unknown. Native
+   foreground terminals must retain their TTY/process-group behavior.
+2. Remove numeric provider generation from runtime caller/status fences in favor
+   of AgentProcess identity. Native request history and performed-work filters
+   must name the agent record, not borrow current Session Work. Preserve origins;
+   neither a delayed Started event nor a process's launch capture identifies a
+   later request. Rewrite this same migration, never add another Task draft.
+3. Complete stop/release authority across providers, both takeover death orders,
+   and FIFO ownership. `HELD_LIFELINES` still retains superseded writers until lf
+   exit. No current live attachment means orphan settlement, not invented exit;
+   unknown attachment liveness stays unknown. Resume must consult the AgentProcess
+   before treating a detached attachment as replaceable. Unfinished rows with
+   unknown PID remain diagnosable. Reconcile zombie and unknown-OS readings across gate/top.
+4. Replace remaining predecessor fixture assumptions and restore required
+   active-Session, native-history and Task-membership coverage on records. Prove
+   headless public top/Task-status/scheduled-entry agreement, not only reducers
+   or SQL. The old directory-watcher costs no longer describe this reader.
+5. Integrate LOO-441's LfProcess/LfSession rename before publication. The current
+   source still names `Process` and `AgentSession`; no dependency integration or
+   partial publication is claimed. Update the final model/API docs and all wire
+   fixtures after the generation cut.
+6. Gate owns affected Rust/Swift/DTO and materialized-migration verification plus
+   Linux lifeline checks. Demo still requires exact SIGKILL removal within two
+   seconds and no invisible Task blocker. Only the installed scheduled path may
+   settle Jack Heart's three pre-#1512 orphaned Codex processes. Branch fixtures
+   never signal them or migrate that store.
 
 ## Preservation counterexamples
 
@@ -160,24 +174,17 @@ lifeline writer or hold provider stdout/stderr open.
 
 ## Implementation review
 
-Native request attribution survives the AgentProcess cut: neither a delayed
-Started observation nor the process's launch capture identifies later requests.
-Codex now keeps each turn's observations together instead of joining five maps
-and sets and scanning every started turn on each message. OpenCode keeps start
-and completion flags beside each submitted request, deleting its separate sets.
-These are connection-local correlation facts, not durable process owners.
-Known-turn rejection tests now submit actual origin evidence; an unowned request
-could not exercise that rejection. Repeated starts and overlapping request replies
-must retain the first origin; repeated OpenCode snapshots emit boundaries once.
+The record cut removes inferred provider ownership rather than adding another
+inventory. Review found and corrected two preservation defects: migration must
+insert AgentProcesses before setting the Session foreign key, and provider name/
+interactive launch mode belong to the process snapshot rather than mutable
+next-launch Session settings. Orphan settlement cannot hold the SQLite mutex
+while its callback reads attached-process evidence. The Claude respawn ownership
+counterexample above stops further launch work until the owner is corrected.
 
-SQLite compares repeated origin evidence without reconstructing another Rust
-snapshot. Matching repeats do not write or advance observation revisions;
-conflicting repeats preserve all original fields, including an absent Work bind.
+Earlier origin, token and pre-exec decisions remain in `a55f5345b` and its
+references. The prior uncommitted reconciliation was preserved verbatim at
+`/tmp/loo443-plan-before-record-cut.md`; `lf commit` returned an empty error, so no
+checkpoint is claimed. The record cut remains local and unpublished.
 
-The remaining deletion list above is unchanged: no predecessor orphan, registry,
-or ownership reader was extended. Full record/DTO cutover is still required.
-Earlier attachment-exit, migration and pre-exec review details and check evidence:
-`207773ca3:scratch/introduce-agentprocess-record-the-provider.md`, “Implementation
-review.” They establish no top, Task-status, scheduled-check or installed result.
-
-Check: `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` passed; `uv run python scripts/test_network.py cargo test -p loopflow --lib -- harness::codex_history::tests harness::opencode_history::tests harness::conformance_tests store::sqlite::session_events::tests --test-threads=1` passed 28. Full Rust/Swift/DTO and Linux lifeline checks remain gate/CI-owned; installed acceptance remains open.
+Check: `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`, `git diff --check`, network-isolated focused record/migration/reaper tests (12), repaired top projection (1), Waiting/handoff (1) and Rust DTO fixtures (22) pass. Full Rust/Swift/Linux/public-entry verification remains gate/CI-owned; Claude respawn and unconditional recording remain unimplemented.

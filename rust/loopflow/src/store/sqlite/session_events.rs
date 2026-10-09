@@ -103,7 +103,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "INSERT INTO session_activity(session_id,attachment_token,observed_at,open_tools,pending_input,yielded,provider_generation)
-             SELECT ?1,?2,?3,?4,?5,?6,?7 FROM agent_sessions WHERE id=?1 AND attachment_token=?2 AND provider_generation=?7
+             SELECT ?1,?2,?3,?4,?5,?6,?7 FROM agent_sessions s JOIN processes p ON p.lfid=s.agent_process_lfid WHERE s.id=?1 AND p.attachment_token=?2 AND p.provider_generation=?7
              ON CONFLICT(session_id) DO UPDATE SET attachment_token=excluded.attachment_token,
                 observed_at=excluded.observed_at,open_tools=excluded.open_tools,
                 pending_input=excluded.pending_input,yielded=excluded.yielded,
@@ -123,8 +123,9 @@ impl SqliteStore {
         Ok(conn.query_row(
             "SELECT MIN(act.observed_at)+?2 FROM session_activity act
              JOIN agent_sessions s ON s.id=act.session_id
-             WHERE s.completed_at IS NULL AND act.attachment_token=s.attachment_token
-             AND act.provider_generation=s.provider_generation AND act.program_status IS NULL
+             JOIN processes p ON p.lfid=s.agent_process_lfid
+             WHERE s.completed_at IS NULL AND act.attachment_token=p.attachment_token
+             AND act.provider_generation=p.provider_generation AND act.program_status IS NULL
              AND act.pending_input=0 AND act.open_tools=0
              AND NOT (s.interactive=1 AND act.yielded=1) AND ?1-act.observed_at<?2",
             params![now, quiet],
@@ -160,9 +161,9 @@ impl SqliteStore {
         })?;
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
-            "SELECT task_id,wave_id,current_capture FROM agent_sessions
-             WHERE id=?1 AND attachment_token=?2 AND attached_process_lfid=?3
-               AND provider_generation=?4",
+            "SELECT s.task_id,s.wave_id,s.current_capture FROM agent_sessions s JOIN processes p ON p.lfid=s.agent_process_lfid
+             WHERE s.id=?1 AND p.attachment_token=?2 AND p.attached_process_lfid=?3
+               AND p.provider_generation=?4",
             params![
                 session,
                 attachment.token,

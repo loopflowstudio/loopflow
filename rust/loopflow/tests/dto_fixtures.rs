@@ -339,6 +339,12 @@ fn process_page_retains_outcomes_unknowns_and_continuation() {
     assert_eq!(page.entries[0].via_agent, None);
     assert_eq!(page.entries[0].pid, None);
     assert_eq!(page.entries[1].pid, Some(4242));
+    assert_eq!(page.entries[1].kind, loopflow::process::ProcessKind::Agent);
+    assert_eq!(
+        page.entries[1].agent_session_id.as_deref(),
+        Some("conversation")
+    );
+    assert_eq!(page.entries[1].os_started_at, Some(1790640000));
     assert_eq!(
         page.entries[1].parent_process_lfid.as_ref(),
         Some(&page.entries[0].lfid)

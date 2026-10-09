@@ -20,12 +20,18 @@ use super::SqliteStore;
 pub(super) const PROCESS_SELECT: &str =
     "SELECT e.lfid,e.trace_id,e.parent_process_lfid,e.via_agent,e.caller_session_id,
     e.caller_provider_generation,e.command,e.repo,e.cwd,
-    e.started_at,e.completed_at,e.outcome,e.exit_code,e.signal,e.error,e.pid FROM processes e";
+    e.started_at,e.completed_at,e.outcome,e.exit_code,e.signal,e.error,e.pid,e.kind,e.agent_session_id,e.os_started_at FROM processes e";
 
 pub(super) fn read_process(row: &rusqlite::Row<'_>) -> rusqlite::Result<Process> {
     Ok(Process {
         lfid: row.get(0)?,
         pid: row.get(15)?,
+        kind: match row.get::<_, String>(16)?.as_str() {
+            "agent" => crate::process::ProcessKind::Agent,
+            _ => crate::process::ProcessKind::Lf,
+        },
+        agent_session_id: row.get(17)?,
+        os_started_at: row.get(18)?,
         trace_id: row.get(1)?,
         parent_process_lfid: row.get(2)?,
         via_agent: row.get(3)?,
@@ -142,15 +148,16 @@ fn attachment_in(
 ) -> StoreResult<Option<SessionAttachment>> {
     let row = conn
         .query_row(
-            "SELECT attached_process_lfid,attachment_token,provider_generation,provider_process_lfid
-         FROM agent_sessions WHERE id=?1",
+            "SELECT p.attached_process_lfid,p.attachment_token,p.provider_generation,p.parent_process_lfid,p.lfid
+         FROM agent_sessions s LEFT JOIN processes p ON p.lfid=s.agent_process_lfid WHERE s.id=?1",
             [session],
             |row| {
                 Ok((
                     row.get::<_, Option<String>>(0)?,
                     row.get::<_, Option<AttachmentToken>>(1)?,
-                    row.get::<_, i64>(2)?,
+                    row.get::<_, Option<i64>>(2)?,
                     row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<ProcessLfid>>(4)?,
                 ))
             },
         )
@@ -164,7 +171,8 @@ fn attachment_in(
     Ok(Some(SessionAttachment {
         process_lfid: row.0.as_deref().map(parse).transpose()?,
         token,
-        provider_generation: row.2,
+        agent_process_lfid: row.4.ok_or(StoreError::NotFound)?,
+        provider_generation: row.2.unwrap_or(0),
         provider_process_lfid: parse(row.3.as_deref().ok_or_else(|| {
             StoreError::InvalidData("Session driver has no provider origin".into())
         })?)?,
@@ -184,7 +192,12 @@ pub(super) fn attach_in(
             "Session attachment changed".into(),
         ));
     }
+    let replacing = current.is_none() || replace_provider;
     let driver = SessionAttachment {
+        agent_process_lfid: current
+            .as_ref()
+            .filter(|_| !replace_provider)
+            .map_or_else(ProcessLfid::new, |value| value.agent_process_lfid.clone()),
         process_lfid: Some(process.clone()),
         token: AttachmentToken::new(),
         provider_generation: current.as_ref().map_or(1, |value| {
@@ -195,43 +208,32 @@ pub(super) fn attach_in(
             |value| value.provider_process_lfid.clone(),
         ),
     };
-    tx.execute(
-        "UPDATE agent_sessions SET attached_process_lfid=?2,attachment_token=?3,attachment_exit_seq=NULL,
-            provider_generation=?4,provider_process_lfid=?5,
-            provider_endpoint=CASE WHEN ?6 THEN NULL ELSE provider_endpoint END,
-            provider_pid=CASE WHEN ?6 THEN NULL ELSE provider_pid END,
-            provider_started_at=CASE WHEN ?6 THEN NULL ELSE provider_started_at END
-         WHERE id=?1",
-        params![
-            session,
-            driver.process_lfid,
-            driver.token,
-            driver.provider_generation,
-            driver.provider_process_lfid,
-            replace_provider
-        ],
-    )?;
-    if current.is_none() || replace_provider {
-        record_provider_launch(tx, session, &driver, "reserved")?;
-    }
-    Ok(driver)
-}
-
-fn record_provider_launch(
-    tx: &rusqlite::Transaction<'_>,
-    session: &str,
-    expected: &SessionAttachment,
-    phase: &str,
-) -> StoreResult<()> {
-    tx.execute(
-            "INSERT OR IGNORE INTO session_events(session_id,kind,receipt_key,process_lfid,observed_at,payload,captured_event)
-             SELECT id,'observed',?2,?3,?4,?5,current_capture FROM agent_sessions WHERE id=?1",
-            params![session, format!("provider:{}:{phase}", expected.provider_generation),
-                expected.process_lfid, time::OffsetDateTime::now_utc().unix_timestamp(),
-                serde_json::json!({"type":"provider_launch", "phase":phase,
-                    "provider_generation":expected.provider_generation}).to_string()],
+    if replacing {
+        if let Some(previous) = &current {
+            tx.execute(
+                "UPDATE processes SET attached_process_lfid=NULL,attachment_token=?2 WHERE lfid=?1",
+                params![previous.agent_process_lfid, AttachmentToken::new()],
+            )?;
+        }
+        tx.execute(
+            "INSERT INTO processes(lfid,kind,trace_id,parent_process_lfid,command,repo,cwd,
+                started_at,agent_session_id,agent_provider,agent_interactive,provider_generation,spawn_state)
+             SELECT ?2,'agent',COALESCE((SELECT trace_id FROM processes WHERE lfid=?3),?2),
+                ?3,s.provider,s.repo,s.cwd,?4,s.id,s.provider,s.interactive,?5,'reserved' FROM agent_sessions s WHERE s.id=?1",
+            params![session,driver.agent_process_lfid,process,
+                time::OffsetDateTime::now_utc().unix_timestamp(),driver.provider_generation],
         )?;
-    Ok(())
+        tx.execute(
+            "UPDATE agent_sessions SET agent_process_lfid=?2 WHERE id=?1",
+            params![session, driver.agent_process_lfid],
+        )?;
+    }
+    tx.execute(
+        "UPDATE processes SET attached_process_lfid=?2,attachment_token=?3,attachment_exit_seq=NULL
+         WHERE lfid=?1",
+        params![driver.agent_process_lfid, driver.process_lfid, driver.token],
+    )?;
+    Ok(driver)
 }
 
 impl SqliteStore {
@@ -385,7 +387,7 @@ impl SqliteStore {
     pub fn session_connection(&self, session: &str) -> StoreResult<Option<(String, String)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn.query_row(
-            "SELECT provider_endpoint,provider_thread FROM agent_sessions WHERE id=?1 AND provider_endpoint IS NOT NULL AND provider_thread IS NOT NULL",
+            "SELECT p.endpoint,s.provider_thread FROM agent_sessions s JOIN processes p ON p.lfid=s.agent_process_lfid WHERE s.id=?1 AND p.endpoint IS NOT NULL AND s.provider_thread IS NOT NULL",
             [session], |row| Ok((row.get(0)?, row.get(1)?)),
         ).optional()?)
     }
@@ -409,8 +411,8 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
-                "SELECT provider_pid,provider_started_at FROM agent_sessions WHERE id=?1
-             AND provider_pid IS NOT NULL AND provider_started_at IS NOT NULL",
+                "SELECT p.pid,p.os_started_at FROM agent_sessions s JOIN processes p ON p.lfid=s.agent_process_lfid WHERE s.id=?1
+             AND p.pid IS NOT NULL AND p.os_started_at IS NOT NULL",
                 [session],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
@@ -423,7 +425,7 @@ impl SqliteStore {
         &self,
         session: &str,
         expected: &SessionAttachment,
-        spawning: bool,
+        command: &std::process::Command,
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -434,12 +436,12 @@ impl SqliteStore {
                 "Session attachment changed".into(),
             ));
         }
-        let phase = if spawning {
-            "spawn_requested"
-        } else {
-            "reserved"
-        };
-        record_provider_launch(&tx, session, expected, phase)?;
+        let argv = std::iter::once(command.get_program())
+            .chain(command.get_args())
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        tx.execute("UPDATE processes SET spawn_state='spawn_requested',command=?2 WHERE lfid=?1 AND completed_at IS NULL",
+            params![expected.agent_process_lfid,serde_json::to_string(&argv)?])?;
         tx.commit()?;
         Ok(())
     }
@@ -461,11 +463,13 @@ impl SqliteStore {
                 "Session attachment changed".into(),
             ));
         }
-        record_provider_launch(
-            &tx,
-            session,
-            expected,
-            if spawned { "exited" } else { "spawn_failed" },
+        tx.execute(
+            "UPDATE processes SET spawn_state=?2,completed_at=?3 WHERE lfid=?1",
+            params![
+                expected.agent_process_lfid,
+                if spawned { "exited" } else { "spawn_failed" },
+                time::OffsetDateTime::now_utc().unix_timestamp()
+            ],
         )?;
         tx.commit()?;
         Ok(())
@@ -487,10 +491,17 @@ impl SqliteStore {
                 "Session attachment changed".into(),
             ));
         }
-        tx.execute(
-            "UPDATE agent_sessions SET provider_pid=?2,provider_started_at=?3 WHERE id=?1",
-            params![session, pid, started_at],
+        let changed = tx.execute(
+            "UPDATE processes SET pid=?2,os_started_at=?3 WHERE lfid=?1
+             AND ((pid IS NULL AND os_started_at IS NULL) OR (pid=?2 AND os_started_at=?3))",
+            params![expected.agent_process_lfid, pid, started_at],
         )?;
+        if changed != 1 {
+            return Err(StoreError::InvalidAuthority(
+                "AgentProcess already records another OS process; a new launch needs a new record"
+                    .into(),
+            ));
+        }
         tx.commit()?;
         Ok(())
     }
@@ -512,8 +523,12 @@ impl SqliteStore {
             ));
         }
         tx.execute(
-            "UPDATE agent_sessions SET provider_endpoint=?2,provider_thread=?3 WHERE id=?1",
-            params![session, endpoint, thread],
+            "UPDATE processes SET endpoint=?2 WHERE lfid=?1",
+            params![expected.agent_process_lfid, endpoint],
+        )?;
+        tx.execute(
+            "UPDATE agent_sessions SET provider_thread=?2 WHERE id=?1",
+            params![session, thread],
         )?;
         tx.commit()?;
         Ok(())
@@ -586,71 +601,68 @@ impl SqliteStore {
         write()
     }
 
-    /// Read current conversation attribution and exact retained client membership.
-    /// No captured input, history body, endpoint or command outcome establishes liveness.
-    pub(crate) fn session_process_ownership(
+    /// All unfinished agent rows, including detached and replaced processes.
+    pub(crate) fn agent_processes(&self) -> StoreResult<Vec<crate::process::AgentProcess>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(&format!("{} WHERE e.kind='agent' AND e.completed_at IS NULL ORDER BY e.lfid",
+            PROCESS_SELECT.replace(" FROM processes e",",e.attached_process_lfid,e.attachment_token,e.agent_provider,e.agent_interactive FROM processes e")))?;
+        let rows = query
+            .query_map([], |row| {
+                Ok(crate::process::AgentProcess {
+                    process: read_process(row)?,
+                    attached_process_lfid: row.get(19)?,
+                    attachment_token: row.get(20)?,
+                    provider: row.get(21)?,
+                    interactive: row.get(22)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// Recheck the exact record and attachment while excluding native takeover.
+    /// Only positive OS death evidence (including successful termination) settles it.
+    pub(crate) fn settle_agent_process(
         &self,
-        inputs: &[String],
-        processes: &[String],
-        pids: &[u32],
-    ) -> StoreResult<crate::process::SessionProcessOwnership> {
+        expected: &crate::process::AgentProcess,
+        terminate: impl FnOnce() -> StoreResult<()>,
+    ) -> StoreResult<bool> {
+        let session = expected
+            .process
+            .agent_session_id
+            .as_deref()
+            .ok_or(StoreError::NotFound)?;
+        let _dispatch = self.lock_session_attachment(session)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction()?;
-        let input_json = serde_json::to_string(inputs)?;
-        let process_json = serde_json::to_string(processes)?;
-        let pid_json = serde_json::to_string(pids)?;
-        let sessions = {
-            let mut statement = tx.prepare(
-                "SELECT s.id,s.title,s.task_id,s.wave_id,s.attached_process_lfid,e.trace_id,
-                    s.provider_pid,s.provider_started_at,s.provider_process_lfid
-                 FROM agent_sessions s LEFT JOIN processes e ON e.lfid=s.attached_process_lfid
-                 WHERE s.id IN (
-                    SELECT id FROM agent_sessions WHERE attached_process_lfid IN (SELECT value FROM json_each(?2))
-                    UNION SELECT id FROM agent_sessions WHERE provider_pid IN (SELECT value FROM json_each(?3))
-                    UNION SELECT id FROM agent_sessions WHERE provider_pid IS NULL
-                        AND provider_process_lfid IN (SELECT value FROM json_each(?2))
-                    UNION SELECT session_id FROM session_events
-                        WHERE kind='captured' AND receipt_key IN (SELECT value FROM json_each(?1)))
-                 ORDER BY s.id",
-            )?;
-            let mut rows = statement.query(params![input_json, process_json, pid_json])?;
-            let mut sessions = Vec::new();
-            while let Some(row) = rows.next()? {
-                let task = row
-                    .get::<_, Option<String>>(2)?
-                    .as_deref()
-                    .map(crate::durable::TaskId::parse)
-                    .transpose()
-                    .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-                let wave: Option<crate::id::WaveId> = row.get(3)?;
-                sessions.push(crate::process::SessionProcessObservation {
-                    id: row.get(0)?,
-                    title: row.get(1)?,
-                    work: task
-                        .map(crate::durable::WorkRef::Task)
-                        .or_else(|| wave.map(crate::durable::WorkRef::Wave)),
-                    attached_process_lfid: row.get(4)?,
-                    driver_trace_id: row.get(5)?,
-                    provider_pid: row.get(6)?,
-                    provider_started_at: row.get(7)?,
-                    provider_process_lfid: row.get(8)?,
-                });
-            }
-            sessions
-        };
-        let inputs = {
-            let mut statement = tx.prepare(
-                "SELECT receipt_key,session_id FROM session_events
-                 WHERE kind='captured' AND receipt_key IN (SELECT value FROM json_each(?1))
-                    AND session_id IS NOT NULL ORDER BY receipt_key",
-            )?;
-            let rows = statement
-                .query_map([&input_json], |row| Ok((row.get(0)?, row.get(1)?)))?
-                .collect::<rusqlite::Result<std::collections::BTreeMap<_, _>>>()?;
-            rows
-        };
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Deferred)?;
+        let matches: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM processes WHERE lfid=?1 AND kind='agent'
+              AND pid IS ?2 AND os_started_at IS ?3 AND attached_process_lfid IS ?4
+              AND attachment_token IS ?5 AND completed_at IS NULL)",
+            params![
+                expected.process.lfid,
+                expected.process.pid,
+                expected.process.os_started_at,
+                expected.attached_process_lfid,
+                expected.attachment_token
+            ],
+            |row| row.get(0),
+        )?;
+        if !matches {
+            return Ok(false);
+        }
         tx.commit()?;
-        Ok(crate::process::SessionProcessOwnership { sessions, inputs })
+        drop(conn);
+        terminate()?;
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE processes SET completed_at=?2,spawn_state='exited',endpoint=NULL WHERE lfid=?1",
+            params![
+                expected.process.lfid,
+                time::OffsetDateTime::now_utc().unix_timestamp()
+            ],
+        )?;
+        Ok(true)
     }
 
     pub fn session_attachment(&self, session: &str) -> StoreResult<Option<SessionAttachment>> {
@@ -690,8 +702,8 @@ impl SqliteStore {
         current.process_lfid = None;
         current.token = AttachmentToken::new();
         tx.execute(
-            "UPDATE agent_sessions SET attached_process_lfid=NULL,attachment_token=?2 WHERE id=?1",
-            params![session, current.token],
+            "UPDATE processes SET attached_process_lfid=NULL,attachment_token=?2 WHERE lfid=?1",
+            params![current.agent_process_lfid, current.token],
         )?;
         tx.commit()?;
         Ok(current)
@@ -734,7 +746,7 @@ impl SqliteStore {
                 "UPDATE agent_sessions AS s SET completed_at=?2 WHERE s.id=?1
              AND s.completed_at IS NULL AND s.primary_scope IS NULL
              AND s.wave_id IS NULL AND {} IS NULL
-             AND s.attached_process_lfid=s.provider_process_lfid
+             AND EXISTS(SELECT 1 FROM processes p WHERE p.lfid=s.agent_process_lfid AND p.attached_process_lfid=p.parent_process_lfid)
              AND NOT EXISTS({}) AND ?3 IN ('completed','interrupted')",
                 super::sessions::SESSION_FLOW,
                 super::task_work::session_tasks("s")
@@ -742,10 +754,17 @@ impl SqliteStore {
             params![session, now, outcome],
         )?;
         tx.execute(
-            "UPDATE agent_sessions SET attached_process_lfid=NULL,attachment_token=?3,
-                attachment_exit_seq=?4,
-                provider_endpoint=CASE WHEN ?2 THEN NULL ELSE provider_endpoint END WHERE id=?1",
-            params![session, closed, AttachmentToken::new(), exit_seq],
+            "UPDATE processes SET attached_process_lfid=NULL,attachment_token=?3,
+                attachment_exit_seq=?4,endpoint=CASE WHEN ?2 THEN NULL ELSE endpoint END,
+                completed_at=CASE WHEN ?2 THEN COALESCE(completed_at,?5) ELSE completed_at END,
+                spawn_state=CASE WHEN ?2 THEN 'exited' ELSE spawn_state END WHERE lfid=?1",
+            params![
+                expected.agent_process_lfid,
+                closed,
+                AttachmentToken::new(),
+                exit_seq,
+                now
+            ],
         )?;
         tx.commit()?;
         Ok(())
@@ -786,7 +805,7 @@ mod discovery_tests {
     use crate::store::sqlite::SqliteStore;
     use crate::store::StoreError;
 
-    fn insert_process(store: &SqliteStore, number: u32, started_at: i64) -> ProcessLfid {
+    pub(super) fn insert_process(store: &SqliteStore, number: u32, started_at: i64) -> ProcessLfid {
         let id = ProcessLfid::parse(&format!("00000000-0000-0000-0000-{number:012x}")).unwrap();
         store
             .conn
@@ -842,11 +861,13 @@ mod discovery_tests {
         assert_ne!(admitted.captured, session.captured);
         assert_eq!(claimed.process_lfid, Some(second.clone()));
         let history = store.session_history(&session.id, 0, 0).unwrap();
-        let reserved_capture: i64 = store.conn.lock().unwrap().query_row(
-            "SELECT captured_event FROM session_events WHERE session_id=?1 AND receipt_key='provider:2:reserved'",
-            [&session.id], |row| row.get(0),
-        ).unwrap();
-        assert_eq!(Some(reserved_capture), admitted.captured);
+        let reserved = store.process(&claimed.agent_process_lfid).unwrap().unwrap();
+        assert_eq!(
+            reserved.agent_session_id.as_deref(),
+            Some(session.id.as_str())
+        );
+        assert_eq!(reserved.parent_process_lfid.as_ref(), Some(&second));
+        assert!(reserved.completed_at.is_none());
         next.artifact_key = crate::session_record::new_artifact_key();
         assert!(store
             .claim_session_input(next, Some(&claimed), &first, true)
@@ -876,64 +897,6 @@ mod discovery_tests {
         assert_eq!(store.process(&first.lfid).unwrap(), Some(first));
         assert_eq!(store.process(&second.lfid).unwrap(), Some(second));
         assert_eq!(store.process(&historical).unwrap(), Some(retained));
-    }
-
-    #[test]
-    fn active_ownership_filters_dense_retained_history_before_materializing() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&dir.path().join("store.db")).unwrap();
-        let old = insert_process(&store, 1, 1);
-        let live = insert_process(&store, 2, 2);
-        let input = crate::session_record::new_artifact_key();
-        {
-            let conn = store.conn.lock().unwrap();
-            conn.execute(
-                "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<20000)
-                INSERT INTO agent_sessions(id,title,title_source,created_at,completed_at,
-                    input_published,cwd,provider_process_lfid,provider_pid,provider_started_at)
-                SELECT 'retained-'||x,'Retained','human',1,2,1,'/fixture',?1,
-                    CASE WHEN x%2=0 THEN x+100000 END,1 FROM n",
-                [&old],
-            )
-            .unwrap();
-            conn.execute("UPDATE agent_sessions SET attached_process_lfid=?1,completed_at=NULL WHERE id='retained-1'", [&live]).unwrap();
-            conn.execute(
-                "UPDATE agent_sessions SET provider_process_lfid=?1 WHERE id='retained-3'",
-                [&live],
-            )
-            .unwrap();
-            super::super::sessions::test_capture(&conn, "retained-5", &input);
-        }
-        for (processes, pids, inputs, expected) in [
-            (vec![], vec![], vec![], vec![]),
-            (
-                vec![live.to_string()],
-                vec![100002],
-                vec![input.clone()],
-                vec!["retained-1", "retained-2", "retained-3", "retained-5"],
-            ),
-        ] {
-            let started = std::time::Instant::now();
-            for _ in 0..5 {
-                let result = store
-                    .session_process_ownership(&inputs, &processes, &pids)
-                    .unwrap();
-                assert_eq!(
-                    result
-                        .sessions
-                        .iter()
-                        .map(|s| s.id.as_str())
-                        .collect::<Vec<_>>(),
-                    expected
-                );
-                assert_eq!(result.inputs.len(), inputs.len());
-            }
-            eprintln!(
-                "active ownership: 20000 retained, {} selected, five bundled-SQLite queries {:?}",
-                expected.len(),
-                started.elapsed()
-            );
-        }
     }
 
     #[test]
@@ -1204,7 +1167,7 @@ mod discovery_tests {
             // Known Task, unknown original process: neither current driver nor observer is its owner.
             conn.execute("INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,task_id,wave_id,observed_at,payload)
                 VALUES('session-0','thread','unmapped','started','',?1,?2,1,'{}')",params![first.as_str(),wave]).unwrap();
-            conn.execute("UPDATE agent_sessions SET attached_process_lfid=?1,provider_process_lfid=?1 WHERE id='session-0'",[&observer]).unwrap();
+
             conn.execute(
                 "UPDATE processes SET caller_session_id='session-0',via_agent=1 WHERE lfid=?1",
                 [&observer],
@@ -1291,6 +1254,7 @@ mod discovery_tests {
 
 #[cfg(test)]
 mod attachment_tests {
+    use super::discovery_tests::insert_process;
     use crate::id::ProcessLfid;
     use crate::session::SessionActivity;
     use crate::store::sqlite::SqliteStore;
@@ -1401,20 +1365,10 @@ mod attachment_tests {
         use crate::store::migrations::{apply_before_current_draft, current_draft_sql};
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         apply_before_current_draft(&conn, "agent_process");
-        conn.execute_batch(r#"
-            PRAGMA foreign_keys=ON;
-            INSERT INTO processes(lfid,trace_id,started_at) VALUES('parent','trace',1);
-            INSERT INTO agent_sessions(id,title,title_source,created_at,cwd,input_published,driver_process_lfid,driver_generation,provider_generation,provider_process_lfid,provider_thread,provider_pid,provider_started_at)
-              VALUES('live','Retained','human',1,'/repo',1,'parent',7,3,'parent','native',42,100),
-                    ('released','Retained exit','human',1,'/repo',1,NULL,8,3,'parent','history',NULL,NULL),
-                    ('stale','Old reading','human',1,'/repo',1,'parent',7,3,'parent','native-stale',NULL,NULL);
-            INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
-              VALUES('released','observed','driver:7:exit',2,'{"type":"driver_exit","outcome":"interrupted"}'),
-                    ('live','captured','input',1,'{"text":"keep pending input"}');
-            UPDATE agent_sessions SET current_capture=(SELECT seq FROM session_events WHERE receipt_key='input') WHERE id='live';
-            INSERT INTO session_activity(session_id,driver_generation,observed_at,open_tools,pending_input,yielded,provider_generation)
-              VALUES('live',7,100,0,1,0,3),('stale',6,90,0,1,0,3);
-        "#).unwrap();
+        conn.execute_batch(include_str!(
+            "../../../tests/fixtures/agent_process_released.sql"
+        ))
+        .unwrap();
         let history = || {
             conn.prepare(
                 "SELECT seq,session_id,receipt_key,payload FROM session_events ORDER BY seq",
@@ -1437,7 +1391,7 @@ mod attachment_tests {
             .unwrap();
         assert_eq!(history(), before);
         let live: (String, String, String, u32, i64, i64) = conn.query_row(
-            "SELECT attached_process_lfid,provider_process_lfid,provider_thread,provider_pid,provider_started_at,current_capture FROM agent_sessions WHERE id='live'",
+            "SELECT p.attached_process_lfid,p.parent_process_lfid,s.provider_thread,p.pid,p.os_started_at,s.current_capture FROM agent_sessions s JOIN processes p ON p.lfid=s.agent_process_lfid WHERE s.id='live'",
             [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?)),
         ).unwrap();
         assert_eq!(
@@ -1451,11 +1405,11 @@ mod attachment_tests {
                 before[1].0
             )
         );
-        let matched: i64 = conn.query_row("SELECT COUNT(*) FROM session_activity a JOIN agent_sessions s ON s.id=a.session_id WHERE a.attachment_token=s.attachment_token", [], |row| row.get(0)).unwrap();
+        let matched: i64 = conn.query_row("SELECT COUNT(*) FROM session_activity a JOIN agent_sessions s ON s.id=a.session_id JOIN processes p ON p.lfid=s.agent_process_lfid WHERE a.attachment_token=p.attachment_token", [], |row| row.get(0)).unwrap();
         assert_eq!(matched, 1);
         let exit: i64 = conn
             .query_row(
-                "SELECT attachment_exit_seq FROM agent_sessions WHERE id='released'",
+                "SELECT p.attachment_exit_seq FROM agent_sessions s JOIN processes p ON p.lfid=s.agent_process_lfid WHERE s.id='released'",
                 [],
                 |row| row.get(0),
             )
@@ -1468,9 +1422,137 @@ mod attachment_tests {
             .unwrap();
         assert_eq!(violations, 0);
         for table in ["agent_sessions", "session_activity"] {
-            assert!(conn
-                .prepare(&format!("SELECT driver_generation FROM {table}"))
-                .is_err());
+            let columns = conn
+                .prepare(&format!("PRAGMA table_info({table})"))
+                .unwrap()
+                .query_map([], |row| row.get::<_, String>(1))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            assert!(!columns.iter().any(|column| column.starts_with("driver_")));
         }
+    }
+    #[test]
+    fn detached_and_replaced_agents_remain_in_the_process_inventory() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let session =
+            store.test_session("conversation", &crate::session_record::new_artifact_key());
+        let a = insert_process(&store, 1, 1);
+        let b = insert_process(&store, 2, 2);
+        let first = store
+            .claim_session_attachment(&session.id, None, &a, true)
+            .unwrap();
+        store
+            .record_session_provider_process(&session.id, &first, 4242, 123)
+            .unwrap();
+        let second = store
+            .claim_session_attachment(&session.id, Some(&first), &b, false)
+            .unwrap();
+        assert_eq!(first.agent_process_lfid, second.agent_process_lfid);
+        assert_ne!(first.token, second.token);
+        let released = store
+            .release_session_attachment(&session.id, &second)
+            .unwrap();
+        let rows = store.agent_processes().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].process.parent_process_lfid, Some(a.clone()));
+        assert_eq!(rows[0].attached_process_lfid, None);
+        assert_eq!(rows[0].process.pid, Some(4242));
+        assert!(matches!(
+            store.record_session_provider_process(&session.id, &first, 5555, 123),
+            Err(StoreError::InvalidAuthority(_))
+        ));
+        let replacement = store
+            .claim_session_attachment(&session.id, Some(&released), &b, true)
+            .unwrap();
+        assert_ne!(replacement.agent_process_lfid, first.agent_process_lfid);
+        assert_eq!(store.agent_processes().unwrap().len(), 2);
+        let old = store.process(&first.agent_process_lfid).unwrap().unwrap();
+        assert_eq!(old.pid, Some(4242));
+        assert_eq!(old.parent_process_lfid, Some(a));
+        assert!(old.completed_at.is_none());
+    }
+
+    #[test]
+    fn agent_spawn_lifecycle_uses_the_record_and_retains_failed_identity() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let session =
+            store.test_session("conversation", &crate::session_record::new_artifact_key());
+        let parent = insert_process(&store, 1, 1);
+        let attachment = store
+            .claim_session_attachment(&session.id, None, &parent, true)
+            .unwrap();
+        let history = store.session_history(&session.id, 0, 0).unwrap();
+        let mut command = std::process::Command::new("codex");
+        command.args(["app-server", "--listen", "unix:///fixture"]);
+        store
+            .record_session_provider_launch(&session.id, &attachment, &command)
+            .unwrap();
+        store
+            .record_session_provider_process(&session.id, &attachment, 4242, 123)
+            .unwrap();
+        store
+            .record_native_provider_exit(&session.id, &attachment, false)
+            .unwrap();
+        let row = store
+            .process(&attachment.agent_process_lfid)
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.kind, crate::process::ProcessKind::Agent);
+        assert_eq!(row.pid, Some(4242));
+        assert_eq!(row.os_started_at, Some(123));
+        assert!(store
+            .record_session_provider_process(&session.id, &attachment, 5555, 124)
+            .is_err());
+        assert_eq!(
+            store
+                .process(&attachment.agent_process_lfid)
+                .unwrap()
+                .unwrap()
+                .pid,
+            Some(4242)
+        );
+        assert_eq!(
+            row.command.as_deref(),
+            Some(r#"["codex","app-server","--listen","unix:///fixture"]"#)
+        );
+        assert!(row.completed_at.is_some());
+        assert!(
+            row.outcome.is_none(),
+            "failed exec is not an observed provider exit"
+        );
+        assert_eq!(store.session_history(&session.id, 0, 0).unwrap(), history);
+        assert!(store.agent_processes().unwrap().is_empty());
+    }
+
+    #[test]
+    fn stale_orphan_observation_cannot_settle_a_transferred_agent() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let session =
+            store.test_session("conversation", &crate::session_record::new_artifact_key());
+        let a = insert_process(&store, 1, 1);
+        let b = insert_process(&store, 2, 2);
+        let first = store
+            .claim_session_attachment(&session.id, None, &a, true)
+            .unwrap();
+        store
+            .record_session_provider_process(&session.id, &first, 4242, 123)
+            .unwrap();
+        let observed = store.agent_processes().unwrap().remove(0);
+        store
+            .claim_session_attachment(&session.id, Some(&first), &b, false)
+            .unwrap();
+        assert!(!store
+            .settle_agent_process(&observed, || panic!("stale signal"))
+            .unwrap());
+        let current = store.agent_processes().unwrap().remove(0);
+        assert!(store.settle_agent_process(&current, || Ok(())).unwrap());
+        let retained = store.process(&first.agent_process_lfid).unwrap().unwrap();
+        assert_eq!(retained.pid, Some(4242));
+        assert_eq!(retained.parent_process_lfid, Some(a));
+        assert!(retained.completed_at.is_some());
     }
 }

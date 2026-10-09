@@ -527,6 +527,9 @@ fn ledger_insert(
         _ => None,
     };
     let record = Process {
+        kind: crate::process::ProcessKind::Lf,
+        agent_session_id: None,
+        os_started_at: None,
         lfid: context.process_lfid.clone(),
         pid: Some(std::process::id()),
         trace_id: event.trace_id.clone(),
@@ -981,6 +984,15 @@ pub(crate) fn process_evidence(
     store: &SqliteStore,
     process: &ProcessLfid,
 ) -> ProcessIdentityEvidence {
+    if let Ok(Some(record)) = store.process(process) {
+        if record.kind == crate::process::ProcessKind::Agent {
+            return match (record.pid, record.os_started_at) {
+                (Some(pid), Some(start)) => process_identity_evidence(pid, start),
+                _ if record.completed_at.is_some() => ProcessIdentityEvidence::Dead,
+                _ => ProcessIdentityEvidence::Unknown,
+            };
+        }
+    }
     let Ok(receipts) = read_process_receipts_at(&crate::store::lf_home_dir()) else {
         return ProcessIdentityEvidence::Unknown;
     };

@@ -1,3 +1,4 @@
+pub mod agent_process;
 mod attention;
 pub mod claude;
 mod claude_history;
@@ -13,13 +14,11 @@ mod conformance_tests;
 mod dispatch;
 #[cfg(all(test, unix))]
 mod dispatch_tests;
-pub mod engine_orphans;
 mod lf_tag;
 pub(crate) mod native_titles;
 pub mod opencode;
 pub(crate) mod opencode_history;
 mod opencode_mapping;
-pub mod opencode_runtime;
 
 pub(crate) use claude_mapping::rate_limit_signal as claude_rate_limit_signal;
 pub(crate) use codex_mapping::rate_limit_signal as codex_rate_limit_signal;

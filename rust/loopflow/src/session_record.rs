@@ -2353,10 +2353,10 @@ impl CaptureHandle {
         store.session_thread(&session.id)
     }
 
-    pub(crate) fn begin_provider_spawn(&self) -> StoreResult<()> {
+    pub(crate) fn begin_provider_spawn(&self, command: &std::process::Command) -> StoreResult<()> {
         let capture = self.0.lock().expect("Session capture mutex poisoned");
         if let Some((session, driver)) = &capture.driver {
-            row_store(&capture.dir)?.record_session_provider_launch(session, driver, true)?;
+            row_store(&capture.dir)?.record_session_provider_launch(session, driver, command)?;
         }
         Ok(())
     }
@@ -2914,7 +2914,7 @@ fn replaceable_driver(
             "Conversation already has a driver; connect to it".into(),
         ));
     }
-    runtime::end_abandoned_engine(store, session, previous)?;
+    runtime::end_abandoned_agent_process(store, session, previous)?;
     Ok(expected)
 }
 

@@ -22,13 +22,12 @@ pub(crate) fn finish_session_attachment(
         if provider.as_deref() == Some("codex") {
             if let (Some((endpoint, thread)), Some((pid, started))) = (connection, process) {
                 let serving = Some((endpoint.as_str(), thread.as_str()));
-                crate::harness::codex_connection::close_engine(serving, pid, started).map_err(
-                    |error| {
+                crate::harness::codex_connection::close_agent_process(serving, pid, started)
+                    .map_err(|error| {
                         StoreError::InvalidData(format!(
                             "close Codex conversation {session}: {error}"
                         ))
-                    },
-                )?;
+                    })?;
                 return Ok(true);
             }
         }
@@ -41,7 +40,7 @@ pub(crate) fn finish_session_attachment(
 /// Session driver lock: a concurrent connect either holds the engine already,
 /// which fails this, or finds it gone. An engine that cannot be ended refuses
 /// the replacement and leaves the Session as it was.
-pub(super) fn end_abandoned_engine(
+pub(super) fn end_abandoned_agent_process(
     store: &SqliteStore,
     session: &str,
     dead: &SessionAttachment,
@@ -59,7 +58,7 @@ pub(super) fn end_abandoned_engine(
             .as_ref()
             .filter(|_| codex)
             .map(|(endpoint, thread)| (endpoint.as_str(), thread.as_str()));
-        crate::harness::codex_connection::close_engine(serving, pid, started).map_err(|error| {
+        crate::harness::codex_connection::close_agent_process(serving, pid, started).map_err(|error| {
             StoreError::InvalidAuthority(format!(
                 "Conversation's previous engine (process {pid}) is still running and was not ended: {error}"
             ))

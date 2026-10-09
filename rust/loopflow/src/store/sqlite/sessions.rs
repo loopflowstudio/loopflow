@@ -106,12 +106,12 @@ pub(super) fn session_in(conn: &Connection, id: &str) -> StoreResult<Option<Agen
 fn waiting_sql(session: &str, now: i64) -> String {
     format!(
         "EXISTS(SELECT 1 FROM session_activity act WHERE act.session_id={session}.id
-            AND {session}.completed_at IS NULL AND act.provider_generation={session}.provider_generation
+            AND {session}.completed_at IS NULL AND act.provider_generation=(SELECT provider_generation FROM processes WHERE lfid={session}.agent_process_lfid)
             AND CASE WHEN act.program_status IS NOT NULL THEN
                 EXISTS(SELECT 1 FROM json_each(act.program_status,'$.records') r
                     WHERE json_extract(r.value,'$.state')='blocked'
                     OR ({session}.interactive=1 AND json_extract(r.value,'$.state')='idle'))
-            ELSE act.attachment_token={session}.attachment_token
+            ELSE act.attachment_token=(SELECT attachment_token FROM processes WHERE lfid={session}.agent_process_lfid)
                 AND (act.pending_input>0 OR (act.open_tools=0 AND (({session}.interactive=1 AND act.yielded=1)
                     OR {now}-act.observed_at>={quiet}))) END)",
         quiet = crate::session::WAITING_QUIET_SECONDS
@@ -210,12 +210,13 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         (SELECT json_group_array(id) FROM ({})),
         a.primary_scope,
         (SELECT CASE WHEN json_valid(e.payload) THEN json_extract(e.payload,'$.outcome') END FROM session_events e
-            WHERE e.session_id=s.id AND e.seq=a.attachment_exit_seq AND e.kind='observed'),
+            WHERE e.session_id=s.id AND e.seq=(SELECT attachment_exit_seq FROM processes WHERE lfid=a.agent_process_lfid) AND e.kind='observed'),
         {waiting},
         COALESCE(({task_state}) IN ('done','abandoned'),0),
         EXISTS(SELECT 1 FROM tasks p WHERE p.primary_session_id=s.id),
-        (SELECT act.program_status FROM session_activity act WHERE act.session_id=s.id AND act.provider_generation=a.provider_generation),a.provider_generation
+        (SELECT act.program_status FROM session_activity act WHERE act.session_id=s.id AND act.provider_generation=p.provider_generation),COALESCE(p.provider_generation,0)
         FROM page s JOIN agent_sessions a ON a.id=s.id
+        LEFT JOIN processes p ON p.lfid=a.agent_process_lfid
         LEFT JOIN session_events captured ON captured.seq=s.current_capture
         LEFT JOIN flow_process_steps fs ON fs.process_lfid=captured.process_lfid
         LEFT JOIN flow_processes flow ON flow.process_lfid=fs.flow_process_lfid
@@ -1188,9 +1189,9 @@ fn resolve_ancestry_in(conn: &Connection, session: &mut AgentSession) -> StoreRe
 fn require_current_actor_in(conn: &Connection, id: &str) -> StoreResult<()> {
     if let Some(caller) = crate::journal::agent_caller().filter(|caller| caller.session_id == id) {
         let current: bool = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE id=?1
-                AND provider_generation=?2 AND provider_process_lfid=?3
-                AND attached_process_lfid IS NOT NULL)",
+            "SELECT EXISTS(SELECT 1 FROM agent_sessions s JOIN processes p ON p.lfid=s.agent_process_lfid WHERE s.id=?1
+                AND p.provider_generation=?2 AND p.parent_process_lfid=?3
+                AND p.attached_process_lfid IS NOT NULL)",
             params![id, caller.provider_generation, caller.origin_process_lfid],
             |row| row.get(0),
         )?;

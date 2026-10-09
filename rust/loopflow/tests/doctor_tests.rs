@@ -56,6 +56,9 @@ fn continuity_check(output: &Output) -> serde_json::Value {
 fn insert_process(store: &SqliteStore, _id: &str, ts: i64) {
     store
         .record_process(&Process {
+            kind: loopflow::process::ProcessKind::Lf,
+            agent_session_id: None,
+            os_started_at: None,
             lfid: loopflow::id::ProcessLfid::new(),
             pid: None,
             trace_id: loopflow::id::TraceId::new(),

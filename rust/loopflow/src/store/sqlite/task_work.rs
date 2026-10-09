@@ -54,7 +54,8 @@ pub(super) fn process_lfids(selector: &str) -> String {
     format!("WITH members AS MATERIALIZED ({})
         SELECT ae.lfid FROM processes ae JOIN ({}) tw ON ({})
         UNION SELECT se.process_lfid FROM session_events se INDEXED BY session_process_membership WHERE se.session_id IN (SELECT id FROM members) AND se.process_lfid IS NOT NULL
-        UNION SELECT a.attached_process_lfid FROM agent_sessions a WHERE a.id IN (SELECT id FROM members) AND a.attached_process_lfid IS NOT NULL",
+        UNION SELECT p.attached_process_lfid FROM processes p WHERE p.agent_session_id IN (SELECT id FROM members) AND p.attached_process_lfid IS NOT NULL
+        UNION SELECT p.lfid FROM processes p WHERE p.agent_session_id IN (SELECT id FROM members)",
         session_ids(selector), tasks(selector), checkout("ae.cwd"))
 }
 
@@ -344,11 +345,12 @@ pub(super) fn reach_end_in(
 fn open_process_tasks() -> String {
     let session = session_membership("a");
     format!(
-        "WITH open AS MATERIALIZED (SELECT lfid,cwd FROM processes INDEXED BY processes_unfinished
+        "WITH open AS MATERIALIZED (SELECT lfid,cwd,agent_session_id,attached_process_lfid FROM processes INDEXED BY processes_unfinished
             WHERE completed_at IS NULL),
         sessions AS (SELECT DISTINCT se.process_lfid AS process,se.session_id AS session
             FROM open CROSS JOIN session_events se ON se.process_lfid=open.lfid
-            UNION SELECT a.attached_process_lfid,a.id FROM open CROSS JOIN agent_sessions a ON a.attached_process_lfid=open.lfid)
+            UNION SELECT p.attached_process_lfid,p.agent_session_id FROM open CROSS JOIN processes p ON p.attached_process_lfid=open.lfid
+            UNION SELECT lfid,agent_session_id FROM open WHERE agent_session_id IS NOT NULL)
         SELECT open.lfid,tw.id FROM open JOIN tasks tw ON {}
         UNION SELECT s.process,tw.id FROM sessions s JOIN agent_sessions a ON a.id=s.session
             JOIN tasks tw ON ({session})",

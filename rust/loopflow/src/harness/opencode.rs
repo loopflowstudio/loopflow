@@ -16,8 +16,8 @@ use crate::engine::config::parse_agent;
 use crate::engine::process::kill_process_group;
 use crate::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
 use crate::harness::{
-    opencode_history, opencode_mapping, opencode_runtime, ApprovalPolicy, Harness, HarnessError,
-    RawProviderEvent, SendCurrentOutcome,
+    opencode_history, opencode_mapping, ApprovalPolicy, Harness, HarnessError, RawProviderEvent,
+    SendCurrentOutcome,
 };
 
 pub(crate) const OPENCODE_DISCONNECTED_CODE: &str = "opencode_disconnected";
@@ -110,7 +110,7 @@ impl OpenCodeHarness {
         {
             let history = self.history.lock().expect("OpenCode history lock poisoned");
             if let Some((store, session, driver)) = &history.owner {
-                store.record_session_provider_launch(session, driver, true)?;
+                store.record_session_provider_launch(session, driver, command.as_std())?;
             }
         }
         let mut child = crate::engine::process::spawn_agent_process(command, None, |pid| {
@@ -389,13 +389,6 @@ impl OpenCodeHarness {
         let opencode_pid = child.id();
         if let Some(pid) = opencode_pid {
             self.child_group.store(pid, Ordering::Release);
-            if let Err(err) = opencode_runtime::register_opencode_server(pid) {
-                tracing::warn!(
-                    opencode_pid = pid,
-                    error = %err,
-                    "failed to register OpenCode server runtime metadata"
-                );
-            }
         }
 
         self.child = Some(child);
@@ -581,15 +574,6 @@ impl Harness for OpenCodeHarness {
         }
         self.child = None;
         self.child_group.store(0, Ordering::Release);
-        if let Some(pid) = opencode_pid {
-            if let Err(err) = opencode_runtime::unregister_opencode_server(pid) {
-                tracing::warn!(
-                    opencode_pid = pid,
-                    error = %err,
-                    "failed to unregister OpenCode server runtime metadata"
-                );
-            }
-        }
 
         if let Some(task) = self.sse_task.take() {
             task.abort();

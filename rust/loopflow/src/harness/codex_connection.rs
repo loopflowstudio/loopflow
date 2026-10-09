@@ -20,7 +20,11 @@ use crate::store::{StoreError, StoreResult};
 /// shutdown. Saved history and the provider thread ID survive. `serving` is
 /// the recorded endpoint and thread; an engine that also serves an unrelated
 /// conversation is left running, and that is an error.
-pub(crate) fn close_engine(serving: Option<(&str, &str)>, pid: u32, started: i64) -> Result<()> {
+pub(crate) fn close_agent_process(
+    serving: Option<(&str, &str)>,
+    pid: u32,
+    started: i64,
+) -> Result<()> {
     let same_process = || -> Result<bool> {
         Ok(crate::journal::process_started_at(pid)?
             .is_some_and(|actual| (actual - started).abs() <= 3))

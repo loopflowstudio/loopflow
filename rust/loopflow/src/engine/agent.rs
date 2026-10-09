@@ -2036,7 +2036,7 @@ fn spawn_agent_child(
 ) -> Result<Child, CoreError> {
     if let Some(capture) = capture {
         capture
-            .begin_provider_spawn()
+            .begin_provider_spawn(cmd)
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     }
     let mut child = cmd.spawn()?;

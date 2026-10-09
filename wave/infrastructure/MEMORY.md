@@ -221,20 +221,20 @@ unpublished code retained, without deletion or delivery authorization.
 
 ## AgentProcess (LOO-443, 2026-10-09)
 
-Jack Heart requested one inventory. #1512 is `3e1e6245c`; authorized parallel
-LOO-441 must integrate before publication. Prior proofs: `6f96a964c`, this heading.
+Jack Heart requested one inventory. #1512 is `3e1e6245c`; LOO-441 must integrate
+before publication. Prior proofs: `a55f5345b`, this heading.
 
-Tokens fence A → B → A; retain provider identity/parent and exits.
-Freeze Work/capture before native requests, never from delayed starts or launch
-capture. `a563794b7` preserves matching origins and rejects conflicting repeats.
-Late history grants no control; broadcasts cannot borrow newer input.
+The local cut moves attachment/lifecycle onto processes and replaces inferred
+ownership, registry and orphan inventories.
+Detached rows remain; duplicate PID/birth grants no signal authority. Late history grants no control; tokens fence A → B → A.
+SQLite must be released before nested evidence reads.
 
-`ce80dc3e3`: Codex/OpenCode record before exec only with attachments.
-`Command::spawn` waits for exec: record on a parent thread, never after fork.
-Cover launches and detached providers. FIFO holders outlive transfer;
-prove both death orders. Retain native terminals, dash-compatible signals and
-throwaway tests. Records, rename, DTOs, two-second removal and installation
-remain unproved.
+Claude restarts its OS process within one attachment. A PID overwrite loses
+history; harness-only replacement strands capture. Invocation must hand replacement snapshots to harness and capture
+before more launch work. Old operations retain old snapshots. Identity refusal is
+not accepted resume behavior. Optional launches, native pre-exec, generation wires,
+FIFO death orders, full fixture replacement and LOO-441 remain unfinished.
+Two-second/public-entry/installed agreement remains unproved.
 
 ## Process vocabulary (LOO-400, curated 2026-10-09)
 

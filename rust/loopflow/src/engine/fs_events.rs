@@ -37,7 +37,6 @@ unsafe extern "C" {
     ) -> Ref;
     fn FSEventStreamSetDispatchQueue(stream: Ref, queue: Ref);
     fn FSEventStreamStart(stream: Ref) -> u8;
-    fn FSEventStreamFlushSync(stream: Ref);
     fn FSEventStreamStop(stream: Ref);
     fn FSEventStreamInvalidate(stream: Ref);
     fn FSEventStreamRelease(stream: Ref);
@@ -179,15 +178,6 @@ impl Stream {
                 bail!("cannot start filesystem event stream");
             }
             Ok(started)
-        }
-    }
-
-    /// Deliver every event that preceded this call before returning.
-    pub(crate) fn flush(&self) {
-        // SAFETY: only the owner calls this, never the callback queue. The
-        // SDK guarantees delivery of preceding events when FlushSync returns.
-        unsafe {
-            FSEventStreamFlushSync(self.stream);
         }
     }
 }

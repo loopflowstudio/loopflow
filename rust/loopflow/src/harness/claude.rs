@@ -151,27 +151,21 @@ impl ClaudeHarness {
             })
             .transpose()?;
         if let Some((store, session, driver)) = &owner {
-            store.record_session_provider_launch(session, driver, true)?;
+            store.record_session_provider_launch(session, driver, cmd.as_std())?;
         }
-        let mut child = cmd
-            .spawn()
-            .map_err(|err| anyhow!("failed to spawn claude: {err}"))?;
-        drop(activation);
-        if let Some((store, session, driver)) = &owner {
-            let recorded = (|| -> Result<()> {
-                if let Some(pid) = child.id() {
-                    if let Some(start) = crate::journal::process_started_at(pid)? {
-                        store.record_session_provider_process(session, driver, pid, start)?;
-                    }
-                }
-                Ok(())
-            })();
-            if let Err(error) = recorded {
-                let _ = child.kill().await;
-                let _ = child.wait().await;
-                return Err(error);
+        let mut child = crate::engine::process::spawn_agent_process(cmd, None, |pid| {
+            if let Some((store, session, attachment)) = &owner {
+                let started_at = crate::journal::process_started_at(pid)?.ok_or_else(|| {
+                    std::io::Error::other("AgentProcess birth unavailable before exec")
+                })?;
+                store
+                    .record_session_provider_process(session, attachment, pid, started_at)
+                    .map_err(std::io::Error::other)?;
             }
-        }
+            Ok(())
+        })
+        .map_err(|err| anyhow!("failed to spawn claude: {err}"))?;
+        drop(activation);
         let stdin = child
             .stdin
             .take()

@@ -35,11 +35,8 @@ Composition uses committed dependency APIs; no dirty dependency checkout was
 changed. Earlier integration limits and stalled checks:
 `8558e3177:scratch/findings.md`, this heading. Current composition is recorded below.
 
-### Integrated writer evidence — October 9
-
-Writer/reopening evidence: `565dc0fbb:scratch/findings.md`, **Integrated writer
-evidence**. Readback cannot exclude unseen Linear reopening; composed Git/Desktop
-proof remains.
+Writer/reopening evidence: `565dc0fbb`, **Integrated writer evidence**.
+Readback cannot exclude unseen Linear reopening; composed Git/Desktop proof remains.
 
 ### Committed exchange update — October 9
 
@@ -156,12 +153,9 @@ fixtures prove scoped lookup and foreign-repo edit refusal, not Git acquisition.
 Historical integration/CLI-reference attempts: `dffdbaaa5:scratch/findings.md`,
 this heading. No installed runtime or production plan changed.
 
-`2afcfba1a`: correspondence lookup mixed physical absence, mapping and record content across
-observations. The real-WAL fixture fails on `75fff9cb0` (lookup returns null), then
-passes with one read snapshot for Tasks/Projects. The next lookup sees the changed
-mapping. Imports are Store-seeded, not Git acquisition. The initial unqualified
-`--exact` filter ran zero tests; the qualified filter ran the regression.
-Resource-recovery limits: `18d02a610`, this heading.
+`2afcfba1a` reads lookup in one snapshot; later reads see remapping. WAL
+counterexample, initial zero-test attempt and recovery: `16372d0e1`, this heading.
+Store-seeded lookup is not Git acquisition; resource limits: `18d02a610`.
 
 Merge `663f78256` retains creation origins/exact-fact links through `3c67b29b1`,
 prepared validation and snapshot lookup. Import/readback creates no local requests.
@@ -200,12 +194,16 @@ The ID-versus-alias failure and recovery remain at `4688a4d85`, this heading
 
 ## Planning invocation explanation — October 9
 
-Create/edit/comment replace identity-only preview with shared input, scope,
-current-Project and store validation. Reads use the read-only registry, with no
-planning acquisition, initialization, author capture, Process logging or delivery.
-Review caught creation retaining the caller Task's recorded location: a new Task's
-checkout/execution are now unbound. Comment reads can refresh Linear during actual
-execution; preview exposes that effect without refreshing. This does not establish
-provider delivery or remote execution. CLI fixtures compare checkpointed stores,
-include refused/deleted/missing records and piped creation input, and compare the
-terminal-Project refusal with execution. Rust/Swift fixtures preserve the new wire.
+`16372d0e1` adds shared input/scope/current-Project/store validation without
+acquisition, initialization, author capture or delivery. Its review corrected a
+new Task inheriting the caller's execution location; new identity/location stays
+unbound. Comment execution may refresh Linear; preview never does. Checkpointed
+stores, invalid/deleted/missing records and piped creation are covered, not provider
+or remote execution. Prior details: `16372d0e1`, this heading.
+
+Compression separates creation from saved-Task reads, removes repeated request
+dispatch and parses creation input once. Review found `var_os("LF_WAVE_ID")`
+mislabeling default inbox selection as inherited for empty/whitespace declarations.
+Provenance now follows the resolved branch. The public CLI fixture checks explicit
+override, inherited identity and empty/whitespace defaults against unchanged
+checkpointed storage. It establishes no admission, peer or native acceptance.

@@ -123,169 +123,196 @@ async fn read_planning(
     request: &TaskPlanningRequest<'_>,
     report: &mut TaskPlanningExplanation,
 ) -> anyhow::Result<()> {
-    if matches!(request, TaskPlanningRequest::Create { .. }) {
-        // A new Task has no execution location or planning observation yet.
-        report.resolution.task = ContextFact::Unbound;
-        report.resolution.wave = ContextFact::Unavailable {
-            reason: "Creation Wave selection has not been validated".into(),
-        };
-        report.resolution.checkout = ContextFact::Unbound;
-        report.resolution.execution_machine = ContextFact::Unbound;
-        report.resolution.planning_observed_at = None;
-    }
-    let validation = match request {
+    match request {
         TaskPlanningRequest::Create { title, notes } => {
-            super::resolve_task_create_input(*title, *notes).map(|_| ())
+            read_creation(store, cwd, selection.wave, *title, *notes, report).await?;
         }
-        TaskPlanningRequest::Edit(update) => super::validate_task_edit_input(update),
-        TaskPlanningRequest::Comment {
-            message: Some(message),
-            ..
-        } => super::validate_task_comment_input(message),
-        TaskPlanningRequest::Comment { message: None, .. } => Ok(()),
-    };
-    if let Err(error) = validation {
-        report.impediments.push(error.to_string());
-        return Ok(());
-    }
-    if let TaskPlanningRequest::Create { title, notes } = request {
-        let input = super::resolve_task_create_input(*title, *notes)?;
-        report.action = Some(TaskPlanningAction::Create {
-            title: input.title,
-            description: input.report,
-            project: None,
-        });
-        report.effects.push("Save a new unstarted Task and pending planning mutations locally; attempt configured synchronization without allocating execution".into());
-        let main = crate::engine::worktrees::main_repo_root(cwd)?;
-        let selected = match super::select_task_creation_wave(store, &main, selection.wave).await {
-            Ok(selected) => selected,
-            Err(error) => {
-                report.resolution.wave = ContextFact::Unavailable {
-                    reason: error.to_string(),
-                };
-                anyhow::bail!("{error}; Wave registration/acquisition was not performed");
-            }
-        };
-        let wave = match selected {
-            Some(wave) => wave,
-            None => {
-                let locator = crate::work::wave::WaveLocator::discover(&main, "inbox")?;
-                match store.get_wave_at(&locator).await? {
-                    Some(wave) => wave,
-                    None => {
-                        report.resolution.wave = ContextFact::Unbound;
-                        report.effects.push("Ensure the repository's inbox Wave and Project before creating the Task".into());
-                        report.unavailable.push("Inbox Wave/Project identity requires initialization; it was not performed".into());
-                        return Ok(());
-                    }
-                }
-            }
-        };
-        report.resolution = crate::ops::context::explain_context(
-            store,
-            cwd,
-            WorkSelection {
-                task: None,
-                wave: Some(wave.id().as_str()),
-            },
-            None,
-            None,
-        )
-        .await;
-        report.resolution.checkout = ContextFact::Unbound;
-        report.resolution.execution_machine = ContextFact::Unbound;
-        report.resolution.wave = ContextFact::Bound {
-            value: wave.id().to_string(),
-            source: if selection.wave.is_some() {
-                "explicit"
-            } else if std::env::var_os("LF_WAVE_ID").is_some() {
-                "inherited_declaration"
-            } else {
-                "default_inbox"
-            }
-            .into(),
-        };
-        let project = match crate::ops::project::current_project(store, &wave) {
-            Ok(project) => project,
-            Err(error) => {
+        TaskPlanningRequest::Edit(update) => {
+            if let Err(error) = super::validate_task_edit_input(update) {
                 report.impediments.push(error.to_string());
                 return Ok(());
             }
-        };
-        let project = store
-            .get_project_by_project(&project.id)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("selected Project is missing"))?;
-        if let Some(TaskPlanningAction::Create {
-            project: selected, ..
-        }) = &mut report.action
-        {
-            *selected = Some(project.id.to_string());
-        }
-    } else {
-        let id = match &report.resolution.task {
-            ContextFact::Bound { value, .. } => crate::durable::TaskId::parse(value)?,
-            ContextFact::Unavailable { reason } => {
-                anyhow::bail!("{reason}; no planning acquisition was performed")
-            }
-            ContextFact::Unbound => {
-                anyhow::bail!("No saved Task selected; no planning acquisition was performed")
-            }
-        };
-        let task = store
-            .get_task(&id)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("Task {id} is missing"))?;
-        crate::ops::pm::validate_saved_task_scope(store, cwd, selection.wave, &task).await?;
-        match request {
-            TaskPlanningRequest::Edit(update) => {
-                if let Err(error) = store
+            let task = read_saved_task(store, cwd, selection.wave, &report.resolution).await?;
+            if let Err(error) =
+                store
                     .sqlite
-                    .validate_task_edit(&id, task.plan.revision, update)
-                {
+                    .validate_task_edit(&task.id, task.plan.revision, update)
+            {
+                report.impediments.push(error.to_string());
+                return Ok(());
+            }
+            let fields = [
+                ("title", update.name.is_some()),
+                ("description", update.description.is_some()),
+                ("rank", update.rank.is_some()),
+                ("assignee", update.assignee.is_some()),
+            ]
+            .into_iter()
+            .filter(|(_, present)| *present)
+            .map(|(field, _)| field.to_owned())
+            .collect();
+            report.action = Some(TaskPlanningAction::Edit {
+                revision: task.plan.revision,
+                fields,
+            });
+            report.effects.push("Save changed fields and pending planning mutations locally; attempt configured synchronization. Workflow, checkout and Processes stay unchanged".into());
+        }
+        TaskPlanningRequest::Comment { message, steer } => {
+            if let Some(message) = message {
+                if let Err(error) = super::validate_task_comment_input(message) {
                     report.impediments.push(error.to_string());
                     return Ok(());
                 }
-                let fields = [
-                    ("title", update.name.is_some()),
-                    ("description", update.description.is_some()),
-                    ("rank", update.rank.is_some()),
-                    ("assignee", update.assignee.is_some()),
-                ]
-                .into_iter()
-                .filter(|(_, present)| *present)
-                .map(|(field, _)| field.to_owned())
-                .collect();
-                report.action = Some(TaskPlanningAction::Edit {
-                    revision: task.plan.revision,
-                    fields,
-                });
-                report.effects.push("Save changed fields and pending planning mutations locally; attempt configured synchronization. Workflow, checkout and Processes stay unchanged".into());
             }
-            TaskPlanningRequest::Comment { message, steer } => {
-                if message.is_some() {
-                    if let Err(error) = store.sqlite.require_task_not_deleted(&id) {
-                        report.impediments.push(error.to_string());
-                        return Ok(());
-                    }
-                    report.effects.push("Append one local comment with stable identity and authored provenance; attempt configured synchronization. Execution stays unchanged".into());
-                    report.unavailable.push("Comment identity and caller/participant provenance are captured only when saving".into());
-                } else if task.plan.linear_id.is_some() {
-                    report.effects.push("Refresh Linear comments with a bounded wait, then show the saved thread even if refresh fails".into());
-                } else {
-                    report
-                        .effects
-                        .push("Read the saved local comment thread".into());
+            let task = read_saved_task(store, cwd, selection.wave, &report.resolution).await?;
+            if message.is_some() {
+                if let Err(error) = store.sqlite.require_task_not_deleted(&task.id) {
+                    report.impediments.push(error.to_string());
+                    return Ok(());
                 }
-                report.action = Some(TaskPlanningAction::Comment {
-                    message: message.map(|value| value.trim().to_owned()),
-                    steer: *steer,
-                    refresh: message.is_none() && task.plan.linear_id.is_some(),
-                });
+                report.effects.push("Append one local comment with stable identity and authored provenance; attempt configured synchronization. Execution stays unchanged".into());
+                report.unavailable.push("Comment identity and caller/participant provenance are captured only when saving".into());
+            } else if task.plan.linear_id.is_some() {
+                report.effects.push("Refresh Linear comments with a bounded wait, then show the saved thread even if refresh fails".into());
+            } else {
+                report
+                    .effects
+                    .push("Read the saved local comment thread".into());
             }
-            TaskPlanningRequest::Create { .. } => unreachable!("creation handled above"),
+            report.action = Some(TaskPlanningAction::Comment {
+                message: message.map(|value| value.trim().to_owned()),
+                steer: *steer,
+                refresh: message.is_none() && task.plan.linear_id.is_some(),
+            });
         }
     }
     report.unavailable.push("Provider freshness, synchronization delivery and concurrent saves are not observed or reserved".into());
+    Ok(())
+}
+
+async fn read_saved_task(
+    store: &SharedStore,
+    cwd: &Path,
+    wave: Option<&str>,
+    resolution: &ContextExplanation,
+) -> anyhow::Result<crate::work::task::Task> {
+    let id = match &resolution.task {
+        ContextFact::Bound { value, .. } => crate::durable::TaskId::parse(value)?,
+        ContextFact::Unavailable { reason } => {
+            anyhow::bail!("{reason}; no planning acquisition was performed")
+        }
+        ContextFact::Unbound => {
+            anyhow::bail!("No saved Task selected; no planning acquisition was performed")
+        }
+    };
+    let task = store
+        .get_task(&id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("Task {id} is missing"))?;
+    crate::ops::pm::validate_saved_task_scope(store, cwd, wave, &task).await?;
+    Ok(task)
+}
+
+async fn read_creation(
+    store: &SharedStore,
+    cwd: &Path,
+    wave_selector: Option<&str>,
+    title: Option<&str>,
+    notes: Option<&str>,
+    report: &mut TaskPlanningExplanation,
+) -> anyhow::Result<()> {
+    // A new Task has no execution location or planning observation yet.
+    report.resolution.task = ContextFact::Unbound;
+    report.resolution.wave = ContextFact::Unavailable {
+        reason: "Creation Wave selection has not been validated".into(),
+    };
+    report.resolution.checkout = ContextFact::Unbound;
+    report.resolution.execution_machine = ContextFact::Unbound;
+    report.resolution.planning_observed_at = None;
+    let input = match super::resolve_task_create_input(title, notes) {
+        Ok(input) => input,
+        Err(error) => {
+            report.impediments.push(error.to_string());
+            return Ok(());
+        }
+    };
+    report.action = Some(TaskPlanningAction::Create {
+        title: input.title,
+        description: input.report,
+        project: None,
+    });
+    report.effects.push("Save a new unstarted Task and pending planning mutations locally; attempt configured synchronization without allocating execution".into());
+    let main = crate::engine::worktrees::main_repo_root(cwd)?;
+    let selected = match super::select_task_creation_wave(store, &main, wave_selector).await {
+        Ok(selected) => selected,
+        Err(error) => {
+            report.resolution.wave = ContextFact::Unavailable {
+                reason: error.to_string(),
+            };
+            anyhow::bail!("{error}; Wave registration/acquisition was not performed");
+        }
+    };
+    let (wave, source) = match selected {
+        Some(wave) => (
+            wave,
+            if wave_selector.is_some() {
+                "explicit"
+            } else {
+                "inherited_declaration"
+            },
+        ),
+        None => {
+            let locator = crate::work::wave::WaveLocator::discover(&main, "inbox")?;
+            match store.get_wave_at(&locator).await? {
+                Some(wave) => (wave, "default_inbox"),
+                None => {
+                    report.resolution.wave = ContextFact::Unbound;
+                    report.effects.push(
+                        "Ensure the repository's inbox Wave and Project before creating the Task"
+                            .into(),
+                    );
+                    report.unavailable.push(
+                        "Inbox Wave/Project identity requires initialization; it was not performed"
+                            .into(),
+                    );
+                    return Ok(());
+                }
+            }
+        }
+    };
+    report.resolution = crate::ops::context::explain_context(
+        store,
+        cwd,
+        WorkSelection {
+            task: None,
+            wave: Some(wave.id().as_str()),
+        },
+        None,
+        None,
+    )
+    .await;
+    report.resolution.checkout = ContextFact::Unbound;
+    report.resolution.execution_machine = ContextFact::Unbound;
+    report.resolution.wave = ContextFact::Bound {
+        value: wave.id().to_string(),
+        source: source.into(),
+    };
+    let project = match crate::ops::project::current_project(store, &wave) {
+        Ok(project) => project,
+        Err(error) => {
+            report.impediments.push(error.to_string());
+            return Ok(());
+        }
+    };
+    let project = store
+        .get_project_by_project(&project.id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("selected Project is missing"))?;
+    if let Some(TaskPlanningAction::Create {
+        project: selected, ..
+    }) = &mut report.action
+    {
+        *selected = Some(project.id.to_string());
+    }
     Ok(())
 }

@@ -134,8 +134,9 @@ Two-CLI fixtures cover routing/Flow previews, not configured SSH or exclusive st
 
 Identity is not action validation. Run/move/restart and create/edit/comment
 previews reuse operation owners. Planning edits need no execution checkout;
-new Tasks have no execution location. Comment reads may refresh Linear during
-execution, never preview. Initialization/provenance remain unavailable.
+new Tasks have no execution location. Creation provenance follows resolved selection,
+not empty environment declarations. Comment refresh runs only in execution;
+initialization/authorship stay unavailable.
 Session explanation never probes endpoints; execution re-resolves. JSON grants
 no takeover, end intent no completion/cleanup. Other Task explanations remain
 identity-only. Native proof remains.

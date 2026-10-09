@@ -2431,3 +2431,54 @@ fn task_planning_explain_create_uses_piped_input_and_current_project_validation(
         1
     );
 }
+
+#[test]
+fn task_planning_explain_creation_provenance_follows_resolved_selection() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    let path = home.path().join(".lf/loopflow.db");
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let store = SqliteStore::new(&path).unwrap();
+    let canonical = repo.path().canonicalize().unwrap();
+    let selected = store
+        .ensure_wave_project(canonical.to_str().unwrap(), "selected")
+        .unwrap();
+    let inbox = store
+        .ensure_wave_project(canonical.to_str().unwrap(), "inbox")
+        .unwrap();
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+    let before = fs::read(&path).unwrap();
+    for (explicit, declaration, project, source) in [
+        (true, "unknown", &selected, "explicit"),
+        (
+            false,
+            selected.wave_id.as_str(),
+            &selected,
+            "inherited_declaration",
+        ),
+        (false, "", &inbox, "default_inbox"),
+        (false, "  ", &inbox, "default_inbox"),
+    ] {
+        let mut invocation = command(
+            home.path(),
+            repo.path(),
+            &["task", "create", "--title", "New", "--explain", "--json"],
+        );
+        invocation.env("LF_WAVE_ID", declaration);
+        if explicit {
+            invocation.args(["--wave", "selected"]);
+        }
+        let preview: serde_json::Value =
+            serde_json::from_str(&success(invocation.output().unwrap())).unwrap();
+        assert_eq!(
+            preview["resolution"]["wave"]["value"],
+            project.wave_id.as_str()
+        );
+        assert_eq!(preview["resolution"]["wave"]["source"], source);
+        assert_eq!(preview["resolution"]["task"]["state"], "unbound");
+        assert_eq!(preview["action"]["project"], project.id.as_str());
+    }
+    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+    assert!(fs::read(&path).unwrap() == before);
+}

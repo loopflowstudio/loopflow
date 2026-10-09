@@ -225,9 +225,8 @@ no preparation, Process writes or excerpt persistence. Session explanation reads
 recorded endpoints without probing a live driver's protocol. No removed launch,
 Project/roadmap or callback path is retained beside those owners.
 
-Repository/window locator and observation-fence deletion details: `6ce198b75`,
-this section. One retention path owns opening/restoration; scene equality cannot
-fence A→B→A. Receiver, delivery and native lifetimes remain separate.
+Window retention/fence deletion details: `6ce198b75`, this section. Scene equality
+cannot fence A→B→A; receiver, delivery and native lifetimes stay separate.
 
 Repository association replaces the blanket different-ID refusal with one selected
 identity plus retained local IDs in `repository_plans`; no second alias registry.
@@ -248,9 +247,11 @@ Task lookup plus `read_local_execution` wrapper for run/move explanations. It
 retains unavailable location and remote refusals before reading Workflow intent;
 no preparation or admission is added.
 
-Create/edit/comment no longer fall through to identity-only explanation. Shared
-input/scope/store validators replace inline save-only validation; transaction-time
-checks survive. Creation uses the same Wave/Project owners without initialization.
+Create/edit/comment share input/scope/store validators; transaction-time checks
+survive. `planning_explain::read_creation` parses input once, separately from saved
+Task reads. One request match replaces the repeated dispatch and unreachable
+creation arm. Wave provenance follows the selection result, not environment presence;
+empty declarations select the default inbox. No initialization or acquisition is added.
 
 Input reuses `insertTerminalText` and the pane event. Registry, multiplexer and
 surface owners remain authoritative: Close/Undo renews content tokens; filtered
@@ -531,4 +532,4 @@ identity/delegation, open them, add shell/Files panes, retain an unfinished draf
 change focus, target a harmless command, read output, hide/restore, and verify the
 original input target and draft survive. Demo owns native usability; preserve comparison evidence and use no real accounts or live user terminals.
 
-Check: network-isolated `global_commands task_planning_explain` (3), `dto_fixtures task_planning_explanations` (1), headless Swift DTO build/test (1), build/fmt/Clippy PASS; full suites/installation: gate/CI, native: demo.
+Check: `cargo build -p loopflow --bin lf`, network-isolated `global_commands task_planning_explain` (4), fmt/`cargo clippy --all-targets -- -D warnings` PASS; prior DTO/Swift results unchanged. Full suites/installation: gate/CI; native: demo.

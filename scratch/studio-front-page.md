@@ -221,3 +221,4 @@ Then: "oh needs a section on flows afte the project manager part" and "cut the p
 
 Jack Heart's Flows copy for `/cli`: "lf allows you to run flows. flows are (looping) sequences of skills, each step of which can be configured to be interactive or autonomous, run on a particular model, etc. lf provides lots of reasonable built-in flows that you can use to do software engineering, but you are encouraged to build your own and share them with others. loopflow aspires to help you focus on the stages that matter most to you." Applied; the last sentence became the section heading.
 Jack Heart: "lf is the CLI for defining workflows with coding agents." Placed as the `/cli` lede under the headline; whether it replaces the headline is open.
+Revised by Jack Heart to: "lf is the CLI for coding agent workflows."

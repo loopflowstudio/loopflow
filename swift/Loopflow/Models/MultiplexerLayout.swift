@@ -45,21 +45,17 @@ public indirect enum LayoutNode: Codable, Sendable, Equatable {
     }
 
     public func visible(excluding collapsed: Set<String>) -> LayoutNode? {
-        _filterPanes { !collapsed.contains($0.id) }
+        removing(collapsed)
     }
 
-    /// Removes a leaf and collapses its parent. Removing the final leaf returns nil.
-    public func removing(_ paneId: String) -> LayoutNode? {
-        _filterPanes { $0.id != paneId }
-    }
-
-    /// Both visibility and removal preserve surviving leaves and divider ratios.
-    private func _filterPanes(_ include: (PaneState) -> Bool) -> LayoutNode? {
+    /// Prune leaves in one traversal, preserving surviving occurrences and ratios.
+    /// Removing every leaf returns nil; the store owns the empty-workspace choice.
+    public func removing(_ paneIds: Set<String>) -> LayoutNode? {
         switch self {
-        case .leaf(let pane): return include(pane) ? self : nil
+        case .leaf(let pane): return paneIds.contains(pane.id) ? nil : self
         case .split(let axis, let first, let second, let ratio):
-            let left = first._filterPanes(include)
-            let right = second._filterPanes(include)
+            let left = first.removing(paneIds)
+            let right = second.removing(paneIds)
             switch (left, right) {
             case let (left?, right?): return .split(axis, first: left, second: right, ratio: ratio)
             case let (left?, nil): return left

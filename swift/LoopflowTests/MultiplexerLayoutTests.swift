@@ -36,7 +36,7 @@ struct MultiplexerLayoutTests {
         let b = PaneState(content: .shell)
         let split = LayoutNode.leaf(a).splitting(a.id, axis: .horizontal, newPane: b)
 
-        let collapsed = split.removing(b.id)
+        let collapsed = split.removing([b.id])
         #expect(collapsed == .leaf(a))          // back to a bare leaf
         #expect(collapsed?.allPanes.count == 1)
     }
@@ -44,7 +44,7 @@ struct MultiplexerLayoutTests {
     @Test("removing the only pane returns nil")
     func removingLastReturnsNil() {
         let a = PaneState(content: .empty)
-        #expect(LayoutNode.leaf(a).removing(a.id) == nil)
+        #expect(LayoutNode.leaf(a).removing([a.id]) == nil)
     }
 
     @Test("Pruning nested panes retains surviving occurrences, axes and ratios")
@@ -67,9 +67,7 @@ struct MultiplexerLayoutTests {
         ]
         for (hidden, expected) in cases {
             #expect(tree.visible(excluding: hidden) == expected)
-            if hidden.count == 1, let id = hidden.first {
-                #expect(tree.removing(id) == expected)
-            }
+            #expect(tree.removing(hidden) == expected)
         }
     }
 

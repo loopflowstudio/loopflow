@@ -93,16 +93,16 @@ public final class MultiplexerStore {
     public func move(_ paneId: String, beside destination: String, axis: SplitAxis) {
         guard paneId != destination,
               let pane = layout.pane(for: paneId), layout.pane(for: destination) != nil,
-              let remaining = layout.removing(paneId) else { return }
+              let remaining = layout.removing([paneId]) else { return }
         layout = remaining.splitting(destination, axis: axis, newPane: pane)
         closedState = nil
         _notify()
     }
 
     public func close(_ paneId: String) {
-        guard let pane = layout.pane(for: paneId),
-              layout.allPanes.count > 1 || pane.content != .empty
-        else { return }
+        guard let pane = layout.pane(for: paneId) else { return }
+        let remaining = layout.removing([paneId])
+        guard remaining != nil || pane.content != .empty else { return }
 
         // Undo restores this pane as a new occurrence, never reviving a stale
         // control target. Other panes retain their existing occurrences.
@@ -116,18 +116,11 @@ public final class MultiplexerStore {
         // interrupted conversation's initial launch command.
         collapsedPaneIds.remove(paneId)
         shellCommands.removeValue(forKey: paneId)
-        if layout.allPanes.count == 1 {
-            layout = layout.replacingContent(of: paneId, with: .empty)
-            zoomedPaneId = nil
-            _notify()
-            return
-        }
-        guard let updated = layout.removing(paneId) else { return }
-        layout = updated
+        layout = remaining ?? .leaf(PaneState(id: paneId, content: .empty))
         if zoomedPaneId == paneId { zoomedPaneId = nil }
-        if focusedPaneId == paneId {
+        if focusedPaneId == paneId, remaining != nil {
             focusedPaneId = _nearestPane(to: paneId, in: closedState?.layout)
-                ?? updated.firstPane.id
+                ?? layout.firstPane.id
         }
         _notify()
     }
@@ -297,24 +290,20 @@ public final class MultiplexerStore {
 
     /// Removes confirmed resolved or moved Sessions without creating an undo entry.
     public func removeSessions(_ sessionIds: Set<String>) {
-        let stale = layout.allPanes.filter { pane in
+        let removes: (PaneState) -> Bool = { pane in
             guard case .session(let id) = pane.content else { return false }
             return sessionIds.contains(id)
         }
-        let undoIsStale = closedState?.layout.allPanes.contains { pane in
-            guard case .session(let id) = pane.content else { return false }
-            return sessionIds.contains(id)
-        } == true
+        let stale = layout.allPanes.filter(removes)
+        let undoIsStale = closedState?.layout.allPanes.contains(where: removes) == true
         guard !stale.isEmpty || undoIsStale else { return }
 
-        for pane in stale {
-            collapsedPaneIds.remove(pane.id)
-            if zoomedPaneId == pane.id { zoomedPaneId = nil }
-            if layout.allPanes.count == 1 {
-                layout = .leaf(PaneState(id: pane.id, content: .empty))
-            } else if let updated = layout.removing(pane.id) {
-                layout = updated
-            }
+        if let last = stale.last {
+            let removed = Set(stale.map(\.id))
+            // Keep the final slot when all Sessions leave, as single removals do.
+            layout = layout.removing(removed) ?? .leaf(PaneState(id: last.id, content: .empty))
+            collapsedPaneIds.subtract(removed)
+            if let zoomedPaneId, removed.contains(zoomedPaneId) { self.zoomedPaneId = nil }
         }
         if layout.pane(for: focusedPaneId) == nil {
             focusedPaneId = layout.firstPane.id

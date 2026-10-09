@@ -374,16 +374,54 @@ struct MultiplexerStoreTests {
         #expect(store.zoomedPaneId == nil)
     }
 
-    @Test("completed sessions leave an empty workspace")
-    func completedSessionClearsPane() {
+    @Test("Removing all Sessions retains the last empty slot with a fresh occurrence", arguments: [1, 3])
+    func removedSessionsLeaveEmptySlot(count: Int) {
         let store = MultiplexerStore()
-        store.load(sessionId: "session-1")
-
-        store.removeSessions(["session-1"])
+        let ids = (0..<count).map { "session-\($0)" }
+        for id in ids { store.reveal(sessionId: id) }
+        let last = store.focusedPane
+        store.setZoom(last.id, enabled: true)
+        store.removeSessions(Set(ids))
 
         #expect(store.layout.allPanes.count == 1)
         #expect(store.focusedPane.content == .empty)
-        #expect(store.pane(forSessionId: "session-1") == nil)
+        #expect(store.focusedPane.id == last.id)
+        #expect(store.focusedPane.incarnation != last.incarnation)
+        #expect(store.zoomedPaneId == nil)
+        #expect(!store.canUndoClose)
+    }
+
+    @Test("Batch membership moves preserve companions, ratios and focus while retiring stale Undo")
+    func batchRemovalPreservesCompanions() throws {
+        let store = MultiplexerStore()
+        store.newShell(command: ["retained-command"])
+        let shell = store.focusedPane
+        store.reveal(sessionId: "first")
+        let first = store.focusedPane
+        store.reveal(sessionId: "second")
+        let second = store.focusedPane
+        store.show(.files(taskId: "task"))
+        let files = store.focusedPane
+        store.updateRatio(between: shell.id, and: files.id, ratio: 0.3)
+        let temporary = try #require(store.split(files.id, axis: .horizontal))
+        store.close(temporary.id)
+        store.setCollapsed(paneId: first.id, collapsed: true)
+        store.setFocusedPane(files.id)
+        store.setZoom(second.id, enabled: true)
+        #expect(store.canUndoClose)
+
+        store.removeSessions(["first", "second"])
+
+        let retained = LayoutNode.split(.vertical, first: .leaf(shell), second: .leaf(files), ratio: 0.3)
+        #expect(store.layout == retained)
+        #expect(store.focusedPane == files)
+        #expect(store.collapsedPaneIds.isEmpty)
+        #expect(store.zoomedPaneId == nil)
+        #expect(store.shellCommands[shell.id] == ["retained-command"])
+        #expect(!store.canUndoClose)
+        store.undoClose()
+        store.removeSessions(["first", "second"])
+        #expect(store.layout == retained)
     }
 
     @Test("Undo restores a hidden Session only while shared evidence retains it", arguments: [false, true])

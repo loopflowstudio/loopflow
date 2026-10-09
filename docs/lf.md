@@ -241,12 +241,12 @@ lf planning associate <incoming-work-id> --with <local-work-id> --linear <provid
 ```
 
 Both IDs remain intact. The incoming full ID resolves to existing local Work;
-no execution or private history moves. Scalar fields project jointly, but receipt
-composition is unfinished. Association retains sharing/effect holds visible in
-status, not convergence.
+no execution or private history moves. The next exchange projects selected fields
+and receipts jointly. Private references and rejected projections remain held;
+association alone never authorizes provider delivery.
 
-Setup is local: these commands neither fetch nor publish planning. In local-only
-repositories, interactive and headless sessions exchange selected planning, even
+Setup is local: these commands neither fetch nor publish planning. Interactive and
+headless sessions exchange selected planning with or without Linear, even
 without a Task. Desktop's work connection does the same. Task saves and Project
 edits commit locally, then attempt exchange before returning; failed exchange
 leaves pending state, not a failed save. Machine dispatch publishes first; cold
@@ -267,9 +267,9 @@ inspection never enrolls Work or publishes it. Selecting a Wave can share its
 retained private history, including comments and old parent references. Its
 foreground reader updates these receipts without a manual refresh; a failed
 reading keeps the last status visibly stale. Import retention is not convergence.
-Git exchange
-in Linear-connected repositories awaits complete provider acquisition and delivery
-receipt integration; it reports that limitation without changing local plans.
+Git publication and Linear delivery have separate receipts. An observed Linear
+value retires a matching unattempted intention without claiming a local provider
+write; unknown effects and losing edits remain available for inspection.
 
 Connection defaults to `refs/loopflow/planning/users/<uuid>`; `--shared <name>`
 explicitly joins `refs/loopflow/planning/shared/<name>`. Joining selects no existing

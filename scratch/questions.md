@@ -53,7 +53,7 @@ earlier adoption and pre-cut storage evidence, with their limitations, remain at
   `6f1869e9b:scratch/questions.md`, October 8 setup choice. A stable user key,
   empty local connection and future-root routing keep joining separate from
   publication. `use local` never withdraws existing membership; descendants
-  inherit their parent's saved selection. Mixed-provider activation remains held.
+  inherit their parent's saved selection. Mixed-provider exchange now uses the common owner; combined acceptance remains.
 
 - Provider-frontier representation and acquisition-before-projection rationale:
   `b4a91632e:scratch/questions.md`, October 8 provenance. The existing journal
@@ -110,7 +110,7 @@ earlier adoption and pre-cut storage evidence, with their limitations, remain at
 
 - Association's refusal-only findings remain at
   `90a37ab79:scratch/questions.md`, October 9 association finding. The design now
-  owns joint projection and receipt composition; exchange/effect holds remain.
+  owns joint projection and receipt composition; private/projection holds remain.
 
 - October 9 correspondence choice: explicit local `planning associate <incoming-id>
   --with <local-id> --linear <provider-id>` uses retained scalar mapping evidence,
@@ -140,14 +140,15 @@ earlier adoption and pre-cut storage evidence, with their limitations, remain at
   **Remaining integration**, item 3. `1cbbba625`/`01769ea0d` reuse accepted sources
   for causal scalar winners; `79e478550`/`521c7040f` resolve membership delivery
   and readback without rewriting captured values. These are reversible composition
-  choices, not new product policy. Private groups and association/mixed exchange
-  remain held; order/deletion origins derive from the journal's unique receipt
+  choices, not new product policy. Private groups remain held; selected associated origins now exchange; order/deletion origins derive from the journal's unique receipt
   identity, not a second mutable column. The validator rejects cross-origin reuse.
 
-- October 9 recovery presentation choice: extend the existing destination status
-  with local per-origin journal values rather than add a restore command or store.
-  Follow associations, retained references and comments for inspection only; omit
-  unrelated private records. Show ranked candidates separately from retained
-  alternatives, without claiming successful projection. Preserve exact JSON and
-  comment authorship; scalar edit authors are unknown, not inferred from Machine
-  or observer. Restoring remains an ordinary edit. No mixed-provider activation.
+- Recovery-presentation choice and proof are consolidated in the design's
+  implemented boundaries; full rationale: `f55d6c5b7:scratch/questions.md`, final
+  entry. No restoration writer, author inference or implicit enrollment.
+- October 9 public Git/HTTPS composition exposed duplicate field delivery after
+  a lost reply: an unattempted equal-desired receipt survived provider readback.
+  The common writer now adopts a changed Linear baseline without acknowledging
+  an unattempted effect; unchanged baselines still preserve saves. This replaces
+  the old membership-test assertion, not Jack Heart's Linear-wins policy. Public
+  creation/link origins and broader combined acceptance remain distinct.

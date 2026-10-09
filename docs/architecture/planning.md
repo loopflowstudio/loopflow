@@ -128,8 +128,9 @@ associated origins share scalar winner selection on their local owner. Causal
 ancestry retires observed predecessors before concurrent-head ranking; retained
 per-origin heads alone cannot make that decision. Accepted source IDs commit on
 the local owner, including foreign peer-authored IDs, without an echo mutation.
-Association exchange/effect holds remain pending public Git/Linear composition;
-storage receipt composition and read-only recovery alone are insufficient.
+Selected associated histories use the same Git exchange as other plans. A
+successful import releases the association's projection conflict only after common
+receipt composition; private references and failed projections still defer effects.
 
 Peer imports can retain uncertain effects in their journal while rejecting the
 object's projection. Common field/deletion, creation/attachment, state and order
@@ -148,15 +149,16 @@ provider evidence. Initial attachment is allowed; ordinary peer edits cannot
 replace or clear an existing Task/Project mapping. Contradictions retain the
 journal and isolate that object while independent plans advance. Clearing a legacy
 mapping is not identity association: it makes the retained Work a provider-creation
-candidate and leaves its old selectors and effect receipts behind. Explicit legacy
-association recovery remains unfinished. `planning associate` records exact local
+candidate and leaves its old selectors and effect receipts behind.
+`planning associate` records exact local
 correspondence and enables full-ID lookup without merging IDs or execution histories.
 The incoming scalar journal must retain one provider mapping matching the existing
 local Work. Names, titles and attempted creation inputs do not establish it.
 Physical rows remain their own owners; lookup rechecks the local mapping,
 repository and contradictory incoming scalar mappings.
 Association changes no sharing membership. Joint scalar projection requires every
-origin and its retained references in the same selection; exchange/effects stay held.
+origin and its retained references in the same selection. Until import succeeds,
+effects remain held; association alone neither publishes nor delivers.
 Replacing a rejected mapping with null cannot hide its earlier claim against
 another local owner. Creation receipts also retain their original Work-derived
 provider UUID and captured model identity: a lookup alias cannot rekey them.
@@ -186,14 +188,20 @@ from the existing journal, separately from the local owner. Reused receipt IDs
 across origins are invalid. Order selection uses the original save's clock;
 projection, delivery and complete-list comparison resolve member references without
 rewriting captured lists or effect inputs. Associated receipt projection no longer
-requires a blanket refusal, but association exchange/effects remain held pending
-public proof. Associated state/comment/Wave
+requires a blanket refusal. Associated state/comment/Wave
 imports retain uncertain attempts, authorship and losing values; association alone
 changes no Wave selection. State delivery readback enters common accepted-planning
 projection so the observation reaches peers, not only the local receipt.
 Task capture compares complete provider bodies: a detail and a later list may
 share an issue revision while carrying different list ranks. Revision equality
 alone cannot establish that the later observation is retained.
+
+A changed provider baseline that already equals an unattempted save retires that
+intention through the same retained-observation receipt as other Linear winners.
+It does not set attempted or acknowledged: only matching actual attempts can
+acknowledge local delivery. This avoids resending another peer's successful write
+before its Git readback arrives. Unchanged baselines preserve later saves; this
+read-before-write behavior supplies no provider compare-and-swap guarantee.
 
 `ops/planning_delivery.rs` consumes mapped Task titles, descriptions, nullable
 assignees and membership, and Project names, summaries, statuses and structured

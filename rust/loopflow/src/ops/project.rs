@@ -149,6 +149,24 @@ async fn resolve_project(store: &Store, repo: &Path, selector: &str) -> OpsResul
     let repo = crate::repository::CanonicalRepo::discover(repo)
         .map_err(project_error)?
         .to_string();
+    if crate::durable::ProjectId::parse(selector).is_ok() {
+        let project = store
+            .get_project_by_project(selector)
+            .await
+            .map_err(project_error)?
+            .ok_or_else(|| project_error(format!("Project {selector:?} not found")))?;
+        let wave = store
+            .get_wave(&project.wave_id)
+            .await
+            .map_err(project_error)?;
+        return if wave.is_some_and(|wave| wave.repo() == repo) {
+            Ok(project)
+        } else {
+            Err(project_error(format!(
+                "Project {selector:?} not found in this repository"
+            )))
+        };
+    }
     let waves = store.list_waves(None).await.map_err(project_error)?;
     let projects = store.list_projects(None).await.map_err(project_error)?;
     let projects: Vec<_> = projects
@@ -160,12 +178,11 @@ async fn resolve_project(store: &Store, repo: &Path, selector: &str) -> OpsResul
         })
         .collect();
     if let Some(project) = projects.iter().find(|project| {
-        project.id.as_str() == selector
-            || project
-                .plan
-                .linear_id
-                .as_ref()
-                .is_some_and(|id| id.as_str() == selector)
+        project
+            .plan
+            .linear_id
+            .as_ref()
+            .is_some_and(|id| id.as_str() == selector)
     }) {
         return Ok(project.clone());
     }

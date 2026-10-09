@@ -619,22 +619,22 @@ acceptance remain at
 
 ## Tasks across machines (LOO-412, 2026-10-09)
 
-Jack Heart selected review-only custom-ref sync; no landing/export.
-Joining publishes nothing; imports stay unplaced. Malformed input aborts import;
-contradictions defer effects, not saves/acquisition. Preserve execution, baselines,
-uncertainty and losers. Mappings/errors/creation never settle removal.
-`af7730926`: CLI/Desktop expose membership, values, authors and
-private references without enrollment or confirmed projection/delivery. Unknown
-authors stay unknown; ordinary edits restore. One validated journal; only recovery
-expands private history. Failure preserves export/receipts and last-good status.
-Release's entry-point lesson: Store-seeded tests prove no foreground composition.
-Mixed-provider and association holds are independent.
+Jack Heart selected review-only custom-ref sync; no landing/export. Joining
+publishes nothing; imports stay unplaced. Malformed input aborts import;
+contradictions defer effects, not saves/acquisition. Preserve execution, uncertainty,
+losers and exact receipt origins. Correspondence grants no identity or authority;
+private references hold groups. Causality precedes ranking; equal revisions can
+carry different ranks, so retain bodies.
 
-Causality precedes ranking; correspondence grants no identity or authority.
-Private references hold groups. Origins retain inputs and later-save baselines.
-Equal revisions can carry different ranks; retain bodies. `8a6f8f807`: peer
-state/comment/Wave readback preserves authorship/execution.
-Transport/installation unproved. Proofs: `6f1869e9b`; plan:
+`af7730926` supplies journal-derived recovery without enrollment or confirmation.
+Unknown authors stay unknown; ordinary edits restore. Proofs: `f55d6c5b7:wave/infrastructure/MEMORY.md`, this heading.
+
+Git/HTTPS exposed duplicate delivery: an unattempted equal-desired save survived
+changed-baseline readback. Common reconciliation adopts Linear without inventing an attempt or
+acknowledgement; unchanged baselines preserve saves. Readback proves no atomicity.
+Selected association import replaces blanket exchange/effect holds, retaining
+private and failed-projection holds. Creation/link-origin public proof, combined
+lifetimes and installation remain unproved. Plan:
 `scratch/work-on-another-machine-name.md`.
 
 ## Driver recovery

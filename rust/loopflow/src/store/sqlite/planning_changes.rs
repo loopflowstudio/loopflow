@@ -436,7 +436,11 @@ impl<'a> PlanningChanges<'a> {
             let remote = self.comparison_value(conn, &change.field, value.clone())?;
             let desired = self.comparison_value(conn, &change.field, change.value.clone())?;
             let base = self.comparison_base(conn, &change.field, change.base.as_ref())?;
-            if remote != desired && base.as_ref() != Some(&remote) {
+            // A changed provider baseline also retires an unattempted save
+            // whose value already arrived through another peer. Preserve the
+            // receipt as an adopted observation, never invent our own effect.
+            // observe_attempts above alone acknowledges actual local attempts.
+            if base.as_ref() != Some(&remote) {
                 conn.execute(
                     &format!("UPDATE {owner}_changes SET conflict_json=?2 WHERE id=?1 AND conflict_json IS NULL"),
                     params![change.id, serde_json::json!({"revision": saved["revision"], "value": remote}).to_string()],

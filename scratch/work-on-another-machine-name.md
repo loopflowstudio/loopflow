@@ -132,6 +132,14 @@ this heading. Keep these replacements deleted:
   origins, exact inputs, causal baselines, uncertain losers and private holds survive.
   Do not restore sequence-ranked order/deletion delivery, raw-ID comparisons,
   scalar visibility over removal receipts, or duplicate receipt writes.
+- Connected-provider refusal in `ops/planning_peer.rs`,
+  `ASSOCIATION_PROJECTION_PENDING` and its `hold_associations` selector argument:
+  replace together with public composition, preserving selection and projection
+  conflicts. No second transport/effect owner or enablement flag.
+- Common reconciliation's equal-desired exception after a changed provider baseline:
+  adopt the observed value without acknowledging an unattempted local effect.
+- Project operations' physical-ID-only scan: full IDs now use the common
+  correspondence lookup, retaining repository scope and name ambiguity checks.
 - Destination-only recovery presentation: CLI/Desktop now consume the same
   journal-derived per-origin values and membership, not a second recovery store.
   No effect writer, enrollment or candidate-as-confirmation path is introduced.
@@ -198,7 +206,7 @@ frontier traverses causal ancestors before ranking; the existing observation tab
 commits accepted source IDs. Per-origin journals/heads, losing edits, creation
 origins and raw delivery inputs survive. Scalar relationship values resolve only
 at projection. Associated order/deletion receipt projection now uses the common writers; the
-association exchange/effect hold remains until composition and its proof are complete.
+private/projection holds remain independent of association.
 
 Compression shares predecessor traversal between resolved-owner frontier selection
 and delivery baselines. Walk shared ancestry once per owner, including paths through
@@ -209,12 +217,12 @@ receipt composition boundaries are unchanged.
 ## Remaining integration — October 9
 
 Receipt origins and full-ID correspondence exist. Ordinary import now projects
-associated creation receipts onto their local owner without releasing holds
+associated creation receipts onto their local owner without releasing private holds
 (`39dba32c1`).
 **Scalar and receipt composition have focused storage proof, including
 state/comment/Wave readback (`8a6f8f807`).** Per-Work recovery presentation now
 reads the retained journal through common status; item 3 still owns public
-Git/HTTPS composition before releasing exchange/effect holds. Private or failed groups never advance
+Git/HTTPS composition before review-only publication. Private or failed groups never advance
 observations. The preceding state/comment/Wave direction is implemented, not a
 second implementation step.
 
@@ -330,8 +338,8 @@ recovery, not provider-frontier acceptance. Combined launch/Flow verification
 remains with gate. The single remaining-work list below owns association,
 public composition and recovery review; retained conflicts are not convergence.
 
-Mixed-provider exchange remains disabled until composition is complete. Local-only
-exchange and private-selection holds remain intact. Combined verification belongs
+Mixed-provider exchange uses the common selected-import and effect owners.
+Private-selection holds remain intact. Combined verification belongs
 to gate; publication still requires the acceptance below, with no landing authority.
 Earlier cut-by-cut evidence: `3f7d9f2da:scratch/work-on-another-machine-name.md`,
 **Remaining integration**.
@@ -362,9 +370,8 @@ without another commit. Uncertainty is saved before push; later local edits are
 compared with the attempted snapshot digest. Fetched, imported and publication
 revisions remain separate. The public work-watch case passes in isolated Linux;
 other composed cases remain gate acceptance.
-Linear-connected repositories still do not exchange: the removal/archive/Team
-storage cut exists, but legacy association and combined public acceptance (including
-invalidation) remain. The diagnostic is temporary, not product policy.
+Connected Linear repositories use the same exchange owner. Public association
+round-trip and private-origin proofs pass; broader invalidation and lifetimes remain.
 
 1. Public `lf planning key/connect/use/select/status` now provisions/recover keys,
    pins an empty binding, selects exact Wave IDs and displays retained imports/holds.
@@ -446,10 +453,9 @@ invalidation) remain. The diagnostic is temporary, not product policy.
    It refuses redirecting an existing physical row. The common Task resolver and
    Project selector resolve associated full IDs only; direct identity readers
    remain exact. Membership, captured effects and execution foreign keys do not
-   change. Lookup rechecks mapping/repository. Selected origins can jointly
-   project scalar fields; association/reimport retains exchange/effect holds pending
-   public composition. Storage receipt composition is
-   implemented; these holds are not Jack Heart's final product policy.
+   change. Lookup rechecks mapping/repository. Selected origins jointly project fields and receipts. Association alone retains
+   its projection conflict; successful import releases it, not private or failed
+   groups. Common receipt composition remains the only effect owner.
 
    The Store correspondence fixture imports older/newer snapshots in both orders,
    repeats association and resolves both IDs. It asserts unchanged private planning,
@@ -465,29 +471,10 @@ invalidation) remain. The diagnostic is temporary, not product policy.
    the joint cut below supersedes its Linear-only parent validation. Private
    dependency serialization proves no public exchange.
 
-   **October 9 joint scalar cut (`1cbbba625`, compressed at `01769ea0d`).**
-   Ordinary import resolves explicit associated origins to the existing local owner and evaluates the full causal frontier
-   before ranking concurrent heads. Each original record must remain complete.
-   The existing `planning_peer_observed` writer stores accepted source IDs under
-   the local owner in the same savepoint, including peer-authored IDs. Creation
-   histories remain keyed by original origin. Private origins/references hold the
-   whole group; association does not enroll them. Captured inputs and execution
-   foreign keys are unchanged.
-
-   Cross-origin scalar predecessors now mean observation, not equivalent identity
-   or equal provider facts. The validator requires matching kind/field and ascending
-   clocks; provider bodies independently justify Linear priority. Only explicit
-   local correspondence groups winners. Common acquisition still requires exact
-   matching facts when borrowing *unobserved* retained heads; accepted IDs can be
-   predecessors of later peer saves or changed provider facts. This supersedes
-   the portable-observation cut's Linear-only validation rule, not its evidence.
-
-   The new Store fixture covers both Task title and Project name/workflow through
-   ordinary association/import, local save and return import, reversing/repeating
-   snapshots, retaining uncertain losing receipts, delivery baselines and populated
-   execution. Later Linear acquisition follows the accepted peer-authored frontier.
-   It serializes retained history because public association exchange
-   remains held. It is not public Git/HTTPS acceptance.
+   Joint-scalar projection, accepted-source capture and portable-observation
+   rationale: `f55d6c5b7:scratch/work-on-another-machine-name.md`, item 3,
+   **October 9 joint scalar cut**. Per-origin journals, uncertainty, private groups
+   and exact provider-equality rules remain; public composition is below.
 
    **Implemented association boundaries — reconciled October 9.**
    `79e478550`/`521c7040f` supply membership composition.
@@ -519,31 +506,39 @@ invalidation) remain. The diagnostic is temporary, not product policy.
    migration is added. Return readback settles the peer without replaying a turn.
    These are storage proofs, not public Git/HTTPS or running-control acceptance.
 
-   **Remaining association work:** complete public Git/HTTPS composition and
-   exact-origin readback. `ops/planning_peer.rs` still rejects connected Linear
-   repositories before fetch; `ASSOCIATION_PROJECTION_PENDING` independently holds
-   associated exchange/effects. Removing only one cannot establish convergence.
-   Their coordinated replacement and public regression are implementation work,
-   not a rerun of storage tests. Private/reference and failed-projection holds
-   remain required. Gate owns combined command/lifetime verification afterward;
-   Jack Heart's review-only boundary is unchanged.
+   **Public composition repair — October 9.**
+   The connected-Linear refusal and blanket association hold are replaced together
+   by the existing selected-import and receipt-conflict owner. Association alone
+   still grants no effect; a successful import must project all selected origins.
+   Private references and rejected projections retain their independent holds.
+   The new public association regressions enter setup,
+   association, work-watch Git exchange and synthetic HTTPS readback on two stores.
+   The first composed run exposed a duplicate title write after a lost response:
+   the receiving store's unattempted save remained pending when Linear already
+   contained its desired value. Common reconciliation previously preserved that
+   equal value, allowing another delivery before the next peer import.
 
-   Acceptance must enter through that correspondence operation and ordinary peer
-   import/lookup, not substitute helper calls for association. For both Tasks and
-   Projects, reversed import order and repeat association must retain the same
-   planning winners, both IDs, losing edits, uncertain origins, populated execution
-   and private-selection holds. Public provider readback must settle only its exact
-   origin; lookup by either associated ID must preserve local execution ownership.
-   After observing a peer Linear winner, save locally and exchange again: the
-   receiver must retain the observed predecessor and delivery baseline, rather
-   than treating the save as concurrent or exporting private history.
+   The repair adopts a changed Linear baseline even when it equals the desired
+   value. It retains the receipt and both values without setting attempted or
+   acknowledged; only matching actual attempts acknowledge. Unchanged baselines
+   still preserve later saves. This is the existing Linear-wins policy applied to
+   an observed fulfilled intention, not provider atomicity or a new retry owner.
+   The membership fixture's earlier pending-unattempted assertion is superseded:
+   desired readback retires delivery without inventing the local effect. The
+   prior assertion remains at `f55d6c5b7:rust/loopflow/src/store/sqlite/planning_peers.rs`,
+   the associated-membership fixture; this section records the public counterexample.
 
-   Earlier refusal/68-test coverage and limits:
-   `381c88fec:scratch/work-on-another-machine-name.md`, item 3. Private ancestry,
-   populated execution and uncertainty survive rejected mappings; no joint
-   projection or running-control proof follows.
-   Field/deletion, creation/link, state and ordering attempts share
-   `require_projected_effects`; composed exact-origin readback remains required.
+   Public Project workflow lookup exposed another bypass: operations scanned
+   physical IDs instead of the common correspondence reader. Full-ID operations
+   now use that reader, with repository scope retained.
+
+   The public regression checks both full IDs, Task/Project causal baselines,
+   uncertain losing receipts, populated execution, repeated association, older and
+   repeated Git documents, and private associated origins. Exact
+   creation/link-origin HTTPS recovery and combined negative-evidence/ordering
+   composition still need their public proof; existing storage fixtures are not
+   that proof. Gate owns combined command/lifetime verification afterward; Jack
+   Heart's review-only boundary is unchanged.
 
    CLI/Desktop share destination-scoped conflicts. Malformed journals report
    `pending_local: null` and a sanitized error while preserving receipts and healthy
@@ -567,8 +562,8 @@ invalidation) remain. The diagnostic is temporary, not product policy.
    Removal/archive/reteam use common acquisition with the focused storage
    proof under **Implemented boundaries, not remaining implementation**. Gate still owns public alternate
    acquisition, complete-list ordering and comment composition, not only detail
-   reads. Legacy association's public composition and public invalidation verification remain
-   before mixed-provider exchange and removal of its temporary diagnostic. This
+   reads. Public invalidation and complete receipt composition remain gate coverage
+   before publication. This
    cut cannot repair LOO-406's unseen provider-write race or supply Linear
    compare-and-swap semantics.
 
@@ -581,8 +576,8 @@ invalidation) remain. The diagnostic is temporary, not product policy.
    walkthrough before republishing #1491. Parent `planning_reconnect_tests` now
    exercises public work-watch and Flow commands against synthetic Linear HTTPS;
    `TESTING.md` assigns it to Linux because macOS ignores the fixture CA setting.
-   That public lifetime coverage is reusable without a second Linear harness;
-   it neither exercises Git peers nor replaces the two-store/disposable-ref cases.
+   The same harness now covers two-store/disposable-ref Git associations; it does
+   not replace native peer-lifetime verification.
    Ordinary checkpoint PR CI skips product suites while scratch is present
    (`TESTING.md`); publication alone cannot supply the deferred checks. A capable
    isolated gate must execute the peer candidate, or CI must demonstrably run its
@@ -694,7 +689,7 @@ State/comment/Wave and completion checks remain at `8a6f8f807`, this heading;
 creation-payload compression checks remain at `1012a6cad`, this heading. Both
 precede the #1511 merge; neither proves the combined native launch path.
 
-Check: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and Rust test builds pass; `scripts/test_network.py` runs `planning_setup_tests` (4) and `associated_readback_captures_foreign_predecessor_without_sharing_private_history` / `associated_import_observes_joint_frontier_before_local_save_and_return_import` (2), all pass (preceding implementation evidence); `git diff --check` passes for prose-only realignment, without product reruns. Earlier headless Desktop/DTO checks remain applicable; gate owns combined launch, released-frontier and public Git/HTTPS acceptance.
+Check: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, Rust test builds and Ruff pass; isolated Linux `public_git_linear_association*` (2), `associated_*` (6), explicit correspondence/private recovery (2), baseline/older-attempt/exact-creation (3) pass; `test_loopflow_skill_alignment.py` (4) and `git diff --check` pass. Gate owns combined lifetimes, materialized schema and remaining public creation/link/negative-evidence coverage; review owns recovery UX.
 
 SQL/macOS and unresolved Flow-exit evidence: `eeb98aa89`, this file's
 **Acceptance for review**. No provider death, replacement authority or installed

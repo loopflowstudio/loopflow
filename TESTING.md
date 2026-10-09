@@ -595,7 +595,11 @@ belong in `session_lifecycle_tests`; Chapter convergence belongs in
 on Linux, using disposable TLS trust and synthetic Linear state. They exercise
 repository/Wave scope without Task selection, selection changes, stdin close/reopen,
 lost replies and independent propagation during rejected field delivery. The
-portable `work_watch` offline-completion test requires a foreground delivery error
+association cases add two stores and a disposable custom ref: public setup,
+correspondence, Git exchange, HTTPS readback, subsequent saves, older documents
+and private-origin holds preserve populated execution and losing receipts.
+Only attempted effects acknowledge; equal-desired provider readback can instead
+retire an unattempted intention without another write. The portable `work_watch` offline-completion test requires a foreground delivery error
 with no Task selected; local frame propagation alone cannot establish sync lifetime.
 Run these through the same external-network denial wrapper as other CLI fixtures.
 

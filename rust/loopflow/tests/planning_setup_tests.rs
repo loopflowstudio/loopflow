@@ -449,7 +449,8 @@ fn public_association_recovery_preserves_private_history_without_publication() {
                 String::from_utf8_lossy(&reply.stderr)
             );
             assert!(String::from_utf8_lossy(&reply.stdout).contains(local_id));
-            assert!(String::from_utf8_lossy(&reply.stderr).contains("unverified"));
+            assert!(String::from_utf8_lossy(&reply.stderr)
+                .contains("private and rejected records remain held"));
         }
     }
     let reply = invoke_lf(
@@ -552,8 +553,7 @@ fn public_association_recovery_preserves_private_history_without_publication() {
         );
     }
     let status = run(repo.path(), home.path(), &["status"]);
-    assert!(status.contains("public Git/Linear composition is unverified"));
-    assert!(status.contains("exchange and effects remain held"));
+    assert!(status.contains("private history is retained"));
     assert!(status.contains("local only; not selected"));
     assert!(status.contains("retained alternative"));
     assert!(status.contains("Private losing title"));

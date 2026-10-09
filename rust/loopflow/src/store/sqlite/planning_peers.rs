@@ -22,8 +22,6 @@ use super::planning::ProviderEvidence;
 use super::planning_changes::PlanningChanges;
 use super::SqliteStore;
 
-const ASSOCIATION_PROJECTION_PENDING: &str = "correspondence retained; public Git/Linear composition is unverified; exchange and effects remain held";
-
 const SHARING_PROJECTION_PENDING: &str = "peer projection skipped by sharing hold; import required";
 
 // Projection and delivery share the same field-keyed winners, including the
@@ -834,7 +832,7 @@ impl SqliteStore {
         retain_mutations(&tx, &saved, incoming)?;
         let owners = resolved_owners(&tx, repo, &merged)?;
         let mut objects = changes_by_object(&merged, &owners)?;
-        let mut held = selection_conflicts(&tx, repo, destination, &merged, false)?;
+        let mut held = selection_conflicts(&tx, repo, destination, &merged)?;
         // One rejected or private origin holds the entire projection, not only
         // that origin's winner. Association never enrolls its local owner.
         for (origin, local) in &owners {
@@ -977,7 +975,7 @@ impl SqliteStore {
         // The receipt records skipped projection, not its current cause. Status
         // derives the specific hold; diagnostic wording never chooses authority.
         conflicts.extend(
-            selection_conflicts(&tx, repo, destination, &merged, true)?
+            selection_conflicts(&tx, repo, destination, &merged)?
                 .into_keys()
                 .map(|object| (object, SHARING_PROJECTION_PENDING.into())),
         );
@@ -1232,7 +1230,6 @@ fn selection_conflicts(
     repo: &str,
     destination: &str,
     snapshot: &PlanningSnapshot,
-    hold_associations: bool,
 ) -> StoreResult<BTreeMap<PlanningObject, String>> {
     let objects = snapshot.objects();
     let mut dependents: BTreeMap<PlanningObject, BTreeSet<&PlanningObject>> = BTreeMap::new();
@@ -1274,20 +1271,6 @@ fn selection_conflicts(
             }
             if member_destination(conn, repo, &local)?.as_deref() != Some(destination) {
                 held.insert(object.clone(), "planning exchange held: associated local Work is outside this selection; private history is retained".into());
-                pending.insert(object.clone());
-            }
-        }
-        // Selected groups can project their scalar frontier now. Exchange and
-        // new effects remain held until public Git/Linear composition is proved.
-        if hold_associations {
-            let associated: bool = conn.query_row(
-                "SELECT EXISTS(SELECT 1 FROM planning_associations WHERE kind=?1 AND repo=?2
-                 AND (origin_id=?3 OR COALESCE(task_id,project_id)=?3))",
-                params![object.kind.as_str(), repo, object.id],
-                |row| row.get(0),
-            )?;
-            if associated {
-                held.insert(object.clone(), ASSOCIATION_PROJECTION_PENDING.into());
                 pending.insert(object.clone());
             }
         }
@@ -1364,7 +1347,7 @@ fn export_selected(
     destination: &str,
     mut snapshot: PlanningSnapshot,
 ) -> StoreResult<(PlanningSnapshot, BTreeMap<PlanningObject, String>)> {
-    let held = selection_conflicts(conn, repo, destination, &snapshot, true)?;
+    let held = selection_conflicts(conn, repo, destination, &snapshot)?;
     snapshot
         .changes
         .retain(|_, change| !held.contains_key(&change.object));
@@ -7795,13 +7778,13 @@ mod tests {
                     deletion_receipt(&source, &removed.id)
                 );
             }
-            assert!(target
+            assert!(!target
                 .attempt_planning_field(
                     PlanningChanges::Task(&local.id),
                     &removed,
                     row.snapshot.items[0].revision.as_deref()
                 )
-                .is_err());
+                .unwrap());
             assert!(target
                 .acknowledge_task_deletion(&local.id, &removed, Some("2026-10-09T12:00:00Z"))
                 .unwrap());
@@ -8037,17 +8020,16 @@ mod tests {
                 selected.baseline,
                 Some(strings(&target_tasks, &[3, 0, 1, 2]))
             );
-            // Association still grants neither effects nor publication.
-            assert!(target
+            // The old move cannot be replayed after complete-list progress.
+            assert!(!target
                 .attempt_project_order(&target_project, &selected.id, &effect)
-                .is_err());
-            assert!(!export(&target, "/target")
+                .unwrap());
+            assert!(export(&target, "/target")
                 .objects()
                 .iter()
                 .any(|o| o.id == source_project.as_str() || o.id == target_project.as_str()));
             let retained = |store: &SqliteStore, repo: &str| {
-                let snapshot =
-                    super::export_in(&store.conn.lock().unwrap(), repo, &destination()).unwrap();
+                let snapshot = export(store, repo);
                 PlanningSnapshot::from_bytes(&snapshot.to_bytes().unwrap()).unwrap()
             };
             let returned = retained(&target, "/target");
@@ -8089,7 +8071,7 @@ mod tests {
                 assert_eq!(delivery.baseline, selected.baseline);
             }
             // Removal readback updates the incoming origin, not the local Task.
-            // Saves still succeed while effects and exchange remain held.
+            // Captured deletion identity survives selected exchange.
             source.delete_task(&source_tasks[2]).unwrap();
             let removed = deletion_change(&source, &source_tasks[2]);
             let removal = retained(&source, "/source");
@@ -8265,9 +8247,8 @@ mod tests {
             source
                 .refile_unplaced_task(&source_task, &source_project, &destination_project)
                 .unwrap();
-            // Retained serialization exercises composition, not held public exchange.
-            let after =
-                super::export_in(&source.conn.lock().unwrap(), "/source", &destination()).unwrap();
+            // Selected export preserves the captured membership IDs.
+            let after = export(&source, "/source");
             let after = PlanningSnapshot::from_bytes(&after.to_bytes().unwrap()).unwrap();
             let snapshots = if reverse {
                 [&after, &before]
@@ -8369,25 +8350,37 @@ mod tests {
                 "2026-10-09T11:00:00Z"
             );
             // Readback of the desired provider membership is not acknowledgement
-            // of an unattempted effect, and association cannot permit that effect.
+            // of an unattempted effect. Adopt the changed Linear value without
+            // resending it or claiming that the local effect happened.
             row.snapshot.items[0].project_id = Some("destination".into());
             row.snapshot.items[0].project = Some("destination".into());
             row.snapshot.items[0].revision = Some("2026-10-09T12:00:00Z".into());
             row.synced_at += 1;
             target.put_pm_snapshot(&row).unwrap();
-            assert!(target
+            assert!(!target
                 .pending_task_changes(&local.id)
                 .unwrap()
                 .contains(&rebased));
-            assert!(target
+            let receipt: (bool, bool, Option<String>) = target
+                .conn
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT attempted,acknowledged,conflict_json FROM task_changes WHERE id=?1",
+                    [&rebased.id],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+                .unwrap();
+            assert!(!receipt.0 && !receipt.1 && receipt.2.is_some());
+            assert!(!target
                 .attempt_planning_field(
                     super::PlanningChanges::Task(&local.id),
                     &change,
                     row.snapshot.items[0].revision.as_deref()
                 )
-                .is_err());
+                .unwrap());
             assert_eq!(execution_rows(&target), execution);
-            assert!(!export(&target, "/target")
+            assert!(export(&target, "/target")
                 .objects()
                 .iter()
                 .any(|o| o.id == local.id.as_str() || o.id == source_task.as_str()));
@@ -8586,10 +8579,8 @@ mod tests {
                 created_at: Some("2026-10-09T12:00:00Z".into()),
             };
             target.append_task_comment(&local.id, &reply).unwrap();
-            // Serialize the retained journal only; public association exchange
-            // remains held until the complete Git/HTTPS path is proved.
-            let returned =
-                super::export_in(&target.conn.lock().unwrap(), "/target", &destination()).unwrap();
+            // Exchange only the selected journal through the ordinary exporter.
+            let returned = export(&target, "/target");
             let returned = PlanningSnapshot::from_bytes(&returned.to_bytes().unwrap()).unwrap();
             let (mutation, saved) = returned
                 .winners()
@@ -8630,8 +8621,8 @@ mod tests {
             }
             let delivery = source.pending_task_state(&source_task).unwrap().unwrap();
             assert!(
-                source.attempt_task_state(&delivery).is_err(),
-                "association effects remain held"
+                source.attempt_task_state(&delivery).unwrap(),
+                "successfully projected selected origins permit delivery"
             );
             let mut observed = row.snapshot.items[0].clone();
             observed.state = Some("canceled".into());
@@ -8651,8 +8642,7 @@ mod tests {
                 .pending_task_comments(&source_task)
                 .unwrap()
                 .is_empty());
-            let readback =
-                super::export_in(&source.conn.lock().unwrap(), "/source", &destination()).unwrap();
+            let readback = export(&source, "/source");
             for incoming in [&readback, &returned, &readback] {
                 import(&target, "/target", "readback", incoming);
                 assert!(target.pending_task_state(&local.id).unwrap().is_none());
@@ -8669,7 +8659,7 @@ mod tests {
                 target.task(&local.id).unwrap().unwrap().worktree.as_deref(),
                 Some(std::path::Path::new("/retained/work"))
             );
-            assert!(!export(&target, "/target")
+            assert!(export(&target, "/target")
                 .objects()
                 .iter()
                 .any(|o| o.id == local.id.as_str()
@@ -8826,10 +8816,8 @@ mod tests {
                     },
                 )
                 .unwrap();
-            // Serialize retained history, not the public export: association
-            // effects/exchange stay held until all receipt protocols compose.
-            let returned =
-                super::export_in(&target.conn.lock().unwrap(), "/target", &destination()).unwrap();
+            // Public export retains the observed foreign causal predecessor.
+            let returned = export(&target, "/target");
             let returned = PlanningSnapshot::from_bytes(&returned.to_bytes().unwrap()).unwrap();
             for (origin, owner, field) in [
                 (source_task.as_str(), local.id.as_str(), "issue_title"),
@@ -8935,8 +8923,7 @@ mod tests {
             row.snapshot.projects[0].revision = Some("2026-10-09T13:00:00Z".into());
             row.synced_at += 1;
             source.put_pm_snapshot(&row).unwrap();
-            let acquired =
-                super::export_in(&source.conn.lock().unwrap(), "/source", &destination()).unwrap();
+            let acquired = export(&source, "/source");
             acquired.to_bytes().unwrap();
             import(&target, "/target", "provider-after-peer", &acquired);
             assert_eq!(
@@ -8945,7 +8932,7 @@ mod tests {
             );
             assert_eq!(execution_rows(&target), target_execution);
             assert_eq!(execution_rows(&source), source_execution);
-            assert!(!export(&target, "/target")
+            assert!(export(&target, "/target")
                 .objects()
                 .iter()
                 .any(|o| o.id == local.id.as_str() || o.id == source_task.as_str()));
@@ -9366,7 +9353,8 @@ mod tests {
                     .collect();
                 // One current explanation, not both the skipped-projection
                 // receipt and its independently derived association hold.
-                assert_eq!(reasons, [super::ASSOCIATION_PROJECTION_PENDING]);
+                assert_eq!(reasons.len(), 1);
+                assert!(reasons[0].contains("private history"));
             }
             // Further local saves remain possible; correspondence grants no effect.
             edit_title(&target, &local.id, "Next private save");

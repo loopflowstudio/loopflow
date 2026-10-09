@@ -110,7 +110,7 @@ async fn run_async(repo: &Path, cmd: &PlanningCommand) -> Result<()> {
                 )
                 .await?;
             println!("{incoming} resolves to local {local}. Neither identity, execution nor sharing selection changed.");
-            eprintln!("Public Git/Linear composition is unverified; exchange and effects stay held. No provider effect or Git publication was issued.");
+            eprintln!("The next exchange projects selected history; private and rejected records remain held. No provider effect or Git publication was issued.");
         }
         PlanningCommand::Status { json } => print_status(&store, &repo_key, *json).await?,
     }

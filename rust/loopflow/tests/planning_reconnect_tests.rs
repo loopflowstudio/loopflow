@@ -9,6 +9,16 @@ use std::process::Command;
 use support::{register_unrun_task, EnvGuard};
 
 #[test]
+fn public_git_linear_association_keeps_private_origins_held() {
+    planning_reconnect_fixture("association-private");
+}
+
+#[test]
+fn public_git_linear_association_round_trip() {
+    planning_reconnect_fixture("associations");
+}
+
+#[test]
 fn public_watch_exports_peer_born_plans_and_recovers_mapped_receipts() {
     planning_reconnect_fixture("exports");
 }
@@ -70,6 +80,81 @@ fn planning_reconnect_fixture(mode: &str) {
     if mode == "effects" {
         fixture["effects"] =
             import_rejected_deletion(repo.path(), home.path(), &registered.task.id);
+    }
+    if mode == "associations" || mode == "association-private" {
+        let peer_home = home.path().join("peer-home");
+        std::fs::create_dir(&peer_home).unwrap();
+        let peer = runtime
+            .block_on(loopflow::store::open_ephemeral_store(
+                &loopflow::store::StorageConfig::sqlite(peer_home.join("loopflow.db")),
+            ))
+            .unwrap();
+        let wave = runtime
+            .block_on(registered.store.get_wave(&registered.task.wave_id))
+            .unwrap()
+            .unwrap();
+        let peer_wave = if mode == "association-private" {
+            loopflow::work::wave::Wave::new(
+                loopflow::id::WaveId::new(),
+                "private".into(),
+                repo.path().to_str().unwrap().into(),
+            )
+        } else {
+            wave.clone()
+        };
+        runtime.block_on(peer.create_wave(&peer_wave)).unwrap();
+        let mut snapshot = runtime
+            .block_on(registered.store.pm_snapshot(wave.id()))
+            .unwrap()
+            .unwrap();
+        snapshot.wave_id = peer_wave.id().clone();
+        runtime
+            .block_on(peer.put_pm_snapshot(snapshot, None))
+            .unwrap();
+        let peer_task = runtime
+            .block_on(
+                peer.get_task_by_issue(registered.task.plan.linear_id.as_ref().unwrap().as_str()),
+            )
+            .unwrap()
+            .unwrap();
+        assert_ne!(peer_task.id, registered.task.id);
+        assert_ne!(peer_task.project_id, registered.task.project_id);
+        // Both stores use a disposable key and a synthetic token; no native login.
+        let previous_key = std::env::var_os("LF_PROVIDER_TOKEN_KEY_PATH");
+        std::env::set_var("LF_PROVIDER_TOKEN_KEY_PATH", &key);
+        runtime
+            .block_on(peer.upsert_provider_token(&ProviderToken {
+                provider: "linear".into(),
+                access_token: "synthetic-planning-token".into(),
+                refresh_token: None,
+                oauth_client_id: None,
+                expires_at: None,
+                login: None,
+                updated_at: 1,
+                credential_type: CredentialType::OAuth,
+            }))
+            .unwrap();
+        match previous_key {
+            Some(value) => std::env::set_var("LF_PROVIDER_TOKEN_KEY_PATH", value),
+            None => std::env::remove_var("LF_PROVIDER_TOKEN_KEY_PATH"),
+        }
+        fixture["peer"] = serde_json::json!({"home":peer_home,"task":peer_task.id.as_str(),"project":peer_task.project_id.as_str(),"wave":peer_wave.id().as_str()});
+        fixture["private"] = serde_json::json!(mode == "association-private");
+        fixture["local_project"] = serde_json::json!(registered.task.project_id.as_str());
+        fixture["remote"] = serde_json::json!(repo.bare_path());
+        // Populate retained execution on both sides. Public inspection adds its
+        // own Processes, but none of these original records may move or settle.
+        for (directory, task, wave) in [
+            (home.path(), &registered.task.id, wave.id()),
+            (peer_home.as_path(), &peer_task.id, peer_wave.id()),
+        ] {
+            let db = rusqlite::Connection::open(directory.join("loopflow.db")).unwrap();
+            db.execute("INSERT INTO processes(lfid,trace_id,started_at) VALUES('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000002',1)", []).unwrap();
+            db.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id) VALUES('retained','Retained','human',1,0,?1,?2,?3)", rusqlite::params![repo.path().to_str().unwrap(),task.as_str(),wave.as_str()]).unwrap();
+            let graph = serde_json::json!({"name":"review","nodes":[{"name":"review","skill":"review","description":null}],"edges":[]});
+            db.execute("INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,?2,'review',1)", rusqlite::params![task.as_str(),graph.to_string()]).unwrap();
+            db.execute("INSERT INTO task_workflow_moves(task_id,workflow,kind,from_node,to_node,at) VALUES(?1,?2,'set','start','review',1)", rusqlite::params![task.as_str(),graph.to_string()]).unwrap();
+        }
     }
     let input = home.path().join("fixture.json");
     std::fs::write(&input, serde_json::to_vec(&fixture).unwrap()).unwrap();

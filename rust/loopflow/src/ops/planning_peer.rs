@@ -67,7 +67,6 @@ async fn exchange_repository(store: &Store, repo: &str, publish: bool) -> OpsRes
 }
 
 fn exchange_destination(store: &SqliteStore, repo: &str, id: &str, publish: bool) -> OpsResult<()> {
-    let linear = super::linear_observe::connected(repo);
     // The blocking worker retains effect ownership through status writes, even
     // if its async waiter is canceled. Acquisition never takes this lock.
     let _lock = if publish {
@@ -84,13 +83,6 @@ fn exchange_destination(store: &SqliteStore, repo: &str, id: &str, publish: bool
         None
     };
     let result = (|| {
-        // Receipt transport exists, but legacy association and public Git/Linear
-        // composition remain unfinished. Keep mixed-provider exchange disabled.
-        if linear {
-            return Err(message(
-                "Git planning awaits Linear provenance reconciliation; local planning is retained",
-            ));
-        }
         let binding = store
             .peer_planning_destination(repo, id)
             .map_err(message)?
@@ -104,9 +96,7 @@ fn exchange_destination(store: &SqliteStore, repo: &str, id: &str, publish: bool
     })();
     // Do not persist provider data or credential-bearing destinations in errors.
     let error = result.as_ref().err().map(|_| {
-        if linear {
-            "Git planning awaits Linear provenance reconciliation"
-        } else if publish {
+        if publish {
             "Git publication pending; local planning retained"
         } else {
             "Git acquisition failed; retained import unchanged"

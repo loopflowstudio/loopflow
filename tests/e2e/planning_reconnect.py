@@ -1,6 +1,7 @@
 """Public work-watch and Flow reconnect against a disposable Linear HTTPS peer."""
 
 import copy
+import fcntl
 import hashlib
 import json
 import os
@@ -61,6 +62,14 @@ class Handler(BaseHTTPRequestHandler):
             return {"errors": [{"message": "fixture offline"}]}
         issue = next((i for i in state["issues"] if i["id"] == variables.get("id")), None)
         project = state["project"]
+        if state.get("associations"):
+            if "mutation DeliverTaskField" in query or "mutation DeliverProjectField" in query:
+                target = project if "DeliverProjectField" in query else issue
+                target.update(variables["input"])
+                state["field_writes"].append((variables["id"], variables["input"]))
+                state["revision"] += 1
+                target["updatedAt"] = f"2026-10-09T12:00:{state['revision']:02d}Z"
+                return {"errors": [{"message": "lost field response"}]}
         if state.get("exports"):
             exports = state["exports"]
             if (
@@ -730,6 +739,271 @@ def _exercise_effects(fixture: dict, env: dict, server: ThreadingHTTPServer) -> 
         db.close()
 
 
+def _exercise_associations(fixture: dict, env: dict, server: ThreadingHTTPServer) -> None:
+    repo = Path(fixture["repo"])
+    peer = {**fixture, **fixture["peer"]}
+    peer_env = {**env, "HOME": peer["home"], "LF_HOME": peer["home"]}
+    sides = [(fixture, env), (peer, peer_env)]
+    databases = [sqlite3.connect(Path(f["home"]) / "loopflow.db", timeout=5) for f, _ in sides]
+    processes = ("00000000-0000-4000-8000-000000000001",)
+
+    def run(side: int, *args: str) -> str:
+        result = subprocess.run(
+            [fixture["lf"], *args],
+            cwd=repo,
+            env=sides[side][1],
+            capture_output=True,
+            text=True,
+            timeout=45,
+        )
+        assert result.returncode == 0, (args, result.stdout, result.stderr)
+        return result.stdout
+
+    def exchange(side: int, predicate) -> None:
+        watch = Watch(*sides[side])
+        try:
+            watch.scope(str(repo))
+            try:
+                _await(predicate, f"side {side} did not exchange")
+            except AssertionError as error:
+                reading = status(side)
+                raise AssertionError(
+                    {k: v for k, v in reading.items() if k != "records"}
+                ) from error
+        finally:
+            watch.close()
+
+    def status(side: int) -> dict:
+        return json.loads(run(side, "planning", "status", "--json"))["destinations"][0]
+
+    def title(side: int) -> str:
+        return (
+            databases[side]
+            .execute("SELECT issue_title FROM tasks WHERE id=?", (sides[side][0]["task"],))
+            .fetchone()[0]
+        )
+
+    def name(side: int) -> str:
+        identity = fixture["local_project"] if side == 0 else peer["project"]
+        return (
+            databases[side]
+            .execute("SELECT project_name FROM projects WHERE id=?", (identity,))
+            .fetchone()[0]
+        )
+
+    subprocess.run(["git", "remote", "add", "plans", fixture["remote"]], cwd=repo, check=True)
+    with server.lock:
+        server.state.update(associations=True, field_writes=[], revision=0)
+        server.state["issues"] = server.state["issues"][:1]
+    for side in range(2):
+        if not (side == 1 and fixture["private"]):
+            run(side, "repo", "refresh", "--all")
+        destination = run(
+            side, "planning", "connect", "--remote", "plans", "--shared", "composition"
+        ).strip()
+        if not (side == 1 and fixture["private"]):
+            run(side, "planning", "select", destination, "--wave", fixture["wave"])
+    before = [_execution_rows(db, processes) for db in databases]
+    if fixture["private"]:
+        with server.lock:
+            server.state["offline"] = True
+        run(1, "task", "edit", peer["task"], "--title", "Private associated title")
+        run(1, "project", "edit", peer["project"], "--name", "Private associated project")
+        exchange(0, lambda: status(0)["publication_state"] == "confirmed")
+        exchange(1, lambda: status(1)["imported_revision"] is not None)
+        for incoming, local, provider in [
+            (fixture["task"], peer["task"], fixture["issue"]),
+            (fixture["local_project"], peer["project"], fixture["project"]),
+        ]:
+            for _ in range(2):
+                run(1, "planning", "associate", incoming, "--with", local, "--linear", provider)
+        revision = status(1)["imported_revision"]
+        # A later public source save supplies a distinct import checkpoint.
+        run(0, "task", "edit", fixture["task"], "--title", "Shared later title")
+        exchange(1, lambda: status(1)["imported_revision"] != revision)
+        reading = status(1)
+        assert reading["conflicts"]
+        assert title(1) == "Private associated title"
+        assert name(1) == "Private associated project"
+        document = subprocess.check_output(
+            [
+                "git",
+                "--git-dir",
+                fixture["remote"],
+                "show",
+                "refs/loopflow/planning/shared/composition:planning.json",
+            ],
+            text=True,
+        )
+        assert "Private associated title" not in document
+        assert "Private associated project" not in document
+        assert peer["task"] not in document and peer["project"] not in document
+        assert not server.state["field_writes"]
+        for side, db in enumerate(databases):
+            _assert_execution_unchanged(db, before[side], processes)
+            db.close()
+        return
+    # An attempted local edit is losing evidence, not permission to repeat it.
+    with server.lock:
+        server.state["offline"] = True
+    run(1, "task", "edit", peer["task"], "--title", "Uncertain losing title")
+    run(1, "project", "edit", peer["project"], "--name", "Uncertain losing project")
+    losing = []
+    for table in ["task_changes", "project_changes"]:
+        databases[1].execute(
+            f"UPDATE {table} SET attempted=1,error='lost reply' WHERE acknowledged=0"
+        )
+        losing.extend(
+            (table, *row)
+            for row in databases[1].execute(
+                f"SELECT id,value_json,base_json FROM {table} WHERE acknowledged=0"
+            )
+        )
+    databases[1].commit()
+    with server.lock:
+        server.state["offline"] = False
+        server.state["issues"][0]["title"] = "Observed peer title"
+        server.state["issues"][0]["updatedAt"] = "2026-10-09T12:00:00Z"
+        server.state["project"]["name"] = "Observed peer project"
+        server.state["project"]["updatedAt"] = "2026-10-09T12:00:00Z"
+    run(0, "repo", "refresh", "--all")
+    # The first public fetch retains duplicate IDs without guessing correspondence.
+    exchange(
+        0,
+        lambda: (
+            status(0)["publication_state"] == "confirmed" and status(0)["pending_local"] is False
+        ),
+    )
+    for side in [1, 0]:
+        exchange(side, lambda side=side: bool(status(side)["conflicts"]))
+        for incoming, local, provider in [
+            (
+                fixture["task"] if side else peer["task"],
+                peer["task"] if side else fixture["task"],
+                fixture["issue"],
+            ),
+            (
+                fixture["local_project"] if side else peer["project"],
+                peer["project"] if side else fixture["local_project"],
+                fixture["project"],
+            ),
+        ]:
+            for _ in range(2):
+                run(side, "planning", "associate", incoming, "--with", local, "--linear", provider)
+        exchange(side, lambda side=side: not status(side)["conflicts"])
+    for side in range(2):
+        exchange(
+            side,
+            lambda side=side: (
+                title(side) == "Observed peer title" and name(side) == "Observed peer project"
+            ),
+        )
+    earlier = status(0)["publication_revision"]
+    # A local save after a peer observation must carry that causal baseline back.
+    with server.lock:
+        server.state["offline"] = True
+    run(1, "task", "edit", peer["task"], "--title", "After peer observation")
+    run(1, "project", "edit", peer["project"], "--name", "After peer project")
+    exchange(0, lambda: title(0) == "After peer observation" and name(0) == "After peer project")
+    for side, db in enumerate(databases):
+        for table, owner_column, owner, value in [
+            ("task_changes", "task_id", sides[side][0]["task"], "After peer observation"),
+            (
+                "project_changes",
+                "project_id",
+                fixture["local_project"] if side == 0 else peer["project"],
+                "After peer project",
+            ),
+        ]:
+            rows = db.execute(
+                f"SELECT base_json FROM {table} WHERE {owner_column}=? AND value_json=? "
+                "AND acknowledged=0 AND conflict_json IS NULL",
+                (owner, json.dumps(value)),
+            ).fetchall()
+            assert rows and all(
+                json.loads(row[0])["revision"] == "2026-10-09T12:00:00Z" for row in rows
+            ), rows
+    for table, identity, value, baseline in losing:
+        assert databases[1].execute(
+            "SELECT attempted,acknowledged,value_json,base_json,conflict_json IS NOT NULL "
+            f"FROM {table} WHERE id=?",
+            (identity,),
+        ).fetchone() == (1, 0, value, baseline, 1)
+    with server.lock:
+        server.state["offline"] = False
+    exchange(
+        0,
+        lambda: (
+            server.state["issues"][0]["title"] == "After peer observation"
+            and server.state["project"]["name"] == "After peer project"
+        ),
+    )
+    for side in [1, 0, 1]:
+        exchange(
+            side,
+            lambda side=side: (
+                not status(side)["conflicts"] and status(side)["pending_local"] is False
+            ),
+        )
+        assert (
+            json.loads(run(side, "task", "status", fixture["task"], "--json"))["execution"][
+                "task_id"
+            ]
+            == sides[side][0]["task"]
+        )
+        assert (
+            json.loads(run(side, "task", "status", peer["task"], "--json"))["execution"]["task_id"]
+            == sides[side][0]["task"]
+        )
+        assert json.loads(
+            run(side, "project", "workflow", "show", fixture["local_project"], "--json")
+        ) == json.loads(run(side, "project", "workflow", "show", peer["project"], "--json"))
+        _assert_execution_unchanged(databases[side], before[side], processes)
+    with server.lock:
+        assert len(server.state["field_writes"]) == 2, server.state["field_writes"]
+        assert not server.state["unexpected"], server.state["unexpected"]
+    # Acquire older then repeated documents from new, fast-forward Git commits.
+    # Hold only publication so the ordinary acquisition path cannot replace the
+    # checkpoint before it is inspected; provider readback remains independent.
+    reference = "refs/loopflow/planning/shared/composition"
+    git_env = {
+        **env,
+        "GIT_AUTHOR_NAME": "Fixture",
+        "GIT_AUTHOR_EMAIL": "fixture@example.test",
+        "GIT_COMMITTER_NAME": "Fixture",
+        "GIT_COMMITTER_EMAIL": "fixture@example.test",
+    }
+
+    def git(*args: str) -> str:
+        return subprocess.check_output(
+            ["git", "--git-dir", fixture["remote"], *args], env=git_env, text=True
+        ).strip()
+
+    for side in [1, 0, 1]:
+        current = git("rev-parse", reference)
+        revision = git(
+            "commit-tree",
+            git("rev-parse", f"{earlier}^{{tree}}"),
+            "-p",
+            current,
+            "-m",
+            "Retained earlier planning document",
+        )
+        git("update-ref", reference, revision, current)
+        lock = Path(sides[side][0]["home"]) / "locks/planning-peers" / f"{status(side)['id']}.lock"
+        with lock.open("a") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX)
+            exchange(side, lambda side=side: status(side)["imported_revision"] == revision)
+            assert title(side) == "After peer observation"
+            assert name(side) == "After peer project"
+        _assert_execution_unchanged(databases[side], before[side], processes)
+    with server.lock:
+        assert len(server.state["field_writes"]) == 2, server.state["field_writes"]
+    for side, db in enumerate(databases):
+        _assert_execution_unchanged(db, before[side], processes)
+        db.close()
+
+
 def main() -> None:
     fixture = json.loads(Path(sys.argv[1]).read_text())
     root, repo = Path(fixture["home"]), Path(fixture["repo"])
@@ -824,7 +1098,9 @@ printf '%s\\n' '{"type":"result","subtype":"success","result":"Done"}'
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
-            if sys.argv[2] == "exports":
+            if sys.argv[2] in ("associations", "association-private"):
+                _exercise_associations(fixture, env, server)
+            elif sys.argv[2] == "exports":
                 _exercise_exports(fixture, env, server)
             elif sys.argv[2] == "effects":
                 _exercise_effects(fixture, env, server)

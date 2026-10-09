@@ -77,8 +77,14 @@ code examples, with restrained typography, generous whitespace, and little decor
    These are reading priorities, not four required panels. Adapt to the change.
    Show a shared data structure once and link back to it;
    do not force a new type or a finding into every stop. For prose or config
-   changes, show the instructions or declarations that control behavior. Prefer
-   before/after snippets when they reveal a changed contract more clearly.
+   changes, show the instructions or declarations that control behavior. Default
+   to inline unified diffs for changed contracts: removed lines in red, added
+   lines in green, with visible −/+ markers so color is not the only signal.
+   Keep enough unchanged context to follow the type or decisive branch. Prefer
+   one diff over separate before/after blocks that make the reader compare from
+   memory. Use plain excerpts for unchanged context; label wholly new code.
+   Generate diffs from the pinned source revisions, preserve source text, and
+   caption both sides with their revision and line range.
 
    Prefer one or two substantial excerpts per stop: a complete relevant type,
    function, or coherent branch with enough surrounding code to explain it.

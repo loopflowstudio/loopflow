@@ -116,9 +116,14 @@ impl LinearObservation {
                     }),
                 })
             }
-            PlanningKind::Comment => serde_json::json!({"content":{
-                "body":self.body["body"],"author":self.body["author"],"created_at":self.body["created_at"],
-            }}),
+            PlanningKind::Comment => {
+                let observed: crate::pm::IssueComment = serde_json::from_value(self.body.clone())?;
+                let comment = crate::ops::pm::TaskComment::from(&observed);
+                serde_json::json!({"content":{
+                    "body":comment.body,"author":serde_json::to_string(&comment.author)?,
+                    "created_at":comment.created_at,
+                }})
+            }
             PlanningKind::Wave => serde_json::json!({}),
         })
     }
@@ -142,22 +147,9 @@ impl LinearObservation {
             PlanningKind::Project => serde_json::to_value(serde_json::from_value::<
                 crate::pm::PmProject,
             >(self.body.clone())?)?,
-            PlanningKind::Comment => {
-                let valid = self.body.as_object().is_some_and(|body| {
-                    body.len() == 5
-                        && ["id", "revision", "body", "author", "created_at"]
-                            .iter()
-                            .all(|key| body.contains_key(*key))
-                }) && self.body["body"].is_string()
-                    && self.body["author"]
-                        .as_str()
-                        .is_some_and(|author| serde_json::from_str::<Value>(author).is_ok())
-                    && (self.body["created_at"].is_null() || self.body["created_at"].is_string());
-                if !valid {
-                    return Err(PlanningExchangeError::Invalid("invalid Linear comment"));
-                }
-                self.body.clone()
-            }
+            PlanningKind::Comment => serde_json::to_value(serde_json::from_value::<
+                crate::pm::IssueComment,
+            >(self.body.clone())?)?,
             PlanningKind::Wave => {
                 return Err(PlanningExchangeError::Invalid(
                     "Wave has no Linear observation",
@@ -271,6 +263,13 @@ impl PlanningSnapshot {
             validate_value(change)?;
             if let Some(observation) = &change.linear {
                 observation.validate(change.object.kind)?;
+                if change.object.kind == PlanningKind::Comment
+                    && observation.body["id"].as_str() != Some(change.object.id.as_str())
+                {
+                    return Err(PlanningExchangeError::Invalid(
+                        "comment observation identity mismatch",
+                    ));
+                }
                 let fields = observation.fields(change.object.kind)?;
                 if let Some(value) = fields.get(&change.field) {
                     if value != &change.value {
@@ -329,7 +328,9 @@ fn validate_value(change: &PlanningMutation) -> Result<(), PlanningExchangeError
                 && group
                     .get("author")
                     .and_then(Value::as_str)
-                    .is_some_and(|a| serde_json::from_str::<Value>(a).is_ok())
+                    .is_some_and(|a| {
+                        serde_json::from_str::<crate::ops::pm::TaskCommentAuthor>(a).is_ok()
+                    })
                 && group.get("created_at").is_some_and(text)
         }),
         _ => text(value),

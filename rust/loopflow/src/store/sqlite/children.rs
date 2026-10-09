@@ -583,7 +583,14 @@ impl SqliteStore {
         let observed_at = observed_at.unix_timestamp();
         let mut follow_ups_created = Vec::new();
         for comment in &observation.comments {
-            super::task_comments::ingest_task_comment(&transaction, task_id, comment)?;
+            if !super::task_comments::ingest_task_comment(
+                &transaction,
+                task_id,
+                comment,
+                observed_at,
+            )? {
+                continue;
+            }
             if !crate::ops::linear_observe::is_direction_comment(
                 &comment.body,
                 comment.author_id.as_deref(),

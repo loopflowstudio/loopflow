@@ -138,88 +138,65 @@ preparation and mutation-decoder cuts remain at
 `81fcf66e3:scratch/work-on-another-machine-name.md`; validation reductions and
 checkpoint fixtures remain at `fea5156eb`.
 
-Removed duplicate ownership and projection paths:
+Keep these replacements deleted:
 
-- `select_peer_waves` no longer validates the entire destination. Holds protect
-  private ancestry while independent selection/exchange proceeds; reverse references
-  propagate holds once through cycles and descendants. Strict incoming membership
-  remains. `b5dafd918`/`7395cf3bb` retain the move/selection counterexamples.
-- `SqliteStore::peer_import_revision` is removed; fixtures read production status.
-  Projection retries retain only final-pass conflicts. The missing-parent → cycle
-  regression requires unchanged status on repeated acquisition.
-- `PlanningSnapshot::resolved` and the parallel object/value index are removed.
-  One grouped winner index supplies projection, completeness checks and delivery;
-  values are borrowed only inside an object's savepoint. Object-only tests inspect
-  identities, not a copied value projection.
-  Ordinary edits/imports share the scalar receipt writer; missing-row fallback and
-  duplicate receipt SQL stay deleted. The origin-only boolean is replaced by provider
-  observations; both capture and validation use their single field map.
-- Unused async Store import/export wrappers and import's export-shaped return
-  are removed. Blocking exchange uses SQLite directly; import records facts and
-  export alone selects publishable history. Preservation tests read persisted exports,
-  including incomplete-record rollback, rather than comparing an import-only copy.
-- Publication's unused pending-document payload is removed. Its result reports
-  confirmation; the next exchange still acquires before reconciliation.
-- Status and publication share `export_selected`, so their pending digest and
-  publication content omit the same held history. Acquisition returns its parsed snapshot;
-  publication neither decodes it twice nor reloads a document to check ancestry.
-- Dispatch lists destination IDs without rendering journals. Each blocking
-  `exchange_destination` owns its effect lock through readback and status writes;
-  cancellation does not transfer that ownership. A damaged journal cannot prevent
-  independent exchange, though all-destination status still fails (item 3 below).
-- The remote fixture's manual import is deleted. Empty target binding now requires
-  source publication and cold acquisition through ordinary dispatch. SSH inspection
-  borrows the Store; the guide links to the single setup account.
-- Ordinary `InvalidData` at the Task/Project provider-contradiction branches is
-  removed. The common acquisition owner emits a typed observation conflict;
-  peer import uses its existing isolation path, not error-text matching or a
-  second frontier. Malformed input retains whole-import rejection.
-- Task disposition import no longer stops at column projection. Local and peer saves
-  share `task_state_delivery::record_in`; peer receipts retain mutation identity,
-  causal provider baseline and saved completion time, without a local Workflow move.
-  Acquisition and peer-winner retirement share reconciliation, not duplicate SQL.
-- The peer-only identical-body acquisition shortcut and replay of superseded entity
-  revision groups are deleted. Common acquisition decides acceptance; unchanged
-  accepted facts issue no cache write. The common membership marker survives an
-  object rollback, without adding a parallel evidence owner.
-- The TaskInput-owned sync starter and lifecycle's provider-only lookup are deleted.
-  Shared provider launch paths own repository sync without Task attribution;
-  saved-planning resolution needs no placement. Saves release Wave locks before
-  exchange. Setup stays local and never publishes itself.
-- Causal heads now borrow mutations directly from the journal. The copied
-  object/field/ID index and subsequent journal lookup are removed; only winner
-  selection groups by field. Export validates the saved head index against the
-  same ordered iterator. Projection uses rusqlite's scoped savepoint instead of
-  hand-written SAVEPOINT/ROLLBACK/RELEASE; contrary membership evidence is still
-  written only after rollback, within the outer import transaction.
-- Winner selection retains one borrowed candidate per field instead of building
-  head vectors and rescanning them. Priority remains Linear origin, provider revision,
-  clock, then mutation ID; causal retirement still precedes that comparison. Scalar
-  receipt baselines now share one normalization path after choosing causal or local
-  evidence. The single-use `omit_held` wrapper is removed; export still filters whole
-  histories using the existing selection-conflict map.
+- Copied planning, issue-derived identity, callbacks and their adoption fixtures.
+  Placement consumes common planning after acquisition; the cold-worker fixture
+  must not manually import it.
+- Repository-wide export, alias-addressed transport and selection coupled to
+  moves. One destination-scoped selection/hold calculation protects whole private
+  histories and dependents; it does not veto independent exchange.
+- Value-only projection indexes and copied causal-head indexes. One borrowed,
+  field-keyed winner index now feeds completeness, projection and delivery across
+  retries; stable IDs and provider provenance stay attached.
+- Peer-only scalar/state receipt SQL, identical-body acquisition bypasses and
+  replay of superseded provider revisions. Use common acquisition and receipt
+  owners, retaining typed contradictions after object rollback. Entity revisions
+  never supply Project relationship ordering.
+- Direct peer comment INSERT/UPDATE and reconstructed provider provenance are
+  deleted. Common acquisition and authored insertion own thread/receipt writes;
+  typed author conversion is shared with transport validation.
+- Task-attributed sync startup, status rendering as a dispatch prerequisite and
+  async waiters owning blocking-worker locks. Repository/provider lifetimes drive
+  exchange; each worker retains its effect lock through readback and status writes.
 
-Authored move/receipt/import fixtures retain local refiling, provider acquisition,
-comments, independent exchange, losing values, Session/Workflow/checkout state and
-idempotent recovery. Rust execution remains unproved; omission is not convergence.
-Earlier cut details: `e62431d0d:scratch/work-on-another-machine-name.md`.
+The completed reduction inventory and exact earlier source cuts remain at
+`a388ed425:scratch/work-on-another-machine-name.md`, “Delete — do not maintain.”
+Existing move/receipt/import fixtures retain local/provider moves, comments,
+independent exchange, losing values and execution. Rust execution remains unproved;
+omission is not convergence. Remaining grouped owners and acceptance are below.
 
 ## Remaining integration — October 8
 
-Reconciled against `7262b6b20` on October 8. The previous feedback's
-same-revision classification repair exists at `270019c8d`: Task/Project provider
-contradictions use `ProviderObservationConflict`, survive object rollback and
-retain independent imports. Malformed observations still abort import. The authored
-regressions check receipt flags/errors as well as pending values; they remain
-unexecuted. `7262b6b20` reduces winner selection and shares receipt baseline
-normalization without extending provider composition.
+Reconciled against `fcd83ffc5` on October 8. `a388ed425` adds peer Task
+disposition receipts through the common state owner; `fcd83ffc5` shares one
+borrowed field-keyed winner index across completeness, projection and delivery.
+The typed provider-conflict repair remains at `270019c8d`. These source cuts do
+not establish executable acceptance: the authored regressions remain unexecuted.
 
-The next implementation is item 4's grouped receipts and alternate acquisition
-paths, followed by legacy association and Desktop presentation. Mixed-provider
-exchange remains disabled. No new decision from Jack Heart is required. The
-locally available upstream history contains no newer changes to the common
-planning acquisition, scalar receipt or foreground lifetime owners; the committed
-parent boundary below still applies. This is source inspection, not a remote refresh.
+October 8 comment composition replaces direct peer row writes with the common
+comment acquisition and authored-delivery owners. Raw provider observations and
+original acquisition times travel in the journal; imported authorship creates no
+local steer. Authored regressions cover lost replies, later edits, conflicts,
+no echo, migration and execution preservation. Rust execution remains unavailable.
+
+Remaining implementation starts with creation, structured Project fields/order
+and deletion receipts, plus alternate acquisition paths; legacy association and
+Desktop presentation follow. Comments and Task disposition have source composition,
+not composed acceptance. Mixed-provider exchange remains disabled.
+
+Locally available parent history has advanced beyond the integrated `b6f34a6f8`.
+`078a6642e` repairs gate fixtures/DTOs and records Linux migration, public
+Flow/work-watch reconnect and adoption passes; its memory also reports native
+reconnect, with Swift unavailable. Those results concern LOO-406, not this combined
+peer candidate. `ffe986160` removes synthetic state settlement: provider
+observations settle receipts; failures only record errors. Neither cut is integrated
+here, and only a local parent ref contains `ffe986160`; publication was not checked.
+The next coherent parent integration must update the peer lost-reply fixture from
+`settle_task_state(..., Some(...))` to `task_state_error(...)`, preserving its
+uncertainty assertions and this branch's `record_in`/`adopt_peer_in` ownership.
+No compatibility shim or duplicate settlement writer is needed. This is a concrete
+integration seam, not a current compile failure or permission to copy dirty code.
 
 Source reconciliation at `4e3cb2160` supersedes the earlier no-production-caller
 finding: `6c0f2256f` connects exchange and `4e3cb2160` isolates destination attempts.
@@ -317,13 +294,13 @@ provenance gap; revise it with the completed composition, not as a product limit
    Task test preserves a pending local value on an unchanged provider baseline.
    Rust execution remains unproved; disposable SQL checks do not execute these tests.
 
-   Creation, Project KRs/targets and ordering, comments and deletion
-   receipts remain uncomposed. Task disposition now uses the common receipt owner;
+   Creation, Project KRs/targets and ordering, and deletion receipts remain
+   uncomposed. Comments now use the common owners described below. Task disposition now uses the common receipt owner;
    authored regressions cover lost replies, later reopening, late readback exclusion,
    unchanged-state provider conflict, idempotence and transaction-wide receipt failure.
    Cancellation is covered by the same authored test; Rust execution remains. Common accepted Task/Project acquisition captures
-   observations; other provider writers still need coverage. Comment payloads retain
-   revision/body but common comment acquisition/delivery is not composed. Project
+   observations; other provider writers still need coverage. Comment payloads now retain the raw provider observation and use common
+   acquisition/delivery; public mixed-provider lifetime acceptance remains. Project
    relationships and list ordering have independent frontiers; entity updatedAt
    cannot order them. Raw observations are immutable evidence in field receipts,
    not permission to invoke execution or acknowledge complete-list acquisition.
@@ -368,11 +345,24 @@ provenance gap; revise it with the completed composition, not as a product limit
    field loop. Source inspection identifies the remaining seams:
    - `planning_export.rs` owns creation/link attempts; imported identity alone
      does not attach or settle them.
-   - `task_comments.rs::ingest_task_comment` owns provider revision checks and
-     delivery settlement, while authored comments also save `task_comment_deliveries`.
-     Peer projection currently writes the comment row directly and supplies neither
-     path. Preserve observed comments without echo and give peer-authored comments
-     stable delivery identity, including lost replies and later provider edits.
+   - Peer comments now reuse `task_comments.rs::ingest_task_comment` and
+     `insert_authored_comment`. Comment ID remains delivery identity; reimport
+     retains errors/acknowledgement/conflicts, and acquired comments create no
+     delivery. The common reader adopts provider edits, retains losing receipts,
+     rejects same-revision contradictions and returns stale rejection to both peer
+     projection and foreground direction ingestion. Peer import never appends steers.
+     Raw `IssueComment` replaces reconstructed display-only provenance; the shared
+     conversion retains body, displayed author and creation time. Equal-value
+     revision acquisition captures missing facts, while readback emits no new mutation.
+     Migration omits acquired comments from the journal until a real acquisition
+     supplies their provenance; authored pending comments retain identity. Omitting
+     only content was rejected during review: incomplete objects abort import.
+     The frontier test covers later capture of that retained row. The SQL proof
+     also caught JSON key ordering preventing content provenance; trigger groups now
+     match the field map's canonical order. New Rust regressions cover authored and
+     provider-only comments, lost replies, later edits, retained losers, isolated
+     contradictions, malformed input and unchanged execution, but remain unexecuted.
+     Public reconnect and foreground direction regressions remain gate acceptance.
    - `task_state_delivery.rs::queue_in` now shares `record_in` with peer projection.
      Peer receipts retain the mutation ID, causal baseline and projected completion
      time; `move_seq` stays null. Reimport retains attempts/errors; a later save
@@ -388,7 +378,7 @@ provenance gap; revise it with the completed composition, not as a product limit
      grouped baselines and attempts.
 
    Cover alternate accepted provider writers, including reteam, archive/removal,
-   complete-list order and comment ingestion, not only Task/Project detail reads.
+   complete-list order and public comment acquisition, not only Task/Project detail reads.
    Existing local writers are evidence for reuse, not proof of peer composition.
    Then finish legacy association and Desktop
    status before enabling mixed-provider foreground exchange and replacing its
@@ -465,15 +455,17 @@ Infrastructure child memory exists in this checkout.
 7. Replace PR copy and create a walkthrough of final behavior and evidence;
    publish #1491 for Jack Heart's review and stop without landing.
 
-Check (October 8 implementation): `cargo fmt --all -- --check`, `git diff --check` and production state-receipt SQL on the released schema plus drafts pass; `cargo test -p loopflow --lib store::sqlite::planning_peers::tests --no-run` and `cargo clippy --all-targets -- -D warnings` stall before compilation in sampled `_dyld_start` build-script children, terminated after diagnosis; capable gate/CI owns Rust execution and composed acceptance. Checkpoint CI skips the matrix while scratch remains.
+Check (October 8 comment implementation): `cargo fmt --all -- --check`, `git diff --check` and production comment SQL on released migrations plus drafts pass; focused `cargo test -p loopflow --lib peer_comments --no-run` and `cargo clippy --all-targets -- -D warnings` time out after 120 seconds during build-script startup, before Rust compilation. Capable gate/CI owns executable checks and composed acceptance; checkpoint CI skips the matrix while scratch remains.
 
 The timeout investigation found Cargo waiting on its build-script child, not
 compiling Rust or waiting for a Cargo lock. Both children had 96 KiB footprints
 and no CPU activity; a fresh-inode copy also timed out before entry. Codesign
 verification returned success. Samples: `/tmp/loo412-cargo-sample.txt`,
-`/tmp/loo412-build-sample.txt`, `/tmp/loo412-clippy-sample.txt`. This identifies
+`/tmp/loo412-build-sample.txt`, `/tmp/loo412-clippy-sample.txt`; compression
+reproductions: `/tmp/loo412-compress-build-sample.txt` and
+`/tmp/loo412-compress-clippy-sample.txt`. This identifies
 the stall boundary, not its cause; no security settings or installed binaries changed.
-Historical Flow `93d4d4f6-4723-4027-951b-b3aee2e696a2` read through
-`flow show --processes` still retains realign step
-`e94edd38-2a26-4047-9650-41a65ab814f7` without exit. Checkpoint `e8ff4c7f6`
-appeared during orientation and is preserved; its updated plan informed this cut.
+Historical Flow `93d4d4f6-4723-4027-951b-b3aee2e696a2` still retains realign
+step `e94edd38-2a26-4047-9650-41a65ab814f7` without a recorded exit, confirmed
+by `lf flow show --processes` on October 8. No exit or replacement authority is
+inferred. Its reconciliation checkpoint `e8ff4c7f6` remains preserved.

@@ -231,10 +231,10 @@ BEGIN
     SELECT lower(hex(randomblob(16))),'comment',NEW.id,j.key,
         CASE WHEN j.type IN ('object','array') THEN j.value ELSE json_quote(j.value) END,
         max(CAST(unixepoch('subsec')*1000 AS INTEGER),COALESCE((SELECT max(clock)+1 FROM planning_peer_changes),0)),
-        CASE WHEN NEW.provider_revision IS NOT NULL THEN json_object('observed_at',unixepoch(),
-            'body',json_object('id',NEW.id,'revision',NEW.provider_revision,'body',NEW.body,'author',NEW.author,'created_at',NEW.created_at)) END,
+        (SELECT CASE WHEN j.key IN (SELECT key FROM json_each(fields))
+            AND j.value IS json_extract(fields, '$.' || j.key) THEN observation END FROM planning_peer_context),
         (SELECT json_group_array(id) FROM planning_peer_heads WHERE kind='comment' AND object_id=NEW.id AND field=j.key)
-    FROM json_each(json_object('task_id',NEW.task_id,'content',json_object('body',NEW.body,'author',NEW.author,'created_at',NEW.created_at))) j ;
+    FROM json_each(json_object('task_id',NEW.task_id,'content',json_object('author',NEW.author,'body',NEW.body,'created_at',NEW.created_at))) j ;
 END;
 
 CREATE TRIGGER peer_comment_update AFTER UPDATE ON task_comments
@@ -244,16 +244,27 @@ BEGIN
     SELECT lower(hex(randomblob(16))),'comment',NEW.id,j.key,
         CASE WHEN j.type IN ('object','array') THEN j.value ELSE json_quote(j.value) END,
         max(CAST(unixepoch('subsec')*1000 AS INTEGER),COALESCE((SELECT max(clock)+1 FROM planning_peer_changes),0)),
-        CASE WHEN NEW.provider_revision IS NOT NULL THEN json_object('observed_at',unixepoch(),
-            'body',json_object('id',NEW.id,'revision',NEW.provider_revision,'body',NEW.body,'author',NEW.author,'created_at',NEW.created_at)) END,
+        (SELECT CASE WHEN j.key IN (SELECT key FROM json_each(fields))
+            AND j.value IS json_extract(fields, '$.' || j.key) THEN observation END FROM planning_peer_context),
         (SELECT json_group_array(id) FROM planning_peer_heads WHERE kind='comment' AND object_id=NEW.id AND field=j.key)
-    FROM json_each(json_object('task_id',NEW.task_id,'content',json_object('body',NEW.body,'author',NEW.author,'created_at',NEW.created_at))) j WHERE j.value IS NOT json_extract(json_object('task_id',OLD.task_id,'content',json_object('body',OLD.body,'author',OLD.author,'created_at',OLD.created_at)), '$.' || j.key);
+    FROM json_each(json_object('task_id',NEW.task_id,'content',json_object('author',NEW.author,'body',NEW.body,'created_at',NEW.created_at))) j WHERE j.value IS NOT json_extract(json_object('task_id',OLD.task_id,'content',json_object('author',OLD.author,'body',OLD.body,'created_at',OLD.created_at)), '$.' || j.key) OR ((SELECT observation FROM planning_peer_context) IS NOT NULL
+        AND j.key IN (SELECT key FROM json_each((SELECT fields FROM planning_peer_context)))
+        AND j.value IS json_extract((SELECT fields FROM planning_peer_context), '$.' || j.key)
+        AND NOT EXISTS(SELECT 1 FROM planning_peer_heads h JOIN planning_peer_changes c ON c.id=h.id
+            WHERE h.kind='comment' AND h.object_id=NEW.id AND h.field=j.key AND c.linear IS NOT NULL
+            AND json_extract(c.linear,'$.body.id') IS json_extract((SELECT observation FROM planning_peer_context),'$.body.id')
+            AND json_extract(c.linear,'$.body.revision') IS json_extract((SELECT observation FROM planning_peer_context),'$.body.revision')));
 END;
 
+-- Existing provider comments wait for acquisition of their raw observation.
+-- Exporting their normalized display body as an authored save would echo it.
 INSERT INTO planning_peer_changes(id,kind,object_id,field,value,clock,linear,parents)
 SELECT lower(hex(randomblob(16))),'comment',r.id,j.key,
     CASE WHEN j.type IN ('object','array') THEN j.value ELSE json_quote(j.value) END,
-    0,NULL,'[]' FROM task_comments r, json_each(json_object('task_id',r.task_id,'content',json_object('body',r.body,'author',r.author,'created_at',r.created_at))) j;
+    0,NULL,'[]' FROM task_comments r, json_each(json_object('task_id',r.task_id,'content',json_object('author',r.author,'body',r.body,'created_at',r.created_at))) j
+    WHERE r.provider_revision IS NULL AND EXISTS(
+        SELECT 1 FROM task_comment_deliveries d WHERE d.comment_id=r.id
+            AND d.acknowledged=0 AND d.conflicting_comment_json IS NULL);
 
 CREATE TRIGGER store_revision_planning_destinations_insert AFTER INSERT ON planning_destinations
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;

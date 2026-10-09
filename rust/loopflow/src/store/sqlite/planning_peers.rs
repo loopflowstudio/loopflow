@@ -58,6 +58,21 @@ pub(super) fn observe_project(
     observe_in(conn, provider, &observation, &fields)
 }
 
+pub(super) fn observe_comment(
+    conn: &Connection,
+    task: &TaskId,
+    comment: &crate::pm::IssueComment,
+    observed_at: i64,
+) -> StoreResult<()> {
+    let observation = LinearObservation {
+        body: serde_json::to_value(comment)?,
+        observed_at,
+    };
+    let mut fields = observation.fields(PlanningKind::Comment)?;
+    fields["task_id"] = Value::String(task.to_string());
+    observe_in(conn, "linear", &observation, &fields)
+}
+
 fn observe_in(
     conn: &Connection,
     provider: &str,
@@ -850,6 +865,10 @@ fn insert_and_project(
     winners: &WinningFields<'_>,
     snapshot: &PlanningSnapshot,
 ) -> StoreResult<()> {
+    if object.kind == PlanningKind::Comment {
+        project_comment(conn, object, winners, snapshot)?;
+        return require_repository(conn, object, repo);
+    }
     if !exists(conn, object)? {
         let required = |key: &str| {
             winners
@@ -874,11 +893,7 @@ fn insert_and_project(
                 conn.execute("INSERT INTO tasks(id,project_id,issue_identifier,created_at) VALUES(?1,?2,?3,unixepoch())",
                     params![object.id,required("project_id")?,required("issue_identifier")?])?;
             }
-            PlanningKind::Comment => {
-                let content = &winners["content"].1.value;
-                conn.execute("INSERT INTO task_comments(id,task_id,body,author,created_at) VALUES(?1,?2,?3,?4,?5)",
-                    params![object.id,required("task_id")?,content["body"].as_str(),content["author"].as_str(),content["created_at"].as_str()])?;
-            }
+            PlanningKind::Comment => unreachable!("comments use the common thread writer"),
         }
     }
     if object.kind == PlanningKind::Wave {
@@ -898,6 +913,61 @@ fn insert_and_project(
     )?;
     project_delivery_fields(conn, object, winners, snapshot, &previous)?;
     require_repository(conn, object, repo)
+}
+
+fn project_comment(
+    conn: &Connection,
+    object: &PlanningObject,
+    winners: &WinningFields<'_>,
+    snapshot: &PlanningSnapshot,
+) -> StoreResult<()> {
+    let task = TaskId::from_raw(
+        winners["task_id"]
+            .1
+            .value
+            .as_str()
+            .ok_or_else(|| invalid("comment requires a Task"))?,
+    );
+    let winner = winners["content"].1;
+    let mut observations = snapshot
+        .changes
+        .values()
+        .filter(|change| change.object == *object && change.field == "content")
+        .filter_map(|change| change.linear.as_ref())
+        .collect::<Vec<_>>();
+    observations.sort_by_key(|observation| (observation.revision_time(), observation.observed_at));
+    if let Some(latest) = observations.last() {
+        let latest = latest.revision_time();
+        observations.retain(|observation| observation.revision_time() == latest);
+    }
+    observations.dedup();
+    for observation in observations {
+        let comment = serde_json::from_value(observation.body.clone())?;
+        if !super::task_comments::ingest_task_comment(
+            conn,
+            &task,
+            &comment,
+            observation.observed_at,
+        )? {
+            return Err(invalid(
+                "peer provider frontier is older than retained evidence",
+            ));
+        }
+    }
+    if winner.linear.is_none() {
+        let content = &winner.value;
+        let comment = crate::ops::pm::TaskComment {
+            id: object.id.clone(),
+            body: content["body"]
+                .as_str()
+                .expect("validated comment body")
+                .into(),
+            author: serde_json::from_str(content["author"].as_str().expect("validated author"))?,
+            created_at: content["created_at"].as_str().map(str::to_owned),
+        };
+        super::task_comments::insert_authored_comment(conn, &task, &comment)?;
+    }
+    Ok(())
 }
 
 /// Reuse provider acquisition's revision and equal-revision checks, rather than
@@ -1195,7 +1265,9 @@ fn projection_conflict(error: &StoreError) -> bool {
         }
         StoreError::InvalidData(reason) => matches!(
             reason.as_str(),
-            "Wave parent would create a cycle"
+            "comment identity already belongs to another comment"
+                | "comment belongs to another Task"
+                | "Wave parent would create a cycle"
                 | "Wave parent is unavailable"
                 | "peer provider frontier is older than retained evidence"
                 | "Linear removal prevents peer Task projection"
@@ -1296,7 +1368,7 @@ fn project_fields<'a>(
 ) -> StoreResult<()> {
     let mut columns = BTreeMap::new();
     for (field, value) in fields {
-        if matches!(field, "disposition" | "content") {
+        if field == "disposition" {
             // The merged snapshot has already validated names and grouped values.
             columns.extend(
                 value
@@ -1446,6 +1518,312 @@ mod tests {
                 None,
             )
             .unwrap());
+    }
+
+    fn acquire_comment(store: &SqliteStore, task: &TaskId, comment: &crate::pm::IssueComment) {
+        let mut conn = store.conn.lock().unwrap();
+        let tx = conn.transaction().unwrap();
+        super::super::task_comments::ingest_task_comment(&tx, task, comment, 42).unwrap();
+        tx.commit().unwrap();
+    }
+
+    fn comment_receipt(
+        store: &SqliteStore,
+        id: &str,
+    ) -> (String, bool, Option<String>, Option<String>) {
+        store.conn.lock().unwrap().query_row(
+            "SELECT comment_json,acknowledged,error,conflicting_comment_json FROM task_comment_deliveries WHERE comment_id=?1",
+            [id], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?)),
+        ).unwrap()
+    }
+
+    #[test]
+    fn peer_comments_preserve_lost_replies_and_adopt_provider_edits_without_echo() {
+        let (_source_home, source) = store();
+        let (_target_home, target) = store();
+        let (wave, _, task) = linear_seed(&source);
+        let base = source
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        target
+            .import_peer_planning("/target", &destination(), "base", &base)
+            .unwrap();
+        preserve_execution(&target, &wave, &task);
+        let execution = target.revisions().unwrap();
+        let workflow = target.workflow(&task).unwrap();
+        let task_before = target.task(&task).unwrap();
+        let steers = target.task_steers(&task).unwrap();
+        let comment = TaskComment {
+            id: "peer-comment".into(),
+            body: "Keep this direction".into(),
+            author: TaskCommentAuthor::Person {
+                name: Some("Maya".into()),
+            },
+            created_at: Some("2026-10-08T10:00:00Z".into()),
+        };
+        source.append_task_comment(&task, &comment).unwrap();
+        let authored = source
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        target
+            .import_peer_planning("/target", &destination(), "authored", &authored)
+            .unwrap();
+        assert_eq!(
+            target.pending_task_comments(&task).unwrap(),
+            vec![comment.clone()]
+        );
+        target
+            .record_comment_delivery(&comment.id, Some("lost response"))
+            .unwrap();
+        let uncertain = comment_receipt(&target, &comment.id);
+        assert!(!uncertain.1);
+        assert_eq!(uncertain.2.as_deref(), Some("lost response"));
+        target
+            .import_peer_planning("/target", &destination(), "authored", &authored)
+            .unwrap();
+        assert_eq!(comment_receipt(&target, &comment.id), uncertain);
+        let mut observed = crate::pm::IssueComment {
+            id: comment.id.clone(),
+            body: comment.body.clone(),
+            author_id: Some("person".into()),
+            author_name: Some("Maya".into()),
+            created_at: comment.created_at.clone(),
+            revision: Some("2026-10-08T10:01:00Z".into()),
+        };
+        acquire_comment(&source, &task, &observed);
+        let confirmed = source
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        assert!(confirmed
+            .changes
+            .values()
+            .any(|change| change.object.id == comment.id
+                && change
+                    .linear
+                    .as_ref()
+                    .is_some_and(|fact| fact.body == serde_json::to_value(&observed).unwrap()
+                        && fact.observed_at == 42)));
+        target
+            .import_peer_planning("/target", &destination(), "confirmed", &confirmed)
+            .unwrap();
+        assert!(target.pending_task_comments(&task).unwrap().is_empty());
+        let receipt = comment_receipt(&target, &comment.id);
+        assert!(receipt.1);
+        assert_eq!(receipt.2, None);
+        assert_eq!(
+            serde_json::from_str::<TaskComment>(&receipt.0).unwrap(),
+            comment
+        );
+        let revisions = target.revisions().unwrap();
+        target
+            .import_peer_planning("/target", &destination(), "confirmed", &confirmed)
+            .unwrap();
+        assert_eq!(target.revisions().unwrap(), revisions);
+        assert_eq!(
+            target
+                .export_peer_planning("/target", &destination())
+                .unwrap(),
+            confirmed
+        );
+        observed.body = "Provider correction".into();
+        observed.author_name = Some("Quinn".into());
+        observed.revision = Some("2026-10-08T10:02:00Z".into());
+        acquire_comment(&source, &task, &observed);
+        let amended = source
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        target
+            .import_peer_planning("/target", &destination(), "amended", &amended)
+            .unwrap();
+        assert_eq!(
+            target.task_comments(&task).unwrap().comments,
+            vec![TaskComment::from(&observed)]
+        );
+        target
+            .record_comment_delivery(&comment.id, Some("late failure"))
+            .unwrap();
+        assert_eq!(comment_receipt(&target, &comment.id), receipt);
+        assert!(target.pending_task_comments(&task).unwrap().is_empty());
+        assert_eq!(
+            target
+                .export_peer_planning("/target", &destination())
+                .unwrap(),
+            amended
+        );
+        assert_eq!(target.workflow(&task).unwrap(), workflow);
+        assert_eq!(target.task(&task).unwrap(), task_before);
+        assert_eq!(target.task_steers(&task).unwrap(), steers);
+        let after = target.revisions().unwrap();
+        assert_eq!(
+            (after.sessions, after.processes, after.flows),
+            (execution.sessions, execution.processes, execution.flows)
+        );
+    }
+
+    #[test]
+    fn peer_comments_retain_losing_delivery_and_isolate_equal_revision_conflicts() {
+        let (_source_home, source) = store();
+        let (_target_home, target) = store();
+        let (_, _, task) = linear_seed(&source);
+        let comment = TaskComment {
+            id: "conflicting-comment".into(),
+            body: "Original direction".into(),
+            author: TaskCommentAuthor::Person {
+                name: Some("Maya".into()),
+            },
+            created_at: Some("2026-10-08T10:00:00Z".into()),
+        };
+        source.append_task_comment(&task, &comment).unwrap();
+        let authored = source
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        target
+            .import_peer_planning("/target", &destination(), "authored", &authored)
+            .unwrap();
+        target
+            .record_comment_delivery(&comment.id, Some("lost response"))
+            .unwrap();
+        let observed = crate::pm::IssueComment {
+            id: comment.id.clone(),
+            body: "Edited on Linear".into(),
+            author_id: Some("person".into()),
+            author_name: Some("Quinn".into()),
+            created_at: comment.created_at.clone(),
+            revision: Some("2026-10-08T10:01:00Z".into()),
+        };
+        acquire_comment(&source, &task, &observed);
+        let provider = source
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        target
+            .import_peer_planning("/target", &destination(), "provider", &provider)
+            .unwrap();
+        let receipt = comment_receipt(&target, &comment.id);
+        assert!(!receipt.1);
+        assert_eq!(
+            serde_json::from_str::<TaskComment>(&receipt.0).unwrap(),
+            comment
+        );
+        assert_eq!(
+            serde_json::from_str::<crate::pm::IssueComment>(receipt.3.as_ref().unwrap()).unwrap(),
+            observed
+        );
+        assert_eq!(
+            target.task_comments(&task).unwrap().conflicts[&comment.id],
+            comment.body
+        );
+        assert!(target.pending_task_comments(&task).unwrap().is_empty());
+        // A separately accepted contradictory body at the same provider revision
+        // stays journal evidence; it cannot overwrite the thread or its receipt.
+        let (_other_home, other) = store();
+        other
+            .import_peer_planning("/source", &destination(), "authored", &authored)
+            .unwrap();
+        let contradictory = crate::pm::IssueComment {
+            body: "Different same revision".into(),
+            ..observed.clone()
+        };
+        acquire_comment(&other, &task, &contradictory);
+        let independent = Wave::new(WaveId::new(), "independent".into(), "/source".into());
+        other.create_wave(&independent).unwrap();
+        other
+            .select_peer_waves(
+                "/source",
+                &destination(),
+                std::slice::from_ref(independent.id()),
+            )
+            .unwrap();
+        let incoming = other
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        target
+            .import_peer_planning("/target", &destination(), "contradiction", &incoming)
+            .unwrap();
+        assert!(target.get_wave(independent.id()).unwrap().is_some());
+        assert_eq!(
+            target.task_comments(&task).unwrap().comments,
+            vec![TaskComment::from(&observed)]
+        );
+        assert_eq!(comment_receipt(&target, &comment.id), receipt);
+        assert!(target
+            .peer_projection_conflicts("/target")
+            .unwrap()
+            .iter()
+            .any(|conflict| conflict.object.id == comment.id));
+        assert_eq!(
+            target
+                .export_peer_planning("/target", &destination())
+                .unwrap(),
+            provider.merge(&incoming).unwrap()
+        );
+        assert_eq!(
+            import_revision(&target, "/target", &destination()).as_deref(),
+            Some("contradiction")
+        );
+        target
+            .import_peer_planning("/target", &destination(), "contradiction", &incoming)
+            .unwrap();
+        assert_eq!(comment_receipt(&target, &comment.id), receipt);
+    }
+
+    #[test]
+    fn peer_comments_acquired_without_local_delivery_never_echo() {
+        let (_source_home, source) = store();
+        let (_target_home, target) = store();
+        let (_, _, task) = linear_seed(&source);
+        let comment = crate::pm::IssueComment {
+            id: "provider-only".into(),
+            body: "Provider direction".into(),
+            author_id: Some("person".into()),
+            author_name: Some("Quinn".into()),
+            created_at: Some("2026-10-08T10:00:00Z".into()),
+            revision: None,
+        };
+        acquire_comment(&source, &task, &comment);
+        let incoming = source
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        target
+            .import_peer_planning("/target", &destination(), "provider", &incoming)
+            .unwrap();
+        assert_eq!(
+            target.task_comments(&task).unwrap().comments,
+            vec![TaskComment::from(&comment)]
+        );
+        assert!(target.pending_task_comments(&task).unwrap().is_empty());
+        let count: i64 = target
+            .conn
+            .lock()
+            .unwrap()
+            .query_row("SELECT count(*) FROM task_comment_deliveries", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 0);
+        assert_eq!(
+            target
+                .export_peer_planning("/target", &destination())
+                .unwrap(),
+            incoming
+        );
+        let mut malformed = incoming.clone();
+        let fact = malformed
+            .changes
+            .values_mut()
+            .find_map(|change| {
+                (change.object.id == comment.id)
+                    .then_some(change.linear.as_mut())
+                    .flatten()
+            })
+            .unwrap();
+        fact.body["process_lfid"] = json!("not planning");
+        assert!(target
+            .import_peer_planning("/target", &destination(), "malformed", &malformed)
+            .is_err());
+        assert_eq!(
+            import_revision(&target, "/target", &destination()).as_deref(),
+            Some("provider")
+        );
     }
 
     #[test]
@@ -3590,7 +3968,9 @@ mod tests {
             "INSERT INTO waves(id,name,repo,created_at) VALUES('wave','planning','/fixture',1);
             INSERT INTO projects(id,wave_id,created_at) VALUES('project','wave',1);
             INSERT INTO tasks(id,project_id,issue_identifier,issue_title,created_at,worktree,agent)
-            VALUES('task','project','FIX-1','Retain identity',1,'/retained','codex');",
+            VALUES('task','project','FIX-1','Retain identity',1,'/retained','codex');
+            INSERT INTO task_comments(id,task_id,body,author,created_at,provider_revision)
+            VALUES('acquired','task','Provider body','{\"kind\":\"integration\"}',NULL,'2026-10-08T10:00:00Z');",
         )
         .unwrap();
         conn.execute_batch(&upgrade.expect("peer draft or materialized migration"))
@@ -3609,6 +3989,36 @@ mod tests {
         .unwrap();
         let before = super::export_in(&conn, "/fixture", &destination()).unwrap();
         assert!(!before.changes.is_empty());
+        assert!(!before
+            .changes
+            .values()
+            .any(|change| change.object.id == "acquired" && change.field == "content"));
+        let acquired = crate::pm::IssueComment {
+            id: "acquired".into(),
+            body: "Provider body".into(),
+            author_id: None,
+            author_name: None,
+            created_at: None,
+            revision: Some("2026-10-08T10:00:00Z".into()),
+        };
+        super::super::task_comments::ingest_task_comment(
+            &conn,
+            &TaskId::from_raw("task"),
+            &acquired,
+            42,
+        )
+        .unwrap();
+        let before = super::export_in(&conn, "/fixture", &destination()).unwrap();
+        assert!(before
+            .changes
+            .values()
+            .any(|change| change.object.id == "acquired" && change.linear.is_some()));
+        let deliveries: i64 = conn
+            .query_row("SELECT count(*) FROM task_comment_deliveries", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(deliveries, 0);
         conn.execute("UPDATE tasks SET issue_title='Changed' WHERE id='task'", [])
             .unwrap();
         let after = super::export_in(&conn, "/fixture", &destination()).unwrap();

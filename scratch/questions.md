@@ -30,7 +30,7 @@ at `b040c7c8d:scratch/questions.md`.
   failures still roll back the import. Legacy-provider association remains unfinished;
   conflicts preserve both IDs rather than guessing which execution history to use.
 
-Peer source is committed through `7262b6b20`; this integrated cut remains unpublished. Current verification and
+Peer source is committed through `fcd83ffc5`; this integrated cut remains unpublished. Current verification and
 remaining integration are in the existing design; previous adoption-only evidence
 is retained at `5d336868f:scratch/questions.md`.
 
@@ -115,3 +115,12 @@ is retained at `5d336868f:scratch/questions.md`.
   No new product policy is selected. Remaining grouped
   receipts and executable checks stay in the design; mixed-provider exchange is
   still disabled and not ready for publication.
+
+- October 8 comment composition uses the existing comment ID as delivery identity,
+  raw provider observations as journal provenance, and the common thread/receipt
+  owners. Acquired migration rows without a raw observation stay local until read;
+  they cannot be exported as authored comments. Local append remains immutable:
+  conflicting reuse of a comment ID isolates projection and preserves its journal,
+  rather than inventing a comment-edit delivery protocol. These are reversible
+  representation choices, not new product policy. Review removed incomplete-record
+  export and corrected grouped JSON ordering; public composed acceptance remains.

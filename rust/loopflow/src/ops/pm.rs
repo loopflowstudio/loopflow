@@ -111,6 +111,28 @@ pub struct TaskComment {
     pub created_at: Option<String>,
 }
 
+impl From<&crate::pm::IssueComment> for TaskComment {
+    fn from(comment: &crate::pm::IssueComment) -> Self {
+        let author =
+            if comment.author_id.is_some() || crate::ops::linear_observe::is_steer(&comment.body) {
+                TaskCommentAuthor::Person {
+                    name: crate::ops::linear_observe::comment_requester(
+                        &comment.body,
+                        comment.author_name.as_deref(),
+                    ),
+                }
+            } else {
+                TaskCommentAuthor::Integration
+            };
+        Self {
+            id: comment.id.clone(),
+            body: comment.body.clone(),
+            author,
+            created_at: comment.created_at.clone(),
+        }
+    }
+}
+
 /// Who wrote a comment. A person has a provider user; an integration has none
 /// and is never participant direction, whatever the display says.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

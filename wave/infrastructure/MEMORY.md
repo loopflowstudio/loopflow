@@ -623,30 +623,30 @@ Jack Heart selected custom-ref sync: LOO-412 owns transport/machines, LOO-406
 storage/Linear; plan ownership above governs sharing/execution exclusion.
 Review-only publication; no landing or public-remote planning export.
 
-Provider-frontier, membership rollback and typed-conflict evidence:
-`e8ff4c7f6:wave/infrastructure/MEMORY.md`, this heading. Malformed input aborts
-import; valid contradictions isolate objects. Entity revisions cannot order
-relationships; parent `b6f34a6f8` supplies common writers.
-`a388ed425` shares disposition receipts: stable IDs, causal baselines, saved times
-and uncertainty, without Workflow moves. A concurrent Linear winner retires a
-losing intention at unchanged baseline; ordinary acquisition preserves that save.
-SQL passes; Rust/composed/installed acceptance remains unproved. Other grouped
-receipts, alternate acquisition, legacy association and Desktop remain. Design:
-`scratch/work-on-another-machine-name.md`.
+Common writers remain at parent `b6f34a6f8`. Malformed input aborts import;
+valid contradictions isolate objects. Entity revisions cannot order relationships.
+`a388ed425` shares disposition receipts without Workflow moves: a selected Linear
+winner retires losing intention; ordinary unchanged acquisition preserves it.
 
-Parent `ffe986160` removes synthetic state settlement: observations settle;
-errors retain uncertainty. Unintegrated here; publication unchecked. Peer fixtures
-must follow that owner.
+Peer comments now share acquisition/delivery owners, stable comment IDs, raw
+provider observations and retained losing receipts. Import creates no steer or
+echo. Acquired migration rows await real observation before export, never inferred
+authorship. SQL passes; Rust/composed/installed acceptance remains unproved.
+Creation, structured Project/order, deletion, alternate acquisition, legacy
+association and Desktop remain. Design: `scratch/work-on-another-machine-name.md`.
+Earlier frontier/conflict proofs: `ae6f392c2:wave/infrastructure/MEMORY.md`, this heading.
 
-Joining publishes nothing. Mixed Linear exchange stays disabled pending composition,
-not by product policy. Fetch/import/publication stay separate; readback settles
-only the attempted save. Workers retain effect locks through cancellation without
-blocking acquisition/saves. Damaged journals break status, not independent exchange.
+Parent `ffe986160` replaces synthetic state settlement with observations/errors;
+unintegrated here, publication unchecked. Peer fixtures must follow that owner.
+Joining publishes nothing; mixed Linear exchange stays disabled pending composition,
+not by policy. Fetch/import/publication stay separate; readback settles only the
+attempted save. Workers retain effect locks through cancellation without blocking
+saves/acquisition. Damaged journals break status, not independent exchange.
 
-Move counterexample: `a43f3e2ea`; repairs: `b5dafd918`/`7395cf3bb`.
-Holds omit private history/dependents, including retained Git documents, until
-explicit selection. Omission is not convergence. CLI holds exist; recovery UX needs
-review. Prior detail: `4aca376dd:wave/infrastructure/MEMORY.md`, this heading.
+Move counterexample `a43f3e2ea`, repairs `b5dafd918`/`7395cf3bb`: holds omit private
+history/dependents, including retained Git documents, until explicit selection.
+Omission is not convergence. CLI holds exist; recovery UX needs review. Earlier
+detail: `4aca376dd:wave/infrastructure/MEMORY.md`, this heading.
 
 ## Synced planning integration (LOO-334)
 

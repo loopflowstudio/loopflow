@@ -80,8 +80,10 @@ Process does not reserve agent work or mark a Task Started.
    under its Process lifetime.
 
 Headless Codex and OpenCode prepare their lifeline before spawning. The child
-establishes its process group and waits for watchdog readiness before executing
-the provider. No post-spawn bind is needed. A reconnecting lf invocation holds
+establishes its process group, waits for watchdog readiness, then asks a parent
+thread to persist its OS identity before exec. Failed recording refuses exec;
+a failed exec retains any recorded identity without claiming provider execution.
+No post-spawn bind is needed. A reconnecting lf invocation holds
 the same FIFO. Writers remain held until OS exit, even after attachment transfer;
 only the last holder's exit closes the lifeline and stops the group, including
 after SIGKILL. The lifeline does not itself enforce current attachment authority.

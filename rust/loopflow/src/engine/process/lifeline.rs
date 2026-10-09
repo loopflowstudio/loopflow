@@ -4,9 +4,7 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::fs::OpenOptionsExt;
-use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::Mutex;
 
 // A connected lf invocation holds its writer until OS exit, including SIGKILL.
@@ -31,31 +29,29 @@ pub(crate) fn spawn_agent_process(
     path: Option<&Path>,
     record: impl FnOnce(u32) -> std::io::Result<()> + Send,
 ) -> std::io::Result<tokio::process::Child> {
-    let writer = prepare_lifeline(command.as_std_mut(), path)?;
+    let (reader, writer) = open_lifeline(path)?;
+    let null = above_stdio(File::options().write(true).open("/dev/null")?)?;
+    command.process_group(0);
     // Command::spawn waits for exec, so recording on its calling thread would
     // deadlock the child. The scoped thread writes in the parent, never after fork.
     let (parent, child) = std::os::unix::net::UnixStream::pair()?;
     let mut parent = above_stdio(File::from(OwnedFd::from(parent)))?;
     let child = above_stdio(File::from(OwnedFd::from(child)))?;
     let parent_fd = parent.as_raw_fd();
-    // SAFETY: the child only closes its inherited peer, sends its own PID and
-    // waits for acknowledgement using async-signal-safe syscalls. The parent
+    let writer_fd = writer.as_raw_fd();
+    // SAFETY: the child closes inherited writers, starts the watchdog and
+    // exchanges identity using async-signal-safe syscalls only. The parent
     // owns the recorder and performs all allocation, locking and database I/O.
     unsafe {
         command.pre_exec(move || {
+            // Close before forking the watchdog: neither child may keep the
+            // lifeline or recording peer alive if lf dies before provider exec.
+            libc::close(writer_fd);
             libc::close(parent_fd);
+            start_watchdog(reader.as_raw_fd(), null.as_raw_fd())?;
             let pid = libc::getpid() as u32;
             transfer(child.as_raw_fd(), &mut pid.to_ne_bytes(), true)?;
-            let mut acknowledged = 0u8;
-            transfer(
-                child.as_raw_fd(),
-                std::slice::from_mut(&mut acknowledged),
-                false,
-            )?;
-            if acknowledged != b'.' {
-                return Err(std::io::Error::from_raw_os_error(libc::EIO));
-            }
-            Ok(())
+            await_ready(child.as_raw_fd())
         });
     }
     let child = std::thread::scope(|scope| {
@@ -92,7 +88,7 @@ fn transfer(fd: libc::c_int, bytes: &mut [u8], write: bool) -> std::io::Result<(
     let mut offset = 0;
     while offset < bytes.len() {
         // SAFETY: callers supply a live buffer and an owned
-        // socket. The offset remains within the buffer; both calls are
+        // descriptor. The offset remains within the buffer; both calls are
         // async-signal-safe and neither retains the pointer.
         let result = unsafe {
             if write {
@@ -123,8 +119,8 @@ fn transfer(fd: libc::c_int, bytes: &mut [u8], write: bool) -> std::io::Result<(
     Ok(())
 }
 
-fn prepare_lifeline(command: &mut Command, path: Option<&Path>) -> std::io::Result<File> {
-    let (reader, writer) = match path {
+fn open_lifeline(path: Option<&Path>) -> std::io::Result<(File, File)> {
+    match path {
         Some(path) => {
             let name = std::ffi::CString::new(path.as_os_str().as_encoded_bytes())?;
             // SAFETY: name is a valid NUL-terminated path.
@@ -142,31 +138,16 @@ fn prepare_lifeline(command: &mut Command, path: Option<&Path>) -> std::io::Resu
             if unsafe { libc::fcntl(reader.as_raw_fd(), libc::F_SETFL, 0) } != 0 {
                 return Err(std::io::Error::last_os_error());
             }
-            (reader, writer)
+            Ok((reader, writer))
         }
         None => {
             let (reader, writer) = std::io::pipe()?;
-            (
+            Ok((
                 above_stdio(File::from(OwnedFd::from(reader)))?,
                 above_stdio(File::from(OwnedFd::from(writer)))?,
-            )
+            ))
         }
-    };
-    let null = above_stdio(File::options().write(true).open("/dev/null")?)?;
-    command.process_group(0);
-    let writer_fd = writer.as_raw_fd();
-    // SAFETY: after fork this closure performs only stack operations and
-    // async-signal-safe syscalls. Captured files stay owned by Command in
-    // the parent; neither branch unwinds, allocates, or locks after fork.
-    unsafe {
-        command.pre_exec(move || {
-            // CLOEXEC alone is too late: a launcher stalled before exec
-            // would otherwise keep its own lifeline alive after lf dies.
-            libc::close(writer_fd);
-            start_watchdog(reader.as_raw_fd(), null.as_raw_fd())
-        });
     }
-    Ok(writer)
 }
 
 fn retain_lifeline(writer: File) {
@@ -247,20 +228,17 @@ fn start_watchdog(reader: libc::c_int, null: libc::c_int) -> std::io::Result<()>
         }
         let [ready_reader, ready_writer] = ready;
         drop(ready_writer);
-        let mut byte = 0u8;
-        loop {
-            match libc::read(ready_reader.as_raw_fd(), (&mut byte as *mut u8).cast(), 1) {
-                1 if byte == b'.' => return Ok(()),
-                -1 => {
-                    let error = std::io::Error::last_os_error();
-                    if error.kind() != std::io::ErrorKind::Interrupted {
-                        return Err(error);
-                    }
-                }
-                _ => return Err(std::io::Error::from_raw_os_error(libc::EIO)),
-            }
-        }
+        await_ready(ready_reader.as_raw_fd())
     }
+}
+
+fn await_ready(fd: libc::c_int) -> std::io::Result<()> {
+    let mut byte = [0];
+    transfer(fd, &mut byte, false)?;
+    if byte[0] != b'.' {
+        return Err(std::io::Error::from_raw_os_error(libc::EIO));
+    }
+    Ok(())
 }
 
 /// Hold a running AgentProcess across attachment transfer. Absent paths belong
@@ -287,16 +265,12 @@ pub(crate) fn agent_process_lifeline_path(endpoint: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use std::os::fd::AsRawFd;
     use std::os::unix::fs::OpenOptionsExt;
-    use std::os::unix::process::CommandExt;
     use std::path::Path;
     use std::process::{Child, Command, Stdio};
     use std::time::{Duration, Instant};
 
-    use super::{
-        hold_agent_process_lifeline, prepare_lifeline, retain_lifeline, spawn_agent_process,
-    };
+    use super::{hold_agent_process_lifeline, spawn_agent_process};
     use crate::engine::process::{kill_process_group, terminate_process_group};
 
     const ATTACHED_MODE: &str = "LF_TEST_LIFELINE_LF";
@@ -323,9 +297,8 @@ mod tests {
     /// lf process that prepares and starts an agent, then ends the way
     /// its mode says. Without the mode variable it does nothing.
     // The lf process ends without waiting on purpose: that is the case under test.
-    #[allow(clippy::zombie_processes)]
-    #[test]
-    fn lifeline_attached_lf_process() {
+    #[tokio::test]
+    async fn lifeline_attached_lf_process() {
         let Ok(mode) = std::env::var(ATTACHED_MODE) else {
             return;
         };
@@ -337,7 +310,7 @@ mod tests {
                 libc::close(2);
             }
         }
-        let mut command = Command::new("sleep");
+        let mut command = tokio::process::Command::new("sleep");
         command
             .arg("60")
             .stdin(Stdio::null())
@@ -345,37 +318,28 @@ mod tests {
             .stderr(Stdio::null());
         let fifo = std::env::var_os(ATTACHED_FIFO);
         let out = std::env::var(ATTACHED_OUT).unwrap();
-        let lifeline = prepare_lifeline(&mut command, fifo.as_deref().map(Path::new)).unwrap();
-        if mode == "before_exec" {
-            let pending = format!("{out}.tmp");
-            let file = std::fs::File::create(&pending).unwrap();
-            let pending = std::ffi::CString::new(pending).unwrap();
-            let published = std::ffi::CString::new(out.clone()).unwrap();
-            // SAFETY: this test-only pre-exec hook uses only syscalls and
-            // stack bytes. It stalls after watchdog readiness, before exec.
-            unsafe {
-                command.pre_exec(move || {
-                    let pid = (libc::getpid() as u32).to_ne_bytes();
-                    if libc::write(file.as_raw_fd(), pid.as_ptr().cast(), pid.len()) != 4
-                        || libc::rename(pending.as_ptr(), published.as_ptr()) != 0
-                    {
-                        return Err(std::io::Error::last_os_error());
-                    }
-                    libc::sleep(60);
-                    Ok(())
-                });
+        let agent = spawn_agent_process(command, fifo.as_deref().map(Path::new), |pid| {
+            if mode == "before_exec" {
+                // The parent recorder stalls after watchdog readiness, before
+                // exec. Killing this lf must end the waiting child too.
+                publish_pid(&out, pid);
+                std::thread::sleep(Duration::from_secs(60));
             }
-        }
-        let agent = command.spawn().unwrap();
-        retain_lifeline(lifeline);
-        std::fs::write(format!("{out}.tmp"), agent.id().to_ne_bytes()).unwrap();
-        std::fs::rename(format!("{out}.tmp"), &out).unwrap();
+            Ok(())
+        })
+        .unwrap();
+        publish_pid(&out, agent.id().unwrap());
         match mode.as_str() {
             "exit" => std::process::exit(0),
             "panic" => panic!("lf process panicked"),
             // Killed by the parent test.
             _ => std::thread::sleep(Duration::from_secs(60)),
         }
+    }
+
+    fn publish_pid(out: &str, pid: u32) {
+        std::fs::write(format!("{out}.tmp"), pid.to_ne_bytes()).unwrap();
+        std::fs::rename(format!("{out}.tmp"), out).unwrap();
     }
 
     /// Start the throwaway lf process and return it with its agent's group.

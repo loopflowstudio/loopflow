@@ -544,9 +544,28 @@ fn desktop_open_has_one_owner_and_ambiguous_shorthand_has_no_effects() {
     assert!(matches!(
         cli.command,
         Some(Commands::Desktop {
-            cmd: DesktopCommand::Open
+            cmd: DesktopCommand::Open {
+                session: None,
+                diff: false,
+                json: false
+            }
         })
     ));
+    let composed = Cli::try_parse_from([
+        "lf",
+        "--task",
+        "LOO-427",
+        "desktop",
+        "open",
+        "--session",
+        "session-exact",
+        "--diff",
+        "--json",
+    ])
+    .unwrap();
+    assert!(
+        matches!(composed.command, Some(Commands::Desktop { cmd: DesktopCommand::Open { session: Some(ref id), diff: true, json: true } }) if id == "session-exact")
+    );
     assert!(Cli::command().find_subcommand("open").is_none());
     let saved: loopflow::engine::flow::Command =
         serde_json::from_value(serde_json::json!({"command": "open", "args": []})).unwrap();

@@ -1,0 +1,17 @@
+[
+  {
+    "url": "loopflow://task/task-a?repo=%2Fsrc%2Frepo&session=session-a&diff=true",
+    "status": "opening",
+    "reason": null
+  },
+  {
+    "url": "loopflow://task/task-a?repo=%2Fsrc%2Frepo&session=session-a&diff=true",
+    "status": "usable",
+    "reason": null
+  },
+  {
+    "url": "loopflow://task/task-a?repo=%2Fsrc%2Frepo&session=session-a&diff=true",
+    "status": "failed",
+    "reason": "Session is no longer associated with this Task."
+  }
+]

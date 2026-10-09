@@ -12,6 +12,17 @@ public struct DesktopInspection: Codable, Sendable, Equatable {
     enum CodingKeys: String, CodingKey { case observedAt = "observed_at", windows }
 }
 
+public struct DesktopOpening: Codable, Sendable, Equatable {
+    public enum Status: String, Codable, Sendable { case opening, usable, failed }
+    public let url: String
+    public let status: Status
+    public let reason: String?
+
+    public init(url: String, status: Status, reason: String?) {
+        self.url = url; self.status = status; self.reason = reason
+    }
+}
+
 public struct DesktopWindowInspection: Codable, Sendable, Equatable {
     public let repository: String
     public let window: String
@@ -25,17 +36,18 @@ public struct DesktopWindowInspection: Codable, Sendable, Equatable {
     public let supportedOperations: [String]
     public let workspaces: [DesktopWorkspaceInspection]
     public let layouts: [DesktopWorktreeInspection]
+    public let opening: DesktopOpening?
 
     public init(repository: String, window: String, path: String?, selectionKind: String?, selectionId: String?,
                 reading: String, reason: String?, task: DesktopTaskInspection?,
-                session: DesktopSessionInspection?, supportedOperations: [String], workspaces: [DesktopWorkspaceInspection], layouts: [DesktopWorktreeInspection]) {
+                session: DesktopSessionInspection?, supportedOperations: [String], workspaces: [DesktopWorkspaceInspection], layouts: [DesktopWorktreeInspection], opening: DesktopOpening?) {
         self.repository = repository; self.window = window; self.path = path
         self.selectionKind = selectionKind; self.selectionId = selectionId
         self.reading = reading; self.reason = reason; self.task = task
-        self.session = session; self.supportedOperations = supportedOperations; self.workspaces = workspaces; self.layouts = layouts
+        self.session = session; self.supportedOperations = supportedOperations; self.workspaces = workspaces; self.layouts = layouts; self.opening = opening
     }
     enum CodingKeys: String, CodingKey {
-        case repository, window, path, reading, reason, task, session, workspaces, layouts
+        case repository, window, path, reading, reason, task, session, workspaces, layouts, opening
         case selectionKind = "selection_kind", selectionId = "selection_id"
         case supportedOperations = "supported_operations"
     }

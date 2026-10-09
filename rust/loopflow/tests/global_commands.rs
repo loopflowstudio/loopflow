@@ -483,7 +483,7 @@ fn desktop_rejects_linux_before_machine_routing_or_work_preparation() {
             ],
         )
         .args(match operation {
-            "open" => vec![],
+            "open" => vec!["--session", "absent", "--diff", "--json"],
             "list" => vec!["--json"],
             "text" => vec!["--target", "invalid-json", "--surface", "stale", "literal"],
             "key" => vec!["--target", "invalid-json", "--surface", "stale", "enter"],
@@ -906,4 +906,64 @@ fn task_run_explanation_reads_unstarted_work_without_preparing_it() {
     assert_eq!(fs::read(path).unwrap(), before);
     let store = SqliteStore::new(&home.path().join(".lf/loopflow.db")).unwrap();
     assert!(store.task_by_issue(id).unwrap().unwrap().worktree.is_none());
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn desktop_open_delivers_exact_task_without_preparing_its_execution() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    let created: serde_json::Value = serde_json::from_str(&success(
+        command(
+            home.path(),
+            repo.path(),
+            &["task", "create", "--title", "Open only", "--json"],
+        )
+        .output()
+        .unwrap(),
+    ))
+    .unwrap();
+    let id = created["id"].as_str().unwrap();
+    let bin = home.path().join("bin");
+    fs::create_dir(&bin).unwrap();
+    let received = home.path().join("opening");
+    fs::write(
+        bin.join("open"),
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$HOME/opening\"\n",
+    )
+    .unwrap();
+    fs::set_permissions(bin.join("open"), fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
+    let output = success(
+        command(
+            home.path(),
+            repo.path(),
+            &["--task", id, "desktop", "open", "--diff", "--json"],
+        )
+        .env("PATH", path)
+        .output()
+        .unwrap(),
+    );
+    let opening: loopflow::lf::commands::desktop::DesktopOpening =
+        serde_json::from_str(&output).unwrap();
+    assert_eq!(
+        opening.status,
+        loopflow::lf::commands::desktop::DesktopOpeningStatus::Opening
+    );
+    let url = reqwest::Url::parse(&opening.url).unwrap();
+    assert_eq!(url.path(), format!("/{id}"));
+    assert!(url
+        .query_pairs()
+        .any(|(key, value)| key == "diff" && value == "true"));
+    assert!(fs::read_to_string(received)
+        .unwrap()
+        .ends_with(&format!("{}\n", opening.url)));
+    let conn = rusqlite::Connection::open(home.path().join(".lf/loopflow.db")).unwrap();
+    let worktree: Option<String> = conn
+        .query_row("SELECT worktree FROM tasks WHERE id=?1", [id], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert!(worktree.is_none());
 }

@@ -131,6 +131,16 @@ final class SessionsWorkspaceRegistry {
         }
     }
 
+    /// Shares the Files pane and document cache with toolbar/CLI companions.
+    /// Repeated opens retain both the conversation draft and file selection.
+    func showChanges(task: RoadmapTask, in identity: WorkspaceIdentity, query: RegistryQuery) {
+        let workspace = workspace(for: identity)
+        let key = task.runtime?.workId ?? task.task.identifier
+        let files = workspace.files(taskId: key, issue: key, cwd: identity.worktree, query: query)
+        files.showsChanges = true
+        workspace.multiplexer.show(.files(taskId: task.id), focus: false)
+    }
+
     func readText(_ request: DesktopTextRequest) throws -> DesktopTextReading {
         let (workspace, pane) = try retainedPane(for: request.target)
         let store = workspace.multiplexer
@@ -703,9 +713,14 @@ struct SessionsContentView: View {
         .onChange(of: model.linkedSession, initial: true) { _, record in
             guard let record,
                   model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath else { return }
+            let changesTask = model.linkedChangesTask
             model.linkedSession = nil
+            model.linkedChangesTask = nil
             store.reconcile(model.sessions.value ?? [])
             openSession(record)
+            if let changesTask, let identity = record.workspace?.identity {
+                workspaces.showChanges(task: changesTask, in: identity, query: query)
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .ghosttySurfaceClosed)) { notification in
             guard let terminal = notification.object as? TerminalIdentity else { return }

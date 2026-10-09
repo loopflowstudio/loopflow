@@ -22,7 +22,7 @@ struct DesktopPaneControlTests {
                 DesktopWindowInspection(repository: repository, window: incarnation.uuidString, path: "/repo",
                     selectionKind: nil, selectionId: nil, reading: "unavailable", reason: "Offline",
                     task: nil, session: nil, supportedOperations: ["list", "hide", "restore", "focus", "split", "move", "resize", "zoom"],
-                    workspaces: registry.inspect(), layouts: registry.inspectLayouts())
+                    workspaces: registry.inspect(), layouts: registry.inspectLayouts(), opening: nil)
             }, controlPane: { try registry.controlPane($0, model: model) }, readText: { try registry.readText($0) }) { _ in }
     }
 

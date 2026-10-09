@@ -545,6 +545,7 @@ supplies `flow_processes`, using the same execution details as CLI inspection.
 ### Inspect retained workspaces
 
 ```sh
+lf --task LOO-427 desktop open --diff --json
 lf desktop list --json
 lf task run LOO-427 --explain --json
 ```
@@ -560,6 +561,12 @@ usability or provider readiness. Terminal panes include a `surface`
 incarnation only when a native surface exists. It is separate from the pane's
 content incarnation; inspection never creates a surface or cleans up an exited
 child. Neither token authorizes terminal input.
+
+`desktop open` delivers the resolved Task/Session link to this same repository
+window. `--diff` reveals the existing Changes browser beside the conversation,
+retaining file selection and drafts. Launch acceptance returns `opening`; it does
+not prove a usable native endpoint. Inspection exposes lookup failures separately.
+Native readiness and downstream connection/comparison receipts remain unfinished.
 
 `lf desktop hide --target "$target"` and `lf desktop restore --target "$target"`
 change retained pane visibility. Focus, split, move, resize and zoom use that same

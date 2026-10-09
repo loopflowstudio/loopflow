@@ -1005,10 +1005,13 @@ Open, inspect and control Loopflow Desktop (macOS only)
 
 ## lf desktop open
 
-Open or focus Loopflow.app
+Open resolved Work in its retained repository window
 
 | Argument | What it does |
 |---|---|
+| `--session` | Open this Task-associated Session without taking over another client |
+| `--diff` | Show the Task's Changes browser beside its conversation Default: false. |
+| `--json` | json Default: false. |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 

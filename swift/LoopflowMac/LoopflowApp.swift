@@ -242,7 +242,7 @@ struct LoopflowApp: App {
         var destination = link
         if let link {
             let target = try TaskLink(url: link)
-            destination = TaskLink(issue: target.issue, repo: workspace.path, session: target.session).url
+            destination = TaskLink(issue: target.issue, repo: workspace.path, session: target.session, diff: target.diff).url
         }
         if !taskLinks.deliver(destination, repository: workspace.id) {
             openWindow(id: "workspace", value: workspace)

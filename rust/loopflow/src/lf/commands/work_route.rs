@@ -83,9 +83,6 @@ pub fn resolve_repository_selection(cli: &mut Cli) -> Result<()> {
 
 fn launch_task(cli: &Cli) -> Option<&str> {
     match &cli.command {
-        Some(Commands::Desktop {
-            cmd: crate::lf::DesktopCommand::Open,
-        }) => cli.task.as_deref(),
         Some(Commands::Desktop { .. }) => None,
         Some(Commands::Task {
             cmd: TaskCommand::Run { issue, .. } | TaskCommand::Checkout { issue, .. },

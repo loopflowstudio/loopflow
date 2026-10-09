@@ -104,7 +104,8 @@
             "unavailable_reason": null
           }
         ]
-      }
+      },
+      "opening": null
     },
     {
       "repository": "repo_other",
@@ -140,7 +141,8 @@
           "unavailable": "Task checkout is on another Machine"
         }
       },
-      "session": null
+      "session": null,
+      "opening": null
     }
   ]
 }

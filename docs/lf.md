@@ -490,7 +490,8 @@ lf task run LOO-427 --explain --json
 lf --explain                                # resolve the current checkout
 lf session connect SESSION_ID --explain
 lf history show PROCESS_LFID --explain
-lf desktop open                             # open or focus the Mac app
+lf --task LOO-427 desktop open --diff --json  # conversation plus Changes
+lf desktop open --session SESSION_ID --diff  # exact Task-associated Session
 lf desktop list --json                       # read an already-running Mac app
 ```
 
@@ -503,8 +504,19 @@ permission to start. Process checkout resolution describes current Work at that
 location, not historical usage attribution. Ordinary `lf context` still reads
 prompt budgets.
 
-`desktop open` launches/focuses the app; selected Task/Session opening is not yet
-composed with this command. Bare `open` is ambiguous with `pr open`; Sessions use `session connect`.
+`desktop open` resolves Work before handing its repository-qualified link to the
+Mac app. Without a Task it opens the current repository. `--session` selects an
+existing Task-associated conversation; `--diff` reveals its retained Changes
+browser without replacing file selection or drafts. Without `--session`, the
+Task's ordinary primary-Session owner chooses/prepares its conversation.
+
+JSON returns `opening`, not `usable`: macOS accepting a link proves no native
+endpoint. `desktop list --json` includes each window's latest Task `opening`
+reading and lookup failures. Native usability and connection/comparison failure
+receipts are not yet composed; an `opening` receipt must not authorize pane input.
+Display opening does not automatically route to the Task's execution Machine or
+prepare its checkout in the CLI. Bare `open` is ambiguous with `pr open`;
+Sessions use `session connect`.
 
 Desktop inspection reports registered repository/window identities, selection,
 reading availability and retained Machine/checkout pane trees with focus, zoom

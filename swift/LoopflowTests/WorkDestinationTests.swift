@@ -12,10 +12,10 @@ import os
 @MainActor
 struct WorkDestinationTests {
     @Test func taskLinksRetainLiteralTargetsWhenChangingRepositoryLocator() throws {
-        let original = TaskLink(issue: "LOO-427", repo: "/src/a #?&% repo", session: "session+&%")
+        let original = TaskLink(issue: "LOO-427", repo: "/src/a #?&% repo", session: "session+&%", diff: true)
         let parsed = try TaskLink(url: #require(original.url))
         #expect(parsed == original)
-        let relocated = TaskLink(issue: parsed.issue, repo: "/peer/other #repo", session: parsed.session)
+        let relocated = TaskLink(issue: parsed.issue, repo: "/peer/other #repo", session: parsed.session, diff: parsed.diff)
         #expect(try TaskLink(url: #require(relocated.url)) == relocated)
         #expect(try TaskLink(url: #require(TaskLink(issue: "LOO-427", repo: nil).url))
             == TaskLink(issue: "LOO-427", repo: nil))
@@ -131,6 +131,73 @@ struct WorkDestinationTests {
         await model.openTaskLink(try #require(url.url))
         #expect(model.navigation.selectedSessionId == record.id)
         #expect(model.sessions.value?.map(\.id) == [record.id, other.id])
+    }
+
+    @Test func composedOpeningRetainsTheExactSessionAndChangesPane() async throws {
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(try fixture().utf8))
+        let wave = try #require(snapshot.waves.first)
+        let task = try #require(wave.tasks.items.first)
+        var record = try renameFixtureRecord("composed-session", title: "Review", work: .task(id: #require(task.runtime?.workId)))
+        let identity = try #require(task.reference.workspace?.identity)
+        record.workspace = try JSONDecoder().decode(SessionWorkspace.self, from: JSONSerialization.data(withJSONObject: [
+            "machine_id": identity.machineId, "worktree": identity.worktree,
+            "task_id": try #require(task.runtime?.workId)
+        ]))
+        let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
+        let query = RegistryQuery { args, _ in
+            guard args.starts(with: ["session", "list"]) else { throw RegistryQueryError("No launch or planning mutation permitted") }
+            return #"{"entries":[\#(encoded)],"next":null}"#
+        }
+        let model = WorkModel(query: query, repoPath: wave.wave.repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        let link = TaskLink(issue: try #require(task.runtime?.workId), repo: wave.wave.repo, session: record.id, diff: true)
+        await model.openTaskLink(try #require(link.url))
+        #expect(model.linkedSession?.id == record.id)
+        #expect(model.linkedChangesTask?.id == task.id)
+        #expect(model.taskOpening?.status == .opening) // selection is not native readiness
+        let registry = SessionsWorkspaceRegistry()
+        let workspace = registry.workspace(for: identity)
+        workspace.multiplexer.load(sessionId: record.id)
+        let terminal = try #require(workspace.multiplexer.layout.allPanes.first)
+        registry.showChanges(task: task, in: identity, query: query)
+        let files = workspace.files(taskId: try #require(task.runtime?.workId), issue: task.task.identifier, cwd: identity.worktree, query: query)
+        files.selection = "retained-draft.rs"
+        registry.showChanges(task: task, in: identity, query: query)
+        #expect(workspace.multiplexer.layout.allPanes.count == 2)
+        #expect(workspace.multiplexer.layout.pane(for: terminal.id) == terminal)
+        #expect(workspace.multiplexer.focusedPaneId == terminal.id)
+        #expect(files.selection == "retained-draft.rs")
+        #expect(files.showsChanges)
+        let failure = TaskLink(issue: task.task.identifier, repo: wave.wave.repo, session: "missing", diff: true)
+        await model.openTaskLink(try #require(failure.url))
+        #expect(model.taskOpening?.status == .failed)
+        #expect(model.taskOpening?.url == failure.url?.absoluteString)
+        #expect(model.navigation.selectedSessionId == record.id)
+    }
+
+    @Test func delayedPrimarySessionPreparationDoesNotOpenChangesInAnotherTask() async throws {
+        let data = try fixture()
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
+        let wave = try #require(snapshot.waves.first)
+        let task = try #require(wave.tasks.items.first)
+        let record = try renameFixtureRecord("prepared-session", title: "Review", work: .task(id: #require(task.runtime?.workId)))
+        let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
+        let barrier = LinkedDestinationBarrier()
+        let model = WorkModel(query: RegistryQuery { args, _ in
+            guard args.starts(with: ["session", "ensure"]) else { throw RegistryQueryError("Canceled preparation must not read or open another Task") }
+            await barrier.wait("ensure")
+            return encoded
+        }, repoPath: wave.wave.repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        let url = try #require(TaskLink(issue: task.task.identifier, repo: wave.wave.repo, diff: true).url)
+        let opening = Task { await model.openTaskLink(url) }
+        while !(await barrier.contains("ensure")) { await Task.yield() }
+        model.select(.wave(id: wave.wave.id))
+        await barrier.release("ensure")
+        await opening.value
+        #expect(model.selection == .wave(id: wave.wave.id))
+        #expect(model.linkedChangesTask == nil)
+        #expect(model.linkedSession == nil)
     }
 
     @Test func paletteBindingTargetsOnlyTheSelectedUnassignedSession() async throws {
@@ -546,7 +613,7 @@ struct WorkDestinationTests {
     private func windowInspection(_ id: UUID) -> DesktopWindowInspection {
         DesktopWindowInspection(repository: "fixture", window: id.uuidString, path: nil,
             selectionKind: nil, selectionId: nil, reading: "loading", reason: nil,
-            task: nil, session: nil, supportedOperations: ["list"], workspaces: [], layouts: [])
+            task: nil, session: nil, supportedOperations: ["list"], workspaces: [], layouts: [], opening: nil)
     }
 
     @Test func inspectionIncludesOnlyRegisteredWindowIncarnationsWithoutFocusing() {

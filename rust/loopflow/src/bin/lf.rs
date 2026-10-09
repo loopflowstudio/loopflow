@@ -1591,6 +1591,22 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
             None => break,
         }
     }
+    if let Some(Commands::Desktop {
+        cmd: loopflow::lf::DesktopCommand::Open { session, .. },
+    }) = &cli.command
+    {
+        anyhow::ensure!(
+            !cli.context,
+            "--context requires an agent invocation; nothing was executed"
+        );
+        let resolution = loopflow::lf::commands::desktop::opening_context(cli, session.as_deref())?;
+        if json {
+            println!("{}", serde_json::to_string_pretty(&resolution)?);
+        } else {
+            println!("{}", resolution.render());
+        }
+        return Ok(());
+    }
     let mut task = cli.task.as_deref();
     let wave = cli.wave.as_deref();
     let mut session = None;
@@ -1609,10 +1625,7 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
             }
             task = cmd.selector().or(task);
         }
-        Some(Commands::Desktop {
-            cmd: loopflow::lf::DesktopCommand::Open,
-        })
-        | None => {}
+        None => {}
         Some(Commands::Session {
             cmd: loopflow::lf::SessionCommand::Open { id, .. },
         }) => session = Some(id.as_str()),
@@ -1708,11 +1721,31 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
     // Remote commands prove they reached the saved machine before dispatch.
     loopflow::lf::commands::machine::validate_expected_machine_process()?;
 
-    // Opening retains ordinary Work selection; exact pane controls do not prepare Work.
+    // Display location is not execution placement. Opening reads Work here;
+    // the retained Desktop owners prepare/connect only the requested view.
     if let Some(Commands::Desktop { cmd }) = &cli.command {
-        if !matches!(cmd, loopflow::lf::DesktopCommand::Open) {
-            return loopflow::lf::commands::desktop::run(cmd);
-        }
+        return match cmd {
+            loopflow::lf::DesktopCommand::Open {
+                session,
+                diff,
+                json,
+            } => {
+                let _cwd = cli
+                    .wt
+                    .as_deref()
+                    .map(loopflow::lf::commands::ops::resolve_worktree)
+                    .transpose()?
+                    .map(|path| CwdGuard::enter(&path))
+                    .transpose()?;
+                loopflow::lf::commands::desktop::open_work(
+                    &cli,
+                    session.as_deref(),
+                    *diff,
+                    *json || cli.json,
+                )
+            }
+            _ => loopflow::lf::commands::desktop::run(cmd),
+        };
     }
     if loopflow::lf::commands::work_route::dispatch(&cli, args)? {
         return Ok(());

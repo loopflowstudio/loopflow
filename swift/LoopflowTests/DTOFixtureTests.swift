@@ -21,6 +21,15 @@ struct DTOFixtureTests {
         }
     }
 
+    @Test func desktopOpeningDoesNotConfuseLaunchWithUsability() throws {
+        let data = try loadFixtureData("desktop_openings.json")
+        let readings = try JSONDecoder().decode([DesktopOpening].self, from: data)
+        #expect(readings.map(\.status) == [.opening, .usable, .failed])
+        #expect(readings[0].reason == nil)
+        #expect(readings[2].reason != nil)
+        #expect(try JSONDecoder().decode([DesktopOpening].self, from: JSONEncoder().encode(readings)) == readings)
+    }
+
     @Test func desktopTextDistinguishesEmptyAndUnavailable() throws {
         let data = try loadFixtureData("desktop_text_readings.json")
         let readings = try JSONDecoder().decode([DesktopTextReading].self, from: data)

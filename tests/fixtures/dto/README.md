@@ -71,3 +71,5 @@ submitted input by source, flagged against budgets, with Task totals. One step
 is LOO-298-shaped (384 steers over the goal budget); the other has no retained
 capture, so every source is `null` rather than zero. Rust round-trips it and
 Swift decodes it for the Task's Session history.
+
+`desktop_openings.json` distinguishes request acceptance, usable endpoints and failures; fixture shape is not native readiness proof.

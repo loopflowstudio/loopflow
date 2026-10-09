@@ -787,3 +787,24 @@ fn desktop_text_distinguishes_empty_and_unavailable() {
         }
     }
 }
+
+#[test]
+fn desktop_opening_distinguishes_launch_acceptance_from_usable_and_failed() {
+    use loopflow::lf::commands::desktop::{DesktopOpening, DesktopOpeningStatus};
+    let json = include_str!("../../../tests/fixtures/dto/desktop_openings.json");
+    let readings: Vec<DesktopOpening> = serde_json::from_str(json).unwrap();
+    assert_eq!(
+        readings.iter().map(|r| r.status).collect::<Vec<_>>(),
+        vec![
+            DesktopOpeningStatus::Opening,
+            DesktopOpeningStatus::Usable,
+            DesktopOpeningStatus::Failed
+        ]
+    );
+    assert!(readings[0].reason.is_none());
+    assert!(readings[2].reason.is_some());
+    assert_eq!(
+        serde_json::to_value(readings).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+}

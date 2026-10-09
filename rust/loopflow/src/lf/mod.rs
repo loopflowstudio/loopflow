@@ -505,8 +505,17 @@ pub enum Commands {
 
 #[derive(Subcommand, Debug)]
 pub enum DesktopCommand {
-    /// Open or focus Loopflow.app
-    Open,
+    /// Open resolved Work in its retained repository window
+    Open {
+        /// Open this Task-associated Session without taking over another client
+        #[arg(long)]
+        session: Option<String>,
+        /// Show the Task's Changes browser beside its conversation
+        #[arg(long)]
+        diff: bool,
+        #[arg(long)]
+        json: bool,
+    },
     /// Insert literal text at an exact surface's cursor; never submits or clears a draft
     Text {
         #[arg(long)]

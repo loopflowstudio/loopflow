@@ -98,6 +98,8 @@ final class WorkModel {
     private(set) var taskLinkReading: WorkReading<RoadmapSnapshot> = .loading
     var showsTaskLink = false
     var linkedSession: SessionRecord?
+    var linkedChangesTask: RoadmapTask?
+    private(set) var taskOpening: DesktopOpening?
     @ObservationIgnored private var destinationGeneration = 0
 
     @ObservationIgnored private var taskLinkExpectedID: String?
@@ -106,6 +108,9 @@ final class WorkModel {
         guard !Task.isCancelled else { return }
         destinationGeneration &+= 1
         let generation = destinationGeneration
+        linkedSession = nil
+        linkedChangesTask = nil
+        taskOpening = DesktopOpening(url: url.absoluteString, status: .opening, reason: nil)
         // Observation invalidates on every write, changed or not. Reopening
         // what is already open must not redraw the window.
         if taskLinkURL != url { taskLinkURL = url }
@@ -136,10 +141,12 @@ final class WorkModel {
             if matches.count == 1, link.repo != nil || !unavailable, let match = matches.first {
                 try await openLinkedTask(wave: match.0, task: match.1, link: link, generation: generation)
             } else {
+                taskOpening = DesktopOpening(url: url.absoluteString, status: .failed, reason: "Task lookup is missing, ambiguous or unavailable; choose a repository-qualified Task.")
                 showsTaskLink = true
             }
         } catch {
             guard !Task.isCancelled, destinationGeneration == generation else { return }
+            taskOpening = DesktopOpening(url: url.absoluteString, status: .failed, reason: error.localizedDescription)
             taskLinkReading = .unavailable(lastGood: nil, reason: error.localizedDescription)
             showsTaskLink = true
         }
@@ -149,6 +156,7 @@ final class WorkModel {
         destinationGeneration &+= 1
         if showsTaskLink { showsTaskLink = false }
         if linkedSession != nil { linkedSession = nil }
+        linkedChangesTask = nil
     }
 
     func chooseLinkedTask(wave: WaveRoadmap, task: RoadmapTask) async {
@@ -168,7 +176,7 @@ final class WorkModel {
         guard let repo = link.repo?.normalizedFilePath else { return nil }
         guard case .available(let snapshot) = roadmap else { return nil }
         let matches = snapshot.waves.filter { $0.wave.repo.normalizedFilePath == repo }.flatMap { wave in
-            wave.tasks.items.filter { $0.task.identifier == link.issue }.map { (wave, $0) }
+            wave.tasks.items.filter { $0.task.identifier == link.issue || $0.id == link.issue || $0.runtime?.workId == link.issue }.map { (wave, $0) }
         }
         return matches.count == 1 ? matches[0] : nil
     }
@@ -176,16 +184,37 @@ final class WorkModel {
     private func openLinkedTask(wave: WaveRoadmap, task: RoadmapTask, link: TaskLink, generation: Int) async throws {
         try Task.checkCancellation()
         guard destinationGeneration == generation else { return }
+        var task = task
         if let openRepository, repoPath?.normalizedFilePath != wave.wave.repo.normalizedFilePath {
             openRepository(wave.wave.repo, taskLinkURL)
             return
         }
-        guard let sessionID = link.session else {
+        guard link.session != nil || link.diff else {
             openTaskDestination(wave: wave, task: task)
             return
         }
         let sameRepo = repoPath?.normalizedFilePath == wave.wave.repo.normalizedFilePath
         var records = sameRepo ? sessions.value ?? [] : []
+        let sessionID: String
+        if let selected = link.session {
+            sessionID = selected
+        } else {
+            // Reuse the primary-Session owner rather than creating another
+            // conversation or replaying a retained terminal's launch command.
+            let record = try await query.ensureTaskSession(issue: task.runtime?.workId ?? task.task.identifier, cwd: wave.wave.repo)
+            guard !Task.isCancelled, destinationGeneration == generation else { return }
+            sessionID = record.id
+            // Preparation may have supplied a checkout/runtime absent from the
+            // planning read. Refresh this exact Task, never the current selection.
+            let refreshed = try await query.taskDestination(issue: task.task.identifier, repo: wave.wave.repo)
+            guard !Task.isCancelled, destinationGeneration == generation else { return }
+            guard let current = refreshed.waves.flatMap({ $0.tasks.items }).first(where: { $0.id == task.id }) else {
+                throw RegistryQueryError("The prepared Task is no longer available; its Session was not retargeted.")
+            }
+            task = current
+            // Do not publish the single ensured record as a complete inventory.
+            records = []
+        }
         if !records.contains(where: { $0.id == sessionID }) {
             // Publishing a partial inventory would retire retained panes whose
             // records occur on later pages. Only retained targets skip this read.
@@ -203,11 +232,18 @@ final class WorkModel {
               record.taskIds.contains(taskID) || record.workspace?.taskId == taskID else {
             throw RegistryQueryError("Session \(sessionID) was not found in Task \(task.task.identifier). Retry after its Session is available.")
         }
+        if link.diff {
+            guard let identity = record.workspace?.identity,
+                  identity == (navigation.preparedTaskWorktrees[task.id] ?? task.reference.workspace?.identity) else {
+                throw RegistryQueryError("The Session and Task do not share a recorded checkout; no Changes pane was opened.")
+            }
+        }
         openTaskDestination(wave: wave, task: task)
         supersedeSessions()
         sessions = .available(records)
         navigation.selectedSessionId = record.id
         navigation.content = .terminals
+        linkedChangesTask = link.diff ? task : nil
         linkedSession = record
     }
 
@@ -266,7 +302,7 @@ final class WorkModel {
             path: repoPath, selectionKind: selection?.kind.rawValue, selectionId: selection?.id,
             reading: reading, reason: workStatus.message,
             task: inspectSelectedTask(), session: inspectSelectedSession(),
-            supportedOperations: ["list", "hide", "restore", "focus", "split", "move", "resize", "zoom", "shell", "files", "flow-log", "text", "key"], workspaces: workspaces.inspect(), layouts: workspaces.inspectLayouts())
+            supportedOperations: ["list", "hide", "restore", "focus", "split", "move", "resize", "zoom", "shell", "files", "flow-log", "text", "key"], workspaces: workspaces.inspect(), layouts: workspaces.inspectLayouts(), opening: taskOpening)
     }
 
     private func inspectSelectedTask() -> DesktopTaskInspection? {

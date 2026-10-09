@@ -1004,29 +1004,32 @@ tuning policy; the synthetic harness remains unbuilt. Jack Heart's July 6
 
 ## Direct invocation and large inputs (curated 2026-10-09)
 
-Jack Heart's LOO-444 direction supersedes 429's all-system transport: preserve
-native prompts/guides, skill/request first, refreshed whole-file context at
-start/compaction. Jack selected option B: fixed additions per surface/reply/participant
-profile, retaining that metadata in the slot. Production cut authorized, not built.
-Native-guide wording remains proposed. Refresh Wave/ancestors from SQLite, not checkout.
+Jack Heart's LOO-444 supersedes 429's all-system transport: native prompts/guides,
+skill/request first, whole-file context refreshed at start/compaction. Option B
+fixes additions per surface/reply/participant profile; metadata stays there.
+Production authorized, not built. Native-guide wording is proposed. Wave/ancestor
+bytes come from SQLite, not checkout.
 
 Fake-API proofs: Claude 2.1.295 refreshes user context; Codex 0.161.0 retains native
-base/AGENTS.md/additions across compact. SessionStart injects; PostCompact does not.
-App-server needs scoped trust. Codex exec accepts 225,023 stdin bytes; TUI rejects
-nonterminal stdin without a request. Caps, lf integration, automatic compaction,
-OpenCode and cmux remain unproved. [Evidence](../../scripts/benchmarks/skill-invocation/README.md).
+base/AGENTS.md/additions across compact. SessionStart injects, PostCompact does not;
+app-server needs scoped trust. Exec accepts 225,023 stdin bytes; TUI rejects them
+without a request. Caps, lf integration, automatic compact, OpenCode and cmux are
+unproved. [Evidence](../../scripts/benchmarks/skill-invocation/README.md).
+
+Main `3e1e6245c` (#1512) ties engines to driver lifelines; dead-driver replacement
+resumes native history on a new engine, not the abandoned turn. Context/trust must
+survive supported resume without replaying launch input or restoring deleted
+engine recovery. Source/child fixtures prove no installed/provider acceptance.
 
 Retain setup-free capture, saved config/trust, native identity and caller checkpoints.
-Interrupted profiles may remain unselected; prior PTYs prove no fresh reconnect
-hooks or host tracking. 429/428 decisions:
-`3a0aa5ca4:wave/infrastructure/MEMORY.md`, this heading.
+Interrupted profiles may remain unselected; PTYs prove no fresh reconnect hooks or
+host tracking. 429/428 history: `3a0aa5ca4:wave/infrastructure/MEMORY.md`, this heading.
 
-Flow output shows position/name/messages; verbose adds accounting/INFO, never
-prompts. Started commits with registration. Jack removed `--tui`: terminal defaults
-interactive, `-i` forces it, `-b` stays headless; stale forwarding is removed.
-CI owns the materialized matrix. Dated proofs: `9ab5b6a52`, this heading.
-LOO-422 owns OSC 7501 simplification after adoption. Codex rejected-turn recovery
-remains unresolved; homepage capture follows installation.
+Flow output shows position/name/messages; verbose adds accounting/INFO, not prompts.
+Started commits with registration. Jack removed `--tui`: terminal defaults interactive,
+`-i` forces it, `-b` stays headless; stale forwarding is removed. CI owns the matrix.
+Proofs: `9ab5b6a52`, this heading. LOO-422 owns OSC 7501 simplification after adoption.
+Rejected-turn recovery remains unresolved; homepage capture follows installation.
 
 LOO-420: Jack Heart's October 8 comments `5f149330-5f5d-4a71-bb05-289b13fe2d94`
 and `76407cd0-b271-45e7-8953-62abe7f9df2b` correct the overexpanded scope:
@@ -1044,12 +1047,9 @@ subagent names do not select lf's harness. Independent fixes preserve saved Sess
 placement, active captures on refused continuation and unpublished reservations on
 publication failure. Launcher success proves no provider exit.
 
-Compression history: `1e4ae02a5`, `754efacb2`, `31e0640eb`, `dd2cdba82`;
-source audit: `48d145b78`. Native/sibling history and stale-client rejection remain
-required. Native terminal snapshots retain declarations, exact arguments and
-lossless JSON user context; escape native argument/preprocessing syntax.
-Rejected hooks changed context authority; shell preprocessing missed first-request
-context. Exact counterexamples: `4624224bb`, this section.
+Native/sibling history, stale-client rejection, declarations, exact arguments and
+lossless escaped context remain required. Compression history and rejected hook/
+preprocessing evidence: `4eac67a1e:wave/infrastructure/MEMORY.md`, this heading.
 
 Codex 0.160.1 ignores typed skill input outside its discovered catalog, but an
 explicit Markdown skill reference selects the original path on both surfaces.

@@ -105,13 +105,13 @@ Store/CLI/migration checks pass, not Git acquisition.
 `2afcfba1a`: lookup, mapping and record reads share one snapshot;
 subsequent calls recheck. Observation reserves nothing.
 
-Composed through `3c67b29b1`: creation origins, exact-fact predecessors and
-private dependencies survive; five focused fixtures pass, not joint projection.
-**Retention is not observation:** rejected import heads can become local-save
-parents here. October 9's SQL probe distinguishes that defect from LOO-412's
-`dac02060a`/`ccdd273d0` accepted-frontier repair, not yet composed. Its import/migration
-fixtures remain unexecuted. Equal text grants no causality. Mixed exchange and
-first-start stay refused; no native proof.
+`3c67b29b1` retains creation origins, exact-fact predecessors and private dependencies.
+**Retention is not observation:** `44d73dbcd` composes `dac02060a`/`ccdd273d0`.
+Accepted projection, not retention, supplies local-save parents. Rejected heads
+remain recoverable. Four focused fixtures pass;
+SQL counterexample: `29fa9a90e`, this heading. Immutable preparation and shared
+scalar/semantic capture survive. Equal text grants no causality; joint projection,
+mixed exchange, first-start and native proof remain unfinished.
 
 #1512 (`3e1e6245c`): live connect hands off; dead-driver resume starts an engine
 on native history. Local resume is not import-triggered launch; native proof remains.

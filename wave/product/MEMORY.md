@@ -93,11 +93,10 @@ ages/baselines and causal frontiers. Import reuses portable fields.
 Entity revisions cannot order relationships; scalar/list replay cannot clear
 freshness or unseen notices. Prior evidence: `7d12ab10a`, this heading.
 
-October 9: `d4fbca0ae`/`a73198197` bind roots, retaining locators, Work and execution,
-publishing nothing. Journals exclude RepositoryId/delegation; imports allocate identity.
-Desktop reads locators atomically, retaining native owners. Scene equality misses
-A→B→A; per-path fences miss concurrent locators. Opening/restoration share one
-observation fence; headless fixtures prove no native usability.
+`d4fbca0ae`/`a73198197`: binding retains local locators, Work and execution;
+imports allocate identity, exporting neither RepositoryId nor delegation.
+Opening/restoration share atomic locator reads and an observation fence: scene
+A→B→A and concurrent locators defeat scene/per-path fences. No native proof.
 
 **Unmapping is not association:** it can enable duplicate creation. `66dd3c44f`
 composes LOO-412 through `de3c84b08`: correspondence/full-ID lookup preserves
@@ -106,10 +105,13 @@ Store/CLI/migration checks pass, not Git acquisition.
 `2afcfba1a`: lookup, mapping and record reads share one snapshot;
 subsequent calls recheck. Observation reserves nothing.
 
-Composed through `3c67b29b1`: import retains creation origins; exact Linear facts
-link causal predecessors. Equal text is not causality; per-origin heads and private
-dependencies survive. Five focused fixtures pass; snapshot lookup survives.
-Joint projection, mixed exchange and first-start remain unfinished; no native proof.
+Composed through `3c67b29b1`: creation origins, exact-fact predecessors and
+private dependencies survive; five focused fixtures pass, not joint projection.
+**Retention is not observation:** rejected import heads can become local-save
+parents here. October 9's SQL probe distinguishes that defect from LOO-412's
+`dac02060a`/`ccdd273d0` accepted-frontier repair, not yet composed. Its import/migration
+fixtures remain unexecuted. Equal text grants no causality. Mixed exchange and
+first-start stay refused; no native proof.
 
 #1512 (`3e1e6245c`): live connect hands off; dead-driver resume starts an engine
 on native history. Local resume is not import-triggered launch; native proof remains.
@@ -525,11 +527,8 @@ continuity to Flows, not separate execution semantics. See
 and [research](../../docs/reviews/independent-operations.md). These decisions do not
 authorize an automatic Project reset, Task cancellation or claims of measured gains.
 
-## CI watcher decisions (2026-10-01)
-
-Jack’s LOO-365: `6c1bc2029:wave/product/MEMORY.md`, this heading. Taskless repairs,
-unarmed-PR reporting and missing Desktop watcher view remain unreviewed;
-no real failing landing was proved.
+CI watcher gaps: `e021858ec:wave/product/MEMORY.md`,
+**CI watcher decisions**; no failing-landing proof.
 
 ## Skill reduction decisions (2026-09-28)
 

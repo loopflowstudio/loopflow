@@ -19,7 +19,9 @@ use crate::id::WaveId;
 use crate::store::{PeerPlanningStatus, PeerProjectionConflict, StoreError, StoreResult};
 
 use super::planning::ProviderEvidence;
-use super::planning_changes::PlanningChanges;
+use super::planning_changes::{DeletionReceipt, PlanningChanges};
+use super::planning_export::CreationReceipt;
+use super::planning_order::OrderReceipt;
 use super::SqliteStore;
 
 const SHARING_PROJECTION_PENDING: &str = "peer projection skipped by sharing hold; import required";
@@ -28,16 +30,16 @@ const SHARING_PROJECTION_PENDING: &str = "peer projection skipped by sharing hol
 // mutation identity and provenance. Retries never rebuild a value-only index.
 type WinningFields<'a> = BTreeMap<&'a str, (&'a str, &'a PlanningMutation)>;
 
-// Prepare winners and provider frontiers once, before projection retries.
-// The snapshot still owns every mutation, losing value and causal link.
+// Prepare scalar winners and decode validated receipt/evidence histories before
+// projection retries. The snapshot retains every mutation, loser and causal link.
 #[derive(Default)]
 struct ObjectChanges<'a> {
     winners: WinningFields<'a>,
     observations: Vec<&'a LinearObservation>,
-    creation: BTreeMap<&'a PlanningObject, (&'a Value, Vec<&'a Value>)>,
+    creation: BTreeMap<&'a PlanningObject, (CreationReceipt, Vec<CreationReceipt>)>,
     observed: Vec<(&'a str, &'a PlanningMutation)>,
-    deletions: BTreeMap<&'a str, Vec<&'a Value>>,
-    orders: BTreeMap<&'a str, FieldHistory<&'a Value>>,
+    deletions: BTreeMap<&'a str, Vec<DeletionReceipt>>,
+    orders: BTreeMap<&'a str, FieldHistory<OrderReceipt>>,
     evidence: BTreeMap<&'a str, FieldHistory<ProviderEvidence>>,
 }
 
@@ -141,7 +143,13 @@ fn changes_by_object<'a>(
         }
     }
     let mut objects: BTreeMap<_, ObjectChanges<'_>> = BTreeMap::new();
-    let frontier = snapshot.frontier_by(|object| &owners[object]);
+    // Receipts and independent provider evidence keep their own merge protocols;
+    // only scalar planning fields participate in the joint projection frontier.
+    let frontier: Vec<_> = snapshot
+        .frontier_by(|object| &owners[object])
+        .into_iter()
+        .filter(|(_, change)| change.object.kind.fields().contains(&change.field.as_str()))
+        .collect();
     for (id, change) in winning_heads_by(frontier.iter().copied(), |change| &owners[&change.object])
     {
         objects
@@ -169,7 +177,10 @@ fn changes_by_object<'a>(
             .get_mut(&owners[&change.object])
             .expect("creation has an owner")
             .creation
-            .insert(&change.object, (&change.value, Vec::new()));
+            .insert(
+                &change.object,
+                (serde_json::from_value(change.value.clone())?, Vec::new()),
+            );
     }
     for (id, change) in &snapshot.changes {
         let is_head = heads.contains_key(id.as_str());
@@ -182,21 +193,21 @@ fn changes_by_object<'a>(
                 .get_mut(&change.object)
                 .expect("creation has a frontier")
                 .1
-                .push(&change.value);
+                .push(serde_json::from_value(change.value.clone())?);
         }
         if let Some(receipt) = change.deletion_receipt() {
             object
                 .deletions
                 .entry(receipt)
                 .or_default()
-                .push(&change.value);
+                .push(serde_json::from_value(change.value.clone())?);
         }
         if let Some(receipt) = change.order_receipt() {
             object
                 .orders
                 .entry(receipt)
                 .or_default()
-                .push(&change.value, is_head);
+                .push(serde_json::from_value(change.value.clone())?, is_head);
         }
         if change.provider_evidence() {
             object
@@ -220,8 +231,7 @@ fn changes_by_object<'a>(
             object.observations.push(observation);
         }
     }
-    // Retain decoded evidence outside dependency retries. Removal ages
-    // select the first known timestamp, never random mutation-ID traversal order.
+    // Removal ages select the first known timestamp, never random mutation-ID order.
     for changes in objects.values_mut() {
         if let Some(history) = changes.evidence.get_mut("provider_removal") {
             history.entries.sort_by_key(|(fact, _)| match fact {
@@ -1531,8 +1541,8 @@ fn insert_and_project(
                 conn,
                 &ProjectId::from_raw(&object.id),
                 receipt,
-                history.values().copied(),
-                history.heads().copied(),
+                history.values(),
+                history.heads(),
             )?;
         }
     }

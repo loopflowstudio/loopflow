@@ -468,7 +468,7 @@ fn read_change(row: &rusqlite::Row<'_>) -> StoreResult<PlanningChange> {
 /// The receipt's field key carries its identity; local sequence numbers stay local.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-struct DeletionReceipt {
+pub(super) struct DeletionReceipt {
     deleted_at: Option<i64>,
     base: Option<DeletionObservation>,
     attempted: bool,
@@ -525,11 +525,9 @@ pub(super) fn import_peer_deletion(
     conn: &Connection,
     task: &TaskId,
     id: &str,
-    history: &[&Value],
+    history: &[DeletionReceipt],
 ) -> StoreResult<()> {
-    let mut receipts = history
-        .iter()
-        .map(|value| serde_json::from_value::<DeletionReceipt>((*value).clone()));
+    let mut receipts = history.iter().cloned();
     let local: Option<(String, String, String)> = conn.query_row(
         "SELECT task_id,field,json_object('deleted_at',deletion_saved_at,'base',json(base_json),'attempted',json(CASE WHEN attempted THEN 'true' ELSE 'false' END),
         'acknowledged',json(CASE WHEN acknowledged THEN 'true' ELSE 'false' END),'acknowledged_revision',acknowledged_revision,
@@ -544,10 +542,9 @@ pub(super) fn import_peer_deletion(
     } else {
         receipts
             .next_back()
-            .expect("a deletion field has at least one mutation")?
+            .expect("a deletion field has at least one mutation")
     };
     for receipt in receipts {
-        let receipt = receipt?;
         let baseline_conflict = match (&merged.base, &receipt.base) {
             (Some(left), Some(right)) => left != right,
             (None, Some(_)) => merged.attempted,

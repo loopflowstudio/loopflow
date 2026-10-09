@@ -123,8 +123,9 @@ all mutations for reconciliation. `planning_peer_observed` retains source mutati
 IDs only after scalar/content projection succeeds in its savepoint; import creates
 no echo edit. Local capture consumes and advances that accepted frontier, so a
 rejected or held import cannot become the next save's causal parent. Receipt-owned
-ordering, deletion and provider evidence keep their separate protocols. Explicitly
-associated origins share scalar winner selection on their local owner. Causal
+ordering, deletion and provider evidence keep their separate protocols. Import decodes
+these histories before dependency retries; scalar ranking never chooses their effects.
+Explicitly associated origins share scalar winner selection on their local owner. Causal
 ancestry retires observed predecessors before concurrent-head ranking; retained
 per-origin heads alone cannot make that decision. Accepted source IDs commit on
 the local owner, including foreign peer-authored IDs, without an echo mutation.
@@ -483,7 +484,8 @@ acquisition time. Contradictory concurrent confirmations isolate projection;
 entity revisions never choose a Team set or settle an order effect. Replaying old
 confirmation cannot clear retained membership uncertainty. Migration preserves
 negative evidence with unknown age and fabricates no historical Team confirmation.
-These storage boundaries do not enable mixed-provider foreground exchange.
+Foreground exchange preserves these independent facts and the same selection holds;
+none grants execution authority.
 
 Chapter rollover transfers started work and retains unreviewed backlog in its
 predecessor Project. The same local transaction marks the predecessor completed,

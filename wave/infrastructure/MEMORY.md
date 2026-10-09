@@ -629,13 +629,11 @@ carry different ranks, so retain bodies.
 `af7730926` supplies journal-derived recovery without enrollment or confirmation.
 Unknown authors stay unknown; ordinary edits restore. Proofs: `f55d6c5b7:wave/infrastructure/MEMORY.md`, this heading.
 
-Git/HTTPS exposed duplicate delivery: an unattempted equal-desired save survived
-changed-baseline readback. Common reconciliation adopts Linear without inventing an attempt or
-acknowledgement; unchanged baselines preserve saves. Readback proves no atomicity.
-Selected association import replaces blanket exchange/effect holds, retaining
-private and failed-projection holds. Creation/link-origin public proof, combined
-lifetimes and installation remain unproved. Plan:
-`scratch/work-on-another-machine-name.md`.
+`81df09092` retires unattempted equal-desired saves after changed-baseline readback,
+adopting Linear without inventing attempts/acknowledgement. Unchanged baselines
+preserve saves; readback proves no atomicity. Git/HTTPS association tests pass,
+retaining private and failed-projection holds. Creation/link-origin, combined-lifetime
+and installed acceptance remain unproved. Plan: `scratch/work-on-another-machine-name.md`.
 
 ## Driver recovery
 

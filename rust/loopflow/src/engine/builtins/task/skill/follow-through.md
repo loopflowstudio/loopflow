@@ -41,8 +41,9 @@ Finish delivered work by giving each accepted remaining obligation its own Task.
    and a different key for each additional obligation. Retry the same filing;
    do not reword it, select a new destination,
    or bypass it with ordinary Task creation to escape an error. Preserve successful
-   filings when another fails. Confirm every issue and relation before `--finish`;
-   failed or uncertain readback leaves follow-through pending.
+   filings when another fails. `--finish` confirms the saved Tasks and local links.
+   Optional Linear creation and related-issue links use foreground planning sync;
+   an unavailable provider leaves that export pending, not the source's completion.
 
    When no accepted obligation remains, use
    `lf task follow-up <source> --none '<reason no follow-up is needed>'` instead.

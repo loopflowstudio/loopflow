@@ -325,6 +325,14 @@ fn follow_up_export_recovers_lost_issue_and_relation_responses_after_completion(
                 .unwrap()
                 .unwrap();
             assert!(mapped.plan.linear_id.is_some());
+            let sources = store.sqlite.follow_up_sources().unwrap();
+            let local_sources = &sources[child.id.as_str()];
+            assert_eq!(local_sources.len(), 1);
+            assert_eq!(local_sources[0].identifier, "FIX-1");
+            assert_eq!(
+                local_sources,
+                &sources[mapped.plan.linear_id.as_ref().unwrap().as_str()]
+            );
             let follow = store.sqlite.task_follow_through(&task.id).unwrap();
             assert!(follow.resolved());
             assert_eq!(follow.links[0].identifier, "FIX-2");

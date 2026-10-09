@@ -2894,8 +2894,7 @@ pub struct TaskStatus {
 }
 
 pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
-    let task = task_execution_status(repo, issue)?;
-    if let Some(task) = &task {
+    if let Some(task) = task_execution_status(repo, issue)? {
         let read = block_on_task(async {
             let store = task_store().await?;
             Ok(crate::ops::pm::TaskPlanningInspection {
@@ -2908,40 +2907,18 @@ pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
             planning_state: read.observation.state,
             planning: read.observation.record,
             planning_error: read.refresh_error,
-            execution: Some(task_snapshot(task)?),
+            execution: Some(task_snapshot(&task)?),
         });
     }
-    let selector = task
-        .as_ref()
-        .and_then(|task| task.plan.linear_id.as_ref().map(|id| id.as_str()))
-        .or(issue)
-        .ok_or_else(|| task_error("this checkout has no Task"))?;
-    let read = match crate::ops::pm::inspect_task_planning(
-        repo,
-        selector,
-        crate::ops::pm::PmRefresh::Auto,
-    ) {
-        Ok(read) => read,
-        Err(error) if task.is_some() => crate::ops::pm::TaskPlanningInspection {
-            observation: crate::store::PmTaskObservation {
-                record: None,
-                state: crate::store::PlanningState::Unavailable,
-            },
-            refresh_error: Some(error.to_string()),
-        },
-        Err(error) => return Err(error),
-    };
-    let planning_stale = read.is_stale();
-    let planning_state = read.observation.state;
-    let planning = read.observation.record;
-    let planning_error = read.refresh_error;
-    let execution = task.as_ref().map(task_snapshot).transpose()?;
+    let selector = issue.ok_or_else(|| task_error("this checkout has no Task"))?;
+    let read =
+        crate::ops::pm::inspect_task_planning(repo, selector, crate::ops::pm::PmRefresh::Auto)?;
     Ok(TaskStatus {
-        planning,
-        planning_error,
-        planning_stale,
-        planning_state,
-        execution,
+        planning_stale: read.is_stale(),
+        planning_state: read.observation.state,
+        planning: read.observation.record,
+        planning_error: read.refresh_error,
+        execution: None,
     })
 }
 
@@ -2968,7 +2945,7 @@ fn task_execution_status(repo: &Path, issue: Option<&str>) -> OpsResult<Option<T
     })
 }
 /// Complete the Task without changing its Workflow or Processes.
-pub fn task_complete(repo: &Path, issue: &str, note: Option<&str>) -> OpsResult<Option<Task>> {
+pub fn task_complete(repo: &Path, issue: &str, note: Option<&str>) -> OpsResult<Task> {
     block_on_task(async {
         let store = task_store().await?;
         let mut task = match store.get_task_by_issue(issue).await.map_err(task_error)? {
@@ -2995,7 +2972,7 @@ pub fn task_complete(repo: &Path, issue: &str, note: Option<&str>) -> OpsResult<
         } else {
             reconcile_task_completion(&store, &mut task).await?;
         }
-        Ok(Some(task))
+        Ok(task)
     })
 }
 

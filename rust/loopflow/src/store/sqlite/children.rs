@@ -247,7 +247,8 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         validate_task_project(&transaction, task)?;
-        if super::durable::task_state_in(&transaction, &task.id)? == TaskState::Done {
+        let state = super::durable::task_state_in(&transaction, &task.id)?;
+        if state == TaskState::Done {
             return Ok(true);
         }
         let current_request: Option<i64> = transaction.query_row(
@@ -259,26 +260,24 @@ impl SqliteStore {
             return Ok(false);
         }
         let current = active_task_pr_on(&transaction, &task.id)?;
-        if super::durable::task_state_in(&transaction, &task.id)? != TaskState::Done {
-            let disposition = crate::work::task::follow_through::FollowThrough::from_events(
-                &task_events_after_in(&transaction, &task.id, 0)?,
-            );
-            if (disposition.needs_conversion || !disposition.intents.is_empty())
-                && !disposition.resolved()
-            {
+        let disposition = crate::work::task::follow_through::FollowThrough::from_events(
+            &task_events_after_in(&transaction, &task.id, 0)?,
+        );
+        if (disposition.needs_conversion || !disposition.intents.is_empty())
+            && !disposition.resolved()
+        {
+            return Err(StoreError::InvalidAuthority(
+                "Follow-through scope needs resolution".into(),
+            ));
+        }
+        if let Some(pr) = current {
+            if pr.phase() != PrPhase::Merged || !disposition.resolved() {
                 return Err(StoreError::InvalidAuthority(
-                    "Follow-through scope needs resolution".into(),
+                    "Task requires verified merge and resolved follow-through".into(),
                 ));
             }
-            if let Some(pr) = current {
-                if pr.phase() != PrPhase::Merged || !disposition.resolved() {
-                    return Err(StoreError::InvalidAuthority(
-                        "Task requires verified merge and resolved follow-through".into(),
-                    ));
-                }
-            }
         }
-        if super::durable::task_state_in(&transaction, &task.id)? == TaskState::Abandoned {
+        if state == TaskState::Abandoned {
             return Err(StoreError::InvalidData(format!(
                 "Task {} is abandoned and cannot be completed",
                 task.id

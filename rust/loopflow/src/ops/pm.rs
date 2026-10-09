@@ -224,6 +224,22 @@ impl std::ops::Deref for PmContext {
 }
 
 fn read_wave_pm_config(repo: &Path, wave: &str) -> Option<WavePmConfig> {
+    // The PM fixture's saved Wave definitions share its snapshot/token store.
+    #[cfg(test)]
+    if let Ok(config) = PM_TEST_CONTEXT.try_with(|ctx| {
+        let locator = crate::work::wave::WaveLocator::discover(repo, wave).unwrap();
+        let wave = ctx.store.sqlite.get_wave_at(&locator).unwrap()?;
+        let goal = ctx
+            .store
+            .sqlite
+            .wave_document(wave.id(), "GOAL.md")
+            .unwrap()?;
+        crate::work::wave::config::parse_wave_config(&goal)
+            .unwrap()
+            .pm
+    }) {
+        return config;
+    }
     read_wave_config(repo, wave).and_then(|config| config.pm)
 }
 
@@ -2280,9 +2296,9 @@ pub(crate) async fn pm_rename(
 pub fn list_local_waves(repo: &Path) -> OpsResult<Vec<String>> {
     let canonical = crate::repository::CanonicalRepo::discover(repo)
         .map_err(|error| OpsError::Message(error.to_string()))?;
-    let store =
-        crate::store::sqlite::SqliteStore::open_read_only(&crate::store::database_path_from_env()?)
-            .map_err(|error| OpsError::Message(error.to_string()))?;
+    let StorageConfig::Sqlite { path } = storage_config_from_env()?;
+    let store = crate::store::sqlite::SqliteStore::open_read_only(&path)
+        .map_err(|error| OpsError::Message(error.to_string()))?;
     Ok(store
         .list_waves(Some(&canonical.to_string()))
         .map_err(|error| OpsError::Message(error.to_string()))?

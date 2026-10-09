@@ -87,13 +87,15 @@ impl FollowThrough {
     }
 
     pub fn resolved(&self) -> bool {
-        self.reason.is_some()
-            && !self.needs_conversion
-            && self.intents.iter().all(|intent| {
-                self.links
-                    .iter()
-                    .any(|link| link.key == intent.key && link.issue_id == intent.issue_id)
-            })
+        self.reason.is_some() && !self.needs_conversion && self.links_confirmed()
+    }
+
+    pub(crate) fn links_confirmed(&self) -> bool {
+        self.intents.iter().all(|intent| {
+            self.links
+                .iter()
+                .any(|link| link.key == intent.key && link.issue_id == intent.issue_id)
+        })
     }
 }
 

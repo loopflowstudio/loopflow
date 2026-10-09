@@ -80,7 +80,7 @@ fn filing_cannot_finish_until_every_issue_and_link_is_confirmed() {
         assert!(sqlite
             .finish_follow_through(&fixture.task.id, "filed", false)
             .is_err());
-        let link = FollowThroughLink {
+        let mut link = FollowThroughLink {
             key: intent.key.clone(),
             issue_id: intent.issue_id.clone(),
             identifier: format!("LOO-{}", index + 1),
@@ -89,6 +89,16 @@ fn filing_cannot_finish_until_every_issue_and_link_is_confirmed() {
         };
         sqlite.link_follow_through(&fixture.task.id, &link).unwrap();
         sqlite.link_follow_through(&fixture.task.id, &link).unwrap();
+        // A historical provider issue need not have a local Task. Multiple
+        // saved presentations of its link still identify one source.
+        link.identifier = format!("RENAMED-{}", index + 1);
+        sqlite.link_follow_through(&fixture.task.id, &link).unwrap();
+        let sources = sqlite.follow_up_sources().unwrap();
+        assert_eq!(sources[&link.issue_id].len(), 1);
+        assert_eq!(
+            sources[&link.issue_id][0].identifier,
+            fixture.task.plan.identifier
+        );
     }
     sqlite
         .finish_follow_through(&fixture.task.id, "Accepted evidence checks filed", false)

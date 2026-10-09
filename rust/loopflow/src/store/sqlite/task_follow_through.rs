@@ -163,15 +163,7 @@ impl SqliteStore {
                 "filing intents exist; confirm them with --finish".into(),
             ));
         }
-        if !none
-            && (current.intents.is_empty()
-                || current.intents.iter().any(|intent| {
-                    !current
-                        .links
-                        .iter()
-                        .any(|link| link.key == intent.key && link.issue_id == intent.issue_id)
-                }))
-        {
+        if !none && (current.intents.is_empty() || !current.links_confirmed()) {
             return Err(StoreError::InvalidAuthority(
                 "follow-up filing or relation is still unconfirmed".into(),
             ));
@@ -186,16 +178,17 @@ impl SqliteStore {
         tx.commit()?;
         Ok(())
     }
-}
 
-impl SqliteStore {
     /// Read confirmed source links once for the whole planning projection, including
-    /// children that have never acquired a checkout or local Task row.
+    /// children without a checkout or a locally retained historical provider issue.
     pub fn follow_up_sources(&self) -> StoreResult<HashMap<String, Vec<FollowThroughSource>>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(
-            "SELECT COALESCE(t.external_issue_id,t.id), t.issue_identifier, e.kind_json
+            "SELECT COALESCE(t.external_issue_id,t.id), t.issue_identifier, e.kind_json,
+                    COALESCE(target.external_issue_id,target.id)
              FROM task_events e JOIN tasks t ON t.id = e.task_id
+             LEFT JOIN tasks target ON target.id=json_extract(e.kind_json, '$.link.issue_id')
+                OR target.external_issue_id=json_extract(e.kind_json, '$.link.issue_id')
              WHERE json_extract(e.kind_json, '$.kind') = 'follow_through_linked'
              ORDER BY e.id",
         )?;
@@ -205,10 +198,11 @@ impl SqliteStore {
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
                 row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
             ))
         })?;
         for row in rows {
-            let (issue_id, identifier, json) = row?;
+            let (issue_id, identifier, json, alias) = row?;
             let event: TaskEventKind = serde_json::from_str(&json).map_err(|error| {
                 StoreError::InvalidData(format!("invalid follow-through event: {error}"))
             })?;
@@ -217,10 +211,6 @@ impl SqliteStore {
                     issue_id,
                     identifier,
                 };
-                let alias: Option<String> = conn.query_row(
-                    "SELECT COALESCE(external_issue_id,id) FROM tasks WHERE id=?1 OR external_issue_id=?1",
-                    [&link.issue_id], |row| row.get(0),
-                ).optional()?;
                 for key in std::iter::once(link.issue_id).chain(alias) {
                     let children = sources.entry(key).or_default();
                     if !children.contains(&source) {

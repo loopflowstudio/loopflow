@@ -1937,7 +1937,6 @@ fi
         let complete = |summary: &str| match merge {
             None | Some(PrMergeMode::User) => {
                 crate::ops::task::task_complete(&repo, selector, Some(summary))
-                    .map(|task| task.unwrap())
             }
             Some(PrMergeMode::Auto) => runtime.block_on(async {
                 let task = &task;

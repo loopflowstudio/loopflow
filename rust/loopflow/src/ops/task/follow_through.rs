@@ -1,5 +1,6 @@
 use super::{block_on_task, owning_wave, task_error, task_store};
 use crate::ops::OpsResult;
+use crate::store::Store;
 use crate::work::task::follow_through::{FollowThroughIntent, FollowThroughLink};
 use crate::work::task::PrPhase;
 use std::path::Path;
@@ -39,7 +40,7 @@ pub fn task_follow_up(repo: &Path, issue: &str, options: &FollowUpOptions) -> Op
         if let Some(reason) = options.none.as_ref().or(options.finish.as_ref()) {
             if options.finish.is_some() {
                 for intent in &prior.intents {
-                    let link = confirm_intent(repo, intent).await?;
+                    let link = confirm_intent(&store, repo, intent).await?;
                     store
                         .sqlite
                         .link_follow_through(&task.id, &link)
@@ -152,7 +153,7 @@ pub fn task_follow_up(repo: &Path, issue: &str, options: &FollowUpOptions) -> Op
                 .reserve_follow_through(&task.id, &candidate)
                 .map_err(task_error)?
         };
-        let link = confirm_intent(repo, &intent).await?;
+        let link = confirm_intent(&store, repo, &intent).await?;
         store
             .sqlite
             .link_follow_through(&task.id, &link)
@@ -161,8 +162,11 @@ pub fn task_follow_up(repo: &Path, issue: &str, options: &FollowUpOptions) -> Op
     })
 }
 
-async fn confirm_intent(repo: &Path, intent: &FollowThroughIntent) -> OpsResult<FollowThroughLink> {
-    let store = task_store().await?;
+async fn confirm_intent(
+    store: &Store,
+    repo: &Path,
+    intent: &FollowThroughIntent,
+) -> OpsResult<FollowThroughLink> {
     let saved = if let Some(saved) = store
         .get_task_by_issue(&intent.issue_id)
         .await
@@ -208,7 +212,7 @@ async fn confirm_intent(repo: &Path, intent: &FollowThroughIntent) -> OpsResult<
             .map_err(task_error)?
             .ok_or_else(|| task_error("historical follow-up filing remains unconfirmed"))?
     };
-    let item = super::task_planning_item(&store, &saved)?;
+    let item = super::task_planning_item(store, &saved)?;
     Ok(FollowThroughLink {
         key: intent.key.clone(),
         issue_id: intent.issue_id.clone(),

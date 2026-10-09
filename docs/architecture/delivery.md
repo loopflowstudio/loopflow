@@ -313,9 +313,11 @@ Keep the checkout available for the finishing step.
 Follow-through reads the accepted brief, merged PR copy and delivery evidence.
 It uses `lf task follow-up` to file or link actual Tasks for accepted later
 obligations, or records none needed with a reason. Filing intent retains a stable
-child UUID, destination Project and exact payload before provider mutation;
+child identity, destination Project and exact payload before local creation;
 uncertain responses and chapter rotation cannot select a replacement destination.
-Confirm the issue and related link before recording the filed disposition.
+The common planning writer creates the Task; its confirmed local link permits
+the filed disposition. Foreground planning sync delivers optional Linear creation
+and related-issue links independently, including after source completion.
 Existing unresolved keep-open records require scope conversion, never silent
 completion or remote issue creation during migration.
 

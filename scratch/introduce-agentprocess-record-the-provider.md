@@ -79,7 +79,7 @@ attribution survive.
 
 ## Current implementation boundary (2026-10-09 record cut)
 
-The working tree now uses `processes.kind` (`lf` / `agent`). The Task's one draft
+`446cfb2b5` uses `processes.kind` (`lf` / `agent`). The Task's one draft
 backfills directly from the released Session shape, including original parent,
 PID/birth, endpoint, attachment token, attachment-exit reference and available
 spawn/exit evidence. It drops the Session process columns. Native thread and
@@ -183,8 +183,6 @@ while its callback reads attached-process evidence. The Claude respawn ownership
 counterexample above stops further launch work until the owner is corrected.
 
 Earlier origin, token and pre-exec decisions remain in `a55f5345b` and its
-references. The prior uncommitted reconciliation was preserved verbatim at
-`/tmp/loo443-plan-before-record-cut.md`; `lf commit` returned an empty error, so no
-checkpoint is claimed. The record cut remains local and unpublished.
+references. The record cut is checkpointed at `446cfb2b5`, local and unpublished.
 
 Check: `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`, `git diff --check`, network-isolated focused record/migration/reaper tests (12), repaired top projection (1), Waiting/handoff (1) and Rust DTO fixtures (22) pass. Full Rust/Swift/Linux/public-entry verification remains gate/CI-owned; Claude respawn and unconditional recording remain unimplemented.

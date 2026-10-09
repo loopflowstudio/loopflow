@@ -69,7 +69,7 @@ public final class MultiplexerStore {
         } else if focusedPane.content == .empty {
             load(sessionId: sessionId)
         } else {
-            _ = _split(focusedPaneId, axis: .vertical, content: .session(id: sessionId))
+            _insert(.session(id: sessionId), beside: focusedPaneId)
         }
     }
 
@@ -85,21 +85,7 @@ public final class MultiplexerStore {
 
     @discardableResult
     public func split(_ paneId: String, axis: SplitAxis, focusNewPane: Bool = true) -> PaneState? {
-        _split(paneId, axis: axis, content: .empty, focusNewPane: focusNewPane)
-    }
-
-    private func _split(_ paneId: String, axis: SplitAxis, content: PaneContent, focusNewPane: Bool = true, shellCommand: [String]? = nil) -> PaneState? {
-        guard layout.pane(for: paneId) != nil else { return nil }
-        let pane = PaneState(content: content)
-        if let shellCommand { shellCommands[pane.id] = shellCommand }
-        layout = layout.splitting(paneId, axis: axis, newPane: pane)
-        if focusNewPane {
-            focusedPaneId = pane.id
-            zoomedPaneId = nil
-        }
-        closedState = nil
-        _notify()
-        return pane
+        _insert(.empty, beside: paneId, focus: focusNewPane, splitAxis: axis)
     }
 
     /// Relocate the leaf itself, retaining content occurrence and surface keys.
@@ -176,7 +162,7 @@ public final class MultiplexerStore {
 
         switch focusedPane.content {
         case .shell, .flowLog, .files:
-            _ = _split(focusedPaneId, axis: .vertical, content: .session(id: sessionId))
+            _insert(.session(id: sessionId), beside: focusedPaneId)
             return
         case .empty, .session:
             break
@@ -206,18 +192,37 @@ public final class MultiplexerStore {
         }
     }
 
-    private func _insert(_ content: PaneContent, beside paneId: String, focus: Bool, shellCommand: [String]? = nil) {
-        guard let target = layout.pane(for: paneId) else { return }
-        if target.content != .empty {
-            _ = _split(paneId, axis: .vertical, content: content, focusNewPane: focus, shellCommand: shellCommand)
-            return
+    /// Fill empty targets unless an explicit split was requested. Publish only
+    /// after the new occurrence, launch command, focus and Undo state agree.
+    @discardableResult
+    private func _insert(
+        _ content: PaneContent,
+        beside paneId: String,
+        focus: Bool = true,
+        splitAxis: SplitAxis? = nil,
+        shellCommand: [String]? = nil
+    ) -> PaneState? {
+        guard let target = layout.pane(for: paneId) else { return nil }
+        let axis = splitAxis ?? (target.content == .empty ? nil : .vertical)
+        let insertedId: String
+        if let axis {
+            let pane = PaneState(content: content)
+            insertedId = pane.id
+            layout = layout.splitting(paneId, axis: axis, newPane: pane)
+        } else {
+            insertedId = paneId
+            layout = layout.replacingContent(of: paneId, with: content)
+            collapsedPaneIds.remove(paneId)
         }
-        if let shellCommand { shellCommands[paneId] = shellCommand }
-        layout = layout.replacingContent(of: paneId, with: content)
-        collapsedPaneIds.remove(paneId)
-        if focus { setFocusedPane(paneId) }
+        if let shellCommand { shellCommands[insertedId] = shellCommand }
+        if focus {
+            focusedPaneId = insertedId
+            zoomedPaneId = axis == nil && zoomedPaneId != nil ? insertedId : nil
+        }
         closedState = nil
+        let inserted = layout.pane(for: insertedId)
         _notify()
+        return inserted
     }
 
     /// Explicit arrangement changes visibility without selecting another Session.

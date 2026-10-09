@@ -1,4 +1,5 @@
 //! Stream input UUIDs, echoed by Claude, correlate each native result.
+use crate::id::AgentSessionId;
 use std::collections::{HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 
@@ -13,7 +14,7 @@ use crate::store::sqlite::SqliteStore;
 pub(super) struct History {
     pub owner: Option<(SqliteStore, String, SessionDriver)>,
     pub requests: Arc<Mutex<HashSet<String>>>,
-    pub pending: VecDeque<(String, String)>,
+    pub pending: VecDeque<(AgentSessionId, String)>,
     pub attention: super::attention::Attention,
 }
 
@@ -32,6 +33,7 @@ impl History {
             else {
                 return Ok(());
             };
+            let thread = AgentSessionId::from(thread);
             if !self
                 .requests
                 .lock()
@@ -46,7 +48,7 @@ impl History {
                 .context("Claude request has no driving Process")?;
             store.record_session_turn_origin(
                 session,
-                thread,
+                &thread,
                 turn,
                 driver.provider_generation,
                 process,
@@ -57,7 +59,7 @@ impl History {
                 return Ok(());
             };
             anyhow::ensure!(
-                value["session_id"] == *thread,
+                value["session_id"] == thread.as_str(),
                 "Claude result changed conversation"
             );
             let status = if value["subtype"] == "success" && value["is_error"] != true {

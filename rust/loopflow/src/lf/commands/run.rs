@@ -547,7 +547,7 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
     if !built.process.auto {
         info!("launching interactive vendor session");
         let capture = begin_capture(built, "tui", &built.agent_config, None)?;
-        let provider_session_id = if built.harness == "claude" {
+        let agent_session: Option<crate::id::AgentSessionId> = if built.harness == "claude" {
             let artifact_key = capture.artifact_key();
             let raw_id = artifact_key
                 .as_str()
@@ -556,7 +556,8 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
             Some(
                 uuid::Uuid::parse_str(raw_id)
                     .expect("capture keys always carry a UUID")
-                    .to_string(),
+                    .to_string()
+                    .into(),
             )
         } else {
             None
@@ -588,7 +589,7 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
                 &built.repo_root,
                 &prompt,
                 &environment,
-                provider_session_id.as_deref(),
+                agent_session.as_ref(),
                 &flags,
                 context_file.as_deref(),
             )
@@ -598,7 +599,7 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
                 .map_err(|error| anyhow!("failed to read provider session: {error}"))?
         {
             capture.observe_provider(
-                Some(provider_session.provider_session_id),
+                Some(provider_session.agent_session),
                 provider_session.account_id,
             );
         }

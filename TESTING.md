@@ -1138,7 +1138,10 @@ guide must retain the current invocation, laptop account selection, and target-r
 
 For gate runs launched inside managed execution, clear inherited `LF_*` authority and
 pin `LF_BIN` to the checkout's compiled `target/debug/lf` before invoking the test
-runner. The materialization wrapper clears only its listed variables; it does not
+runner. On macOS, also set `TMPDIR=/private/tmp`: Wave/Task fixtures that
+register raw `/var/folders` paths otherwise disagree with canonical repository
+readers. This affects cron lookup, authored-goal context and exact-Task roadmap
+checks, not just orphan Session proofs. The materialization wrapper clears only its listed variables; it does not
 clear every inherited pin. The provider harness prepends the selected CLI's parent
 to PATH, so an inherited CLI directory containing `claude` can outrank a fixture's
 fake provider and launch the real one. A temporary `LF_HOME` alone does not prevent

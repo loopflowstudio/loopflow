@@ -85,6 +85,10 @@ attribution survive.
   are removed. Resume uses the shared record judgment and invocation-owned close
   beneath one attachment fence, including input admission. No detached shortcut,
   direct receipt sampler or mutable-Session provider selector remains there.
+- Native resume's separate claim/interrupt/finish path in `resume_session_with_env`
+  is removed. `session_command_status_with_env` owns fresh and resumed admission;
+  saved captures and explicit connection attachments survive. Intentional client
+  moves remain successful command exits, including their attachment outcome.
 - Metadata-only `CaptureHandle::fail_and_begin_attempt` is removed; invocation
   retry settles/replaces the record before advancing capture metadata. The private
   metadata reducer remains for history/usage projection.
@@ -194,9 +198,14 @@ invisible-blocker implementation finding, not public Task-status/scheduled proof
    now enters the existing invocation runtime before creating its implicit capture;
    nested calls reuse their parent. Native helpers also admit at entry, creating
    a capture only when absent. Native spawn requires an attachment; missing
-   provenance no longer selects the remote-client path. Explicit remote endpoints
-   are checked against the saved AgentProcess, and client spawn holds its attachment
-   fence without recording provider exit. Library account failover now uses the
+   provenance no longer selects the remote-client path. Client spawn holds its
+   attachment fence without recording provider exit. The composed Codex connection
+   still needs repair: `connect_live_codex` passes an empty extra environment to
+   native resume and a new relay path, whereas native admission requires caller
+   provenance and compares that path to the saved upstream endpoint. The lower
+   fixture bypasses the relay, so its pass does not prove this entry path. Carry
+   the exact connection attachment and distinguish relay from provider endpoint;
+   do not infer client authority from missing provenance. Library account failover now uses the
    replacement above. Raw `Harness::start` remains: its
    optional config/open_owner/headless spawn still
    permits unrecorded children. Admission belongs at the invocation entry, not in
@@ -248,62 +257,24 @@ lifeline writer or hold provider stdout/stderr open.
 
 ## Implementation review
 
-Prior review corrected migration insert/FK order, mutable next-launch settings
-leaking into process snapshots, SQLite held across close, stale retry/wait
-snapshots and duplicate launch settlement. The exact findings, fixture fixes,
-checks and source references remain at `e0d360e6a`, this plan. Release's
-operation-entry lesson still applies: internal helpers do not prove public
-top/Task-status/scheduled agreement or installed settlement.
+Prior findings and fixes: `e0d360e6a`, this plan (migration/FK ordering,
+mutable launch settings, SQLite across close, stale snapshots and duplicate
+launches); `c1c09fb6c`, this plan (atomic resume, cleanup, fixture isolation and
+checks). These remain source proofs, not configured or installed acceptance.
 
-This reduction retains Codex's pre-handle group slot: deriving it from `child`
-would lose failed-startup cleanup. OpenCode installs its child before exposing
-the group, so no second slot is needed. Combining native setup errors must not
-drop the published client guard before cleanup; it remains in the outer scope.
-No new signal authority, attachment refresh or lifecycle owner is introduced.
+Compression removes native resume's duplicate admission/settlement path. The
+common entry admits one lf invocation and AgentProcess around the saved capture;
+explicit remote ownership is not replaced. Review retained intentional move
+semantics: the public command accepts a recorded stop reason even with nonzero
+provider status, so attachment settlement must do the same. Fixtures exercise
+both outer-runtime and direct resume, saved native identity and one reservation
+per launch. Top's activity fold uses array indices instead of cloned ID graphs;
+unknown parent evidence, provider-only state and cycle refusal remain unchanged.
 
-October 9 resume implementation removes the realignment's separate admission
-bypasses. The shared close retains duplicate-identity refusal, recorded settings
-and foreground exclusion. The store holds one attachment fence through close and
-claim, but no SQLite lock over OS I/O. An uncertain spawn changes neither input
-nor attachment; a never-launched reservation retires without invented OS exit.
-Ending the former record and reserving the next commit together. An intervening
-claim loses without touching the replacement. Tests use throwaway children only.
-The live-takeover history fixture now reserves its input and transfers attachment
-explicitly rather than using the fresh-provider resume API. Review corrected the
-older close fixture's default interactive setting: headless group close must not
-be applied to a foreground provider. Shared LfProcess judgment also exposed its
-invalid trace string; the fixture now seeds one valid trace in row and receipt
-rather than bypassing the record reader. Its old “PID absent” assertion also
-excluded zombies; death now uses the same record/OS judgment as production.
+The composed relay mismatch under remaining item 1 is source counterevidence,
+not a configured failure observation. It predates this compression and needs the
+connection-owner cut, not weaker native admission checks. Release's operation-entry
+lesson applies: helpers alone cannot prove top/Task-status/scheduled or installed
+acceptance. No configured orphan was signaled and no installed store was opened.
 
-Release's GOAL/full MEMORY remain the only immediate child scope here. Its
-operation-entry lesson still applies: focused store/runtime resume fixtures do
-not establish public Task-status/scheduled or installed acceptance. The account-
-daemon merge is integrated, not installed acceptance.
-
-Review caught two boundary errors and repaired them: native clients must hold the
-attachment fence at spawn, and a helper-created capture must finish with the
-actual command result rather than its drop fallback. Native helper fixtures now
-select the same test ledger as their Session, preserving FK ownership.
-The network runner clears `LF_BIN`; initial library probes consequently reached
-installed Claude in a fresh fixture provider home and got login failure, with
-external networking denied. No configured-provider acceptance is claimed.
-Integration EnvGuard now pins the compiled CLI inside the boundary. Source review
-also removed the eager cwd lookup when an explicit working directory is supplied.
-
-Prior admission checks: `91d184b1c:scratch/introduce-agentprocess-record-the-provider.md`.
-Compression moves OS observation below presentation and deletes the native-client
-elapsed-time parser. Invalid ages report unavailability. The inventory reduction
-keeps missing PID/birth rows visible and removes top's per-receipt SQL reads.
-Review retained unknown parent state even beside a working child and matched
-receipts by both LFID and trace; display grants no signaling or settlement authority. Replacement review preserved the generic stop
-boundary, corrected closing against mutable Session provider settings and kept
-telemetry loss nonfatal after the durable replacement transaction. The live-close
-fixture's invalid trace identity was repaired before its passing run.
-
-Prior checks: `5fa855c6c:scratch/introduce-agentprocess-record-the-provider.md`
-records fmt/Clippy, focused compilation, 21 top/active/journal cases, public ps,
-Rust DTO filters and a Swift ActivitySnapshot round-trip; invocation replacement
-checks remain at `397b2ee59`, this plan. They predate the account-daemon sync.
-
-Check: `cargo test -p loopflow --lib --no-run` builds; network-isolated `resume_`, `losing_input_claim` and `delayed_start_keeps_request_capture` filters pass after fixture repairs (nine affected cases); `cargo fmt --check`, all-target Clippy, `git diff --check` and context budgets pass; full Rust/Swift/materialized matrix and public/configured acceptance remain gate/CI-owned.
+Check: `cargo test -p loopflow --lib --no-run`, network-isolated lib filters `top::tests`, `preferred_name_resume`, `intentional_session_move`, `provider_sigterm`, `native_` (10 cases), `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` and `lf context --skill compress` pass; full Rust/Swift/materialized and public/configured acceptance remain gate/CI-owned.

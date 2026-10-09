@@ -377,58 +377,49 @@ fn fold_activity_state(nodes: &mut [ActivityNode]) -> Result<()> {
     let index = nodes
         .iter()
         .enumerate()
-        .map(|(index, node)| (node.id.clone(), index))
+        .map(|(index, node)| (node.id.as_str(), index))
         .collect::<HashMap<_, _>>();
-    let mut children = HashMap::<String, Vec<String>>::new();
-    for node in nodes.iter() {
-        if let Some(parent) = &node.parent_id {
-            children
-                .entry(parent.clone())
-                .or_default()
-                .push(node.id.clone());
+    let mut children = vec![Vec::new(); nodes.len()];
+    for (child, node) in nodes.iter().enumerate() {
+        if let Some(parent) = node.parent_id.as_deref().and_then(|id| index.get(id)) {
+            children[*parent].push(child);
         }
     }
-    let ids = nodes.iter().map(|node| node.id.clone()).collect::<Vec<_>>();
     let mut done = HashSet::new();
     let mut visiting = HashSet::new();
-    for id in ids {
-        fold_node(&id, nodes, &index, &children, &mut done, &mut visiting)?;
+    for node in 0..nodes.len() {
+        fold_node(node, nodes, &children, &mut done, &mut visiting)?;
     }
     Ok(())
 }
 
 fn fold_node(
-    id: &str,
+    index: usize,
     nodes: &mut [ActivityNode],
-    index: &HashMap<String, usize>,
-    children: &HashMap<String, Vec<String>>,
-    done: &mut HashSet<String>,
-    visiting: &mut HashSet<String>,
+    children: &[Vec<usize>],
+    done: &mut HashSet<usize>,
+    visiting: &mut HashSet<usize>,
 ) -> Result<()> {
-    if done.contains(id) {
+    if done.contains(&index) {
         return Ok(());
     }
-    if !visiting.insert(id.to_string()) {
-        return Err(anyhow!("activity tree contains a cycle at {id}"));
+    if !visiting.insert(index) {
+        return Err(anyhow!(
+            "activity tree contains a cycle at {}",
+            nodes[index].id
+        ));
     }
-    let node_index = *index
-        .get(id)
-        .ok_or_else(|| anyhow!("activity node {id} is missing"))?;
-    let child_ids = children.get(id).cloned().unwrap_or_default();
     let mut child_states = Vec::new();
-    for child_id in child_ids {
-        fold_node(&child_id, nodes, index, children, done, visiting)?;
-        let child = &nodes[*index
-            .get(&child_id)
-            .ok_or_else(|| anyhow!("activity child {child_id} is missing"))?];
-        child_states.push(child.state);
+    for &child in &children[index] {
+        fold_node(child, nodes, children, done, visiting)?;
+        child_states.push(nodes[child].state);
     }
-    let node = &mut nodes[node_index];
+    let node = &mut nodes[index];
     if node.kind == ActivityNodeKind::Process {
         node.state = fold_process_state(node.state, &child_states);
     }
-    visiting.remove(id);
-    done.insert(id.to_string());
+    visiting.remove(&index);
+    done.insert(index);
     Ok(())
 }
 
@@ -604,6 +595,58 @@ mod tests {
     use super::{collect_activity, ActivityNodeKind, OsProcess};
     use crate::id::{ProcessLfid, TraceId};
     use crate::process::{LfProcess, ProcessKind};
+
+    #[test]
+    fn activity_fold_keeps_unknown_parents_and_rejects_cycles() {
+        use super::{fold_activity_state, ActivityNode, ActivityState};
+        use ActivityNodeKind::{AgentProcess, Process};
+        use ActivityState::{Stalled, Unknown, Waiting, Working};
+
+        let node = |id: &str, parent: Option<&str>, kind, state| ActivityNode {
+            id: id.into(),
+            parent_id: parent.map(str::to_owned),
+            kind,
+            state,
+            label: id.into(),
+            repo: None,
+            worktree: None,
+            wave: None,
+            pid: None,
+            started_at: 0,
+        };
+        // Children can precede parents. Missing parents remain separate roots;
+        // agent state is its own OS observation, not inherited child activity.
+        let original = vec![
+            node("working", Some("parent"), AgentProcess, Working),
+            node("parent", Some("unknown"), Process, Waiting),
+            node("unknown", None, Process, Unknown),
+            node("stalled", Some("parent"), AgentProcess, Stalled),
+            node("orphan", Some("absent"), Process, Waiting),
+            node("helper", Some("orphan"), AgentProcess, Stalled),
+            node("agent", None, AgentProcess, Waiting),
+            node("agent-child", Some("agent"), Process, Working),
+        ];
+        for mut nodes in [original.clone(), original.into_iter().rev().collect()] {
+            fold_activity_state(&mut nodes).unwrap();
+            let state = |id| nodes.iter().find(|node| node.id == id).unwrap().state;
+            assert_eq!(state("parent"), Working);
+            assert_eq!(state("unknown"), Unknown);
+            assert_eq!(state("orphan"), Stalled);
+            assert_eq!(state("agent"), Waiting);
+        }
+        for mut nodes in [
+            vec![node("self", Some("self"), Process, Waiting)],
+            vec![
+                node("a", Some("b"), Process, Waiting),
+                node("b", Some("a"), AgentProcess, Working),
+            ],
+        ] {
+            assert!(fold_activity_state(&mut nodes)
+                .unwrap_err()
+                .to_string()
+                .contains("cycle"));
+        }
+    }
 
     #[test]
     fn uncertain_records_stay_visible_and_share_the_gate_judgment() {

@@ -118,6 +118,9 @@ lock, but no headless group/watchdog setup. Failed recording prevents provider c
 from running. Captured native waits retain the spawned attachment snapshot: a late
 wait cannot mark a replacement exited. Native terminal process groups are unchanged;
 foreground orphan cleanup remains unfinished.
+Fresh native launches and saved-history resumes share invocation admission and
+attachment settlement. A recorded client move is an intentional command exit,
+not provider failure; it does not establish a successful provider turn.
 
 Scheduled settlement reads unfinished AgentProcess rows, but live-orphan
 termination currently recognizes only noninteractive Codex app-server and

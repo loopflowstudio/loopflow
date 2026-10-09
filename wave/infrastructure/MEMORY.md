@@ -221,21 +221,21 @@ unpublished code retained, without deletion or delivery authorization.
 
 ## AgentProcess (LOO-443, 2026-10-09)
 
-Jack Heart requested one inventory; #1512/#1516 integrated. Tokens fence A → B → A.
-Top/gate retain Unknown LFIDs; active Sessions retain Unavailable; zombies are dead.
-Invocation retry preserves account/native history and exact settlement; failover
-selects a fresh thread. Native admission requires attachment, headless remains optional.
+Jack Heart requested one inventory; #1512/#1516 integrated. A → B → A is fenced.
+Top/gates retain Unknown LFIDs; Sessions retain Unavailable; zombies are dead.
+Exact retry retains account/native history; failover starts a fresh thread.
+Native admission requires attachment; headless remains optional.
 Remote clients never settle providers; generic stop preserves takeover.
 
-Resume now fences settlement/claim together, using recorded settings and shared
-identity judgment; detached-live and duplicate ownership cannot bypass close.
-Configured resume remains unproved.
-Codex alone has FIFO handoff; live reaping covers noninteractive Codex/OpenCode.
-Generations, foreground cleanup, death orders, public status/scheduled agreement,
+Resume fences close/claim; native launch/resume share admission.
+Detached-live and duplicate ownership require recorded-identity close.
+Configured resume is unproved; Codex's relay omits caller provenance and fails
+the provider-endpoint comparison. Direct fixtures miss both.
+Codex alone has FIFO handoff; reaping covers noninteractive Codex/OpenCode.
+Generations, foreground cleanup, death orders, public/scheduled agreement,
 two-second removal and installed settlement remain open.
 
-#1511 adds native Codex `--no-daemon`.
-Prior constraints/proofs: `5fa855c6c:wave/infrastructure/MEMORY.md`, this heading.
+#1511: native Codex `--no-daemon`. Prior: `5fa855c6c`, this heading.
 
 ## Execution ownership names (LOO-441, 2026-10-09)
 

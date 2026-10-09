@@ -211,51 +211,15 @@ pub(crate) fn resume_session_with_env(
         crate::engine::config::USER_NAME_ENV.to_string(),
         user_name.unwrap_or_default(),
     );
-    // A native resume has no CaptureHandle, but still owns an exact driver.
-    // Remote connections already claimed their live engine's driver.
-    let owned = if remote.is_none() {
-        if let Some(process) = crate::journal::current_process_lfid() {
-            let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
-            let session = store
-                .session_for_artifact(artifact_key)?
-                .ok_or_else(|| anyhow!("Session input {artifact_key} is not recorded"))?;
-            let driver =
-                crate::session_record::resume_session_agent_process(&store, &session.id, &process)?;
-            environment.insert(
-                crate::process::AGENT_CALLER_ENV.into(),
-                serde_json::to_string(&driver.caller(session.id.clone()))?,
-            );
-            crate::session_record::register_session_attachment_interrupt(
-                &store,
-                session.id.clone(),
-                driver.clone(),
-            );
-            Some((store, session.id, driver))
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-    let result = spawn_session_command_with_env(
+    // Fresh launches and native resumes share admission and settlement below.
+    // Remote clients retain the attachment supplied by their connection owner.
+    spawn_session_command_with_env(
         &command,
         &environment,
         Some(&provider_session.provider_session_id),
         provider_session.account_id.as_ref(),
         launch_lock,
-    );
-    if let Some((store, session, driver)) = owned {
-        let outcome = if result.is_ok() {
-            "completed"
-        } else {
-            "failed"
-        };
-        match crate::session_record::finish_session_attachment(&store, &session, &driver, outcome) {
-            Ok(()) | Err(crate::store::StoreError::InvalidAuthority(_)) => {}
-            Err(error) => return Err(error.into()),
-        }
-    }
-    result
+    )
 }
 
 pub(crate) fn active_provider_clients(dir: &Path, harness: &str) -> Result<Vec<ProviderClientRef>> {
@@ -686,7 +650,7 @@ fn session_command_status_with_env(
         );
         let outcome = if result
             .as_ref()
-            .is_ok_and(|outcome| outcome.status.success())
+            .is_ok_and(|outcome| outcome.stop_reason.is_some() || outcome.status.success())
         {
             "completed"
         } else {
@@ -1589,6 +1553,17 @@ mod tests {
         let pid = stop.join().unwrap();
 
         assert!(result.is_ok());
+        let store = SqliteStore::new(&temp.path().join("loopflow.db")).unwrap();
+        let session = store
+            .session_for_artifact(&capture.artifact_key())
+            .unwrap()
+            .unwrap();
+        let history = store.session_history(&session.id, 0, 0).unwrap();
+        let exit = history
+            .iter()
+            .find(|event| event.payload["type"] == "attachment_exit")
+            .unwrap();
+        assert_eq!(exit.payload["outcome"], "completed");
         assert_eq!(
             provider_client_stop_message(ProviderClientStopReason::Moved),
             "Session moved to another terminal."
@@ -1803,12 +1778,15 @@ mod tests {
         let session = crate::session_record::read_provider_session(&capture_dir)
             .unwrap()
             .unwrap();
-        for (saved, forwarded, expected) in [
+        for (index, (saved, forwarded, expected)) in [
             ("Jack", None, Some("Jack")),
             ("Maya", None, Some("Maya")),
             ("Host Owner", Some("Jack"), Some("Jack")),
             ("Host Owner", Some(""), Some("Host Owner")),
-        ] {
+        ]
+        .into_iter()
+        .enumerate()
+        {
             std::fs::write(
                 temp.path().join("config.yaml"),
                 format!("user:\n  name: {saved}\n"),
@@ -1818,17 +1796,54 @@ mod tests {
                 Some(name) => std::env::set_var("LF_USER_NAME", name),
                 None => std::env::remove_var("LF_USER_NAME"),
             }
-            resume_session_with_env(
-                "opencode",
-                None,
-                temp.path(),
-                &capture.artifact_key(),
-                &session,
-                &BTreeMap::new(),
-                None,
-                None,
-            )
+            let resume = || {
+                resume_session_with_env(
+                    "opencode",
+                    None,
+                    temp.path(),
+                    &capture.artifact_key(),
+                    &session,
+                    &BTreeMap::new(),
+                    None,
+                    None,
+                )
+            };
+            if index % 2 == 0 {
+                crate::journal::with_runtime(temp.path(), &["lf".into(), "resume".into()], resume)
+            } else {
+                resume()
+            }
             .unwrap();
+            // Both entry paths reuse the saved conversation and reserve exactly
+            // one provider under the admitted lf invocation.
+            let store = SqliteStore::new(&temp.path().join("loopflow.db")).unwrap();
+            let rows = store.processes_since(0).unwrap();
+            let agents = rows
+                .iter()
+                .filter(|row| row.kind == crate::process::ProcessKind::Agent)
+                .collect::<Vec<_>>();
+            let saved = store
+                .session_for_artifact(&capture.artifact_key())
+                .unwrap()
+                .unwrap();
+            assert_eq!(agents.len(), index + 1);
+            assert!(agents
+                .iter()
+                .all(|agent| agent.agent_session_id.as_deref() == Some(&saved.id)
+                    && agent.completed_at.is_some()));
+            assert_eq!(
+                rows.iter()
+                    .filter(|row| row.kind == crate::process::ProcessKind::Lf)
+                    .count(),
+                index + 1
+            );
+            let attachment = store.session_attachment(&saved.id).unwrap().unwrap();
+            assert!(attachment.process_lfid.is_none());
+            assert!(rows
+                .iter()
+                .any(|row| row.lfid == attachment.provider_process_lfid
+                    && row.pid == Some(std::process::id())
+                    && row.completed_at.is_some()));
             let received = std::fs::read_to_string(temp.path().join("received")).unwrap();
             let arguments = received.split('\0').collect::<Vec<_>>();
             assert_eq!(arguments[0], expected.unwrap_or_default());

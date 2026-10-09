@@ -106,8 +106,8 @@ Jack deferred Discord changes; leave it unchanged.
 
 Within launch flags, context inputs are `--docs`/`--clipboard`/`--diff`;
 agent/account selection is separate from execution settings `--chrome`/`--yolo`.
-Jack requests removing `--max-turns` and probably `--no-loopflow`; the draft
-removes both public switches while retaining normal operating guidance.
+The accepted cut removes `--max-turns` and `--no-loopflow`; both public switches
+are removed locally while normal operating guidance remains.
 Keep `--steers-after`: Jack recalled context-budget blowups. Flow records a cursor
 per node, passed through `Cli::step_args` to `task_input::read_seed`. Preserve
 `a_repeated_node_receives_only_task_direction_newer_than_its_last_run`'s inclusion,
@@ -401,20 +401,21 @@ completions. Utility windows and retained surfaces keep their own lifetimes.
 Inspection forwards Task and Session actions independently, retaining Task dates;
 Session observation time stays unavailable. Saved/failed readings grant no actions.
 Shared peer identity, remote observations/opening and configured proof remain.
-**Explanation coverage:** run/move/Workflow restart, create/edit/comment, Desktop
-open, Session connect and interactive message-less resume have operation-specific
-readings. Planning previews share input/scope/current-Project and saved-record
-validation; report effects without acquisition, registration, saves or delivery.
-New Task identity/location, missing initialization and comment provenance stay
-unallocated/unavailable. Other Task commands, `history show` and agent invocations
-still explain identity only; `--context` separately previews input. Remaining
-explanations must reuse their operation owners, not equate identity with permission.
+**Explanation coverage, October 9:** `16372d0e1`/`06ebfa11e` fulfill the
+create/edit/comment slice. Run/move/Workflow restart,
+Desktop open, Session connect and interactive message-less resume also have
+operation-specific readings. Planning previews share input/scope/current-Project
+and saved-record validation; transaction-time validation remains in the writer.
+New Task identity/location, initialization and comment provenance stay unavailable
+or unallocated. Movement retains prior node/edge, reason and force; end intent
+performs no completion reconciliation or cleanup.
 
-`task move` and Workflow restart now share captured-node validation with execution.
-Preview retains the exact prior node/edge, reason and force choice; restart intends
-`start`, not a Flow. End intent leaves completion reconciliation/gates/cleanup
-explicitly unperformed. No move, Process or provider write is permitted. The
-identity-only predecessor is replaced for these commands; other actions remain.
+**Remaining explanation work:** generic Task previews omit operation arguments:
+`refile`'s destination Wave/current Project and placement restriction; `save`'s
+path/revision/draft; checkout, abandon/delete and interrupt's preparation, cleanup
+or control impediments. These effects must remain unperformed.
+Existing owners and checkpointed-store assertions govern these previews.
+`history show` and agent invocations remain identity-only; `--context` previews input.
 
 **Required proof:** cold opens for two repositories arriving before registration and
 registering in reverse order both reach their own windows; same-repo opens reuse
@@ -532,4 +533,4 @@ identity/delegation, open them, add shell/Files panes, retain an unfinished draf
 change focus, target a harmless command, read output, hide/restore, and verify the
 original input target and draft survive. Demo owns native usability; preserve comparison evidence and use no real accounts or live user terminals.
 
-Check: `cargo build -p loopflow --bin lf`, network-isolated `global_commands task_planning_explain` (4), fmt/`cargo clippy --all-targets -- -D warnings` PASS; prior DTO/Swift results unchanged. Full suites/installation: gate/CI; native: demo.
+Check: `git diff --check` PASS (prose-only realign); `06ebfa11e` build/fmt/Clippy and four isolated `task_planning_explain` passes retained without rerun; full suites/installation: gate/CI; native: demo.

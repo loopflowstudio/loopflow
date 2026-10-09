@@ -132,14 +132,13 @@ readers and suppresses fallback Process writes. Parsed transport retains scoped 
 Checkpoint both stores: an effect-free receiver cannot undo a sender's write.
 Two-CLI fixtures cover routing/Flow previews, not configured SSH or exclusive start.
 
-Identity is not action validation. Run/move/restart and create/edit/comment
-previews reuse operation owners. Planning edits need no execution checkout;
+Identity is not action validation. Create/edit/comment and run/move/restart
+previews share validators; writers revalidate. Planning edits need no checkout;
 new Tasks have no execution location. Creation provenance follows resolved selection,
-not empty environment declarations. Comment refresh runs only in execution;
-initialization/authorship stay unavailable.
-Session explanation never probes endpoints; execution re-resolves. JSON grants
-no takeover, end intent no completion/cleanup. Other Task explanations remain
-identity-only. Native proof remains.
+not empty declarations. Comment refresh runs only in execution;
+initialization/authorship stay unavailable. Other Task fallbacks ignore operation
+arguments. Session explanation never probes endpoints. JSON grants no takeover,
+end intent no completion/cleanup. Native proof remains.
 
 ## Terminal-host adoption (2026-10-07)
 

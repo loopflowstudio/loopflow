@@ -213,7 +213,7 @@ fn invalid(error: impl std::fmt::Display) -> StoreError {
 /// Capture in the caller's transaction, using the same journal and causal heads
 /// as scalar triggers. Import suppresses echo; readback only adds missing facts.
 pub(super) fn capture_project_content(conn: &Connection, project: &ProjectId) -> StoreResult<()> {
-    let (importing, observation, observed): (bool, Option<String>, Option<String>) = conn
+    let (importing, observation, observed_fields): (bool, Option<String>, Option<String>) = conn
         .query_row(
             "SELECT importing,observation,fields FROM planning_peer_context WHERE singleton=1",
             [],
@@ -225,7 +225,7 @@ pub(super) fn capture_project_content(conn: &Connection, project: &ProjectId) ->
     let observation: Option<LinearObservation> = observation
         .map(|body| serde_json::from_str(&body))
         .transpose()?;
-    let observed: Option<Value> = observed
+    let observed_fields: Option<Value> = observed_fields
         .map(|body| serde_json::from_str(&body))
         .transpose()?;
     let mut query = conn.prepare(
@@ -234,12 +234,8 @@ pub(super) fn capture_project_content(conn: &Connection, project: &ProjectId) ->
         WHERE c.kind='project' AND h.object_id=?1
             AND c.field IN ('workflow','krs','metric_targets')",
     )?;
-    let mut heads = PlanningSnapshot::default();
-    let mut rows = query.query([project.as_str()])?;
-    while let Some(row) = rows.next()? {
-        heads.changes.insert(row.get(7)?, read_mutation(row)?);
-    }
-    let winners: BTreeMap<_, _> = heads
+    let accepted = read_snapshot(query.query([project.as_str()])?)?;
+    let winners: BTreeMap<_, _> = accepted
         .winners()
         .map(|(_, c)| (c.field.as_str(), c))
         .collect();
@@ -249,17 +245,17 @@ pub(super) fn capture_project_content(conn: &Connection, project: &ProjectId) ->
     for (field, value) in fields.as_object().expect("Project content is an object") {
         let linear = observation
             .as_ref()
-            .filter(|_| observed.as_ref().and_then(|o| o.get(field)) == Some(value));
+            .filter(|_| observed_fields.as_ref().and_then(|o| o.get(field)) == Some(value));
         let unchanged = winners
             .get(field.as_str())
             .is_some_and(|winner| winner.value == *value);
-        let frontier_retained = linear.is_none_or(|observation| {
-            heads.changes.values().any(|head| {
-                head.field == *field
-                    && head.value == *value
-                    && head.linear.as_ref().is_some_and(|prior| {
-                        prior.body["id"] == observation.body["id"]
-                            && prior.revision() == observation.revision()
+        let already_observed = linear.is_none_or(|observation| {
+            accepted.changes.values().any(|prior| {
+                prior.field == *field
+                    && prior.value == *value
+                    && prior.linear.as_ref().is_some_and(|fact| {
+                        fact.body["id"] == observation.body["id"]
+                            && fact.revision() == observation.revision()
                     })
             })
         });
@@ -270,7 +266,7 @@ pub(super) fn capture_project_content(conn: &Connection, project: &ProjectId) ->
                 params![project.as_str(), field],
                 |row| row.get(0),
             )?;
-        if unchanged && frontier_retained && !missing_origin {
+        if unchanged && already_observed && !missing_origin {
             continue;
         }
         conn.execute("INSERT INTO planning_peer_changes(id,kind,object_id,field,value,clock,linear,parents)
@@ -1260,11 +1256,7 @@ fn export_in(conn: &Connection, repo: &str, destination: &str) -> StoreResult<Pl
     ) SELECT c.kind,c.object_id,c.field,c.value,c.clock,c.linear,c.parents,c.id
         FROM planning_peer_changes c JOIN origins o ON o.kind=c.kind AND o.object_id=c.object_id",
     )?;
-    let mut snapshot = PlanningSnapshot::default();
-    let mut rows = query.query(params![repo, destination])?;
-    while let Some(row) = rows.next()? {
-        snapshot.changes.insert(row.get(7)?, read_mutation(row)?);
-    }
+    let snapshot = read_snapshot(query.query(params![repo, destination])?)?;
     snapshot.validate().map_err(invalid)?;
     let mut query = conn.prepare(
         "SELECT h.id FROM json_each(?1) o JOIN planning_peer_heads h
@@ -1283,6 +1275,17 @@ fn export_in(conn: &Connection, repo: &str, destination: &str) -> StoreResult<Pl
         return Err(invalid(
             "planning causal heads disagree with retained mutations",
         ));
+    }
+    Ok(snapshot)
+}
+
+/// SELECT kind,object_id,field,value,clock,linear,parents,id.
+/// The caller chooses retained history or accepted observations; decoding neither
+/// validates a partial frontier nor grants it projection authority.
+fn read_snapshot(mut rows: rusqlite::Rows<'_>) -> StoreResult<PlanningSnapshot> {
+    let mut snapshot = PlanningSnapshot::default();
+    while let Some(row) = rows.next()? {
+        snapshot.changes.insert(row.get(7)?, read_mutation(row)?);
     }
     Ok(snapshot)
 }
@@ -1455,11 +1458,12 @@ fn insert_and_project(
         .fields()
         .iter()
         .copied()
-        .filter(|field| {
-            !(*field == "planning_teams" && changes.evidence.contains_key("provider_teams")
-                || pending_order && *field == "planning_rank"
-                || deletion_receipts && *field == "planning_deleted_at"
-                || object.kind == PlanningKind::Wave && *field == "current_project_id")
+        .filter(|field| match *field {
+            "planning_teams" => !changes.evidence.contains_key("provider_teams"),
+            "planning_rank" => !pending_order,
+            "planning_deleted_at" => !deletion_receipts,
+            "current_project_id" => object.kind != PlanningKind::Wave,
+            _ => true,
         })
         .collect();
     project_fields(
@@ -4658,22 +4662,25 @@ mod tests {
             assert_eq!(execution_rows(&target), execution);
             // The rejected journal survives, but capture must follow the last
             // accepted field, not the retained peer head that never projected.
-            if project_case {
-                let mut content = target.planning_project(&project).unwrap();
-                content.workflow = "local-review".into();
-                target
-                    .update_project_content(
-                        &project,
-                        &crate::pm::ProjectContent {
-                            workflow: content.workflow,
-                            krs: content.krs,
-                            metric_targets: content.metric_targets,
-                        },
-                    )
-                    .unwrap();
-            } else {
-                edit_title(&target, &task, "Local after rejection");
-            }
+            let save_local = |value: &str| {
+                if project_case {
+                    let content = target.planning_project(&project).unwrap();
+                    target
+                        .update_project_content(
+                            &project,
+                            &crate::pm::ProjectContent {
+                                workflow: value.into(),
+                                krs: content.krs,
+                                metric_targets: content.metric_targets,
+                            },
+                        )
+                        .unwrap();
+                } else {
+                    edit_title(&target, &task, value);
+                }
+            };
+            let local_value = "local-after-rejection";
+            save_local(local_value);
             let saved = export(&target, "/target");
             assert_eq!(saved.changes[peer_id], *peer);
             let local = saved
@@ -4683,12 +4690,7 @@ mod tests {
                     c.object.id == owner
                         && c.field == field
                         && c.linear.is_none()
-                        && c.value
-                            == if project_case {
-                                json!("local-review")
-                            } else {
-                                json!("Local after rejection")
-                            }
+                        && c.value == local_value
                 })
                 .unwrap();
             assert!(!local.parents.contains(peer_id));
@@ -4725,20 +4727,10 @@ mod tests {
             if project_case {
                 let content = target.planning_project(&project).unwrap();
                 assert_eq!(content.workflow, "peer-review");
-                target
-                    .update_project_content(
-                        &project,
-                        &crate::pm::ProjectContent {
-                            workflow: "final-review".into(),
-                            krs: content.krs,
-                            metric_targets: content.metric_targets,
-                        },
-                    )
-                    .unwrap();
             } else {
                 assert_eq!(target.task(&task).unwrap().unwrap().plan.title, "Peer name");
-                edit_title(&target, &task, "Final local name");
             }
+            save_local("final-local-edit");
             let exchanged = export(&target, "/target");
             let (_, local) = exchanged
                 .winners()

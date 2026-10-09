@@ -342,3 +342,24 @@ Task row naming its stop. All page copy is outside the mock, in the two plain
 lists from `x4`. The diagram follows `task/workflow/feature.yaml` and its three
 Flows. A Wave-level workflow diagram is not known to exist in the app today;
 the source shows one per Task, in the Task header.
+
+Jack Heart's notes on `x6`, pasted from a session where they had gone to
+another agent by mistake:
+- "maybe just put the yaml syntax (slightly minified) under flow names in the
+  diagram. extend whitespace down so that all names can be center aligned and
+  no constraint on number of sub skills."
+- On "A terminal": "Native OS X terminal"; "dont literally reuse prase \"at
+  its most basic\"".
+- On Sessions: "I like the big emphasis on flows now, but the second big
+  emphasis as to be the work model, and how sessions are now keyed by teh work
+  they represent".
+- On "One Task, one copy of the code": "This just doesnt seem to speak to a
+  user need . need to say something more about automated software process or
+  something". The other agent offered "A process that moves work forward" and
+  Jack Heart answered "ok update ti".
+- On "It is yours.": "Free and open-source (MIT)".
+
+Applied to `x6`. Each Flow in the diagram shows its real YAML under a
+centred name; the three arrows share one line. The list now runs: native Mac
+terminal, Skills, the process, Workflows, organized around the work, Sessions
+belong to the work, waiting on you, side by side.

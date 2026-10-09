@@ -615,6 +615,9 @@ Prompt fixtures nested in the source tree must fence Git discovery so the enclos
 checkout cannot become their stored Wave owner. Verify them inside a Git checkout;
 a source archive alone does not exercise that boundary.
 Include the shared DTO fixtures and Desktop planning states in the affected gate.
+Repository-wide Linear fixtures must return comments only for their owning issue;
+exercise acquisition in a different order from Task creation. Process-sensitive
+cleanup fixtures must observe child readiness before inspecting live executables.
 
 ```bash
 uv run python scripts/materialize_rust_tests.py -- cargo nextest run -p loopflow --lib -E 'test(ops::pm::task_planning_tests::)' --no-fail-fast

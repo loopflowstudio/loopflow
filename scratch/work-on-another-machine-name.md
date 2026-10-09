@@ -293,15 +293,17 @@ Executable feedback exposed two distinct presentation/execution boundaries:
   and absence. The public fixture retains the six-table comparison above that
   exposed this failure rather than relaxing it.
 
-Remaining composition, reconciled October 9 against `5bed3a211`:
+Remaining composition, reconciled October 9 against `25cbc0a09`:
 
-Ordering is implemented at `fcd64901f` and `357090d4b`; item 3 now carries
-alternate acquisition. Retained-effect
-eligibility already exists at `08a285872`; `30b476328` shares its fixture reader.
-`5bed3a211` integrates main `3a0aa5ca4` (#1510), after the common writer's
-`d20c56daf`. Main adds chat Flow recipes and hierarchical names, not provider
-frontier transport. Earlier focused passes predate that merge; gate owns the
-combined launch/Flow candidate. The writer is integrated.
+`358f7fa08` implements alternate removal/archive/Team acquisition;
+`25cbc0a09` prepares typed histories before projection retries. These supersede
+the earlier instruction to implement item 3, not its public acceptance.
+Ordering (`fcd64901f`, `357090d4b`) and retained-effect eligibility (`08a285872`)
+remain integrated. The latest 63 peer-storage passes include the alternate cut;
+the public reader change at `30b476328` still awaits gate.
+`5bed3a211` integrates main `3a0aa5ca4` (#1510), after common writer `d20c56daf`.
+Main adds chat Flow recipes and hierarchical names, not provider frontier transport;
+combined launch/Flow verification remains with gate.
 
 1. **Retained-effect eligibility is implemented, with bounded proof.**
    Common field/deletion, creation/link, state and ordering attempt transactions
@@ -354,12 +356,20 @@ combined launch/Flow candidate. The writer is integrated.
    legitimately notifies planning readers and is not projection churn.
    Focused fixtures cover source-only removal against stale detail, archive without
    a delete receipt, reteam beside newer entity facts, conflicting confirmations,
-   malformed evidence, migration and populated execution. Complete-list evidence
-   remains independent; the incomplete-list case retains uncertain ordering effects.
-   This proves neither public acquisition nor mixed-provider lifetime behavior.
-   Mixed-provider exchange stays off; legacy association/presentation and combined
-   verification below remain before activation.
-4. **Legacy association and presentation remain implementation work.** Divergent
+   malformed evidence, migration and populated execution. The Team fixture retains
+   an uncertain order without acquiring a list; the earlier order fixture separately
+   rejects a cold empty list. Neither proves partial-list acquisition composed with
+   alternate provider evidence. That case and public acquisition remain gate coverage,
+   not reasons to weaken acceptance or claim mixed-provider lifetime behavior.
+4. **Replay-safe invalidation remains implementation work.**
+   `observe_pm_issue_change` still invalidates locally, but `capture_provider_evidence`
+   deliberately omits non-removal notifications and the peer validator rejects them.
+   The missing boundary is distinguishing an old unversioned invalidation from a
+   later successful detail acquisition without using receiving time or inventing a
+   provider revision. Preserve local invalidation and retained frontiers; cover delayed
+   replay after successful detail and a genuinely new invalidation before mixed
+   activation. No new product policy is needed to preserve that existing contract.
+5. **Legacy association and presentation remain implementation work.** Divergent
    existing IDs retain history; unplaced Waves need nullable Rust/Swift Machine
    presentation, not placement on read. Desktop still needs selected-plan,
    authorship/assignee, pending/conflict and losing-edit/recovery presentation.
@@ -471,11 +481,12 @@ and combined public acceptance remain. The diagnostic is temporary, not product 
    checks are storage evidence, not connected Git/Linear lifetime acceptance.
 
    Removal/archive/reteam now use common acquisition with the focused storage
-   proof in item 3. Gate still owns public alternate acquisition, complete-list
-   ordering and comment composition, not only Task/Project detail reads. Finish
-   legacy association and Desktop status before mixed-provider foreground exchange
-   and removal of its temporary diagnostic. This cut cannot repair LOO-406's unseen provider-write
-   race or supply Linear compare-and-swap semantics.
+   proof in Remaining integration item 3. Gate still owns public alternate
+   acquisition, complete-list ordering and comment composition, not only detail
+   reads. Replay-safe invalidation, legacy association and Desktop status remain
+   before mixed-provider exchange and removal of its temporary diagnostic. This
+   cut cannot repair LOO-406's unseen provider-write race or supply Linear
+   compare-and-swap semantics.
 
 5. Execute the public cold-worker regression: an absent issue selector must acquire
    automatically, run pushed code, then reuse the same identity/checkout by full ID.
@@ -572,7 +583,7 @@ and limitations: `9b59e9b71:scratch/work-on-another-machine-name.md`,
 **Acceptance for review**. They do not establish this ordering cut, public
 combined behavior or Desktop acceptance.
 
-Check (October 9 compress): `cargo test -p loopflow --lib --no-run` passes; `scripts/test_network.py target/debug/deps/loopflow-0b179d3755b15c2d store::sqlite::planning_peers::tests:: --test-threads=4` passes (63 tests); `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` pass. Combined/public/Desktop: gate.
+Check (October 9 realign): `git diff --check` passes; prose-only reconciliation reuses `25cbc0a09`’s lib build, 63 peer-storage tests, fmt and all-target Clippy passes; combined/public/Desktop verification remains with gate.
 
 Earlier SQL proofs, macOS startup limitations and the retained historical Flow
 without a recorded exit remain at

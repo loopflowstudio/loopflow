@@ -635,17 +635,16 @@ before import. `30b476328`'s public fixture awaits gate. `fcd64901f` transports 
 receipts; `357090d4b` preserves primary-only moves. Only complete lists settle
 progress; effect updates cannot promote losers.
 
-**Independent facts need independent rollback.** Peer import gives removal,
-archive and Teams separate savepoints; common acquisition owns each fact.
-Decode validated histories before projection retries; retain original ages and
-Team baselines. Legacy negative evidence has unknown age. Entity revisions never
-order relationships; replay cannot clear membership uncertainty. Missing inventory
-proves neither deletion nor negative membership. Storage proof only; composition unproved.
+**Independent facts need independent rollback.** Common acquisition gives removal,
+archive and Teams separate savepoints. Prepare validated histories before retries;
+preserve ages and Team baselines. Legacy ages stay unknown. Entity revisions never
+order relationships; replay cannot clear membership uncertainty. The Team proof has no list acquisition; cold empty-list
+rejection is separate. Neither proves composed partial-list behavior.
 
 Acquisition/saves bypass effect locks; unreadable journals mean unknown pending.
-Private histories/dependents, including order lists and Git documents, remain held
-until explicit selection. Omission is not convergence. Legacy association,
-unplaced-Wave/Desktop recovery and combined/public verification remain.
+Private histories/dependents remain held until explicit selection. Omission is not
+convergence. Non-removal invalidations remain local: safe replay after later detail,
+legacy association, unplaced-Wave/Desktop recovery and public verification remain.
 Mixed-provider exchange stays disabled.
 Design: `scratch/work-on-another-machine-name.md`. History:
 `5624151a3:wave/infrastructure/MEMORY.md`, this heading.

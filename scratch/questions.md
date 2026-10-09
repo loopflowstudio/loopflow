@@ -32,9 +32,9 @@ at `b040c7c8d:scratch/questions.md`.
 
 The integrated cut remains unpublished. The current design owns verification and
 remaining integration; earlier adoption evidence stays at `5d336868f:scratch/questions.md`.
-October 9's 49 passing peer-storage tests at `b21429d9b` cover the storage
-choices below, including prepared creation/link effects. The later dependency-only
-sync preceded the current focused foreground-creation checks in the design.
+October 9's 63 peer-storage passes at `25cbc0a09` cover the latest alternate
+acquisition cut; earlier 49-test evidence remains at `b21429d9b`. The design
+separates storage proof from focused foreground-creation checks.
 Broader public/DTO, provider-lifetime, cold-worker, Desktop and mixed-provider acceptance
 remain separate. No new product decision is selected.
 
@@ -59,8 +59,8 @@ remain separate. No new product decision is selected.
   root Waves only (including newly ingested definitions); `use local` does not
   withdraw existing membership. Children follow their parent's saved selection.
   This keeps joining separate from publication consent. All setup is local;
-  grouped Linear receipts and legacy association remain unfinished; local-only
-  exchange now uses the existing foreground lifetime.
+  grouped Linear receipts now exist; legacy association and mixed-provider
+  activation remain unfinished. Local-only exchange uses the foreground lifetime.
 
 - October 8 provenance implementation: replace the origin-only boolean with the
   accepted provider body, identity/revision and original acquisition time in the
@@ -78,12 +78,12 @@ remain separate. No new product decision is selected.
   Identical bodies still undergo removal/archive checks; superseded entity revision
   groups remain journal history, not reacquisition. Common no-op upserts preserve
   readback idempotence. The October 9 storage suite covers these regressions. Grouped
-  receipts, alternate provider paths and independent relationship ordering remain,
-  alongside legacy association and Desktop presentation. No mixed-provider
+  receipts and removal/archive/Team transport are now implemented. Replay-safe
+  invalidation, legacy association and Desktop presentation remain. No mixed-provider
   completion or compare-and-swap is claimed.
 
-- October 8 foreground safety choice: until grouped receipts and all provider paths are
-  composed, Linear-connected repositories retain plans and report the gap instead
+- October 8 foreground safety choice: until all provider paths are composed and
+  verified, Linear-connected repositories retain plans and report the gap instead
   of activating unsafe peer exchange. This is an internal incomplete boundary, not
   Jack Heart's final product policy. Publication always fetches/imports first and
   persists uncertainty before pushing; independent acquisition bypasses its effect
@@ -116,9 +116,9 @@ remain separate. No new product decision is selected.
   a losing intention after a peer Linear winner; peer-winner reconciliation now
   explicitly retires it. Cached non-lifecycle states still project without minting
   unsupported lifecycle deliveries; the common writer still owns its three targets.
-  No new product policy is selected. Remaining grouped
-  receipts and composed checks stay in the design; mixed-provider exchange is
-  still disabled and not ready for publication.
+  No new product policy is selected. Grouped receipts now exist; composed checks
+  stay in the design. Mixed-provider exchange is still disabled and not ready
+  for publication.
 
 - October 8 comment composition uses the existing comment ID as delivery identity,
   raw provider observations as journal provenance, and the common thread/receipt
@@ -164,8 +164,9 @@ remain separate. No new product decision is selected.
   remain possible. Project/link readback therefore stays with its existing
   owner pending full receipt composition. The later receipt-transport cut below
   supersedes the missing-transport finding;
-  foreground creation is covered by the current cut below; independent relationship
-  ordering and mixed-provider activation remain unfinished. No new product policy is selected.
+  foreground creation has focused proof. Ordering and removal/archive/Team transport
+  now exist; replay-safe invalidation and mixed-provider activation remain unfinished.
+  No new product policy is selected.
 
 - October 9 effect-eligibility choice: a rejected or sharing-held peer object
   cannot authorize a new common field/deletion, creation/link, state or ordering
@@ -186,7 +187,7 @@ remain separate. No new product decision is selected.
   selection. Unordered active/trash evidence isolates projection; no inferred
   deletion settlement. Full rationale and prior checks:
   `225b8c95f:scratch/questions.md`, final two entries. The current design owns
-  remaining alternate-acquisition and presentation work;
+  remaining replay-safe invalidation and presentation work;
   mixed-provider exchange remains disabled.
 
 - October 9 ordering choices and counterexamples now live in the design's

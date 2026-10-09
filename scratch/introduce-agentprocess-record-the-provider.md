@@ -87,6 +87,16 @@ columns, ownership projections, registry, gate and orphan reader remain.
 The source still declares `Process` and `AgentSession`; LOO-441 integration
 remains before publication. The integrated #1512 base is `3e1e6245c`.
 
+The history boundary now uses `SessionTurnOrigin`: per-request immutable
+attribution, captured before sending under the current attachment check.
+Claude/OpenCode keep it with their input IDs; Codex keeps it with the request
+sequence and accepts both reply/notification orders. Started insertion and
+origin assignment share one transaction; retained historical attribution is not
+rewritten. Duplicate correlated origins retain
+exact values; conflicting repeats fail without rewriting history. Uncorrelated
+broadcasts retain neither guessed Work nor the latest capture. No schema or wire
+shape changed; this does not implement AgentProcess records.
+
 Two boundaries remain distinct from the launch proof:
 
 - `HELD_LIFELINES` retains every writer until its lf process exits. A superseded
@@ -119,11 +129,12 @@ Two boundaries remain distinct from the launch proof:
    without granting signal authority. Preserve history ingestion independently of
    the attachment claim: `record_session_event` deliberately accepts observations
    after transfer, and `record_session_turn_origin` retains correlated origin.
-   Its first Started receipt currently copies the Session's current capture/Work;
-   audit a delayed old start after a new capture so it cannot borrow the new
-   input's attribution. Prove late completion/usage retention alongside rejection
-   of stale native writes, attention updates and process publication. This
-   capture-order boundary is not covered by the A → B → A capability test.
+   The delayed-start repair now freezes initiating Work/capture before native
+   requests; broadcasts remain unattributed until correlated. This observation
+   snapshot is not attachment authority or another process owner. Preserve it
+   when replacing provider generation with AgentProcess identity. Request
+   correlation lost in a crash stays unknown; neither the latest Session
+   capture nor AgentProcess's launch capture can recover it.
 4. Move Task gates, active Sessions, top/monitor and scheduled orphan settlement
    to the same process inventory and delete the predecessors above. Prove both
    takeover death orders; no live current attachment means orphan settlement,
@@ -148,6 +159,18 @@ captures survive migration and failed admission. The watchdog must not inherit a
 lifeline writer or hold provider stdout/stderr open.
 
 ## Implementation review
+
+The October 9 capture audit found the design's counterexample in the old
+reader: a first delayed Started observation selected the current capture/Work.
+An AgentProcess launch snapshot would still be wrong after live takeover or
+another turn on the same provider. Attribution therefore belongs to the native
+request correlation, not the process lifecycle. History is retained without
+current authority; dispatch and attention still require the current claim.
+Codex fixtures exercise A → B → A before both start/reply orders and retain late
+usage/completion on the original input. Claude and OpenCode delay their first
+start until after input replacement. Binding has its own before/after request
+fixture; repeat observations cannot reassign its earlier Work.
+
 
 The attachment slice replaces arithmetic exit lookup with an exact event-sequence
 reference, leaving old event keys and payloads unchanged. Claim clears the current
@@ -175,4 +198,4 @@ These are launch proofs, not process-record or installed acceptance. Release's
 child memory reinforces operation-entry verification: helper success cannot
 establish top, Task status or scheduled orphan settlement.
 
-Check: `git diff --check` passed; unchanged-source prior passes retained for `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`; `uv run python scripts/test_network.py cargo test -p loopflow --lib -- attachment_tests store::sqlite::program_status::tests store::sqlite::revisions::tests store::sqlite::session_events::tests --test-threads=1` passed 22; full Rust/Swift/DTO and Linux lifeline checks remain gate/CI-owned, installed acceptance remains open.
+Check: `cargo fmt --all` and `cargo clippy --all-targets -- -D warnings` passed; `uv run python scripts/test_network.py cargo test -p loopflow --lib -- harness::codex_history::tests harness::claude_history::tests harness::opencode_history::tests harness::conformance_tests store::sqlite::session_events::tests harness::claude::tests::sequential_managed_sessions_retain_their_exact_claude_engines harness::claude::tests::send_input_spawn_failure_releases_turn_guard harness::claude::tests::interrupt_without_turn_is_noop --test-threads=1` passed 32; `git diff --check` passed. Full Rust/Swift/DTO and Linux lifeline checks remain gate/CI-owned; installed acceptance remains open.

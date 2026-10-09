@@ -10,3 +10,10 @@ Task directive is inferred.
 2026-10-09: Source OpenCode launches are one-server/one-Session. Historical
 shared PID/birth rows must remain recoverable and non-signallable until exact
 ownership is resolved; source inventory is not an audit of configured data.
+
+2026-10-09 implementation choice: native request attribution freezes before
+sending rather than on a delayed Started observation. A later bind affects later
+requests, not already-submitted work. Per-request correlation—not AgentProcess's
+original capture—retains this snapshot across live takeover and multiple turns.
+Crash-lost correlation remains unknown; this introduces no recovery replay or
+new execution owner.

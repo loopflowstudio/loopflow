@@ -93,7 +93,10 @@ populated Process/control proof; revised status assertions await gate. Ordering/
 alternate/relationship acquisition, legacy association and unplaced-Wave/Desktop remain.
 
 `e49e4ccf3`: a Session callback masked a pane-close gap; Observation replaces
-notification bridges. Generations, not URLs, fence outcomes. Native proof remains.
+notification bridges. Generations, not URLs, fence outcomes. October 9: repository
+failures before window registration now have router receipts; plain Task links await
+mounted page content. Registration retains its validated requests, not later arrivals.
+Shell/page readiness proves neither compositor usability nor Session readiness.
 
 ## Terminal-host adoption (2026-10-07)
 
@@ -584,12 +587,6 @@ a differently named Home, preserving historical authors and review authority.
 LOO-297's attempted read failed on missing Linear credentials; local Task absence
 did not establish remote absence. Any sentence repair requires a fresh authorized
 issue read. No Task was filed or changed by these records.
-
-## PR authorship and retired UX research (2026-09-25)
-
-PRs explain experienced change: Try it gives action/result; Checks gives evidence.
-Failed chapter reads retain stale content/history. Archive:
-`f48d84511:wave/product/MEMORY.md`, this heading.
 
 ## Workspace redesign decisions (2026-09-26)
 

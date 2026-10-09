@@ -72,4 +72,7 @@ is LOO-298-shaped (384 steers over the goal budget); the other has no retained
 capture, so every source is `null` rather than zero. Rust round-trips it and
 Swift decodes it for the Task's Session history.
 
-`desktop_openings.json` distinguishes request acceptance, usable endpoints and failures; fixture shape is not native readiness proof.
+`desktop_openings.json` distinguishes request acceptance, usable endpoints and failures;
+`desktop_inspection.json` requires top-level `openings` for failures before window
+registration. Window receipts own Task/Session outcomes. Fixture shape is not native
+readiness proof.

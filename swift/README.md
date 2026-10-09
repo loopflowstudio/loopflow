@@ -566,12 +566,20 @@ child. Neither token authorizes terminal input.
 window. `--diff` reveals the existing Changes browser beside the conversation,
 retaining file selection and drafts. Launch acceptance returns `opening`; it does
 not prove a usable native endpoint. Inspection retains the latest request's outcome:
-`usable` requires the Session's native-surface callback and a loaded Changes reading
+`usable` for a Session request requires the Session's native-surface callback and a loaded Changes reading
 when requested, with both original panes still visible. Closing, hiding, replacing or
 zooming away a requested pane fails the pending request, as do connection, surface and
 comparison errors. Navigation cancels an unfinished opening; late results cannot settle a newer
 request, even for the same URL. This is endpoint readiness, not provider-turn completion
-or proof of compositor rendering. Plain-repository and remote opening remain separate.
+or proof of compositor rendering. A plain Task link waits for its Task page to mount;
+it does not require a Session or checkout. An unavailable workspace reports failure.
+
+Top-level `openings` records the latest repository-opening request per local locator,
+including lookup/validation failures before any window registers. A plain repository
+becomes usable when its validated workspace receiver registers, even while planning
+loads. Registered Task links report their page/Session outcome on the window instead.
+These are transient receipts, not opening history or Work identity. Remote opening
+remains separate.
 
 `lf desktop hide --target "$target"` and `lf desktop restore --target "$target"`
 change retained pane visibility. Focus, split, move, resize and zoom use that same

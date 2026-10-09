@@ -55,13 +55,15 @@ struct RepositoryWorkspaceView: View {
     let router: WorkLinkRouter
     let openRepository: (String, URL?) -> Void
     @State private var reading: WorkReading<RepositoryWorkspace> = .loading
+    @State private var openingRequests: [UUID] = []
 
     var body: some View {
+        let requests = router.workspaceRequests(workspace.id)
         Group {
             switch reading {
             case .available(let resolved):
                 RepoView(portfolioService: portfolioService, initialRepoPath: resolved.path,
-                         query: query, taskLinks: router, repository: resolved.id,
+                         query: query, taskLinks: router, repository: resolved.id, openingRequests: openingRequests,
                          openRepository: openRepository)
             case .unavailable(_, let reason):
                 VStack {
@@ -72,18 +74,29 @@ struct RepositoryWorkspaceView: View {
                 ProgressView("Opening repository…")
             }
         }
-        .task(id: workspace.id) { await resolve() }
+        .task(id: requests) {
+            // A new request may arrive between validation and registration.
+            // Reuse that now-registered shell without unmounting retained content.
+            if case .available = reading, router.hasWindow(workspace.id) {
+                router.confirmRegisteredWorkspace(workspace.id, requests: requests)
+                return
+            }
+            await resolve()
+        }
     }
 
     private func resolve() async {
         reading = .loading
+        let requests = router.workspaceRequests(workspace.id)
         do {
-            let current = try await RepositoryWorkspace.resolve(path: workspace.path, query: query)
-            guard current.id == workspace.id else {
-                throw RegistryQueryError("This location now selects another repository plan. Open it explicitly from Open Repo; the restored workspace was not changed.")
-            }
+            let current = try await router.resolveWorkspace(workspace, query: query)
+            guard !Task.isCancelled else { return }
+            openingRequests = requests
             reading = .available(current)
-        } catch { reading = .unavailable(lastGood: nil, reason: error.localizedDescription) }
+        } catch {
+            guard !Task.isCancelled, !(error is CancellationError) else { return }
+            reading = .unavailable(lastGood: nil, reason: error.localizedDescription)
+        }
     }
 }
 

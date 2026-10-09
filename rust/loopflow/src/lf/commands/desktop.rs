@@ -11,6 +11,7 @@ use crate::ops::task_run::TaskRunControl;
 pub struct DesktopInspection {
     pub observed_at: i64,
     pub windows: Vec<DesktopWindowInspection>,
+    pub openings: Vec<DesktopOpening>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -577,6 +578,18 @@ impl DesktopInspection {
         let mut lines = vec![format!("Desktop reading: {}", self.observed_at)];
         if self.windows.is_empty() {
             lines.push("No repository workspace windows are open.".into());
+        }
+        for opening in &self.openings {
+            lines.push(format!(
+                "Repository opening {:?}: {}{}",
+                opening.status,
+                opening.url,
+                opening
+                    .reason
+                    .as_ref()
+                    .map(|reason| format!(" · {reason}"))
+                    .unwrap_or_default()
+            ));
         }
         for window in &self.windows {
             lines.push(format!(

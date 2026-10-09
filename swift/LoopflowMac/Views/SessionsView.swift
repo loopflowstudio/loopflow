@@ -473,6 +473,7 @@ struct SessionsView: View {
     var query: RegistryQuery = RegistryQueryLocal.shared
 
     var body: some View {
+        let taskPage = model.linkedTaskPage
         Group {
             if let home = workspaces.localMachineId {
                 SessionsContentView(model: model, repoPath: repoPath, workspaces: workspaces,
@@ -482,6 +483,9 @@ struct SessionsView: View {
                     WorkNavigator(model: model, onOpenSession: { _ in })
                     if let error = workspaces.machineError {
                         ContentUnavailableView("Workspace unavailable", systemImage: "folder", description: Text(error))
+                            .task(id: taskPage) {
+                                if let request = taskPage { model.finishTaskPage(request, error: error) }
+                            }
                     } else {
                         ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
@@ -563,6 +567,7 @@ struct SessionsContentView: View {
     }
 
     var body: some View {
+        let taskPage = model.linkedTaskPage
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 WorkNavigator(model: model, onOpenSession: openSession, onConversation: { work in
@@ -605,6 +610,12 @@ struct SessionsContentView: View {
                         if terminalsVisible, !navigation.showsRetainedTerminals, let task = fileTask,
                            let wave = model.task(id: task.task.id)?.wave.wave {
                             TaskWorkflowHeader(model: model, task: task.task, wave: wave, work: model.taskWork[task.task.id])
+                                .task(id: taskPage) {
+                                    if let request = taskPage,
+                                       request.taskID == task.task.id, request.repo == store.repoPath.normalizedFilePath {
+                                        model.finishTaskPage(request)
+                                    }
+                                }
                             if taskPath != nil { missingCheckout }
                         }
                         ZStack {

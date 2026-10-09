@@ -760,6 +760,168 @@ struct WorkDestinationTests {
         #expect(model.navigation.selectedSessionId == record.id)
     }
 
+    @Test(arguments: ["usable", "failed", "canceled"])
+    func plainTaskPageWaitsForItsOwnContent(outcome: String) async throws {
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(try fixture().utf8))
+        let wave = try #require(snapshot.waves.first)
+        let task = try #require(wave.tasks.items.first)
+        let model = WorkModel(query: RegistryQuery { _, _ in
+            throw RegistryQueryError("No Session preparation is required to show a Task page")
+        }, repoPath: wave.wave.repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        let url = try #require(TaskLink(issue: task.task.identifier, repo: wave.wave.repo).url)
+        await model.openTaskLink(url)
+        let old = try #require(model.linkedTaskPage)
+        #expect(model.taskOpening?.status == .opening)
+        #expect(model.linkedSession == nil)
+        await model.openTaskLink(url)
+        let current = try #require(model.linkedTaskPage)
+        #expect(old != current)
+        model.finishTaskPage(old)
+        model.finishTaskPage(old, error: "Old failure")
+        #expect(model.taskOpening?.status == .opening)
+        if outcome == "canceled" { model.select(.wave(id: wave.wave.id)) }
+        model.finishTaskPage(current, error: outcome == "failed" ? "Machine unavailable" : nil)
+        #expect(model.taskOpening?.status == (outcome == "usable" ? .usable : .failed))
+        if outcome == "failed" { #expect(model.taskOpening?.reason == "Machine unavailable") }
+        #expect(model.linkedTaskPage == nil)
+    }
+
+    @Test func repositoryLookupFailureIsInspectableWithoutAWindow() async throws {
+        let router = WorkLinkRouter()
+        let missing = "/nonexistent-loopflow-fixture-\(UUID().uuidString)"
+        do {
+            _ = try await router.openRepository(path: missing, link: nil, query: RegistryQuery { _, _ in
+                throw RegistryQueryError("No registry read for an absent Git directory")
+            }) { _ in Issue.record("A failed lookup cannot open a window") }
+            Issue.record("Missing repository unexpectedly opened")
+        } catch {}
+        let report = router.inspect()
+        #expect(report.windows.isEmpty)
+        #expect(report.openings.count == 1)
+        #expect(report.openings[0].status == .failed)
+        #expect(report.openings[0].reason?.contains("not an available local Git repository") == true)
+    }
+
+    @Test func plainRepositoryWaitsForRegistrationAndReusesTheWindow() async throws {
+        let router = WorkLinkRouter()
+        let query = RegistryQuery { _, _ in "\"plan\"" }
+        let workspace = try await router.openRepository(path: repositoryFixturePath(), link: nil, query: query) { _ in }
+        #expect(router.inspect().windows.isEmpty)
+        #expect(router.inspect().openings.first?.status == .opening)
+        let id = UUID()
+        router.register(id, repository: workspace.id, openingRequests: router.workspaceRequests(workspace.id), focus: {}, inspect: windowInspection,
+                        controlPane: { _ in }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+        #expect(router.inspect().openings.first?.status == .usable)
+        _ = try await router.openRepository(path: repositoryFixturePath(), link: nil, query: query) { _ in
+            Issue.record("An open repository must reuse its window")
+        }
+        #expect(router.inspect().windows.map(\.window) == [id.uuidString])
+        #expect(router.inspect().openings.first?.status == .usable)
+    }
+
+    @Test(arguments: ["success", "failure", "cancellation"])
+    func obsoleteRepositoryLookupCannotOpenOrSettleANewerRequest(outcome: String) async throws {
+        let router = WorkLinkRouter(), barrier = LinkedDestinationBarrier()
+        let path = repositoryFixturePath()
+        let old = Task {
+            try await router.openRepository(path: path, link: nil, query: RegistryQuery { _, _ in
+                await barrier.wait("lookup")
+                if outcome == "failure" { throw RegistryQueryError("Old lookup failure") }
+                return "\"old-plan\""
+            }) { _ in Issue.record("An obsolete lookup must not open its window") }
+        }
+        while !(await barrier.contains("lookup")) { await Task.yield() }
+        if outcome == "cancellation" { old.cancel() }
+        let current = try await router.openRepository(path: path, link: nil, query: RegistryQuery { _, _ in "\"plan\"" }) { _ in }
+        await barrier.release("lookup")
+        switch await old.result {
+        case .success: Issue.record("Obsolete lookup unexpectedly succeeded")
+        case .failure(let error): #expect(error is CancellationError)
+        }
+        #expect(router.inspect().openings.first?.status == .opening)
+        router.register(UUID(), repository: "old-plan", focus: {}, inspect: windowInspection,
+                        controlPane: { _ in }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+        #expect(router.inspect().openings.first?.status == .opening)
+        router.register(UUID(), repository: current.id, openingRequests: router.workspaceRequests(current.id), focus: {}, inspect: windowInspection,
+                        controlPane: { _ in }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+        #expect(router.inspect().openings.first?.status == .usable)
+    }
+
+    @Test(arguments: [false, true])
+    func sceneValidationFailureDoesNotSettleNewRepositoryRequest(cancel: Bool) async throws {
+        let router = WorkLinkRouter(), barrier = LinkedDestinationBarrier()
+        let path = repositoryFixturePath()
+        let query = RegistryQuery { _, _ in "\"plan\"" }
+        let workspace = try await router.openRepository(path: path, link: nil, query: query) { _ in }
+        let oldRequests = router.workspaceRequests(workspace.id)
+        let validation = Task {
+            try await router.resolveWorkspace(workspace, query: RegistryQuery { _, _ in
+                await barrier.wait("validate")
+                throw RegistryQueryError("Old validation failure")
+            })
+        }
+        while !(await barrier.contains("validate")) { await Task.yield() }
+        _ = try await router.openRepository(path: path, link: nil, query: query) { _ in }
+        #expect(router.workspaceRequests(workspace.id) != oldRequests)
+        if cancel { validation.cancel() }
+        await barrier.release("validate")
+        switch await validation.result {
+        case .success: Issue.record("Obsolete validation unexpectedly succeeded")
+        case .failure(let error): #expect(error is CancellationError)
+        }
+        #expect(router.inspect().openings.first?.status == .opening)
+        let stale = UUID()
+        router.register(stale, repository: workspace.id, openingRequests: oldRequests, focus: {}, inspect: windowInspection,
+                        controlPane: { _ in }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+        #expect(router.inspect().openings.first?.status == .opening)
+        router.remove(stale, repository: workspace.id)
+        _ = try await router.resolveWorkspace(workspace, query: query)
+        router.register(UUID(), repository: workspace.id, openingRequests: router.workspaceRequests(workspace.id), focus: {}, inspect: windowInspection,
+                        controlPane: { _ in }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+        #expect(router.inspect().openings.first?.status == .usable)
+    }
+
+    @Test func requestArrivingBetweenValidationAndRegistrationUsesTheRetainedShell() async throws {
+        let router = WorkLinkRouter()
+        let path = repositoryFixturePath()
+        let query = RegistryQuery { _, _ in "\"plan\"" }
+        let workspace = try await router.openRepository(path: path, link: nil, query: query) { _ in }
+        let validated = router.workspaceRequests(workspace.id)
+        _ = try await router.resolveWorkspace(workspace, query: query)
+        _ = try await router.openRepository(path: path, link: nil, query: query) { _ in }
+        let current = router.workspaceRequests(workspace.id)
+        let id = UUID()
+        router.register(id, repository: workspace.id, openingRequests: validated, focus: {}, inspect: windowInspection,
+                        controlPane: { _ in }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+        #expect(router.inspect().openings.first?.status == .opening)
+        router.confirmRegisteredWorkspace(workspace.id, requests: validated)
+        #expect(router.inspect().openings.first?.status == .opening)
+        router.confirmRegisteredWorkspace(workspace.id, requests: current)
+        #expect(router.inspect().openings.first?.status == .usable)
+        #expect(router.inspect().windows.map(\.window) == [id.uuidString])
+    }
+
+    @Test func sceneValidationFailureRemainsFailedAfterDelayedRegistration() async throws {
+        let router = WorkLinkRouter()
+        let workspace = try await router.openRepository(path: repositoryFixturePath(), link: nil,
+            query: RegistryQuery { _, _ in "\"plan\"" }) { _ in }
+        do {
+            _ = try await router.resolveWorkspace(workspace, query: RegistryQuery { _, _ in "\"different-plan\"" })
+            Issue.record("A changed plan must not restore this workspace")
+        } catch {}
+        #expect(router.inspect().windows.isEmpty)
+        #expect(router.inspect().openings.first?.status == .failed)
+        let receipt = router.inspect().openings
+        router.register(UUID(), repository: workspace.id, openingRequests: router.workspaceRequests(workspace.id), focus: {}, inspect: windowInspection,
+                        controlPane: { _ in }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+        #expect(router.inspect().openings == receipt)
+    }
+
+    private func repositoryFixturePath() -> String {
+        URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().path
+    }
+
     private func windowInspection(_ id: UUID) -> DesktopWindowInspection {
         DesktopWindowInspection(repository: "fixture", window: id.uuidString, path: nil,
             selectionKind: nil, selectionId: nil, reading: "loading", reason: nil,

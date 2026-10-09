@@ -1,5 +1,6 @@
 import Foundation
 import Loopflow
+import Observation
 
 /// The plan identifies the window; the path is only its local opening locator.
 /// SwiftUI compares values to reuse an existing window, including during opening.
@@ -14,6 +15,7 @@ struct RepositoryWorkspace: Codable, Hashable, Sendable {
 /// Queues are keyed before a window is requested. Registration order and focus
 /// cannot change the destination. Receivers own their retained model/surfaces.
 @MainActor
+@Observable
 final class WorkLinkRouter {
     static let shared = WorkLinkRouter()
 
@@ -25,6 +27,14 @@ final class WorkLinkRouter {
         let controlPane: (DesktopPaneCommand) throws -> Void
         let readText: (DesktopTextRequest) throws -> DesktopTextReading
     }
+    private struct RepositoryOpening {
+        let id: UUID
+        var repository: String?
+        var receipt: DesktopOpening
+    }
+    // A locator exists before plan lookup can succeed. These receipts never
+    // fabricate a window or supply Work identity from a filesystem path.
+    private var repositoryOpenings: [String: RepositoryOpening] = [:]
     private var targets: [String: Target] = [:]
     private var pending: [String: [URL]] = [:]
     private struct Delivery {
@@ -33,7 +43,7 @@ final class WorkLinkRouter {
     }
     private var delivering: [String: Delivery] = [:]
 
-    func register(_ incarnation: UUID, repository: String,
+    func register(_ incarnation: UUID, repository: String, openingRequests: [UUID] = [],
                   focus: @escaping () -> Void,
                   inspect: @escaping (UUID) -> DesktopWindowInspection,
                   controlPane: @escaping (DesktopPaneCommand) throws -> Void,
@@ -43,13 +53,101 @@ final class WorkLinkRouter {
             delivering.removeValue(forKey: repository)?.task.cancel()
         }
         targets[repository] = Target(incarnation: incarnation, focus: focus, receive: receive, inspect: inspect, controlPane: controlPane, readText: readText)
+        confirmRegisteredWorkspace(repository, requests: openingRequests)
         deliverPending(repository)
+    }
+
+    /// All entry points resolve before opening, including a repeated plain repo
+    /// request. Late reads may neither open a window nor overwrite newer feedback.
+    func openRepository(path: String, link: URL?, query: RegistryQuery,
+                        openWindow: (RepositoryWorkspace) -> Void) async throws -> RepositoryWorkspace {
+        let path = path.normalizedFilePath
+        var components = URLComponents()
+        components.scheme = "loopflow"
+        components.host = "open"
+        components.queryItems = [URLQueryItem(name: "repo", value: path)]
+        guard let url = link ?? components.url else { throw RegistryQueryError("Invalid repository opening path.") }
+        let id = UUID()
+        repositoryOpenings[path] = RepositoryOpening(id: id, repository: nil,
+            receipt: DesktopOpening(url: url.absoluteString, status: .opening, reason: nil))
+        do {
+            let workspace = try await RepositoryWorkspace.resolve(path: path, query: query)
+            try Task.checkCancellation()
+            guard repositoryOpenings[path]?.id == id else { throw CancellationError() }
+            var destination = link
+            if let link {
+                let target = try TaskLink(url: link)
+                destination = TaskLink(issue: target.issue, repo: workspace.path, session: target.session, diff: target.diff).url
+            }
+            repositoryOpenings[path]?.repository = workspace.id
+            if deliver(destination, repository: workspace.id) {
+                finishRepositoryOpening(path, id: id, status: .usable)
+            } else {
+                openWindow(workspace)
+            }
+            return workspace
+        } catch {
+            guard repositoryOpenings[path]?.id == id else { throw CancellationError() }
+            finishRepositoryOpening(path, id: id, status: .failed,
+                reason: error is CancellationError ? "Repository opening canceled." : error.localizedDescription)
+            throw error
+        }
+    }
+
+    func hasWindow(_ repository: String) -> Bool { targets[repository] != nil }
+
+    func confirmRegisteredWorkspace(_ repository: String, requests: [UUID]) {
+        guard !Task.isCancelled, hasWindow(repository) else { return }
+        for (path, request) in repositoryOpenings where request.repository == repository && requests.contains(request.id) {
+            finishRepositoryOpening(path, id: request.id, status: .usable)
+        }
+    }
+
+    func workspaceRequests(_ repository: String) -> [UUID] {
+        repositoryOpenings.sorted { $0.key < $1.key }.compactMap {
+            $0.value.repository == repository ? $0.value.id : nil
+        }
+    }
+
+    /// Restored scenes use the same resolver. Failure belongs to requests that
+    /// were waiting when this validation began, never arrivals during the read.
+    func resolveWorkspace(_ workspace: RepositoryWorkspace, query: RegistryQuery) async throws -> RepositoryWorkspace {
+        let requests = repositoryOpenings.filter { $0.value.repository == workspace.id }
+        let requestIDs = requests.sorted { $0.key < $1.key }.map { $0.value.id }
+        do {
+            let current = try await RepositoryWorkspace.resolve(path: workspace.path, query: query)
+            try Task.checkCancellation()
+            guard current.id == workspace.id else {
+                throw RegistryQueryError("This location now selects another repository plan. Open it explicitly from Open Repo; the restored workspace was not changed.")
+            }
+            guard workspaceRequests(workspace.id) == requestIDs else {
+                throw CancellationError()
+            }
+            return current
+        } catch {
+            guard workspaceRequests(workspace.id) == requestIDs else { throw CancellationError() }
+            for (path, request) in requests {
+                finishRepositoryOpening(path, id: request.id, status: .failed,
+                    reason: error is CancellationError ? "Repository opening canceled." : error.localizedDescription)
+            }
+            throw error
+        }
+    }
+
+    private func finishRepositoryOpening(_ path: String, id: UUID, status: DesktopOpening.Status, reason: String? = nil) {
+        guard let request = repositoryOpenings[path], request.id == id,
+              request.receipt.status == .opening else { return }
+        repositoryOpenings[path]?.receipt = DesktopOpening(url: request.receipt.url, status: status, reason: reason)
     }
 
     /// No focus change, reads, surface allocation, or provider launch.
     func inspect() -> DesktopInspection {
         DesktopInspection(observedAt: Int64(Date().timeIntervalSince1970), windows: targets.sorted { $0.key < $1.key }.map { _, target in
             target.inspect(target.incarnation)
+        }, openings: repositoryOpenings.sorted { $0.key < $1.key }.compactMap { _, request in
+            // Task outcome ownership transfers to the receiving WorkModel.
+            if request.receipt.status == .usable, URL(string: request.receipt.url)?.host == "task" { return nil }
+            return request.receipt
         })
     }
 

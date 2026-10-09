@@ -5,11 +5,14 @@ public struct DesktopInspection: Codable, Sendable, Equatable {
     public let observedAt: Int64
     public let windows: [DesktopWindowInspection]
 
-    public init(observedAt: Int64, windows: [DesktopWindowInspection]) {
+    public let openings: [DesktopOpening]
+
+    public init(observedAt: Int64, windows: [DesktopWindowInspection], openings: [DesktopOpening]) {
         self.observedAt = observedAt
         self.windows = windows
+        self.openings = openings
     }
-    enum CodingKeys: String, CodingKey { case observedAt = "observed_at", windows }
+    enum CodingKeys: String, CodingKey { case observedAt = "observed_at", windows, openings }
 }
 
 public struct DesktopOpening: Codable, Sendable, Equatable {

@@ -96,6 +96,12 @@ struct LinkedSession: Equatable {
     let changesTask: RoadmapTask?
 }
 
+struct LinkedTaskPage: Equatable {
+    let generation: Int
+    let taskID: String
+    let repo: String
+}
+
 @MainActor
 @Observable
 final class WorkModel {
@@ -105,6 +111,7 @@ final class WorkModel {
     private(set) var taskLinkReading: WorkReading<RoadmapSnapshot> = .loading
     var showsTaskLink = false
     var linkedSession: LinkedSession?
+    private(set) var linkedTaskPage: LinkedTaskPage?
     private(set) var taskOpening: DesktopOpening?
     @ObservationIgnored private var destinationGeneration = 0
 
@@ -163,6 +170,7 @@ final class WorkModel {
         destinationGeneration &+= 1
         if showsTaskLink { showsTaskLink = false }
         if linkedSession != nil { linkedSession = nil }
+        if linkedTaskPage != nil { linkedTaskPage = nil }
     }
 
     func chooseLinkedTask(wave: WaveRoadmap, task: RoadmapTask) async {
@@ -207,6 +215,7 @@ final class WorkModel {
         }
         guard link.session != nil || link.diff else {
             openTaskDestination(wave: wave, task: task, preservingOpening: true)
+            linkedTaskPage = LinkedTaskPage(generation: generation, taskID: task.id, repo: wave.wave.repo.normalizedFilePath)
             return
         }
         let sameRepo = repoPath?.normalizedFilePath == wave.wave.repo.normalizedFilePath
@@ -260,6 +269,16 @@ final class WorkModel {
         navigation.selectedSessionId = record.id
         navigation.content = .terminals
         linkedSession = LinkedSession(generation: generation, record: record, changesTask: link.diff ? task : nil)
+    }
+
+    /// Called by the requested Task's mounted page (or its unavailable surface).
+    /// A callback from an older rendering of the same Task is not this request.
+    func finishTaskPage(_ request: LinkedTaskPage, error: String? = nil) {
+        guard !Task.isCancelled, linkedTaskPage == request, request.generation == destinationGeneration,
+              repoPath?.normalizedFilePath == request.repo,
+              let opening = taskOpening, opening.status == .opening else { return }
+        taskOpening = DesktopOpening(url: opening.url, status: error == nil ? .usable : .failed, reason: error)
+        linkedTaskPage = nil
     }
 
     /// Observe the existing Session and Files owners, never a second readiness store.

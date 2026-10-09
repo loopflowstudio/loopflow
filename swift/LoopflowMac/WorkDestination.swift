@@ -69,13 +69,14 @@ struct TaskLink: Equatable, Sendable {
 struct WorkLinkReceiver: NSViewRepresentable {
     let router: WorkLinkRouter
     let repository: String
+    let openingRequests: [UUID]
     let inspect: (UUID) -> DesktopWindowInspection
     let controlPane: (DesktopPaneCommand) throws -> Void
     let readText: (DesktopTextRequest) throws -> DesktopTextReading
     let receive: (URL) async -> Void
 
     func makeNSView(context: Context) -> Receiver {
-        Receiver(router: router, repository: repository, inspect: inspect, controlPane: controlPane, readText: readText, receive: receive)
+        Receiver(router: router, repository: repository, openingRequests: openingRequests, inspect: inspect, controlPane: controlPane, readText: readText, receive: receive)
     }
     func updateNSView(_ view: Receiver, context: Context) {
         view.receive = receive
@@ -91,17 +92,19 @@ struct WorkLinkReceiver: NSViewRepresentable {
         let id = UUID()
         let router: WorkLinkRouter
         let repository: String
+        let openingRequests: [UUID]
         var inspect: (UUID) -> DesktopWindowInspection
         var controlPane: (DesktopPaneCommand) throws -> Void
         var readText: (DesktopTextRequest) throws -> DesktopTextReading
         var receive: (URL) async -> Void
 
-        init(router: WorkLinkRouter, repository: String, inspect: @escaping (UUID) -> DesktopWindowInspection,
+        init(router: WorkLinkRouter, repository: String, openingRequests: [UUID], inspect: @escaping (UUID) -> DesktopWindowInspection,
              controlPane: @escaping (DesktopPaneCommand) throws -> Void,
              readText: @escaping (DesktopTextRequest) throws -> DesktopTextReading,
              receive: @escaping (URL) async -> Void) {
             self.router = router
             self.repository = repository
+            self.openingRequests = openingRequests
             self.receive = receive
             self.inspect = inspect
             self.controlPane = controlPane
@@ -112,7 +115,7 @@ struct WorkLinkReceiver: NSViewRepresentable {
         override func viewDidMoveToWindow() {
             router.remove(id, repository: repository)
             if let window {
-                router.register(id, repository: repository, focus: { [weak window] in
+                router.register(id, repository: repository, openingRequests: openingRequests, focus: { [weak window] in
                     window?.makeKeyAndOrderFront(nil)
                 }, inspect: inspect, controlPane: { [weak self] request in
                     guard let self else { throw RegistryQueryError("The repository window is unavailable.") }

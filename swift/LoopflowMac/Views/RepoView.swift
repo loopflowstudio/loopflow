@@ -15,6 +15,7 @@ struct RepoView: View {
     @State private var sessionWorkspaces: SessionsWorkspaceRegistry
     private let taskLinks: WorkLinkRouter?
     private let repository: String?
+    private let openingRequests: [UUID]
     private let query: RegistryQuery
 
     init(
@@ -23,6 +24,7 @@ struct RepoView: View {
         query: RegistryQuery = RegistryQueryLocal.shared,
         taskLinks: WorkLinkRouter? = nil,
         repository: String? = nil,
+        openingRequests: [UUID] = [],
         openRepository: ((String, URL?) -> Void)? = nil
     ) {
         self.portfolioService = portfolioService
@@ -30,6 +32,7 @@ struct RepoView: View {
         self.query = query
         self.taskLinks = taskLinks
         self.repository = repository
+        self.openingRequests = openingRequests
         let restored = initialRepoPath == nil && !AppTestMode.shouldBypassRegistry
             ? loadLoopflowState()?.selectedRepoPath : nil
         let model = WorkModel.window(query: query, launchCandidates: [initialRepoPath, restored].compactMap { $0 })
@@ -68,7 +71,7 @@ struct RepoView: View {
         .accessibilityIdentifier("loopflow")
         .background {
             if let taskLinks, let repository {
-                WorkLinkReceiver(router: taskLinks, repository: repository, inspect: { incarnation in
+                WorkLinkReceiver(router: taskLinks, repository: repository, openingRequests: openingRequests, inspect: { incarnation in
                     model.inspectDesktop(repository: repository, window: incarnation, workspaces: sessionWorkspaces)
                 }, controlPane: { try sessionWorkspaces.controlPane($0, model: model) },
                    readText: { try sessionWorkspaces.readText($0) }) { url in

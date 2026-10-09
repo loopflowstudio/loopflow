@@ -222,6 +222,7 @@ struct LoopflowApp: App {
 
     @MainActor
     private func reportOpeningError(_ error: Error) {
+        guard !(error is CancellationError) else { return }
         openingError = error.localizedDescription
         openWindow(id: "open-work")
     }
@@ -237,16 +238,10 @@ struct LoopflowApp: App {
     @MainActor
     private func openRepository(_ path: String, link: URL? = nil) async throws {
         let query = SessionFixture.query ?? RegistryQueryLocal.shared
-        let workspace = try await RepositoryWorkspace.resolve(path: path, query: query)
-        portfolioService.addRepo(URL(fileURLWithPath: workspace.path))
-        var destination = link
-        if let link {
-            let target = try TaskLink(url: link)
-            destination = TaskLink(issue: target.issue, repo: workspace.path, session: target.session, diff: target.diff).url
-        }
-        if !taskLinks.deliver(destination, repository: workspace.id) {
+        let workspace = try await taskLinks.openRepository(path: path, link: link, query: query) { workspace in
             openWindow(id: "workspace", value: workspace)
         }
+        portfolioService.addRepo(URL(fileURLWithPath: workspace.path))
         try? saveLoopflowState(LoopflowState(selectedRepoPath: workspace.path))
     }
 

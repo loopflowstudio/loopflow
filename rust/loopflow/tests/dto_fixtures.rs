@@ -627,6 +627,14 @@ fn desktop_inspection_preserves_exact_windows_hidden_panes_and_stale_reading() {
     use loopflow::lf::commands::desktop::DesktopInspection;
     let json = include_str!("../../../tests/fixtures/dto/desktop_inspection.json");
     let report: DesktopInspection = serde_json::from_str(json).unwrap();
+    assert_eq!(
+        report.openings[0].reason.as_deref(),
+        Some("Repository path is unavailable")
+    );
+    assert!(report.render().contains("Repository path is unavailable"));
+    let mut missing_openings: serde_json::Value = serde_json::from_str(json).unwrap();
+    missing_openings.as_object_mut().unwrap().remove("openings");
+    assert!(serde_json::from_value::<DesktopInspection>(missing_openings).is_err());
     let window = &report.windows[0];
     assert_eq!(
         window.workspaces[0].layout.children[0].surface.as_deref(),

@@ -92,6 +92,13 @@ struct DTOFixtureTests {
     @Test func desktopInspectionRetainsUnavailableWorkAndExactPanes() throws {
         let data = try loadFixtureData("desktop_inspection.json")
         let report = try JSONDecoder().decode(DesktopInspection.self, from: data)
+        #expect(report.openings.first?.status == .failed)
+        #expect(report.openings.first?.reason == "Repository path is unavailable")
+        var missingOpenings = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        missingOpenings.removeValue(forKey: "openings")
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(DesktopInspection.self, from: JSONSerialization.data(withJSONObject: missingOpenings))
+        }
         let window = try #require(report.windows.first)
         #expect(window.reading == "unavailable")
         #expect(window.task?.actions == nil)

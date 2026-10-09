@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::id::WaveId;
+use crate::id::{AgentSessionId, WaveId};
 use crate::profile::{
     AccessProfile, AuthBrowserBinding, EmailAddress, ProfileId, ProviderRoute, RouteScope,
 };
@@ -919,14 +919,14 @@ impl Store {
     pub async fn pin_provider_session_route(
         &self,
         provider: Provider,
-        provider_session_id: &str,
+        agent_session: &AgentSessionId,
         account_id: &ProviderAccountId,
         isolated: bool,
     ) -> StoreResult<()> {
-        let provider_session_id = provider_session_id.to_string();
+        let agent_session = agent_session.clone();
         let account_id = account_id.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.pin_provider_session_route(provider, &provider_session_id, &account_id, isolated)
+            store.pin_provider_session_route(provider, &agent_session, &account_id, isolated)
         })
         .await
     }
@@ -934,11 +934,11 @@ impl Store {
     pub async fn provider_session_isolated(
         &self,
         provider: Provider,
-        provider_session_id: &str,
+        agent_session: &AgentSessionId,
     ) -> StoreResult<Option<bool>> {
-        let provider_session_id = provider_session_id.to_string();
+        let agent_session = agent_session.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.provider_session_isolated(provider, &provider_session_id)
+            store.provider_session_isolated(provider, &agent_session)
         })
         .await
     }
@@ -970,11 +970,11 @@ impl Store {
     pub async fn provider_session_account(
         &self,
         provider: Provider,
-        provider_session_id: &str,
+        agent_session: &AgentSessionId,
     ) -> StoreResult<Option<ProviderAccountId>> {
-        let provider_session_id = provider_session_id.to_string();
+        let agent_session = agent_session.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.provider_session_account(provider, &provider_session_id)
+            store.provider_session_account(provider, &agent_session)
         })
         .await
     }
@@ -983,12 +983,12 @@ impl Store {
         &self,
         provider: Provider,
         candidates: &[ProviderAccountId],
-        provider_session_id: Option<&str>,
+        agent_session: Option<&AgentSessionId>,
     ) -> StoreResult<Option<ProviderAccountSelection>> {
         let candidates = candidates.to_vec();
-        let provider_session_id = provider_session_id.map(str::to_string);
+        let agent_session = agent_session.cloned();
         run_sqlite(&self.sqlite, move |store| {
-            store.select_provider_account(provider, &candidates, provider_session_id.as_deref())
+            store.select_provider_account(provider, &candidates, agent_session.as_ref())
         })
         .await
     }
@@ -2922,7 +2922,7 @@ mod tests {
         async fn stop(&mut self) -> anyhow::Result<()> {
             Ok(())
         }
-        fn provider_session_id(&self) -> Option<String> {
+        fn agent_session(&self) -> Option<crate::id::AgentSessionId> {
             None
         }
     }

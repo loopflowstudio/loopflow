@@ -995,7 +995,7 @@ mod tests {
             std::env::set_var(crate::lf::WORK_DECLARATION_ENV, format!("task:{selector}"));
             crate::session_record::write_provider_session(
                 &capture.artifact_dir(),
-                "saved-session",
+                &"saved-session".into(),
                 None,
             )
             .unwrap();

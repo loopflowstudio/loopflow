@@ -2,6 +2,7 @@
 //! does. A conversation Loopflow started recorded that id; one the provider
 //! started alone is found in its home and admitted when first connected.
 
+use crate::id::AgentSessionId;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{BufRead, BufReader};
@@ -19,7 +20,7 @@ pub(super) async fn human_input_times<'a>(
     store: &SharedStore,
     sessions: impl IntoIterator<Item = &'a LfSession>,
 ) -> Result<BTreeMap<String, i64>> {
-    let mut codex = BTreeMap::<PathBuf, Vec<(String, String)>>::new();
+    let mut codex = BTreeMap::<PathBuf, Vec<(String, AgentSessionId)>>::new();
     let mut claude = BTreeMap::new();
     let mut times = BTreeMap::new();
     for session in sessions {
@@ -31,7 +32,7 @@ pub(super) async fn human_input_times<'a>(
         let Some(reference) = store.sqlite.input_provider_session(&session.artifact_key)? else {
             continue;
         };
-        let id = reference.provider_session_id;
+        let id = reference.agent_session;
         let isolated = store.provider_session_isolated(provider, &id).await?;
         let home = if isolated == Some(true) {
             let account = match reference.account_id {
@@ -60,7 +61,8 @@ pub(super) async fn human_input_times<'a>(
                 .push((session.id.clone(), id));
         } else {
             let at = claude.entry((home.clone(), id.clone())).or_insert_with(|| {
-                transcript(provider, &home, &id).and_then(|path| claude_input_time(&path, &id))
+                transcript(provider, &home, id.as_str())
+                    .and_then(|path| claude_input_time(&path, id.as_str()))
             });
             if let Some(at) = at {
                 times.insert(session.id.clone(), *at);
@@ -71,7 +73,7 @@ pub(super) async fn human_input_times<'a>(
         let wanted = sessions.iter().map(|(_, id)| id.as_str()).collect();
         let native = codex_input_times(&home.join("history.jsonl"), &wanted);
         for (session, id) in sessions {
-            if let Some(at) = native.get(&id) {
+            if let Some(at) = native.get(id.as_str()) {
                 times.insert(session, *at);
             }
         }
@@ -172,7 +174,7 @@ fn claude_input_time(path: &Path, id: &str) -> Option<i64> {
 
 /// The Session that recorded `id` as its provider conversation.
 pub(crate) async fn recorded(store: &SharedStore, id: &str) -> Result<Option<LfSession>> {
-    let sessions = store.sqlite.sessions_for_provider_thread(id)?;
+    let sessions = store.sqlite.sessions_for_agent_session(&id.into())?;
     match sessions.as_slice() {
         [] => Ok(None),
         [session] => Ok(store.session(session).await?),
@@ -256,11 +258,11 @@ pub(crate) async fn admit(store: &SharedStore, id: &str) -> Result<Option<LfSess
     )?;
     let dir = local_capture_dir(&session.artifact_key)
         .ok_or_else(|| anyhow!("Session {} has an invalid capture reference", session.id))?;
-    crate::session_record::write_provider_session(&dir, id, conversation.account.clone())?;
+    crate::session_record::write_provider_session(&dir, &id.into(), conversation.account.clone())?;
     if let Some(account) = &conversation.account {
         // It resumes in the account home that holds its history.
         store
-            .pin_provider_session_route(conversation.provider, id, account, true)
+            .pin_provider_session_route(conversation.provider, &id.into(), account, true)
             .await?;
     }
     Ok(Some(session))
@@ -382,7 +384,7 @@ mod tests {
         };
         store.upsert_provider_account(&account).await.unwrap();
         store
-            .pin_provider_session_route(Provider::Codex, ID, &account.account_id, true)
+            .pin_provider_session_route(Provider::Codex, &ID.into(), &account.account_id, true)
             .await
             .unwrap();
         let home = account.home.as_ref().unwrap();

@@ -131,7 +131,7 @@ struct DesktopPaneControlTests {
         func quote(_ value: String) -> String { "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'" }
         let registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId)
         let router = WorkLinkRouter(), windowID = UUID()
-        let store = registry.workspace(for: identity).multiplexer
+        let workspace = registry.workspace(for: identity), store = workspace.multiplexer
         store.newShell()
         let pane = store.focusedPane
         store.newShell()
@@ -159,7 +159,8 @@ struct DesktopPaneControlTests {
         let token = try #require(registry.surfaces.surfaceIncarnation(for: terminal))
         let destination = target(pane, window: windowID)
         register(router, window: windowID, registry: registry)
-        func text(_ pane: PaneState, terminal: TerminalIdentity) throws -> String {
+        func text(_ pane: PaneState) throws -> String {
+            let terminal = try #require(workspace.terminal(for: pane))
             let surface = try #require(registry.surfaces.surfaceIncarnation(for: terminal))
             let result = try router.readText(.init(target: target(pane, window: windowID),
                 surface: surface, region: .screen, maxBytes: 65536)).result
@@ -169,8 +170,8 @@ struct DesktopPaneControlTests {
             return text
         }
         let deadline = ContinuousClock.now + .seconds(5)
-        while try !text(pane, terminal: terminal).contains("fixture-ready")
-            || !text(otherPane, terminal: other).contains("fixture-ready") {
+        while try !text(pane).contains("fixture-ready")
+            || !text(otherPane).contains("fixture-ready") {
             try #require(ContinuousClock.now < deadline)
             try await Task.sleep(for: .milliseconds(20))
         }
@@ -191,7 +192,7 @@ struct DesktopPaneControlTests {
         try send(.key(surface: token, key: .end))
         try send(.text(surface: token, text: " > " + quote(result.path)))
         let draftDeadline = ContinuousClock.now + .seconds(3)
-        while try !text(pane, terminal: terminal).contains("submitted") {
+        while try !text(pane).contains("submitted") {
             try #require(ContinuousClock.now < draftDeadline)
             try await Task.sleep(for: .milliseconds(20))
         }
@@ -202,14 +203,14 @@ struct DesktopPaneControlTests {
             try #require(ContinuousClock.now < submitDeadline)
             try await Task.sleep(for: .milliseconds(20))
         }
-        #expect(try !text(otherPane, terminal: other).contains("printf"))
+        #expect(try !text(otherPane).contains("printf"))
         #expect(store.layout == before)
         #expect(store.focusedPaneId == otherPane.id)
         #expect(window.firstResponder === otherView)
         #expect(registry.surfaces.surfaceIncarnation(for: terminal) == token)
     }
 
-    @Test(.requiresDisplay) func boundedReadKeepsRegionsAndUTF8PrefixesWithoutChangingSelectionOrFocus() throws {
+    @Test(.requiresDisplay) func boundedReadPreservesRegionsSelectionAndExitedSurfaceUntilReplacement() throws {
         _ = NSApplication.shared
         let manager = GhosttyManager.shared
         manager.initialize()
@@ -268,34 +269,8 @@ struct DesktopPaneControlTests {
         #expect(store.focusedPaneId == focus)
         #expect(registry.surfaces.surfaceIncarnation(for: terminal) == token)
         #expect(view.surface == surface)
-    }
-
-    @Test(.requiresDisplay) func passiveReadRetainsExitedSurfaceAndRejectsItsReplacement() throws {
-        _ = NSApplication.shared
-        let manager = GhosttyManager.shared
-        manager.initialize()
-        let registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId)
-        let router = WorkLinkRouter(), window = UUID()
-        let store = registry.workspace(for: identity).multiplexer
-        store.newShell()
-        let pane = store.focusedPane
-        let terminal = TerminalIdentity.shell(pane.id, machineId: identity.machineId)
-        let view = registry.surfaces.view(for: terminal)
-        view.setFrameSize(CGSize(width: 400, height: 300))
-        view.workingDirectory = NSTemporaryDirectory()
-        view.command = "/bin/sh -c 'printf retained; exit 0'"
-        view.createSurface(manager: manager)
-        defer { registry.surfaces.release(terminal) }
-        let surface = try #require(view.surface)
-        let token = try #require(registry.surfaces.surfaceIncarnation(for: terminal))
-        let request = DesktopTextRequest(target: target(pane, window: window), surface: token, region: .screen, maxBytes: 16)
-        register(router, window: window, registry: registry)
-        // Keep queued MainActor lifecycle callbacks pending to observe the real
-        // exited-but-retained interval. Reading must not perform their cleanup.
-        let deadline = Date().addingTimeInterval(3)
-        while !ghostty_surface_process_exited(surface), Date() < deadline { Thread.sleep(forTimeInterval: 0.01) }
-        try #require(ghostty_surface_process_exited(surface))
-        #expect(try router.readText(request).result == .available(text: "retained", truncated: false))
+        let request = DesktopTextRequest(target: target(pane, window: window), surface: token,
+                                         region: .screen, maxBytes: 65536)
         for action in [DesktopPaneAction.text(surface: token, text: "must not reopen"), .key(surface: token, key: .enter)] {
             #expect(throws: RegistryQueryError.self) { try router.controlPane(.init(target: request.target, action: action)) }
         }

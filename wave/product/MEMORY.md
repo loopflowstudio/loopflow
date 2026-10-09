@@ -50,9 +50,9 @@ Neither negative peer observation nor local SQLite reserves first start; runtime
 must not synchronize. Seeded IDs prove routing, not exchange/admission.
 
 `desktop text/key` reuse existing owners: Jack selected cursor insertion into
-drafts with Enter separate; control-text/IME limits are reversible. October 9's
-verified lf3 enables bounded reads. Native extraction/input remains unproved;
-reads grant no input authority.
+drafts with Enter separate; control-text/IME limits are reversible. Verified lf3
+enables bounded reads. Headless builds skip native I/O diagnostics;
+extraction/input remains unproved. Reads grant no input authority.
 
 Jack's October 8 API: `--context` previews input, `--explain` is broader,
 `--chrome` controls execution. Root `run`, `--max-turns` and `--no-loopflow` are

@@ -5,26 +5,9 @@ import Loopflow
 
 class CaptureScreenshotCommand: NSScriptCommand {
     override func performDefaultImplementation() -> Any? {
-        var result: String?
-        var errorString: String?
-
-        MainActor.assumeIsolated {
-            let service = SnapshotService()
-            do {
-                let screenshotURL = try service.snapshotKeyWindow()
-                result = screenshotURL.path
-            } catch {
-                errorString = error.localizedDescription
-            }
+        scriptReply {
+            try SnapshotService().snapshotKeyWindow().path
         }
-
-        if let errorString {
-            scriptErrorNumber = NSInternalScriptError
-            scriptErrorString = errorString
-            return nil
-        }
-
-        return result
     }
 }
 
@@ -63,10 +46,14 @@ private extension NSScriptCommand {
     /// Resolve and encode in one MainActor turn. Failed replies grant no replay.
     func desktopReply<Reading: Encodable>(_ read: @MainActor (String?) throws -> Reading) -> String? {
         let json = directParameter as? String
+        return scriptReply {
+            String(decoding: try JSONEncoder().encode(read(json)), as: UTF8.self)
+        }
+    }
+
+    func scriptReply(_ operation: @MainActor () throws -> String) -> String? {
         do {
-            return try MainActor.assumeIsolated {
-                String(decoding: try JSONEncoder().encode(read(json)), as: UTF8.self)
-            }
+            return try MainActor.assumeIsolated(operation)
         } catch {
             scriptErrorNumber = NSInternalScriptError
             scriptErrorString = error.localizedDescription

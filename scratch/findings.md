@@ -205,3 +205,14 @@ outer conflict handler could soften a commit/release failure into a projection h
 Retained mutation identity checks precede completeness validation. Creation readback
 still reconciles both pre-existing and newly projected delivery receipts; neither
 call is redundant. Focused checks do not authorize mixed-provider activation.
+
+Source review at `97bf9dbcb` distinguishes independent Task creation from root
+association: `independent_peer_tasks_converge_without_transferring_execution`
+binds the repository ID before creating either Task. `PlanningKind::fields()`
+exports neither repository identity nor delegation; first Wave import allocates
+local identity via `ensure_repository_in`. The admission guard checks membership
+in any destination, not only shared-named refs. The plan now names those remaining
+mechanisms rather than counting refusal or pre-binding as distributed routing.
+Product still has no child directories/memories. Relevant Infrastructure planning,
+peer/recovery and Intelligence check/context sections were read; unrelated sibling
+history was not re-audited. Local main remains `3e1e6245c`; no remote fetch was made.

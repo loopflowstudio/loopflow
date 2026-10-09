@@ -93,13 +93,17 @@ ages/baselines and causal frontiers. Import reuses portable fields.
 Entity revisions cannot order relationships; scalar/list replay cannot clear
 freshness or unseen notices. Prior evidence: `7d12ab10a`, this heading.
 
-`repo identity --bind` associates an unbound checkout without selecting/publishing; divergent roots retain their identities. Shared first starts refuse pending exclusive admission. Delegation exchange,
-legacy association and remote/native composition remain. Desktop peer readings use Machine/repository keys.
+`repo identity --bind` associates unbound checkouts without selection/publication;
+divergent roots remain unresolved. The peer fixture pre-binds repository identity; journals carry neither
+RepositoryId nor delegation. Unbound
+import allocates local identity: Task convergence cannot prove window convergence.
+Git-selected Tasks without retained checkouts refuse first start, including
+user-keyed refs. Refusal proves no exclusive admission.
 
-Composition excludes LOO-412's started-Task transfer/preparing resolver, preserving
-Jack Heart's recorded-Machine retention and effect-free selection. **Unmapping is not association:** duplicate provider creation can
-leave selectors/effects behind. Preserve IDs, lookup and execution. Per-Work
-sharing/recovery and combined public/native acceptance remain unproved.
+Composition excludes LOO-412's transfer/preparing resolver, preserving Jack Heart's
+recorded-Machine retention and effect-free selection. **Unmapping is not association:**
+preserve IDs, lookup, effects and execution. Peer reads use Machine/repository keys.
+Legacy association, sharing/recovery and remote/native acceptance remain unproved.
 
 Integrated #1512 (`3e1e6245c`): live connect hands off; dead-driver resume starts a
 fresh engine on native history. Peer proof must separate local resume from
@@ -193,10 +197,9 @@ and a miss ships with numbers. Later that day: no follow-up Tasks.
 
 ## Workflow and Flow alignment (LOO-386, 2026-10-07)
 
-Jack Heart retained Workflow and Flow, scoped commands to Project and Task, and
-specified restart resets position. After reviewing PR #1492 and accepting
-TaskRunEvidence, he requested “lets ship it”: gate then
-Task-completing landing. Review and approval: `9669d67d5:scratch/workflow-review.md`.
+Jack Heart approved LOO-386/#1492, retaining Workflow/Flow and restart-to-start,
+then requested gate and Task-completing landing. Review/approval:
+`9669d67d5:scratch/workflow-review.md`; earlier detail: `97bf9dbcb`, this heading.
 
 Definitions have independent namespaces; navigation carries kind and name.
 Project selection affects future take-up; restart retains the captured graph and
@@ -204,9 +207,8 @@ history. Workflow selection, latest FlowProcessDetail, execution evidence and
 TaskRunControl stay separate; latest grants no authority. LOO-400's landed
 `e467ea995` supplies Process/LFID and the migration; old captures remain readable.
 
-October 9's Wave-owned planning supersedes Project command spelling. Earlier
-catalog/diagram/restart choices and proofs: `942dab5d8:wave/product/MEMORY.md`,
-this heading. Restart cannot let an active Flow's arrival advance the reset Task.
+Wave-owned planning supersedes Project commands. Catalog/diagram/restart history:
+`942dab5d8`, this heading. An active Flow's arrival cannot advance a reset Task.
 
 Gate repaired fixtures missed by focused checks: absent
 execution is null, and every Task needs run_control. A nested macOS sandbox

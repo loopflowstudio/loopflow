@@ -197,9 +197,10 @@ a Desktop Work database, a second layout store or a terminal emulator. Network
 loss retains locally committed planning and visible pending synchronization.
 LOO-411's old SSH `--repo` removal is not a veto on Work-directed routing.
 
-LOO-406 owns the local planning lifecycle; LOO-412 supplies remote checkout/adoption
-work and custom Git-ref Task synchronization; ordinary operations remain local. LOO-426 owns Work
-opening; LOO-416 saved panes; LOO-387 draft preparation; LOO-415/424 relay/resume;
+LOO-406 owns the local planning lifecycle; LOO-412 supplies custom Git-ref Task
+synchronization. Its started-Task transfer is excluded; remote launch composition
+remains in LOO-427, using existing Task preparation. Ordinary operations remain local.
+LOO-426 owns Work opening; LOO-416 saved panes; LOO-387 draft preparation; LOO-415/424 relay/resume;
 LOO-422 host status; LOO-402/403 Waiting/shortcuts; LOO-397 command discovery.
 These boundaries are integration constraints, not separate replacement projects.
 
@@ -222,43 +223,12 @@ separate native setup is removed, preserving read and input rejection assertions
 Apple-event handlers share MainActor/error reply handling; screenshot paths remain
 plain strings while Desktop readings remain JSON.
 
-Removed the blanket Flow-context refusal and preview orchestration/types from
-`run.rs` and `flow.rs`; `context/preview.rs` owns effect-free presentation, using
-existing prompt/graph owners. Removed raw-name checkout guards: preview and launch
-share `operator_scope` on resolved skills, including aliases and captured Flow steps.
-
-Removed: blanket remote-preview refusal, writable receiver identity lookup,
-SSH's repeated command parse, and shell-side `machine id` recheck/`probe_identity`
-switch. Entry validates addressed identity once before help, scope lookup or
-admission; rejection suppresses fallback Process writes. Transport consumes the
-parsed CLI; launch retains its sender probe/credentials, preview skips them.
-
-Removed launch-only opening, execution routing/preparation, split Session/Changes
-intent and URL completion. Generation-scoped `LinkedSession` uses existing
-Session/Files/pane owners; palette/direct/chooser links share receipts. Observation
-replaces `multiplexerStoreDidChange`, `_notify`, view revision counters and
-`openingSessionObservation`. MultiplexerStore owns visibility; request validation
-uses ID sets, not copied receipts. Earlier detail: `bdb008907` under this heading.
-
-Launch/preview share Task admission, Workflow selection, URL validation and definition
-syntax. Only launch prepares Work; previews suppress fallback Process writes and
-report Linux opening impediments. Builtins dispatch the parsed command directly,
-without `Target::Command` reconstruction.
-
-Wave replaces public Project/roadmap dispatch; each operation resolves `PlanTarget`
-on its own store, with separate Workflow reads/writes. Prompt excerpts persist
-only on launch; standalone budget reporting's final home remains open. Existing
-planning/history/prompt owners survive. Removal history:
-`82f9ed087:scratch/compare-cmux-s-command-line.md`, this heading.
-
-Session explanation reuses selection, action and client-observation owners without
-preparation or takeover. Removed remote workspace branches and unused Machine
-parameters remain at `7d12ab10a`, this heading; `workspace::associate` owns location.
-
-Earlier command, inherited-placement, Process-prompt and read-only lookup cuts:
-`8558e3177:scratch/compare-cmux-s-command-line.md`, **Delete — do not maintain**.
-History, Desktop, shared prompt owners and Task skill/Flow dispatch remain; legacy
-captures stay readable. Explicit `repo identity` alone owns registration.
+Command/opening deletion detail: `97bf9dbcb`, this file, **Delete — do not maintain**.
+The surviving owners are shared prompt/graph assembly, read-only selection,
+parsed transport, Session/Files/pane readiness and Wave planning. Preview performs
+no preparation, Process writes or excerpt persistence. Session explanation reads
+recorded endpoints without probing a live driver's protocol. No removed launch,
+Project/roadmap or callback path is retained beside those owners.
 
 Peer import no longer mutates its prepared object index in the retry loop or
 maintains a second receipt-exclusion list for scalar writes. Index construction
@@ -304,7 +274,10 @@ publishes a destination. Imported Waves establish a local repository identity wh
 none exists, without allocating placement. The new peer fixture starts with
 independently created Tasks/Waves on both stores, exchanges their journals and
 checks stable identity, offline saves, completion and replay against retained local
-Workflow, checkout, Session and Process rows. Matching Work IDs are not seeded.
+Workflow, checkout, Session and Process rows. Matching Task/Wave IDs are not seeded,
+but the fixture explicitly binds the repository ID **before** either side creates Work. It proves journal convergence
+under prior repository association, not association of independently established
+repository roots. Execution rows are populated retained fixtures, not live clients.
 This is storage composition, not configured transport or exclusive admission.
 
 The merge exposed an incompatible source-side transfer path: LOO-412's
@@ -315,30 +288,34 @@ Cold planning acquisition and common Git exchange remain; code preparation uses
 the existing Task owner. Remote first start needs its own accepted admission,
 not the removed source envelope or an implicit provider-alias association.
 
-First-start admission remains unresolved. Shared Tasks without a retained local
-checkout now refuse start through the common planning/admission check, before Git
-preparation and again at placement. Local-only Tasks, saves, acquisition and
+First-start admission remains unresolved. Git-selected Tasks (including user-keyed
+refs) without a retained local checkout refuse start through the common planning/
+admission check, before Git preparation and again at placement. Local-only Tasks, saves, acquisition and
 retained execution remain usable. Neither local absence, a negative peer reading
 nor a local SQLite transaction supplies a cross-Machine reservation.
 Delegation inheritance remains proposed, not accepted from source code alone.
 
-Remaining identity work composes the existing repository root with LOO-412's
-user-keyed default and explicit shared selection. At `ce740b028`, one repository
-can select different destinations for different Waves; a destination/ref is not
-itself repository identity. Window convergence must preserve that distinction,
-not open a window per destination or implicitly merge existing plans.
-Code remotes grant neither identity nor publication permission. `bind_repository` currently refuses a different
-existing ID; preserving existing plans while selecting/joining belongs in this
-composition, not a second registry. Connected-plan ownership and historical IDs
-remain intact.
+**Remaining identity/routing composition (source review October 9).**
+`PlanningKind::fields()` carries neither RepositoryId nor authored delegation.
+Import creates a fresh local repository ID when unbound; fetching the same journal
+alone therefore cannot converge window identity. The existing pre-bound fixture
+must not be treated as proof of that missing behavior.
 
-Resolve Work → effective delegation → execution checkout. Define explicit versus
-inherited provenance, assignment changes and pending/conflicted synchronization. A
-Machine can execute work from several repositories without rewriting its saved
-default per request. Consume LOO-412's transport and LOO-406's common local writer; do not add a
-callback planner or another synchronization engine. Work is one logical planning
-model with synchronized local records, not one physical planning-machine store.
-Retain historical execution and explicit legacy-ID mappings.
+- Associate independently established repository roots explicitly, preserving both
+  roots' Work, historical IDs, provider lookup and local execution. `bind_repository`
+  currently refuses a different existing ID. Reuse this owner with LOO-412's selection;
+  do not substitute destination/ref, clone name or code remote for repository identity.
+  One repository can select multiple destinations without splitting its window.
+- Exchange authored delegation through the common journal/Placement owners, retaining
+  explicit/legacy provenance, conflicts and pending state. Nearest-ancestor inheritance
+  is still proposed (Q2); the code cannot approve it.
+- Observe recorded execution location separately, with freshness/unavailability,
+  before interpreting an imported Task's missing local checkout as unstarted.
+  Couple first-start allocation to exclusive admission, not a negative peer read.
+  The present refusal is a safe incomplete path, not successful delegated execution.
+- Compose remote opening after identity/location resolution. Preserve execution on
+  its recorded Machine, Mac presentation and saved Machine defaults; no transfer
+  envelope, callback planner or second synchronization engine.
 
 **Required proof:** two machine fixtures converge on the same planning identities and
 changes; delegated execution reaches the correct checkout. Network failure retains
@@ -542,4 +519,4 @@ identity/delegation, open them, add shell/Files panes, retain an unfinished draf
 change focus, target a harmless command, read output, hide/restore, and verify the
 original input target and draft survive. Demo owns native usability; preserve comparison evidence and use no real accounts or live user terminals.
 
-Check (October 9 compression): `cargo build -p loopflow --bin lf`, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` PASS; `scripts/test_network.py` with 10 focused peer-import regressions PASS (independent stores, identity collisions, rollback, provider conflicts/frontiers, creation/deletion/order/content). Earlier composition checks: `8558e3177`, this file. Full affected suites: gate; native I/O: demo.
+Check (October 9 realign): `git diff --check` PASS; prose-only, no test rerun. Build/Clippy and 10 focused peer-import passes: `97bf9dbcb`, this file's check line. Full affected suites: gate; native I/O: demo.

@@ -98,10 +98,14 @@ Machine is unavailable, never a local default.
 that ID to the Machine-local repository locator; it contains no copied Work or
 execution. Existing repository paths receive distinct opaque IDs; new Wave writes
 use the same binding, and `lf repo identity` covers repositories without Work.
-Peer binding is explicit and cannot replace an existing plan. A shared code remote
+`lf repo identity --bind ID` explicitly binds an unbound checkout and refuses a
+different existing plan; it selects and publishes nothing. A shared code remote
 or equal clone name supplies no identity. `--repository ID` resolves at the target
 before Process admission, so SSH need not change the Machine's saved default.
-LOO-412 still owns user/shared selection and importing the same identity.
+LOO-412 supplies user/shared destination selection and portable Work exchange.
+That journal does not carry RepositoryId or delegation: unbound import creates
+a local repository ID. Explicit association of existing divergent roots and
+delegation exchange remain unfinished; equal Work IDs alone do not converge windows.
 
 This is not complete distributed routing: a peer's absence of a checkout is not
 proof of an unstarted Task. Planning exchange excludes execution. An observed
@@ -110,8 +114,10 @@ applying delegation to imported Work. The prototype handles recorded locations;
 remote observation and alias acquisition/rerouting remain unfinished. A negative
 observation is not a reservation: first-start admission must also exclude another
 Machine starting between the read and allocation. The local SQLite transaction
-does not supply that cross-machine guarantee. Do not infer a global execution
-destination from the current delegation alone.
+does not supply that cross-machine guarantee. Until admission is composed, Tasks
+selected into any Git destination without a retained checkout refuse first start,
+including user-keyed refs. Saves and acquisition still work. Do not infer a global
+execution destination from the current delegation alone.
 
 Task checkout location is recorded separately: `tasks.checkout_machine_id` and
 `worktree` identify the Machine and path prepared for execution. New checkouts

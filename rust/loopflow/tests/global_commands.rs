@@ -806,7 +806,10 @@ fn repo_selection_carries_scoped_task_prefix_through_reads_and_writes() {
         .as_str()
         .unwrap()
         .contains("Changed selected"));
-    assert_eq!(fs::read(path).unwrap(), before);
+    assert!(
+        fs::read(path).unwrap() == before,
+        "preview changed database bytes"
+    );
 }
 
 #[test]
@@ -857,7 +860,7 @@ fn invocation_previews_preserve_absent_storage_and_reject_unsupported_commands()
 }
 
 #[test]
-fn task_run_explanation_reads_unstarted_work_without_preparing_it() {
+fn task_run_explain_reads_unstarted_work_without_preparing_it() {
     let home = tempfile::tempdir().unwrap();
     let repo = TestRepo::new();
     let created: serde_json::Value = serde_json::from_str(&success(
@@ -893,7 +896,16 @@ fn task_run_explanation_reads_unstarted_work_without_preparing_it() {
         .unwrap(),
     );
     let report: serde_json::Value = serde_json::from_str(&output).unwrap();
-    assert_eq!(report["task"]["value"], id);
+    assert_eq!(report["resolution"]["task"]["value"], id);
+    assert_eq!(
+        report["resolution"]["execution_machine"]["source"],
+        "effective_delegation"
+    );
+    assert!(report["unavailable"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|reason| reason.as_str().unwrap().contains("first-start")));
     let inherited: serde_json::Value = serde_json::from_str(&success(
         command(home.path(), repo.path(), &["--explain", "--json"])
             .env("LF_AS", format!("task:{id}"))
@@ -903,7 +915,14 @@ fn task_run_explanation_reads_unstarted_work_without_preparing_it() {
     .unwrap();
     assert_eq!(inherited["task"]["value"], id);
     assert_eq!(inherited["task"]["source"], "inherited_declaration");
-    assert_eq!(fs::read(path).unwrap(), before);
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
+        .unwrap();
+    assert!(
+        fs::read(path).unwrap() == before,
+        "preview changed database bytes"
+    );
     let store = SqliteStore::new(&home.path().join(".lf/loopflow.db")).unwrap();
     assert!(store.task_by_issue(id).unwrap().unwrap().worktree.is_none());
 }
@@ -966,4 +985,224 @@ fn desktop_open_delivers_exact_task_without_preparing_its_execution() {
         })
         .unwrap();
     assert!(worktree.is_none());
+}
+
+#[test]
+fn task_run_explain_explicit_and_checkout_inferred_actions_preserve_all_state() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    support::bind_task_planning(&repo);
+    repo.create_branch("explain-proof");
+    let registered = support::register_task(
+        &home.path().join(".lf"),
+        &repo.path().canonicalize().unwrap(),
+        "explain-proof",
+        &repo.head_sha(),
+    );
+    // A captured Workflow wins over the Project's feature selection.
+    let graph = serde_json::json!({"name": "captured", "nodes": [{"name":"review", "skill":"demo", "description":null}], "edges":[{"from":"review", "to":"end", "flow":null}]});
+    let path = home.path().join(".lf/loopflow.db");
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute(
+        "INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,?2,'review',1)",
+        rusqlite::params![registered.task.id.as_str(), graph.to_string()],
+    )
+    .unwrap();
+    support::record_flow(
+        &home.path().join(".lf"),
+        repo.path(),
+        "prior",
+        "prior-step",
+        "succeeded",
+    );
+    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+    let before = fs::read(&path).unwrap();
+    let read = |args: &[&str]| -> serde_json::Value {
+        serde_json::from_str(&success(
+            command(home.path(), repo.path(), args).output().unwrap(),
+        ))
+        .unwrap()
+    };
+    let explicit = read(&["task", "run", "INF-123", "--explain", "--json"]);
+    let inferred = read(&["task", "run", "--explain", "--json"]);
+    let scoped = read(&["--task", "INF-123", "task", "run", "--explain", "--json"]);
+    assert_eq!(
+        explicit["resolution"]["task"]["value"],
+        registered.task.id.as_str()
+    );
+    assert_eq!(inferred["resolution"]["task"]["source"], "checkout");
+    assert_eq!(explicit["resolution"]["task"]["source"], "explicit");
+    for other in [&inferred, &scoped] {
+        assert_eq!(explicit["action"], other["action"]);
+        assert_eq!(explicit["impediments"], other["impediments"]);
+        assert_eq!(
+            explicit["resolution"]["execution_machine"],
+            other["resolution"]["execution_machine"]
+        );
+    }
+    assert_eq!(
+        explicit["action"],
+        serde_json::json!({"kind":"edge", "workflow":"captured", "take_up":false, "from":"review", "to":"end", "flow":null})
+    );
+    assert_eq!(
+        explicit["resolution"]["execution_machine"]["source"],
+        "recorded_checkout"
+    );
+    let invalid = read(&[
+        "task",
+        "run",
+        "INF-123",
+        "nonexistent",
+        "--explain",
+        "--json",
+    ]);
+    assert!(invalid["action"].is_null());
+    assert!(invalid["impediments"][0]
+        .as_str()
+        .unwrap()
+        .contains("does not leave review"));
+    let text = success(
+        command(home.path(), repo.path(), &["task", "run", "--explain"])
+            .output()
+            .unwrap(),
+    );
+    assert!(
+        text.contains("Workflow captured: review → end; run no Flow"),
+        "{text}"
+    );
+    assert!(text.contains("Nothing was executed"));
+    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+    assert!(
+        fs::read(path).unwrap() == before,
+        "preview changed database bytes"
+    );
+}
+
+#[test]
+fn task_run_explain_reports_remote_unknown_and_refused_evidence_without_effects() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    support::bind_task_planning(&repo);
+    repo.create_branch("explain-proof");
+    let registered = support::register_task(
+        &home.path().join(".lf"),
+        &repo.path().canonicalize().unwrap(),
+        "explain-proof",
+        &repo.head_sha(),
+    );
+    let path = home.path().join(".lf/loopflow.db");
+    let db = rusqlite::Connection::open(&path).unwrap();
+    let store = SqliteStore::new(&path).unwrap();
+    let machine = store.local_machine().unwrap().id;
+    for condition in ["terminal", "remote", "unknown", "missing_checkout"] {
+        db.execute(
+            "UPDATE tasks SET planning_state=NULL, planning_completed=0, checkout_machine_id=?1",
+            [machine.as_str()],
+        )
+        .unwrap();
+        match condition {
+            "terminal" => {
+                db.execute("UPDATE tasks SET planning_state='canceled'", [])
+                    .unwrap();
+            }
+            "remote" => {
+                let remote = loopflow::durable::MachineId::new();
+                store
+                    .add_machine(
+                        &remote,
+                        "must-not-contact.invalid",
+                        "fixture-peer",
+                        "/peer/repo",
+                    )
+                    .unwrap();
+                db.execute("UPDATE tasks SET checkout_machine_id=?1", [remote.as_str()])
+                    .unwrap();
+            }
+            "unknown" => {
+                db.execute("UPDATE tasks SET checkout_machine_id=NULL", [])
+                    .unwrap();
+            }
+            "missing_checkout" => {
+                db.execute(
+                    "UPDATE tasks SET worktree=?1",
+                    [repo.path().join("absent").to_str().unwrap()],
+                )
+                .unwrap();
+            }
+            _ => unreachable!(),
+        }
+        db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+        let before = fs::read(&path).unwrap();
+        let report: serde_json::Value = serde_json::from_str(&success(
+            command(
+                home.path(),
+                repo.path(),
+                &["task", "run", "INF-123", "--explain", "--json"],
+            )
+            .output()
+            .unwrap(),
+        ))
+        .unwrap();
+        assert_eq!(
+            report["resolution"]["task"]["value"],
+            registered.task.id.as_str()
+        );
+        match condition {
+            "terminal" => assert!(
+                report["impediments"]
+                    .to_string()
+                    .contains("terminal planning"),
+                "{report}"
+            ),
+            "remote" => {
+                assert!(report["action"].is_null());
+                assert!(report["unavailable"].to_string().contains("no peer read"));
+            }
+            "unknown" => assert_eq!(
+                report["resolution"]["execution_machine"]["state"],
+                "unavailable"
+            ),
+            "missing_checkout" => {
+                assert!(report["impediments"].to_string().contains("missing"));
+                assert!(report["action"].is_null());
+            }
+            _ => unreachable!(),
+        }
+        db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+        assert!(
+            fs::read(&path).unwrap() == before,
+            "{condition}: preview changed database bytes"
+        );
+    }
+}
+
+#[test]
+fn task_run_explain_preserves_absent_and_unreadable_registries() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    let path = home.path().join(".lf/loopflow.db");
+    for corrupt in [false, true] {
+        if corrupt {
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, "not a database").unwrap();
+        }
+        let report: serde_json::Value = serde_json::from_str(&success(
+            command(
+                home.path(),
+                repo.path(),
+                &["task", "run", "UNKNOWN-1", "--explain", "--json"],
+            )
+            .output()
+            .unwrap(),
+        ))
+        .unwrap();
+        assert!(report["action"].is_null());
+        assert_eq!(report["resolution"]["task"]["state"], "unavailable");
+        assert!(!report["unavailable"].as_array().unwrap().is_empty());
+        if corrupt {
+            assert_eq!(fs::read(&path).unwrap(), b"not a database");
+        } else {
+            assert!(!path.exists());
+        }
+    }
 }

@@ -43,13 +43,14 @@ pub fn resolve_repository_selection(cli: &mut Cli) -> Result<()> {
     }
     let (command_task, parent_task) = match &mut cli.command {
         Some(Commands::Task {
-            cmd:
-                TaskCommand::Run {
-                    issue, stack_on, ..
-                }
-                | TaskCommand::Checkout {
-                    issue, stack_on, ..
-                },
+            cmd: TaskCommand::Run {
+                issue, stack_on, ..
+            },
+        }) => (issue.as_mut(), stack_on.as_mut()),
+        Some(Commands::Task {
+            cmd: TaskCommand::Checkout {
+                issue, stack_on, ..
+            },
         }) => (Some(issue), stack_on.as_mut()),
         Some(Commands::Task { cmd }) => (cmd.selector_mut(), None),
         Some(Commands::Context { task, .. }) => (task.as_mut(), None),
@@ -85,7 +86,10 @@ fn launch_task(cli: &Cli) -> Option<&str> {
     match &cli.command {
         Some(Commands::Desktop { .. }) => None,
         Some(Commands::Task {
-            cmd: TaskCommand::Run { issue, .. } | TaskCommand::Checkout { issue, .. },
+            cmd: TaskCommand::Run { issue, .. },
+        }) => issue.as_deref().or(cli.task.as_deref()),
+        Some(Commands::Task {
+            cmd: TaskCommand::Checkout { issue, .. },
         }) => Some(issue),
         _ => cli.task.as_deref(),
     }
@@ -110,7 +114,20 @@ pub fn dispatch(cli: &Cli, args: &[String]) -> Result<bool> {
         return Err(anyhow!("Task {selector} resolves to Machine {} on the destination; reconcile its planning/location before retrying (no work was started)", route.machine_id));
     }
     let machine = route.machine_id.clone();
-    super::ssh::run(machine.as_str(), false, &args[1..], Some(route))?;
+    let mut forwarded = args[1..].to_vec();
+    if matches!(
+        &cli.command,
+        Some(Commands::Task {
+            cmd: TaskCommand::Run { issue: None, .. }
+        })
+    ) && cli.task.is_some()
+        && !args
+            .iter()
+            .any(|arg| arg == "--task" || arg.starts_with("--task="))
+    {
+        forwarded.extend(["--task".into(), selector.into()]);
+    }
+    super::ssh::run(machine.as_str(), false, &forwarded, Some(route))?;
     Ok(true)
 }
 

@@ -4,13 +4,8 @@ Dated evidence; [plan](compare-cmux-s-command-line.md) owns scope and acceptance
 [questions](questions.md) unresolved judgments. October 8 removes the earlier
 storage coupling locally.
 
-## Earlier identity and storage findings
-
-October 7's path-only identity, copied placement, mutable checkout joins and
-single pending Desktop URL are superseded locally. Owner constraints and dated
-observations: `f48d84511:scratch/findings.md`, this heading. Shared identity remains
-independent of clone names/remotes; historical assignment provenance stays unknown.
-LOO-406 owns local planning/Linear and LOO-412 exchange; runtime stays local.
+Earlier storage findings: `f48d84511:scratch/findings.md`, **Earlier identity and
+storage findings**. Historical assignment provenance remains unknown.
 
 ## Decisions these findings do not establish
 
@@ -55,63 +50,55 @@ Earlier stalled checks and the `b6f34a6f8` integration account:
 
 ### Integrated writer evidence — October 9
 
-`cbf0a174a` is integrated, including `078a6642e`'s fixture repairs and
-`2bab3fbd5`'s observed/unseen reopening regressions. Infrastructure memory records
-Linux migration/Flow/work-watch reconnect and a 54-test planning pass including reopening; no
-LOO-427 mixed Git/Desktop proof follows. `docs/architecture/planning.md` retains
-the unconditional Linear-write race: acquisition/readback cannot exclude an
-unseen concurrent reopen. The accepted causal-reopening outcome is unchanged.
-Product has no child Wave memories. Related review covered Infrastructure planning only.
+Writer/reopening evidence: `565dc0fbb:scratch/findings.md`, **Integrated writer
+evidence**. Readback cannot exclude unseen Linear reopening; composed Git/Desktop
+proof remains.
 
-### Committed exchange update — October 8
+### Committed exchange update — October 9
 
-Read LOO-412 at `ce740b028` through Git, without integrating it or changing its
-checkout. `ops/planning_peer.rs` explicitly refuses mixed Linear/Git exchange;
-its new foreground/post-save paths are not composed connected-repository proof.
-`store/sqlite/planning_peers.rs::project_object` writes winner fields before
-`acquire_linear_frontier`: rejecting a provider-cache update alone cannot undo
-those projected fields. Infrastructure's memory records removal/archive refusal
-and rolled-back unresolved-membership markers as remaining source findings,
-not executed counterexamples. Grouped receipts and alternate acquisition remain.
-The common-owner repairs must precede enabling that path; the selected Product
-outcome still includes connected repositories and independent imports.
+LOO-412 through `cdec83fe8` was inspected through Git, not integrated. Creation
+acquisition precedes projection (`270019c8d`); `a002e4060` supplies foreground
+creation discovery and mapped uncertainty through `planning_exports`, without
+allocating placement. The earlier unprepared-import recovery gap is superseded.
+Its Linux synthetic-HTTPS work-watch fixture covers lost creation/link replies
+and later saves, but only six unrun execution tables; revised `sync.changes`
+assertions (`098de8033`) still await gate.
 
-The dependency's user/shared refs and per-Wave destination selection supersede
-this plan's provisional single-ref spelling. Joining selects/publishes nothing;
-multiple destinations in one repository cannot become multiple Desktop windows.
-LOO-427's local `repository_plans` binding still needs composition with that
-selection, not a second exchange implementation.
+`84f8fb9d8`/`97bba1869` add common deletion receipts, preserving original save time,
+attempts and acknowledgement instead of treating local sequence as recency.
+The dependency records focused seven-table equality including populated Processes,
+Sessions and Workflows, not running-provider control or public mixed-provider proof.
+Provider-only removal and ordering receipts remain separate work.
 
-Later committed source at `270019c8d` repairs the projection-order finding above:
-`acquire_linear_frontier` precedes `project_fields`, and object-scoped SQLite
-savepoints roll back rejected projection/cache changes. Removal/archive evidence
-fences projection; typed membership and same-revision provider conflicts survive
-outside the rollback so independent valid objects can import. Malformed provider
-input still aborts the whole import. Task/Project regressions cover retained local
-values, uncertain receipts, execution and repeat-import stability, but have not
-executed. The dependency's memory reports SQL checks only. Mixed Linear/Git stays
-disabled; grouped receipts, alternate acquisition, legacy association and Desktop
-composition remain. This is inspection of committed dependency code, not integration
-or a replacement sync implementation. No new product decision was
-inferred from the dependency. Infrastructure was read only for these shared boundaries.
+Source review confirms the dependency's new gap: `insert_and_project` imports
+creation/deletion receipts inside the object savepoint before
+`acquire_linear_frontier`; rejection rolls them back while the journal/conflict
+survives. Common pending/attempt readers do not consult that peer conflict.
+Retained uncertainty must constrain effects even when projection fails. Required
+proof: a rejected stale entity with an uncertain deletion cannot issue a second
+public mutation, while independent acquisition and populated execution survive.
+This is a source gap, not an observed production duplicate.
 
-`a388ed425` routes peer Task disposition through common stable/causal receipts;
-`7262b6b20` shares winner/baseline normalization. Inspected, not integrated;
-SQL checks only, mixed Linear/Git still disabled. Grouped receipts, alternate
-acquisition, legacy association and Desktop remain. Detail:
-`fc87e09c1:scratch/findings.md`, this heading; the plan retains composition work.
+`ops/planning_peer.rs` still refuses connected Linear exchange. Remaining ordering
+receipt transport, alternate/relationship acquisition, legacy association and
+unplaced-Wave/Desktop presentation belong to the common owners, not a parallel
+planner. User/shared refs and per-Wave destinations are not repository identity;
+joining publishes nothing. Local placement is not peer-exclusive admission.
+Dependency detail: `cdec83fe8:scratch/work-on-another-machine-name.md`,
+**Remaining integration**, and its Infrastructure memory, **Tasks across machines**.
+
+Main's LOO-406/#1503 remains integrated. Relevant local/dependency Infrastructure
+memories were read through `cdec83fe8`, not unrelated history. Product has no child
+directories or memories. Pre-edit notes: `/tmp/loo427-realign-endpoints-PvXjSl/`.
 
 ## Arrangement evidence — October 8
 
-`d9fa2b829` implements exact-target arrangement; `df3e43fb3` shares visibility/removal
-pruning and removes duplicate reveal-before-focus calls. `f4b7aae11` adds companions;
-`caa48b5c1` shares insertion and publishes command/focus/Undo state together. Source and fixtures retain
-leaf occurrences, commands, document selection and view objects. Native terminal
-drafts, responder behavior and the complete cross-machine path remain unproved.
-The comparison tables remain the October 7 baseline; its source delta records
-these additions without changing the original command judgments.
-
-Arrangement checks: direct Swift 6 builds/typechecks and interpreted production smoke passed, including 31 insertion cases at `caa48b5c1`; packaged SwiftPM/test executables and Rust/Clippy stalled before results (30–120 s). Earlier failed attempts and commands are preserved in Git blob `939890436fc712a5e14875749d586ae3ae450523`. Gate/CI own packaged execution, demo owns native/composed proof.
+`d9fa2b829`–`caa48b5c1` implement exact-target arrangement, shared pruning and
+companion insertion, publishing command/focus/Undo together. Direct Swift/model
+checks passed; packaged attempts stalled. Commands and failures remain at
+`0dba18b79:scratch/findings.md`, this heading, and Git blob
+`939890436fc712a5e14875749d586ae3ae450523`. Native drafts/responders and the
+cross-machine path remain unproved; the plan retains their acceptance.
 
 ## Terminal identity and extraction boundary — October 8
 
@@ -124,47 +111,13 @@ they typecheck, while packaged execution remains unavailable.
 Inspection exposes `ProgramStatusSurface.incarnation` without allocation or
 child-exit cleanup. Released views cannot create another surface under that token.
 
-Pinned Ghostty's allocating `dumpTextLocked` cannot bound extraction by truncating
-Swift's copy. `0004-bounded-text.patch` now adds caller-owned fixed storage through
-the existing ScreenFormatter: byte bound, complete UTF-8 prefix, truncation flag,
-empty success, and current text/command-block selection. UTF-8 repair examines
-only the final scalar, removing repeated full-prefix validation. One byte-limit
-matrix compares against the existing allocating reader, including empty output,
-all scalar widths, combining characters and soft wraps. The Linux check also covers
-oversized scrollback without allocation,
-retained selection and stale command-block reads without cleanup. Review found
-`selectedCommandBlock` released its stale tracked pin during a read; the getter
-is now const, leaving release to selection changes/reset/deinit. Existing clipboard
-and Quick Look reads still need their full text and viewport metadata.
-
-This proves the terminal extraction primitive, not the embedded surface call or
-Desktop path. Native Zig helpers stalled before startup, sampled at `_dyld_start`;
-a cached build driver reached new helpers that also stalled. Linux lib-vt tests
-ran without networking. The broader embedded Linux build could not resolve its
-uncached HarfBuzz dependency; fetch-only preparation did not fetch that lazy
-package. The new framework has not been built/published and Package.swift remains
-on lf2. At this extraction-only cut there was no terminal-text CLI. The later
-exact-target boundary below supersedes that gap: request transport and passive
-validation now exist without the artifact. Native reads, exited/replaced surface
-execution proof and bounded Swift copying still require composition. The later exact-input cut supplies `desktop text/key`; native input proof remains. The plan owns the check-result line.
-
-Review also caught the native-soak fixture using its static synthetic Machine for
-real disposable CLI records; its surface keys now use that record's workspace.
-Direct module builds/typechecks and isolated model smoke establish compilation
-and model behavior only; the plan's single check line retains timed-out packaged,
-Clippy and full-library execution attempts. Native exit/no-cleanup and stale text-
-read rejection remain unproved, not inferred from optional inspection tokens.
-
-
-### Artifact build follow-through — October 8
-
-The Linux application-root bounded-text check passes after explicit HarfBuzz
-fetching. Both embedded libraries compile with `fontconfig_freetype` and export
-the reader; bare `freetype` failed because upstream requires discovery. Package
-fetches must reach the build's cache. This proves neither macOS ABI nor a running
-surface. A minimal C executable also stalled at `_dyld_start`, before main;
-the native framework remains unavailable, with no upload or manifest change.
-Exact commands and failed attempts: `/tmp/loo427-input-skDK4w/scratch/findings.md`.
+Bounded extraction details and failed native builds remain at
+`565dc0fbb:scratch/findings.md`, **Terminal identity and extraction boundary**.
+The fixed-buffer formatter preserves complete UTF-8 prefixes and selection without
+allocating the whole result or cleaning stale pins. Linux primitive/library checks
+passed; native helpers stalled before main. No lf3 framework was built or published;
+lf2 still cannot extract bounded text. Exact-target read/input transport does not
+supply native composition or draft-retention proof.
 
 ### Exact-target read boundary — October 8
 
@@ -191,6 +144,45 @@ ID. The launch and explanation readers now share checkout-before-declaration
 selection. Preview also exposed two hidden writes: opening an “existing” store can
 migrate it, and bounding input wrote full-source files. Preview uses the shared
 read-only registry; prompt assembly returns complete sources for launch to persist.
-The oversized-message fixture proves exact system-input parity with a fake provider,
-not a real provider account or remote preview. `--explain` is local identity reading,
+Fake-provider parity proves neither real-provider nor remote behavior.
+Bound-snapshot fixture failures required registering the canonical Wave, not a production workaround. `--explain` is local identity reading,
 not a complete action plan. The plan owns remaining work and the check-result line.
+
+## Composed-opening review — October 9
+
+`ef179762d`, `c633589e0`, `1dd8230d0` and `e3ca861b1` retain the local opening
+implementation. Review repaired form-encoding, partial Session inventory retirement,
+checkout mismatch and delayed primary preparation. URL equality was not request
+identity: repeated opens, lookup/registration and mounted Task content now fence
+success, failure and cancellation by generation. Pre-registration failures are
+inspectable, but obsolete errors no longer escape to utility feedback.
+
+A Session callback masked an unobserved pane closure; later, an absent Session
+reading returned before observing visibility. The regression failed with “Opening
+never settled.” Session/Files/multiplexer Observation now follows original visible
+pane occurrences, even before Session evidence. Composed Changes clears zoom but
+keeps drafts. Direct tests first failed on build ordering/concurrent edits; the
+corrected runs establish model readiness, not native/provider/remote acceptance.
+Detailed pre-edit notes and failures: `/tmp/loo427-compress-openings/`,
+`/tmp/loo427-repository-readiness/`, `/tmp/loo427-compress-readiness/`; the supplied
+uncommitted notes are preserved at `/tmp/loo427-task-run-explain/scratch/`.
+
+## Invocation-level Task run explanation — October 9
+
+The Workflow choice inside `traverse_workflow` is now a shared read-only selection;
+launch alone takes up/moves it. Explanation reuses launch admission and execution
+routing, distinguishes recorded location from effective delegation, and reports
+remote/missing checkout/registry evidence as unavailable. Missing local execution
+still cannot prove peer-exclusive first start. An omitted Task uses the existing
+checkout/declaration resolver, also for ordinary launch; remote forwarding carries
+the inferred Task rather than asking the destination to infer it again.
+
+The first state-preservation regression failed after checkpointing SQLite's WAL:
+`journal::with_process` logged an early Process after the preview returned. Earlier
+byte comparisons without a post-read checkpoint missed those writes. Parsed previews
+now explicitly suppress that fallback observation, including failed previews;
+ordinary commands retain their Process history. The regression retains populated
+Flow/Process history and checks the complete checkpointed database, not empty tables.
+Failed build/test logs and pre-edit notes: `/tmp/loo427-task-run-explain/`.
+Neither these fixtures nor action explanation establish remote admission, native
+Desktop usability, provider acceptance or delivery.

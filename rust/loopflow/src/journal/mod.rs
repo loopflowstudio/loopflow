@@ -94,6 +94,13 @@ thread_local! {
 // outer with_runtime scope; inherited environment cannot opt into or out of it.
 static PROCESS_STARTED_AT: OnceLock<i64> = OnceLock::new();
 static PROCESS_START: OnceLock<Instant> = OnceLock::new();
+static EFFECT_FREE_PREVIEW: AtomicBool = AtomicBool::new(false);
+
+/// Parsed invocation previews must not acquire even an observation Process on exit.
+/// The executable selects this before any command admission; environment cannot.
+pub fn mark_effect_free_preview() {
+    EFFECT_FREE_PREVIEW.store(true, Ordering::Relaxed);
+}
 // An actual lf process keeps one identity across async and blocking workers.
 // Library callers retain the thread-scoped with_runtime lifetime above.
 static PROCESS_CONTEXT: Mutex<Option<ProcessContext>> = Mutex::new(None);
@@ -266,7 +273,7 @@ pub fn with_process(run: impl FnOnce() -> anyhow::Result<()>) -> anyhow::Result<
         .set(Instant::now())
         .expect("one lf entry point per process");
     let result = run();
-    if current_context().is_none() {
+    if current_context().is_none() && !EFFECT_FREE_PREVIEW.load(Ordering::Relaxed) {
         observe_process(&std::env::args().collect::<Vec<_>>());
     }
     crate::engine::agent::wait_for_interrupt_cleanup();

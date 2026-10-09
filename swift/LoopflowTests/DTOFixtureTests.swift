@@ -7,6 +7,16 @@ import Testing
 /// the Mac app.
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
+    @Test func taskRunExplanationsPreserveActionsAndMissingEvidence() throws {
+        let data = try loadFixtureData("task_run_explanations.json")
+        let reports = try JSONDecoder().decode([TaskRunExplanation].self, from: data)
+        #expect(reports[0].action == .edge(workflow: "feature", takeUp: true, from: "start", to: "design", flow: "task-design"))
+        #expect(reports[1].action == .edge(workflow: "feature", takeUp: false, from: "design", to: "end", flow: nil))
+        #expect(reports[2].action == .flow("proof"))
+        #expect(reports[3].action == nil)
+        #expect(try JSONDecoder().decode([TaskRunExplanation].self, from: JSONEncoder().encode(reports)) == reports)
+    }
+
     @Test func contextExplanationPreservesAvailabilityAndProvenance() throws {
         let data = try loadFixtureData("context_explanation.json")
         let report = try JSONDecoder().decode(ContextExplanation.self, from: data)

@@ -1,3 +1,5 @@
+mod explain;
+pub use explain::{explain_task_run, TaskRunAction, TaskRunExplanation};
 mod directory;
 mod lifecycle;
 pub(crate) use lifecycle::{cleanup_completed_task, notice_retained_task, record_abandoned_pr};
@@ -467,18 +469,24 @@ pub fn task_place(
     })
 }
 
-/// Choose what `lf task run` runs and, for a Task on a Workflow, put the Task
-/// on the edge this process sets out on. A Task keeps the Workflow it has; one
-/// with none takes up the workflow named, else its Project's. A named Flow
-/// runs ad hoc only when the Project's workflow does not load.
-async fn traverse_workflow(
+/// Read the same edge choice for launch and explanation, without taking it up.
+#[derive(Debug)]
+pub(crate) enum TaskRunSelection {
+    Edge {
+        workflow: crate::ops::workflow::Workflow,
+        index: u32,
+        take_up: bool,
+    },
+    Flow(String),
+}
+
+pub(crate) fn select_task_run(
     store: &SharedStore,
     task: &Task,
+    checkout: &Path,
     requested: Option<&str>,
     project_workflow: &str,
-    note: Option<&str>,
-    end: &EndOptions,
-) -> OpsResult<Option<String>> {
+) -> OpsResult<TaskRunSelection> {
     let current = store.sqlite.workflow(&task.id).map_err(task_error)?;
     // A name that leaves the current node is that edge, whatever else
     // shares its name.
@@ -492,7 +500,7 @@ async fn traverse_workflow(
     };
     let named = match requested {
         Some(name) if !names_edge(name) => {
-            super::project::load_workflow(store, &task.wave_id, name, task.worktree()?)?
+            super::project::load_workflow(store, &task.wave_id, name, checkout)?
         }
         _ => None,
     };
@@ -507,23 +515,20 @@ async fn traverse_workflow(
             None
         }
         (_, Some(named)) => Some(named),
-        (_, None) => match super::project::load_workflow(
-            store,
-            &task.wave_id,
-            project_workflow,
-            task.worktree()?,
-        )? {
-            Some(definition) => Some(definition),
-            None => {
-                let Some(flow) = requested else {
-                    return Err(task_error(format!(
+        (_, None) => {
+            match super::project::load_workflow(store, &task.wave_id, project_workflow, checkout)? {
+                Some(definition) => Some(definition),
+                None => {
+                    let Some(flow) = requested else {
+                        return Err(task_error(format!(
                         "Task {}'s Project names {project_workflow:?}, which is not a workflow. `lf project workflow set <project> <name>` sets one; `lf task run {} <workflow>` takes one up for this Task",
                         task.plan.identifier, task.plan.identifier
                     )));
-                };
-                return Ok(Some(load_task_flow(task.worktree()?, flow)?.0));
+                    };
+                    return Ok(TaskRunSelection::Flow(load_task_flow(checkout, flow)?.0));
+                }
             }
-        },
+        }
     };
     // Validate the choice against the Workflow the Task will be on before
     // anything is written.
@@ -561,7 +566,7 @@ async fn traverse_workflow(
         .definition
         .outgoing(node)
         .filter(|(_, edge)| requested.is_none_or(|name| edge.name() == name));
-    let (index, edge) = match (edges.next(), edges.next()) {
+    let (index, _) = match (edges.next(), edges.next()) {
         (Some(edge), None) => edge,
         (None, _) | (Some(_), Some(_)) => {
             return Err(refuse(match requested {
@@ -573,15 +578,46 @@ async fn traverse_workflow(
             }));
         }
     };
+    drop(edges);
+    Ok(TaskRunSelection::Edge {
+        index,
+        take_up: take_up.is_some(),
+        workflow,
+    })
+}
+
+/// Choose what `lf task run` runs and, for a Task on a Workflow, put the Task
+/// on the edge this process sets out on. A Task keeps the Workflow it has; one
+/// with none takes up the workflow named, else its Project's. A named Flow
+/// runs ad hoc only when the Project's workflow does not load.
+async fn traverse_workflow(
+    store: &SharedStore,
+    task: &Task,
+    requested: Option<&str>,
+    project_workflow: &str,
+    note: Option<&str>,
+    end: &EndOptions,
+) -> OpsResult<Option<String>> {
+    let (workflow, index, take_up) =
+        match select_task_run(store, task, task.worktree()?, requested, project_workflow)? {
+            TaskRunSelection::Edge {
+                workflow,
+                index,
+                take_up,
+            } => (workflow, index, take_up),
+            TaskRunSelection::Flow(flow) => return Ok(Some(flow)),
+        };
+    let issue = &task.plan.identifier;
+    let name = &workflow.definition.name;
+    let edge = workflow.definition.edges[index as usize].clone();
     let process = crate::journal::current_process_lfid()
         .ok_or_else(|| task_error("a workflow move requires a registered Process"))?;
-    if let Some(definition) = &take_up {
+    if take_up {
         store
             .sqlite
-            .take_up_workflow(&task.id, definition, &process, note)
+            .take_up_workflow(&task.id, &workflow.definition, &process, note)
             .map_err(task_error)?;
     }
-    let edge = edge.clone();
     // An edge that runs nothing enters `end`: choosing it completes the Task.
     let chose = if edge.flow.is_none() {
         let how = EndMove::Choose {

@@ -816,3 +816,30 @@ fn desktop_opening_distinguishes_launch_acceptance_from_usable_and_failed() {
         serde_json::from_str::<serde_json::Value>(json).unwrap()
     );
 }
+
+#[test]
+fn task_run_explanations_preserve_actions_and_missing_evidence() {
+    use loopflow::ops::task::{TaskRunAction, TaskRunExplanation};
+    let json = include_str!("../../../tests/fixtures/dto/task_run_explanations.json");
+    let reports: Vec<TaskRunExplanation> = serde_json::from_str(json).unwrap();
+    assert!(matches!(
+        &reports[0].action,
+        Some(TaskRunAction::Edge { take_up: true, .. })
+    ));
+    assert!(matches!(
+        &reports[1].action,
+        Some(TaskRunAction::Edge { flow: None, .. })
+    ));
+    assert!(matches!(
+        &reports[2].action,
+        Some(TaskRunAction::Flow { .. })
+    ));
+    assert!(reports[3].action.is_none());
+    assert_eq!(
+        serde_json::to_value(reports).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+    let mut missing: serde_json::Value = serde_json::from_str(json).unwrap();
+    missing[0].as_object_mut().unwrap().remove("unavailable");
+    assert!(serde_json::from_value::<Vec<TaskRunExplanation>>(missing).is_err());
+}

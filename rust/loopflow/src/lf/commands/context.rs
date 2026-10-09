@@ -147,3 +147,36 @@ pub fn explain(
         }
     }))
 }
+
+/// Read invocation effects and missing evidence using the same read-only registry.
+pub fn explain_task_run(
+    task: Option<&str>,
+    options: &crate::ops::task::TaskProcessOptions,
+) -> Result<crate::ops::task::TaskRunExplanation> {
+    let cwd = std::env::current_dir()?;
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let unavailable = match crate::store::read_existing_registry() {
+            Ok(Some(store)) => {
+                return Ok(crate::ops::task::explain_task_run(
+                    &std::sync::Arc::new(store),
+                    &cwd,
+                    crate::ops::WorkSelection {
+                        task,
+                        wave: options.wave.as_deref(),
+                    },
+                    options,
+                )
+                .await)
+            }
+            Ok(None) => "Local registry is absent".into(),
+            Err(error) => format!("Local registry unavailable: {error}"),
+        };
+        Ok(crate::ops::task::TaskRunExplanation {
+            resolution: crate::ops::context::ContextExplanation::unavailable(&unavailable),
+            action: None,
+            impediments: Vec::new(),
+            unavailable: vec![unavailable],
+        })
+    })
+}

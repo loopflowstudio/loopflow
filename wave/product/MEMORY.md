@@ -100,6 +100,12 @@ Router receipts expose pre-registration failures; plain Task links await mounted
 content. Validated request IDs fence registration, never URLs or later arrivals.
 Headless callbacks prove neither compositor usability nor native Session readiness.
 
+October 9 Task-run explanation shares launch routing, admission and Workflow choice;
+only launch mutates position. Delegation is a proposed destination, never peer start
+permission. Preview still wrote through the Process journal's
+fallback. Checkpointing WAL exposed it where main-file byte checks had missed it;
+parsed previews now opt out of observation. Native/remote acceptance remains unproved.
+
 ## Terminal-host adoption (2026-10-07)
 
 Jack Heart: Flow → Task → Wave, Desktop optional. Automated trials are account-free;
@@ -510,18 +516,12 @@ authorize an automatic Project reset, Task cancellation or claims of measured ga
 
 ## CI watcher decisions (2026-10-01)
 
-Jack Heart's [LOO-365](https://linear.app/loopflow/issue/LOO-365) decisions:
-one optional repo-wide watcher for terminal, launchd or Desktop. Correctness is
-independent. The clock starts ci-fix without an owning conversation, once per
-PR/failing head. Taskless PRs are reported, not repaired. Future watchers stay
-separate programs. Jack preferred the watcher to the one-minute cron
-and wanted the cron removed; the branch retired only its repair path.
-
-`lf ci watch` uses REST/ETags and existing landing admission/claim. No real
-failing landing was proved.
-Unreviewed choices: standalone `lf land` without a Task still repairs; an unarmed
-Task PR is only reported; Desktop has no watcher view. TaskSessions remain
-conversations with Jack. Dated detail: `8813ee7bb:wave/product/MEMORY.md`, this heading.
+Jack Heart's LOO-365 selected one optional repo-wide watcher for terminal, launchd
+or Desktop, independent of correctness. It starts ci-fix once per PR/failing head
+without an owning conversation; taskless PRs are reported, not repaired. Jack
+preferred removing the one-minute cron; only its repair path was retired.
+Unreviewed: standalone Taskless `lf land` still repairs; unarmed Task PRs only
+report; Desktop has no watcher view. No real failing landing was proved. Details: `d421741f6:wave/product/MEMORY.md`, this heading.
 
 ## Skill reduction decisions (2026-09-28)
 

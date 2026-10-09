@@ -479,6 +479,15 @@ A real launch refreshes Task direction, so parity applies to the same snapshot.
 `--explain` reads selected Work without executing the invocation. Task commands,
 Desktop opening, Session connection and exact Process history lookup are supported;
 other command shapes fail before effects. Combine both flags for identity plus input.
+`task run --explain` also reports the intended Workflow edge (or ad-hoc Flow),
+selected execution Machine, observed impediments and missing evidence. Omit the Task
+to use its checkout or `--task`. JSON separates `resolution`, `action`, `impediments`
+and `unavailable`; no Workflow is taken up or moved. Started Tasks use recorded
+execution; unstarted Tasks show effective delegation as a **proposed destination**,
+not proof of peer-exclusive first start. Remote execution state is unavailable
+without reading that Machine. Completion, future checkout and provider checks are
+not fabricated; a real run checks them again.
+
 Flow-wide input and remote previews are unavailable; preview a skill directly on its
 execution Machine. Bare-agent and new operator-checkout input is not predicted by
 creating Work. `lf context` remains the standalone budget report.

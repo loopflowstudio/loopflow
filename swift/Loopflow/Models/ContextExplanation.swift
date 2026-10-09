@@ -53,3 +53,50 @@ public struct ContextExplanation: Codable, Equatable, Sendable {
         case machine, repository, checkout, wave, task, session, process
     }
 }
+
+public enum TaskRunAction: Codable, Equatable, Sendable {
+    case edge(workflow: String, takeUp: Bool, from: String, to: String, flow: String?)
+    case flow(String)
+
+    private enum CodingKeys: String, CodingKey {
+        case kind, workflow, from, to, flow
+        case takeUp = "take_up"
+    }
+    private enum Kind: String, Codable { case edge, flow }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        switch try values.decode(Kind.self, forKey: .kind) {
+        case .edge:
+            self = .edge(workflow: try values.decode(String.self, forKey: .workflow),
+                         takeUp: try values.decode(Bool.self, forKey: .takeUp),
+                         from: try values.decode(String.self, forKey: .from),
+                         to: try values.decode(String.self, forKey: .to),
+                         flow: try values.decodeIfPresent(String.self, forKey: .flow))
+        case .flow: self = .flow(try values.decode(String.self, forKey: .flow))
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .edge(let workflow, let takeUp, let from, let to, let flow):
+            try values.encode(Kind.edge, forKey: .kind)
+            try values.encode(workflow, forKey: .workflow)
+            try values.encode(takeUp, forKey: .takeUp)
+            try values.encode(from, forKey: .from)
+            try values.encode(to, forKey: .to)
+            try values.encode(flow, forKey: .flow)
+        case .flow(let flow):
+            try values.encode(Kind.flow, forKey: .kind)
+            try values.encode(flow, forKey: .flow)
+        }
+    }
+}
+
+public struct TaskRunExplanation: Codable, Equatable, Sendable {
+    public let resolution: ContextExplanation
+    public let action: TaskRunAction?
+    public let impediments: [String]
+    public let unavailable: [String]
+}

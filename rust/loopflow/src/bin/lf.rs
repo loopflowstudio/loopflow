@@ -1395,6 +1395,7 @@ fn run() -> anyhow::Result<()> {
             Err(error) => return Err(error.into()),
         };
         if preview {
+            journal::mark_effect_free_preview();
             anyhow::bail!("remote invocation preview is unavailable without an effect-free identity transport; no remote command was sent. Run the preview directly on the selected Machine");
         }
         // The target owns command flags, including --verbose; RUST_LOG controls transport logs.
@@ -1432,6 +1433,9 @@ fn run() -> anyhow::Result<()> {
             return Err(loopflow::process::CommandExit(code).into());
         }
     };
+    if cli.context || cli.explain {
+        journal::mark_effect_free_preview();
+    }
     init_tracing(cli.verbose);
     if matches!(cli.command, Some(Commands::Desktop { .. })) {
         loopflow::lf::commands::desktop::require_supported()?;
@@ -1607,6 +1611,49 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
         }
         return Ok(());
     }
+    if let Some(Commands::Task {
+        cmd:
+            TaskCommand::Run {
+                issue,
+                flow,
+                name,
+                stack_on,
+                directive,
+                reason,
+                force,
+            },
+    }) = &cli.command
+    {
+        anyhow::ensure!(
+            !cli.context,
+            "--context requires a skill or inline agent request; nothing was executed"
+        );
+        if let (Some(global), Some(subject)) = (cli.task.as_deref(), issue.as_deref()) {
+            anyhow::ensure!(
+                global == subject,
+                "conflicting Task selections: {global} and {subject}"
+            );
+        }
+        let report = loopflow::lf::commands::context::explain_task_run(
+            issue.as_deref().or(cli.task.as_deref()),
+            &loopflow::ops::task::TaskProcessOptions {
+                wave: cli.wave.clone(),
+                reason: reason.clone(),
+                agent: cli.agent.clone(),
+                name: name.clone(),
+                flow: flow.clone(),
+                stack_on: stack_on.clone(),
+                directive: directive.clone(),
+                end: loopflow::ops::task::EndOptions { force: *force },
+            },
+        )?;
+        if json {
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        } else {
+            println!("{}", report.render());
+        }
+        return Ok(());
+    }
     let mut task = cli.task.as_deref();
     let wave = cli.wave.as_deref();
     let mut session = None;
@@ -1735,9 +1782,6 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
         return loopflow::lf::commands::desktop::run(&cli, cmd);
     }
 
-    if loopflow::lf::commands::work_route::dispatch(&cli, args)? {
-        return Ok(());
-    }
     let mut direct_binding = None;
     let mut _work_declaration = None;
     let mut _bound_cwd = None;
@@ -1745,6 +1789,26 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
         _bound_cwd = Some(CwdGuard::enter(
             &loopflow::lf::commands::ops::resolve_worktree(name)?,
         )?);
+    }
+    if matches!(
+        &cli.command,
+        Some(Commands::Task {
+            cmd: TaskCommand::Run { issue: None, .. }
+        })
+    ) && cli.task.is_none()
+    {
+        let resolution =
+            loopflow::lf::commands::context::explain(cli.wave.as_deref(), None, None, None)?;
+        cli.task = Some(match resolution.task {
+            loopflow::ops::context::ContextFact::Bound { value, .. } => value,
+            loopflow::ops::context::ContextFact::Unavailable { reason } => anyhow::bail!(reason),
+            loopflow::ops::context::ContextFact::Unbound => {
+                anyhow::bail!("No Task selected; name a Task or run from its checkout")
+            }
+        });
+    }
+    if loopflow::lf::commands::work_route::dispatch(&cli, args)? {
+        return Ok(());
     }
     // `lf task run` places the Task and fills its defaults; from here it is
     // `lf --task ISSUE flow FLOW`.
@@ -1761,6 +1825,10 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             },
     }) = &cli.command
     {
+        let issue = issue
+            .as_deref()
+            .or(cli.task.as_deref())
+            .context("No Task selected")?;
         let end = loopflow::ops::task::EndOptions { force: *force };
         let directory = loopflow::repo::working_directory()?;
         let repo = selected_task_repository(&cli, &directory, Some(issue))?;

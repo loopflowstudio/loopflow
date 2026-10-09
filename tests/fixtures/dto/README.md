@@ -76,3 +76,6 @@ Swift decodes it for the Task's Session history.
 `desktop_inspection.json` requires top-level `openings` for failures before window
 registration. Window receipts own Task/Session outcomes. Fixture shape is not native
 readiness proof.
+
+`task_run_explanations.json` covers edge take-up, no-Flow completion, ad-hoc Flow
+selection and unavailable execution evidence. Explanation never grants admission.

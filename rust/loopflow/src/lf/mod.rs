@@ -1053,7 +1053,7 @@ pub enum TaskCommand {
     },
     /// Place a Task's worktree, then run a Flow there like `lf --task ISSUE flow FLOW`
     Run {
-        issue: String,
+        issue: Option<String>,
         /// The edge's Flow, or a workflow to take up; the Task's only edge or its
         /// Project's workflow when omitted
         flow: Option<String>,
@@ -1236,10 +1236,11 @@ impl TaskCommand {
                     TaskWorkflowCommand::Show { issue, .. } | TaskWorkflowCommand::Restart { issue },
             } => Some(issue),
             Self::Automate { issue, .. } => Some(issue),
-            Self::Status { issue, .. } | Self::Abandon { issue, .. } => issue.as_deref(),
+            Self::Status { issue, .. } | Self::Abandon { issue, .. } | Self::Run { issue, .. } => {
+                issue.as_deref()
+            }
             Self::Checkout { issue, .. }
             | Self::Sync { issue, .. }
-            | Self::Run { issue, .. }
             | Self::Move { issue, .. }
             | Self::Diff { issue, .. }
             | Self::Files { issue, .. }
@@ -1267,10 +1268,11 @@ impl TaskCommand {
                     TaskWorkflowCommand::Show { issue, .. } | TaskWorkflowCommand::Restart { issue },
             } => Some(issue),
             Self::Automate { issue, .. } => Some(issue),
-            Self::Status { issue, .. } | Self::Abandon { issue, .. } => issue.as_mut(),
+            Self::Status { issue, .. } | Self::Abandon { issue, .. } | Self::Run { issue, .. } => {
+                issue.as_mut()
+            }
             Self::Checkout { issue, .. }
             | Self::Sync { issue, .. }
-            | Self::Run { issue, .. }
             | Self::Move { issue, .. }
             | Self::Diff { issue, .. }
             | Self::Files { issue, .. }
@@ -2540,7 +2542,7 @@ mod tests {
             cli.command,
             Some(Commands::Task {
                 cmd: TaskCommand::Run { issue, flow: Some(flow), .. }
-            }) if issue == "INF-123" && flow == "proof"
+            }) if issue.as_deref() == Some("INF-123") && flow == "proof"
         ));
     }
 

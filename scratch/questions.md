@@ -12,8 +12,7 @@ remain unfinished.
 Jack Heart selected execution-Machine-local operations and portable planning
 exchange: LOO-406 owns the writer/Linear, LOO-412 Git-ref merge/scope. Workflow,
 Processes and cleanup stay local; imported completion changes planning only.
-Disconnect retains local work and pending sync. Q1 is resolved; protocol/composition
-proof remains implementation, not a renewed transport vote.
+Disconnect retains local work and pending sync. Q1 is resolved; composition proof remains.
 
 ## Q2 — Delegation inheritance
 
@@ -30,17 +29,13 @@ text. Enter stays separate and submits the combined composer contents. No silent
 clear/replacement, draft parking or occupied-composer refusal is required. Exact
 surface targeting is implemented; native text/key fidelity proof remains.
 
-Transport, API spelling, schema field names and queue implementation are ordinary
-implementation choices. They are not additional product-approval checkpoints.
-
 ## Reversible visibility choice — October 8
 
 Hide/restore address an existing retained view through the selected plan/window,
 Machine/checkout and pane/content occurrence. Restore removes collapse without
 selecting Work, focusing a window, changing zoom or acquiring a client. This
 implementation choice leaves Q2 open. View occurrence tokens grant no
-terminal-surface or composer-input authority. No product decision is inferred
-from this limited internal slice.
+terminal-surface or composer-input authority.
 
 ## Reversible arrangement choices — October 8
 
@@ -70,7 +65,7 @@ The read request uses a 64 KiB default and a 1 MiB maximum; the reply echoes its
 exact target and distinguishes missing/nonterminal/unavailable-reader from empty
 text. `hidden` describes pane collapse or zoom within its retained workspace,
 not compositor visibility. Existing lf2 surfaces report unavailable, with no
-unbounded fallback. These read choices neither resolve Q2 nor implement Q3.
+unbounded fallback.
 
 ## Command-map review — October 8
 
@@ -109,11 +104,10 @@ These are reversible lookup choices, not shared Work identity or publication.
 Primary and stack-parent Task selectors now carry repository-scoped full IDs through
 dispatch; an unscoped ambiguous prefix still fails.
 
-The October 9 implementation query measured generated goal input at 22891/16000
-tokens (6891 over), including provider direction and the generated change inventory.
-The complete supplied source was read; it has no additional steer hidden in that
-inventory. Editing the recorded direction or context producer is outside this cut.
-No limit was raised. Earlier index recovery: `fc87e09c1:scratch/questions.md`.
+October 9 realign measured generated goal input at 23343/16000 tokens (7343 over):
+stored direction plus generated inventory. The complete supplied source adds no
+instruction in its omitted inventory. Local memory/scratch edits cannot fix this
+separate generated budget; context-producer changes remain outside this cut. No limit changed.
 
 ## Reversible preview limits — October 9
 
@@ -122,8 +116,11 @@ comments first. Flow-wide context remains undefined. Bare-agent/new operator-che
 previews cannot create their future checkout to manufacture input. Remote transport
 currently probes identity and prepares credentials, so remote preview fails before
 transport rather than pretending those effects are reads. These gaps remain in the
-one-PR scope, not deferred deliverables. Explanation currently reports Work selection;
-complete action/impediment explanation still needs composition.
+one-PR scope, not deferred deliverables. Task-run action/impediment explanation now uses the launch owners. Other command
+action explanation remains. Omitting a Task from `task run` uses checkout/declaration
+inference in preview and execution; naming a Flow still uses the explicit Task
+positional form. Remote action evidence is unavailable without effect-free transport;
+local absence does not resolve Q2 or first-start admission.
 
 ## Reversible exact-input choices — October 8
 
@@ -135,3 +132,20 @@ unavailable rather than discarded. This preserves Q3's existing-draft decision;
 multiline insertion needs terminal-mode proof before expanding this contract.
 Pre-input scratch: `/tmp/loo427-input-skDK4w/scratch/`; pre-compression scratch
 and working diff: `/tmp/loo427-compress-input-nryd8M/`.
+
+## Reversible composed-opening choices — October 9
+
+`--diff` reveals the retained Changes browser without choosing a file or replacing
+its draft/selection. The same Task link carries Session and companion intent.
+`--session` opens only Task-associated Sessions in this cut; standalone Sessions
+remain available through `session connect`. CLI opening does not run on the
+Task's execution Machine automatically. Request-scoped native/Files readiness and failure propagation are implemented locally;
+an `opening` reply grants no input target or usability. Composed `--diff` opening
+clears zoom to make both requested panes visible; ordinary companion commands retain
+zoom. Native endpoint acceptance remains unproved.
+
+Repository/page readiness choice (October 9): registration of the validated repository
+shell is usable even while planning loads. A plain Task request waits for its mounted
+page, not optional Session preparation. Receipts are latest-per-locator/window,
+not a durable history; locators never become repository identity. This reversible
+endpoint definition leaves native usability and remote composition unproved.

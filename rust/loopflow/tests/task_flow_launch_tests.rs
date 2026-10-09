@@ -446,7 +446,15 @@ fn checkout_leaves_workflow_selection_to_the_first_run() {
 fn a_task_takes_up_its_projects_workflow_and_keeps_one_it_named() {
     // Nothing named, no Workflow yet: the Project's.
     let task = WorkflowTask::new();
-    task.ok(&["-b", "task", "run", "INF-123"]);
+    let preview = task.run(&["task", "run", "--explain", "--json"]);
+    assert!(
+        preview.status.success(),
+        "{}",
+        String::from_utf8_lossy(&preview.stderr)
+    );
+    let preview: serde_json::Value = serde_json::from_slice(&preview.stdout).unwrap();
+    assert_eq!(preview["action"]["to"], "review");
+    task.ok(&["-b", "task", "run"]);
     let workflow = task.workflow();
     assert_eq!(workflow["name"], "feature");
     assert_eq!(workflow["position"], at("review"));

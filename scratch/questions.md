@@ -32,9 +32,10 @@ at `b040c7c8d:scratch/questions.md`.
 
 The integrated cut remains unpublished. The current design owns verification and
 remaining integration; earlier adoption evidence stays at `5d336868f:scratch/questions.md`.
-October 9's 63 peer-storage passes at `25cbc0a09` cover the latest alternate
-acquisition cut; earlier 49-test evidence remains at `b21429d9b`. The design
-separates storage proof from focused foreground-creation checks.
+October 9's 63 peer-storage passes at `25cbc0a09` cover alternate acquisition,
+not the later invalidation cut. `6ccbbabe3` records four focused passes for that
+cut; earlier 49-test evidence remains at `b21429d9b`. The design separates these
+storage proofs from public composition and remaining implementation.
 Broader public/DTO, provider-lifetime, cold-worker, Desktop and mixed-provider acceptance
 remain separate. No new product decision is selected.
 
@@ -191,11 +192,8 @@ remain separate. No new product decision is selected.
   remaining public invalidation verification and presentation work;
   mixed-provider exchange remains disabled.
 
-- October 9 ordering choices and counterexamples now live in the design's
-  **Remaining integration**, item 2. Common receipt identities and first-mutation
-  clocks select intentions; effect updates cannot promote losers. No new product
-  policy or mixed-provider activation. Detailed rationale and the settled-partial
-  and cold-inventory counterexamples: `fcd64901f:scratch/questions.md`, final entry.
+- Ordering choices and counterexamples live in the design's **Remaining integration**,
+  item 2; detailed rationale stays at `fcd64901f:scratch/questions.md`.
 
 - October 9 alternate-acquisition choice: common removal/archive evidence commits
   before scalar projection, so rejecting a stale body cannot erase the negative
@@ -220,3 +218,7 @@ remain separate. No new product decision is selected.
   List/scalar replay cannot clear freshness. Null-detail invalidation uses the same
   capture path, and migration retains unknown-age invalid caches. No new provider
   revision, execution authority or mixed-provider activation is introduced.
+
+- October 9 unplaced-Wave presentation uses the existing optional placement query;
+  execution's required reader stays strict. Null means unplaced, never local by
+  default. Rust/Swift share the nullable DTO; no migration or new authority is added.

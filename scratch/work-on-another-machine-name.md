@@ -216,6 +216,9 @@ this heading. Keep these replacements deleted:
 - The peer validator's requirement to rewrite both sort keys. Common moves between
   priority groups intentionally retain the secondary key; transport keeps that exact
   input rather than inventing an additional write.
+- Wave reads requiring Machine placement and Rust/Swift fixtures rejecting its
+  absence. Optional reads reuse the existing placement query; execution requirements
+  and dangling-Machine errors remain distinct from unplaced planning.
 - Status's intermediate `(DTO, digest)` vector and duplicated reconnect execution
   readers. Destination rows stream within the same read transaction. One fixture
   reader compares full rows and explicitly selected retained Process IDs; new CLI
@@ -289,25 +292,27 @@ transition, not populated execution/control preservation. That separate acceptan
 remains with the two-store foreground fixture and combined gate.
 
 Executable feedback exposed two distinct presentation/execution boundaries:
-- `wave status` rejects imported Waves without Machine placement;
-  `WaveSnapshot.machine` is nonoptional in Rust/Swift. Keep imports unplaced.
-  The remaining presentation cut must represent absence, not allocate execution
-  on reads. The existing public `project workflow show --json` reader exposes
-  Project sync receipts independently; it proves no Wave/Desktop acceptance.
+- Wave list/status/roadmap now expose nullable `WaveSnapshot.machine` in Rust
+  and Swift; text and Desktop show “unplaced.” Reads retain imported planning
+  without allocating placement. Project sync receipts remain independently visible.
 - Common provider acquisition called `inherit_project_placement`, allocating
   placement during creation readback. That call is deleted. Explicit local
   creation/placement keeps its owner; acquisition preserves existing placement
   and absence. The public fixture retains the six-table comparison above that
   exposed this failure rather than relaxing it.
 
-Remaining composition, reconciled October 9 against `25cbc0a09`:
+Remaining composition, reconciled October 9 against `6ccbbabe3`:
 
 `358f7fa08` implements alternate removal/archive/Team acquisition;
-`25cbc0a09` prepares typed histories before projection retries. These supersede
-the earlier instruction to implement item 3, not its public acceptance.
+`25cbc0a09` prepares typed histories before projection retries. `4acd37ec8` adds
+causal invalidation; `6ccbbabe3` simplifies replay while retaining revision floors.
+These supersede the earlier instructions to implement items 3 and 4, not their
+public acceptance. Legacy association and Desktop peer presentation remain
+implementation cuts; another invalidation implementation is unnecessary.
 Ordering (`fcd64901f`, `357090d4b`) and retained-effect eligibility (`08a285872`)
-remain integrated. The latest 63 peer-storage passes include the alternate cut;
-the public reader change at `30b476328` still awaits gate.
+remain integrated. The 63 peer-storage passes at `25cbc0a09` predate invalidation;
+the current cut has four focused passes, not a rerun of that full suite. The public
+reader change at `30b476328` still awaits gate.
 `5bed3a211` integrates main `3a0aa5ca4` (#1510), after common writer `d20c56daf`.
 Main adds chat Flow recipes and hierarchical names, not provider frontier transport;
 combined launch/Flow verification remains with gate.
@@ -389,10 +394,16 @@ combined launch/Flow verification remains with gate.
    fabricating a revision or accepting a stale local read. Repeated unchanged detail
    does not mint another acknowledgement. Public composition remains gate work,
    not mixed activation.
-5. **Legacy association and presentation remain implementation work.** Divergent
-   existing IDs retain history; unplaced Waves need nullable Rust/Swift Machine
-   presentation, not placement on read. Desktop still needs selected-plan,
-   authorship/assignee, pending/conflict and losing-edit/recovery presentation.
+5. **Unplaced-Wave presentation is implemented at `60d113a70`; broader presentation remains.**
+   `WaveSnapshot.machine` is nullable in Rust/Swift, with shared placed/unplaced
+   fixtures and absence-aware text/roadmap consumers. The Store exposes its existing
+   optional placement reader; required execution placement still rejects absence.
+   Public list/status/roadmap coverage imports synthetic planning and compares
+   retained Sessions, Process, Workflow and all placements across repeated reads.
+   No live control, SSH or installed acceptance follows. Divergent legacy IDs still
+   need association without renumbering or merging execution histories. Desktop
+   selected-plan, authorship/assignee, pending/conflict and losing-edit/recovery
+   presentation remain; mixed-provider activation still requires composed acceptance.
 
 Mixed-provider exchange remains disabled until composition is complete. Local-only
 exchange and private-selection holds remain intact. Combined verification belongs
@@ -553,8 +564,8 @@ and disposable remotes. Installed-release behavior remains separate. Release's c
 records a recovery path missed by lower-level fixtures and a successful failure
 report mistaken for operation success. The same lessons require public command
 coverage here, and status that distinguishes retained conflicts from convergence.
-October 9 reconciliation reread Release's GOAL.md and full MEMORY.md; filesystem
-inspection found no other immediate child memory. Its operation-entry and
+October 9 reconciliation at `6ccbbabe3` reread Release's GOAL.md and full MEMORY.md;
+filesystem inspection found no other immediate child memory. Its operation-entry and
 result-accounting lessons remain in parent memory: storage readback cannot prove
 foreground acquisition, and a successful report cannot replace operation success.
 
@@ -603,7 +614,7 @@ and limitations: `9b59e9b71:scratch/work-on-another-machine-name.md`,
 **Acceptance for review**. They do not establish this ordering cut, public
 combined behavior or Desktop acceptance.
 
-Check (October 9 compress): `cargo test -p loopflow --lib peer_invalidation --no-run` builds; `scripts/test_network.py <lib-test>` passes `peer_invalidation` (2), `peer_provider_removal_and_archive_precede_stale_detail_without_losing_work` and `provider_move_to_unselected_project_preserves_execution_and_sibling_exchange` (4 total); `cargo fmt --check`, `git diff --check` and `cargo clippy --all-targets -- -D warnings` pass. Combined public, partial-list and Desktop checks remain with gate.
+Check (October 9 unplaced-Wave): Rust focused build and `scripts/test_network.py` public Wave read + placed/unplaced DTO tests pass (3); `scripts/test_desktop.sh --filter 'DTOFixtureTests/(unplacedWaveFixture|waveDetailFixturePreservesHierarchy)'` builds Desktop and passes (2); fmt, diff and all-target Clippy pass. Combined public/partial-list and Desktop interaction checks remain with gate.
 
 Earlier SQL proofs, macOS startup limitations and the retained historical Flow
 without a recorded exit remain at

@@ -5,10 +5,19 @@ implementation, deletion and retention defaults are not approved.
 
 > “lf is aggressive about cleaning up worktrees so that we are not causing a bunch of waste on our customers computers”
 
+**Accepted direction, 2026-10-09:** Jack Heart considers Etude experiment output
+disposable too. In response to excluding the 17.9 GiB `.runs` directory from
+cache cleanup, Jack said: “I think i would say it can”. Experiment output is not
+automatically archival data. Protection while running and explicit retention for
+selected results are proposed mechanics; expiry and byte budgets remain draft.
+Jack also asked whether the 62 GiB Loopflow home can be rotated. Rotation and
+compression are in scope for design; expiry of usable conversation history has
+not been approved.
+
 ## What to build
 
-Make the installed product automatically reclaim finished, disposable checkouts,
-retry deferred cleanup, and explain retained bytes without discarding work.
+Make the installed product automatically reclaim finished checkouts and declared
+disposable artifacts, retry deferred cleanup, and preserve unfinished source.
 
 ## Placement
 
@@ -19,7 +28,7 @@ Selected from `lf wave list --json` on 2026-10-09. No Task filed or Flow launche
 
 Additive series. The keystone is one cleanup owner plus automatic worktree
 collection. It replaces today's overlapping deletion decisions in one PR.
-Independent follow-ups cover caches in retained checkouts and other storage;
+Independent follow-ups cover artifacts in retained checkouts and other storage;
 they must use this owner rather than introduce another cleaner.
 
 ## The demo
@@ -163,16 +172,35 @@ changes in each consumer language. Gate owns execution, not this design pass.
 
 ## Follow-ups
 
-1. **Disposable caches in retained checkouts:** product-level declaration of
-   regenerable roots, idle/age and machine-wide byte budgets; preserve source and
-   Task identity while evicting cold artifacts. Replace the Python build-cleanup
+1. **Disposable artifacts in retained checkouts:** product-level declaration of
+   disposable roots, idle/age and machine-wide byte budgets; preserve source and
+   Task identity while evicting cold build and experiment output. Etude `.runs`
+   belongs in this category by Jack Heart's direction; it does not require
+   byte-for-byte reproducibility. Proposed behavior: protect running producers
+   and consumers, expire inactive unpinned runs, and explicitly retain selected
+   results. Preserve durable conclusions in source/docs rather than implicitly
+   keeping every raw run forever. Replace the Python build-cleanup
    policy with this product owner; retain repository-specific test admission.
    Include persistent checkouts and interrupted-removal residue with proven
-   ownership. Do not infer disposability from `target`, `.venv` or `.gitignore`.
-2. **Other lf-owned storage:** measure and bound temporary artifacts, installation
-   generations and logs at their writers. Durable transcripts and database
-   history need a separately accepted retention contract. Preserve existing
-   two-generation migration-backup policy rather than adding a rival pruner.
+   ownership. The same policy handles `target`, `.venv` and `.runs` when declared;
+   do not infer permission from a name or `.gitignore` alone.
+2. **Rotate diagnostics and recovery generations:** size- and age-bounded logs,
+   compress closed raw traces, expire unreferenced diagnostic segments and
+   temporary captures, and retain two validated migration backups. Proposed
+   diagnostics defaults: seven days hot, 30 days total, 4 GiB machine-wide;
+   caps apply to disposable diagnostics, not credentials or sole conversation
+   evidence. Keep writer ownership and one retention implementation; extend the
+   existing backup policy rather than add a rival pruner. Ad hoc historical
+   backups need explicit recovery disposition. A cap on all diagnostic roots
+   prevents per-Session limits from multiplying without bound.
+3. **Compact conversation storage:** lossless cold archive and on-demand reading
+   for lf-owned completed Session payloads; retire duplicate captures only after
+   proving their retained owner. Provider account homes contain about 10 GiB of
+   transcripts and several GiB of provider databases, not just logins. Do not
+   truncate native rollout files, remove SQLite/WAL files, or gzip paths a
+   provider expects to read. Provider-owned histories need a tested archive and
+   restore path that preserves supported resume entry points, or an explicit
+   history-expiration decision. Credentials and live histories remain untouched.
 
 ## Measure
 

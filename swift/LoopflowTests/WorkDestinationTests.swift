@@ -11,6 +11,16 @@ import os
 @Suite("Work destinations", .serialized)
 @MainActor
 struct WorkDestinationTests {
+    @Test func taskLinksRetainLiteralTargetsWhenChangingRepositoryLocator() throws {
+        let original = TaskLink(issue: "LOO-427", repo: "/src/a #?&% repo", session: "session+&%")
+        let parsed = try TaskLink(url: #require(original.url))
+        #expect(parsed == original)
+        let relocated = TaskLink(issue: parsed.issue, repo: "/peer/other #repo", session: parsed.session)
+        #expect(try TaskLink(url: #require(relocated.url)) == relocated)
+        #expect(try TaskLink(url: #require(TaskLink(issue: "LOO-427", repo: nil).url))
+            == TaskLink(issue: "LOO-427", repo: nil))
+    }
+
     @Test func resolvingTaskKeepsTheWorkspaceVisible() async throws {
         let data = try fixture()
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
@@ -420,6 +430,32 @@ struct WorkDestinationTests {
         #expect(workspaces.inspect().isEmpty)
     }
 
+    @Test func inspectionUsesTheRepositoryInventoryForBothTaskIdentities() throws {
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(fixture().utf8))
+        let wave = try #require(snapshot.waves.first)
+        let task = try #require(wave.tasks.items.first)
+        let runtimeID = try #require(task.runtime?.workId)
+        let model = WorkModel(query: RegistryQuery { _, _ in
+            throw RegistryQueryError("Inspection must not read Work")
+        }, repoPath: wave.wave.repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        let registry = SessionsWorkspaceRegistry()
+        for id in [task.id, runtimeID] {
+            model.select(.task(id: id))
+            #expect(model.task(id: id)?.task.id == task.id)
+            let reading = model.inspectDesktop(repository: "plan", window: UUID(), workspaces: registry)
+            #expect(reading.task?.reading == "current")
+            #expect(reading.task?.actions == task.actions)
+        }
+        // A repository window cannot offer actions from another repo's inventory.
+        model.setRepoPath("/another-repository")
+        model.navigation.selection = .task(id: task.id)
+        let outside = model.inspectDesktop(repository: "other-plan", window: UUID(), workspaces: registry)
+        #expect(outside.task?.reading == "unavailable")
+        #expect(outside.task?.actions == nil)
+        #expect(outside.task?.conditionObservedAt == nil)
+    }
+
     @Test func inspectionKeepsStaleDatesButNeverHistoricalActions() throws {
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(fixture().utf8))
         let wave = try #require(snapshot.waves.first)
@@ -507,7 +543,7 @@ struct WorkDestinationTests {
 
     private func windowInspection(_ id: UUID) -> DesktopWindowInspection {
         DesktopWindowInspection(repository: "fixture", window: id.uuidString, path: nil,
-            selectionKind: nil, selectionId: nil, selectedSession: nil, reading: "loading", reason: nil,
+            selectionKind: nil, selectionId: nil, reading: "loading", reason: nil,
             task: nil, session: nil, supportedOperations: ["inspect"], workspaces: [], layouts: [])
     }
 

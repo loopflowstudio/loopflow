@@ -18,7 +18,6 @@ public struct DesktopWindowInspection: Codable, Sendable, Equatable {
     public let path: String?
     public let selectionKind: String?
     public let selectionId: String?
-    public let selectedSession: String?
     public let reading: String
     public let reason: String?
     public let task: DesktopTaskInspection?
@@ -28,16 +27,16 @@ public struct DesktopWindowInspection: Codable, Sendable, Equatable {
     public let layouts: [DesktopWorktreeInspection]
 
     public init(repository: String, window: String, path: String?, selectionKind: String?, selectionId: String?,
-                selectedSession: String?, reading: String, reason: String?, task: DesktopTaskInspection?,
+                reading: String, reason: String?, task: DesktopTaskInspection?,
                 session: DesktopSessionInspection?, supportedOperations: [String], workspaces: [DesktopWorkspaceInspection], layouts: [DesktopWorktreeInspection]) {
         self.repository = repository; self.window = window; self.path = path
-        self.selectionKind = selectionKind; self.selectionId = selectionId; self.selectedSession = selectedSession
+        self.selectionKind = selectionKind; self.selectionId = selectionId
         self.reading = reading; self.reason = reason; self.task = task
         self.session = session; self.supportedOperations = supportedOperations; self.workspaces = workspaces; self.layouts = layouts
     }
     enum CodingKeys: String, CodingKey {
         case repository, window, path, reading, reason, task, session, workspaces, layouts
-        case selectionKind = "selection_kind", selectionId = "selection_id", selectedSession = "selected_session"
+        case selectionKind = "selection_kind", selectionId = "selection_id"
         case supportedOperations = "supported_operations"
     }
 }

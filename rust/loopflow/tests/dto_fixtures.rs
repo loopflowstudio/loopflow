@@ -630,6 +630,8 @@ fn desktop_inspection_preserves_exact_windows_hidden_panes_and_stale_reading() {
         Some("2026-10-08T18:59:58Z")
     );
     let session = window.session.as_ref().unwrap();
+    assert_eq!(session.id, "session-one");
+    assert!(report.render().contains("Session: session-one"));
     assert!(session.observed_at.is_none());
     let actions = session.actions.as_ref().unwrap();
     assert_eq!(actions.len(), 2);

@@ -55,8 +55,11 @@ installed help or reviewed Desktop code, not proof that no external tool exists.
   convergence or usable Session/diff proof. Rust/configured SwiftPM remain
   unverified. The command tables preserve October 7's baseline and judgments;
   these two read surfaces are now partial implementations of their **want** rows.
-  Complete legal actions/freshness, composed opening, pane control and terminal
-  I/O remain unfinished. No cmux/herdr behavior was re-exercised for this delta.
+  The later `a629e512a` cut forwards Task run control and Session actions with
+  independent reading availability and retained Task dates; Session observation
+  time remains unavailable. Complete legal actions/freshness, composed opening,
+  pane control and terminal I/O remain unfinished. No cmux/herdr behavior was
+  re-exercised for this delta.
 - Public [cmux API](https://cmux.com/docs/api) and
   [concepts](https://cmux.com/docs/concepts) provide context, but the tables below
   use the installed command discovery and our local observations. The public API
@@ -290,7 +293,8 @@ Reuse these owners without duplicating their outcomes:
   [multiplexer](../../swift/Loopflow/Models/MultiplexerStore.swift),
   [terminal input/read primitives](../../swift/LoopflowMac/Services/Ghostty/GhosttyTerminalView.swift).
 - [AppleScript dictionary](../../swift/LoopflowMac/Loopflow.sdef) and
-  [handler](../../swift/LoopflowMac/ScriptCommands.swift): key-window capture only.
+  [handler](../../swift/LoopflowMac/ScriptCommands.swift): passive retained-window
+  inspection plus key-window capture.
 - [Shared bindings](../../rust/loopflow/src/ops/run.rs),
   [context command](../../rust/loopflow/src/lf/commands/context.rs),
   [RegistryQuery](../../swift/Loopflow/Services/RegistryQuery.swift).

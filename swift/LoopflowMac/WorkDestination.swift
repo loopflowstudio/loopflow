@@ -20,6 +20,23 @@ struct TaskLink: Equatable, Sendable {
     let repo: String?
     let session: String?
 
+    init(issue: String, repo: String?, session: String? = nil) {
+        self.issue = issue
+        self.repo = repo
+        self.session = session
+    }
+
+    var url: URL? {
+        var components = URLComponents()
+        components.scheme = "loopflow"
+        components.host = "task"
+        components.path = "/" + issue
+        components.queryItems = [("repo", repo), ("session", session)].compactMap { name, value in
+            value.map { URLQueryItem(name: name, value: $0) }
+        }
+        return components.url
+    }
+
     init(url: URL) throws {
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
               components.scheme == "loopflow", components.host == "task",

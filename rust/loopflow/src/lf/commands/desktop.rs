@@ -20,7 +20,6 @@ pub struct DesktopWindowInspection {
     pub path: Option<String>,
     pub selection_kind: Option<String>,
     pub selection_id: Option<String>,
-    pub selected_session: Option<String>,
     pub reading: String,
     pub reason: Option<String>,
     pub task: Option<DesktopTaskInspection>,
@@ -134,7 +133,11 @@ impl DesktopInspection {
                 "  Work: {} {} · Session: {}",
                 window.selection_kind.as_deref().unwrap_or("unbound"),
                 window.selection_id.as_deref().unwrap_or(""),
-                window.selected_session.as_deref().unwrap_or("unbound")
+                window
+                    .session
+                    .as_ref()
+                    .map(|session| session.id.as_str())
+                    .unwrap_or("unbound")
             ));
             if let Some(reason) = &window.reason {
                 lines.push(format!("  {reason}"));

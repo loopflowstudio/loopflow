@@ -63,9 +63,10 @@ control and composed proof remain.
 
 LOO-427 keys windows/queues by plan; delivery tokens fence canceled completions.
 Context/launch/status/PR reads share recorded Machine/path, not branch names.
-Passive inspection projects retained layouts, only a Task recommendation and UI
-read time—not complete actions, source freshness or usable-content proof. Router
-smoke/stub typecheck pass; Rust, configured SwiftPM and native/remote proof remain.
+Inspection forwards Task/run control and Session actions independently,
+retaining Task dates; Session time stays unknown. Saved/failed readings grant no
+actions. Stub checks prove neither freshness nor usable content.
+Rust, SwiftPM and native/remote proof remain.
 
 Jack selected execution-machine local operations and Git-ref Task sync: 406 owns
 writes/Linear, 412 exchange. Workflow, Sessions, Processes, checkouts and control

@@ -125,10 +125,7 @@ struct LoopflowApp: App {
 
         Window("Portfolio", id: "portfolio") {
             WavesView(portfolioService: portfolioService, openTask: { path, id in
-                var link = URLComponents()
-                link.scheme = "loopflow"; link.host = "task"; link.path = "/" + id
-                link.queryItems = [URLQueryItem(name: "repo", value: path)]
-                requestRepository(path, link.url)
+                requestRepository(path, TaskLink(issue: id, repo: path).url)
             })
                 .tint(.loopflowBurgundy)
                 .modifier(AppAppearance(mode: resolvedAppearance))
@@ -243,10 +240,9 @@ struct LoopflowApp: App {
         let workspace = try await RepositoryWorkspace.resolve(path: path, query: query)
         portfolioService.addRepo(URL(fileURLWithPath: workspace.path))
         var destination = link
-        if let link, var components = URLComponents(url: link, resolvingAgainstBaseURL: false) {
-            components.queryItems = (components.queryItems ?? []).filter { $0.name != "repo" }
-                + [URLQueryItem(name: "repo", value: workspace.path)]
-            destination = components.url
+        if let link {
+            let target = try TaskLink(url: link)
+            destination = TaskLink(issue: target.issue, repo: workspace.path, session: target.session).url
         }
         if !taskLinks.deliver(destination, repository: workspace.id) {
             openWindow(id: "workspace", value: workspace)

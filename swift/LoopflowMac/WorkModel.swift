@@ -213,12 +213,7 @@ final class WorkModel {
 
     func openTaskDestination(wave: WaveRoadmap, task: RoadmapTask) {
         if let openRepository, repoPath?.normalizedFilePath != wave.wave.repo.normalizedFilePath {
-            var link = URLComponents()
-            link.scheme = "loopflow"
-            link.host = "task"
-            link.path = "/" + task.task.identifier
-            link.queryItems = [URLQueryItem(name: "repo", value: wave.wave.repo)]
-            openRepository(wave.wave.repo, link.url)
+            openRepository(wave.wave.repo, TaskLink(issue: task.task.identifier, repo: wave.wave.repo).url)
             return
         }
         setRepoPath(wave.wave.repo)
@@ -269,7 +264,7 @@ final class WorkModel {
         }
         return DesktopWindowInspection(repository: repository, window: window.uuidString,
             path: repoPath, selectionKind: selection?.kind.rawValue, selectionId: selection?.id,
-            selectedSession: navigation.selectedSessionId, reading: reading, reason: workStatus.message,
+            reading: reading, reason: workStatus.message,
             task: inspectSelectedTask(), session: inspectSelectedSession(),
             supportedOperations: ["inspect"], workspaces: workspaces.inspect(), layouts: workspaces.inspectLayouts())
     }
@@ -278,9 +273,7 @@ final class WorkModel {
         guard let selection, selection.kind == .task else { return nil }
         // Never use task(id:): its historical fallback remains useful for
         // display after removal, but is not a current action reading.
-        let task = roadmap.value?.waves.flatMap { $0.tasks.items }.first {
-            $0.id == selection.id || $0.runtime?.workId == selection.id
-        }
+        let task = currentTask(id: selection.id)?.task
         let state: String
         let reason: String?
         switch roadmap {
@@ -1390,12 +1383,18 @@ final class WorkModel {
         roadmap.value?.waves.first { $0.currentProject?.id == projectId || $0.currentProject?.slug == projectId || $0.currentProject?.workId == projectId }
     }
 
-    func task(id: String) -> (wave: WaveRoadmap, task: RoadmapTask)? {
+    /// Current repository inventory only; retained navigation evidence is display-only.
+    private func currentTask(id: String) -> (wave: WaveRoadmap, task: RoadmapTask)? {
         for wave in visibleRoadmaps {
             if let task = wave.tasks.items.first(where: { $0.id == id || $0.runtime?.workId == id }) {
                 return (wave, task)
             }
         }
+        return nil
+    }
+
+    func task(id: String) -> (wave: WaveRoadmap, task: RoadmapTask)? {
+        if let current = currentTask(id: id) { return current }
         if let retained = navigation.selectedTaskEvidence, retained.task.id == id {
             if let current = wave(id: retained.wave.wave.id) {
                 return (current, retained.task)

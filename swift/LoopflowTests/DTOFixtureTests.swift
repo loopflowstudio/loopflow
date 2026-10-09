@@ -29,6 +29,7 @@ struct DTOFixtureTests {
         #expect(window.task?.actions == nil)
         #expect(window.task?.roadmapGeneratedAt == "2026-10-08T19:00:00Z")
         #expect(window.task?.conditionObservedAt == "2026-10-08T18:59:58Z")
+        #expect(window.session?.id == "session-one")
         #expect(window.session?.actions?.map(\.kind) == [.open, .moveHere])
         #expect(window.session?.actions?.first?.unavailableReason != nil)
         #expect(window.session?.observedAt == nil)

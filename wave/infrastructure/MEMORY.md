@@ -49,8 +49,8 @@ receipts advance revision. `29777b8cb` scopes sync to repositories;
 `078a6642e`: LOO-406 Linux migration/reconnect/adoption pass, not peer acceptance.
 `ffe986160` removes synthetic settlement; queue gate's 15-second lock refusal
 leaves receipts unverified. Swift/matrix await CI. Jack Heart authorized
-LOO-406 landing/CI after queue. #1503's classifier proves
-neither acceptance nor installation.
+LOO-406 landing/CI after queue. Main `d20c56daf` integrates #1503;
+its classifier proves neither acceptance nor installation.
 
 Jack Heart's `8821db44-0480-4493-8609-953207663f1d` removes public creation tokens.
 Each create generates/saves/returns a distinct ID, even for identical titles;
@@ -626,19 +626,19 @@ Joining publishes nothing; imports remain unplaced. Malformed input aborts impor
 contradictions defer effects, never saves/acquisition. Retain baselines, uncertainty
 and losers. Readback settles effects, not mappings/errors or removal via creation.
 
-Ordering, causal freshness, private-history holds and unknown-journal proofs:
-`9dfb95451`, this heading. Omission is not convergence. Desktop keeps last-good
-scoped status. Mixed exchange stays disabled;
-sharing/recovery and public composition remain unfinished.
+Earlier proofs: `9dfb95451`, this heading. Omission is not convergence.
+Desktop retains last-good scoped status; per-Work recovery remains.
+Mixed exchange stays disabled.
 
-`39dba32c1` retains creation origins through import; common acquisition owns
-exact-origin readback. `8f3472eda` adds exact-Linear-fact parents without exporting
-correspondence. Equal text grants no causality; heads remain per-origin and baselines
-traverse the links. Scalar/content capture shares parent detection.
-Unselected origins stay held. Static checks prove no fixture execution or recovery.
-Joint winners, peer-authored causality, relationships, non-creation receipts and
-public Git/Linear acceptance remain unfinished. Preserve execution, inputs, private
-selection and losers. Earlier evidence: `f2a5c94e8`, this heading.
+`39dba32c1` retains creation origins; common acquisition owns exact readback.
+`8f3472eda`/`b5b491099` capture exact Linear parents across origins, without
+exporting correspondence. Equal text grants no causality; per-origin heads and
+private selection survive. Behavioral proof remains deferred.
+Retention is not observation: import suppresses capture and skips associated
+projection. Lifting holds alone cannot establish causality. Joint winners need
+ancestry before comparing per-origin winners. Peer-authored observation,
+relationships, non-creation receipts and public composition remain unfinished.
+Preserve execution. History: `f2a5c94e8`, this heading.
 Plan: `scratch/work-on-another-machine-name.md`.
 
 ## Driver recovery
@@ -995,8 +995,8 @@ owning fact's terminal time; publish measured coverage beside percentiles.
 Unknown authority cannot be inferred from observer time or trace prose.
 
 LOO-406's October 8 direction selects local Wave/Project/Task ownership with optional
-provider mappings and explicit ingestion of Git-authored definitions; that cutover
-remains unfinished. Historical label migration
+provider mappings and explicit ingestion of Git-authored definitions; #1503 is
+integrated, not installed acceptance. Historical label migration
 and old command names are archived, not current instructions. KRs are explicit
 judgments, never inferred completion. Preserve unrelated provider associations;
 ambiguous moves remain diagnoses. Standing frontier plans need not acquire an

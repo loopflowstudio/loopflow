@@ -19,7 +19,8 @@ and truth source for each responsibility.
 ## Projects
 
 Jack Heart selected locally owned Projects and Tasks with optional repository-wide
-Linear synchronization. LOO-406 owns the unfinished writer cutover.
+Linear synchronization. LOO-406's common writer is integrated on main (#1503);
+installed acceptance and LOO-412's peer composition remain separate.
 Projects do not own memory, cadence, or child projects.
 
 ## Bounds

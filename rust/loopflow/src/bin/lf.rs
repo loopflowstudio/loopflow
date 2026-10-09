@@ -1814,7 +1814,7 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
     let input = cli
         .context
         .then(|| {
-            loopflow::lf::commands::run::preview(
+            loopflow::lf::commands::context::preview::assemble(
                 &std::env::current_dir()?,
                 invocation.as_ref().map(|invocation| invocation.name),
                 invocation.as_ref().and_then(|invocation| invocation.kind),

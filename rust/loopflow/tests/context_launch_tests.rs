@@ -352,3 +352,60 @@ fn flow_context_preview_retains_native_arguments_and_operating_guidance() {
     assert!(!home.path().join("machine").exists());
     assert!(!repo.path().join(".lf/tmp").exists());
 }
+
+#[test]
+fn operator_context_preview_uses_resolved_skills_without_preparing_checkouts() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    repo.create_file(
+        ".lf/config.yaml",
+        "diff: false\ndiff_files: false\npaste: false\n",
+    );
+    repo.create_file(".lf/flows/inspect.yaml", "- repo/operate\n");
+    let preview = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_lf"))
+            .env_clear()
+            .env("HOME", home.path())
+            .env("LF_HOME", home.path().join("machine"))
+            .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+            .env("PATH", "/usr/bin:/bin")
+            .current_dir(repo.path())
+            .args(args)
+            .args(["--context", "--json"])
+            .output()
+            .unwrap()
+    };
+    for args in [
+        vec!["operate"],
+        vec!["repo/operate"],
+        vec!["skill", "repo-operate"],
+        vec!["flow", "inspect"],
+    ] {
+        let output = preview(&args);
+        assert!(!output.status.success(), "{args:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr)
+                .contains("context unavailable before the operator's scope checkout is prepared"),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    // A literal hierarchical override is not the builtin operator. Preview must
+    // follow the resolved skill, rather than imposing policy on its spelling.
+    repo.create_file(
+        ".lf/skills/repo/operate.md",
+        "Local skill, current checkout.",
+    );
+    for args in [vec!["repo/operate"], vec!["flow", "inspect"]] {
+        let output = preview(&args);
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stdout).contains("Local skill, current checkout."));
+    }
+    assert!(!home.path().join("machine").exists());
+    assert!(!repo.path().join(".lf/tmp").exists());
+    assert!(!repo.path().join(".git/worktrees").exists());
+}

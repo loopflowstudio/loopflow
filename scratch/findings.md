@@ -172,14 +172,13 @@ Executable quoting/effect tests replace the removed shell-check fixture.
 
 ## Flow context preview — October 9
 
-Preview compiles through the launch owner and projects its existing graph; the
-execution cursor selects only the first skill/router. The ordinary prompt owner
-assembles that current snapshot. Command nodes have no agent input; later nodes
-and repeat passes remain unavailable, without executing predecessors.
-Review found that native captured skills need operating guidance even when no
-transport file is written. Prompt assembly now takes capture provenance explicitly;
-launch still derives it from its captured input. The first loop fixture accidentally
-named its Flow and skill identically, invoking flow-first composition and correctly
-failing cycle detection; the fixture now uses distinct names. No collision policy
-changed. Local and two-CLI simulated-SSH checks do not prove configured transport,
-peer admission or the native Desktop endpoint.
+`49effe9bf` compiles through launch's owner and assembles only the first skill/router;
+future/repeat input stays unavailable and commands never run. Capture provenance
+preserves native operating guidance without writing transport files. The original
+fixture's same-named Flow/skill correctly failed cycle detection; distinct fixture
+names repaired it, without changing collision policy (`bdb008907`, this heading).
+
+Review found raw-name guards missed resolved
+`repo-operate` aliases and captured Flow steps while refusing a literal hierarchical
+override. Shared `operator_scope` now owns preview/launch checkout decisions.
+Two-CLI simulated SSH proves no configured transport, admission or native endpoint.

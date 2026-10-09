@@ -205,9 +205,10 @@ These boundaries are integration constraints, not separate replacement projects.
 
 ## Delete — do not maintain
 
-Removed the blanket Flow-context refusal. Direct and Flow previews share prompt
-assembly; only the existing graph describes branches/loops. No executor or second
-planner is introduced.
+Removed the blanket Flow-context refusal and preview orchestration/types from
+`run.rs` and `flow.rs`; `context/preview.rs` owns effect-free presentation, using
+existing prompt/graph owners. Removed raw-name checkout guards: preview and launch
+share `operator_scope` on resolved skills, including aliases and captured Flow steps.
 
 Removed: blanket remote-preview refusal, writable receiver identity lookup,
 SSH's repeated command parse, and shell-side `machine id` recheck/`probe_identity`
@@ -215,14 +216,12 @@ switch. Entry validates addressed identity once before help, scope lookup or
 admission; rejection suppresses fallback Process writes. Transport consumes the
 parsed CLI; launch retains its sender probe/credentials, preview skips them.
 
-Removed: launch-only opening, automatic execution routing/preparation, split Session/Changes
-intent and URL-based completion. One generation-scoped `LinkedSession` observes existing
-Session/Files/pane owners. Palette links reuse `TaskLink.url`; direct/chooser failures
-share receipts. Compression also removes `multiplexerStoreDidChange`, `_notify`, both
-view revision counters and `openingSessionObservation`. Session and multiplexer stores
-now use Observation, like Files; no replacement readiness or layout store is added.
-MultiplexerStore now owns exact-pane visibility for reads and readiness; ordered
-request-ID snapshots are sets, with no copied receipt dictionary for validation.
+Removed launch-only opening, execution routing/preparation, split Session/Changes
+intent and URL completion. Generation-scoped `LinkedSession` uses existing
+Session/Files/pane owners; palette/direct/chooser links share receipts. Observation
+replaces `multiplexerStoreDidChange`, `_notify`, view revision counters and
+`openingSessionObservation`. MultiplexerStore owns visibility; request validation
+uses ID sets, not copied receipts. Earlier detail: `bdb008907` under this heading.
 
 Removed in the invocation cut: embedded Workflow choice, caller-supplied Project
 selection, duplicate option/provenance checks and fallback Process writes after previews.
@@ -580,4 +579,4 @@ identity/delegation, open them, add shell/Files panes, retain an unfinished draf
 change focus, target a harmless command, read output, hide/restore, and verify the
 original input target and draft survive. Demo owns native usability; preserve comparison evidence and use no real accounts or live user terminals.
 
-Check (October 9): `cargo build -p loopflow --bin lf`, focused `context_launch_tests flow_context_preview` (2) and `machine_commands flow_context_preview` (1) PASS; `cargo clippy --all-targets -- -D warnings` PASS; `cargo fmt --all` and `git diff --check` PASS. Combined verification: gate; native usability: demo.
+Check (October 9): `cargo build -p loopflow --bin lf`; `cargo test -p loopflow --test context_launch_tests context_preview` (4) and `--test machine_commands flow_context_preview` (1); `cargo clippy --all-targets -- -D warnings`, fmt and diff-check PASS. Combined verification: gate; native usability: demo.

@@ -3,6 +3,7 @@ use crate::engine::{
     AgentCapabilities, AgentConfig, ContextSourceOverrides, ProcessConfig, ProcessPromptInput,
     PromptComponents, Skill, StreamFormat, Surface,
 };
+use crate::lf::commands::context::preview::PromptPreview;
 use crate::lf::commands::util::launch_session;
 use crate::lf::output::{format_context_header, format_reproducible_command, Colors};
 use crate::lf::Cli;
@@ -44,122 +45,6 @@ pub fn run(repo_root: &Path, skill: Option<&str>, message: Option<&str>, cli: &C
     run_prompt(&built, cli).map(|_| ())
 }
 
-/// Assemble the launch's ordinary input from existing local evidence only.
-pub fn preview(
-    repo: &Path,
-    skill: Option<&str>,
-    kind: Option<crate::engine::target::DefinitionKind>,
-    message: Option<&str>,
-    cli: &Cli,
-) -> Result<ContextPreview> {
-    let runtime = tokio::runtime::Runtime::new()?;
-    let mut binding = runtime.block_on(async {
-        let Some(store) = crate::store::read_existing_registry()? else {
-            anyhow::ensure!(
-                cli.task.is_none() && cli.wave.is_none(),
-                "Work input unavailable: no local registry"
-            );
-            return Ok::<_, anyhow::Error>(None);
-        };
-        let store = std::sync::Arc::new(store);
-        let binding = if let Some(task) = &cli.task {
-            Some(
-                crate::ops::resolve_work_selection(
-                    &store,
-                    repo,
-                    crate::ops::WorkSelection {
-                        task: Some(task),
-                        wave: cli.wave.as_deref(),
-                    },
-                )
-                .await?,
-            )
-        } else {
-            crate::ops::resolve_execution_binding(&store, repo).await?
-        };
-        if let Some(wave) = cli.wave.as_deref().filter(|_| cli.task.is_none()) {
-            let selected = crate::ops::resolve_work_selection(
-                &store,
-                repo,
-                crate::ops::WorkSelection {
-                    task: cli.task.as_deref(),
-                    wave: Some(wave),
-                },
-            )
-            .await?;
-            if let Some(binding) = &binding {
-                anyhow::ensure!(
-                    binding.wave_id == selected.wave_id,
-                    "selected Wave conflicts with checkout Work"
-                );
-            }
-        };
-
-        if let Some(crate::ops::WorkBinding {
-            work: crate::durable::WorkRef::Task(id),
-            ..
-        }) = &binding
-        {
-            let route = store.sqlite.task_execution_route(id)?;
-            anyhow::ensure!(
-                route.machine_id == store.local_machine().await?.id,
-                "Task input is on Machine {}; run the preview directly there",
-                route.machine_id
-            );
-        }
-        Ok(binding)
-    })?;
-    let mut launch = cli.process_options();
-    launch.context = true;
-    if let (Some(binding), Some(cwd)) = (&mut binding, &cli.bound_cwd) {
-        binding.cwd = cwd.clone();
-    }
-    let cwd = binding
-        .as_ref()
-        .map(|binding| binding.cwd.as_path())
-        .or(cli.bound_cwd.as_deref())
-        .unwrap_or(repo);
-    if let Some(name) = skill {
-        let invocation = if let Some(path) = &cli.skill_input {
-            let invocation = crate::engine::skill_invocation::SkillInvocation::read(path)?;
-            anyhow::ensure!(
-                invocation.skill.name == name,
-                "captured skill does not match {name}"
-            );
-            invocation
-        } else {
-            let skill = match crate::engine::target::resolve_definition(cwd, name, kind)? {
-                crate::engine::target::Target::Skill(skill) => skill,
-                crate::engine::target::Target::Flow(flow) => {
-                    return crate::lf::commands::flow::preview(
-                        &flow,
-                        message,
-                        &launch,
-                        cwd,
-                        binding.as_ref(),
-                    )
-                    .map(|preview| ContextPreview::Flow(Box::new(preview)));
-                }
-                _ => unreachable!("definitions resolve to skills or Flows"),
-            };
-            crate::engine::skill_invocation::SkillInvocation {
-                skill,
-                arguments: message.unwrap_or_default().into(),
-            }
-        };
-        launch.resolved_invocation = Some(invocation);
-    }
-    preview_prompt(
-        cwd,
-        skill,
-        message,
-        &launch,
-        binding.as_ref(),
-        cli.skill_input.is_some(),
-    )
-    .map(|preview| ContextPreview::Prompt(Box::new(preview)))
-}
-
 pub(crate) fn preview_prompt(
     cwd: &Path,
     skill: Option<&str>,
@@ -169,9 +54,7 @@ pub(crate) fn preview_prompt(
     captured: bool,
 ) -> Result<PromptPreview> {
     anyhow::ensure!(
-        !matches!(skill, Some("repo/operate" | "wave/operate"))
-            || cli.bound_cwd.is_some() || cli.task.is_some() || cli.wt.is_some()
-            || crate::repository::CanonicalRepo::discover(cwd)?.as_path() != cwd.canonicalize()?,
+        operator_scope(skill, cli, cwd, binding)?.is_none(),
         "context unavailable before the operator's scope checkout is prepared; preview from its existing checkout"
     );
     let built = match binding {
@@ -196,49 +79,6 @@ pub(crate) fn preview_prompt(
         context: built.budget,
         unwritten_sources: built.sources,
     })
-}
-
-/// A direct prompt or a Flow's graph and presently knowable input.
-#[derive(Debug, serde::Serialize)]
-#[serde(untagged)]
-pub enum ContextPreview {
-    Prompt(Box<PromptPreview>),
-    Flow(Box<crate::lf::commands::flow::FlowContextPreview>),
-}
-
-impl ContextPreview {
-    pub fn render(&self) -> String {
-        match self {
-            Self::Prompt(prompt) => prompt.render(),
-            Self::Flow(flow) => flow.render(),
-        }
-    }
-}
-
-#[derive(Debug, serde::Serialize)]
-pub struct PromptPreview {
-    pub checkout: PathBuf,
-    pub system_prompt: String,
-    pub task_prompt: String,
-    pub skill_invocation: Option<crate::engine::skill_invocation::SkillInvocation>,
-    pub context: crate::engine::context_budget::ContextBudgetReport,
-    pub unwritten_sources: Vec<crate::engine::context_budget::ContextSource>,
-}
-
-impl PromptPreview {
-    pub fn render(&self) -> String {
-        let mut text = format!("{}\n\n{}", self.system_prompt, self.task_prompt);
-        if let Some(invocation) = &self.skill_invocation {
-            text.push_str(&format!(
-                "\n\nNative skill: {}\nArguments: {}",
-                invocation.skill.name, invocation.arguments
-            ));
-        }
-        if !self.unwritten_sources.is_empty() {
-            text.push_str(&format!("\n\nPreview only: {} excerpt sources were not written; JSON includes their complete bytes.", self.unwritten_sources.len()));
-        }
-        text
-    }
 }
 
 /// `lf -b session resume ID MESSAGE`: one more headless turn of a conversation,
@@ -308,27 +148,10 @@ fn run_bound_prompt(
     binding: &crate::ops::WorkBinding,
 ) -> Result<Option<FinalAnswer>> {
     let mut scoped;
-    let binding = if resolve_skill(skill, cli, &binding.cwd)?
-        .as_ref()
-        .map(|skill| skill.name.as_str())
-        == Some("wave-operate")
-        && cli.bound_cwd.is_none()
-        && cli.task.is_none()
-        && cli.wt.is_none()
-        && crate::repository::CanonicalRepo::discover(&binding.cwd)?.as_path()
-            == binding.cwd.canonicalize()?
-    {
-        if let crate::durable::WorkRef::Wave(id) = &binding.work {
-            scoped = binding.clone();
-            scoped.cwd = crate::ops::human_session::ensure_scope_worktree(
-                &binding.cwd,
-                &crate::session::PrimaryScope::Wave(id.clone()),
-            )?
-            .path;
-            &scoped
-        } else {
-            binding
-        }
+    let binding = if let Some(scope) = operator_scope(skill, cli, &binding.cwd, Some(binding))? {
+        scoped = binding.clone();
+        scoped.cwd = crate::ops::human_session::ensure_scope_worktree(&binding.cwd, &scope)?.path;
+        &scoped
     } else {
         binding
     };
@@ -433,23 +256,9 @@ fn build_prompt(
     cli: &Cli,
 ) -> Result<PromptBuild> {
     let start = Instant::now();
-    let repo_root = repo_root.to_path_buf();
-    let repo_root = if resolve_skill(skill, cli, &repo_root)?
-        .as_ref()
-        .map(|skill| skill.name.as_str())
-        == Some("repo-operate")
-        && cli.bound_cwd.is_none()
-        && cli.task.is_none()
-        && cli.wt.is_none()
-        && crate::repository::CanonicalRepo::discover(&repo_root)?.as_path()
-            == repo_root.canonicalize()?
-    {
-        let scope = crate::session::PrimaryScope::Repository(
-            crate::repository::CanonicalRepo::discover(&repo_root)?,
-        );
-        crate::ops::human_session::ensure_scope_worktree(&repo_root, &scope)?.path
-    } else {
-        repo_root
+    let repo_root = match operator_scope(skill, cli, repo_root, None)? {
+        Some(scope) => crate::ops::human_session::ensure_scope_worktree(repo_root, &scope)?.path,
+        None => repo_root.to_path_buf(),
     };
     debug!(elapsed_ms = start.elapsed().as_millis(), "found repo root");
     build_prompt_at(
@@ -460,6 +269,37 @@ fn build_prompt(
         repo_root,
         None,
         cli.skill_input.is_some(),
+    )
+}
+
+/// Decide checkout preparation from the resolved skill, not its CLI alias.
+/// Preview observes this same decision but never creates the scope checkout.
+fn operator_scope(
+    skill: Option<&str>,
+    cli: &Cli,
+    cwd: &Path,
+    binding: Option<&crate::ops::WorkBinding>,
+) -> Result<Option<crate::session::PrimaryScope>> {
+    use crate::durable::WorkRef;
+    use crate::session::PrimaryScope;
+
+    if cli.bound_cwd.is_some() || cli.task.is_some() || cli.wt.is_some() {
+        return Ok(None);
+    }
+    let skill = resolve_skill(skill, cli, cwd)?;
+    let scope = match (skill.as_ref().map(|skill| skill.name.as_str()), binding) {
+        (Some("repo-operate"), None) => {
+            PrimaryScope::Repository(crate::repository::CanonicalRepo::discover(cwd)?)
+        }
+        (Some("wave-operate"), Some(binding)) => match &binding.work {
+            WorkRef::Wave(id) => PrimaryScope::Wave(id.clone()),
+            _ => return Ok(None),
+        },
+        _ => return Ok(None),
+    };
+    Ok(
+        (crate::repository::CanonicalRepo::discover(cwd)?.as_path() == cwd.canonicalize()?)
+            .then_some(scope),
     )
 }
 

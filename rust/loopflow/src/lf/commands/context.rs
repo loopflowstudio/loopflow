@@ -1,5 +1,7 @@
 //! Inspect the same budgets and local source snapshot used at launch.
 
+pub mod preview;
+
 use anyhow::{anyhow, Result};
 use serde::Serialize;
 

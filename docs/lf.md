@@ -488,7 +488,9 @@ Only the initial skill or router gets current-snapshot input. Later nodes and
 repeat passes are unavailable: files, Work, feedback and branch choices may change.
 Command nodes are labeled `not_agent`, never executed to discover later input.
 This is a fresh-start preview, not a resumed execution. Native skill arguments and
-router instructions use the same owners as launch.
+router instructions use the same owners as launch. If an operator would prepare a
+scope checkout, its input stays unavailable until previewed from that checkout;
+CLI aliases and captured Flow steps use the same resolved-skill decision.
 
 `--explain` reads selected Work without executing the invocation. Task commands,
 Desktop opening, Session connection and exact Process history lookup are supported;

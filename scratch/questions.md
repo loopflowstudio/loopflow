@@ -107,10 +107,10 @@ These are reversible lookup choices, not shared Work identity or publication.
 Primary and stack-parent Task selectors now carry repository-scoped full IDs through
 dispatch; an unscoped ambiguous prefix still fails.
 
-October 9 `lf context --skill implement`: generated goal 27,138/16,000 tokens
-(11,138 over); the supplied complete source contains the Work seed and 203-file
-inventory. Authored-note curation cannot remove generated inventory. Context-producer
-work remains separate; no limit was raised.
+October 9 `lf context --skill compress --json`: generated goal 27,219/16,000 tokens
+(11,219 over). The complete launch source is a Work seed plus generated file inventory;
+authored-note curation cannot remove that inventory. Context-producer work remains
+separate; no limit was raised.
 
 ## Reversible preview limits — October 9
 

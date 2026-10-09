@@ -59,6 +59,19 @@ built or published. `Package.swift` deliberately remains on published lf2 until
 the relevant checks and upload/download checksum verification succeed. Desktop
 must not import the new symbol before that artifact is available.
 
+On Linux, also compile the embedded C entry point (the terminal-only test does
+not compile it):
+
+```sh
+zig build -Dapp-runtime=none -Dfont-backend=fontconfig_freetype -Drenderer=opengl -Demit-lib-vt=false
+nm -D zig-out/lib/ghostty-internal.so | grep ' T ghostty_surface_read_text_bounded$'
+```
+
+Prepare lazy dependencies with networking enabled before an isolated build.
+Use the discovery-capable Fontconfig backend: `freetype` alone does not compile
+upstream's embedded app. This verifies Linux libraries, not a macOS framework,
+native surface reads or publication readiness.
+
 ## Program Status
 
 `0003-program-status.patch` forwards validated OSC 7501 reports from Ghostty's

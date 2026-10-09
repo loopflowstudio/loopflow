@@ -135,6 +135,16 @@ partial progress, advances later saves' baselines and preserves their desired or
 Lost replies require matching list readback; an unchanged list after an attempt stays
 uncertain without replay. Observed competing order adopts Linear and retains the
 losing list. New members survive; omission alone cannot retire a retained Task.
+Peer exchange transports each common order receipt under its saved identity,
+including exact effects, losing desired lists and partial settlement. Intentions
+are selected by the first journal mutation's logical clock and receipt ID, not
+receiving-machine sequence or later effect-update clocks. Unresolved losing effects
+still hold delivery; settled superseded partial moves do not revive their desired
+lists. Incompatible effect chains or unordered baseline heads retain projection
+conflicts. Referenced Tasks in every retained list participate in private-selection
+holds. Import projects the chosen pending list after Task rows without creating a
+complete-list observation. Captured baseline/effect members still prevent an empty
+or partial list from settling a cold peer's attempt without local list inventory.
 Detail reads never change rank. Project scalar fields continue during uncertain
 ordering. These observations do not provide an atomic provider snapshot or write fence.
 

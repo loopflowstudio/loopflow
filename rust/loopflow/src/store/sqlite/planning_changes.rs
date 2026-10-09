@@ -27,7 +27,7 @@ impl SqliteStore {
              SELECT 'project',p.id FROM projects p JOIN waves w ON w.id=p.wave_id
              WHERE w.repo=?1 AND p.external_project_id IS NOT NULL AND EXISTS(
                  SELECT 1 FROM project_changes c WHERE c.project_id=p.id AND c.acknowledged=0 AND c.conflict_json IS NULL
-                 AND (c.attempted=1 OR c.seq=(SELECT max(seq) FROM project_changes WHERE project_id=p.id AND field=c.field)))"
+                 AND (c.id IN (SELECT id FROM planning_order_deliveries) OR (c.field!='task_order' AND (c.attempted=1 OR c.seq=(SELECT max(seq) FROM project_changes WHERE project_id=p.id AND field=c.field)))))"
         )?;
         let rows = query.query_map([repo], |row| {
             let kind: String = row.get(0)?;
@@ -384,8 +384,8 @@ impl<'a> PlanningChanges<'a> {
         let (owner, id) = self.owner();
         let mut query = conn.prepare(&format!(
             "SELECT id,field,value_json,base_json FROM {owner}_changes c
-             WHERE {owner}_id=?1 AND acknowledged=0 AND conflict_json IS NULL AND (field='deleted' OR seq=(SELECT max(seq) FROM {owner}_changes
-                 WHERE {owner}_id=c.{owner}_id AND field=c.field)) ORDER BY seq"
+             WHERE {owner}_id=?1 AND acknowledged=0 AND conflict_json IS NULL AND (field='deleted' OR (field='task_order' AND id IN (SELECT id FROM planning_order_current)) OR (field!='task_order' AND seq=(SELECT max(seq) FROM {owner}_changes
+                 WHERE {owner}_id=c.{owner}_id AND field=c.field))) ORDER BY seq"
         ))?;
         let changes = query.query_and_then([id], read_change)?;
         changes.collect()

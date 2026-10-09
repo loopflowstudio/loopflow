@@ -32,6 +32,8 @@ struct ObjectChanges<'a> {
     observations: Vec<&'a LinearObservation>,
     creation: Vec<&'a Value>,
     deletions: BTreeMap<&'a str, Vec<&'a Value>>,
+    orders: BTreeMap<&'a str, Vec<&'a Value>>,
+    order_heads: BTreeMap<&'a str, Vec<&'a Value>>,
 }
 
 /// Rejected projections can retain effects only in the peer journal. Never
@@ -66,7 +68,10 @@ fn changes_by_object(snapshot: &PlanningSnapshot) -> BTreeMap<&PlanningObject, O
             .insert(change.field.as_str(), (id, change));
     }
     for change in snapshot.changes.values().filter(|change| {
-        change.field == "creation" || change.linear.is_some() || change.deletion_receipt().is_some()
+        change.field == "creation"
+            || change.linear.is_some()
+            || change.deletion_receipt().is_some()
+            || change.order_receipt().is_some()
     }) {
         let object = objects
             .get_mut(&change.object)
@@ -77,6 +82,13 @@ fn changes_by_object(snapshot: &PlanningSnapshot) -> BTreeMap<&PlanningObject, O
         if let Some(receipt) = change.deletion_receipt() {
             object
                 .deletions
+                .entry(receipt)
+                .or_default()
+                .push(&change.value);
+        }
+        if let Some(receipt) = change.order_receipt() {
+            object
+                .orders
                 .entry(receipt)
                 .or_default()
                 .push(&change.value);
@@ -99,6 +111,17 @@ fn changes_by_object(snapshot: &PlanningSnapshot) -> BTreeMap<&PlanningObject, O
                 && winner.value.as_str() == observation.body["id"].as_str()
         }) {
             object.observations.push(observation);
+        }
+    }
+    for (_, change) in snapshot.heads() {
+        if let Some(receipt) = change.order_receipt() {
+            objects
+                .get_mut(&change.object)
+                .expect("retained order object")
+                .order_heads
+                .entry(receipt)
+                .or_default()
+                .push(&change.value);
         }
     }
     objects
@@ -669,6 +692,16 @@ impl SqliteStore {
                 Err(error) => return Err(error),
             }
         }
+        // Project lists can refer to Tasks first created by this import. Apply
+        // only after their projection; no receipt is settled by this pass.
+        for object in objects.keys().filter(|o| o.kind == PlanningKind::Project) {
+            if !held.contains_key(*object)
+                && !conflicts.iter().any(|(failed, _)| failed == *object)
+                && exists(&tx, object)?
+            {
+                super::planning_order::project_pending(&tx, &ProjectId::from_raw(&object.id))?;
+            }
+        }
         // A skipped projection may retain new effects only in the journal.
         // Selection can later release a sharing hold without importing again;
         // keep the projection conflict until those receipts actually project.
@@ -786,7 +819,7 @@ fn reserve_incoming(
         enroll(conn, repo, destination, object)?;
     }
     for (_, change) in incoming.winners() {
-        if let Some(object) = reference(change) {
+        for object in references(change) {
             if unselected(conn, repo, destination, &object)? {
                 return Err(invalid(format!(
                     "planning reference {} belongs to unselected work",
@@ -796,6 +829,39 @@ fn reserve_incoming(
         }
     }
     Ok(())
+}
+
+fn references(change: &PlanningMutation) -> Vec<PlanningObject> {
+    if change.order_receipt().is_none() {
+        return reference(change).into_iter().collect();
+    }
+    let mut ids = BTreeSet::new();
+    for list in [
+        &change.value["desired"],
+        &change.value["base"]["value"],
+        &change.value["conflict"]["value"],
+    ]
+    .into_iter()
+    .chain(
+        change.value["effects"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .flat_map(|effect| [&effect["before"], &effect["after"]]),
+    ) {
+        ids.extend(
+            list.as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str),
+        );
+    }
+    ids.into_iter()
+        .map(|id| PlanningObject {
+            kind: PlanningKind::Task,
+            id: id.into(),
+        })
+        .collect()
 }
 
 fn reference(change: &PlanningMutation) -> Option<PlanningObject> {
@@ -843,7 +909,7 @@ fn selection_conflicts(
 ) -> StoreResult<BTreeMap<PlanningObject, String>> {
     let mut dependents: BTreeMap<PlanningObject, BTreeSet<&PlanningObject>> = BTreeMap::new();
     for change in snapshot.changes.values() {
-        if let Some(parent) = reference(change) {
+        for parent in references(change) {
             dependents.entry(parent).or_default().insert(&change.object);
         }
     }
@@ -1100,12 +1166,30 @@ fn insert_and_project(
             )?;
         }
     }
+    if object.kind == PlanningKind::Project {
+        for (receipt, history) in &changes.orders {
+            super::planning_order::import_peer_receipt(
+                conn,
+                &ProjectId::from_raw(&object.id),
+                receipt,
+                history,
+                &changes.order_heads[receipt],
+            )?;
+        }
+    }
     let previous = delivery_fields(conn, object)?;
     acquire_linear_frontier(conn, object, changes, repo)?;
     let deletion_receipts = object.kind == PlanningKind::Task && !changes.deletions.is_empty();
     if deletion_receipts {
         super::planning_changes::reconcile_deletion(conn, &TaskId::from_raw(&object.id))?;
     }
+    let pending_order = if object.kind == PlanningKind::Task {
+        let project = winners["project_id"].1.value.as_str();
+        conn.query_row("SELECT EXISTS(SELECT 1 FROM project_changes c JOIN planning_order_current o ON o.id=c.id
+            WHERE o.project_id=?1 AND c.acknowledged=0 AND c.conflict_json IS NULL)", [project], |row| row.get::<_, bool>(0))?
+    } else {
+        false
+    };
     project_fields(
         conn,
         object,
@@ -1114,6 +1198,8 @@ fn insert_and_project(
             .filter(|(_, change)| {
                 !(change.field == "creation"
                     || change.deletion_receipt().is_some()
+                    || change.order_receipt().is_some()
+                    || pending_order && change.field == "planning_rank"
                     || deletion_receipts && change.field == "planning_deleted_at"
                     || object.kind == PlanningKind::Wave && change.field == "current_project_id"
                     || object.kind == PlanningKind::Project && content_field(&change.field))
@@ -5343,6 +5429,11 @@ mod tests {
         conn.execute("INSERT INTO project_changes(seq,id,project_id,field,value_json) VALUES(1,'captured',?1,'name','\"Created\"'),(2,'later',?1,'name','\"Later\"')", [created.as_str()]).unwrap();
         conn.execute("INSERT INTO project_transitions(wave_id,successor_id,created_at,export_json,export_attempted,export_link_attempted,export_error)
             VALUES('00000000-0000-0000-0000-000000000001',?1,1,?2,1,1,'lost attachment')", params![created.as_str(),receipt.to_string()]).unwrap();
+        let effects = json!([{"before":["task","other"],"after":["other","task"],"issue":"FIX-1",
+            "input":{"sortOrder":12,"prioritySortOrder":0},"settled":false}]);
+        conn.execute("INSERT INTO project_changes(id,project_id,field,value_json,base_json,order_effects_json,attempted,error)
+            VALUES('retained-order','project','task_order','[\"other\",\"task\"]','{\"value\":[\"task\",\"other\"]}',?1,1,'lost order reply')",[effects.to_string()]).unwrap();
+        conn.execute("INSERT INTO project_changes(id,project_id,field,value_json) VALUES('later-order','project','task_order','[\"task\",\"other\"]')",[]).unwrap();
         conn.execute_batch(&upgrade.expect("peer draft or materialized migration"))
             .unwrap();
         super::super::project_content::seed_peer_content(&conn).unwrap();
@@ -5404,6 +5495,25 @@ mod tests {
             .values()
             .find(|change| change.deletion_receipt() == Some("retained-deletion"))
             .unwrap();
+        let order = before
+            .changes
+            .values()
+            .find(|change| change.order_receipt() == Some("retained-order"))
+            .unwrap();
+        assert_eq!(order.value["effects"], effects);
+        assert_eq!(order.value["base"], json!({"value":["task","other"]}));
+        assert_eq!(order.value["attempted"], true);
+        assert_eq!(order.value["acknowledged"], false);
+        assert_eq!(order.value["error"], "lost order reply");
+        assert_eq!(
+            conn.query_row(
+                "SELECT id FROM planning_order_current WHERE project_id='project'",
+                [],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap(),
+            "later-order"
+        );
         assert_eq!(deletion.value["deleted_at"], 42);
         assert_eq!(deletion.value["attempted"], true);
         assert_eq!(deletion.value["acknowledged"], false);
@@ -6093,5 +6203,198 @@ mod tests {
         import(&right, "/target", "omission", &Default::default());
         assert_eq!(export(&right, "/target"), retained);
         assert!(right.planning_task(&task).unwrap().record.is_some());
+    }
+    #[test]
+    fn peer_ordering_keeps_save_order_and_private_history() {
+        let (_source_home, source) = store();
+        let (_target_home, target) = store();
+        let first = seed(&source);
+        let project = source.task(&first).unwrap().unwrap().project_id;
+        let second = TaskId::new();
+        {
+            let conn = source.conn.lock().unwrap();
+            conn.execute("INSERT INTO tasks(id,project_id,issue_identifier,issue_title,issue_description,created_at,updated_at,workspace_slug,planning_rank)
+                VALUES(?1,?2,'FIX-2','Second','',2,2,'',1)",params![second.as_str(),project.as_str()]).unwrap();
+        }
+        let reorder = |store: &SqliteStore, task: &TaskId| {
+            let current = store.task(task).unwrap().unwrap();
+            store
+                .edit_task(
+                    task,
+                    current.plan.revision,
+                    &crate::pm::PmItemUpdate {
+                        rank: Some(0),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+        };
+        reorder(&source, &second);
+        let old = source
+            .pending_project_changes(&project)
+            .unwrap()
+            .into_iter()
+            .find(|c| c.field == "task_order")
+            .unwrap();
+        import(&target, "/target", "one", &export(&source, "/source"));
+        reorder(&target, &first);
+        let latest = target
+            .pending_project_changes(&project)
+            .unwrap()
+            .into_iter()
+            .find(|c| c.field == "task_order")
+            .unwrap();
+        // A late diagnostic on the old move must not promote its intention.
+        source
+            .planning_field_error(
+                super::PlanningChanges::Project(&project),
+                &old,
+                "late reply",
+            )
+            .unwrap();
+        import(&source, "/source", "two", &export(&target, "/target"));
+        import(&target, "/target", "three", &export(&source, "/source"));
+        for store in [&source, &target] {
+            assert_eq!(
+                store
+                    .pending_project_changes(&project)
+                    .unwrap()
+                    .into_iter()
+                    .find(|c| c.field == "task_order")
+                    .unwrap()
+                    .id,
+                latest.id
+            );
+            assert_eq!(
+                store
+                    .planning_task(&first)
+                    .unwrap()
+                    .record
+                    .unwrap()
+                    .item
+                    .rank,
+                0
+            );
+            assert_eq!(
+                store
+                    .planning_task(&second)
+                    .unwrap()
+                    .record
+                    .unwrap()
+                    .item
+                    .rank,
+                1
+            );
+        }
+        let before = target.task(&first).unwrap().unwrap();
+        let snapshot = export(&source, "/source");
+        import(&target, "/target", "three", &snapshot);
+        assert_eq!(target.task(&first).unwrap().unwrap(), before);
+        assert_eq!(export(&target, "/target"), snapshot);
+
+        // A previously selected Task moving into private ancestry also holds the
+        // Project's historical order lists; order payloads cannot bypass selection.
+        let private = Wave::new(WaveId::new(), "private".into(), "/source".into());
+        source.create_wave(&private).unwrap();
+        let private_project = ProjectId::new();
+        {
+            let conn = source.conn.lock().unwrap();
+            conn.execute("INSERT INTO projects(id,wave_id,created_at,project_name) VALUES(?1,?2,1,'Private')",
+                params![private_project.as_str(),private.id()]).unwrap();
+            super::capture_project_content(&conn, &private_project).unwrap();
+            conn.execute(
+                "UPDATE tasks SET project_id=?2 WHERE id=?1",
+                params![second.as_str(), private_project.as_str()],
+            )
+            .unwrap();
+        }
+        let held = export(&source, "/source");
+        assert!(!held
+            .changes
+            .values()
+            .any(|change| change.object.id == project.as_str()));
+        assert!(source
+            .peer_projection_conflicts("/source")
+            .unwrap()
+            .iter()
+            .any(|c| c.object.id == project.as_str()));
+    }
+
+    #[test]
+    fn peer_ordering_rejects_malformed_effect_without_advancing_import() {
+        let (_source_home, source) = store();
+        let (_target_home, target) = store();
+        let first = seed(&source);
+        let project = source.task(&first).unwrap().unwrap().project_id;
+        let conn = source.conn.lock().unwrap();
+        super::PlanningChanges::Project(&project)
+            .record_value(&conn, "task_order", "order-fixture", json!([first]), None)
+            .unwrap();
+        drop(conn);
+        let mut snapshot = export(&source, "/source");
+        let mutation = snapshot
+            .changes
+            .values_mut()
+            .find(|c| c.order_receipt().is_some())
+            .unwrap();
+        mutation.value["effects"] = json!([{"before":[first],"after":[first],"issue":"FIX-1",
+            "input":{"sortOrder":0,"prioritySortOrder":0,"process_lfid":"forbidden"},"settled":false}]);
+        mutation.value["attempted"] = json!(true);
+        assert!(target
+            .import_peer_planning("/target", &destination(), "bad", &snapshot)
+            .is_err());
+        assert_eq!(import_revision(&target, "/target", &destination()), None);
+        assert!(target.task(&first).unwrap().is_none());
+    }
+    #[test]
+    fn peer_ordering_retains_competing_attempts_without_authorizing_another() {
+        let (_source_home, source) = store();
+        let (_target_home, target) = store();
+        let task = seed(&source);
+        let project = source.task(&task).unwrap().unwrap().project_id;
+        {
+            let conn = source.conn.lock().unwrap();
+            super::PlanningChanges::Project(&project)
+                .record_value(&conn, "task_order", "order-fixture", json!([task]), None)
+                .unwrap();
+        }
+        let mut snapshot = export(&source, "/source");
+        import(&target, "/target", "initial", &snapshot);
+        let (parent, saved) = snapshot
+            .changes
+            .iter()
+            .find(|(_, c)| c.order_receipt().is_some())
+            .unwrap();
+        let parent = parent.clone();
+        let saved = saved.clone();
+        for (name, sort) in [("attempt-a", 1), ("attempt-b", 2)] {
+            let mut change = saved.clone();
+            change.clock += sort;
+            change.parents = [parent.clone()].into();
+            change.value["attempted"] = json!(true);
+            change.value["effects"] = json!([{"before":[task],"after":[task],"issue":"FIX-1",
+                "input":{"sortOrder":sort,"prioritySortOrder":0},"settled":false}]);
+            snapshot.changes.insert(name.into(), change);
+        }
+        import(&target, "/target", "competing", &snapshot);
+        assert!(target
+            .peer_projection_conflicts("/target")
+            .unwrap()
+            .iter()
+            .any(|c| c.object.id == project.as_str()
+                && c.reason.contains("competing planning ordering receipts")));
+        assert_eq!(export(&target, "/target"), snapshot);
+        let delivery = target.project_order_delivery(&project).unwrap().unwrap();
+        assert!(delivery.effects.is_empty());
+        let effect =
+            serde_json::from_value(snapshot.changes["attempt-a"].value["effects"][0].clone())
+                .unwrap();
+        assert!(target
+            .attempt_project_order(&project, &delivery.id, &effect)
+            .unwrap_err()
+            .to_string()
+            .contains("deferred"));
+        import(&target, "/target", "competing", &snapshot);
+        assert_eq!(export(&target, "/target"), snapshot);
     }
 }

@@ -184,6 +184,16 @@ pub struct PlanningSnapshot {
 }
 
 impl PlanningMutation {
+    pub(crate) fn order_receipt(&self) -> Option<&str> {
+        (self.object.kind == PlanningKind::Project)
+            .then(|| {
+                self.field
+                    .strip_prefix("order:")
+                    .filter(|id| !id.is_empty())
+            })
+            .flatten()
+    }
+
     pub(crate) fn deletion_receipt(&self) -> Option<&str> {
         if self.object.kind != PlanningKind::Task {
             return None;
@@ -271,7 +281,8 @@ impl PlanningSnapshot {
                         change.object.kind,
                         PlanningKind::Task | PlanningKind::Project
                     ) && change.field == "creation")
-                    || change.deletion_receipt().is_some())
+                    || change.deletion_receipt().is_some()
+                    || change.order_receipt().is_some())
             {
                 return Err(PlanningExchangeError::Invalid("invalid planning mutation"));
             }
@@ -325,6 +336,10 @@ fn validate_value(change: &PlanningMutation) -> Result<(), PlanningExchangeError
     if change.deletion_receipt().is_some() {
         return crate::store::sqlite::planning_changes::validate_peer_deletion(value)
             .map_err(|_| PlanningExchangeError::Invalid("invalid planning deletion receipt"));
+    }
+    if change.order_receipt().is_some() {
+        return crate::store::sqlite::planning_order::validate_peer_receipt(value)
+            .map_err(|_| PlanningExchangeError::Invalid("invalid planning order receipt"));
     }
     let text = |value: &Value| value.is_null() || value.is_string();
     let valid = match change.field.as_str() {

@@ -7,12 +7,13 @@ use serde_json::{json, Value};
 
 use crate::durable::{ProjectId, TaskId};
 use crate::pm::PmItem;
-use crate::store::StoreResult;
+use crate::store::{StoreError, StoreResult};
 
 use super::planning_changes::PlanningChanges;
 use super::SqliteStore;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct OrderEffect {
     pub before: Vec<String>,
     pub after: Vec<String>,
@@ -35,7 +36,7 @@ impl SqliteStore {
         project: &ProjectId,
     ) -> StoreResult<Option<OrderDelivery>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(deliveries(&conn, project)?.into_iter().next())
+        next_delivery(&conn, project)
     }
 
     /// Capture exactly one move before issuing it. Local edits and acquisition
@@ -49,7 +50,7 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         super::planning_peers::require_projected_effects(&tx, PlanningChanges::Project(project))?;
-        let Some(mut delivery) = deliveries(&tx, project)?.into_iter().next() else {
+        let Some(mut delivery) = next_delivery(&tx, project)? else {
             return Ok(false);
         };
         if delivery.id != receipt || delivery.effects.last().is_some_and(|e| !e.settled) {
@@ -115,8 +116,7 @@ pub(super) fn observed_order(
 fn deliveries(conn: &Connection, project: &ProjectId) -> StoreResult<Vec<OrderDelivery>> {
     let members = project_members(conn, project)?;
     let mut query = conn.prepare("SELECT id,value_json,json_extract(base_json,'$.value'),order_effects_json FROM project_changes
-        WHERE project_id=?1 AND field='task_order' AND acknowledged=0 AND conflict_json IS NULL
-        AND (attempted=1 OR seq=(SELECT max(seq) FROM project_changes WHERE project_id=?1 AND field='task_order')) ORDER BY seq")?;
+        WHERE project_id=?1 AND id IN (SELECT id FROM planning_order_deliveries) ORDER BY id")?;
     let rows = query.query_and_then([project.as_str()], |row| -> StoreResult<_> {
         let value: String = row.get(1)?;
         let base: Option<String> = row.get(2)?;
@@ -193,13 +193,26 @@ pub(super) fn observe_in(
         }
         observed.push(id);
     }
-    if let Some(previous) = observed_order(conn, &project)? {
-        // List omission proves neither deletion nor a completed membership move.
-        for id in previous.iter().filter(|id| !observed.contains(id)) {
-            let retained: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND project_id=?2 AND planning_deleted_at IS NULL)", params![id,project.as_str()], |row| row.get(0))?;
-            if retained {
-                return Ok(false);
-            }
+    let mut retained_lists = observed_order(conn, &project)?
+        .into_iter()
+        .collect::<Vec<_>>();
+    for delivery in deliveries(conn, &project)? {
+        retained_lists.extend(delivery.baseline);
+        if let Some(effect) = delivery.effects.last() {
+            retained_lists.push(effect.before.clone());
+            retained_lists.push(effect.after.clone());
+        }
+    }
+    // A cold peer may have captured attempts but no local list inventory. Their
+    // known members still prevent an empty/partial read from settling the move.
+    for id in retained_lists
+        .iter()
+        .flatten()
+        .filter(|id| !observed.contains(id))
+    {
+        let retained: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND project_id=?2 AND planning_deleted_at IS NULL)", params![id,project.as_str()], |row| row.get(0))?;
+        if retained {
+            return Ok(false);
         }
     }
     conn.execute(
@@ -207,16 +220,13 @@ pub(super) fn observe_in(
         params![repo, provider, external, serde_json::to_string(&observed)?],
     )?;
     let observation = json!({"value":observed}).to_string();
-    let mut pending = deliveries(conn, &project)?;
-    let mut remaining = pending.as_mut_slice();
-    while let Some((delivery, later)) = remaining.split_first_mut() {
-        remaining = later;
+    for mut delivery in deliveries(conn, &project)? {
         if let Some(last) = delivery.effects.last_mut() {
             if !last.settled && same_order(&observed, &last.after) {
                 last.settled = true;
-                // A later local move saved during this effect keeps its identity
-                // and value, but now compares against the confirmed progress.
-                for later in remaining.iter_mut() {
+                // Every unattempted save against this baseline retains its value.
+                // Arrival sequence on another machine cannot order these intentions.
+                for later in deliveries(conn, &project)? {
                     if later.effects.is_empty()
                         && later
                             .baseline
@@ -227,7 +237,6 @@ pub(super) fn observe_in(
                             "UPDATE project_changes SET base_json=?2 WHERE id=?1",
                             params![later.id, observation],
                         )?;
-                        later.baseline = Some(observed.clone());
                     }
                 }
                 conn.execute(
@@ -236,6 +245,8 @@ pub(super) fn observe_in(
                 )?;
             }
         }
+    }
+    for delivery in deliveries(conn, &project)? {
         let last = delivery.effects.last();
         let expected = last
             .map(|effect| {
@@ -266,26 +277,50 @@ pub(super) fn observe_in(
             )?;
         }
     }
-    // Only the latest pending intention projects locally; older attempts retain
-    // delivery evidence without reviving a superseded local order.
-    let pending = PlanningChanges::Project(&project)
+    if !project_pending(conn, &project)? {
+        apply_order(conn, &project, &observed)?;
+    }
+    Ok(true)
+}
+
+/// Ranks render the selected intention; they never acknowledge a move.
+pub(super) fn project_pending(conn: &Connection, project: &ProjectId) -> StoreResult<bool> {
+    let pending = PlanningChanges::Project(project)
         .pending(conn)?
         .into_iter()
         .find(|c| c.field == "task_order");
-    let order = if let Some(change) = pending {
-        include_members(
-            &current_members(
-                conn,
-                &project,
-                &serde_json::from_value::<Vec<String>>(change.value)?,
-            )?,
-            &observed,
-        )
-    } else {
-        observed
+    let Some(change) = pending else {
+        return Ok(false);
     };
-    apply_order(conn, &project, &order)?;
+    let members = project_members(conn, project)?;
+    let desired = current_members(
+        conn,
+        project,
+        &serde_json::from_value::<Vec<String>>(change.value)?,
+    )?;
+    apply_order(conn, project, &include_members(&desired, &members))?;
     Ok(true)
+}
+
+fn next_delivery(conn: &Connection, project: &ProjectId) -> StoreResult<Option<OrderDelivery>> {
+    let pending = deliveries(conn, project)?;
+    // Any uncertain attempt, including a losing order, prevents another write.
+    if let Some(index) = pending
+        .iter()
+        .position(|d| d.effects.last().is_some_and(|e| !e.settled))
+    {
+        return Ok(pending.into_iter().nth(index));
+    }
+    let selected: Option<String> = conn
+        .query_row(
+            "SELECT id FROM planning_order_current WHERE project_id=?1",
+            [project.as_str()],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(pending
+        .into_iter()
+        .find(|d| Some(&d.id) == selected.as_ref()))
 }
 
 fn project_members(conn: &Connection, project: &ProjectId) -> StoreResult<Vec<String>> {
@@ -318,5 +353,171 @@ fn apply_order(conn: &Connection, project: &ProjectId, order: &[String]) -> Stor
             params![id, rank as u32, project.as_str()],
         )?;
     }
+    Ok(())
+}
+
+/// The common receipt is the transport unit. No list observation is synthesized
+/// from an imported rank, baseline, settlement or checkpoint.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OrderReceipt {
+    desired: Vec<String>,
+    base: Option<Value>,
+    effects: Vec<OrderEffect>,
+    attempted: bool,
+    acknowledged: bool,
+    conflict: Option<Value>,
+    error: Option<String>,
+}
+
+pub(crate) fn validate_peer_receipt(value: &Value) -> StoreResult<()> {
+    let receipt: OrderReceipt = serde_json::from_value(value.clone())?;
+    let valid_list = |list: &[String]| {
+        list.iter().all(|id| !id.is_empty())
+            && list.iter().collect::<std::collections::BTreeSet<_>>().len() == list.len()
+    };
+    let valid_observation = |value: &Value| {
+        value.as_object().is_some_and(|fields| {
+            fields
+                .keys()
+                .all(|key| matches!(key.as_str(), "value" | "revision"))
+                && fields.get("value").is_some_and(|value| {
+                    value.is_null()
+                        || serde_json::from_value::<Vec<String>>(value.clone())
+                            .is_ok_and(|ids| valid_list(&ids))
+                })
+                && fields
+                    .get("revision")
+                    .is_none_or(|v| v.is_null() || v.is_string())
+        })
+    };
+    if serde_json::to_value(&receipt)? != *value
+        || !valid_list(&receipt.desired)
+        || receipt.base.as_ref().is_some_and(|v| !valid_observation(v))
+        || receipt
+            .conflict
+            .as_ref()
+            .is_some_and(|v| !valid_observation(v))
+        || receipt.attempted != !receipt.effects.is_empty()
+        || receipt.acknowledged
+            && (receipt.conflict.is_some() || receipt.effects.last().is_some_and(|e| !e.settled))
+    {
+        return Err(StoreError::InvalidData(
+            "invalid planning order receipt".into(),
+        ));
+    }
+    for (index, effect) in receipt.effects.iter().enumerate() {
+        if !valid_list(&effect.before)
+            || !valid_list(&effect.after)
+            || effect
+                .before
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                != effect.after.iter().collect()
+            || effect.issue.is_empty()
+            || !effect.input.as_object().is_some_and(|input| {
+                input.len() == 2
+                    && ["sortOrder", "prioritySortOrder"]
+                        .iter()
+                        .all(|key| input.get(*key).is_some_and(Value::is_number))
+            })
+            || index > 0
+                && (!receipt.effects[index - 1].settled
+                    || !same_order(&receipt.effects[index - 1].after, &effect.before))
+        {
+            return Err(StoreError::InvalidData(
+                "invalid planning order effect".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn import_peer_receipt(
+    conn: &Connection,
+    project: &ProjectId,
+    id: &str,
+    history: &[&Value],
+    heads: &[&Value],
+) -> StoreResult<()> {
+    let conflict = || StoreError::PlanningReceiptConflict { effect: "ordering" };
+    let mut merged: OrderReceipt = serde_json::from_value((*heads[0]).clone())?;
+    // Concurrent baseline changes have no list revision with which to order them.
+    // Causally retired baselines stay in history but do not veto confirmed progress.
+    for head in &heads[1..] {
+        let head: OrderReceipt = serde_json::from_value((*head).clone())?;
+        match (&merged.base, &head.base) {
+            (Some(left), Some(right)) if left["value"] != right["value"] => return Err(conflict()),
+            (None, Some(_)) => merged.base = head.base,
+            _ => {}
+        }
+    }
+    for value in history {
+        let receipt: OrderReceipt = serde_json::from_value((*value).clone())?;
+        if merged.desired != receipt.desired {
+            return Err(conflict());
+        }
+        for (index, effect) in receipt.effects.into_iter().enumerate() {
+            if let Some(saved) = merged.effects.get_mut(index) {
+                if saved.before != effect.before
+                    || saved.after != effect.after
+                    || saved.issue != effect.issue
+                    || saved.input != effect.input
+                {
+                    return Err(conflict());
+                }
+                saved.settled |= effect.settled;
+            } else {
+                merged.effects.push(effect);
+            }
+        }
+        merged.attempted |= receipt.attempted;
+        merged.acknowledged |= receipt.acknowledged;
+        if let Some(observed) = receipt.conflict {
+            if merged
+                .conflict
+                .as_ref()
+                .is_some_and(|saved| saved != &observed)
+            {
+                return Err(conflict());
+            }
+            merged.conflict = Some(observed);
+        }
+        merged.error = merged.error.max(receipt.error);
+    }
+    if merged.acknowledged && merged.conflict.is_some() {
+        return Err(conflict());
+    }
+    if merged.acknowledged || merged.conflict.is_some() {
+        merged.error = None;
+    }
+    validate_peer_receipt(&serde_json::to_value(&merged)?).map_err(|_| conflict())?;
+    let local: Option<(String, String, String)> = conn
+        .query_row(
+            "SELECT project_id,field,value_json FROM project_changes WHERE id=?1",
+            [id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()?;
+    if let Some((owner, field, desired)) = local {
+        if owner != project.as_str()
+            || field != "task_order"
+            || serde_json::from_str::<Vec<String>>(&desired)? != merged.desired
+        {
+            return Err(conflict());
+        }
+    }
+    conn.execute(
+        "INSERT INTO project_changes(id,project_id,field,value_json,base_json,order_effects_json,attempted,acknowledged,conflict_json,error)
+         VALUES(?1,?2,'task_order',?3,?4,?5,?6,?7,?8,?9)
+         ON CONFLICT(id) DO UPDATE SET base_json=excluded.base_json,order_effects_json=excluded.order_effects_json,
+            attempted=excluded.attempted,acknowledged=excluded.acknowledged,conflict_json=excluded.conflict_json,error=excluded.error
+         WHERE base_json IS NOT excluded.base_json OR order_effects_json IS NOT excluded.order_effects_json
+            OR attempted IS NOT excluded.attempted OR acknowledged IS NOT excluded.acknowledged
+            OR conflict_json IS NOT excluded.conflict_json OR error IS NOT excluded.error",
+        params![id,project.as_str(),serde_json::to_string(&merged.desired)?,
+            merged.base.map(|v| v.to_string()),serde_json::to_string(&merged.effects)?,
+            merged.attempted,merged.acknowledged,merged.conflict.map(|v| v.to_string()),merged.error],
+    )?;
     Ok(())
 }

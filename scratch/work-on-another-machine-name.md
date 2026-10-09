@@ -166,6 +166,10 @@ this heading. Keep these replacements deleted:
 - Local-receipt-only attempt eligibility after rejected peer projection. The
   common attempts consult retained projection conflicts, including skipped holds,
   in their write transaction; pending/readback and saves remain independent.
+- Sequence-selected Project order intentions and delivery of settled, superseded
+  partial moves. Shared views select the original save, while uncertain losing
+  effects still hold delivery. Import projects the chosen list after Task rows;
+  scalar rank replay cannot overwrite it or advance revisions on reimport.
 - Sequence-selected deletion delivery and scalar-clock visibility over a retained
   removal receipt: neither imported arrival nor that clock orders provider evidence.
   Common pending/attempt/status readers retain every unresolved
@@ -233,8 +237,8 @@ removal still needs its separate acquisition cut. Reimport changes no revision.
 Focused regressions cover these cases, migration, late errors and full-row equality
 for seven execution tables (including populated Sessions, Processes and Workflows),
 plus the retained checkout. They do not prove running-provider controls or public
-mixed-provider lifetime behavior. This is one internal cut, not completed ordering
-or alternate-provider composition; mixed-provider exchange remains disabled.
+mixed-provider lifetime behavior. Ordering's later cut is below; alternate-provider
+composition remains unfinished and mixed-provider exchange stays disabled.
 
 The latest sync includes issue-scoped comments and child-readiness repair.
 TESTING.md requires comment acquisition in a different order from Task creation.
@@ -300,14 +304,20 @@ remaining composition is not blocked on its writer.
    public case; the combined gate must cover it. Exact earlier proof and rationale:
    `08a285872:scratch/work-on-another-machine-name.md`, **Remaining integration**
    and **Acceptance for review**.
-2. **Next implementation: ordering receipt transport.** The peer field catalog and draft
-   capture `planning_rank`, not Project `task_order` or `order_effects_json`.
-   Replicating ranks cannot preserve one move's baseline, before/after lists,
-   attempted input, partial settlement and losing desired order. Composition belongs
-   to `planning_order.rs`, whose `observe_in` consumes complete-list evidence.
-   Detail reads, peer scalar winners and import checkpoints must not settle a move.
-   Lost-response and later-save proofs need both stores and common delivery, not
-   merely equal final ranks.
+2. **Ordering receipt transport is implemented with focused proof.**
+   `planning_order.rs` imports each captured move's baseline, desired list,
+   exact effects, acknowledgement and conflicts through the existing journal.
+   The first mutation's logical clock plus receipt ID selects the saved intention;
+   attempt/readback clocks and receiving-machine sequence never select it.
+   Common views drive pending, delivery and status. Any unresolved losing effect
+   still prevents another write; settled partial progress cannot revive a losing
+   desired order. Only complete-list acquisition recognizes progress and rebases
+   unattempted saves. Scalar ranks, detail reads and import checkpoints settle nothing.
+   Lists include private-history references in the existing sharing holds.
+   Divergent effect chains or unordered baseline heads isolate projection.
+   The two-store common-delivery fixture covers lost replies, cold empty-list
+   rejection, reopening and a later save. Migration, selection and competing-effect
+   proofs remain distinct from public mixed-provider acceptance.
 3. **Alternate acquisition remains separate from deletion receipts.** Provider-only
    removal/archive, reteam and independent Initiative/Team/list observations must
    retain their own frontiers and original ages through common owners. The deletion
@@ -337,14 +347,9 @@ completion, reconnect and retained execution with synthetic provider facts, not 
 connected Linear service, mixed-provider delivery or real SSH. The connected-provider
 creation fixture has the narrower preservation boundary described above.
 
-The earlier October 8 sync integrated parent `ffe986160`, including
-`078a6642e`'s gate fixture/DTO repairs and reported Linux migration, native/public
-Flow/work-watch reconnect and adoption passes; Swift remains unavailable. Those
-results concern LOO-406, not this combined peer candidate. `ffe986160` removes
-synthetic state settlement: provider observations settle receipts; failures only
-record errors. The peer lost-reply fixture now uses `task_state_error`, retaining
-its uncertainty assertions and this branch's `record_in`/`adopt_peer_in` ownership.
-No compatibility shim or duplicate settlement writer is needed.
+Earlier parent-integration results and the synthetic-state-settlement removal:
+`9b59e9b71:scratch/work-on-another-machine-name.md`, **Remaining integration**.
+They establish no combined peer acceptance; observed facts, not errors, settle effects.
 
 Source reconciliation at `4e3cb2160` supersedes the earlier no-production-caller
 finding: `6c0f2256f` connects exchange and `4e3cb2160` isolates destination attempts.
@@ -446,8 +451,8 @@ provenance gap; revise it with the completed composition, not as a product limit
    The focused storage suite passes; connected-provider composition remains unproved.
 
    Creation/link receipts and foreground discovery/readback now share their common
-   owner; deletion receipts now use their common owner as described above. Ordering
-   and alternate removal/frontier acquisition remain uncomposed. Comments use the common owners
+   owner; deletion and ordering receipts now use their common owners. Alternate
+   removal/frontier acquisition remains uncomposed. Comments use the common owners
    described below. Task disposition now uses the common receipt owner;
    authored regressions cover lost replies, later reopening, late readback exclusion,
    unchanged-state provider conflict, idempotence and transaction-wide receipt failure.
@@ -533,11 +538,9 @@ provenance gap; revise it with the completed composition, not as a product limit
      per-item identity model. Acquisition records original provider provenance
      only on equal values. Populated migration and runtime writers use the same
      capture owner; import suppresses echo. Storage tests pass; composed acceptance remains.
-   - `planning_order.rs::observe_in` requires complete-list evidence; Task entity
-     revisions and scalar peer fields cannot settle a captured move. Deletion
-     now transports its separate baselines and attempts through `planning_changes.rs`.
-     Its positive acknowledgement/active evidence is not entity or list ordering;
-     alternate removal/archive acquisition remains a distinct unfinished boundary.
+   - `planning_order.rs` now transports captured moves, using the two-store cut
+     above. Its `observe_in` still requires complete-list evidence, never detail
+     revisions or scalar ranks. Alternate removal/archive acquisition remains separate.
 
    Cover alternate accepted provider writers, including reteam, archive/removal,
    complete-list order and public comment acquisition, not only Task/Project detail reads.
@@ -638,25 +641,12 @@ this heading; earlier Project-content/public work-watch evidence remains at
 this heading. Public status/DTO, cold-worker and provider-lifetime execution remain
 with gate, alongside Desktop and mixed-provider acceptance.
 
-Pre-sync proof at `b21429d9b`: isolated/network-denied Linux peer-storage (49)
-and `planning_export_` (4), all-target Clippy and fmt passed. Earlier public
-sync-status proof is at `5ebcc877e:scratch/work-on-another-machine-name.md`,
-**Acceptance for review**; work-watch evidence remains above. These results do not
-establish the dependency-updated candidate, provider-lifetime, cold-worker or
-mixed-provider acceptance.
+Prior storage/build/Clippy/fmt and public recovery proofs, with exact candidates
+and limitations: `9b59e9b71:scratch/work-on-another-machine-name.md`,
+**Acceptance for review**. They do not establish this ordering cut, public
+combined behavior or Desktop acceptance.
 
-Prior creation/export and Linux public recovery results: `a002e4060:scratch/work-on-another-machine-name.md`, **Acceptance for review**.
-
-Compression's build, Project-content/migration and static-check evidence remains at
-`098de8033:scratch/work-on-another-machine-name.md`, **Acceptance for review**.
-
-Deletion-cut check evidence at `97bba1869`, this heading: focused compile,
-network-isolated peer-storage (55), all-target Clippy and fmt passed. The subsequent
-ancestry-only merge preserves that tested tree, not public/combined acceptance.
-
-Retained-effect checks: `08a285872:scratch/work-on-another-machine-name.md`, **Acceptance for review**.
-
-Check (compression, October 9): `cargo test --lib --no-run`, three exact status/hold tests via `test_network.py`, SQLite snapshot sanity, all-target Clippy, fmt, Ruff and `git diff --check` pass. Linux reconnect/combined/Desktop acceptance: gate. Realign: `git diff --check` passes; prose-only, no product rerun.
+Check (October 9 ordering): `cargo test -p loopflow --lib --no-run`, six focused network-isolated storage/migration/common-delivery tests, all-target Clippy, fmt and `git diff --check` pass. Public reconnect/combined/Desktop acceptance: gate.
 
 Earlier SQL proofs, macOS startup limitations and the retained historical Flow
 without a recorded exit remain at

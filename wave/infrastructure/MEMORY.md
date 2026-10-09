@@ -621,31 +621,28 @@ acceptance remain at
 
 ## Tasks across machines (LOO-412, 2026-10-09)
 
-Jack Heart selected custom-ref sync. Review-only; no landing or public-remote
-planning export. Joining publishes nothing. Invalid input aborts import;
-contradictions isolate objects. Execution stays local and imports stay unplaced.
+Jack Heart selected custom-ref sync. Review-only; no landing or public-remote export. Joining publishes nothing; invalid
+input aborts import and contradictions isolate objects. Execution stays local and imports stay unplaced.
 
-Common receipts retain captured saves, parents, baselines and attempts; imports
-create no transitions. Readback acknowledges effects, never mappings or late errors.
-Creation readback may fill a deletion baseline, never settle removal. Explicit active
-evidence retains losing removals. Local sequence cannot order imported effects.
-Creation status awaits gate; its proof excludes populated Processes. Deletion
-compares seven execution tables including Processes, not live controls.
+Common receipts preserve saves, parents, baselines and effects without transitions. Readback acknowledges effects, never mappings or late errors.
+Creation readback never settles removal. Explicit active evidence retains losing
+removals. Creation excludes populated Processes; deletion compares seven execution
+tables, not live controls.
 
 **Retained uncertainty constrains effects.** `08a285872` defers attempts when
 rejected/skipped projection retains receipts only in journals. Saves/acquisition
-stay independent; selection cannot release effects before import. Proofs exclude
-live controls and mixed transport. `30b476328`'s
-changed fixture reader awaits public gate coverage.
+stay independent; selection cannot release effects before import. `30b476328`'s changed public fixture awaits gate; mixed transport/live controls remain unproved.
+
+Ordering now transports common move receipts, not just ranks. Save clocks select intentions; effect updates cannot revive losing orders. Unresolved effects
+hold delivery, while settled superseded partial moves remain history. Only complete lists recognize progress; imports and detail reads settle nothing.
+Mixed-provider activation remains unproved.
 
 Provider age survives; entity revisions never order relationships. Missing inventory
-proves neither negative membership nor deletion. Archive and membership/Initiative
-contradictions block. Fetch/import/publication stay separate; effect locks block
-neither saves nor acquisition. Broken journals mean unknown pending state. Private
-histories/dependents, including Git documents, stay held until explicit selection;
-omission is not convergence. Scalar ranks carry no ordering attempts or list proof.
-Ordering, alternate acquisition,
-legacy association and unplaced-Wave/Desktop recovery UX remain before mixed activation.
+proves neither negative membership nor deletion. Archive/membership contradictions
+block. Acquisition and saves bypass effect locks; broken journals mean unknown pending.
+Private histories/dependents, including order lists and Git documents, stay held until
+explicit selection. Omission is not convergence. Alternate acquisition, legacy association
+and unplaced-Wave/Desktop recovery UX remain before mixed activation.
 Design: `scratch/work-on-another-machine-name.md`; earlier proofs:
 `225b8c95f:wave/infrastructure/MEMORY.md`, this heading.
 

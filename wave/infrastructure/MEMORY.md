@@ -639,12 +639,11 @@ empty; new descendants inherit selection. Key recovery exists; public setup,
 root selection, foreground exchange and legacy association remain unfinished.
 Peer projection still bypasses Linear delivery receipts.
 
-Move-after-join evidence: `a43f3e2ea`, this heading. Exchange holds affected
-journals/dependents, preserving accepted moves and private historical references.
-Moving back cannot expose a loser; explicit selection can release it. Holds no
-longer veto independent Wave selection. Omission preserves peers' last values,
-not convergence; imports retain held mutations without overwriting local work.
-Rust execution, public exchange and conflict presentation remain unproved.
+Move counterexample: `a43f3e2ea`; repairs: `b5dafd918`/`7395cf3bb`. Exchange
+holds journals/dependents, preserving accepted moves and private history. Moving
+back cannot release a hold; explicit selection can. Independent selection proceeds.
+Omission retains peers' last values, not convergence; imports retain held mutations
+without projection. No exchange caller exists. Rust execution and public conflict/recovery remain unproved.
 Design: `scratch/work-on-another-machine-name.md`; prior limits: `fea5156eb`.
 
 ## Synced planning integration (LOO-334)

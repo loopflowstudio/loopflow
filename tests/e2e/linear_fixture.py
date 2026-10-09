@@ -6,6 +6,7 @@ from pathlib import Path
 
 
 def tls_context(root: Path) -> tuple[ssl.SSLContext, Path]:
+    # A distinct issuer and explicit signing/key IDs also work with strict TLS verifiers.
     cert, key = root / "cert.pem", root / "tls.key"
     subprocess.run(
         [
@@ -22,11 +23,13 @@ def tls_context(root: Path) -> tuple[ssl.SSLContext, Path]:
             "-out",
             str(cert),
             "-subj",
-            "/CN=api.linear.app",
-            "-addext",
-            "subjectAltName=DNS:api.linear.app",
+            "/CN=Loopflow fixture CA",
             "-addext",
             "basicConstraints=critical,CA:TRUE",
+            "-addext",
+            "keyUsage=critical,keyCertSign,cRLSign",
+            "-addext",
+            "subjectKeyIdentifier=hash",
         ],
         check=True,
         capture_output=True,
@@ -52,7 +55,10 @@ def tls_context(root: Path) -> tuple[ssl.SSLContext, Path]:
         capture_output=True,
     )
     extensions = root / "extensions"
-    extensions.write_text("basicConstraints=critical,CA:FALSE\nsubjectAltName=DNS:api.linear.app\n")
+    extensions.write_text(
+        "basicConstraints=critical,CA:FALSE\nsubjectAltName=DNS:api.linear.app\n"
+        "authorityKeyIdentifier=keyid:always\n"
+    )
     subprocess.run(
         [
             "openssl",

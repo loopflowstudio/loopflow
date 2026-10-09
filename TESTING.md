@@ -590,7 +590,7 @@ accounts or installed data. Ordinary retry, usage, binding and review behavior
 belong in `session_lifecycle_tests`; Chapter convergence belongs in
 `ops::chapter::tests`, including interrupted rotation and second-Machine sync.
 
-`task_deletion_tests` also runs the public work-watch and Flow reconnect fixtures
+`planning_reconnect_tests` runs the public work-watch and Flow reconnect fixtures
 on Linux, using disposable TLS trust and synthetic Linear state. They exercise
 repository/Wave scope without Task selection, selection changes, stdin close/reopen,
 lost replies and independent propagation during rejected field delivery. The
@@ -796,8 +796,9 @@ Managed Task fixtures must bind the checkout's Team and Initiative before
 creating Task worktrees; reuse `support::bind_task_planning` for the shared fixture.
 
 When changing Task planning lookup or provider response shapes, run the affected
-installation proofs and the paired `local_planning` deletion proof. The independent abandonment
-`task_deletion_tests` binary fixture runs only on Linux, and the regular Rust suite skips installation proofs. Keep
+installation proofs and the paired `local_planning` deletion proof. The portable `task_abandonment`
+fixture retains unresolved Sessions, Processes, published PRs and files in both
+connection modes. The regular Rust suite skips installation proofs. Keep
 simulated provider revisions and checkout Team/Initiative bindings consistent
 with the planning records those workflows resolve. Exercise unfinished work
 before confirmed removal; do not resurrect deleted Tasks by resetting only
@@ -873,19 +874,18 @@ tests/e2e/test_full_cycle.sh
 tests/e2e/test_sync_safety.sh
 ```
 
-Exercise retained execution during abandonment through the real CLI on Linux:
+Exercise repository planning reconnect through real work-watch and Flow commands on Linux:
 
 ```bash
-cargo test -p loopflow --test task_deletion_tests
+cargo test -p loopflow --test planning_reconnect_tests
 ```
 
-Requires `uv`, Python and OpenSSL. The test creates an isolated Machine/store and a
+Requires `uv`, Python and OpenSSL. The fixture uses an isolated Machine/store and
 local HTTPS proxy with synthetic Linear state and credentials. Its CA is trusted
 only by CLI children through `SSL_CERT_FILE`; macOS platform TLS ignores that
-setting, so this test is Linux-only. It verifies an immediate cancellation save, stable pending delivery and retained
-Sessions, Processes, PRs and files. `local_planning` covers deletion in both connection
-modes, rollback, retry identity and retained execution without provider access. No installation or live provider is
-used.
+setting, so reconnect is Linux-only. `task_abandonment` and `local_planning` cover
+portable local decisions and deletion, retry identity and retained execution in
+both connection modes without provider access. No installation or live provider is used.
 
 Exercise Linear expiry and rejection through an explicit experimental CLI:
 

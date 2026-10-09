@@ -10,11 +10,10 @@ import sys
 import threading
 import time
 import uuid
-from http.server import ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from linear_fixture import tls_context
-from task_deletion import Handler as ConnectHandler
 
 
 def _page(nodes: list) -> dict:
@@ -32,7 +31,19 @@ def _comment(body: str, issue: str, identity: str | None = None) -> dict:
     }
 
 
-class Handler(ConnectHandler):
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, format: str, *args: object) -> None:
+        pass
+
+    def do_CONNECT(self) -> None:
+        assert self.path == "api.linear.app:443"
+        self.send_response(200)
+        self.end_headers()
+        self.connection = self.server.tls.wrap_socket(self.connection, server_side=True)
+        self.rfile = self.connection.makefile("rb")
+        self.wfile = self.connection.makefile("wb")
+        self.close_connection = False
+
     def do_POST(self) -> None:
         request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         with self.server.lock:

@@ -185,16 +185,20 @@ and retained conflicts are not convergence.
 
 ## Remaining integration — October 9
 
-Current checkpoint: `eeb98aa89`, integrating parent `a4678d242` (LOO-406).
-`88cd47572` implements prepared creation/link transport and Project readback;
-`b21429d9b` simplifies capture and records 49 peer-storage plus four export tests.
-This supersedes the prior feedback's request to implement that storage boundary.
-The final conflict-free sync changes dependencies only: shlex 2.0.1, libc 0.2.190,
-uuid 1.27.0 and Python lock updates. Current focused foreground/storage checks
-are below; the older pre-sync results are not an identical-tree gate pass.
-Task admission, cold-worker behavior and connected-provider recovery remain affected
-checks. The preceding `ffbe0ad42` sync supplied terminal-Task guidance and fixture
-isolation; neither sync completes peer composition.
+Current implementation: `098de8033`, with parent `efc90abb1` integrated at
+`7b5a12e2b`. `a002e4060` implements the previous feedback's foreground creation
+request: discover unprepared peer-born plans, retain mapped uncertainty in acquisition
+and status, and acknowledge through common readback. Prepared receipt transport
+(`88cd47572`) is no longer the frontier. Remaining work is below, not another
+creation owner or a repeat implementation of discovery.
+
+The latest conflict-free sync adds issue-scoped comment fixtures and an
+installation-test child-readiness repair; it is not the earlier dependency-only
+sync at `eeb98aa89`. TESTING.md now requires comment acquisition in a different
+order from Task creation, preventing a fixture from silently reassigning comments.
+Gate's combined candidate includes that regression, Task admission, cold-worker
+behavior and connected-provider recovery. Prior passes are not an identical-tree
+gate result. No parent sync completes peer composition.
 Destination-scoped status/conflicts (`de9470d5a`), common comment acquisition and
 receipts (`7e56c01fd`), and semantic Project content (`a518b985b`) are integrated.
 Their owners and preservation boundaries are described under **Delete — do not
@@ -224,12 +228,20 @@ late errors. Mapping alone never grants acknowledgement or another write. A late
 accepted Project move does not reopen its acknowledged creation. Existing attempts,
 errors, original parent and captured-save boundaries remain.
 
-The passing isolated Linux connected-provider fixture imports unprepared plans
-before connecting Linear, then exercises public work-watch, Task edits/status and Project edits/workflow
-readback against synthetic HTTPS. It withholds creation/link responses, inserts
-mapping-only evidence, saves later edits, then requires acknowledgement without
-repeated writes or execution changes. It does not enable mixed-provider Git
-exchange or establish simultaneous cross-machine creation authority.
+At `a002e4060`, the isolated Linux connected-provider fixture passed after importing
+unprepared plans before connecting Linear. It exercises public work-watch, Task
+edits/status and Project edits/workflow readback against synthetic HTTPS. Lost
+creation/link responses, mapping-only evidence and later saves require readback
+without repeated writes. `098de8033` then corrected status assertions to read
+`sync.changes` directly; execution of that revised Linux fixture remains with gate.
+Neither result enables mixed-provider Git exchange or establishes simultaneous
+cross-machine creation authority.
+
+The fixture compares complete rows in six tables: Sessions, Workflows, Workflow
+moves, Task PRs, placements and Project transitions. Its peer-born records are
+unrun, and it does not compare Process rows. It proves no fabricated placement or
+transition, not populated execution/control preservation. That separate acceptance
+remains with the two-store foreground fixture and combined gate.
 
 Executable feedback exposed two distinct presentation/execution boundaries:
 - `wave status` rejects imported Waves without Machine placement;
@@ -240,8 +252,8 @@ Executable feedback exposed two distinct presentation/execution boundaries:
 - Common provider acquisition called `inherit_project_placement`, allocating
   placement during creation readback. That call is deleted. Explicit local
   creation/placement keeps its owner; acquisition preserves existing placement
-  and absence. The public fixture retains the full execution-table comparison
-  that exposed this failure rather than relaxing it.
+  and absence. The public fixture retains the six-table comparison above that
+  exposed this failure rather than relaxing it.
 
 Next: ordering/deletion receipts and alternate provider/relationship acquisition,
 then legacy association and unplaced-Wave/Desktop presentation.
@@ -267,8 +279,7 @@ part of the creation composition above. Exact intermediate evidence remains at
 The public two-store work-watch proof covers cold creation, offline edits/comments/
 completion, reconnect and retained execution with synthetic provider facts, not a
 connected Linear service, mixed-provider delivery or real SSH. The connected-provider
-creation fixture is separate and retains the full execution-table comparison that
-exposed acquisition-side placement.
+creation fixture has the narrower preservation boundary described above.
 
 The earlier October 8 sync integrated parent `ffe986160`, including
 `078a6642e`'s gate fixture/DTO repairs and reported Linux migration, native/public
@@ -498,7 +509,8 @@ provenance gap; revise it with the completed composition, not as a product limit
 ## Committed integration boundary — 2026-10-09
 
 Jack Heart requested stacking on LOO-406 and continuing pursue. Current stack
-`eeb98aa89` integrates parent `a4678d242`; `ffbe0ad42` previously integrated
+`7b5a12e2b` integrates parent `efc90abb1`; `eeb98aa89` integrated `a4678d242`
+and `ffbe0ad42` previously integrated
 `cbf0a174a`, and earlier `a6cb48664` integrated
 `7c626ca23`, preserving restored scratch checkpoint `1ad5e1267` and the retained
 stash. The October 9 sync changes no publication or landing authority. Earlier
@@ -585,7 +597,10 @@ mixed-provider acceptance.
 
 Prior creation/export and Linux public recovery results: `a002e4060:scratch/work-on-another-machine-name.md`, **Acceptance for review**.
 
-Check (October 9 compress): `cargo test -p loopflow --lib --no-run` builds; network-isolated Project-content (5) and populated peer migration (1) pass; fmt, all-target Clippy, Ruff, diff and context pass. Linux-only `planning_reconnect_tests public_watch_exports` and broader combined-candidate/Wave/Desktop verification remain with gate.
+Compression's build, Project-content/migration and static-check evidence remains at
+`098de8033:scratch/work-on-another-machine-name.md`, **Acceptance for review**.
+
+Check (October 9 realign): `git diff --check` and `lf context --skill realign` pass; prose-only reconciliation, no product rerun; revised Linux creation fixture and combined-candidate/Wave/Desktop checks remain with gate.
 
 Earlier SQL proofs, macOS startup limitations and the retained historical Flow
 without a recorded exit remain at

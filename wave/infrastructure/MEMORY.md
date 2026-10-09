@@ -625,22 +625,22 @@ Jack Heart selected custom-ref sync. Review-only; no landing
 or public-remote planning export. Joining publishes nothing. Malformed input aborts
 import; contradictions isolate objects. Execution stays local.
 
-Creation/link receipts retain captured saves, parent and attempts. Project rows replace transition columns; imports create no rotation or
-settlement. Competing effects retain both histories. One common view exposes unprepared plans and mapped uncertainty to foreground
-sync/status. Only readback acknowledges creation/attachment, never mapping alone.
-Settled receipts reject late errors.
+Creation/link receipts retain captured saves, parent and attempts on Project rows
+and Task receipts, never imported transitions. Competing histories survive.
+One common view exposes unprepared plans and mapped uncertainty to foreground
+sync/status. Readback alone acknowledges effects; settled receipts reject late errors.
 
-Linux work-watch and CLI sync receipts prove creation/link response-loss
-recovery, later saves and execution preservation after import, not mixed-provider
-Git exchange. Acquisition-side Project placement is removed. Wave status still
-rejects unplaced Waves: Rust/Swift must represent absent Machine placement.
-Gate, mixed-provider, SSH and installation remain.
+`a002e4060` proves Linux foreground creation recovery and later saves after import,
+not mixed-provider Git exchange. Its six-table comparison catches fabricated placement
+and transitions, not populated Process/control preservation. `098de8033` revises
+status assertions; gate retains that rerun. Acquisition-side placement is removed;
+Rust/Swift Wave status must represent absent Machine placement. SSH/installation remain.
 
 Acquisition preserves provider age; entity revisions never order relationships.
 Missing inventory is not negative membership; archive, unresolved membership and
 configured-Initiative contradictions block. Lookup and launch freshness differ.
-Imports stay unplaced; explicit placement uses this machine without a placed parent
-and preserves existing placement.
+Imports stay unplaced; explicit placement uses this machine without a placed parent.
+Existing placement survives.
 
 Fetch/import/publication stay separate; effect locks block neither saves nor
 acquisition. Damaged journals retain unknown pending state without hiding plans.

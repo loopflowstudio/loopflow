@@ -550,6 +550,9 @@ pub enum FlowCommand {
         json: bool,
         #[arg(long)]
         processes: bool,
+        /// Read the resolved plan and skill bodies for this conversation
+        #[arg(long, conflicts_with_all = ["json", "processes"])]
+        instructions: bool,
     },
     /// Print the repository file that defines a Flow, creating
     /// it from the builtin when the repository has none
@@ -1474,7 +1477,7 @@ pub enum SelfCommand {
         #[command(subcommand)]
         cmd: Option<InstallCommand>,
     },
-    /// Compile loopflow skills into your home vendor Skills directories.
+    /// Export skills and Flows into native vendor Skills directories.
     #[command(name = "sync-skills", hide = true)]
     SyncSkills {
         /// Confirm writes under ~/ without prompting
@@ -1483,6 +1486,9 @@ pub enum SelfCommand {
         /// Keep stale loopflow-generated skills
         #[arg(long = "no-prune")]
         no_prune: bool,
+        /// Export repository definitions into this checkout instead of home
+        #[arg(long)]
+        repo: bool,
     },
 }
 

@@ -55,18 +55,20 @@ fn discover_builtin_skills() {
 }
 
 #[test]
-fn builtin_catalog_uses_slashes_for_ownership_and_never_underscores() {
+fn builtin_catalog_uses_portable_dashes_and_never_slashes_or_underscores() {
     let skill_names = builtin_skill_names();
     for scope in ["repo", "wave", "task"] {
         for role in ["operate", "session"] {
-            let name = format!("{scope}/{role}");
+            let name = format!("{scope}-{role}");
             assert!(skill_names.contains(&name.as_str()), "{name}");
         }
     }
-    assert!(!skill_names.iter().any(|name| name.starts_with("project/")));
+    assert!(!skill_names.iter().any(|name| name.starts_with("project-")));
     assert!(skill_names.contains(&"implement"));
-    assert!(skill_names.iter().all(|name| !name.contains('_')));
-    assert!(builtin_flow_names().iter().all(|name| !name.contains('_')));
+    assert!(skill_names.iter().all(|name| !name.contains(['_', '/'])));
+    assert!(builtin_flow_names()
+        .iter()
+        .all(|name| !name.contains(['_', '/'])));
 }
 
 #[test]
@@ -145,11 +147,11 @@ fn discover_namespaced_flows_with_slash_names_and_authored_branch_summaries() {
         loopflow::lf::commands::list::list_children(&["flow".to_string()], repo.path()).unwrap();
     let flow = flows
         .iter()
-        .find(|f| f.name == "gstack/sprint")
+        .find(|f| f.name == "gstack-sprint")
         .expect("flow");
     assert_eq!(
         flow.description,
-        "gstack/office-hours → xor[gstack/office-hours]{autoplan: gstack/autoplan | manual: gstack/plan-manual} → implement → gstack/pr-review"
+        "gstack-office-hours → xor[gstack-office-hours]{autoplan: gstack-autoplan | manual: gstack-plan-manual} → implement → gstack-pr-review"
     );
 }
 

@@ -307,7 +307,7 @@ fn list_preserves_kinds_overrides_sources_and_reserved_invocations() {
 }
 
 #[test]
-fn skill_catalog_preserves_namespace_discovery() {
+fn skill_catalog_lists_flat_portable_names_from_nested_sources() {
     let repo = fixture();
     let home = tempfile::tempdir().unwrap();
     fs::create_dir_all(repo.path().join(".lf/skills/team/nested")).unwrap();
@@ -320,10 +320,11 @@ fn skill_catalog_preserves_namespace_discovery() {
     }
 
     let catalog = json_entries(repo.path(), home.path(), &["list", "skill", "--json"]);
-    let namespace = catalog.iter().find(|row| row["name"] == "team").unwrap();
-    assert_eq!(namespace["kind"], "namespace");
-    assert_eq!(namespace["invocation"], "lf list skill team");
-    assert!(!catalog.iter().any(|row| row["kind"] == "flow"));
+    assert!(catalog
+        .iter()
+        .any(|row| row["name"] == "team-review" && row["kind"] == "skill"));
+    assert!(catalog.iter().any(|row| row["name"] == "team-nested-check"));
+    assert!(!catalog.iter().any(|row| row["kind"] == "namespace"));
     let scoped = json_entries(
         repo.path(),
         home.path(),
@@ -332,7 +333,7 @@ fn skill_catalog_preserves_namespace_discovery() {
     let all = json_entries(repo.path(), home.path(), &["list", "--json"]);
     let expected: Vec<_> = all
         .into_iter()
-        .filter(|row| row["kind"] == "skill" && row["name"].as_str().unwrap().starts_with("team/"))
+        .filter(|row| row["kind"] == "skill" && row["name"].as_str().unwrap().starts_with("team-"))
         .collect();
     assert_eq!(scoped, expected);
     assert_eq!(scoped.len(), 2);
@@ -855,4 +856,73 @@ fn native_skill_help_and_flow_capture_keep_the_selected_source_and_declarations(
         step.skill.content.as_deref(),
         Some("Audit $ARGUMENTS using [rules](rules.md).\n")
     );
+}
+
+#[test]
+fn portable_flow_instructions_are_read_only_and_resolve_current_overrides() {
+    let repo = fixture();
+    let home = tempfile::tempdir().unwrap();
+    fs::create_dir_all(repo.path().join(".lf/flows/team")).unwrap();
+    fs::write(
+        repo.path().join(".lf/flows/team/chat.yaml"),
+        "- step: {name: solo, id: review, human: true}\n",
+    )
+    .unwrap();
+    for name in ["team/chat", "team-chat"] {
+        let output = success(run(
+            repo.path(),
+            home.path(),
+            &["flow", "show", name, "--instructions"],
+        ));
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("# Flow: team-chat"));
+        assert!(output.contains("Skill solo body."));
+        assert!(output.contains("pause for their response"));
+    }
+    fs::write(repo.path().join(".lf/skills/solo.md"), "Updated override").unwrap();
+    let output = success(run(
+        repo.path(),
+        home.path(),
+        &["flow", "show", "team-chat", "--instructions"],
+    ));
+    assert!(String::from_utf8(output)
+        .unwrap()
+        .contains("Updated override"));
+    for conflict in ["--json", "--processes"] {
+        assert!(!run(
+            repo.path(),
+            home.path(),
+            &["flow", "show", "team-chat", "--instructions", conflict]
+        )
+        .status
+        .success());
+    }
+    assert!(!home.path().join(".lf").exists());
+}
+
+#[test]
+fn portable_same_key_help_keeps_flow_first_and_explicit_skill_selection() {
+    let repo = fixture();
+    let home = tempfile::tempdir().unwrap();
+    fs::create_dir_all(repo.path().join(".lf/flows/team")).unwrap();
+    fs::write(repo.path().join(".lf/flows/team/check.yaml"), "- solo\n").unwrap();
+    fs::write(
+        repo.path().join(".lf/skills/team-check.md"),
+        "Explicit skill body",
+    )
+    .unwrap();
+    for name in ["team/check", "team-check"] {
+        let flow =
+            String::from_utf8(success(run(repo.path(), home.path(), &["help", name]))).unwrap();
+        assert!(flow.contains("team-check — flow"));
+        assert!(flow.contains("Also available: skill"));
+        let skill = String::from_utf8(success(run(
+            repo.path(),
+            home.path(),
+            &["help", "skill", name],
+        )))
+        .unwrap();
+        assert!(skill.contains("Explicit skill body"));
+        assert!(skill.contains("Untyped lookup selects the same-named flow"));
+    }
 }

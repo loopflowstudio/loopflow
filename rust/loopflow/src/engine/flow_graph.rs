@@ -167,8 +167,11 @@ pub fn flow_catalog_entry(
         Err(error) => (None, None, Some(error.to_string())),
     };
     Ok(FlowCatalogEntry {
-        name: name.to_string(),
-        source: crate::engine::flow::find_flow_source_path(name, repo).map(|path| {
+        name: graph.as_ref().map_or_else(
+            || crate::engine::definition_name::definition_key(name),
+            |graph| graph.name.clone(),
+        ),
+        source: crate::engine::flow::find_flow_source_path(name, repo)?.map(|path| {
             path.strip_prefix(repo)
                 .unwrap_or(&path)
                 .to_string_lossy()

@@ -1,4 +1,3 @@
-use std::collections::BTreeSet;
 use std::io::{self, IsTerminal, Write};
 use std::path::Path;
 
@@ -20,22 +19,22 @@ pub struct Entry {
     pub invocation: String,
 }
 
-fn flow_entry(tree: &Command, repo: &Path, name: String) -> Entry {
+fn flow_entry(tree: &Command, repo: &Path, name: String) -> Result<Entry> {
     let kind = DefinitionKind::Flow;
     let description = match resolve_definition(repo, &name, Some(kind)) {
         Ok(target) => format_target(&target),
         Err(error) => format!("unavailable: {error}"),
     };
-    Entry {
+    Ok(Entry {
         source: definition_source(
             repo,
-            crate::engine::flow::find_flow_source_path(&name, repo).as_deref(),
+            crate::engine::flow::find_flow_source_path(&name, repo)?.as_deref(),
         ),
         invocation: definition_invocation(tree, &name, kind),
         name,
         kind: kind.as_str().to_string(),
         description,
-    }
+    })
 }
 
 pub fn list_children(path: &[String], repo: &Path) -> Result<Vec<Entry>> {
@@ -67,29 +66,16 @@ fn collect_entries(tree: &Command, path: &[String], repo: &Path) -> Result<Vec<E
     }
     if path.is_empty() || path.first().is_some_and(|name| name == "skill") {
         let catalog = crate::engine::skill_catalog::SkillCatalog::discover(Some(repo))?;
-        let namespace = path.get(1).map(|name| format!("{name}/"));
-        let mut namespaces = BTreeSet::new();
+        let prefix = path
+            .get(1)
+            .map(|name| format!("{}-", crate::engine::definition_name::definition_key(name)));
         for source in catalog.entries() {
-            let name = &source.name;
-            if namespace
+            let name = crate::engine::definition_name::definition_key(&source.name);
+            if prefix
                 .as_ref()
                 .is_some_and(|prefix| !name.starts_with(prefix))
             {
                 continue;
-            }
-            if path.len() == 1 {
-                if let Some((namespace, _)) = name.split_once('/') {
-                    if namespaces.insert(namespace.to_string()) {
-                        entries.push(Entry {
-                            name: namespace.to_string(),
-                            kind: "namespace".to_string(),
-                            source: "skills".to_string(),
-                            description: "List skills in this namespace".to_string(),
-                            invocation: format!("lf list skill {namespace}"),
-                        });
-                    }
-                    continue;
-                }
             }
             let description = match source.read() {
                 Ok(content) => {
@@ -102,7 +88,7 @@ fn collect_entries(tree: &Command, path: &[String], repo: &Path) -> Result<Vec<E
                 kind: "skill".into(),
                 source: definition_source(repo, source.path.as_deref()),
                 description,
-                invocation: definition_invocation(tree, name, DefinitionKind::Skill),
+                invocation: definition_invocation(tree, &name, DefinitionKind::Skill),
             });
         }
         if !path.is_empty() {
@@ -111,7 +97,7 @@ fn collect_entries(tree: &Command, path: &[String], repo: &Path) -> Result<Vec<E
     }
     if path.is_empty() || path == ["flow"] {
         for name in crate::engine::available_flow_names(repo)? {
-            entries.push(flow_entry(tree, repo, name));
+            entries.push(flow_entry(tree, repo, name)?);
         }
         if !path.is_empty() {
             return Ok(entries);

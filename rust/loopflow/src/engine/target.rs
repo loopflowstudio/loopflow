@@ -104,9 +104,9 @@ mod tests {
     fn operate_resolves_to_repo_and_wave_operate_stays_explicit() {
         let tmp = TempDir::new().unwrap();
         for (name, expected) in [
-            ("operate", "repo/operate"),
-            ("repo/operate", "repo/operate"),
-            ("wave/operate", "wave/operate"),
+            ("operate", "repo-operate"),
+            ("repo/operate", "repo-operate"),
+            ("wave/operate", "wave-operate"),
         ] {
             let Target::Skill(skill) = resolve_definition(tmp.path(), name, None).unwrap() else {
                 panic!("expected a skill for {name}");
@@ -121,7 +121,7 @@ mod tests {
             let Target::Skill(skill) = resolve_definition(tmp.path(), name, None).unwrap() else {
                 panic!("expected a skill for {name}");
             };
-            assert_eq!(skill.name, "repo/operate");
+            assert_eq!(skill.name, "repo-operate");
             assert_eq!(
                 skill.content.as_deref(),
                 Some("Repository operation override")

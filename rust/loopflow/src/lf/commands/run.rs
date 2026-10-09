@@ -108,7 +108,10 @@ fn run_bound_prompt(
     binding: &crate::ops::WorkBinding,
 ) -> Result<Option<FinalAnswer>> {
     let mut scoped;
-    let binding = if skill == Some("wave/operate")
+    let binding = if skill
+        .map(crate::engine::definition_name::definition_key)
+        .as_deref()
+        == Some("wave-operate")
         && cli.bound_cwd.is_none()
         && cli.task.is_none()
         && cli.wt.is_none()
@@ -217,7 +220,10 @@ fn build_prompt(
 ) -> Result<PromptBuild> {
     let start = Instant::now();
     let repo_root = repo_root.to_path_buf();
-    let repo_root = if skill == Some("repo/operate")
+    let repo_root = if skill
+        .map(crate::engine::definition_name::definition_key)
+        .as_deref()
+        == Some("repo-operate")
         && cli.bound_cwd.is_none()
         && cli.task.is_none()
         && cli.wt.is_none()

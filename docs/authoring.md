@@ -91,6 +91,43 @@ Mechanical git/PR operations ride along as `cmd:` steps:
 remain separate targets; `lf run NAME` selects only those definitions. Use
 `cmd:` in authored YAML; the former `op:` spelling is no longer accepted.
 
+### Flows in chat
+
+```bash
+lf sync-skills --repo
+lf flow show ship-api --instructions
+```
+
+Select `ship-api` as a native skill to run its compiled plan in the current
+conversation. The wrapper reads the current checkout’s definitions, including
+local overrides, and returns the numbered plan plus each resolved skill body.
+No separate chat parser or authored Flow copy is involved. Skills and Flows use
+dashed public names; slash input still resolves the same definition.
+
+Follow commands in order, loop over the named range on `iterate`, continue on
+`advance`, and stop for missing input on `blocked`. XOR selects one declared
+path and rejoins afterward. A `human: true` occurrence performs its review here
+and pauses for the participant’s response. Keep occurrence IDs exact:
+
+```yaml
+- step: {name: implement, id: build}
+- loop: build
+- step: {name: review-design, id: review, human: true}
+```
+
+The returned plan is frozen for this invocation. Source edits apply on the next
+invocation. After interruption, inspect evidence before continuing; never blindly
+replay a successful command. This is instruction-driven execution, not the
+autonomous driver’s enforcement or crash recovery. It starts no synthetic
+FlowProcess, step Process or new Session, and does not move the Task’s Workflow.
+Explicit LF command steps retain their normal effects. Native controls and agent
+preferences are disclosed, not silently translated or used to switch models.
+
+Native names have no Flow prefix. If a skill already owns the same canonical
+name, sync skips that Flow export and preserves the skill. `lf flow show NAME
+--instructions` still reads that Flow explicitly. Newly added repository names
+need another `sync-skills --repo`; editing an existing Flow does not.
+
 ### Working notes and feedback
 
 ```text

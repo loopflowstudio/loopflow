@@ -1,6 +1,10 @@
 //! Scans the builtins directory and generates registration code so that
 //! adding a new .md or .yaml file is all you need — no manual HashMap insert.
 
+#[path = "src/engine/definition_name.rs"]
+mod definition_name;
+use definition_name::definition_key;
+
 use std::env;
 use std::fmt::Write as _;
 use std::fs;
@@ -23,16 +27,16 @@ mod migration_schema;
 /// Everything else is a namespaced category: names are stored as `<cat>/<name>`.
 /// Core categories share one flat namespace and must not collide with each other.
 /// Within a filename, `_` encodes a namespace separator (`wave_clarify.md`
-/// registers as `wave/clarify`); `-` remains a word separator.
+/// registers as `wave-clarify`); `-` remains a word separator.
 const CORE_CATEGORIES: &[&str] = &["task", "project", "wave", "ops"];
 
 /// Each ongoing conversation carries its scope's operating procedure inline:
 /// the registered session skill is its own file followed by the body of its
 /// operate skill. The operate skill stays registered on its own.
 const SESSION_OPERATE_PAIRS: &[(&str, &str)] = &[
-    ("repo/session", "repo/operate"),
-    ("wave/session", "wave/operate"),
-    ("task/session", "task/operate"),
+    ("repo-session", "repo-operate"),
+    ("wave-session", "wave-operate"),
+    ("task-session", "task-operate"),
 ];
 
 fn main() {
@@ -323,7 +327,7 @@ fn generate_kind_map(
             let mut files: Vec<(String, PathBuf)> = Vec::new();
             collect_files(&kind_dir, extension, &mut files);
             for (stem, path) in files {
-                let name = canonical_builtin_name(&stem);
+                let name = builtin_source_name(&stem);
                 if is_core {
                     entries.push((name, path));
                 } else {
@@ -348,7 +352,7 @@ fn compose_sessions(entries: &mut [(String, PathBuf)], out_dir: &Path) {
         let index = |name: &str| {
             entries
                 .iter()
-                .position(|(entry, _)| entry == name)
+                .position(|(entry, _)| definition_key(entry) == name)
                 .unwrap_or_else(|| panic!("builtin skill `{name}` is missing"))
         };
         let read = |path: &Path| {
@@ -377,6 +381,18 @@ fn skill_body(content: &str) -> &str {
 }
 
 fn emit_map(entries: &mut [(String, PathBuf)], map_name: &str, out_path: &Path) {
+    let mut shortcuts = std::collections::BTreeMap::<String, Vec<String>>::new();
+    for (name, _) in entries.iter() {
+        if let Some((_, bare)) = name.rsplit_once('/') {
+            shortcuts
+                .entry(bare.into())
+                .or_default()
+                .push(definition_key(name));
+        }
+    }
+    for (name, _) in entries.iter_mut() {
+        *name = definition_key(name);
+    }
     entries.sort_by(|a, b| a.0.cmp(&b.0));
 
     for pair in entries.windows(2) {
@@ -394,7 +410,7 @@ fn emit_map(entries: &mut [(String, PathBuf)], map_name: &str, out_path: &Path) 
         fs::write(
             out_path,
             format!(
-                "static {map_name}: std::sync::LazyLock<std::collections::HashMap<&'static str, &'static str>> = std::sync::LazyLock::new(std::collections::HashMap::new);\n"
+                "static {map_name}: std::sync::LazyLock<std::collections::HashMap<&'static str, &'static str>> = std::sync::LazyLock::new(std::collections::HashMap::new);\nstatic {map_name}_SHORTCUTS: &[(&str, &str)] = &[];\n"
             ),
         )
         .unwrap_or_else(|e| panic!("write {}: {e}", out_path.display()));
@@ -424,6 +440,13 @@ fn emit_map(entries: &mut [(String, PathBuf)], map_name: &str, out_path: &Path) 
     writeln!(code, "    m").expect("write to String");
     writeln!(code, "}});").expect("write to String");
 
+    writeln!(code, "static {map_name}_SHORTCUTS: &[(&str, &str)] = &[").expect("write shortcuts");
+    for (bare, names) in shortcuts {
+        if names.len() == 1 {
+            writeln!(code, "({bare:?}, {:?}),", names[0]).expect("write shortcut");
+        }
+    }
+    code.push_str("];\n");
     fs::write(out_path, code).unwrap_or_else(|e| panic!("write {}: {e}", out_path.display()));
 }
 
@@ -468,30 +491,15 @@ fn generate_category_map(
         let category = title_case(&cat_name);
 
         let mut names = Vec::new();
-        if let Ok(files) = fs::read_dir(&kind_dir) {
-            for file in files.flatten() {
-                let file_path = file.path();
-                let matches_ext = match extension {
-                    "yaml" => file_path
-                        .extension()
-                        .is_some_and(|e| e == "yaml" || e == "yml"),
-                    other => file_path.extension().is_some_and(|e| e == other),
-                };
-                if matches_ext {
-                    let stem = file_path
-                        .file_stem()
-                        .expect("file has no stem")
-                        .to_string_lossy()
-                        .to_string();
-                    let stem = canonical_builtin_name(&stem);
-                    let name = if is_core {
-                        stem
-                    } else {
-                        format!("{cat_name}/{stem}")
-                    };
-                    names.push(name);
-                }
-            }
+        let mut files = Vec::new();
+        collect_files(&kind_dir, extension, &mut files);
+        for (stem, _) in files {
+            let stem = builtin_source_name(&stem);
+            names.push(definition_key(&if is_core {
+                stem
+            } else {
+                format!("{cat_name}/{stem}")
+            }));
         }
         names.sort();
         if !names.is_empty() {
@@ -519,11 +527,11 @@ fn title_case(s: &str) -> String {
     }
 }
 
-fn canonical_builtin_name(stem: &str) -> String {
+fn builtin_source_name(stem: &str) -> String {
     stem.replace('_', "/")
 }
 
-/// Recursively collect files with the given extension. The key is the file stem.
+/// Recursively collect source names, preserving folder hierarchy for shortcuts.
 fn collect_files(dir: &Path, extension: &str, entries: &mut Vec<(String, PathBuf)>) {
     let Ok(read_dir) = fs::read_dir(dir) else {
         return;
@@ -532,8 +540,21 @@ fn collect_files(dir: &Path, extension: &str, entries: &mut Vec<(String, PathBuf
         let Ok(entry) = entry else { continue };
         let path = entry.path();
         if path.is_dir() {
-            collect_files(&path, extension, entries);
-        } else if path.extension().is_some_and(|e| e == extension) {
+            let mut children = Vec::new();
+            collect_files(&path, extension, &mut children);
+            let folder = path
+                .file_name()
+                .expect("directory has a name")
+                .to_string_lossy();
+            entries.extend(
+                children
+                    .into_iter()
+                    .map(|(name, source)| (format!("{folder}/{name}"), source)),
+            );
+        } else if path
+            .extension()
+            .is_some_and(|e| e == extension || (extension == "yaml" && e == "yml"))
+        {
             let name = path
                 .file_stem()
                 .expect("file has no stem")

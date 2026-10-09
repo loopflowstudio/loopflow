@@ -296,9 +296,24 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
                 crate::lf::commands::flow::list(&repo, *json)?;
             }
             Commands::Flow {
-                cmd: FlowCommand::Show { name, json, .. },
+                cmd:
+                    FlowCommand::Show {
+                        name,
+                        json,
+                        instructions,
+                        ..
+                    },
             } => {
-                if *json {
+                if *instructions {
+                    let flow = crate::engine::flow::load_authored_flow(name, &repo)?;
+                    let steps = crate::engine::compile_flow(&flow, &repo)?;
+                    print!(
+                        "{}",
+                        crate::engine::flow_instructions::render_flow_instructions(
+                            &flow.name, &steps
+                        )?
+                    );
+                } else if *json {
                     let entry = crate::engine::flow_graph::flow_catalog_entry(name, &repo)?;
                     println!("{}", serde_json::to_string(&entry)?);
                 } else {
@@ -460,7 +475,15 @@ pub(crate) fn format_target(target: &Target) -> String {
 }
 
 fn format_xor(router: Option<&str>, paths: &HashMap<String, XorPath>) -> String {
-    let label = router.map_or_else(|| "xor".to_string(), |name| format!("xor[{name}]"));
+    let label = router.map_or_else(
+        || "xor".to_string(),
+        |name| {
+            format!(
+                "xor[{}]",
+                crate::engine::definition_name::definition_key(name)
+            )
+        },
+    );
     let mut names: Vec<_> = paths.keys().collect();
     names.sort();
     let rendered = names
@@ -497,7 +520,7 @@ fn definition_help(
                 flow.name.as_str(),
                 DefinitionKind::Flow,
                 description,
-                crate::engine::flow::find_flow_source_path(&flow.name, repo),
+                crate::engine::flow::find_flow_source_path(&flow.name, repo)?,
             )
         }
     };
@@ -520,13 +543,15 @@ fn definition_help(
             }
         }
     }
-    if kind == DefinitionKind::Flow
-        && resolve_definition(repo, name, Some(DefinitionKind::Skill)).is_ok()
-    {
-        output.push_str(&format!(
-            "\nAlso available: skill (flow wins untyped lookup)\n  {} [message]\n",
-            definition_invocation(tree, name, DefinitionKind::Skill)
-        ));
+    if kind == DefinitionKind::Flow {
+        match resolve_definition(repo, name, Some(DefinitionKind::Skill)) {
+            Ok(_) => output.push_str(&format!(
+                "\nAlso available: skill (flow wins untyped lookup)\n  {} [message]\n",
+                definition_invocation(tree, name, DefinitionKind::Skill)
+            )),
+            Err(crate::engine::LoadError::SkillNotFound(_)) => {}
+            Err(error) => output.push_str(&format!("\nSame-named skill unavailable: {error}\n")),
+        }
     }
     Ok(output)
 }

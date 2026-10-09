@@ -705,7 +705,7 @@ Task steering posts Linear comments. Task Runs refresh comments into local
 delivery events and starting context; publication, seed inclusion, and provider
 acceptance are distinct evidence.
 Steering an idle Task starts nothing. Wave guidance travels as extra
-instructions to `wave/operate`.
+instructions to `wave-operate`.
 
 ```bash
 lf comment INF-123 "keep the public name"
@@ -914,7 +914,7 @@ Work to a Machine and stores eligibility, never liveness or signal authority.
 lf machine add jack@mini.local --label mini
 lf machine list --json
 lf wave place <wave-id> <machine-id>
-lf --machine <machine-id> --wave product wave/operate
+lf --machine <machine-id> --wave product wave-operate
 ```
 
 The target uses its own store, repository, provider homes, OS locks and payload

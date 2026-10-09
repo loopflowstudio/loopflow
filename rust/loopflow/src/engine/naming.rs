@@ -15,10 +15,21 @@ pub(crate) fn generated_session_title(
     task: Option<&str>,
     cwd: &Path,
 ) -> String {
-    let purpose = skill
-        .and_then(|skill| skill.rsplit('/').next())
-        .filter(|skill| !matches!(*skill, "session" | "operate"));
-    [
+    let skill = skill.map(crate::engine::definition_name::definition_key);
+    let purpose = skill.as_deref().filter(|skill| {
+        !matches!(
+            *skill,
+            "session"
+                | "operate"
+                | "repo-session"
+                | "wave-session"
+                | "task-session"
+                | "repo-operate"
+                | "wave-operate"
+                | "task-operate"
+        )
+    });
+    let title = [
         context.and_then(session_request),
         purpose,
         task,
@@ -27,7 +38,8 @@ pub(crate) fn generated_session_title(
     .into_iter()
     .flatten()
     .find_map(request_title)
-    .unwrap_or_else(|| "Session".to_string())
+    .unwrap_or_else(|| "Session".to_string());
+    title
 }
 
 pub(crate) fn request_title(source: &str) -> Option<String> {

@@ -535,7 +535,28 @@ source-file changes or removal: Claude uses a captured native definition, while
 Codex uses captured instructions. Both retain the original resource directory;
 resources removed with the bundle are not preserved.
 
-`lf sync-skills` exports personal sources and builtins, preserves third-party
-files at destination paths, and leaves repository skills local. Cross-harness
-exports retain declarations and report that native controls and argument syntax
-are not yet translated.
+```bash
+lf sync-skills --yes       # personal skills and builtin skills/Flows → home
+lf sync-skills --repo      # repository skills/Flows → this checkout
+```
+
+Global exports go to `~/.claude/skills` and `~/.agents/skills`; repository exports
+go to the corresponding checkout directories, never home. Release promotion’s
+skill sync includes builtin Flows. Sync again after adding or removing repository
+definitions. Flow content changes and overrides resolve at invocation time.
+
+Keep hierarchy in sources: `.lf/skills/wave/session.md` has the public name
+`wave-session`; `wave/session` remains accepted input. The same rule applies to
+Flows. A nested source and a dashed filename at the same precedence are ambiguous;
+the error names both paths. Repository, personal and provider-root precedence
+remain unchanged. Only existing unique bare shortcuts resolve; a hyphen suffix
+does not create a new shortcut. Original native declarations and resource paths
+remain attached to the selected source.
+
+Each native export occupies one flat directory matching its dashed name. A Flow
+uses its own name, without a prefix, and yields to any same-key skill (Loopflow or
+third-party), with a reported skip. Typed and untyped LF resolution are unchanged.
+Invalid portable names are reported, never silently rewritten. Third-party files
+and bundles are preserved. Sync prunes only generated exports; a blocked flat
+replacement preserves its old nested export. Cross-harness exports retain native
+declarations without claiming to enforce or translate their controls.

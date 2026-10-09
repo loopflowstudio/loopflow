@@ -2,6 +2,5 @@
 
 2026-10-08 — Jack Heart, chat Flow skills:
 
-- Proposed native Flow names use `flow-` to distinguish them from skills. No decision yet on that prefix.
-- Proposed automatic export uses existing sync/promotion, with explicit `sync-skills --repo` for repository-only names. Confirm whether discovering newly authored Flows without another sync is part of the desired experience.
+- Implementation assumption, 2026-10-08: use existing sync/promotion and explicit `sync-skills --repo` for repository-only names. Newly added names require another sync; no watcher or provider hook. This is the simpler reversible scope, not a claim of additional approval.
 - Placement remains unresolved; no owning Wave was named.

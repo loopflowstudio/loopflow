@@ -1,6 +1,6 @@
 # Flows in chat, portable skill names
 
-Draft — 2026-10-08. Jack Heart requested both changes and accepted the naming rule below. Flow export mechanics remain proposed; implementation has not been requested.
+Implementation — 2026-10-08. Jack Heart requested both changes and accepted the naming rule and unprefixed Flow exports below. The supplied implement step selects the complete change; sync timing remains the reversible assumption in `scratch/questions.md`.
 
 ## What to build
 
@@ -19,8 +19,8 @@ CLI:     lf skill wave-session       # wave/session also resolves
 Claude:  /wave-session
 Codex:   wave-session in the skill picker
 
-Claude:  /flow-pursue
-Codex:   flow-pursue in the skill picker
+Claude:  /pursue
+Codex:   pursue in the skill picker
 ```
 
 The `pursue` recipe expands to implement → compress → sync → realign → loop-or-next → pr-publish. Iterate returns to implement and repeats the intervening steps. Advance reaches publication. Blocked explains the missing input in this conversation and waits for new direction. No arbitrary iteration limit.
@@ -43,7 +43,7 @@ Preserve source paths, resource bases, native provider invocation names, and rec
 
 ## Flow skills
 
-Generate one `flow-<definition-key>/SKILL.md` per authored Flow. The prefix distinguishes a Flow from a same-named skill without changing LF's existing Flow names. Export only one flat directory per generated native name; validate portable names and report invalid names or collisions without silently truncating or suffixing them.
+**Accepted correction — Jack Heart, 2026-10-08:** “no flow prefix” and “just dont write flows that collide with skills (ours OR theirs)”. Generate `<definition-key>/SKILL.md` for each authored Flow whose name does not collide with a skill. Compare canonical keys across both Loopflow and third-party skills, including destination-native skills; skip the Flow export on collision and preserve the skill. This is a reported skip, not a fatal sync error. Never invent a prefix or suffix to escape a collision. LF's existing typed and untyped resolution remains unchanged; only native Flow export yields to skills. Export one flat directory per generated native name and report invalid portable names without silently truncating them.
 
 Each generated wrapper says:
 
@@ -54,7 +54,7 @@ Follow that plan here, including its loop decisions and review boundaries.
 Do not launch `lf run` or new Sessions to carry out its skill steps.
 ```
 
-`--instructions` is a proposed read-only view on `flow show`, mutually exclusive with process inspection and JSON. Resolve in the current checkout using `load_authored_flow` and `compile_flow`; emit a complete numbered plan and each distinct resolved skill body once, with original resource base and relevant declarations. This avoids stale repository overrides and dependence on another skill being discoverable in the provider menu. Loading/applying these bodies is the in-chat skill invocation; merely typing another slash command in assistant prose is insufficient.
+`--instructions` is a read-only view on `flow show`, mutually exclusive with process inspection and JSON. Resolve in the current checkout using `load_authored_flow` and `compile_flow`; emit a complete numbered plan and each distinct resolved skill body once, with original resource base and relevant declarations. This avoids stale repository overrides and dependence on another skill being discoverable in the provider menu. Loading/applying these bodies is the in-chat skill invocation; merely typing another slash command in assistant prose is insufficient.
 
 The wrapper is small; the compiler owns topology. Expanded skill bodies are generated output, never another authored copy. Freeze the returned plan for that invocation. Source edits during a pass take effect on a fresh invocation, not halfway around a loop.
 
@@ -78,20 +78,13 @@ Repository-only names need that sync after addition/removal. Content changes are
 
 Keep generated ownership markers and source kind/name. Preflight destinations and collisions before mutation; preserve all third-party files and report skipped exports. Prune obsolete generated nested exports only after replacements are writable; a blocked replacement must not erase the working old export. Generated wrappers remain excluded from source discovery, preventing self-import. Sync remains idempotent.
 
-## Current system and implementation
+## Implementation ownership
 
-`engine/skills.rs::sync_skills` exports only `SkillCatalog` entries, with raw names in paths/frontmatter. `build.rs::canonical_builtin_name` changes `_` to `/`; builtin suffix lookup and session composition also use slash keys. `skill_catalog.rs::insert` deduplicates exact strings. `flow.rs::find_flow_path` looks up literal paths; `DefinitionLoader::resolve` owns Flow-first selection. `lf/navigation.rs::definition_help` probes both kinds for collision notices. The compiler already owns nested expansion, loop targets, XOR, and review flags.
+`definition_name::definition_key` owns portable keys for builtin registration, catalog selection, Flow lookup, loops, help and exports. Builtin shortcuts are derived from source namespaces before flattening; hyphen suffixes do not create aliases. `SkillSource` and `SkillOrigin` retain original names, paths and declarations. New captures use canonical names; stored graphs are not rewritten.
 
-Core values remain `SkillSource`, `FlowDefinition`, `ConcreteStep`, `DefinitionKind`, and original source paths. Add a shared canonical-key function and renderer, not a chat execution engine:
+`flow_instructions::render_flow_instructions` consumes `compile_flow` output, emits the numbered topology and deduplicates captured bodies. `flow show --instructions` is local inspection, incompatible with JSON/process inspection. `SkillSyncOptions::repo` selects repository destinations. Sync preflights names/collisions, writes replacements before pruning, preserves blocked nested exports, and reports skipped Flow names without prefixes.
 
-```rust
-pub fn definition_key(name: &str) -> String;
-pub fn render_flow_instructions(name: &str, steps: &[ConcreteStep]) -> Result<String, LoadError>;
-```
-
-Thread repository scope through `SkillSyncOptions`; keep source/native spelling in provenance where canonical display differs. Resolution must return ambiguity errors instead of discarding them as absence.
-
-**Delete — do not maintain:** direct raw-name export path construction and its nested-path expectations in `skills.rs`; exact-string-only deduplication in `skill_catalog.rs`; separate literal-path matching in `flow.rs`; slash-only builtin registration/lookup assumptions in `build.rs` and `builtins.rs`. Replace their consumers in the same cut. Retain original source layouts, source precedence, composed session bodies, generated-only pruning, and third-party preservation tests. Update guides and help examples to dashed public names; retain deliberate slash-input tests.
+**Delete — do not maintain (replaced in this diff):** raw-name export paths and nested-path expectations; exact-string-only skill deduplication; literal Flow path lookup; slash-only builtin registration and runtime comparisons; namespace rows in native-facing listings. Retain hierarchical source paths, generated-only pruning, source precedence, derived unique shortcuts, session composition, native invocation names and recorded history. Scoped Session creation and operation checks also use canonical names; no storage migration.
 
 Forbidden outcomes: an export-only rename, different definitions selected by spelling, two authored Flow representations, a second Flow parser, executing a Workflow as a Flow, ignored loop/command/review nodes, overwritten third-party bundles, or chat completion counted as Task completion.
 
@@ -99,9 +92,9 @@ Forbidden outcomes: an export-only rename, different definitions selected by spe
 
 One integrated native-skill change, implemented in internal slices and shipped as one PR. No follow-up Tasks are needed for the two requested outcomes.
 
-1. **This slice:** replace name comparison and registration assumptions across discovery/resolution/help/export; preserve slash inputs and native provenance. Cut over obsolete nested exports and their tests together.
-2. Add instruction rendering from compiled steps and `flow show --instructions`; prove decisions, branch rejoin, exact occurrence targets, and review boundaries.
-3. Add builtin/repository Flow wrappers and scoped sync, document proposed usage, then exercise both native chat surfaces.
+All three implementation slices are present: canonical resolution/export, compiled instruction rendering, and unprefixed global/repository Flow wrappers. Remaining work is gate's automated acceptance and native-provider demo/review. Rendering fixtures do not prove model adherence.
+
+Review repairs: preserve old exports until both providers finish replacements; do not prune through third-party symlinks or turn existing namespaces into bundles; preserve unfamiliar native declarations as text; report counterpart lookup errors rather than treating ambiguity as absence; migrate scoped operation comparisons and new Session names with discovery.
 
 Gate: `cargo test -p loopflow --lib`, `cargo test -p loopflow --test documented_commands --test flow_discovery_tests --test discovery_tests --test cli_discovery --test flow_tests`, `cargo fmt --check`, and `cargo clippy --all-targets -- -D warnings` must pass. Add behavior fixtures to the existing modules: both filename layouts in isolation; both together; cross-scope overrides; same-key Flow/skill help and explicit/untyped lookup; recursive composition through alternate spelling; repeated skills with exact occurrence IDs; export pruning/collisions/idempotence; and rendered loop/XOR/review/command plans with original skill bodies.
 
@@ -111,4 +104,4 @@ Native chat demo is judgment, not a headless gate dependency. Use harmless fixtu
 
 2026-10-08: repository inspection established the paths and behavior above; no provider reproduction was run. The naming incompatibility is grounded in the [Agent Skills specification](https://agentskills.io/specification#name-field), which requires dashed names matching their containing directories. [Claude's skill documentation](https://code.claude.com/docs/en/skills#control-who-invokes-a-skill) documents user-only invocation controls. [OpenAI's skill documentation](https://learn.chatgpt.com/docs/build-skills) documents explicit skill selection and lazy body loading. Neither establishes that every historical Claude release rejects the current nested export in the same way.
 
-Check: design-only inspection; implementation and native-provider checks deferred to the implementation/gate/demo steps above.
+Check: Linux `cargo test -p loopflow --lib` with focused `portable_`, `engine::skills::tests`, `engine::skill_catalog::tests`, `engine::flow::tests`, `engine::builtins::tests`, and `engine::naming::tests` filters plus `cargo test -p loopflow --test cli_discovery portable_` PASS; `cargo clippy --all-targets -- -D warnings` and local `cargo fmt --check` PASS. Native macOS dependency build scripts stalled; broader suites remain gate-owned and native-provider adherence remains demo/review.

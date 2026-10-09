@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use serde::{Deserialize, Serialize};
 use serde_yaml_ng::Value;
 
+use crate::engine::definition_name::definition_key;
 use crate::engine::{builtins, flow::split_frontmatter, LoadError, Skill};
 
 static RETIRED_INTERACTIVE_WARNING: AtomicBool = AtomicBool::new(false);
@@ -67,7 +68,7 @@ impl SkillSource {
             );
         }
         Ok(Skill {
-            name: self.name.clone(),
+            name: definition_key(&self.name),
             source: self.path.as_ref().map(|path| SkillOrigin {
                 path: path.clone(),
                 dialect: self.dialect,
@@ -134,7 +135,7 @@ impl SkillCatalog {
 
     pub fn resolve(&self, name: &str) -> Option<&SkillSource> {
         self.sources
-            .get(name)
+            .get(&definition_key(name))
             .or_else(|| builtins::resolve_builtin_skill(name).and_then(|key| self.sources.get(key)))
     }
 
@@ -157,7 +158,13 @@ impl SkillCatalog {
             (codex.join("skills"), SkillDialect::Codex, false),
             (codex.join("prompts"), SkillDialect::Codex, true),
         ] {
-            self.collect(&root, &root, dialect, files, &mut HashSet::new())?;
+            let mut scope = Self {
+                sources: BTreeMap::new(),
+            };
+            scope.collect(&root, &root, dialect, files, &mut HashSet::new())?;
+            for (key, source) in scope.sources {
+                self.sources.entry(key).or_insert(source);
+            }
         }
         Ok(())
     }
@@ -221,13 +228,25 @@ impl SkillCatalog {
         let name = name
             .to_string_lossy()
             .replace(std::path::MAIN_SEPARATOR, "/");
-        if self.sources.contains_key(&name) || is_generated(&path) {
+        if is_generated(&path) {
             return Ok(());
         }
         // Keep an absolute lexical path: a symlink's native name is part of its identity.
         let path = std::path::absolute(path)?;
+        let key = definition_key(&name);
+        if let Some(previous) = self.sources.get(&key) {
+            let previous = previous.path.as_ref().expect("scope contains file sources");
+            if fs::canonicalize(previous)? == fs::canonicalize(&path)? {
+                return Ok(());
+            }
+            return Err(LoadError::InvalidSkill(format!(
+                "ambiguous skill {key:?}: {} and {}",
+                previous.display(),
+                path.display()
+            )));
+        }
         self.sources.insert(
-            name.clone(),
+            key,
             SkillSource {
                 name,
                 path: Some(path),
@@ -259,6 +278,56 @@ mod tests {
         let path = root.join(relative);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, content).unwrap();
+    }
+
+    #[test]
+    fn portable_spellings_share_precedence_and_reject_same_root_ambiguity() {
+        let repo = TempDir::new().unwrap();
+        let home = TempDir::new().unwrap();
+        write(home.path(), ".lf/skills/wave/session.md", "Personal");
+        write(repo.path(), ".lf/skills/wave-session.md", "Repository");
+        for name in ["wave/session", "wave-session"] {
+            let catalog = SkillCatalog::load(Some(repo.path()), Some(home.path()), false).unwrap();
+            let selected = catalog.resolve(name).unwrap();
+            assert_eq!(selected.read().unwrap(), "Repository");
+            assert_eq!(selected.load().unwrap().name, "wave-session");
+            assert!(selected.path.as_ref().unwrap().ends_with("wave-session.md"));
+        }
+        write(
+            repo.path(),
+            ".lf/skills/wave/session.md",
+            "Conflicting repository",
+        );
+        let error = SkillCatalog::load(Some(repo.path()), Some(home.path()), false)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("ambiguous skill"), "{error}");
+        assert!(error.contains("wave-session.md") && error.contains("wave/session.md"));
+    }
+
+    #[test]
+    fn portable_names_preserve_native_declarations_and_do_not_invent_shortcuts() {
+        let repo = TempDir::new().unwrap();
+        write(
+            repo.path(),
+            ".claude/skills/team/KeepCase/SKILL.md",
+            "---\nname: NativeName\nallowed-tools: Read\n---\nNative body",
+        );
+        let catalog = SkillCatalog::load(Some(repo.path()), None, false).unwrap();
+        let skill = catalog.resolve("team-KeepCase").unwrap().load().unwrap();
+        assert_eq!(skill.name, "team-KeepCase");
+        assert!(skill
+            .source
+            .unwrap()
+            .frontmatter
+            .unwrap()
+            .contains("NativeName"));
+        assert!(catalog.resolve("KeepCase").is_none());
+        assert!(catalog.resolve("message").is_none());
+        assert_eq!(
+            catalog.resolve("operate").unwrap().load().unwrap().name,
+            "repo-operate"
+        );
     }
 
     #[test]

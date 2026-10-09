@@ -109,14 +109,11 @@ composition remain. This is inspection of committed dependency code, not integra
 or a replacement sync implementation. No new product decision was
 inferred from the dependency. Infrastructure was read only for these shared boundaries.
 
-Later committed source at `a388ed425` routes peer Task disposition through the
-common state-delivery owner: stable peer receipt IDs, causal baselines and null
-Workflow-move association. Repeated imports retain attempted/error evidence;
-provider winners reconcile through the same owner. `7262b6b20` also shares winner
-indexing and baseline normalization. The dependency reports production SQL checks,
-not executed Rust regressions. Mixed Linear/Git remains disabled in
-`ops/planning_peer.rs`; other grouped receipts, alternate acquisition, legacy
-association and Desktop remain. These commits were inspected, not integrated.
+`a388ed425` routes peer Task disposition through common stable/causal receipts;
+`7262b6b20` shares winner/baseline normalization. Inspected, not integrated;
+SQL checks only, mixed Linear/Git still disabled. Grouped receipts, alternate
+acquisition, legacy association and Desktop remain. Detail:
+`fc87e09c1:scratch/findings.md`, this heading; the plan retains composition work.
 
 ## Arrangement evidence — October 8
 

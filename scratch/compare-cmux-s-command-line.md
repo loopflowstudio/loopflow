@@ -68,7 +68,7 @@ lf
 
 Unique descendant commands omit parents:
 `lf ps` → `lf monitor ps`, `lf top` → `lf monitor top`. `open` is ambiguous
-among Desktop, PR and Session; use `lf desktop open`. Exact owner commands win;
+between Desktop and PR (Sessions use `connect`); use `lf desktop open`. Exact owner commands win;
 ambiguous shortcuts name their choices and perform nothing. `list`/`show` generally require an owner. Explicit
 `skill`/`flow` resolve naming collisions; the shorthand collision policy remains
 open. Not every verb exists yet.
@@ -153,24 +153,27 @@ The standalone budget report's final home remains open.
 
 ### Repository lookup
 
-Jack proposed `~/src` as the default search root with a user override. Use the
-existing machine-local `~/.lf/config.yaml`; proposed key `repo_root: ~/src`.
-No new dotfile or mandatory registration command. First resolve the execution
-Machine, then its root/path; remote `~` is expanded there, never by the laptop.
+**Implemented locally October 9.** `--repo NAME` resolves `<repo_root>/NAME`;
+Machine-local `~/.lf/config.yaml` owns `repo_root` (default `~/src`). Explicit
+absolute, `./`, `../` and quoted `~/` paths retain the selected checkout; existing
+common-directory identity recognizes symlinks/worktrees. No remembered-name
+registry, recursive scan, auto-registration or checkout creation is added.
+Explicit `--machine` forwards the selector unchanged and bypasses its saved
+repository; names/home expansion happen there. Automatic Task routing replaces
+the caller's path with the resolved repository plan ID. Neither changes saved
+defaults or joins/publishes plans. Existing opaque `--repository ID` remains the
+Work transport's identity selector, distinct from filesystem lookup.
 
-Proposed minimal rule: no `--repo` uses cwd; a bare name uses `<root>/<name>`;
-absolute paths or explicit `./`/`../` paths use that location. Canonical Git
-common-directory handling recognizes linked worktrees. Missing/non-Git paths
-fail with the resolved location; no recursive disk scan or checkout creation.
-`--repo` narrows Task lookup; an explicit mismatched Task cannot silently select
-another repository. The selection stays bound through asynchronous operations.
+Known Task selectors are checked against canonical repository scope before
+routing/preparation; retained branch lookup is also checked before execution.
+Exact Task IDs now obey the store's repository filter. Ambiguous abbreviated
+Task IDs can still fail in downstream global lookup despite a scoped match;
+carrying the resolved identity through those consumers remains. Remote execution remains unproved; argument tests cover transport only.
 
-Jack remains unsure about remembered names. The draft uses deterministic paths
-with no remembered-name precedence or auto-registration side effect. Durable
-repository/Work IDs still identify shared planning across machines; this path
-lookup neither pairs clones nor joins/publishes a shared plan. Git remotes are
-not a substitute for Work identity.
-
+`lf list` now handles an absent registry without registering; unreadable stores
+remain errors. Focused CLI fixtures cover default/overridden roots, explicit paths,
+no registration, missing/non-Git paths and another Task's ID refusing edit,
+checkout and launch.
 ### Cutover and acceptance
 
 Proposed structures: `RepositorySelection` (cwd/name/path), one resolved invocation
@@ -270,7 +273,7 @@ rendered readiness. Exact pane controls still bypass Work preparation. Inspectio
 capabilities now advertise `list`, not the removed `inspect` CLI name.
 
 Remaining API work: Wave-owned planning, composed Work opening, context preview/explain
-and configurable repository root/path lookup.
+and carrying repository-scoped Task identity through remaining global lookups.
 Q2, shared-plan composition, native extraction and input proof, and complete-path acceptance
 remain required. This internal cut neither completes LOO-427 nor splits its PR.
 
@@ -300,7 +303,7 @@ history, alias pagination and explicit bindings. No installed store was changed.
 
 ### 2. Shared Work identity, delegation and routing
 
-**Partially implemented, not composed.** The current branch includes LOO-406's
+**Partially implemented, not composed.** The branch includes LOO-406's
 common writer and planning-sync receipts. `repository_plans` supplies local plan
 identity even without Tasks; explicit binding can associate a peer path with that
 ID. Known started Tasks route via recorded checkout Machine; locally unstarted
@@ -570,4 +573,4 @@ remain in [findings](findings.md), Git blob `6046145dcdd3d334bb2ad3560130de60dce
 and `/tmp/loo427-compress-msMFvo/current-scratch/`. No native surface proof or
 artifact publication follows from these checks.
 
-Check: `cargo fmt --check`, `git diff --check`, `swiftc -swift-version 6 -emit-module` for Loopflow/LoopflowMac and `swiftc -typecheck` for DesktopPaneControlTests/DTOFixtureTests/DisplayTests PASS (commands/logs: `/tmp/loo427-open-*`); `cargo test -p loopflow --lib --test cli_discovery --test global_commands desktop_` and `cargo clippy --all-targets -- -D warnings` each timed out after 90 s compiling Loopflow, without results. Gate/CI retain Rust, Linux and packaged Swift execution; demo retains native/composed proof. Prior input smoke and failed checks remain in `/tmp/loo427-compress-input-nryd8M/scratch/`.
+Check (October 9): `cargo fmt --check`, `git diff --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test -p loopflow --test global_commands repo_selection_` (3), `--lib lf::commands::ssh::tests` (8), and `--test cli_discovery desktop_open_has_one_owner` (1) PASS; logs `/tmp/loo427-repo-*.log`. Initial checks exposed stale imports/planning-lock fixtures, a nonexistent normalization helper, Session's renamed `connect`, and an unnecessary borrow; repaired. Full gate/CI and native/composed demo remain. Earlier passes/timeouts: `fc87e09c1:scratch/compare-cmux-s-command-line.md` and findings.

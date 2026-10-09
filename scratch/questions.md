@@ -98,10 +98,6 @@ the prepared Task checkout, not the caller's cwd. This does not settle the broad
 collision-policy question. Historical request turn limits and the internal
 prompt-parity helper remain readable; neither restores a public launch switch.
 
-The October 8 compress input query measured 22896/16000 goal tokens (6896 over):
-stored steers plus generated Task-workspace inventory. Trimming local notes cannot fix
-this generated source. No authored direction, Task definition or limit changed.
-
 ## History command shape — October 8
 
 `history` defaults to the existing durable Work activity feed. `history list`
@@ -110,11 +106,20 @@ retains bounded Process pages and their exact cursors, while `history show`,
 second history store is introduced. `history list` is a reversible spelling
 for the required command-page behavior, not a new product decision.
 
-October 9 recovery: the notes were reconciled but the unmerged index stopped
-pursuit at sync. Ordinary `lf commit` resolved it; selected-path commits had
-excluded scratch. Current notes and all three conflict versions were preserved in
-`/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo427-sync-recovery-rfx89hv3/`.
-`git ls-files -u` and status are empty; this prose-only recovery needs no build.
+## Repository selection assumptions — October 9
+
+Names contain no slash; paths use `/`, `./`, `../` or `~/`. `repo_root` must be
+absolute or home-relative, avoiding caller-cwd-dependent configuration. Explicit
+remote relative paths start at the remote login directory, not its saved repo.
+These are reversible lookup choices, not shared Work identity or publication.
+Global Task lookup can still reject an abbreviated ID that is unique only within
+the selected repository; propagating its scoped identity remains implementation work.
+
+The October 9 context query measured 23193/16000 generated goal tokens (7193 over).
+The complete source contains repeated provider definition steers plus generated
+file inventory. Local note curation cannot reduce that source without changing
+recorded direction or its producer; neither was edited and no limit was raised.
+The earlier index recovery is preserved at `fc87e09c1:scratch/questions.md`.
 
 ## Reversible exact-input choices — October 8
 

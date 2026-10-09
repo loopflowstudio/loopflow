@@ -68,7 +68,7 @@ pub(crate) fn execution_blockers(
         })
         .map(|process| {
             format!(
-                "Process {} has live or unresolved execution; inspect `lf monitor show {}`",
+                "Process {} has live or unresolved execution; inspect `lf history show {}`",
                 process.lfid, process.lfid
             )
         })

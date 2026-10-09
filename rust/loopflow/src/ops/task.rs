@@ -5157,7 +5157,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(blockers.len(), 1, "{blockers:?}");
-        assert!(blockers[0].contains(process.lfid.as_str()));
+        assert!(blockers[0].contains(&format!("lf history show {}", process.lfid)));
         let gate = runtime
             .block_on(super::task_completion_gate(&fixture.store, &fixture.task))
             .unwrap();

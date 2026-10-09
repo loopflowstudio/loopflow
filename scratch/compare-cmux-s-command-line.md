@@ -15,9 +15,8 @@ Local Task/Session-plus-Changes opening follows request-scoped readiness; native
 Remaining implementation: Wave-owned planning,
 remote/Flow input and broader explanation, shared identity/exchange and first-start
 admission, and verified native bounded extraction. Full-path proof remains.
-Details and contrary evidence follow below and in [findings](findings.md); [questions](questions.md)
-retains unresolved choices. [Comparison](../docs/reviews/terminal-command-comparison.md)
-retains every host disposition and behavioral observation.
+[Findings](findings.md), [questions](questions.md) and the
+[comparison](../docs/reviews/terminal-command-comparison.md) retain evidence and open choices.
 
 ## Accepted outcome
 

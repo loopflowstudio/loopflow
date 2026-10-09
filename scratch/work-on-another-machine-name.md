@@ -198,6 +198,11 @@ this heading. Keep these replacements deleted:
   bodies. Their common transaction helpers now also acquire peer evidence;
   the existing journal retains original ages, negative facts and Team baselines.
   Scalar projection never turns these facts into list-order or execution authority.
+- Repeated provider-evidence decoding, validation and removal-age sorting inside
+  projection retries. `ObjectChanges` retains typed evidence histories beside
+  borrowed order histories; document validation remains the malformed-input owner.
+  Peer Team acquisition reuses the common cached-Project reader. Independent
+  fact savepoints, causal heads, original ages and sharing holds stay unchanged.
 - Parallel order-history/head maps and the second next-delivery selection query.
   Each receipt owns its history and heads together; the common delivery view already
   excludes superseded settled intentions. Projection reuses one membership read.
@@ -567,7 +572,7 @@ and limitations: `9b59e9b71:scratch/work-on-another-machine-name.md`,
 **Acceptance for review**. They do not establish this ordering cut, public
 combined behavior or Desktop acceptance.
 
-Check (October 9 implement): `cargo test -p loopflow --lib --no-run` passes; seven provider-evidence/preservation/migration filters through `scripts/test_network.py` pass (including the final unknown-age replay case); `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` pass. Combined/public/Desktop: gate.
+Check (October 9 compress): `cargo test -p loopflow --lib --no-run` passes; `scripts/test_network.py target/debug/deps/loopflow-0b179d3755b15c2d store::sqlite::planning_peers::tests:: --test-threads=4` passes (63 tests); `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` pass. Combined/public/Desktop: gate.
 
 Earlier SQL proofs, macOS startup limitations and the retained historical Flow
 without a recorded exit remain at

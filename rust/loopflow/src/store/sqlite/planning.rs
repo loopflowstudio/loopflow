@@ -100,7 +100,7 @@ impl ProviderEvidence {
     }
 }
 
-fn cached_project(
+pub(super) fn cached_project(
     conn: &Connection,
     repo: &str,
     provider: &str,

@@ -635,13 +635,12 @@ before import. `30b476328`'s public fixture awaits gate. `fcd64901f` transports 
 receipts; `357090d4b` preserves primary-only moves. Only complete lists settle
 progress; effect updates cannot promote losers.
 
-**Independent facts need independent rollback.** Peer removal/archive evidence must
-survive rejected scalar projection or conflicting Teams. Common acquisition owns
-those facts and confirmed Team baselines; original ages remain in the journal.
-Legacy negative evidence has unknown age. Entity revisions
-never order relationships. Replayed confirmation cannot clear retained membership
-uncertainty. Missing inventory proves neither deletion nor negative membership.
-Storage checks pass; composition unproved.
+**Independent facts need independent rollback.** Peer import gives removal,
+archive and Teams separate savepoints; common acquisition owns each fact.
+Decode validated histories before projection retries; retain original ages and
+Team baselines. Legacy negative evidence has unknown age. Entity revisions never
+order relationships; replay cannot clear membership uncertainty. Missing inventory
+proves neither deletion nor negative membership. Storage proof only; composition unproved.
 
 Acquisition/saves bypass effect locks; unreadable journals mean unknown pending.
 Private histories/dependents, including order lists and Git documents, remain held

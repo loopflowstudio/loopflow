@@ -15,6 +15,7 @@ use crate::engine::planning_git::PlanningDestination;
 use crate::id::WaveId;
 use crate::store::{PeerPlanningStatus, PeerProjectionConflict, StoreError, StoreResult};
 
+use super::planning::ProviderEvidence;
 use super::planning_changes::PlanningChanges;
 use super::SqliteStore;
 
@@ -32,14 +33,22 @@ struct ObjectChanges<'a> {
     observations: Vec<&'a LinearObservation>,
     creation: Vec<&'a Value>,
     deletions: BTreeMap<&'a str, Vec<&'a Value>>,
-    orders: BTreeMap<&'a str, FieldHistory<'a>>,
-    evidence: BTreeMap<&'a str, FieldHistory<'a>>,
+    orders: BTreeMap<&'a str, FieldHistory<&'a Value>>,
+    evidence: BTreeMap<&'a str, FieldHistory<ProviderEvidence>>,
 }
 
-#[derive(Default)]
-struct FieldHistory<'a> {
-    values: Vec<&'a Value>,
-    heads: Vec<&'a Value>,
+struct FieldHistory<T> {
+    values: Vec<T>,
+    heads: Vec<T>,
+}
+
+impl<T> Default for FieldHistory<T> {
+    fn default() -> Self {
+        Self {
+            values: Vec::new(),
+            heads: Vec::new(),
+        }
+    }
 }
 
 /// Rejected projections can retain effects only in the peer journal. Never
@@ -64,7 +73,9 @@ pub(super) fn require_projected_effects(
     Ok(())
 }
 
-fn changes_by_object(snapshot: &PlanningSnapshot) -> BTreeMap<&PlanningObject, ObjectChanges<'_>> {
+fn changes_by_object(
+    snapshot: &PlanningSnapshot,
+) -> StoreResult<BTreeMap<&PlanningObject, ObjectChanges<'_>>> {
     let mut objects: BTreeMap<_, ObjectChanges<'_>> = BTreeMap::new();
     for (id, change) in snapshot.winners() {
         objects
@@ -73,13 +84,7 @@ fn changes_by_object(snapshot: &PlanningSnapshot) -> BTreeMap<&PlanningObject, O
             .winners
             .insert(change.field.as_str(), (id, change));
     }
-    for change in snapshot.changes.values().filter(|change| {
-        change.field == "creation"
-            || change.linear.is_some()
-            || change.deletion_receipt().is_some()
-            || change.order_receipt().is_some()
-            || change.provider_evidence()
-    }) {
+    for change in snapshot.changes.values() {
         let object = objects
             .get_mut(&change.object)
             .expect("every retained object has a winning field");
@@ -107,7 +112,7 @@ fn changes_by_object(snapshot: &PlanningSnapshot) -> BTreeMap<&PlanningObject, O
                 .entry(change.field.as_str())
                 .or_default()
                 .values
-                .push(&change.value);
+                .push(serde_json::from_value(change.value.clone())?);
         }
         let Some(observation) = &change.linear else {
             continue;
@@ -138,7 +143,7 @@ fn changes_by_object(snapshot: &PlanningSnapshot) -> BTreeMap<&PlanningObject, O
                 .entry(change.field.as_str())
                 .or_default()
                 .heads
-                .push(&change.value);
+                .push(serde_json::from_value(change.value.clone())?);
         }
         if let Some(receipt) = change.order_receipt() {
             objects
@@ -151,7 +156,17 @@ fn changes_by_object(snapshot: &PlanningSnapshot) -> BTreeMap<&PlanningObject, O
                 .push(&change.value);
         }
     }
-    objects
+    // Retain decoded evidence outside dependency retries. Removal ages
+    // select the first known timestamp, never random mutation-ID traversal order.
+    for changes in objects.values_mut() {
+        if let Some(history) = changes.evidence.get_mut("provider_removal") {
+            history.values.sort_by_key(|fact| match fact {
+                ProviderEvidence::IssueChange { observed_at, .. } => *observed_at,
+                _ => None,
+            });
+        }
+    }
+    Ok(objects)
 }
 
 fn invalid(error: impl std::fmt::Display) -> StoreError {
@@ -625,7 +640,7 @@ impl SqliteStore {
         let saved = export_in(&tx, repo, destination)?;
         let merged = saved.merge(incoming).map_err(invalid)?;
         reserve_incoming(&tx, repo, destination, incoming)?;
-        let mut objects = changes_by_object(&merged);
+        let mut objects = changes_by_object(&merged)?;
         let held = selection_conflicts(&tx, repo, destination, &merged)?;
         retain_mutations(&tx, &saved, incoming)?;
         tx.execute("UPDATE planning_peer_context SET importing=1", [])?;
@@ -1352,26 +1367,22 @@ fn acquire_provider_evidence(
     object: &PlanningObject,
     changes: &ObjectChanges<'_>,
     field: &str,
-    history: &FieldHistory<'_>,
+    history: &FieldHistory<ProviderEvidence>,
 ) -> StoreResult<()> {
-    use super::planning::ProviderEvidence;
-
     let mapping = if object.kind == PlanningKind::Task {
         "external_issue_id"
     } else {
         "external_project_id"
     };
     let provider_id = changes.winners[mapping].1.value.as_str();
-    let mut evidence = Vec::new();
-    for value in &history.values {
-        let fact = ProviderEvidence::validate(object.kind, field, value)?;
+    let mapping_conflict = || StoreError::ProviderObservationConflict {
+        entity: "planning mapping",
+        id: object.id.clone(),
+    };
+    for fact in &history.values {
         if Some(fact.id()) != provider_id {
-            return Err(StoreError::ProviderObservationConflict {
-                entity: "planning mapping",
-                id: object.id.clone(),
-            });
+            return Err(mapping_conflict());
         }
-        evidence.push(fact);
     }
     // A remote mapping may not redirect evidence for an existing local object.
     let local: Option<Option<String>> = conn
@@ -1386,10 +1397,7 @@ fn acquire_provider_evidence(
         .as_deref()
         .is_some_and(|id| Some(id) != provider_id)
     {
-        return Err(StoreError::ProviderObservationConflict {
-            entity: "planning mapping",
-            id: object.id.clone(),
-        });
+        return Err(mapping_conflict());
     }
     let foreign: bool = conn.query_row(
         &format!(
@@ -1400,41 +1408,27 @@ fn acquire_provider_evidence(
         |row| row.get(0),
     )?;
     if foreign {
-        return Err(StoreError::ProviderObservationConflict {
-            entity: "planning mapping",
-            id: object.id.clone(),
-        });
+        return Err(mapping_conflict());
     }
     match field {
         "provider_removal" => {
-            // Retain the first known acquisition age on an unmarked Task,
-            // independent of random journal-ID traversal order.
-            evidence.sort_by_key(|fact| match fact {
-                ProviderEvidence::IssueChange { observed_at, .. } => *observed_at,
-                _ => None,
-            });
-            for fact in &evidence {
+            for fact in &history.values {
                 super::planning::observe_issue_change_in(conn, fact)?;
             }
         }
         "provider_archive" => {
-            for fact in &evidence {
+            for fact in &history.values {
                 super::planning::confirm_project_archival_in(conn, repo, "linear", fact)?;
             }
         }
         "provider_teams" => {
-            let heads = history
-                .heads
-                .iter()
-                .map(|value| ProviderEvidence::validate(object.kind, field, value))
-                .collect::<StoreResult<Vec<_>>>()?;
-            let Some(ProviderEvidence::Teams { project, .. }) = heads.first() else {
+            let Some(ProviderEvidence::Teams { project, .. }) = history.heads.first() else {
                 return Ok(());
             };
             let conflict = || StoreError::ProjectMembershipConflict {
                 project_id: project.id.clone(),
             };
-            for head in &heads {
+            for head in &history.heads {
                 let ProviderEvidence::Teams { project: other, .. } = head else {
                     unreachable!("validated Team evidence")
                 };
@@ -1451,23 +1445,17 @@ fn acquire_provider_evidence(
             if unresolved {
                 return Err(conflict());
             }
-            let retained: Option<String> = conn
-                .query_row(
-                    "SELECT body FROM pm_projects WHERE repo=?1 AND provider='linear' AND id=?2",
-                    params![repo, project.id],
-                    |row| row.get(0),
-                )
-                .optional()?;
-            if let Some(body) = retained {
-                let retained: crate::pm::PmProject = serde_json::from_str(&body)?;
+            if let Some(retained) =
+                super::planning::cached_project(conn, repo, "linear", &project.id)?
+            {
                 if !super::planning::same_ids(&retained.initiative_ids, &project.initiative_ids)
-                    || !team_history_contains(&evidence, &retained.team_ids)
+                    || !team_history_contains(&history.values, &retained.team_ids)
                 {
                     return Err(conflict());
                 }
             }
             // Apply only the causal heads. Older entity bodies remain history.
-            for head in &heads {
+            for head in &history.heads {
                 super::planning::reconcile_project_teams_in(conn, repo, "linear", head)?;
             }
             project_confirmed_teams(conn, object, history)?;
@@ -1480,19 +1468,10 @@ fn acquire_provider_evidence(
 fn project_confirmed_teams(
     conn: &Connection,
     object: &PlanningObject,
-    history: &FieldHistory<'_>,
+    history: &FieldHistory<ProviderEvidence>,
 ) -> StoreResult<()> {
-    let Some(value) = history.heads.first() else {
+    let Some(ProviderEvidence::Teams { project, .. }) = history.heads.first() else {
         return Ok(());
-    };
-    let super::planning::ProviderEvidence::Teams { project, .. } =
-        super::planning::ProviderEvidence::validate(
-            PlanningKind::Project,
-            "provider_teams",
-            value,
-        )?
-    else {
-        unreachable!("validated Team evidence")
     };
     conn.execute(
         "UPDATE projects SET planning_teams=?2 WHERE id=?1 AND planning_teams IS NOT ?2",
@@ -1501,9 +1480,9 @@ fn project_confirmed_teams(
     Ok(())
 }
 
-fn team_history_contains(evidence: &[super::planning::ProviderEvidence], teams: &[String]) -> bool {
+fn team_history_contains(evidence: &[ProviderEvidence], teams: &[String]) -> bool {
     evidence.iter().any(|fact| match fact {
-        super::planning::ProviderEvidence::Teams {
+        ProviderEvidence::Teams {
             project, previous, ..
         } => {
             super::planning::same_ids(&project.team_ids, teams)
@@ -1522,39 +1501,21 @@ fn retain_confirmed_teams(
     let Some(history) = changes.evidence.get("provider_teams") else {
         return Ok(());
     };
-    let evidence = history
-        .values
-        .iter()
-        .map(|value| {
-            super::planning::ProviderEvidence::validate(
-                PlanningKind::Project,
-                "provider_teams",
-                value,
-            )
-        })
-        .collect::<StoreResult<Vec<_>>>()?;
-    if !team_history_contains(&evidence, &project.team_ids) {
+    if !team_history_contains(&history.values, &project.team_ids) {
         return Err(StoreError::ProjectMembershipConflict {
             project_id: project.id.clone(),
         });
     }
-    if let Some(value) = history.heads.first() {
-        let super::planning::ProviderEvidence::Teams {
-            project: confirmed, ..
-        } = super::planning::ProviderEvidence::validate(
-            PlanningKind::Project,
-            "provider_teams",
-            value,
-        )?
-        else {
-            unreachable!("validated Team evidence")
-        };
+    if let Some(ProviderEvidence::Teams {
+        project: confirmed, ..
+    }) = history.heads.first()
+    {
         if !super::planning::same_ids(&project.initiative_ids, &confirmed.initiative_ids) {
             return Err(StoreError::ProjectMembershipConflict {
                 project_id: project.id.clone(),
             });
         }
-        project.team_ids = confirmed.team_ids;
+        project.team_ids.clone_from(&confirmed.team_ids);
     }
     Ok(())
 }

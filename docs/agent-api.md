@@ -86,8 +86,8 @@ Child edits survive the parent's squash landing without replay.
 ```bash
 lf comment INF-123 "keep the public API"          # post a Linear Task comment
 lf comment INF-123 --steer "keep the public API"  # explicit direction from an agent
-lf --wave <wave> wave/operate "prioritize the parser"
-lf --wave <wave> wave/operate "reassess Project priorities"
+lf --wave <wave> wave-operate "prioritize the parser"
+lf --wave <wave> wave-operate "reassess Project priorities"
 ```
 
 Comment on the Linear Task directly, or use `task comment`. Both reach only the

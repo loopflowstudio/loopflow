@@ -1510,7 +1510,7 @@ pub enum SelfCommand {
         #[command(subcommand)]
         cmd: Option<InstallCommand>,
     },
-    /// Compile loopflow skills into your home vendor Skills directories.
+    /// Export skills and Flows into native vendor Skills directories.
     #[command(name = "sync-skills", hide = true)]
     SyncSkills {
         /// Confirm writes under ~/ without prompting
@@ -1519,6 +1519,9 @@ pub enum SelfCommand {
         /// Keep stale loopflow-generated skills
         #[arg(long = "no-prune")]
         no_prune: bool,
+        /// Export repository definitions into this checkout instead of home
+        #[arg(long)]
+        repo: bool,
     },
 }
 

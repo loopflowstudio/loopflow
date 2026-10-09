@@ -256,7 +256,7 @@ lf --machine <machine-id> account route
 lf wave list --json
 lf wave place <wave-id> <machine-id>
 lf wave status <wave> --json
-lf --machine <machine-id> --wave <wave> wave/operate
+lf --machine <machine-id> --wave <wave> wave-operate
 ```
 
 `lf --machine` always runs the remote `lf`; ordinary `ssh` owns arbitrary remote
@@ -265,7 +265,7 @@ terminal. Remote processes use credentials installed on their Machine. Before
 placement, use remote reads to verify that the remote has `lf`, the repository,
 required accounts, and the intended route. `lf machine add` discovers the identity
 and records its label, repository and SSH route. Placement is allowed only while
-no execution is live. `lf --wave <wave> wave/operate` makes a finite pass locally; prefix it with
+no execution is live. `lf --wave <wave> wave-operate` makes a finite pass locally; prefix it with
 `lf --machine <machine-id>` to run on the remote Machine. Adding a machine,
 changing placement, and starting a Wave each change durable execution state.
 
@@ -300,7 +300,7 @@ Accounts     GitHub + Linear connected
 Wave         designer placed on home_...
 Planning     Linear bound; 1 current chapter / 7 open Tasks
 
-Next         lf --wave designer wave/operate
+Next         lf --wave designer wave-operate
 Also         lf roadmap --wave designer | lf task run DES-123 | lf debug -c
 ```
 

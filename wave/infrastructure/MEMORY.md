@@ -221,21 +221,19 @@ unpublished code retained, without deletion or delivery authorization.
 
 ## AgentProcess (LOO-443, 2026-10-09)
 
-Jack Heart requested one inventory, deleting Session columns/duplicate owners.
-#1512 is `3e1e6245c`; Jack authorized parallel LOO-441 work, integrated before
-publication. Rename and records remain absent. Prior proofs: `6f96a964c`, this heading.
+Jack Heart requested one inventory. #1512 is `3e1e6245c`; authorized parallel
+LOO-441 must integrate before publication. Prior proofs: `6f96a964c`, this heading.
 
 Fresh tokens fence A → B → A; retain provider identity/parent and exact exits.
 Freeze Work/capture before native requests, never from delayed starts or launch
 capture. `a563794b7` preserves matching origins and rejects conflicting repeats.
 Late history grants no control; broadcasts cannot borrow newer input.
 
-Codex/OpenCode now gate exec on parent-side identity persistence; Session columns
-still own it. `Command::spawn` waits for exec, so recording needs another parent
-thread, never SQLite after fork. Clippy passes; runtime proofs await disk capacity.
+Codex/OpenCode gate exec on identity persistence, still in Session columns. `Command::spawn` waits for exec, so recording needs another parent
+thread, never SQLite after fork.
 FIFO holders outlive transfer; both death orders need record-based proof. Inventory
 must include detached providers. Retain native terminals, dash-compatible signals
-and throwaway-only tests. Full record, DTO and installed outcomes remain unproved.
+and throwaway tests. Records, rename, DTOs and installed outcomes remain unproved.
 
 ## Process vocabulary (LOO-400, curated 2026-10-09)
 

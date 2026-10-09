@@ -32,6 +32,21 @@
 .x5 .tasks b{font-weight:600}.x5 .tasks small{display:block;color:#444;font-size:13.5px;line-height:1.55;max-width:74ch}
 .x5 .foot{display:flex;gap:14px 24px;align-items:center;flex-wrap:wrap;margin-top:30px}.x5 .foot .cost{margin:0;max-width:44ch}
 @media (max-width:760px){.x5 .win{grid-template-columns:1fr}.x5 .side{display:none}.x5 .pane{padding:24px 18px}}
+.x5 .lab code{font:inherit;text-transform:none;letter-spacing:0;color:var(--text);background:none;padding:0}
+.x5 .wf{list-style:none;display:flex;align-items:center;gap:10px;margin:10px 0 12px;padding:22px 18px;background:#fff;border:1px solid var(--border);border-radius:8px}
+.x5 .wf li{list-style:none;margin:0;text-align:center}
+.x5 .wf .cap{font:500 11px var(--font-mono);text-transform:uppercase;letter-spacing:.1em;color:var(--text-secondary)}
+.x5 .wf .edge{flex:1 1 0;min-width:0;display:grid;gap:7px}
+.x5 .wf .edge b{font:500 13px var(--font-mono);color:var(--text)}
+.x5 .wf .edge i{display:block;height:2px;background:#b9b1a6;position:relative}
+.x5 .wf .edge i::after{content:"";position:absolute;right:-1px;top:-4px;border-left:8px solid #b9b1a6;border-top:5px solid transparent;border-bottom:5px solid transparent}
+.x5 .wf .edge small{font:11.5px/1.5 var(--font-mono);color:var(--text-secondary)}
+.x5 .wf .node{flex:0 0 150px;background:linear-gradient(180deg,#fbf2f4,#f1dce2);box-shadow:inset 0 0 0 1px #722f371f;border-radius:10px;padding:12px 10px 11px;display:grid;gap:2px}
+.x5 .wf .node span{font:500 10px var(--font-mono);text-transform:uppercase;letter-spacing:.1em;color:var(--wine)}
+.x5 .wf .node b{font:400 26px/1.1 var(--font-serif);color:var(--burgundy)}
+.x5 .wf .node small{font-size:12.5px;color:#333}.x5 .wf .node em{font:11px/1.4 var(--font-mono);font-style:normal;color:var(--text-secondary);margin-top:4px}
+.x5 .wfnote{font-size:13.5px;line-height:1.6;color:#444;max-width:74ch;margin:0 0 28px}
+@media (max-width:900px){.x5 .wf{flex-direction:column;align-items:stretch;gap:12px}.x5 .wf .node{flex:none}.x5 .wf .edge i{width:2px;height:22px;margin:0 auto}.x5 .wf .edge i::after{right:-4px;top:auto;bottom:-1px;border-top:8px solid #b9b1a6;border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:0}}
 </style></head>
   <body>
 <a href="#main-content" class="skip-link">Skip to main content</a>    <div class="home-page">
@@ -64,6 +79,17 @@
       <p class="obj">We’ll get you building whatever software you want like a software engineer, by guiding you through workflows that get the most out of you and ensure high quality software, not slop.</p>
       <p class="lab">You need</p>
       <ul class="krs"><li>A coding agent (Claude Code, Codex, or OpenCode)</li><li>A GitHub account</li></ul>
+      <p class="lab">Workflow · <code>feature</code>, built in</p>
+      <ol class="wf" aria-label="The feature workflow: start, design, demo, end">
+        <li class="cap">start</li>
+        <li class="edge"><b>task-design</b><i></i><small>kickoff</small></li>
+        <li class="node"><span>you</span><b>design</b><small>you review the plan</small><em>↺ redrafted until you agree</em></li>
+        <li class="edge"><b>pursue</b><i></i><small>implement · compress · refresh · implement ↺ · pr-publish</small></li>
+        <li class="node"><span>you</span><b>demo</b><small>you try the change</small><em>↺ reworked until it is right</em></li>
+        <li class="edge"><b>ship</b><i></i><small>gate · pr land</small></li>
+        <li class="cap">end</li>
+      </ol>
+      <p class="wfnote">Two stops are yours. Between them a Flow runs: each word under a line is a Skill, and your agent does it in a Session of its own. The workflow is a file, so you choose the stops.</p>
       <p class="lab">What you get · 8</p>
       <ol class="tasks"><li><div><b>A terminal</b><small>At its most basic, Loopflow for Mac is a terminal. Open a repository and start a Session with Claude Code, Codex, or OpenCode, the same way every time.</small></div></li>
 <li><div><b>Skills</b><small>Start a Session from a Skill instead of an empty prompt, so you stop retyping how you like work done. Pick one when you open the Session.</small></div></li>

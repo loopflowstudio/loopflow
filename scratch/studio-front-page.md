@@ -327,3 +327,18 @@ Jack Heart: "i like the way the ticker is now skills/flows". The `x5` ticker
 now cycles four built-in names in the order a Task meets them: `design`,
 `implement`, `demo` (Skills) and `ship` (a Flow). "build" and "review" were
 not names of anything.
+
+Jack Heart on `x5`: "i think we need a workflow diagram to really connect the
+dots here"; "we can have a mock of hte product with the workflow diagram for
+the wave above the task list"; "also the i think keep the header, replace the
+cute meta thing *and* the screenshot with the video we're talking about";
+"Move some more of the text otusisde the meta thing".
+
+`x6-video.html` (built by `x6-build.py` from the running `/cli` shell): the
+rotating header, then one slot for the video. Until it is recorded the slot
+holds a mock of the app: a Wave called exports, the built-in `feature`
+workflow drawn above its five Tasks with how many sit at each stop, and each
+Task row naming its stop. All page copy is outside the mock, in the two plain
+lists from `x4`. The diagram follows `task/workflow/feature.yaml` and its three
+Flows. A Wave-level workflow diagram is not known to exist in the app today;
+the source shows one per Task, in the Task header.

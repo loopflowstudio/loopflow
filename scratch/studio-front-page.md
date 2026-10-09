@@ -376,3 +376,5 @@ for every Task, you choose where you step in, what needs you is on screen, a
 Wave remembers, many at once, and one closing item for the terminal. Skills,
 splits and the Session picker are off the page. Wording draws on Jack Heart's
 earlier sentences for `/cli` and the old homepage claims.
+Jack Heart added "& outcomes". The list now opens with "Every Task ends
+shipped", and the Wave item names its goal and key results.

@@ -53,11 +53,12 @@ main = f'''
 <section class="reading">
   <ul class="plain">
 {items([
+("Every Task ends shipped", "A Task is one outcome, and it is done when its pull request has merged: designed before it was built, checked before you saw it, and tried by you before it went in."),
 ("The work, not the chats", "Loopflow for Mac is laid out around your work. Waves are long-lived streams, Tasks are concrete outcomes (i.e. PRs), and every Session is kept under the Task it was for, so you follow the work and not a trail of chats."),
 ("A workflow for every Task", "Loopflow encodes the stages a Task goes through to become a shipped and validated PR. Flows carry it from one stage to the next, and it stops where your judgment is needed."),
 ("You choose where you step in", "Stay in one Session and steer as you go, come in at design and demo, or let it run. Set it project by project, and spend your time on the stages that matter most to you."),
 ("What needs you is on screen", "A Task that is waiting on you is marked. The rest keeps running."),
-("A Wave remembers", "A Wave keeps its goal, its plan, and its memory, so later Sessions start from what earlier ones learned and you do not rebuild context by hand."),
+("A Wave is a goal you can check", "A Wave holds a goal, the key results that show whether you are getting there, and the Tasks that move them. It keeps its plan and its memory, so later Sessions start from what earlier ones learned."),
 ("Many at once", "Each Task works in its own copy of the code, so several can move side by side without colliding."),
 ("A native Mac terminal underneath", "Every pane is a real terminal running Claude Code, Codex, or OpenCode, with <code>lf</code> included."),
 ])}

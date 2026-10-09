@@ -4100,10 +4100,8 @@ mod tests {
             let (id, next_driver) = next.session_driver().unwrap();
             assert_eq!(id, session.id);
             assert_eq!(
-                next.conversation_resume_token()?
-                    .as_ref()
-                    .map(crate::id::AgentSessionId::as_str),
-                Some("native-thread")
+                next.conversation_resume_token()?,
+                Some("native-thread".into())
             );
             // The finished driver's engine is never adopted.
             assert_eq!(
@@ -4313,12 +4311,8 @@ mod tests {
             .unwrap()
             .is_none());
         assert_eq!(
-            store
-                .session_thread("conversation")
-                .unwrap()
-                .as_ref()
-                .map(crate::id::AgentSessionId::as_str),
-            Some("saved-thread")
+            store.session_thread("conversation").unwrap(),
+            Some("saved-thread".into())
         );
     }
 

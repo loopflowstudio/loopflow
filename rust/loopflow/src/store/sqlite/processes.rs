@@ -8,8 +8,7 @@ use rusqlite::types::Value;
 use rusqlite::{params, params_from_iter, OptionalExtension, TransactionBehavior};
 use sha2::{Digest, Sha256};
 
-use crate::id::AgentSessionId;
-use crate::id::ProcessLfid;
+use crate::id::{AgentSessionId, ProcessLfid};
 use crate::process::{
     AgentCaller, LfProcess, LfProcessCursor, LfProcessFilter, LfProcessOutcomeFilter,
     LfProcessPage, LfProcessWorkFilter, SessionDriver,

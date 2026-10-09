@@ -798,13 +798,7 @@ mod tests {
         let result = process_line(line, "turn_1", &tx, &mut state);
         assert!(result.is_none());
         assert!(rx.is_empty(), "system event should not emit events");
-        assert_eq!(
-            state
-                .take_agent_session()
-                .as_ref()
-                .map(crate::id::AgentSessionId::as_str),
-            Some("sess_abc123")
-        );
+        assert_eq!(state.take_agent_session(), Some("sess_abc123".into()));
         assert!(state.take_agent_session().is_none(), "take drains");
     }
 
@@ -817,13 +811,7 @@ mod tests {
         let result = process_line(line, "turn_1", &tx, &mut state);
         assert!(result.is_none());
         assert!(rx.is_empty(), "system event should not emit events");
-        assert_eq!(
-            state
-                .take_agent_session()
-                .as_ref()
-                .map(crate::id::AgentSessionId::as_str),
-            Some("sess_wrapped")
-        );
+        assert_eq!(state.take_agent_session(), Some("sess_wrapped".into()));
     }
 
     #[test]

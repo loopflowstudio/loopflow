@@ -1,10 +1,9 @@
 //! Daemonless local persistence shared by `lf`, Waves, Projects, and Tasks.
 
-use crate::id::AgentSessionId;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::id::WaveId;
+use crate::id::{AgentSessionId, WaveId};
 use crate::profile::{
     AccessProfile, AuthBrowserBinding, EmailAddress, ProfileId, ProviderRoute, RouteScope,
 };

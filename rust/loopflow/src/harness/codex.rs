@@ -703,13 +703,6 @@ impl CodexHarness {
         Ok(())
     }
 
-    fn thread_id(&self) -> Option<AgentSessionId> {
-        self.agent_session
-            .lock()
-            .expect("codex provider session id lock poisoned")
-            .clone()
-    }
-
     fn turn_id(&self) -> Option<String> {
         self.current_turn_id
             .lock()
@@ -836,7 +829,7 @@ impl Harness for CodexHarness {
         };
 
         let thread_id = self
-            .thread_id()
+            .agent_session()
             .ok_or_else(|| anyhow!("codex thread not started"))?;
         let mut input = vec![json!({ "type": "text", "text": turn_text })];
         if let Some(invocation) = invocation {
@@ -858,7 +851,7 @@ impl Harness for CodexHarness {
         if !self.turn_in_progress.load(Ordering::Relaxed) {
             return SendCurrentOutcome::NotSteerable;
         }
-        let (Some(thread_id), Some(turn_id)) = (self.thread_id(), self.turn_id()) else {
+        let (Some(thread_id), Some(turn_id)) = (self.agent_session(), self.turn_id()) else {
             return SendCurrentOutcome::NotSteerable;
         };
         let input = json!([{ "type": "text", "text": text }]);
@@ -912,7 +905,7 @@ impl Harness for CodexHarness {
         if !self.turn_in_progress.load(Ordering::Relaxed) {
             return Ok(());
         }
-        let (Some(thread_id), Some(turn_id)) = (self.thread_id(), self.turn_id()) else {
+        let (Some(thread_id), Some(turn_id)) = (self.agent_session(), self.turn_id()) else {
             return Ok(());
         };
         self.send_request(
@@ -926,7 +919,7 @@ impl Harness for CodexHarness {
     async fn stop(&mut self) -> Result<()> {
         self.shutdown_requested.store(true, Ordering::Relaxed);
 
-        if self.session_driver.is_some() && self.thread_id().is_some() {
+        if self.session_driver.is_some() && self.agent_session().is_some() {
             // Managed engines close when the invocation settles its driver, under
             // the same ownership transaction as takeover. Harness teardown
             // only drops this connection; a replaced driver cannot stop work.
@@ -978,7 +971,10 @@ impl Harness for CodexHarness {
     }
 
     fn agent_session(&self) -> Option<AgentSessionId> {
-        self.thread_id()
+        self.agent_session
+            .lock()
+            .expect("codex provider session id lock poisoned")
+            .clone()
     }
 
     fn set_agent_session(&mut self, agent_session: Option<AgentSessionId>) {
@@ -1574,12 +1570,8 @@ mod tests {
             "{error}"
         );
         assert_eq!(
-            store
-                .session_thread("saved")
-                .unwrap()
-                .as_ref()
-                .map(crate::id::AgentSessionId::as_str),
-            Some("saved-thread")
+            store.session_thread("saved").unwrap(),
+            Some("saved-thread".into())
         );
         assert!(store
             .session_history("saved", 0, 100)
@@ -1700,13 +1692,7 @@ mod tests {
             &tx,
         );
 
-        assert_eq!(
-            slot.lock()
-                .unwrap()
-                .as_ref()
-                .map(crate::id::AgentSessionId::as_str),
-            Some("thread_abc")
-        );
+        assert_eq!(*slot.lock().unwrap(), Some("thread_abc".into()));
     }
 
     #[test]

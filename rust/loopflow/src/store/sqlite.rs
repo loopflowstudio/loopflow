@@ -5,8 +5,7 @@ use std::time::Duration;
 use rusqlite::{params, Connection, OptionalExtension, ToSql, TransactionBehavior};
 
 use crate::durable::{ProjectId, TaskId, WorkRef};
-use crate::id::AgentSessionId;
-use crate::id::WaveId;
+use crate::id::{AgentSessionId, WaveId};
 use crate::profile::{
     AccessProfile, AuthBrowserBinding, EmailAddress, ProfileId, ProviderRoute, RouteScope,
 };

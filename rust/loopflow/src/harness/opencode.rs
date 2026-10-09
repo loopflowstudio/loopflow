@@ -653,13 +653,7 @@ async fn create_provider_session(
         .map_err(|err| anyhow!("failed to parse opencode session response: {err}"))?;
 
     parse_session_id(&body)
-        .map(AgentSessionId::from)
-        .ok_or_else(|| {
-            anyhow!(
-                "opencode session response did not include session id: {}",
-                body
-            )
-        })
+        .ok_or_else(|| anyhow!("opencode session response did not include session id: {body}"))
 }
 
 fn send_disconnect_error(
@@ -820,11 +814,11 @@ async fn send_request_with_retry(
     }
 }
 
-fn parse_session_id(value: &Value) -> Option<String> {
+fn parse_session_id(value: &Value) -> Option<AgentSessionId> {
     value
         .get("id")
         .and_then(Value::as_str)
-        .map(ToString::to_string)
+        .map(AgentSessionId::from)
 }
 
 fn build_turn_content(content: &str, config: &AgentConfig, first_turn: bool) -> Option<String> {
@@ -991,7 +985,7 @@ mod tests {
     fn parse_session_id_requires_canonical_top_level_id() {
         assert_eq!(
             parse_session_id(&json!({"id": "session_1"})),
-            Some("session_1".to_string())
+            Some("session_1".into())
         );
         assert_eq!(
             parse_session_id(&json!({"session": {"id": "session_2"}})),

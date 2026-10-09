@@ -2,8 +2,7 @@ use rusqlite::{params, OptionalExtension, TransactionBehavior};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use crate::id::AgentSessionId;
-use crate::id::ProcessLfid;
+use crate::id::{AgentSessionId, ProcessLfid};
 use crate::session::{SessionEvent, SessionEventKind};
 use crate::session_record::{FinalAnswer, ProviderSessionRef};
 use crate::store::{StoreError, StoreResult};
@@ -930,12 +929,8 @@ mod tests {
             let _ = child.wait();
             assert!(store.session_connection(&session.id).unwrap().is_none());
             assert_eq!(
-                store
-                    .session_thread(&session.id)
-                    .unwrap()
-                    .as_ref()
-                    .map(crate::id::AgentSessionId::as_str),
-                Some("saved-thread")
+                store.session_thread(&session.id).unwrap(),
+                Some("saved-thread".into())
             );
             assert!(store
                 .session_driver(&session.id)
@@ -1492,12 +1487,8 @@ mod tests {
             .unwrap()
             .is_none());
         assert_eq!(
-            store
-                .session_thread("conversation")
-                .unwrap()
-                .as_ref()
-                .map(crate::id::AgentSessionId::as_str),
-            Some("thread")
+            store.session_thread("conversation").unwrap(),
+            Some("thread".into())
         );
         assert!(store
             .record_session_connection(

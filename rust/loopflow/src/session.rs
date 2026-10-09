@@ -1,10 +1,9 @@
 //! Conversation identity and execution history. An invocation never owns feedback.
 
-use crate::id::AgentSessionId;
 use serde::{Deserialize, Serialize};
 
 use crate::durable::TaskId;
-use crate::id::WaveId;
+use crate::id::{AgentSessionId, WaveId};
 
 /// Immutable native evidence. Missing start, attribution or usage stays missing.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

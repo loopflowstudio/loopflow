@@ -121,8 +121,8 @@ fn replay_codex_lines(lines: Vec<String>) -> Vec<ConversationEvent> {
 fn claude_trace_normal_turn() {
     let (events, session_id) = replay_claude_trace("claude_normal_turn.ndjson");
     assert_eq!(
-        session_id.as_ref().map(crate::id::AgentSessionId::as_str),
-        Some("sess_claude_normal"),
+        session_id,
+        Some("sess_claude_normal".into()),
         "system event's session id should be captured for --resume"
     );
     let event_types: Vec<_> = events.iter().map(ConversationEvent::event_type).collect();
@@ -393,15 +393,16 @@ fn opencode_native_history_preserves_output_tools_and_usage_missingness() {
             .unwrap();
         let mut history = History::new(Some((store.clone(), session.clone(), driver)));
         let request = history.request();
+        let agent_session = AgentSessionId::from(session.as_str());
         let mut display =
-            opencode_mapping::ReaderState::new(session.clone().into(), None, "opencode");
+            opencode_mapping::ReaderState::new(agent_session.clone(), None, "opencode");
         let mut message = json!({
             "info":{"id":"assistant","sessionID":session,"role":"assistant","parentID":request,"time":{"created":1}},
             "parts":[{"id":"tool","sessionID":session,"messageID":"assistant","type":"tool","tool":"bash",
                 "state":{"status":"running","input":{"command":"echo ok"}}}]
         });
         let started = history
-            .observe(&session.clone().into(), std::slice::from_ref(&message))
+            .observe(&agent_session, std::slice::from_ref(&message))
             .unwrap();
         assert!(
             matches!(&started[..], [ConversationEvent::TurnStarted { turn_id }] if turn_id == &request)
@@ -440,13 +441,13 @@ fn opencode_native_history_preserves_output_tools_and_usage_missingness() {
         assert!(output.iter().any(|event| matches!(event, ConversationEvent::ItemCompleted {turn_id,item:ConversationItem::Command {output:Some(text),exit_code:Some(0),..}} if turn_id == &request && text == "ok")));
         assert!(output.iter().any(|event| matches!(event, ConversationEvent::TextDelta {turn_id,content} if turn_id == &request && content == "Final answer")));
         let completion = history
-            .observe(&session.clone().into(), std::slice::from_ref(&message))
+            .observe(&agent_session, std::slice::from_ref(&message))
             .unwrap();
         assert!(
             matches!(&completion[..], [ConversationEvent::TurnCompleted {turn_id,status:Lifecycle::Completed}] if turn_id == &request)
         );
         assert!(history
-            .observe(&session.clone().into(), &[message])
+            .observe(&agent_session, &[message])
             .unwrap()
             .is_empty());
         let usage = store.input_history(input.as_str()).unwrap().usage;

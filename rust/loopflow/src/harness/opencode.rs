@@ -113,8 +113,19 @@ impl OpenCodeHarness {
                 store.record_session_provider_launch(session, driver, true)?;
             }
         }
-        let mut child = crate::engine::process::spawn_agent_process(command, None)
-            .map_err(|err| anyhow!("failed to spawn opencode serve: {err}"))?;
+        let mut child = crate::engine::process::spawn_agent_process(command, None, |pid| {
+            let history = self.history.lock().expect("OpenCode history lock poisoned");
+            if let Some((store, session, attachment)) = &history.owner {
+                let started_at = crate::journal::process_started_at(pid)?.ok_or_else(|| {
+                    std::io::Error::other("AgentProcess birth is unavailable before exec")
+                })?;
+                store
+                    .record_session_provider_process(session, attachment, pid, started_at)
+                    .map_err(std::io::Error::other)?;
+            }
+            Ok(())
+        })
+        .map_err(|err| anyhow!("failed to spawn opencode serve: {err}"))?;
         let stderr = child
             .stderr
             .take()
@@ -167,11 +178,6 @@ impl OpenCodeHarness {
         {
             let history = self.history.lock().expect("OpenCode history lock poisoned");
             if let Some((store, session, driver)) = &history.owner {
-                if let Some(pid) = child.id() {
-                    if let Some(start) = crate::journal::process_started_at(pid)? {
-                        store.record_session_provider_process(session, driver, pid, start)?;
-                    }
-                }
                 store.record_session_connection(
                     session,
                     driver,

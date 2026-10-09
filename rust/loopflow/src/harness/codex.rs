@@ -1103,8 +1103,21 @@ impl CodexHarness {
         let lifeline = agent_process_lifeline_path(&endpoint);
         let mut child = if connection.is_none() {
             Some(
-                spawn_agent_process(command, Some(&lifeline))
-                    .map_err(|err| anyhow!("failed to spawn codex app-server: {err}"))?,
+                spawn_agent_process(command, Some(&lifeline), |pid| {
+                    if let Some((store, session, attachment)) = &self.session_attachment {
+                        let started_at =
+                            crate::journal::process_started_at(pid)?.ok_or_else(|| {
+                                std::io::Error::other(
+                                    "AgentProcess birth is unavailable before exec",
+                                )
+                            })?;
+                        store
+                            .record_session_provider_process(session, attachment, pid, started_at)
+                            .map_err(std::io::Error::other)?;
+                    }
+                    Ok(())
+                })
+                .map_err(|err| anyhow!("failed to spawn codex app-server: {err}"))?,
             )
         } else {
             None
@@ -1117,11 +1130,6 @@ impl CodexHarness {
         // ends, by return, signal, panic or SIGKILL, the group is terminated.
         if let Some(pid) = child.as_ref().and_then(tokio::process::Child::id) {
             self.child_group.store(pid, Ordering::Release);
-            if let Some((store, session, driver)) = &self.session_attachment {
-                if let Some(started_at) = crate::journal::process_started_at(pid)? {
-                    store.record_session_provider_process(session, driver, pid, started_at)?;
-                }
-            }
         } else {
             // Reconnecting adopts the engine; one that predates lifelines has none.
             hold_agent_process_lifeline(&lifeline).map_err(|error| {

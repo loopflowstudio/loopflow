@@ -225,14 +225,17 @@ Jack Heart requested one inventory, deleting Session columns/duplicate owners.
 #1512 is `3e1e6245c`; Jack authorized parallel LOO-441 work, integrated before
 publication. Rename and records remain absent. Prior proofs: `6f96a964c`, this heading.
 
-Fresh tokens fence A → B → A; preserve provider identity/parent and exact exits.
-Freeze request Work/capture before sending, never from delayed start or launch
-capture. `a563794b7`: matching origins are no-ops; conflicts retain the first. Late history grants no
-control; broadcasts cannot borrow newer input. FIFO holders survive transfer
-until OS exit; both takeover death orders need record-based proof. Current SQL
-omits detached providers: inventory must not depend on attachment presence.
-Close inherited writers before exec; retain native terminals, dash-compatible
-signals and throwaway-only tests. Fixtures prove no installed outcome.
+Fresh tokens fence A → B → A; retain provider identity/parent and exact exits.
+Freeze Work/capture before native requests, never from delayed starts or launch
+capture. `a563794b7` preserves matching origins and rejects conflicting repeats.
+Late history grants no control; broadcasts cannot borrow newer input.
+
+Codex/OpenCode now gate exec on parent-side identity persistence; Session columns
+still own it. `Command::spawn` waits for exec, so recording needs another parent
+thread, never SQLite after fork. Clippy passes; runtime proofs await disk capacity.
+FIFO holders outlive transfer; both death orders need record-based proof. Inventory
+must include detached providers. Retain native terminals, dash-compatible signals
+and throwaway-only tests. Full record, DTO and installed outcomes remain unproved.
 
 ## Process vocabulary (LOO-400, curated 2026-10-09)
 

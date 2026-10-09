@@ -1,6 +1,7 @@
 //! Start the watchdog before execing an agent, never after spawning it.
 
 use std::fs::File;
+use std::io::{Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::process::CommandExt;
@@ -23,15 +24,103 @@ kill -s KILL -- "-$1" 2>/dev/null"#;
 
 /// Spawn a headless AgentProcess with its watchdog already running. Consume the
 /// command so its inherited descriptors cannot outlive this spawn or be reused.
-/// A successful launch holds the lifeline until this lf invocation exits.
+/// Record its OS identity before provider code executes; a failed record refuses
+/// exec. A successful launch holds the lifeline until this lf invocation exits.
 pub(crate) fn spawn_agent_process(
     mut command: tokio::process::Command,
     path: Option<&Path>,
+    record: impl FnOnce(u32) -> std::io::Result<()> + Send,
 ) -> std::io::Result<tokio::process::Child> {
     let writer = prepare_lifeline(command.as_std_mut(), path)?;
-    let child = command.spawn()?;
+    // Command::spawn waits for exec, so recording on its calling thread would
+    // deadlock the child. The scoped thread writes in the parent, never after fork.
+    let (parent, child) = std::os::unix::net::UnixStream::pair()?;
+    let mut parent = above_stdio(File::from(OwnedFd::from(parent)))?;
+    let child = above_stdio(File::from(OwnedFd::from(child)))?;
+    let parent_fd = parent.as_raw_fd();
+    // SAFETY: the child only closes its inherited peer, sends its own PID and
+    // waits for acknowledgement using async-signal-safe syscalls. The parent
+    // owns the recorder and performs all allocation, locking and database I/O.
+    unsafe {
+        command.pre_exec(move || {
+            libc::close(parent_fd);
+            let pid = libc::getpid() as u32;
+            transfer(child.as_raw_fd(), &mut pid.to_ne_bytes(), true)?;
+            let mut acknowledged = 0u8;
+            transfer(
+                child.as_raw_fd(),
+                std::slice::from_mut(&mut acknowledged),
+                false,
+            )?;
+            if acknowledged != b'.' {
+                return Err(std::io::Error::from_raw_os_error(libc::EIO));
+            }
+            Ok(())
+        });
+    }
+    let child = std::thread::scope(|scope| {
+        let recorder = std::thread::Builder::new()
+            .name("agent-process-record".into())
+            .spawn_scoped(scope, move || {
+                let mut pid = [0u8; 4];
+                match parent.read_exact(&mut pid) {
+                    Ok(()) => {}
+                    // Spawn failed before reaching our hook; preserve that error.
+                    Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => {
+                        return Ok(())
+                    }
+                    Err(error) => return Err(error),
+                }
+                record(u32::from_ne_bytes(pid))?;
+                parent.write_all(b".")
+            })?;
+        let spawned = command.spawn();
+        // A failed spawn might never enter pre_exec. Close the parent's copy
+        // of the child endpoint before waiting for the recorder's EOF.
+        drop(command);
+        recorder
+            .join()
+            .map_err(|_| std::io::Error::other("AgentProcess recorder panicked"))??;
+        spawned
+    })?;
     retain_lifeline(writer);
     Ok(child)
+}
+
+/// Complete a tiny pre-exec handshake without allocating or using Rust locks.
+fn transfer(fd: libc::c_int, bytes: &mut [u8], write: bool) -> std::io::Result<()> {
+    let mut offset = 0;
+    while offset < bytes.len() {
+        // SAFETY: callers supply a live buffer and an owned
+        // socket. The offset remains within the buffer; both calls are
+        // async-signal-safe and neither retains the pointer.
+        let result = unsafe {
+            if write {
+                libc::write(
+                    fd,
+                    bytes.as_mut_ptr().add(offset).cast(),
+                    bytes.len() - offset,
+                )
+            } else {
+                libc::read(
+                    fd,
+                    bytes.as_mut_ptr().add(offset).cast(),
+                    bytes.len() - offset,
+                )
+            }
+        };
+        if result > 0 {
+            offset += result as usize;
+        } else if result == 0 {
+            return Err(std::io::Error::from_raw_os_error(libc::EIO));
+        } else {
+            let error = std::io::Error::last_os_error();
+            if error.kind() != std::io::ErrorKind::Interrupted {
+                return Err(error);
+            }
+        }
+    }
+    Ok(())
 }
 
 fn prepare_lifeline(command: &mut Command, path: Option<&Path>) -> std::io::Result<File> {
@@ -383,7 +472,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let fifo = dir.path().join("lifeline");
         let command = tokio::process::Command::new(dir.path().join("absent-provider"));
-        let error = spawn_agent_process(command, Some(&fifo)).unwrap_err();
+        let error = spawn_agent_process(command, Some(&fifo), |_| Ok(())).unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
         assert!(
             wait_until(|| {
@@ -395,6 +484,71 @@ mod tests {
             }),
             "failed spawn kept its watchdog alive"
         );
+    }
+
+    #[tokio::test]
+    async fn provider_exec_observes_its_recorded_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let record = dir.path().join("process");
+        let executed = dir.path().join("executed");
+        let mut command = tokio::process::Command::new("/bin/sh");
+        command
+            .args([
+                "-c",
+                "test \"$(cat \"$1\")\" = \"$$\" && printf recorded > \"$2\"",
+                "fixture",
+            ])
+            .arg(&record)
+            .arg(&executed);
+        let mut child = spawn_agent_process(command, None, |pid| {
+            assert!(!executed.exists());
+            // SAFETY: read metadata of the throwaway child supplied by spawn.
+            assert_eq!(unsafe { libc::getpgid(pid as i32) }, pid as i32);
+            std::fs::write(&record, pid.to_string())
+        })
+        .unwrap();
+        assert!(child.wait().await.unwrap().success());
+        assert_eq!(std::fs::read(&executed).unwrap(), b"recorded");
+    }
+
+    #[tokio::test]
+    async fn rejected_process_record_prevents_provider_effects() {
+        let dir = tempfile::tempdir().unwrap();
+        let executed = dir.path().join("executed");
+        let fifo = dir.path().join("lifeline");
+        let mut command = tokio::process::Command::new("/bin/sh");
+        command
+            .args(["-c", "printf executed > \"$1\"", "fixture"])
+            .arg(&executed);
+        let error = spawn_agent_process(command, Some(&fifo), |_| {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "attachment changed",
+            ))
+        })
+        .unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+        assert_eq!(error.to_string(), "attachment changed");
+        assert!(!executed.exists());
+        assert!(wait_until(|| std::fs::File::options()
+            .write(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(&fifo)
+            .is_err_and(|error| error.raw_os_error() == Some(libc::ENXIO))));
+    }
+
+    #[tokio::test]
+    async fn pre_exec_failure_keeps_its_error_without_waiting_for_a_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let record = dir.path().join("record");
+        let mut command = tokio::process::Command::new("/bin/sh");
+        command.current_dir(dir.path().join("absent"));
+        let error = spawn_agent_process(command, None, |pid| {
+            std::fs::write(&record, pid.to_string())
+        })
+        .unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+        assert!(!record.exists());
     }
 
     #[tokio::test]
@@ -411,7 +565,7 @@ mod tests {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        let mut child = spawn_agent_process(command, None).unwrap();
+        let mut child = spawn_agent_process(command, None, |_| Ok(())).unwrap();
         child
             .stdin
             .take()

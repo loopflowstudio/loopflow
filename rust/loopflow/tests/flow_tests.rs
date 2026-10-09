@@ -2364,7 +2364,7 @@ fn task_edges_keep_single_skill_execution_after_removing_run_dispatch() {
     fs::create_dir_all(repo.path().join(".lf/workflows")).unwrap();
     fs::write(
         repo.path().join(".lf/workflows/skill-edge.yaml"),
-        "edges:\n  - {from: start, to: review, flow: list}\n",
+        "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, flow: list}\n",
     )
     .unwrap();
     let (_bin, path) = scripted_provider(home.path(), &[WORK]);

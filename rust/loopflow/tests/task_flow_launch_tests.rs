@@ -635,7 +635,7 @@ fn task_edges_launch_flows_named_after_collection_commands() {
     .unwrap();
     fs::write(
         task.repo.path().join(".lf/workflows/reserved.yaml"),
-        "edges:\n  - {from: start, to: review, flow: list}\n",
+        "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, flow: list}\n",
     )
     .unwrap();
     task.ok(&["-b", "task", "run", "INF-123", "reserved"]);

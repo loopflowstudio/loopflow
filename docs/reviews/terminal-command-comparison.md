@@ -339,8 +339,11 @@ screen and command receipts do not meet the chapter's sustained-use KRs.
 LOO-427 delivers the identity → arrange → observe/input path in one PR;
 premature LOO-430/431/432 are folded back. Jack Heart authorized advancement
 through the demo review boundary. Jack subsequently selected cursor insertion into
-existing drafts, with Enter separate. Delegation inheritance remains open; current
-transport, command spelling and implementation limits are in the working design at
+existing drafts, with Enter separate. On October 9 Jack accepted nearest-explicit-
+ancestor delegation for unstarted Tasks, with narrower Task/sub-Wave overrides;
+started Tasks stay on their recorded Machine. Unknown historical assignment
+provenance stays unknown. Current transport, command spelling and implementation
+limits are in the working design at
 `scratch/compare-cmux-s-command-line.md`. Browser, cloud, checkpoint vault,
 custom sidebars and host terminal administration remain outside this diff.
 

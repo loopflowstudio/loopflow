@@ -106,11 +106,11 @@ Store/CLI/migration checks pass, not Git acquisition.
 subsequent calls recheck. Observation reserves nothing.
 
 `3c67b29b1` retains creation origins, exact-fact predecessors and private dependencies.
-**Retention is not observation:** `44d73dbcd` composes `dac02060a`/`ccdd273d0`.
-Accepted projection, not retention, supplies local-save parents. Rejected heads
-remain recoverable. Four focused fixtures pass;
-SQL counterexample: `29fa9a90e`, this heading. Immutable preparation and shared
-scalar/semantic capture survive. Equal text grants no causality; joint projection,
+**Retention is not observation:** `44d73dbcd` composes `dac02060a`/`ccdd273d0`;
+shared decoding (`d62003e0f`) grants no authority. Projection records evaluated heads,
+including losers; rejected heads stay recoverable, not save parents. Four fixtures
+pass (`29fa9a90e`: counterexample). Winners remain origin-grouped;
+both associated origins stay held. Joint projection,
 mixed exchange, first-start and native proof remain unfinished.
 
 #1512 (`3e1e6245c`): live connect hands off; dead-driver resume starts an engine

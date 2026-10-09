@@ -46,10 +46,11 @@ acquisition recognizes partial progress, never detail reads.
 pending-only projections, retaining baselines. Configuration selects pending display;
 creation receipts advance revision. `29777b8cb` scopes sync to repositories;
 `b6f34a6f8` separates Linux reconnect and portable abandonment fixtures.
-`078a6642e` repairs gate fixtures, DTOs and ownership docs. Linux migration,
-native/public Flow/work-watch reconnect and adoption pass; Swift remains unavailable.
-Jack requires queue before landing, with no check waiver or landing authority here.
-PR #1503's scratch checkpoint skips product CI; installed acceptance is unproved.
+`078a6642e`'s Linux migration, native/public Flow/work-watch reconnect and adoption
+passed after fixture/DTO repairs. `ffe986160` removes synthetic settlement; its
+receipt changes still need gate verification. Swift remains unavailable.
+Jack requires queue before landing, without waiver or landing authority here.
+PR #1503's scratch classifier proves no product CI or installed acceptance.
 
 Jack Heart's `8821db44-0480-4493-8609-953207663f1d` removes public creation tokens.
 Each create generates/saves/returns a distinct ID, even for identical titles;
@@ -59,11 +60,11 @@ No rewrite is authorized; Linear Done beside a running Flow remains unanswered.
 
 The enabled `task_completion_preserves_linear_reopening_during_delivery` regression
 still fails: an unseen reopening is overwritten and matching readback falsely
-settles delivery. Its atomic-preservation/pending-retention assertion exceeds accepted
-observed Linear-wins with retired losing intentions; it stays enabled, not waived.
+settles delivery. Unseen-write prevention and a pending loser exceed accepted
+observed Linear-wins. Test disposition remains for review, not precedence.
+The regression stays enabled, not waived.
 Linear's schema at `7d2bc4279f` exposes no expected-revision issue update. More reads
-cannot prove atomic preservation. State settlement now has no test-only success
-shortcut: observations settle; failures retain uncertainty. The design retains evidence.
+cannot prove atomic preservation. Observations settle state; failures retain uncertainty.
 
 Comments retain provider authorship and losing edits without echo. Cancellation
 resolves the Team's lowest-position state before attempting; failed discovery stays

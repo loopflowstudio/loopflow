@@ -22,6 +22,33 @@ use super::SqliteStore;
 // mutation identity and provenance. Retries never rebuild a value-only index.
 type WinningFields<'a> = BTreeMap<&'a str, (&'a str, &'a PlanningMutation)>;
 
+// One borrowed view per object keeps projection retries from scanning the whole
+// repository journal. The snapshot still owns every mutation and causal link.
+#[derive(Default)]
+struct ObjectChanges<'a> {
+    winners: WinningFields<'a>,
+    history: Vec<&'a PlanningMutation>,
+}
+
+fn changes_by_object(snapshot: &PlanningSnapshot) -> BTreeMap<&PlanningObject, ObjectChanges<'_>> {
+    let mut objects: BTreeMap<_, ObjectChanges<'_>> = BTreeMap::new();
+    for change in snapshot.changes.values() {
+        objects
+            .entry(&change.object)
+            .or_default()
+            .history
+            .push(change);
+    }
+    for (id, change) in snapshot.winners() {
+        objects
+            .get_mut(&change.object)
+            .expect("every winner is a retained mutation")
+            .winners
+            .insert(change.field.as_str(), (id, change));
+    }
+    objects
+}
+
 fn invalid(error: impl std::fmt::Display) -> StoreError {
     StoreError::InvalidData(error.to_string())
 }
@@ -492,19 +519,13 @@ impl SqliteStore {
         let saved = export_in(&tx, repo, destination)?;
         let merged = saved.merge(incoming).map_err(invalid)?;
         reserve_incoming(&tx, repo, destination, incoming)?;
-        let mut objects: BTreeMap<_, WinningFields<'_>> = BTreeMap::new();
-        for (id, change) in merged.winners() {
-            objects
-                .entry(change.object.clone())
-                .or_default()
-                .insert(change.field.as_str(), (id, change));
-        }
+        let objects = changes_by_object(&merged);
         let held = selection_conflicts(&tx, repo, destination, &merged)?;
         retain_mutations(&tx, &saved, incoming)?;
         tx.execute("UPDATE planning_peer_context SET importing=1", [])?;
-        for (object, winners) in &objects {
+        for (object, changes) in &objects {
             // Validated mutations have known fields and one winner per field.
-            if winners.len() != object.kind.fields().len() {
+            if changes.winners.len() != object.kind.fields().len() {
                 return Err(invalid(format!("incomplete planning record {}", object.id)));
             }
             match object.kind {
@@ -522,6 +543,7 @@ impl SqliteStore {
         }
         let mut pending: Vec<_> = objects
             .iter()
+            .map(|(&object, changes)| (object, changes))
             .filter(|(object, _)| !held.contains_key(*object))
             .collect();
         let mut conflicts = loop {
@@ -530,9 +552,9 @@ impl SqliteStore {
             // Only the final attempt describes a current conflict. A parent
             // projected in this pass may replace an earlier missing-parent error.
             let mut conflicts = BTreeSet::new();
-            for (object, winners) in pending {
+            for (object, changes) in pending {
                 let savepoint = tx.savepoint()?;
-                match insert_and_project(&savepoint, object, repo, winners, &merged) {
+                match insert_and_project(&savepoint, object, repo, changes, &merged) {
                     Ok(()) => {
                         savepoint.commit()?;
                     }
@@ -547,7 +569,7 @@ impl SqliteStore {
                             )?;
                         }
                         conflicts.insert((object.clone(), error.to_string()));
-                        retry.push((object, winners));
+                        retry.push((object, changes));
                     }
                     Err(error) => return Err(error),
                 }
@@ -561,7 +583,7 @@ impl SqliteStore {
         };
         // Wave selection points back at Projects. Set it only after identity and
         // ownership projection, rather than deferring all foreign-key checks.
-        for (object, winners) in &objects {
+        for (&object, changes) in &objects {
             if object.kind != PlanningKind::Wave
                 || held.contains_key(object)
                 || !exists(&tx, object)?
@@ -571,7 +593,10 @@ impl SqliteStore {
             match project_fields(
                 &tx,
                 object,
-                std::iter::once(("current_project_id", &winners["current_project_id"].1.value)),
+                std::iter::once((
+                    "current_project_id",
+                    &changes.winners["current_project_id"].1.value,
+                )),
             ) {
                 Ok(()) => {}
                 Err(error) if projection_conflict(&error) => {
@@ -938,11 +963,12 @@ fn insert_and_project(
     conn: &Connection,
     object: &PlanningObject,
     repo: &str,
-    winners: &WinningFields<'_>,
+    changes: &ObjectChanges<'_>,
     snapshot: &PlanningSnapshot,
 ) -> StoreResult<()> {
+    let winners = &changes.winners;
     if object.kind == PlanningKind::Comment {
-        project_comment(conn, object, winners, snapshot)?;
+        project_comment(conn, object, changes)?;
         return require_repository(conn, object, repo);
     }
     if !exists(conn, object)? {
@@ -976,7 +1002,7 @@ fn insert_and_project(
         validate_wave(conn, object, winners, repo)?;
     }
     let previous = delivery_fields(conn, object)?;
-    acquire_linear_frontier(conn, object, winners, repo, snapshot)?;
+    acquire_linear_frontier(conn, object, changes, repo)?;
     project_fields(
         conn,
         object,
@@ -1003,9 +1029,9 @@ fn insert_and_project(
 fn project_comment(
     conn: &Connection,
     object: &PlanningObject,
-    winners: &WinningFields<'_>,
-    snapshot: &PlanningSnapshot,
+    changes: &ObjectChanges<'_>,
 ) -> StoreResult<()> {
+    let winners = &changes.winners;
     let task = TaskId::from_raw(
         winners["task_id"]
             .1
@@ -1015,10 +1041,10 @@ fn project_comment(
     );
     let winner = winners["content"].1;
     let observations = latest_observations(
-        snapshot
-            .changes
-            .values()
-            .filter(|change| change.object == *object && change.field == "content")
+        changes
+            .history
+            .iter()
+            .filter(|change| change.field == "content")
             .filter_map(|change| change.linear.as_ref()),
     )?;
     for observation in observations {
@@ -1056,21 +1082,22 @@ fn project_comment(
 fn latest_observations<'a>(
     observations: impl Iterator<Item = &'a LinearObservation>,
 ) -> StoreResult<Vec<&'a LinearObservation>> {
-    let mut observations = observations
-        .map(|observation| {
-            Ok((
-                super::planning::revision_nanos(observation.revision())?,
-                observation,
-            ))
-        })
-        .collect::<StoreResult<Vec<_>>>()?;
-    observations.sort_by_key(|(revision, observation)| (*revision, observation.observed_at));
-    if let Some((latest, _)) = observations.last() {
-        let latest = *latest;
-        observations.retain(|(revision, _)| *revision == latest);
+    let mut latest = None;
+    let mut retained = Vec::new();
+    for observation in observations {
+        let revision = super::planning::revision_nanos(observation.revision())?;
+        if revision < latest {
+            continue;
+        }
+        if revision > latest {
+            latest = revision;
+            retained.clear();
+        }
+        retained.push(observation);
     }
-    observations.dedup_by(|a, b| a.1 == b.1);
-    Ok(observations.into_iter().map(|(_, fact)| fact).collect())
+    retained.sort_by_key(|observation| observation.observed_at);
+    retained.dedup();
+    Ok(retained)
 }
 
 /// Reuse provider acquisition's revision and equal-revision checks, rather than
@@ -1079,10 +1106,10 @@ fn latest_observations<'a>(
 fn acquire_linear_frontier(
     conn: &Connection,
     object: &PlanningObject,
-    winners: &WinningFields<'_>,
+    changes: &ObjectChanges<'_>,
     repo: &str,
-    snapshot: &PlanningSnapshot,
 ) -> StoreResult<()> {
+    let winners = &changes.winners;
     let (provider_table, mapping) = match object.kind {
         PlanningKind::Task => ("pm_items", "external_issue_id"),
         PlanningKind::Project => ("pm_projects", "external_project_id"),
@@ -1092,10 +1119,9 @@ fn acquire_linear_frontier(
         return Ok(());
     };
     let observations = latest_observations(
-        snapshot
-            .changes
-            .values()
-            .filter(|change| change.object == *object)
+        changes
+            .history
+            .iter()
             .filter_map(|change| change.linear.as_ref())
             .filter(|observation| observation.body["id"].as_str() == Some(provider_id)),
     )?;
@@ -2228,6 +2254,17 @@ mod tests {
             revision: None,
         };
         acquire_comment(&source, &task, &comment);
+        // Another comment's newer frontier must not suppress this unversioned
+        // comment or its later edit. Provider ordering belongs to each object.
+        let independent = crate::pm::IssueComment {
+            id: "provider-second".into(),
+            body: "Independent direction".into(),
+            author_name: Some("Maya".into()),
+            created_at: Some("2026-10-08T10:05:00Z".into()),
+            revision: Some("2026-10-08T14:00:00Z".into()),
+            ..comment.clone()
+        };
+        acquire_comment(&source, &task, &independent);
         let incoming = source
             .export_peer_planning("/source", &destination())
             .unwrap();
@@ -2236,7 +2273,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             target.task_comments(&task).unwrap().comments,
-            vec![TaskComment::from(&comment)]
+            vec![TaskComment::from(&comment), TaskComment::from(&independent)]
         );
         assert!(target.pending_task_comments(&task).unwrap().is_empty());
         let count: i64 = target
@@ -2270,7 +2307,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             target.task_comments(&task).unwrap().comments,
-            vec![TaskComment::from(&edited)]
+            vec![TaskComment::from(&edited), TaskComment::from(&independent)]
         );
         assert!(target.pending_task_comments(&task).unwrap().is_empty());
         let revisions = target.revisions().unwrap();

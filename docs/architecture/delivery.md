@@ -334,6 +334,11 @@ arrives at end; planning writeback remains retryable.
 A stopped finishing Flow is recovered by the next Task/Wave operation. Inspect
 all associated live work, then run `finish-delivery` or repeat completion if the
 disposition is already durable. Do not replay gate or re-arm a merged PR.
+Provider completion does not block first filing or this recovery: an unresolved,
+merged delivery retains its checkout and admits a Flow containing only
+`follow-through`, regardless of the Flow's name. Normal Flow/Workflow launches
+stay closed on completed Tasks. A resolved disposition admits retries of saved
+filings but no new obligation or finishing Flow; recovery never reopens planning.
 Dated follow-ups return on the owning Wave's next pass, including unstarted ones;
 unattended execution needs a concrete check already authorized in the brief.
 Filing installs no schedule. Without an installed Wave schedule there is no

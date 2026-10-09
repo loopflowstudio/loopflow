@@ -25,6 +25,13 @@ pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> 
         );
         return Ok(());
     };
+    if !super::task_completion_gate(store, task).await?.satisfied() {
+        eprintln!(
+            "Task {} is complete; retained checkout for unresolved delivery.",
+            task.plan.identifier
+        );
+        return Ok(());
+    }
     let blockers = associated_execution_blockers(store, task)?;
     if !blockers.is_empty() {
         eprintln!(

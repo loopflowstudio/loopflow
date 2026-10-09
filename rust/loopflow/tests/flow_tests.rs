@@ -4,10 +4,9 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use base64::Engine;
 use loopflow::engine::flow::{ConcreteStep, Skill, Step};
 use loopflow::engine::{compile_flow, load_flow};
-use support::codex_app_server_script;
+use support::{codex_app_server_script, register_codex_account};
 use tempfile::TempDir;
 
 fn session_id_for_capture(home: &Path, artifact: &str) -> String {
@@ -356,47 +355,6 @@ fn write_executable(path: &Path, content: &str) {
         permissions.set_mode(0o755);
         fs::set_permissions(path, permissions).unwrap();
     }
-}
-
-fn register_codex_account(home: &Path) {
-    let account_home = home.join("accounts/codex/fixture");
-    fs::create_dir_all(&account_home).unwrap();
-    let email = "fixture@example.com";
-    let claims = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .encode(serde_json::json!({"email": email, "sub": "fixture"}).to_string());
-    fs::write(
-        account_home.join("auth.json"),
-        serde_json::json!({"tokens": {
-            "access_token": "synthetic-fixture-token",
-            "id_token": format!("h.{claims}.s")
-        }})
-        .to_string(),
-    )
-    .unwrap();
-    let store = loopflow::store::sqlite::SqliteStore::new(&home.join("loopflow.db")).unwrap();
-    let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    store
-        .upsert_provider_account(&loopflow::store::ProviderAccount {
-            provider: "codex".into(),
-            account_id: loopflow::store::ProviderAccountId::parse("fixture").unwrap(),
-            home: Some(account_home),
-            login_email: Some(loopflow::profile::EmailAddress::parse(email).unwrap()),
-            observed_email: None,
-            observed_subject: None,
-            observed_credential_digest: None,
-            observed_plan: None,
-            credential_state: loopflow::store::CredentialState::Connected,
-            routing_state: loopflow::store::RoutingState::Automatic,
-            plan: None,
-            paid_through: None,
-            utilization_percent: None,
-            cooldown_until: None,
-            cooldown_reason: None,
-            last_selected_at: None,
-            created_at: now,
-            updated_at: now,
-        })
-        .unwrap();
 }
 
 fn run_lf(repo: &Path, home: &Path, args: &[&str], path: Option<&str>) -> std::process::Output {

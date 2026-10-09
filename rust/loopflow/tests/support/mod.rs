@@ -2,9 +2,11 @@ mod planning;
 
 use std::env;
 use std::ffi::OsString;
+use std::fs;
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
+use base64::Engine;
 use loopflow::id::WaveId;
 use loopflow::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
 use loopflow::store::{PmSnapshotRow, StorageConfig, Store};
@@ -138,6 +140,48 @@ fi
 "#,
         script = script.strip_prefix("#!/bin/sh\n").unwrap_or(script),
     )
+}
+
+#[allow(dead_code)] // Shared synthetic account for provider-backed CLI proofs.
+pub fn register_codex_account(home: &Path) {
+    let account_home = home.join("accounts/codex/fixture");
+    fs::create_dir_all(&account_home).unwrap();
+    let email = "fixture@example.com";
+    let claims = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .encode(serde_json::json!({"email": email, "sub": "fixture"}).to_string());
+    fs::write(
+        account_home.join("auth.json"),
+        serde_json::json!({"tokens": {
+            "access_token": "synthetic-fixture-token",
+            "id_token": format!("h.{claims}.s")
+        }})
+        .to_string(),
+    )
+    .unwrap();
+    let store = loopflow::store::sqlite::SqliteStore::new(&home.join("loopflow.db")).unwrap();
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    store
+        .upsert_provider_account(&loopflow::store::ProviderAccount {
+            provider: "codex".into(),
+            account_id: loopflow::store::ProviderAccountId::parse("fixture").unwrap(),
+            home: Some(account_home),
+            login_email: Some(loopflow::profile::EmailAddress::parse(email).unwrap()),
+            observed_email: None,
+            observed_subject: None,
+            observed_credential_digest: None,
+            observed_plan: None,
+            credential_state: loopflow::store::CredentialState::Connected,
+            routing_state: loopflow::store::RoutingState::Automatic,
+            plan: None,
+            paid_through: None,
+            utilization_percent: None,
+            cooldown_until: None,
+            cooldown_reason: None,
+            last_selected_at: None,
+            created_at: now,
+            updated_at: now,
+        })
+        .unwrap();
 }
 
 pub struct EnvGuard {

@@ -1039,6 +1039,12 @@ pub(super) fn require_task_planning(conn: &Connection, task: &Task) -> StoreResu
             "terminal planning state cannot start work; its execution history is preserved".into(),
         ));
     }
+    require_task_planning_identity(conn, task)
+}
+
+/// Planning ownership remains relevant when finishing already completed work.
+pub(super) fn require_task_planning_identity(conn: &Connection, task: &Task) -> StoreResult<()> {
+    require_task_not_deleted(conn, task)?;
     let Some(issue) = &task.plan.linear_id else {
         return Ok(());
     };
@@ -1415,7 +1421,10 @@ fn task_pr_on(conn: &Connection, pr_id: &TaskPrId) -> StoreResult<Option<TaskPr>
         .map_err(StoreError::from)
 }
 
-fn active_task_pr_on(conn: &Connection, task_id: &TaskId) -> StoreResult<Option<TaskPr>> {
+pub(super) fn active_task_pr_on(
+    conn: &Connection,
+    task_id: &TaskId,
+) -> StoreResult<Option<TaskPr>> {
     let query = format!(
         "{TASK_PR_COLUMNS}
          WHERE task_id=?1 AND historical=0"

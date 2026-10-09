@@ -2,11 +2,12 @@ use std::collections::HashMap;
 
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior};
 
+use crate::durable::TaskState;
 use crate::store::{StoreError, StoreResult};
 use crate::work::task::follow_through::{
     FollowThrough, FollowThroughIntent, FollowThroughLink, FollowThroughSource,
 };
-use crate::work::task::{TaskEvent, TaskEventKind, TaskId};
+use crate::work::task::{PrPhase, TaskEvent, TaskEventKind, TaskId};
 
 use super::children::{insert_task_event_in, task_events_after_in};
 use super::SqliteStore;
@@ -20,6 +21,14 @@ pub(crate) struct FollowThroughRelation {
 }
 
 impl SqliteStore {
+    /// Finish the retained delivery without reopening planning or moving Workflow.
+    pub(crate) fn require_task_delivery(&self, task: &TaskId) -> StoreResult<()> {
+        let mut connection = self.conn.lock().expect("store mutex poisoned");
+        let conn = connection.transaction()?;
+        let current = FollowThrough::from_events(&task_events_after_in(&conn, task, 0)?);
+        require_pending_delivery_in(&conn, task, &current)
+    }
+
     pub(crate) fn pending_follow_through_relations(
         &self,
         repo: &str,
@@ -105,10 +114,19 @@ impl SqliteStore {
             tx.commit()?;
             return Ok(existing);
         }
-        if super::durable::task_state_in(&tx, task)?.is_terminal() || current.resolved() {
+        if current.resolved() {
             return Err(StoreError::InvalidAuthority(
                 "Follow-through is already resolved; file new scope as a separate Task".into(),
             ));
+        }
+        match super::durable::task_state_in(&tx, task)? {
+            TaskState::Done => require_pending_delivery_in(&tx, task, &current)?,
+            TaskState::Abandoned => {
+                return Err(StoreError::InvalidAuthority(
+                    "An abandoned Task cannot file new follow-through".into(),
+                ));
+            }
+            _ => {}
         }
         if intent.issue_id.starts_with("task_") && !intent.existing {
             super::durable::require_selected_project(
@@ -302,6 +320,31 @@ fn create_reserved_task_in(conn: &Connection, intent: &FollowThroughIntent) -> S
     )?;
     if !local {
         super::planning_export::retain_follow_through_export_in(conn, &task.id, intent)?;
+    }
+    Ok(())
+}
+
+/// Completion is not a filing disposition. Only an unresolved merged delivery
+/// admits new finishing work after completion, never a second implementation.
+fn require_pending_delivery_in(
+    conn: &Connection,
+    task: &TaskId,
+    current: &FollowThrough,
+) -> StoreResult<()> {
+    let saved = super::children::task_on(conn, task)?.ok_or(StoreError::NotFound)?;
+    super::children::require_task_planning_identity(conn, &saved)?;
+    let canceled: bool = conn.query_row(
+        "SELECT abandoned_at IS NOT NULL OR abandon_requested_at IS NOT NULL
+            OR COALESCE(planning_state IN ('canceled','duplicate'),0) FROM tasks WHERE id=?1",
+        [task.as_str()],
+        |row| row.get(0),
+    )?;
+    let merged = super::children::active_task_pr_on(conn, task)?
+        .is_some_and(|pr| pr.phase() == PrPhase::Merged);
+    if canceled || !merged || current.resolved() {
+        return Err(StoreError::InvalidAuthority(
+            "Finishing requires an unresolved merged delivery on a non-canceled Task".into(),
+        ));
     }
     Ok(())
 }

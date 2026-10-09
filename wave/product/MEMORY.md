@@ -29,9 +29,9 @@ pinned Project after rotation. Historical intents retain unknown creation in
 common export; absence cannot authorize another create. `task reopen` preserves
 execution/PR. Recovery: `7671f8e9f`; compression: `81055b278`.
 
-Completion before filing remains broken: terminal status prevents the first
-reservation despite unresolved delivery. Filing-first proof misses this ordering. Operator prose retains the obligation; recovery needs repair without
-reopening or new scope.
+Done does not resolve delivery. Unresolved merged Tasks permit filing and
+follow-through-only recovery without reopening; resolved disposition prevents
+new scope. Cleanup retains pending delivery. Fixture proof only.
 
 Failed promotion retains confirmed copy; handoffs preserve child edits.
 Performed location owns admission; Flow/Started commit atomically. Docker proves

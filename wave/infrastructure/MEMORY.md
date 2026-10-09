@@ -626,20 +626,20 @@ Joining publishes nothing; imports remain unplaced. Malformed input aborts impor
 contradictions defer effects, never saves/acquisition. Retain baselines, uncertainty
 and losers. Readback settles effects, not mappings/errors or removal via creation.
 
-Complete lists alone settle order progress; primary-only moves retain exact input.
-Effect updates cannot promote losers. Independent provider facts retain separate
-savepoints, original ages/baselines and causal frontiers. Entity revisions cannot
-order relationships; scalar/list replay cannot clear freshness. Preserve revision
-floors, private histories/dependents and unknown pending on unreadable journals.
-Omission is not convergence. Desktop retains scoped receipts/holds and last-good
-readings. Mixed exchange stays disabled; sharing/recovery and composition remain.
-Prior proofs/limits: `b4a91632e`, this heading.
+Ordering, causal evidence/freshness, private-history holds and unknown-journal
+status constraints/proofs remain at `9dfb95451`, this heading. Retain original
+ages, baselines and losers; omission is not convergence. Desktop keeps last-good
+scoped status. Mixed exchange stays disabled; sharing/recovery and public
+composition remain unfinished.
 
-Legacy association remains unfinished. Clearing a mapping creates a provider-creation
-candidate while retaining selectors and uncertain effects; raw SQL proved no recovery.
-One ownership check protects scalar import and independent evidence from mapping
-replacement, removal and duplicates. Association must preserve IDs, lookup, effects
-and execution. Plan/check result: `scratch/work-on-another-machine-name.md`.
+Legacy association remains unfinished. Clearing mappings creates new provider-creation
+candidates while retaining old selectors/effects. Dispatch's issue-name fallback
+persists no association. One mapping check protects scalar and independent evidence;
+`require_projected_effects` checks the attempted Work ID: a conflict on A does not
+itself defer mapped B. Association must compose lookup, projection and both IDs'
+uncertain effects without renumbering Work, merging execution or enrolling private
+history. Source-only finding at `9dfb95451`, not a duplicate-write observation or recovery
+proof. Plan: `scratch/work-on-another-machine-name.md`.
 
 ## Driver recovery
 

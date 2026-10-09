@@ -632,11 +632,11 @@ evidence retains losing removals. Local sequence cannot order imported effects.
 Creation status awaits gate; its proof excludes populated Processes. Deletion
 compares seven execution tables including Processes, not live controls.
 
-**Retained uncertainty constrains effects.** Rejected projection rolls back
-receipts, not journals. Attempted effects consult conflicts and sharing holds
-transactionally. Saves/acquisition stay independent; only successful import releases skipped projection, even after
-selection. Storage/public fixtures preserve execution; mixed activation remains
-unproved.
+**Retained uncertainty constrains effects.** `08a285872` defers attempts when
+rejected/skipped projection retains receipts only in journals. Saves/acquisition
+stay independent; selection cannot release effects before import. Proofs exclude
+live controls and mixed transport. `30b476328`'s
+changed fixture reader awaits public gate coverage.
 
 Provider age survives; entity revisions never order relationships. Missing inventory
 proves neither negative membership nor deletion. Archive and membership/Initiative

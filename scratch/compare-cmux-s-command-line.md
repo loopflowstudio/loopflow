@@ -590,4 +590,4 @@ original input target and draft survive. Demo owns native usability; preserve co
 Earlier failed attempts and check archives: [findings](findings.md) and
 `f48d84511:scratch/compare-cmux-s-command-line.md`.
 
-Check (October 9): `cargo check -p loopflow --bin lf`, focused `global_commands task_run_explain` (4), `task_flow_launch_tests a_task_takes_up_its_projects_workflow_and_keeps_one_it_named` (1), `dto_fixtures task_run_explanations` (1), Clippy, fmt/diff and direct Swift DTO round-trip (4) PASS; packaged suites gate/CI, native usability demo.
+Check (October 9 sync): network-isolated `cli_discovery` filters `desktop_input_keeps_text_separate_from_keys_and_requires_surface_identity` and `portable_help_describes_exact_kind_selection` PASS (2); broader gate/CI and native demo remain. Prior checks: `b7f7a234c:scratch/compare-cmux-s-command-line.md`.

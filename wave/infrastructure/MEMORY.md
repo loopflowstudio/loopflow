@@ -42,14 +42,12 @@ saves nor acquisition. Matching observations settle captured attempts and advanc
 later saves' unchanged baselines; retired receipts retain losing values.
 `b1f175bbf` delivers Project ordering with captured moves; only complete-list
 acquisition recognizes partial progress, never detail reads.
-`6bb8b935a` adds common CLI/Desktop `PlanningSyncStatus` for creation, fields/order,
-state, comments, errors and losing values; `086d3560c` removes pending-only
-projections, retaining baselines. Configuration, not mapping, selects pending display.
-Creation receipts advance planning revision. SQL prepares; Rust/Swift stalled
-before tests. Native reconnect is unexecuted.
-Foreground sync follows the repository, not Desktop Task selection. Work-watch/Flow reconnect tests remain
-unexecuted; builds stall at `_dyld_start`. Helper proofs establish
-neither composed nor installed acceptance.
+`6bb8b935a` adds CLI/Desktop sync status; `086d3560c` removes pending-only
+projections, retaining baselines. Configuration selects pending display; creation
+receipts advance revision. Foreground sync follows repositories, not Task selection.
+LOO-406's `078a6642e` records Linux migration, native/public Flow/work-watch
+reconnect and adoption passes; Swift remains unavailable. These supersede its
+unexecuted-reconnect notes, not peer acceptance. Installation remains unproved.
 
 Jack Heart's `8821db44-0480-4493-8609-953207663f1d` removes public creation tokens.
 Each create generates/saves/returns a distinct ID, even for identical titles;
@@ -625,21 +623,25 @@ Jack Heart selected custom-ref sync: LOO-412 owns transport/machines, LOO-406
 storage/Linear; plan ownership above governs sharing/execution exclusion.
 Review-only publication; no landing or public-remote planning export.
 
-Provider-frontier, membership rollback and typed-conflict evidence is retained at
+Provider-frontier, membership rollback and typed-conflict evidence:
 `e8ff4c7f6:wave/infrastructure/MEMORY.md`, this heading. Malformed input aborts
 import; valid contradictions isolate objects. Entity revisions cannot order
-relationships. Parent `b6f34a6f8` supplies ordering/status/repository sync.
-Disposition shares common receipts/reconciliation: stable peer IDs, saved times,
-causal baselines, retained uncertain attempts, no Workflow association. SQL passes;
-Rust/composed/installed acceptance remains unproved. Other grouped receipts,
-alternate acquisition, legacy association and Desktop remain. Design:
+relationships; parent `b6f34a6f8` supplies common writers.
+`a388ed425` shares disposition receipts: stable IDs, causal baselines, saved times
+and uncertainty, without Workflow moves. A concurrent Linear winner retires a
+losing intention at unchanged baseline; ordinary acquisition preserves that save.
+SQL passes; Rust/composed/installed acceptance remains unproved. Other grouped
+receipts, alternate acquisition, legacy association and Desktop remain. Design:
 `scratch/work-on-another-machine-name.md`.
+
+Parent `ffe986160` removes synthetic state settlement: observations settle;
+errors retain uncertainty. Unintegrated here; publication unchecked. Peer fixtures
+must follow that owner.
 
 Joining publishes nothing. Mixed Linear exchange stays disabled pending composition,
 not by product policy. Fetch/import/publication stay separate; readback settles
-only the attempted save.
-Effect locks survive cancellation without blocking acquisition/saves. Damaged journals
-break status, not independent exchange. Rust/native/installed proof remains.
+only the attempted save. Workers retain effect locks through cancellation without
+blocking acquisition/saves. Damaged journals break status, not independent exchange.
 
 Move counterexample: `a43f3e2ea`; repairs: `b5dafd918`/`7395cf3bb`.
 Holds omit private history/dependents, including retained Git documents, until

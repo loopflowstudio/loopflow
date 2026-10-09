@@ -626,14 +626,12 @@ storage/Linear. Plan ownership above governs sharing and execution exclusion.
 Review-only publication remains stacked on `e68f2a423`/`84664e661`; no landing
 or public-remote planning export.
 
-Copied planning/issue-derived IDs are removed; causal ordering retains losers.
-Checkpoints acknowledge retention, not convergence. Scalar imports share common
-receipts and causal baselines, but no provider revisions. Receipt retirement cannot
-fence older Linear reads; equal-value facts need provenance. This differs from the
-parent's unseen provider-write race. Grouped receipts and legacy association remain.
+Causal ordering retains losers. Scalar receipts lack provider frontiers: older
+reads/equal-value observations remain unsafe, separately from the parent's unseen
+provider-write race. Grouped receipts and legacy association remain.
 
-Planning setup pins empty bindings and retains keys. Future roots use selection;
-children inherit it. Joining publishes nothing. Repository-scoped `PlanningSync`
+Setup retains keys/empty bindings; future roots use selection, children inherit it.
+Joining publishes nothing. Repository-scoped `PlanningSync`
 now drives local-only Git exchange; cold resolution acquires first. Source dispatch
 checks pushed code before publishing planning; target-only dispatch needs no source
 repository. Rust/public proofs are unexecuted; SQL runs. Linear-connected exchange

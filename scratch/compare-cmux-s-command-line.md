@@ -10,9 +10,9 @@ Focused local Rust and model evidence establish neither native acceptance nor de
 LOO-418/#1499 is integrated; completion/checkout previews and creation receipts are reconciled.
 LOO-406/#1503 and LOO-412 through `96f714bd6` are composed locally;
 `1ece5cc52` reconciles transitive ancestry. Section 2 retains remaining composition.
-Remaining: mixed-path proof, delegation exchange, first-start admission, remote
-opening and broader explanation. Mixed Linear/Git stays disabled; native proof
-remains, including request-scoped Task/Session-plus-Changes opening.
+Remaining: mixed-path completion/reopening composition, delegation exchange,
+first-start admission, remote opening and broader explanation. Mixed Linear/Git
+stays disabled; native proof remains, including request-scoped Task/Session-plus-Changes opening.
 [Findings](findings.md), [questions](questions.md) and the
 [comparison](../docs/reviews/terminal-command-comparison.md) retain evidence and open choices.
 
@@ -231,25 +231,13 @@ resolution: repository IDs (including historical locators) resolve to a path bef
 Task aliases/prefixes. The post-routing identity comparison is deleted; scope does
 not depend on globally unique aliases. Unknown Tasks retain ordinary acquisition.
 
-Receipt imports never synthesize `task_creation_intents`. Task/Project correspondence,
-physical lookup and record reads share one snapshot, granting neither execution nor
-sync authority. Projection retains per-origin heads, accepted-only save parents,
-private holds and separate provider savepoints. Foreground fixtures replace direct
-transport tests. Detail: `4688a4d85`, this section; `263d1f7d7` retains earlier deletions.
+Receipt import/lookup, accepted-frontier and per-origin deletion details:
+`a44ddcb5f`, this section. Import creates no local requests or execution authority.
 
-Task preview selection now precedes action dispatch; remove per-action selector
-comparisons, not the shared resolver. `read_local_task` replaces the duplicated
-Task lookup plus `read_local_execution` wrapper for run/move explanations. It
-retains unavailable location and remote refusals before reading Workflow intent;
-no preparation or admission is added.
-
-Preview classifies agent input once, before stdin; per-action `--context` guards
-are deleted. Save constructs its action once from the validated path or refused
-input. Shared validators and transaction-time checks survive. Creation provenance
-follows resolved selection. Refile/save replace identity-only previews: the store owns
-refile validation in both read snapshots and write transactions; file-save owns
-read-only pinned preparation and effectful exchange. Delete the name-only refile
-initialization before durable-ID resolution. No preview acquires locks or writes.
+Preview dispatch shares Task/location resolution, agent-input classification and
+writer validation without preparation, locks or recovery. Compression details and
+failed assertions remain at `a44ddcb5f`, this section; [findings](findings.md)
+retain evidence. Identity alone still cannot validate an action.
 
 Input reuses `insertTerminalText` and the pane event. Registry, multiplexer and
 surface owners remain authoritative: Close/Undo renews content tokens; filtered
@@ -280,11 +268,9 @@ acquisition and retained execution remain usable. Local absence, negative peer
 readings and SQLite transactions provide no cross-Machine reservation.
 Jack Heart accepted nearest-ancestor inheritance with narrower overrides (Q2, October 9).
 
-**Repository association is not provider-Work association.** `d4fbca0ae` and
-`a73198197` retain root locators and repository-scoped lookup. `66dd3c44f` separately
-composes explicit Task/Project correspondence; `2afcfba1a` keeps physical lookup,
-mapping validation and record reads in one snapshot. Later lookups recheck changes.
-Neither boundary supplies joint projection, recovery or first-start authority.
+Repository association retains locators; explicit Task/Project correspondence preserves
+physical IDs. `66dd3c44f`/`2afcfba1a` compose lookup in one snapshot, not a reservation.
+Neither association supplies remote location or first-start authority.
 
 **Remaining identity/routing composition (October 9).**
 `PlanningKind::fields()` carries neither RepositoryId nor authored delegation.
@@ -348,21 +334,12 @@ causal invalidation replace no local owner; prior mechanisms and contrary eviden
 `2c23acbb8:scratch/compare-cmux-s-command-line.md`, **Mixed command**.
 
 Imported Waves stay unplaced; the existing repository Work stream carries scoped
-last-good destination receipts/holds (`60d113a70`/`c20e4ad13`). No second poller or
-destination-derived repository identity. Per-Work sharing/authorship/assignee and
-losing-edit recovery presentation remain. Earlier composition and receipt/CLI
-proof: `e021858ec`, this heading; those checks are not Git acquisition.
-
-Creation-origin retention, accepted-observation repair and their failed attempts:
-[findings](findings.md#shared-planning-composition). Rejected heads
-remain recoverable, never save parents. Snapshot lookup and TaskSource exclusion survive.
-
-**Joint projection:** associated origins retain original mutations/creation inputs;
-only accepted joint frontiers parent saves. Relationship IDs use common writers.
-Both origins require explicit selection; correspondence never enrolls private Work
-or rewrites conflicting provider inputs. Implementation and failed attempts:
-`859c414d1:scratch/findings.md`, **Shared planning composition**. Foreground evidence
-below replaces transport-only proof, not these constraints.
+last-good destination receipts/holds. Per-Work sharing/authorship/assignee and
+losing-edit recovery presentation remain. No second poller or destination-derived
+repository identity. Associated origins preserve original journals, creation inputs,
+receipts and private selection; only accepted joint frontiers parent saves.
+Earlier composition and failures: `a44ddcb5f`, this section, and
+[findings](findings.md#shared-planning-composition).
 
 **Ancestry and foreground composition, October 9:** `1ece5cc52` retires transitive
 ancestors while retaining original heads, mapping validation, accepted-only save
@@ -376,6 +353,18 @@ limits; no live Linear, running provider or mounted Desktop proof follows.
 Remaining: foreground Git/Linear/Desktop composition, delegation exchange,
 exclusive admission, remote opening and broader explanation. Mixed-provider and
 shared first-start refusals remain.
+
+**Post-LOO-418 completion boundary (October 9 source review):** existing foreground
+fixtures inject provider snapshots and compare seeded execution tables; they do not
+exercise public `task complete/reopen` against a retained failed completion request.
+The common local/Linear paths clear superseded requests, while Git scalar projection
+writes disposition separately. End-to-end behavior here remains unproved, not a
+passing consequence of unchanged Workflow rows. Extend the existing foreground
+fixture with public completion/reopening, pending-request supersession and a later
+ordinary completion retry. Accepted reopening must survive that retry; stale/replayed
+facts must not clear a newer request. Incoming completion must still cause no
+Workflow movement, process signal or checkout cleanup. Any repair belongs in the
+common planning/intent owners, without exporting requests or restoring TaskSource.
 
 **Required mixed-operation proofs:** local `task run` writes its own Workflow and
 runs locally while Task comments/follow-ups/completion synchronize to a second
@@ -399,21 +388,13 @@ completions. Utility windows and retained surfaces keep their own lifetimes.
 Inspection forwards Task and Session actions independently, retaining Task dates;
 Session observation time stays unavailable. Saved/failed readings grant no actions.
 Shared peer identity, remote observations/opening and configured proof remain.
-**Explanation coverage, October 9:** `16372d0e1`/`06ebfa11e` fulfill the
-create/edit/comment slice. Run/move/Workflow restart,
-Desktop open, Session connect and interactive message-less resume also have
-operation-specific readings. Planning previews share input/scope/current-Project
-and saved-record validation; transaction-time validation remains in the writer.
-New Task identity/location, initialization and comment provenance stay unavailable
-or unallocated. Movement retains prior node/edge and reason; end intent
-performs no completion reconciliation or cleanup.
-
-**Refile/save explanation, October 9:** shared read-only validation now reports the
-refile destination Wave/current Project, source/destination placement and recorded-
-work restrictions. Save consumes bounded UTF-8 stdin and checks path, draft and
-revision with the existing pinned-file preparation; preview creates no recovery.
-Execution resolves known destination IDs before initialization, rather than creating
-a Wave named after an ID. Concurrent writes still require execution-time validation.
+**Explanation coverage, October 9:** run/move/Workflow restart, Desktop open,
+Session connect and interactive message-less resume have operation-specific readings.
+Create/edit/comment/refile/save share read-only validation with their writers; writes
+revalidate. Refile resolves IDs before initialization; Save uses pinned path/revision/
+draft checks without recovery writes. New identity/location, initialization and
+comment provenance remain unallocated/unavailable. Detailed covered cases and
+commit evidence: `a44ddcb5f`, this section, and [findings](findings.md).
 
 Checkout reads Task-owned placement without requiring a PR; restoration and
 preparation share validators without fetches or leases. LOO-418 removes move/run
@@ -540,4 +521,4 @@ identity/delegation, open them, add shell/Files panes, retain an unfinished draf
 change focus, target a harmless command, read output, hide/restore, and verify the
 original input target and draft survive. Demo owns native usability; preserve comparison evidence and use no real accounts or live user terminals.
 
-Check: `cargo test -p loopflow` focused dispatch/checkout/routing/Wave fixtures PASS (13); `cargo fmt` and `cargo clippy --all-targets -- -D warnings` PASS. Broader suites/migrations: gate/CI; native: demo.
+Check: `git diff --check` PASS; prose-only reconciliation, prior focused results retained at `a44ddcb5f`; completion/exchange coverage remains implementation work, broader suites/migrations gate/CI, native demo.

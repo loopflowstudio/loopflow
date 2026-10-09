@@ -200,13 +200,15 @@ requires a PR; completion requests remain separate from settlement. Historical
 filing uses common creation receipts without changing original input or unknown
 delivery. Failure logs: `/tmp/loo427-integrated-*.log`.
 
-Compression dispatches Task run beside checkout, before ordinary Work binding,
-removing its exception from that binding path. Process admission stays at the
-same boundary, including failed binding. Explicit Wave validation borrows the
-selected binding rather than cloning its assembled context. Scoped lookup cannot
-replace the retained-branch repository check: branch selectors may remain unknown
-at entry and resolve through historical placement later. That check stays.
-The focused scoped-prefix test still expected a missing PR; LOO-418 now requires
-only a checkout. Updated that assertion and inherited Flow fixtures' retired `run`
-spelling. Initial failure: `/tmp/loo427-compress-test.log`. Mixed-provider,
-first-start and native proof limits remain unchanged.
+`a44ddcb5f` dispatches run/checkout before ordinary Work binding, preserving scoped
+lookup, admission and the later historical-branch repository check. Its focused
+13-test pass and stale missing-PR/retired-run assertion failures remain there.
+
+Post-integration source review: `planning_foreground_tests.rs::execution` compares
+Sessions, Processes, Workflows/moves, PRs and placement, not completion requests.
+Its associated-origin reopening case injects `put_pm_snapshot`; public local
+complete/reopen and a retained failed end request are not exercised together.
+`children::reopen_task` and `planning::put_item` clear superseded requests;
+`planning_peers::project_fields` projects portable disposition separately.
+This identifies missing composition proof, not a reproduced failure. The plan
+retains the required stale/replayed-versus-newer-intent cases; no refusal is lifted.

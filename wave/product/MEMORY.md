@@ -145,6 +145,14 @@ Scoped alias resolution does not replace repository checks for historical branch
 selectors, which can resolve only later through retained placement.
 No preview endpoint probes, takeover or end-intent completion/cleanup; native proof remains.
 
+October 9 integration lesson: preserved execution rows do not prove completion-intent
+supersession. The foreground exchange fixture injects provider snapshots and compares
+Workflows/Processes/placement, not pending completion requests. LOO-418 clears old
+requests on local/observed Linear reopening; Git disposition projection is separate.
+Public complete/reopen through exchange followed by an ordinary retry remains
+unproved. Preserve causal reopening without importing requests or granting cleanup;
+source inspection alone establishes no regression or successful composition.
+
 ## Task delivery boundary (LOO-418, reconciled 2026-10-09)
 
 Jack Heart decided: zero or one PR per Task; dependencies use stacked Tasks.

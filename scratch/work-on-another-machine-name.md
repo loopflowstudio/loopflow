@@ -174,6 +174,10 @@ Removed duplicate ownership and projection paths:
   removed. The common acquisition owner emits a typed observation conflict;
   peer import uses its existing isolation path, not error-text matching or a
   second frontier. Malformed input retains whole-import rejection.
+- Task disposition import no longer stops at column projection. Local and peer saves
+  share `task_state_delivery::record_in`; peer receipts retain mutation identity,
+  causal provider baseline and saved completion time, without a local Workflow move.
+  Acquisition and peer-winner retirement share reconciliation, not duplicate SQL.
 - The peer-only identical-body acquisition shortcut and replay of superseded entity
   revision groups are deleted. Common acquisition decides acceptance; unchanged
   accepted facts issue no cache write. The common membership marker survives an
@@ -313,8 +317,11 @@ provenance gap; revise it with the completed composition, not as a product limit
    Task test preserves a pending local value on an unchanged provider baseline.
    Rust execution remains unproved; disposable SQL checks do not execute these tests.
 
-   Creation, Project KRs/targets and ordering, comments, disposition and deletion
-   receipts remain uncomposed. Common accepted Task/Project acquisition captures
+   Creation, Project KRs/targets and ordering, comments and deletion
+   receipts remain uncomposed. Task disposition now uses the common receipt owner;
+   authored regressions cover lost replies, later reopening, late readback exclusion,
+   unchanged-state provider conflict, idempotence and transaction-wide receipt failure.
+   Cancellation is covered by the same authored test; Rust execution remains. Common accepted Task/Project acquisition captures
    observations; other provider writers still need coverage. Comment payloads retain
    revision/body but common comment acquisition/delivery is not composed. Project
    relationships and list ordering have independent frontiers; entity updatedAt
@@ -366,11 +373,15 @@ provenance gap; revise it with the completed composition, not as a product limit
      Peer projection currently writes the comment row directly and supplies neither
      path. Preserve observed comments without echo and give peer-authored comments
      stable delivery identity, including lost replies and later provider edits.
-   - `task_state_delivery.rs::queue_in` stamps the current time, mints a receipt UUID
-     and captures a local Workflow move. It cannot be called unchanged for imported
-     disposition: retain the peer's saved completion time and mutation identity,
-     reconcile existing uncertain receipts, and create no Workflow movement or
-     invented execution attribution. Reuse the receipt owner, not a lifecycle command.
+   - `task_state_delivery.rs::queue_in` now shares `record_in` with peer projection.
+     Peer receipts retain the mutation ID, causal baseline and projected completion
+     time; `move_seq` stays null. Reimport retains attempts/errors; a later save
+     supersedes without deleting uncertainty. Common reconciliation distinguishes
+     acquisition from a selected concurrent Linear winner: the latter retires a
+     losing intention even at its unchanged baseline. Neither moves a Workflow.
+     Non-lifecycle cached states (for example started/backlog) project without
+     inventing a local state intention. Alternate-provider-path coverage and Rust
+     execution remain; imported completion-time preservation is asserted explicitly.
    - `planning_order.rs::observe_in` requires complete-list evidence; Task entity
      revisions and scalar peer fields cannot settle a captured move. Project
      structured content and `planning_changes.rs` deletion also retain their own
@@ -454,4 +465,15 @@ Infrastructure child memory exists in this checkout.
 7. Replace PR copy and create a walkthrough of final behavior and evidence;
    publish #1491 for Jack Heart's review and stop without landing.
 
-Check (October 8 realign, prose only): `git diff --check` passes; prior `cargo fmt --all -- --check` is unchanged; build, exchange/peer Rust tests and Clippy remain deferred to capable gate/CI without repeating compilation timeouts. Checkpoint CI skips the matrix while scratch remains (TESTING.md); republishing alone cannot supply this proof.
+Check (October 8 implementation): `cargo fmt --all -- --check`, `git diff --check` and production state-receipt SQL on the released schema plus drafts pass; `cargo test -p loopflow --lib store::sqlite::planning_peers::tests --no-run` and `cargo clippy --all-targets -- -D warnings` stall before compilation in sampled `_dyld_start` build-script children, terminated after diagnosis; capable gate/CI owns Rust execution and composed acceptance. Checkpoint CI skips the matrix while scratch remains.
+
+The timeout investigation found Cargo waiting on its build-script child, not
+compiling Rust or waiting for a Cargo lock. Both children had 96 KiB footprints
+and no CPU activity; a fresh-inode copy also timed out before entry. Codesign
+verification returned success. Samples: `/tmp/loo412-cargo-sample.txt`,
+`/tmp/loo412-build-sample.txt`, `/tmp/loo412-clippy-sample.txt`. This identifies
+the stall boundary, not its cause; no security settings or installed binaries changed.
+Historical Flow `93d4d4f6-4723-4027-951b-b3aee2e696a2` read through
+`flow show --processes` still retains realign step
+`e94edd38-2a26-4047-9650-41a65ab814f7` without exit. Checkpoint `e8ff4c7f6`
+appeared during orientation and is preserved; its updated plan informed this cut.

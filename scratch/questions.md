@@ -105,3 +105,13 @@ is retained at `5d336868f:scratch/questions.md`.
   rejects. Malformed documents and unexpected SQL remain transaction-wide errors.
   Review strengthened the regressions to assert attempted/acknowledged/conflict/error
   receipt state, not only the pending value reader, which omits those fields.
+
+- October 8 disposition cut reuses the common state receipt/reconciliation owner,
+  preserving causal baselines and uncertain attempts without inventing a local
+  Workflow move. Review caught unchanged-baseline preservation incorrectly retaining
+  a losing intention after a peer Linear winner; peer-winner reconciliation now
+  explicitly retires it. Cached non-lifecycle states still project without minting
+  unsupported lifecycle deliveries; the common writer still owns its three targets.
+  No new product policy is selected. Remaining grouped
+  receipts and executable checks stay in the design; mixed-provider exchange is
+  still disabled and not ready for publication.

@@ -1061,13 +1061,16 @@ fn delivery_fields(
     conn: &Connection,
     object: &PlanningObject,
 ) -> StoreResult<BTreeMap<String, Value>> {
-    let columns = object
+    let mut columns = object
         .kind
         .fields()
         .iter()
         .filter(|field| delivery_field(object.kind, field).is_some())
         .map(|field| format!("'{field}',{field}"))
         .collect::<Vec<_>>();
+    if object.kind == PlanningKind::Task {
+        columns.push("'disposition',json_object('planning_state',planning_state,'planning_completed',planning_completed,'planning_completed_at',planning_completed_at)".into());
+    }
     if columns.is_empty() {
         return Ok(BTreeMap::new());
     }
@@ -1099,6 +1102,31 @@ fn project_delivery_fields(
         _ => return Ok(()),
     };
     for &(id, change) in winners {
+        if object.kind == PlanningKind::Task && change.field == "disposition" {
+            if let Some(observation) = &change.linear {
+                super::task_state_delivery::adopt_peer_in(
+                    conn,
+                    &task,
+                    &serde_json::from_value(observation.body.clone())?,
+                )?;
+            } else if previous.get("disposition") != Some(&change.value) {
+                // Only lifecycle decisions have state delivery. Cached states such
+                // as started/backlog remain planning, not invented local decisions.
+                if let Some(target @ ("completed" | "unstarted" | "canceled")) =
+                    change.value["planning_state"].as_str()
+                {
+                    super::task_state_delivery::record_in(
+                        conn,
+                        &task,
+                        &format!("peer:{id}:disposition"),
+                        target,
+                        None,
+                        linear_predecessor(snapshot, change).as_ref(),
+                    )?;
+                }
+            }
+            continue;
+        }
         let Some(field) = delivery_field(object.kind, &change.field) else {
             continue;
         };
@@ -1400,6 +1428,311 @@ mod tests {
                 },
             )
             .unwrap();
+    }
+
+    fn complete(store: &SqliteStore, task: &TaskId) {
+        let record = store.task(task).unwrap().unwrap();
+        assert!(store
+            .complete_task(
+                &record,
+                None,
+                &super::super::task_work::EndMove::Set,
+                None,
+                None,
+            )
+            .unwrap());
+    }
+
+    #[test]
+    fn peer_disposition_queues_delivery_without_workflow_and_retains_uncertain_attempts() {
+        let (_source_home, source) = store();
+        let (_target_home, target) = store();
+        let (_, row, task) = linear_seed(&source);
+        let base = source
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        target
+            .import_peer_planning("/target", &destination(), "base", &base)
+            .unwrap();
+        let workflow = target.workflow(&task).unwrap();
+        let state = target.task_state(&task).unwrap();
+        let events = target.recent_task_events(&task, 100).unwrap();
+        complete(&source, &task);
+        let completed = source
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        target
+            .import_peer_planning("/target", &destination(), "completed", &completed)
+            .unwrap();
+        assert_eq!(
+            target
+                .planning_task(&task)
+                .unwrap()
+                .record
+                .unwrap()
+                .item
+                .completed_at,
+            source
+                .planning_task(&task)
+                .unwrap()
+                .record
+                .unwrap()
+                .item
+                .completed_at,
+        );
+        let delivery = target.pending_task_state(&task).unwrap().unwrap();
+        assert!(delivery.id.starts_with("peer:"));
+        assert_eq!(delivery.target, "completed");
+        assert!(!delivery.attempted);
+        let baseline: (Option<i64>, Option<String>, Option<String>) = target
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT move_seq,base_revision,base_state FROM task_state_deliveries WHERE id=?1",
+                [&delivery.id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            baseline,
+            (
+                None,
+                row.snapshot.items[0].revision.clone(),
+                row.snapshot.items[0].state.clone()
+            )
+        );
+        assert!(target.attempt_task_state(&delivery).unwrap());
+        target
+            .settle_task_state(&delivery, Some("lost reply"))
+            .unwrap();
+        let revision = target.revisions().unwrap();
+        target
+            .import_peer_planning("/target", &destination(), "completed", &completed)
+            .unwrap();
+        assert_eq!(target.revisions().unwrap(), revision);
+        assert_eq!(
+            target.pending_task_state(&task).unwrap().unwrap().id,
+            delivery.id
+        );
+
+        // A later peer save supersedes delivery, never erases the uncertain effect.
+        super::super::task_state_delivery::queue_in(
+            &source.conn.lock().unwrap(),
+            &task,
+            "unstarted",
+        )
+        .unwrap();
+        let reopened = source
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        target
+            .import_peer_planning("/target", &destination(), "reopened", &reopened)
+            .unwrap();
+        let later = target.pending_task_state(&task).unwrap().unwrap();
+        assert_ne!(later.id, delivery.id);
+        assert_eq!(later.target, "unstarted");
+        assert!(!later.attempted);
+        let retained: (bool, bool, Option<String>) = target
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT attempted,settled,error FROM task_state_deliveries WHERE id=?1",
+                [&delivery.id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(retained, (true, false, Some("lost reply".into())));
+        // A response for the older completion cannot ingest over the reopening.
+        let mut stale = row.snapshot.items[0].clone();
+        stale.state = Some("completed".into());
+        stale.completed = true;
+        stale.revision = Some("2026-10-08T11:00:00Z".into());
+        assert!(!target.observe_task_state(&delivery, &stale).unwrap());
+        assert_eq!(
+            target.pending_task_state(&task).unwrap().unwrap().id,
+            later.id
+        );
+        super::super::task_state_delivery::queue_in(
+            &source.conn.lock().unwrap(),
+            &task,
+            "canceled",
+        )
+        .unwrap();
+        let canceled = source
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        target
+            .import_peer_planning("/target", &destination(), "canceled", &canceled)
+            .unwrap();
+        assert_eq!(
+            target.pending_task_state(&task).unwrap().unwrap().target,
+            "canceled"
+        );
+        assert_eq!(target.workflow(&task).unwrap(), workflow);
+        assert_eq!(target.task_state(&task).unwrap(), state);
+        assert_eq!(target.recent_task_events(&task, 100).unwrap(), events);
+    }
+
+    #[test]
+    fn peer_linear_disposition_retires_concurrent_intention_without_moving_workflow() {
+        let (_source_home, source) = store();
+        let (_target_home, target) = store();
+        let (_, mut row, task) = linear_seed(&source);
+        let base = source
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        target
+            .import_peer_planning("/target", &destination(), "base", &base)
+            .unwrap();
+        complete(&target, &task);
+        let delivery = target.pending_task_state(&task).unwrap().unwrap();
+        let workflow = target.workflow(&task).unwrap();
+        let state = target.task_state(&task).unwrap();
+        // Same provider state, a newer concurrent fact: peer policy selects Linear.
+        row.snapshot.items[0].revision = Some("2026-10-08T11:00:00Z".into());
+        row.synced_at += 1;
+        source.put_pm_snapshot(&row).unwrap();
+        let observed = source
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        target
+            .import_peer_planning("/target", &destination(), "observed", &observed)
+            .unwrap();
+        assert!(target.pending_task_state(&task).unwrap().is_none());
+        let receipt: (String, bool, bool, String) = target.conn.lock().unwrap().query_row(
+            "SELECT target,attempted,settled,conflict_json FROM task_state_deliveries WHERE id=?1",
+            [&delivery.id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)),
+        ).unwrap();
+        assert_eq!(
+            (&*receipt.0, receipt.1, receipt.2),
+            ("completed", false, true)
+        );
+        assert_eq!(
+            serde_json::from_str::<crate::pm::PmItem>(&receipt.3).unwrap(),
+            row.snapshot.items[0]
+        );
+        assert_eq!(
+            target
+                .planning_task(&task)
+                .unwrap()
+                .record
+                .unwrap()
+                .item
+                .state,
+            row.snapshot.items[0].state
+        );
+        assert_eq!(target.workflow(&task).unwrap(), workflow);
+        assert_eq!(target.task_state(&task).unwrap(), state);
+        let revision = target.revisions().unwrap();
+        target
+            .import_peer_planning("/target", &destination(), "observed", &observed)
+            .unwrap();
+        assert_eq!(target.revisions().unwrap(), revision);
+    }
+
+    #[test]
+    fn peer_cached_non_lifecycle_state_does_not_invent_a_delivery() {
+        let (_source_home, source) = store();
+        let (_target_home, target) = store();
+        let task = seed(&source);
+        source
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET planning_state='started' WHERE id=?1",
+                [task.as_str()],
+            )
+            .unwrap();
+        let snapshot = source
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        target
+            .import_peer_planning("/target", &destination(), "started", &snapshot)
+            .unwrap();
+        assert_eq!(
+            target
+                .planning_task(&task)
+                .unwrap()
+                .record
+                .unwrap()
+                .item
+                .state
+                .as_deref(),
+            Some("started")
+        );
+        let count: i64 = target
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT count(*) FROM task_state_deliveries WHERE task_id=?1",
+                [task.as_str()],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0);
+        assert!(target
+            .peer_projection_conflicts("/target")
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn peer_disposition_receipt_failure_rolls_back_planning_and_checkpoint() {
+        let (_source_home, source) = store();
+        let (_target_home, target) = store();
+        let (_, _, task) = linear_seed(&source);
+        let base = source
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        target
+            .import_peer_planning("/target", &destination(), "base", &base)
+            .unwrap();
+        complete(&source, &task);
+        let completed = source
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        let before = target.planning_task(&task).unwrap();
+        target
+            .conn
+            .lock()
+            .unwrap()
+            .execute_batch(
+                "CREATE TRIGGER fail_state_receipt BEFORE INSERT ON task_state_deliveries
+             WHEN NEW.id LIKE 'peer:%' BEGIN SELECT RAISE(ABORT,'receipt failure'); END;",
+            )
+            .unwrap();
+        assert!(target
+            .import_peer_planning("/target", &destination(), "completed", &completed)
+            .is_err());
+        assert_eq!(target.planning_task(&task).unwrap(), before);
+        assert_eq!(
+            import_revision(&target, "/target", &destination()).as_deref(),
+            Some("base")
+        );
+        assert_eq!(
+            target
+                .export_peer_planning("/target", &destination())
+                .unwrap(),
+            base
+        );
+        assert!(target.pending_task_state(&task).unwrap().is_none());
+        target
+            .conn
+            .lock()
+            .unwrap()
+            .execute_batch("DROP TRIGGER fail_state_receipt")
+            .unwrap();
+        target
+            .import_peer_planning("/target", &destination(), "completed", &completed)
+            .unwrap();
+        assert_eq!(
+            target.pending_task_state(&task).unwrap().unwrap().target,
+            "completed"
+        );
     }
 
     #[test]

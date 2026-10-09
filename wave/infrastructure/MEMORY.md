@@ -625,16 +625,15 @@ Jack Heart selected custom-ref sync: LOO-412 owns transport/machines, LOO-406
 storage/Linear; plan ownership above governs sharing/execution exclusion.
 Review-only publication; no landing or public-remote planning export.
 
-`e608b0d2d` retains provider bodies/revisions/ages without relabeling local
-intentions. `c6f55719d` fences projection with removal/archive evidence and
-retains typed membership disputes after object rollback. Entity revisions cannot
-order relationships. `9355170fd` keeps scoped savepoints and borrowed heads.
-SQL passes; Rust/CLI/Desktop/installed acceptance is unproved.
-`270019c8d` isolates typed provider contradictions; malformed input aborts import.
-Grouped receipts, alternate acquisition, legacy association and Desktop remain.
-Local disposition helpers mint time/identity; peer import must retain both.
-Parent `b6f34a6f8` supplies ordering/status/repository sync.
-Design: `scratch/work-on-another-machine-name.md`.
+Provider-frontier, membership rollback and typed-conflict evidence is retained at
+`e8ff4c7f6:wave/infrastructure/MEMORY.md`, this heading. Malformed input aborts
+import; valid contradictions isolate objects. Entity revisions cannot order
+relationships. Parent `b6f34a6f8` supplies ordering/status/repository sync.
+Disposition shares common receipts/reconciliation: stable peer IDs, saved times,
+causal baselines, retained uncertain attempts, no Workflow association. SQL passes;
+Rust/composed/installed acceptance remains unproved. Other grouped receipts,
+alternate acquisition, legacy association and Desktop remain. Design:
+`scratch/work-on-another-machine-name.md`.
 
 Joining publishes nothing. Mixed Linear exchange stays disabled pending composition,
 not by product policy. Fetch/import/publication stay separate; readback settles

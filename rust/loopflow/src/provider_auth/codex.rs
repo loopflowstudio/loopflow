@@ -143,12 +143,13 @@ impl Connection {
     }
 }
 
-/// The login held by the background app-server Codex manages for `home`, when
-/// one is running. A bare `codex` attaches to it instead of reading
-/// `auth.json`, and it reads that file only as it starts.
-pub(crate) async fn daemon_login(home: &Path) -> Option<String> {
+/// The login held by Codex's background app-server. `None` means no daemon;
+/// a running daemon without a readable email is an error, not absence.
+pub(crate) async fn daemon_login(home: &Path) -> Result<Option<String>, AuthError> {
     tokio::time::timeout(DAEMON_TIMEOUT, async {
-        let mut socket = connect_daemon(home).await?;
+        let Some(mut socket) = connect_daemon(home).await? else {
+            return Ok(None);
+        };
         // Never refresh here: that would rotate the token of a login being replaced.
         let account = daemon_request(
             &mut socket,
@@ -157,47 +158,87 @@ pub(crate) async fn daemon_login(home: &Path) -> Option<String> {
             json!({"refreshToken": false}),
         )
         .await?;
-        Some(account.pointer("/account/email")?.as_str()?.to_string())
+        account
+            .pointer("/account/email")
+            .and_then(Value::as_str)
+            .filter(|email| !email.is_empty())
+            .map(|email| Some(email.to_string()))
+            .ok_or_else(|| failed("Codex daemon did not report a login email"))
     })
     .await
-    .ok()
-    .flatten()
+    .map_err(|_| failed("timed out reading Codex daemon login"))?
 }
 
-/// Whether a turn is running through `home`'s background app-server, which a
-/// restart would cut. An unreachable daemon has none.
-pub(crate) async fn daemon_has_running_turn(home: &Path) -> bool {
+/// A failed probe is unknown activity, never evidence that restarting is safe.
+pub(crate) async fn daemon_has_running_turn(home: &Path) -> Result<bool, AuthError> {
     tokio::time::timeout(DAEMON_TIMEOUT, async {
-        let mut socket = connect_daemon(home).await?;
-        let loaded = daemon_request(&mut socket, 2, "thread/loaded/list", json!({})).await?;
-        for (offset, thread) in loaded["data"].as_array()?.iter().enumerate() {
-            let params = json!({"threadId": thread, "includeTurns": false});
-            let read = daemon_request(&mut socket, 3 + offset as i64, "thread/read", params).await;
-            if read.is_some_and(|read| read["thread"]["status"]["type"] == "active") {
-                return Some(true);
+        let Some(mut socket) = connect_daemon(home).await? else {
+            return Ok(false);
+        };
+        let mut cursor = Value::Null;
+        let mut id = 2;
+        loop {
+            let loaded = daemon_request(
+                &mut socket,
+                id,
+                "thread/loaded/list",
+                json!({"cursor": cursor}),
+            )
+            .await?;
+            id += 1;
+            let threads = loaded["data"]
+                .as_array()
+                .ok_or_else(|| failed("Codex daemon did not report loaded threads"))?;
+            for thread in threads {
+                let params = json!({"threadId": thread, "includeTurns": false});
+                let read = daemon_request(&mut socket, id, "thread/read", params).await?;
+                id += 1;
+                match read["thread"]["status"]["type"].as_str() {
+                    Some("active") => return Ok(true),
+                    Some("idle" | "notLoaded" | "systemError") => {}
+                    _ => return Err(failed("Codex daemon did not report thread activity")),
+                }
+            }
+            match &loaded["nextCursor"] {
+                Value::Null => return Ok(false),
+                Value::String(_) => cursor = loaded["nextCursor"].clone(),
+                _ => return Err(failed("Codex daemon returned an invalid thread cursor")),
             }
         }
-        Some(false)
     })
     .await
-    .ok()
-    .flatten()
-    .unwrap_or(false)
+    .map_err(|_| failed("timed out reading Codex daemon activity"))?
 }
 
-async fn connect_daemon(home: &Path) -> Option<WebSocketStream<UnixStream>> {
+async fn connect_daemon(home: &Path) -> Result<Option<WebSocketStream<UnixStream>>, AuthError> {
     let endpoint = home
         .join("app-server-control")
         .join("app-server-control.sock");
-    let stream = UnixStream::connect(endpoint).await.ok()?;
-    let (mut socket, _) = client_async("ws://localhost", stream).await.ok()?;
+    let stream = match UnixStream::connect(endpoint).await {
+        Ok(stream) => stream,
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+            ) =>
+        {
+            return Ok(None)
+        }
+        Err(error) => return Err(io_error(error)),
+    };
+    let (mut socket, _) = client_async("ws://localhost", stream)
+        .await
+        .map_err(|_| failed("Codex daemon WebSocket handshake failed"))?;
     let client = json!({"clientInfo": {
         "name": "loopflow", "title": "loopflow", "version": env!("CARGO_PKG_VERSION")
     }});
     daemon_request(&mut socket, 1, "initialize", client).await?;
     let initialized = json!({"method": "initialized"}).to_string();
-    socket.send(Message::Text(initialized.into())).await.ok()?;
-    Some(socket)
+    socket
+        .send(Message::Text(initialized.into()))
+        .await
+        .map_err(|_| failed("could not initialize Codex daemon connection"))?;
+    Ok(Some(socket))
 }
 
 async fn daemon_request(
@@ -205,32 +246,48 @@ async fn daemon_request(
     id: i64,
     method: &str,
     params: Value,
-) -> Option<Value> {
+) -> Result<Value, AuthError> {
     let request = json!({"id": id, "method": method, "params": params}).to_string();
-    socket.send(Message::Text(request.into())).await.ok()?;
-    loop {
-        let Message::Text(text) = socket.next().await?.ok()? else {
+    socket
+        .send(Message::Text(request.into()))
+        .await
+        .map_err(|_| failed("could not send Codex daemon request"))?;
+    while let Some(message) = socket.next().await {
+        let Message::Text(text) = message.map_err(|_| failed("Codex daemon connection failed"))?
+        else {
             continue;
         };
-        let mut message: Value = serde_json::from_str(&text).ok()?;
+        let mut message: Value = serde_json::from_str(&text)
+            .map_err(|_| failed("Codex daemon returned invalid JSON"))?;
         if message["id"].as_i64() == Some(id) {
-            return Some(message["result"].take()).filter(Value::is_object);
+            // Do not include raw protocol errors: provider responses can contain credentials.
+            return if message["result"].is_object() {
+                Ok(message["result"].take())
+            } else {
+                Err(failed(&format!("Codex daemon {method} request failed")))
+            };
         }
     }
+    Err(failed("Codex daemon closed the connection"))
 }
 
 /// Restart `home`'s background app-server so it reads the installed login.
 /// A turn running through it is cut; its thread reloads from disk.
 pub(crate) async fn restart_daemon(home: &Path) -> Result<(), AuthError> {
-    let status = Command::new("codex")
-        .args(["app-server", "daemon", "restart"])
-        .env("CODEX_HOME", home)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .await
-        .map_err(io_error)?;
+    let status = tokio::time::timeout(
+        Duration::from_secs(30),
+        Command::new("codex")
+            .kill_on_drop(true)
+            .args(["app-server", "daemon", "restart"])
+            .env("CODEX_HOME", home)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status(),
+    )
+    .await
+    .map_err(|_| failed("timed out restarting Codex daemon"))?
+    .map_err(io_error)?;
     if status.success() {
         Ok(())
     } else {
@@ -414,8 +471,8 @@ echo '{"method":"account/login/completed","params":{"loginId":"this-login","succ
     async fn daemon_reports_its_login_and_whether_a_turn_is_running() {
         // Unix socket paths are short; the default temp directory is not.
         let home = tempfile::Builder::new().tempdir_in("/tmp").unwrap();
-        assert_eq!(super::daemon_login(home.path()).await, None);
-        assert!(!super::daemon_has_running_turn(home.path()).await);
+        assert_eq!(super::daemon_login(home.path()).await.unwrap(), None);
+        assert!(!super::daemon_has_running_turn(home.path()).await.unwrap());
 
         let control = home.path().join("app-server-control");
         fs::create_dir(&control).unwrap();
@@ -444,11 +501,11 @@ echo '{"method":"account/login/completed","params":{"loginId":"this-login","succ
         });
 
         assert_eq!(
-            super::daemon_login(home.path()).await.as_deref(),
+            super::daemon_login(home.path()).await.unwrap().as_deref(),
             Some("old@example.com")
         );
-        assert!(super::daemon_has_running_turn(home.path()).await);
-        assert!(!super::daemon_has_running_turn(home.path()).await);
+        assert!(super::daemon_has_running_turn(home.path()).await.unwrap());
+        assert!(!super::daemon_has_running_turn(home.path()).await.unwrap());
         server.await.unwrap();
     }
 }

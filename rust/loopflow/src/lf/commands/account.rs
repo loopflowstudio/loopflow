@@ -213,7 +213,9 @@ async fn use_account(raw_provider: &str, raw_email: &str) -> Result<()> {
     // The login is installed; launches must not wait on the daemon's turns.
     drop(switched);
     if provider == Provider::Codex {
-        restart_stale_codex_daemon(&native, login).await?;
+        restart_stale_codex_daemon(&native, login).await.with_context(|| {
+            format!("Codex login {login} is installed in {}, but its background app-server could not be reconciled; retry `lf account codex use {login}`", native.display())
+        })?;
     }
     Ok(())
 }
@@ -222,30 +224,36 @@ async fn use_account(raw_provider: &str, raw_email: &str) -> Result<()> {
 /// the login it started with whatever `auth.json` now holds. Restarting it
 /// cuts a turn running through it, so running turns get a few minutes to finish.
 async fn restart_stale_codex_daemon(native: &Path, login: &str) -> Result<()> {
-    let Some(held) = daemon_login(native).await else {
+    let Some(held) = daemon_login(native).await? else {
         return Ok(());
     };
     if held.eq_ignore_ascii_case(login) {
         return Ok(());
     }
-    if daemon_has_running_turn(native).await {
+    if !matches!(daemon_has_running_turn(native).await, Ok(false)) {
         println!(
-            "Codex's background app-server is still signed in as {held}; waiting up to {} minutes for its running turns before restarting it",
+            "Codex's background app-server is still signed in as {held}; waiting up to {} minutes for its turns to finish or become readable before restarting it",
             CODEX_DAEMON_TURN_WAIT.as_secs() / 60
         );
         // Bound the probes as well as the sleeps; expiry deliberately permits restart.
-        let _ = tokio::time::timeout(CODEX_DAEMON_TURN_WAIT, async {
+        let expired = tokio::time::timeout(CODEX_DAEMON_TURN_WAIT, async {
             loop {
                 tokio::time::sleep(Duration::from_secs(2)).await;
-                if !daemon_has_running_turn(native).await {
+                if matches!(daemon_has_running_turn(native).await, Ok(false)) {
                     break;
                 }
             }
         })
-        .await;
+        .await
+        .is_err();
+        if expired {
+            println!(
+                "Codex daemon grace period expired; restarting now may interrupt remaining turns"
+            );
+        }
     }
     restart_daemon(native).await?;
-    match daemon_login(native).await {
+    match daemon_login(native).await? {
         Some(now) if now.eq_ignore_ascii_case(login) => println!(
             "Restarted Codex's background app-server, which was still signed in as {held}"
         ),
@@ -2495,3 +2503,7 @@ echo '{"method":"account/login/completed","params":{"loginId":"fixture-login","s
         );
     }
 }
+
+#[cfg(all(test, unix))]
+#[path = "account_daemon_tests.rs"]
+mod daemon_tests;

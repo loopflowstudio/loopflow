@@ -621,35 +621,34 @@ acceptance remain at
 
 ## Tasks across machines (LOO-412, 2026-10-09)
 
-Jack Heart selected review-only custom-ref sync: no landing/public export.
-Joining publishes nothing; imports remain unplaced, execution local.
-Malformed input aborts import; contradictions isolate objects.
+Jack Heart selected review-only custom-ref sync, not landing/real plan export.
+Joining publishes nothing; imports remain unplaced.
+Malformed input aborts import; contradictions isolate objects and defer effects,
+never saves/acquisition. Receipts retain saves, baselines, uncertainty and losers,
+not transitions. Readback settles effects, not mappings/errors or removal via creation.
 
-Receipts retain saves, baselines, uncertainty and losers, not transitions.
-Readback settles effects, not mappings/errors or removal via creation.
-Active evidence retains losing removals; no live-control proof.
+Complete lists alone settle order progress; primary-only moves retain exact input.
+Effect updates cannot promote losers; reread eligibility after settlement.
+Independent removal/archive/Team facts need independent savepoints and original
+ages/baselines; legacy ages stay unknown. Entity revisions cannot order relationships.
+Causal acknowledgements require accepted frontiers and retire only observed notices.
+Preserve revision floors; scalar/list replay cannot clear freshness.
 
-`08a285872` defers rejected/held effects until import, never saves/acquisition.
-`30b476328` awaits gate. `fcd64901f`/`357090d4b` retain primary-only moves;
-only complete lists settle progress. Effect updates cannot promote losers.
-Reread delivery eligibility after settlement.
+Saves/acquisition bypass effect locks. Active evidence retains losing removals.
+Unreadable journals mean unknown pending. Private histories/dependents stay held;
+omission is not convergence. Desktop streams scoped receipts/holds and retains
+last-good readings. Per-Work membership, authorship/recovery UI, legacy association
+and public composition remain; mixed exchange stays disabled. Focused proofs exclude
+live controls/composed partial lists. Plan: `scratch/work-on-another-machine-name.md`;
+prior evidence: `ce1750393`, this heading.
 
-**Independent facts need independent rollback.** Removal, archive and Teams use
-separate savepoints and prevalidated histories. Retain original ages/Team baselines;
-legacy ages stay unknown. Entity revisions cannot order relationships.
-Team/cold-list fixtures prove no composed partial-list acceptance.
+## Driver recovery (#1512)
 
-**Invalidation needs causal acknowledgement.** `6ccbbabe3` retires observed notices,
-not unseen. Replay preserves readback and the greatest revision floor;
-clocks invent no revisions. Scalar/list replay cannot clear freshness;
-acknowledgement requires its accepted frontier. Focused proof.
-
-Acquisition/saves bypass effect locks; unreadable journals mean unknown pending.
-Private histories/dependents stay held; omission is not convergence.
-Reads allocate no placement. Desktop streams scoped receipts/holds, retaining failed
-readings. Legacy association, authorship/recovery UI and composition remain;
-mixed exchange stays disabled.
-`scratch/work-on-another-machine-name.md`; prior proofs: `7f206cd0e`, this heading.
+Main #1512 (`3e1e6245c`) replaces dead-driver engine adoption with native-thread
+resume on a fresh engine; live connect still hands off. Cleanup consults Process
+evidence, not pending turns/reservations. Launch receipts remain history.
+Planning grants no execution authority. Installed recovery and native peer continuity
+remain unproved. [Architecture](../../docs/architecture-reference.md).
 
 ## Synced planning integration (LOO-334)
 

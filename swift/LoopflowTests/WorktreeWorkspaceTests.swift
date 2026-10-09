@@ -50,7 +50,7 @@ struct WorktreeWorkspaceTests {
 
     @Test("Files and the Flow process log open as panes beside a Session and are revealed, not duplicated")
     func taskPanes() {
-        let panes = SessionsWorkspace().multiplexer
+        let panes = SessionsWorkspace(identity: fixtureWorkspace("/repo")).multiplexer
         panes.show(.files(taskId: "task"))
         #expect(panes.layout.allPanes.map(\.content) == [.files(taskId: "task")])
         panes.load(sessionId: "design")
@@ -102,6 +102,7 @@ struct WorktreeWorkspaceTests {
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
         let source = registry.workspace(for: fixtureWorkspace("/first"))
         let target = registry.workspace(for: fixtureWorkspace("/second"))
+        let peer = registry.workspace(for: WorkspaceIdentity(machineId: "peer", worktree: "/first"))
         let otherRepo = registry.workspace(for: fixtureWorkspace("/other-repo"))
         otherRepo.multiplexer.reveal(sessionId: "unrelated")
         let otherLayout = otherRepo.multiplexer.layout
@@ -110,23 +111,30 @@ struct WorktreeWorkspaceTests {
         var record = try JSONDecoder().decode(SessionRecord.self, from: data)
         record.workspace = SessionWorkspace(machineId: fixtureMachineId, worktree: "/second", taskId: "task", unavailable: nil)
         source.multiplexer.reveal(sessionId: record.id)
+        peer.multiplexer.reveal(sessionId: record.id)
         source.multiplexer.newShell(command: ["server"])
         let shell = source.multiplexer.focusedPaneId
         #if GHOSTTY_ENABLED
-        let view = registry.surfaces.view(for: .session(record.id))
+        let view = registry.surfaces.view(for: .session(record.id, machineId: fixtureMachineId))
         #endif
-        registry.reconcileMembership([record])
+        var peerRecord = record
+        peerRecord.workspace = SessionWorkspace(machineId: "peer", worktree: "/first", taskId: "task", unavailable: nil)
+        registry.reconcileMembership([record, peerRecord])
         target.multiplexer.reveal(sessionId: record.id)
         #expect(source.multiplexer.pane(forSessionId: record.id) == nil)
+        #expect(peer.multiplexer.pane(forSessionId: record.id) != nil)
         #expect(source.multiplexer.shellCommands[shell] == ["server"])
         #expect(target.multiplexer.pane(forSessionId: record.id) != nil)
         #expect(otherRepo.multiplexer.layout == otherLayout)
+        registry.removeSessions([record.id], machineId: "peer")
+        #expect(peer.multiplexer.pane(forSessionId: record.id) == nil)
+        #expect(target.multiplexer.pane(forSessionId: record.id) != nil)
         // Absence from another repository's reading cannot remove a retained pane.
         registry.reconcileMembership([])
         #expect(target.multiplexer.pane(forSessionId: record.id) != nil)
         #expect(otherRepo.multiplexer.layout == otherLayout)
         #if GHOSTTY_ENABLED
-        #expect(target.surfaces.view(for: .session(record.id)) === view)
+        #expect(target.surfaces.view(for: .session(record.id, machineId: fixtureMachineId)) === view)
         #endif
     }
 
@@ -138,7 +146,7 @@ struct WorktreeWorkspaceTests {
         panes.reveal(sessionId: "resolved")
         panes.close(panes.focusedPaneId)
         #expect(panes.canUndoClose)
-        registry.removeSessions(["resolved"])
+        registry.removeSessions(["resolved"], machineId: fixtureMachineId)
         #expect(!panes.canUndoClose)
         #expect(panes.pane(forSessionId: "retained") != nil)
     }
@@ -162,7 +170,7 @@ struct WorktreeWorkspaceTests {
         #expect(registry.workspace(for: outer.focusedPath!) === design)
         #expect(design.multiplexer.layout == original)
         #expect(design.multiplexer.focusedPaneId == focus)
-        #expect(registry.path(containingShell: focus) == fixtureWorkspace("/repo.design"))
+        #expect(registry.path(containingShell: focus, machineId: fixtureMachineId) == fixtureWorkspace("/repo.design"))
     }
 
     @Test("Both split levels are independent and closing an outer slot retains its workspace")

@@ -138,7 +138,7 @@ struct TaskSessionLaunchProofTests {
         let workspace = registry.workspace(for: fixtureWorkspace(repo))
         workspace.multiplexer.newShell()
         let pane = workspace.multiplexer.focusedPaneId
-        let terminal = registry.surfaces.view(for: .shell(pane))
+        let terminal = registry.surfaces.view(for: .shell(pane, machineId: fixtureMachineId))
         terminal.frame = CGRect(x: 0, y: 0, width: 600, height: 350)
         terminal.workingDirectory = repo
         terminal.command = buildWorkspaceShellCommand(id: pane, argv: ["/bin/cat"], env: [:])
@@ -147,7 +147,7 @@ struct TaskSessionLaunchProofTests {
         defer {
             for path in registry.paths {
                 for pane in registry.workspace(for: path).multiplexer.layout.allPanes {
-                    registry.surfaces.release(.shell(pane.id))
+                    registry.surfaces.release(.shell(pane.id, machineId: fixtureMachineId))
                 }
             }
         }

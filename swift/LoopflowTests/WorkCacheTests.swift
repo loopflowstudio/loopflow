@@ -10,17 +10,36 @@ import ViewInspector
 struct WorkCacheTests {
     private static let repo = "/src/loopflow"
 
+    @Test("A delayed same-path Session read cannot populate a replacement Machine")
+    func sessionReadKeepsMachineIdentity() async throws {
+        let source = try Source()
+        let model = WorkModel(query: source.query, repoPath: Self.repo)
+        model.confirmMachine("machine-a")
+        await model.refreshSessions()
+        #expect(model.sessions.value?.isEmpty == false)
+        await source.hold("session")
+        let pending = Task { await model.refreshSessions() }
+        await source.waitForHeldRead()
+        model.confirmMachine("machine-b")
+        #expect(model.sessions.value == nil)
+        await source.release()
+        await pending.value
+        #expect(model.sessions.value == nil)
+        await model.refreshSessions()
+        #expect(model.sessions.value?.isEmpty == false)
+    }
+
     @Test("A returning launch restores its cache before any read finishes")
     func returningLaunchRestores() async throws {
         let directory = try temporaryDirectory()
         let source = try Source()
         let cache = WorkCache(directory: directory)
         let first = WorkModel(query: source.query, repoPath: Self.repo, cache: cache)
+        first.confirmMachine("home-a")
         #expect(first.workStatus == .loading)
         await first.refresh()
         #expect(first.workStatus == .current)
         first.select(.task(id: "issue-now"))
-        first.confirmMachine("home-a")
         cache.flush()
 
         let cacheURL = directory.appendingPathComponent("workspace.json")
@@ -137,9 +156,9 @@ struct WorkCacheTests {
         let source = try Source()
         let saving = WorkCache(directory: directory)
         let first = WorkModel(query: source.query, repoPath: Self.repo, cache: saving)
+        first.confirmMachine("home-a")
         await first.refresh()
         first.select(.task(id: "issue-now"))
-        first.confirmMachine("home-a")
         saving.flush()
 
         let cache = WorkCache(directory: directory)

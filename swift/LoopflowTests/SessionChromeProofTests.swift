@@ -32,7 +32,7 @@ struct SessionChromeProofTests {
         for _ in 0..<2 {
             workspace.multiplexer.newShell()
             let pane = workspace.multiplexer.focusedPaneId
-            let terminal = registry.surfaces.view(for: .shell(pane))
+            let terminal = registry.surfaces.view(for: .shell(pane, machineId: fixtureMachineId))
             terminal.frame = CGRect(x: 0, y: 0, width: 400, height: 350)
             terminal.workingDirectory = NSTemporaryDirectory()
             terminal.command = buildWorkspaceShellCommand(id: pane, argv: ["/bin/cat"], env: [:])
@@ -165,12 +165,12 @@ struct SessionChromeProofTests {
         let workspace = registry.workspace(for: fixtureWorkspace(repo))
         workspace.multiplexer.newShell()
         let pane = workspace.multiplexer.focusedPaneId
-        let terminal = registry.surfaces.view(for: .shell(pane))
+        let terminal = registry.surfaces.view(for: .shell(pane, machineId: fixtureMachineId))
         terminal.frame = CGRect(x: 0, y: 0, width: 600, height: 400)
         terminal.workingDirectory = NSTemporaryDirectory()
         terminal.command = buildWorkspaceShellCommand(id: pane, argv: ["/bin/cat"], env: [:])
         terminal.createSurface(manager: GhosttyManager.shared)
-        defer { registry.surfaces.release(.shell(pane)) }
+        defer { registry.surfaces.release(.shell(pane, machineId: fixtureMachineId)) }
         let surface = try #require(terminal.surface)
         let query = RegistryQuery { args, _ in
             switch args.first {
@@ -214,7 +214,7 @@ struct SessionChromeProofTests {
         try await settle(window)
         #expect(workspace.multiplexer.layout.allPanes.map(\.id) == [pane])
         #expect(workspace.multiplexer.focusedPaneId == pane)
-        #expect(!registry.surfaces.hasSurface(.shell(split)))
+        #expect(!registry.surfaces.hasSurface(.shell(split, machineId: fixtureMachineId)))
 
         // Shift-D reaches AppKit as "D"; the binding must still split down.
         try press("D", keyCode: 2, modifiers: [.command, .shift], in: window)
@@ -242,7 +242,7 @@ struct SessionChromeProofTests {
         for _ in 0..<2 {
             workspace.multiplexer.newShell()
             let pane = workspace.multiplexer.focusedPaneId
-            let terminal = registry.surfaces.view(for: .shell(pane))
+            let terminal = registry.surfaces.view(for: .shell(pane, machineId: fixtureMachineId))
             terminal.frame = CGRect(x: 0, y: 0, width: 400, height: 350)
             terminal.workingDirectory = NSTemporaryDirectory()
             terminal.command = buildWorkspaceShellCommand(id: pane, argv: ["/bin/cat"], env: [:])

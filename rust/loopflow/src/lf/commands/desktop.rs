@@ -64,6 +64,7 @@ pub struct DesktopWorkspaceInspection {
 pub struct DesktopLayoutInspection {
     pub pane: Option<String>,
     pub incarnation: Option<String>,
+    pub surface: Option<String>,
     pub content: Option<String>,
     pub subject: Option<String>,
     pub axis: Option<String>,
@@ -362,11 +363,12 @@ impl DesktopLayoutInspection {
     fn render(&self, indent: usize, lines: &mut Vec<String>) {
         if let Some(pane) = &self.pane {
             lines.push(format!(
-                "{:indent$}{pane}: {} {} · content occurrence {}",
+                "{:indent$}{pane}: {} {} · content occurrence {} · surface {}",
                 "",
                 self.content.as_deref().unwrap_or("unknown"),
                 self.subject.as_deref().unwrap_or(""),
-                self.incarnation.as_deref().unwrap_or("unavailable")
+                self.incarnation.as_deref().unwrap_or("unavailable"),
+                self.surface.as_deref().unwrap_or("unavailable")
             ));
         } else {
             lines.push(format!(

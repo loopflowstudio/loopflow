@@ -9,7 +9,7 @@ import Testing
     func offWindowTerminalMount() async throws {
         _ = NSApplication.shared
         let pool = GhosttySurfacePool()
-        let identity = TerminalIdentity.shell("off-window-proof")
+        let identity = TerminalIdentity.shell("off-window-proof", machineId: fixtureMachineId)
         let terminal = pool.view(for: identity)
         let content = GhosttyTerminalView(
             workingDirectory: NSTemporaryDirectory(), argv: ["/bin/cat"], env: [:],
@@ -47,7 +47,7 @@ import Testing
     func retainedTerminalRemount() async throws {
         _ = NSApplication.shared
         let pool = GhosttySurfacePool()
-        let identity = TerminalIdentity.shell("remount-proof")
+        let identity = TerminalIdentity.shell("remount-proof", machineId: fixtureMachineId)
         let terminal = pool.view(for: identity)
         let content = GhosttyTerminalView(
             workingDirectory: NSTemporaryDirectory(), argv: ["/bin/cat"], env: [:],
@@ -348,7 +348,7 @@ struct GhosttyTerminalInputTests {
         for id in ["one", "two"] {
             workspace.multiplexer.newShell()
             let pane = workspace.multiplexer.focusedPaneId
-            let view = registry.surfaces.view(for: .shell(pane))
+            let view = registry.surfaces.view(for: .shell(pane, machineId: fixtureMachineId))
             view.frame = CGRect(x: 0, y: 0, width: 600, height: 300)
             view.workingDirectory = NSTemporaryDirectory()
             view.command = buildWorkspaceShellCommand(id: pane, argv: ["/bin/sh", "-c", "printf 'attachment-ready\\n'; exec /bin/cat"], env: [:])
@@ -357,6 +357,7 @@ struct GhosttyTerminalInputTests {
             _ = try #require(view.surface)
             let data = try JSONSerialization.data(withJSONObject: [
                 "id": id, "run_id": id, "interactive": true, "work": NSNull(), "title": id,
+                "workspace": ["machine_id": fixtureMachineId, "worktree": NSTemporaryDirectory(), "task_id": NSNull(), "unavailable": NSNull()],
                 "detail": "test", "cwd": NSTemporaryDirectory(), "state": "active",
                 "ready_summary": NSNull(), "work_path": NSNull(), "actions": sessionActionFixture(state: "active"), "title_source": "generated", "task_primary": false, "flow_membership": ["kind": "independent"], "task_ids": [], "provider_generation": 1, "terminal_ids": [pane], "open_argv": ["unused"],
             ])
@@ -367,14 +368,14 @@ struct GhosttyTerminalInputTests {
             #expect(store.sessions.first { $0.id == record.id }?.state == .live)
             await store.select(record.id)
             #expect(store.sessions.first { $0.id == record.id }?.surface == record)
-            #expect(store.localTerminal(for: record) == .shell(record.terminalIds[0]))
+            #expect(store.localTerminal(for: record) == .shell(record.terminalIds[0], machineId: fixtureMachineId))
         }
         let otherWindow = SessionsStore(repoPath: NSTemporaryDirectory())
         otherWindow.reconcile(records)
         #expect(otherWindow.sessions.allSatisfy { $0.state == .elsewhere })
         await otherWindow.select("one")
         #expect(otherWindow.sessions.first { $0.id == "one" }?.state == .elsewhere)
-        #expect(registry.surfaces.hasSurface(.shell(records[0].terminalIds[0])))
+        #expect(registry.surfaces.hasSurface(.shell(records[0].terminalIds[0], machineId: fixtureMachineId)))
     }
 
     @Test("Exiting the initial conversation leaves a usable companion shell")
@@ -383,7 +384,7 @@ struct GhosttyTerminalInputTests {
         _ = NSApplication.shared
         let manager = GhosttyManager.shared
         manager.initialize()
-        let view = GhosttyMetalView(terminal: .shell("return-proof"), frame: CGRect(x: 0, y: 0, width: 800, height: 500))
+        let view = GhosttyMetalView(terminal: .shell("return-proof", machineId: fixtureMachineId), frame: CGRect(x: 0, y: 0, width: 800, height: 500))
         view.workingDirectory = NSTemporaryDirectory()
         view.command = buildWorkspaceShellCommand(id: "return-proof", argv: ["/bin/true"], env: [:])
         view.createSurface(manager: manager)
@@ -408,7 +409,7 @@ struct GhosttyTerminalInputTests {
             contentRect: CGRect(x: 0, y: 0, width: 600, height: 300),
             styleMask: [.titled], backing: .buffered, defer: false
         )
-        let view = GhosttyMetalView(terminal: .shell("block-copy-proof"), frame: window.contentLayoutRect)
+        let view = GhosttyMetalView(terminal: .shell("block-copy-proof", machineId: fixtureMachineId), frame: window.contentLayoutRect)
         window.contentView = view
         view.workingDirectory = NSTemporaryDirectory()
         // Feed known OSC 133 boundaries through a real PTY and Ghostty parser:
@@ -553,7 +554,7 @@ struct GhosttyTerminalInputTests {
         manager.initialize()
         let firstPool = GhosttySurfacePool()
         let secondPool = GhosttySurfacePool()
-        let id = TerminalIdentity.session("window-isolation")
+        let id = TerminalIdentity.session("window-isolation", machineId: fixtureMachineId)
         let first = firstPool.view(for: id)
         let second = secondPool.view(for: id)
         for view in [first, second] {
@@ -589,7 +590,7 @@ struct GhosttyTerminalInputTests {
         _ = NSApplication.shared
         let manager = GhosttyManager.shared
         manager.initialize()
-        let view = GhosttyMetalView(terminal: .session("title-proof"), frame: CGRect(x: 0, y: 0, width: 400, height: 300))
+        let view = GhosttyMetalView(terminal: .session("title-proof", machineId: fixtureMachineId), frame: CGRect(x: 0, y: 0, width: 400, height: 300))
         view.workingDirectory = NSTemporaryDirectory()
         view.command = "/bin/sh -c 'printf \"\\033]2;title-proof\\007title-ready\"; exec /bin/cat'"
 
@@ -600,7 +601,7 @@ struct GhosttyTerminalInputTests {
                 guard let title = notification.object as? GhosttyTerminalTitle,
                       title.title == "title-proof"
                 else { return }
-                #expect(title.terminal == .session("title-proof"))
+                #expect(title.terminal == .session("title-proof", machineId: fixtureMachineId))
                 confirmed()
             }
             defer { NotificationCenter.default.removeObserver(observer) }
@@ -631,8 +632,8 @@ struct GhosttyTerminalInputTests {
         )
         let root = NSView(frame: window.contentLayoutRect)
         window.contentView = root
-        let left = GhosttyMetalView(terminal: .session("left"), frame: CGRect(x: 0, y: 0, width: 400, height: 300))
-        let right = GhosttyMetalView(terminal: .shell("right"), frame: CGRect(x: 400, y: 0, width: 400, height: 300))
+        let left = GhosttyMetalView(terminal: .session("left", machineId: fixtureMachineId), frame: CGRect(x: 0, y: 0, width: 400, height: 300))
+        let right = GhosttyMetalView(terminal: .shell("right", machineId: fixtureMachineId), frame: CGRect(x: 400, y: 0, width: 400, height: 300))
         for view in [left, right] {
             root.addSubview(view)
             view.workingDirectory = NSTemporaryDirectory()
@@ -700,8 +701,8 @@ struct GhosttyTerminalInputTests {
             defer: false
         )
         let root = NSView(frame: window.contentLayoutRect)
-        let left = GhosttyMetalView(terminal: .session("left"), frame: CGRect(x: 0, y: 0, width: 200, height: 200))
-        let right = GhosttyMetalView(terminal: .shell("right"), frame: CGRect(x: 200, y: 0, width: 200, height: 200))
+        let left = GhosttyMetalView(terminal: .session("left", machineId: fixtureMachineId), frame: CGRect(x: 0, y: 0, width: 200, height: 200))
+        let right = GhosttyMetalView(terminal: .shell("right", machineId: fixtureMachineId), frame: CGRect(x: 200, y: 0, width: 200, height: 200))
         var focusedPane = "left"
         left.onFocus = { focusedPane = "left" }
         right.onFocus = { focusedPane = "right" }
@@ -786,17 +787,17 @@ struct GhosttyTerminalInputTests {
     @MainActor
     func poolDiscardMintsFreshView() {
         let pool = GhosttySurfacePool()
-        let view = pool.view(for: .session("x"))
-        #expect(pool.view(for: .session("x")) === view)
+        let view = pool.view(for: .session("x", machineId: fixtureMachineId))
+        #expect(pool.view(for: .session("x", machineId: fixtureMachineId)) === view)
 
         pool.discard(view)
 
-        let reopened = pool.view(for: .session("x"))
+        let reopened = pool.view(for: .session("x", machineId: fixtureMachineId))
         #expect(reopened !== view)
         // A delayed callback from the old view must not discard its replacement.
         pool.discard(view)
-        #expect(pool.view(for: .session("x")) === reopened)
-        #expect(!pool.hasSurface(.session("x")))
+        #expect(pool.view(for: .session("x", machineId: fixtureMachineId)) === reopened)
+        #expect(!pool.hasSurface(.session("x", machineId: fixtureMachineId)))
     }
 
     private func onePixelPNG() throws -> Data {

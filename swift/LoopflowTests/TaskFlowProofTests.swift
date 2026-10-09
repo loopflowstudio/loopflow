@@ -375,7 +375,7 @@ struct TaskFlowProofTests {
         for _ in 0..<2 {
             workspace.multiplexer.newShell()
             let pane = workspace.multiplexer.focusedPaneId
-            let terminal = registry.surfaces.view(for: .shell(pane))
+            let terminal = registry.surfaces.view(for: .shell(pane, machineId: fixtureMachineId))
             terminal.frame = CGRect(x: 0, y: 0, width: 400, height: 350)
             terminal.workingDirectory = NSTemporaryDirectory()
             terminal.command = buildWorkspaceShellCommand(id: pane, argv: ["/bin/cat"], env: [:])

@@ -27,6 +27,48 @@ struct DesktopPaneControlTests {
             worktree: identity.worktree, pane: pane.id, incarnation: pane.incarnation)
     }
 
+    @Test func terminalInspectionDoesNotAllocateOrFollowFocus() throws {
+        let registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId)
+        let workspace = registry.workspace(for: identity)
+        workspace.multiplexer.newShell(command: ["retained-command"])
+        let shell = workspace.multiplexer.focusedPane
+        let terminal = TerminalIdentity.shell(shell.id, machineId: identity.machineId)
+        workspace.multiplexer.load(sessionId: "other-session")
+        workspace.multiplexer.setCollapsed(paneId: shell.id, collapsed: true)
+        let before = workspace.multiplexer.layout
+        let reading = try #require(registry.inspect().first)
+        #expect(reading.layout.children.first?.surface == nil)
+        #expect(registry.surfaces.programStatus(for: terminal) == nil)
+        #expect(workspace.multiplexer.layout == before)
+        #expect(workspace.multiplexer.shellCommands[shell.id] == ["retained-command"])
+        #expect(workspace.multiplexer.focusedPane.content == .session(id: "other-session"))
+    }
+
+    #if canImport(GhosttyKit)
+    @Test func sameTerminalIdOnAnotherMachineKeepsItsOwnViewAndLifetime() {
+        let pool = GhosttySurfacePool()
+        let local = TerminalIdentity.session("same-session", machineId: "local")
+        let peer = TerminalIdentity.session("same-session", machineId: "peer")
+        #expect(pool.surfaceIncarnation(for: local) == nil)
+        #expect(pool.programStatus(for: local) == nil)
+        let first = pool.view(for: local)
+        let other = pool.view(for: peer)
+        #expect(first !== other)
+        #expect(first.programStatus.incarnation != other.programStatus.incarnation)
+        // A retained view without a native surface must not advertise one.
+        #expect(pool.surfaceIncarnation(for: local) == nil)
+        pool.release(local)
+        #expect(pool.programStatus(for: local) == nil)
+        #expect(pool.programStatus(for: peer) === other.programStatus)
+        let replacement = pool.view(for: local)
+        #expect(replacement.programStatus.incarnation != first.programStatus.incarnation)
+        pool.discard(first)
+        #expect(pool.programStatus(for: local) === replacement.programStatus)
+        pool.release(local)
+        pool.release(peer)
+    }
+    #endif
+
     @Test func companionsRetainDraftsAndDoNotFollowFocusOrReplaceContent() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from:
@@ -128,8 +170,8 @@ struct DesktopPaneControlTests {
         document.editor.string = "unfinished draft"
         document.editor.setSelectedRange(NSRange(location: 3, length: 5))
         #if GHOSTTY_ENABLED
-        let shellView = registry.surfaces.view(for: .shell(shell.id))
-        let sessionView = registry.surfaces.view(for: .session("retained-session"))
+        let shellView = registry.surfaces.view(for: .shell(shell.id, machineId: identity.machineId))
+        let sessionView = registry.surfaces.view(for: .session("retained-session", machineId: identity.machineId))
         #endif
         register(router, window: window, registry: registry)
         let shellTarget = target(shell, window: window), sessionTarget = target(session, window: window)
@@ -142,7 +184,7 @@ struct DesktopPaneControlTests {
         _ = try router.controlPane(.init(target: shellTarget, action: .move(destination: sessionTarget, axis: .vertical)))
         #expect(store.layout.allPanes.map(\.id) == [empty.id, session.id, shell.id, filesPane.id])
         _ = try router.controlPane(.init(target: shellTarget, action: .resize(toward: sessionTarget, ratio: 0.7)))
-        let reading = DesktopLayoutInspection(store.layout)
+        let reading = DesktopLayoutInspection(store.layout, surface: { _ in nil })
         let movedSplit = reading.children[1].children[0]
         #expect(movedSplit.axis == "vertical")
         #expect(abs(try #require(movedSplit.ratio) - 0.3) < 0.0001)
@@ -164,8 +206,8 @@ struct DesktopPaneControlTests {
         #expect(registry.workspace(for: identity) === workspace)
         #expect(workspace.surfaces === registry.surfaces)
         #if GHOSTTY_ENABLED
-        #expect(registry.surfaces.view(for: .shell(shell.id)) === shellView)
-        #expect(registry.surfaces.view(for: .session("retained-session")) === sessionView)
+        #expect(registry.surfaces.view(for: .shell(shell.id, machineId: identity.machineId)) === shellView)
+        #expect(registry.surfaces.view(for: .session("retained-session", machineId: identity.machineId)) === sessionView)
         #endif
         _ = try router.controlPane(.init(target: shellTarget, action: .focus))
         #expect(store.focusedPane == shell)

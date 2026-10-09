@@ -29,6 +29,18 @@ struct SessionsPolishTests {
         #expect(a.surfaces !== b.surfaces)
     }
 
+    @Test("A shell exit from another Machine cannot close a same-ID pane")
+    func shellExitKeepsMachineIdentity() throws {
+        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
+        let local = registry.workspace(for: fixtureWorkspace("/same/path"))
+        local.multiplexer.newShell()
+        let shell = local.multiplexer.focusedPane
+        #expect(registry.path(containingShell: shell.id, machineId: "peer") == nil)
+        NotificationCenter.default.post(name: .ghosttySurfaceClosed,
+            object: TerminalIdentity.shell(shell.id, machineId: "peer"))
+        #expect(local.multiplexer.focusedPane == shell)
+    }
+
     @Test("A shell exit closes its retained pane while SessionsView is absent")
     func shellExitSurvivesNavigation() {
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
@@ -39,11 +51,11 @@ struct SessionsPolishTests {
         other.multiplexer.newShell()
 
         NotificationCenter.default.post(
-            name: .ghosttySurfaceClosed, object: TerminalIdentity.session(paneId)
+            name: .ghosttySurfaceClosed, object: TerminalIdentity.session(paneId, machineId: fixtureMachineId)
         )
         #expect(workspace.multiplexer.focusedPane.content == .shell)
         NotificationCenter.default.post(
-            name: .ghosttySurfaceClosed, object: TerminalIdentity.shell(paneId)
+            name: .ghosttySurfaceClosed, object: TerminalIdentity.shell(paneId, machineId: fixtureMachineId)
         )
 
         #expect(registry.workspace(for: fixtureWorkspace("/tmp/repo")).multiplexer.focusedPane.content == .empty)

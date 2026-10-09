@@ -479,7 +479,10 @@ Each has its own reading state: a Session failure cannot invalidate current Task
 evidence, or vice versa. Saved, failed and absent subjects supply no actions.
 Task readings retain roadmap-generation and condition-observation dates. Session
 observation time is explicitly unavailable; the UI snapshot time is not source
-freshness. Inspection neither focuses windows nor opens clients.
+freshness. Inspection neither focuses windows nor opens clients. Terminal panes include a `surface`
+incarnation only when a native surface exists. It is separate from the pane's
+content incarnation; inspection never creates a surface or cleans up an exited
+child. Neither token authorizes terminal input.
 It requires macOS and a running app with automation access; failure leaves
 `lf task status <task>` available in the terminal.
 

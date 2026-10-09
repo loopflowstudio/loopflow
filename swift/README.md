@@ -556,7 +556,10 @@ Task recommendations/run legality and Session actions retain their separate
 source availability. Saved or failed readings supply no actions. Inspection
 preserves Task source dates; Session observation time remains unavailable rather
 than borrowing the UI snapshot time. This reports model state, not rendered
-usability or provider readiness.
+usability or provider readiness. Terminal panes include a `surface`
+incarnation only when a native surface exists. It is separate from the pane's
+content incarnation; inspection never creates a surface or cleans up an exited
+child. Neither token authorizes terminal input.
 
 `lf desktop hide --target "$target"` and `lf desktop restore --target "$target"`
 change retained pane visibility. Focus, split, move, resize and zoom use that same

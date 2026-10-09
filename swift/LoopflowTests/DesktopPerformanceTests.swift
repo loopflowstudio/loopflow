@@ -306,7 +306,7 @@ struct DesktopPerformanceTests {
         try await phase("blank_captured")
         GhosttyManager.shared.initialize()
         try #require(GhosttyManager.shared.state == .ready)
-        let terminal = GhosttyMetalView(terminal: .shell(UUID().uuidString), frame: window.contentLayoutRect)
+        let terminal = GhosttyMetalView(terminal: .shell(UUID().uuidString, machineId: fixtureMachineId), frame: window.contentLayoutRect)
         terminal.workingDirectory = try #require(environment["HOME"])
         terminal.command = buildGhosttyShellCommand(argv: ["/bin/cat"], env: [:])
         window.contentView = terminal
@@ -363,7 +363,7 @@ struct DesktopPerformanceTests {
         defer { window.contentView = nil; window.close() }
         let companion = buildWorkspaceShellCommand(id: "launch-contract", argv: ["/bin/sh", "-c", "exit 0"], env: [:])
         for command in ["/bin/bash --noprofile --norc -i", "/bin/bash -i", companion] {
-            let terminal = GhosttyMetalView(terminal: .shell(UUID().uuidString), frame: CGRect(x: 0, y: 0, width: 900, height: 500))
+            let terminal = GhosttyMetalView(terminal: .shell(UUID().uuidString, machineId: fixtureMachineId), frame: CGRect(x: 0, y: 0, width: 900, height: 500))
             terminal.workingDirectory = checkout.path
             terminal.command = command
             window.contentView = terminal
@@ -428,7 +428,7 @@ struct DesktopPerformanceTests {
         let companionPane = multiplexer.focusedPaneId
         multiplexer.load(sessionId: "perf-session-2")
         let otherPane = multiplexer.focusedPaneId
-        let identities: [TerminalIdentity] = [.session("perf-session-0"), .shell(companionPane), .session("perf-session-2")]
+        let identities: [TerminalIdentity] = [.session("perf-session-0", machineId: fixtureMachineId), .shell(companionPane, machineId: fixtureMachineId), .session("perf-session-2", machineId: fixtureMachineId)]
         let terminals = identities.map { registry.surfaces.view(for: $0) }
         defer { for identity in identities { registry.surfaces.release(identity) } }
         for terminal in terminals {
@@ -652,7 +652,7 @@ struct DesktopPerformanceTests {
             })
             try pressElement("workspace-toggle-files", in: window)
             detailWindow.orderFront(nil)
-            let freshIdentity = TerminalIdentity.shell("benchmark-\(UUID().uuidString)")
+            let freshIdentity = TerminalIdentity.shell("benchmark-\(UUID().uuidString)", machineId: fixtureMachineId)
             let fresh = registry.surfaces.view(for: freshIdentity)
             defer { registry.surfaces.release(freshIdentity) }
             try await sample("new_pty", population, attempt, journal, detailWindow, action: {
@@ -732,7 +732,7 @@ struct DesktopPerformanceTests {
         let registry = view.workspaces
         let record = try #require(try await fixture.records().first)
         try #require(record.taskIds.contains(fixture.taskId))
-        let identity = TerminalIdentity.session(fixture.sessionId)
+        let identity = TerminalIdentity.session(fixture.sessionId, machineId: try #require(record.workspace).machineId)
         let workspace = registry.workspace(for: try #require(record.workspace).identity)
         let store = registry.workspace(for: WorkspaceIdentity(machineId: try #require(record.workspace).machineId, worktree: fixture.repo))
             .sessionStore(repoPath: fixture.repo, query: query)
@@ -741,7 +741,7 @@ struct DesktopPerformanceTests {
         let sessionPane = multiplexer.focusedPaneId
         multiplexer.newShell()
         let companion = multiplexer.focusedPaneId
-        let companionIdentity = TerminalIdentity.shell(companion)
+        let companionIdentity = TerminalIdentity.shell(companion, machineId: workspace.identity.machineId)
         let companionView = registry.surfaces.view(for: companionIdentity)
         companionView.workingDirectory = fixture.checkout
         companionView.command = buildGhosttyShellCommand(argv: ["/bin/cat"], env: [:])

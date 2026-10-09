@@ -32,6 +32,7 @@ final class SessionsWorkspace {
         multiplexer.setCollapsed(paneId: paneId, collapsed: collapsed)
     }
 
+    let identity: WorkspaceIdentity
     let multiplexer = MultiplexerStore()
     let hover = PaneHover()
     private var taskFiles: [String: TaskFilesStore] = [:]
@@ -54,16 +55,17 @@ final class SessionsWorkspace {
         return store
     }
 
-    init(surfaces: GhosttySurfacePool = GhosttySurfacePool()) {
+    init(identity: WorkspaceIdentity, surfaces: GhosttySurfacePool = GhosttySurfacePool()) {
+        self.identity = identity
         self.surfaces = surfaces
         // The workspace outlives SessionsView, including while a shell exits
         // on the Work screen or while another repository is selected.
         surfaceClosed = NotificationCenter.default.publisher(for: .ghosttySurfaceClosed)
             .sink { [weak self] notification in
                 guard let terminal = notification.object as? TerminalIdentity,
-                      case .shell(let paneId) = terminal else { return }
+                      case .shell(let paneId, let machineId) = terminal else { return }
                 MainActor.assumeIsolated {
-                    guard let self,
+                    guard let self, self.identity.machineId == machineId,
                           self.multiplexer.layout.pane(for: paneId)?.content == .shell
                     else { return }
                     self.multiplexer.close(paneId)
@@ -113,7 +115,15 @@ final class SessionsWorkspaceRegistry {
         workspaces.sorted { ($0.key.machineId, $0.key.worktree) < ($1.key.machineId, $1.key.worktree) }.map { identity, workspace in
             let panes = workspace.multiplexer
             return DesktopWorkspaceInspection(machineId: identity.machineId, worktree: identity.worktree,
-                layout: DesktopLayoutInspection(panes.layout), focusedPane: panes.focusedPaneId,
+                layout: DesktopLayoutInspection(panes.layout) { pane in
+                    let terminal: TerminalIdentity
+                    switch pane.content {
+                    case .shell: terminal = .shell(pane.id, machineId: identity.machineId)
+                    case .session(let id): terminal = .session(id, machineId: identity.machineId)
+                    case .empty, .files, .flowLog: return nil
+                    }
+                    return surfaces.surfaceIncarnation(for: terminal)
+                }, focusedPane: panes.focusedPaneId,
                 zoomedPane: panes.zoomedPaneId, hiddenPanes: panes.collapsedPaneIds.sorted())
         }
     }
@@ -178,12 +188,12 @@ final class SessionsWorkspaceRegistry {
         return workspace
     }
 
-    func path(containingShell id: String) -> WorkspaceIdentity? {
-        workspaces.first { $0.value.multiplexer.layout.pane(for: id)?.content == .shell }?.key
+    func path(containingShell id: String, machineId: String) -> WorkspaceIdentity? {
+        workspaces.first { $0.key.machineId == machineId && $0.value.multiplexer.layout.pane(for: id)?.content == .shell }?.key
     }
 
-    func removeSessions(_ ids: Set<String>) {
-        for workspace in workspaces.values {
+    func removeSessions(_ ids: Set<String>, machineId: String) {
+        for (identity, workspace) in workspaces where identity.machineId == machineId {
             workspace.multiplexer.removeSessions(ids)
         }
     }
@@ -192,17 +202,21 @@ final class SessionsWorkspaceRegistry {
     /// Removing old placements never releases their native surfaces.
     func reconcileMembership(_ records: [SessionRecord]) {
         let locations = Dictionary(uniqueKeysWithValues: records.compactMap { record in
-            record.workspace.map { (record.id, $0.identity) }
+            record.workspace.map { (TerminalIdentity.session(record.id, machineId: $0.machineId), $0.identity) }
         })
         for (identity, workspace) in workspaces {
-            let moved = Set(locations.compactMap { id, location in location != identity ? id : nil })
+            let moved = Set(locations.compactMap { terminal, location -> String? in
+                guard case .session(let id, let machineId) = terminal,
+                      machineId == identity.machineId, location != identity else { return nil }
+                return id
+            })
             workspace.multiplexer.removeSessions(moved)
         }
     }
 
     func workspace(for repoPath: WorkspaceIdentity) -> SessionsWorkspace {
         if let existing = workspaces[repoPath] { return existing }
-        let workspace = SessionsWorkspace(surfaces: surfaces)
+        let workspace = SessionsWorkspace(identity: repoPath, surfaces: surfaces)
         workspaces[repoPath] = workspace
         return workspace
     }
@@ -343,8 +357,10 @@ final class SessionsStore: ObservableObject {
     }
 
     func localTerminal(for record: SessionRecord) -> TerminalIdentity? {
-        if surfaces.hasSurface(.session(record.id)) { return .session(record.id) }
-        return record.terminalIds.lazy.map { TerminalIdentity.shell($0) }
+        guard let machineId = record.workspace?.machineId else { return nil }
+        let session = TerminalIdentity.session(record.id, machineId: machineId)
+        if surfaces.hasSurface(session) { return session }
+        return record.terminalIds.lazy.map { TerminalIdentity.shell($0, machineId: machineId) }
             .first(where: surfaces.hasSurface)
     }
 
@@ -359,7 +375,9 @@ final class SessionsStore: ObservableObject {
 
     /// Release a surface only after its Session is confirmed absent.
     func releaseSurface(_ id: String) {
-        surfaces.release(.session(id))
+        guard let record = sessions.first(where: { $0.id == id })?.record,
+              let machineId = record.workspace?.machineId else { return }
+        surfaces.release(.session(id, machineId: machineId))
     }
 
     /// A retained surface's child ended — provider exit or an external
@@ -368,9 +386,9 @@ final class SessionsStore: ObservableObject {
     /// whose own pool still holds a live surface for this Session (it just
     /// took the client over) is unaffected.
     func noteSurfaceClosed(_ terminal: TerminalIdentity) {
-        guard case .session(let id) = terminal,
+        guard case .session(let id, let machineId) = terminal,
               !surfaces.hasSurface(terminal),
-              let index = _index(id)
+              let index = _index(id), sessions[index].record.workspace?.machineId == machineId
         else { return }
         switch sessions[index].state {
         case .prepared, .live:
@@ -682,7 +700,7 @@ struct SessionsContentView: View {
         }
         .onChange(of: store.sessions.map(\.id)) { previous, ids in
             for id in Set(previous).subtracting(ids) { store.releaseSurface(id) }
-            workspaces.removeSessions(Set(previous).subtracting(ids))
+            workspaces.removeSessions(Set(previous).subtracting(ids), machineId: machineId)
         }
         .onReceive(NotificationCenter.default.publisher(for: .ghosttySurfaceClosed)) { notification in
             guard let terminal = notification.object as? TerminalIdentity else { return }
@@ -802,16 +820,18 @@ struct SessionsContentView: View {
         navigation.content = .terminals
         // Place the opening/error/elsewhere pane immediately. A slow preparation
         // must never change focus after the human selects another subject.
-        if case .shell(let id) = store.localTerminal(for: record),
-           let path = workspaces.path(containingShell: id) {
+        if case .shell(let id, let machineId) = store.localTerminal(for: record),
+           let path = workspaces.path(containingShell: id, machineId: machineId) {
             worktreeLayout.select(path)
             multiplexer.setCollapsed(paneId: id, collapsed: false)
             multiplexer.setFocusedPane(id)
-            store.surfaces.focus(.shell(id))
+            store.surfaces.focus(.shell(id, machineId: machineId))
         } else {
             worktreeLayout.select(record.workspace?.identity ?? rootIdentity)
             multiplexer.load(sessionId: record.id)
-            store.surfaces.focus(.session(record.id))
+            if let machineId = record.workspace?.machineId {
+                store.surfaces.focus(.session(record.id, machineId: machineId))
+            }
         }
         store.beginPaneLoad(record.id)
         Task { @MainActor in await store.select(record.id) }
@@ -960,8 +980,8 @@ struct SessionsContentView: View {
     private var focusedProgramStatusSurface: ProgramStatusSurface? {
         let pane = multiplexer.focusedPane
         switch pane.content {
-        case .session(let id): return store.surfaces.programStatus(for: .session(id))
-        case .shell: return store.surfaces.programStatus(for: .shell(pane.id))
+        case .session(let id): return store.surfaces.programStatus(for: .session(id, machineId: workspace.identity.machineId))
+        case .shell: return store.surfaces.programStatus(for: .shell(pane.id, machineId: workspace.identity.machineId))
         case .empty, .flowLog, .files: return nil
         }
     }
@@ -983,7 +1003,7 @@ struct SessionsContentView: View {
         let pane = multiplexer.focusedPane
         switch pane.content {
         case .shell:
-            return store.sessions.filter { store.localTerminal(for: $0.record) == .shell(pane.id) }
+            return store.sessions.filter { store.localTerminal(for: $0.record) == .shell(pane.id, machineId: workspace.identity.machineId) }
         case .session(let id):
             return store.sessions.filter { $0.id == id }
         case .empty, .flowLog, .files:
@@ -996,7 +1016,7 @@ struct SessionsContentView: View {
         case .empty, .flowLog, .files:
             return
         case .shell:
-            store.surfaces.release(.shell(pane.id))
+            store.surfaces.release(.shell(pane.id, machineId: workspace.identity.machineId))
         case .session:
             return
         }
@@ -1398,7 +1418,7 @@ private struct SessionPaneView: View {
 
     private func closePane() {
         if case .shell = pane.content {
-            sessions.surfaces.release(.shell(pane.id))
+            sessions.surfaces.release(.shell(pane.id, machineId: workspace.identity.machineId))
         }
         store.close(pane.id)
     }
@@ -1435,7 +1455,7 @@ private struct SessionPaneView: View {
     private var paneSessions: [SessionItem] {
         if case .shell = pane.content {
             return sessions.sessions.filter {
-                sessions.localTerminal(for: $0.record) == .shell(pane.id)
+                sessions.localTerminal(for: $0.record) == .shell(pane.id, machineId: workspace.identity.machineId)
             }
         }
         return item.map { [$0] } ?? []
@@ -1471,7 +1491,7 @@ private struct SessionPaneView: View {
             GhosttyTerminalView(
                 workingDirectory: workingDirectory,
                 argv: store.shellCommands[pane.id] ?? [],
-                terminal: .shell(pane.id),
+                terminal: .shell(pane.id, machineId: workspace.identity.machineId),
                 surfacePool: sessions.surfaces,
                 isFocused: isFocused,
                 onFocus: focusPane
@@ -1600,18 +1620,22 @@ private struct SessionPaneView: View {
 
     @ViewBuilder
     private func _terminal(item: SessionItem, surface: SessionRecord) -> some View {
-        GhosttyTerminalView(
-            workingDirectory: workingDirectory,
-            argv: surface.openArgv,
-            terminal: .session(surface.id),
-            surfacePool: sessions.surfaces,
-            isFocused: isFocused,
-            onSurfaceCreated: {
-                sessions.recordPaneLive(item.id)
-            },
-            onFocus: focusPane
-        )
-        .id(surface.id)
+        if let machineId = surface.workspace?.machineId {
+            GhosttyTerminalView(
+                workingDirectory: workingDirectory,
+                argv: surface.openArgv,
+                terminal: .session(surface.id, machineId: machineId),
+                surfacePool: sessions.surfaces,
+                isFocused: isFocused,
+                onSurfaceCreated: {
+                    sessions.recordPaneLive(item.id)
+                },
+                onFocus: focusPane
+            )
+            .id(surface.id)
+        } else {
+            Text("Session Machine unavailable")
+        }
     }
 
     /// A pane hosting exactly one conversation is named by that Session;
@@ -1646,9 +1670,11 @@ private struct SessionPaneView: View {
     private var _terminalIdentity: TerminalIdentity? {
         switch pane.content {
         case .session:
-            item?.surface.map { .session($0.id) }
+            item?.surface.flatMap { record in
+                record.workspace.map { .session(record.id, machineId: $0.machineId) }
+            }
         case .shell:
-            .shell(pane.id)
+            .shell(pane.id, machineId: workspace.identity.machineId)
         case .empty, .flowLog, .files:
             nil
         }

@@ -628,6 +628,11 @@ fn desktop_inspection_preserves_exact_windows_hidden_panes_and_stale_reading() {
     let json = include_str!("../../../tests/fixtures/dto/desktop_inspection.json");
     let report: DesktopInspection = serde_json::from_str(json).unwrap();
     let window = &report.windows[0];
+    assert_eq!(
+        window.workspaces[0].layout.children[0].surface.as_deref(),
+        Some("native-surface-incarnation")
+    );
+    assert!(window.workspaces[0].layout.children[1].surface.is_none());
     assert_eq!(window.reading, "unavailable");
     let task = window.task.as_ref().unwrap();
     assert!(task.actions.is_none());

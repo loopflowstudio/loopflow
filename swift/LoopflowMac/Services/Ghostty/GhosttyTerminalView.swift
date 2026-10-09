@@ -61,7 +61,7 @@ struct GhosttyTerminalView: View {
     }
 
     private var shellCommand: String? {
-        if case .shell(let id) = terminal {
+        if case .shell(let id, _) = terminal {
             return buildWorkspaceShellCommand(id: id, argv: argv, env: env)
         }
         return buildGhosttyShellCommand(argv: argv, env: env)
@@ -165,6 +165,13 @@ final class GhosttySurfacePool {
         return view
     }
 
+    /// Inspection never allocates a view or retires an exited child. The
+    /// surface owner supplies its lifetime, independently of pane occurrences.
+    func surfaceIncarnation(for id: TerminalIdentity) -> String? {
+        guard let view = views[id], view.surface != nil else { return nil }
+        return view.programStatus.incarnation.uuidString.lowercased()
+    }
+
     func programStatus(for id: TerminalIdentity) -> ProgramStatusSurface? {
         views[id]?.programStatus
     }
@@ -172,7 +179,8 @@ final class GhosttySurfacePool {
     func associateProgramStatus(_ records: [SessionRecord]) {
         for view in views.values {
             let marker = view.terminalMarker
-            if case .session(let id) = view.terminal {
+            let records = records.filter { $0.workspace?.machineId == view.terminal.machineId }
+            if case .session(let id, _) = view.terminal {
                 if let record = records.first(where: { $0.id == id }) {
                     view.programStatus.associate(sessionId: id, terminalId: marker, generation: record.providerGeneration)
                 }
@@ -350,7 +358,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     let programStatus = ProgramStatusSurface()
     var terminalMarker: String {
         switch terminal {
-        case .shell(let id): id
+        case .shell(let id, _): id
         case .session: programStatus.incarnation.uuidString.lowercased()
         }
     }
@@ -384,7 +392,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     init(terminal: TerminalIdentity, frame frameRect: NSRect = .zero) {
         self.terminal = terminal
         super.init(frame: frameRect)
-        if case .session(let id) = terminal {
+        if case .session(let id, _) = terminal {
             programStatus.associate(sessionId: id, terminalId: terminalMarker, generation: nil)
         }
         setupView()
@@ -404,7 +412,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     }
 
     func createSurface(manager: GhosttyManager) {
-        guard surface == nil else { return }
+        guard surface == nil, !childExited else { return }
 
         let surfaceCommand: String?
         if case .session = terminal, let command {
@@ -715,7 +723,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         if accepted, let surface {
             ghostty_surface_set_focus(surface, true)
             // The Session pane is visible and accepting input.
-            if case .session(let id) = terminal { Perf.endAfterCommit(Perf.taskWorkspaceReady, id: id) }
+            if case .session(let id, _) = terminal { Perf.endAfterCommit(Perf.taskWorkspaceReady, id: id) }
         }
         return accepted
     }
@@ -1305,6 +1313,7 @@ func terminalPasteText(from pasteboard: NSPasteboard) -> String? {
 // Stub view when GhosttyKit is not available
 @MainActor @Observable
 final class GhosttySurfacePool {
+    func surfaceIncarnation(for id: TerminalIdentity) -> String? { nil }
     func hasSurface(_ id: TerminalIdentity) -> Bool { false }
     func programStatus(for id: TerminalIdentity) -> ProgramStatusSurface? { nil }
     func associateProgramStatus(_ records: [SessionRecord]) {}

@@ -110,16 +110,17 @@ public struct DesktopWorkspaceInspection: Codable, Sendable, Equatable {
 public struct DesktopLayoutInspection: Codable, Sendable, Equatable {
     public let pane: String?
     public let incarnation: String?
+    public let surface: String?
     public let content: String?
     public let subject: String?
     public let axis: String?
     public let ratio: Double?
     public let children: [DesktopLayoutInspection]
 
-    public init(_ layout: LayoutNode) {
+    public init(_ layout: LayoutNode, surface: (PaneState) -> String?) {
         switch layout {
         case .leaf(let state):
-            pane = state.id; incarnation = state.incarnation; axis = nil; ratio = nil; children = []
+            pane = state.id; incarnation = state.incarnation; self.surface = surface(state); axis = nil; ratio = nil; children = []
             switch state.content {
             case .empty: content = "empty"; subject = nil
             case .shell: content = "shell"; subject = nil
@@ -128,8 +129,8 @@ public struct DesktopLayoutInspection: Codable, Sendable, Equatable {
             case .flowLog(let id): content = "flow_log"; subject = id
             }
         case .split(let splitAxis, let first, let second, let splitRatio):
-            pane = nil; incarnation = nil; content = nil; subject = nil; axis = splitAxis.rawValue; ratio = splitRatio
-            children = [Self(first), Self(second)]
+            pane = nil; incarnation = nil; self.surface = nil; content = nil; subject = nil; axis = splitAxis.rawValue; ratio = splitRatio
+            children = [Self(first, surface: surface), Self(second, surface: surface)]
         }
     }
 }

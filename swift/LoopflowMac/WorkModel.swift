@@ -299,7 +299,7 @@ final class WorkModel {
         switch sessions {
         case .loading: (state, reason) = ("loading", "Sessions have not been read")
         case .unavailable(_, let error): (state, reason) = ("unavailable", error)
-        case .available where savedSessionRepos.contains(repoPath ?? ""):
+        case .available where savedSessionRepos.contains(sessionReadingKey(repoPath ?? "")):
             (state, reason) = ("saved", "Saved Sessions are not a current action reading")
         case .available where sessionsRefresh?.repo == repoPath:
             (state, reason) = ("updating", "Session enumeration is not complete")
@@ -372,10 +372,17 @@ final class WorkModel {
     }
     private(set) var waves: WorkReading<[Wave]> = .loading
     private(set) var processActivity: WorkReading<ActivitySnapshot> = .loading
-    private var sessionReadings: [String: WorkReading<[SessionRecord]>] = [:]
+    private struct SessionReadingKey: Hashable {
+        let machineId: String?
+        let repository: String
+    }
+    private func sessionReadingKey(_ repo: String) -> SessionReadingKey {
+        SessionReadingKey(machineId: workMachine ?? savedMachineId, repository: repo)
+    }
+    private var sessionReadings: [SessionReadingKey: WorkReading<[SessionRecord]>] = [:]
     private(set) var sessions: WorkReading<[SessionRecord]> {
-        get { sessionReadings[repoPath ?? ""] ?? .loading }
-        set { sessionReadings[repoPath ?? ""] = newValue }
+        get { sessionReadings[sessionReadingKey(repoPath ?? "")] ?? .loading }
+        set { sessionReadings[sessionReadingKey(repoPath ?? "")] = newValue }
     }
     private(set) var workActivity: WorkReading<WorkActivitySnapshot> = .loading
     /// Selectable Flows per repository, read once on demand; never per repaint.
@@ -431,7 +438,7 @@ final class WorkModel {
     @ObservationIgnored private(set) var savedMachineId: String?
     /// Parts still showing saved text instead of a read from this launch.
     private var showsSavedPlanning = false
-    private var savedSessionRepos: Set<String> = []
+    private var savedSessionRepos: Set<SessionReadingKey> = []
     private var usesFixedFixture = false
     private var sessionsGeneration = 0
     @ObservationIgnored private var sessionsRefresh: (repo: String, generation: Int, task: Task<Void, Never>)?
@@ -443,7 +450,7 @@ final class WorkModel {
     /// Moves with every planning frame, for views that derive from planning.
     private(set) var planningSequence = 0
     @ObservationIgnored private var workObservation: WorkObservation?
-    @ObservationIgnored private var workMachine: String?
+    private var workMachine: String?
     @ObservationIgnored private var workOpened = ContinuousClock.now
     @ObservationIgnored private var nextRequestId = 0
     @ObservationIgnored private var sentScope: WorkScope?
@@ -514,7 +521,7 @@ final class WorkModel {
 
     /// Whether any part shown is saved text instead of a read from this launch.
     var showsSavedWork: Bool {
-        showsSavedPlanning || savedSessionRepos.contains(repoPath ?? "")
+        showsSavedPlanning || savedSessionRepos.contains(sessionReadingKey(repoPath ?? ""))
     }
 
     /// Show the saved workspace before any read. Text that no longer decodes is skipped.
@@ -530,8 +537,8 @@ final class WorkModel {
         for (repo, entry) in saved.repositories {
             if let pages = entry.sessionPages,
                let records = try? pages.flatMap({ try RegistryQuery.decode(SessionPage.self, from: $0).entries }) {
-                sessionReadings[repo] = .available(records)
-                savedSessionRepos.insert(repo)
+                sessionReadings[SessionReadingKey(machineId: saved.machineId, repository: repo)] = .available(records)
+                savedSessionRepos.insert(SessionReadingKey(machineId: saved.machineId, repository: repo))
             }
             guard let selection = entry.selection, let waves = roadmap.value?.waves else { continue }
             let evidence = waves.lazy.compactMap { wave in
@@ -555,6 +562,11 @@ final class WorkModel {
     /// Reads now come from `id`. A workspace saved under another Machine is dropped
     /// unless this launch has already replaced it.
     func confirmMachine(_ id: String) {
+        if workMachine != id {
+            sessionsGeneration &+= 1
+            if workMachine != nil { dropMachineContent() }
+        }
+        workMachine = id
         if let savedMachineId, savedMachineId != id {
             if showsSavedPlanning {
                 roadmap = .loading
@@ -758,7 +770,7 @@ final class WorkModel {
                   body.includesHeadless == navigation.showsHeadlessSessions else { return }
             let next = WorkReading.available(body.entries)
             if sessions != next { sessions = next }
-            if savedSessionRepos.remove(repoPath) != nil {
+            if savedSessionRepos.remove(sessionReadingKey(repoPath)) != nil {
                 LaunchJournal.home.refreshed("sessions", ms: workOpened.elapsedMs, ok: true)
             }
             endLaunchWhenCurrent()
@@ -1095,6 +1107,7 @@ final class WorkModel {
     }
 
     private func readSessions(repoPath: String, generation: Int) async {
+        let key = sessionReadingKey(repoPath)
         let initialIDs = Set((sessions.value ?? []).map(\.id))
         var records: [SessionRecord] = []
         var after: String?
@@ -1106,6 +1119,7 @@ final class WorkModel {
             repeat {
                 let page = try await query.sessionPage(includingHeadless: includingHeadless, after: after, cwd: repoPath)
                 guard sessionsGeneration == generation, self.repoPath == repoPath,
+                      sessionReadingKey(repoPath) == key,
                       navigation.showsHeadlessSessions == includingHeadless,
                       !Task.isCancelled else { return }
                 records += page.entries
@@ -1119,13 +1133,14 @@ final class WorkModel {
                 if sessions != next { sessions = next }
                 after = page.next
             } while after != nil
-            savedSessionRepos.remove(repoPath)
+            savedSessionRepos.remove(sessionReadingKey(repoPath))
             LaunchJournal.home.refreshed("sessions", ms: started.elapsedMs, ok: true)
             endLaunchWhenCurrent()
             // Explicit history is read on request, never restored at launch.
             if !includingHeadless { cache?.saveSessions(wire.texts, repo: repoPath) }
         } catch {
             guard sessionsGeneration == generation, self.repoPath == repoPath,
+                      sessionReadingKey(repoPath) == key,
                   !Task.isCancelled else { return }
             LaunchJournal.home.refreshed("sessions", ms: started.elapsedMs, ok: false)
             let next = WorkReading.unavailable(lastGood: sessions.value, reason: error.localizedDescription)
@@ -1288,6 +1303,7 @@ final class WorkModel {
     func commitSessionRename() async {
         guard let repo = repoPath, let draft = navigation.renaming, !draft.submitting else { return }
         let owner = navigation
+        let key = sessionReadingKey(repo)
         let target = draft.sessionId
         owner.renaming?.submitting = true
         owner.renaming?.error = nil
@@ -1295,7 +1311,7 @@ final class WorkModel {
             let record = try await query.renameSession(id: target, name: draft.text, cwd: repo)
             // A read started before the rename must not restore the old name.
             supersedeSessions()
-            replaceSession(record, repo: repo)
+            replaceSession(record, key: key)
             if owner.renaming?.sessionId == target { owner.renaming = nil }
         } catch {
             guard owner.renaming?.sessionId == target else { return }
@@ -1336,12 +1352,13 @@ final class WorkModel {
         guard let repo = repoPath, let draft = navigation.binding, !draft.submitting,
               let preview = draft.preview, preview.sessionId == draft.sessionId else { return }
         let owner = navigation
+        let key = sessionReadingKey(repo)
         owner.binding?.submitting = true
         owner.binding?.error = nil
         do {
             let record = try await query.bindSession(id: preview.sessionId, taskId: preview.taskId, cwd: repo)
             supersedeSessions()
-            replaceSession(record, repo: repo)
+            replaceSession(record, key: key)
             if owner.selectedSessionId == record.id { owner.selection = record.work }
             if owner.binding?.id == draft.id { owner.binding = nil }
         } catch {
@@ -1356,15 +1373,15 @@ final class WorkModel {
         navigation.binding = nil
     }
 
-    private func replaceSession(_ record: SessionRecord, repo: String) {
+    private func replaceSession(_ record: SessionRecord, key: SessionReadingKey) {
         let replace = { (records: [SessionRecord]) in
             records.map { $0.id == record.id ? record : $0 }
         }
-        switch sessionReadings[repo] {
+        switch sessionReadings[key] {
         case .available(let records):
-            sessionReadings[repo] = .available(replace(records))
+            sessionReadings[key] = .available(replace(records))
         case .unavailable(let records, let reason):
-            sessionReadings[repo] = .unavailable(lastGood: records.map(replace), reason: reason)
+            sessionReadings[key] = .unavailable(lastGood: records.map(replace), reason: reason)
         case .loading, nil:
             break
         }

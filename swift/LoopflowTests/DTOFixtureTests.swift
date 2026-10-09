@@ -71,6 +71,8 @@ struct DTOFixtureTests {
         #expect(report.windows[1].task?.runControl?.unavailable == "Task checkout is on another Machine")
         #expect(window.workspaces.first?.hiddenPanes == ["files-pane"])
         #expect(window.workspaces.first?.layout.children.first?.subject == "session-one")
+        #expect(window.workspaces.first?.layout.children.first?.surface == "native-surface-incarnation")
+        #expect(window.workspaces.first?.layout.children.last?.surface == nil)
         #expect(try JSONDecoder().decode(DesktopInspection.self, from: JSONEncoder().encode(report)) == report)
         var wire = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         var windows = try #require(wire["windows"] as? [[String: Any]])

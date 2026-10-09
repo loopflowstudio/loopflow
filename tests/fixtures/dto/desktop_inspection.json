@@ -42,7 +42,8 @@
                 "axis": null,
                 "ratio": null,
                 "children": [],
-                "incarnation": "occurrence-session-pane"
+                "incarnation": "occurrence-session-pane",
+                "surface": "native-surface-incarnation"
               },
               {
                 "pane": "files-pane",
@@ -51,10 +52,12 @@
                 "axis": null,
                 "ratio": null,
                 "children": [],
-                "incarnation": "occurrence-files-pane"
+                "incarnation": "occurrence-files-pane",
+                "surface": null
               }
             ],
-            "incarnation": null
+            "incarnation": null,
+            "surface": null
           }
         }
       ],

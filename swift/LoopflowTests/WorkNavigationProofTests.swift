@@ -246,7 +246,7 @@ struct WorkNavigationProofTests {
         for _ in 0..<3 {
             workspace.multiplexer.newShell()
             let pane = workspace.multiplexer.focusedPaneId
-            let terminal = registry.surfaces.view(for: .shell(pane))
+            let terminal = registry.surfaces.view(for: .shell(pane, machineId: fixtureMachineId))
             terminal.frame = CGRect(x: 0, y: 0, width: 400, height: 350)
             terminal.workingDirectory = NSTemporaryDirectory()
             terminal.command = buildWorkspaceShellCommand(id: pane, argv: ["/bin/cat"], env: [:])
@@ -566,7 +566,7 @@ struct WorkNavigationProofTests {
             for _ in 0..<2 {
                 workspace.multiplexer.newShell()
                 let pane = workspace.multiplexer.focusedPaneId
-                let terminal = registry.surfaces.view(for: .shell(pane))
+                let terminal = registry.surfaces.view(for: .shell(pane, machineId: fixtureMachineId))
                 terminal.frame = CGRect(x: 0, y: 0, width: 500, height: 350)
                 terminal.workingDirectory = NSTemporaryDirectory()
                 terminal.command = buildWorkspaceShellCommand(id: pane, argv: ["/bin/cat"], env: [:])
@@ -658,7 +658,7 @@ struct WorkNavigationProofTests {
         manager.initialize()
         try #require(manager.state == .ready)
         let pool = GhosttySurfacePool()
-        let identity = TerminalIdentity.session("navigation-draft-proof")
+        let identity = TerminalIdentity.session("navigation-draft-proof", machineId: fixtureMachineId)
         let terminal = pool.view(for: identity)
         let window = NSWindow(
             contentRect: CGRect(x: 0, y: 0, width: 500, height: 300),
@@ -775,7 +775,7 @@ struct WorkNavigationProofTests {
         let shellPane = workspace.multiplexer.focusedPaneId
         workspace.multiplexer.load(sessionId: "navigation-split")
         let layout = workspace.multiplexer.layout
-        let identities: [TerminalIdentity] = [.session("navigation-split"), .shell(shellPane)]
+        let identities: [TerminalIdentity] = [.session("navigation-split", machineId: fixtureMachineId), .shell(shellPane, machineId: fixtureMachineId)]
         let terminals = identities.map { workspace.surfaces.view(for: $0) }
         defer { for identity in identities { workspace.surfaces.release(identity) } }
         let history = (0..<120).map { "history-\($0)" }.joined(separator: " ")

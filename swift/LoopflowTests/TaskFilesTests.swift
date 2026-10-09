@@ -313,7 +313,7 @@ struct TaskFilesTests {
         first.load(sessionId: "finished")
         other.load(sessionId: "still-running")
         let retained = other.layout
-        registry.removeSessions(["finished"])
+        registry.removeSessions(["finished"], machineId: fixtureMachineId)
         #expect(first.pane(forSessionId: "finished") == nil)
         #expect(other.layout == retained)
     }
@@ -491,7 +491,7 @@ struct TaskFilesTests {
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
         let workspace = registry.workspace(for: fixtureWorkspace(NSTemporaryDirectory()))
         workspace.multiplexer.newShell()
-        let identity = TerminalIdentity.shell(workspace.multiplexer.focusedPaneId)
+        let identity = TerminalIdentity.shell(workspace.multiplexer.focusedPaneId, machineId: fixtureMachineId)
         let terminal = registry.surfaces.view(for: identity)
         terminal.frame = CGRect(x: 0, y: 0, width: 400, height: 350)
         terminal.workingDirectory = NSTemporaryDirectory()

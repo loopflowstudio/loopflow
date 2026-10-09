@@ -158,7 +158,10 @@ Keep these replacements deleted:
   typed author conversion is shared with transport validation.
 - Separate repository-wide conflict/status readers are removed. One per-destination
   status snapshot supplies pending state and conflicts; malformed journals retain
-  unknown state rather than hiding independent plans.
+  unknown state rather than hiding independent plans. Status and import settlement
+  now share a destination-scoped membership join: no global conflict regrouping or
+  per-conflict membership reads. The isolation fixture also resolves one plan while
+  retaining the other plan's conflicts; Rust execution remains unproved.
 - Task-attributed sync startup, status rendering as a dispatch prerequisite and
   async waiters owning blocking-worker locks. Repository/provider lifetimes drive
   exchange; each worker retains its effect lock through readback and status writes.
@@ -263,15 +266,12 @@ provenance gap; revise it with the completed composition, not as a product limit
    idempotent retry, but Rust execution remains unproved. CLI `planning status`
    already reads projection conflicts; Desktop still needs that presentation.
    A durable import checkpoint is not completed projection.
-   Dispatch and CLI status now isolate malformed destination journals. The common
-   status snapshot includes each destination's retained projection conflicts and
-   current sharing holds, with `pending_local: null` and a sanitized local error
-   when the journal cannot be read. Stored fetch/import/publication receipts remain
-   visible and unchanged; SQL failures still fail the read. The separate conflict
-   reader is deleted, preventing a second all-or-nothing read from hiding healthy
-   plans. Public JSON/text and recovery, exchange isolation and DTO regressions are
-   authored; executable acceptance remains with capable gate/CI. Desktop still
-   needs the same presentation, and status never repairs a damaged journal.
+   Dispatch and status isolate malformed journals: `pending_local: null` plus a
+   sanitized error, with retained conflicts and fetch/import/publication receipts.
+   Healthy plans and sharing holds remain visible; SQL failures still fail the read.
+   Public JSON/text recovery, exchange isolation and DTO regressions are authored;
+   executable acceptance remains with capable gate/CI. Desktop needs the same
+   presentation. Status never repairs a journal or equates retention with convergence.
 4. Complete optional Linear composition. Task title/brief/assignee/membership and
    Project name/summary/workflow/status use the common scalar receipt writer in the
    import savepoint. Stable peer mutation IDs supply delivery identity. The latest
@@ -464,23 +464,16 @@ Infrastructure child memory exists in this checkout.
 7. Replace PR copy and create a walkthrough of final behavior and evidence;
    publish #1491 for Jack Heart's review and stop without landing.
 
-Check (October 8 status isolation): `cargo fmt --all -- --check` and `git diff --check` pass; `cargo test -p loopflow --test planning_setup_tests public_status_keeps_healthy_plans_and_receipts_visible_beside_a_damaged_journal` and `cargo clippy --all-targets -- -D warnings` each time out at 120 seconds before test/lint results; capable gate/CI owns executable acceptance. Earlier comment SQL and timeout evidence: `9241c1da5:scratch/work-on-another-machine-name.md`.
+Check (October 8 conflict-reader reduction): `cargo fmt --all -- --check`, `git diff --check` and the source-extracted conflict query against released SQL + both drafts pass; `cargo test -p loopflow --lib importing_one_destination_does_not_clear_another_destinations_conflicts` and `cargo clippy --all-targets -- -D warnings` each time out at 120 seconds before test/lint results; capable gate/CI owns executable acceptance. Prior public-status, comment SQL and timeout evidence: `b9f88eafd:scratch/work-on-another-machine-name.md`.
 
-The timeout investigation found Cargo waiting on its build-script child, not
-compiling Rust or waiting for a Cargo lock. Both children had 96 KiB footprints
-and no CPU activity; a fresh-inode copy also timed out before entry. Codesign
-verification returned success. Samples: `/tmp/loo412-cargo-sample.txt`,
-`/tmp/loo412-build-sample.txt`, `/tmp/loo412-clippy-sample.txt`; compression
-reproductions: `/tmp/loo412-compress-build-sample.txt` and
-`/tmp/loo412-compress-clippy-sample.txt`. The status pass reproduces the same
-96 KiB `_dyld_start` boundary in `/tmp/loo412-status-build-sample.txt`. This identifies
-the stall boundary, not its cause; no security settings or installed binaries changed.
+Both build-script children again stalled at `_dyld_start` with 96 KiB footprints,
+not at a Cargo lock or in Rust compilation. Samples:
+`/tmp/loo412-destination-build-sample.txt` and
+`/tmp/loo412-destination-clippy-sample.txt`. Earlier fresh-inode reproduction and
+successful codesign verification are retained in the same Git reference. This
+identifies the stall boundary, not its cause; no security settings or installed
+binaries changed.
 Historical Flow `93d4d4f6-4723-4027-951b-b3aee2e696a2` still retains realign
 step `e94edd38-2a26-4047-9650-41a65ab814f7` without a recorded exit, confirmed
 by `lf flow show --processes` on October 8. No exit or replacement authority is
 inferred. Its reconciliation checkpoint `e8ff4c7f6` remains preserved.
-
-October 8 status review removed the second conflict read, which would otherwise
-still abort the public command after destination-local status succeeded. Unknown
-pending state is explicit rather than false; malformed journal messages never
-include raw values. No new product decision or mixed-provider activation is claimed.

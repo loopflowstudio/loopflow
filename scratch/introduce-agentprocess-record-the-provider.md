@@ -81,6 +81,9 @@ attribution survive.
   admission. Both use one parent-side pre-exec recording channel. Shared
   `open_owner` replaces three harness-local store-opening sequences without
   refreshing their attachment snapshots.
+- Metadata-only `CaptureHandle::fail_and_begin_attempt` is removed; invocation
+  retry settles/replaces the record before advancing capture metadata. The private
+  metadata reducer remains for history/usage projection.
 - Native `spawn_native(None)`, capture launch without an attachment, and
   `native_provider_driver`'s missing-provenance-as-client inference are removed.
   Raw headless optional admission remains a deletion target.
@@ -142,31 +145,27 @@ Earlier implementation/review detail and contrary evidence:
 
 ## Remaining implementation
 
-**Admission counterexample (2026-10-09):** the existing
-`release_acceptance_recovers_from_a_revoked_selected_account` fixture now fails
-with `Saved conversation thread differs; reconnect with its recorded provider`.
-`run_agent` previously omitted attachments for this library path. With admission,
-Codex stop retains the live AgentProcess for capture settlement; account failover
-then requests a fresh native thread on that same attachment. The preserved
-Session thread check refuses it. The metadata-only `fail_and_begin_attempt` does
-not transition the AgentProcess or preserve a selected replacement thread.
-Dependent admission expansion stopped rather than bypassing that check.
+**Invocation-owned replacement (2026-10-09):** the library admission
+counterexample is repaired without weakening the saved-thread check or changing
+Codex's takeover-preserving `stop`. Retry now holds the capture's exact attachment,
+closes or observes the old AgentProcess dead, and atomically retains its end,
+reserves a fresh identity and selects the next native thread. Failed close or
+stale authority leaves the old record unchanged. Only the capture owner advances
+its snapshot; pending dispatch/history keep theirs. Account failover explicitly
+clears the resume selection, including one inherited from the original launch;
+same-account retry retains its thread. Prior account/native observations remain
+history. Metadata-only retry is no longer a production capture API.
 
-The next lifecycle change is invocation-owned replacement, not a broader
-`Harness::stop` kill: attached Codex stop intentionally relinquishes the connection
-so takeover can preserve the provider. `_run_harness_once` currently ignores its
-stop result and `fail_and_begin_attempt` changes capture metadata only.
-`prepare_session_agent_process` refuses a running row; calling it alone cannot
-repair failover. Under the exact attachment, selected account failover needs an
-observed old-process end, retained account/native history, a fresh reservation and
-an explicit fresh-thread selection. Same-account retry must deliberately reuse
-its native thread or replace the process while retaining that thread. Failed close
-or lost authority leaves uncertainty, never replacement permission. Late waits
-and history keep the old snapshot; only the capture owner advances settlement.
-These are remaining implementation requirements, not permission to remove the
-saved-thread check. The existing failing regression remains valid; extend it to
-assert distinct process identities and preserved old history, not only fallback
-text. The fixture currently returns the same synthetic thread ID for both accounts.
+Settlement reads the recorded provider/interactivity, not next-launch settings.
+Unknown or duplicated OS identity grants no signal authority; native foreground
+providers keep their launcher-owned teardown. The owned Codex close uses the
+shared zombie/identity judgment. Generic harness teardown errors now propagate.
+The regression uses different native threads for revoked and fallback accounts
+and checks distinct ended AgentProcesses, one Session/parent and retained
+thread/account pairs. Its socket fixture exits on disconnect; the separate
+throwaway-group check exercises live close with an absent endpoint, not a live
+Codex thread-inventory exchange. Configured-provider acceptance remains open.
+Earlier failing proof and analysis: `3f530ffce:scratch/introduce-agentprocess-record-the-provider.md`.
 
 
 1. Eliminate optional attachment paths in raw headless harness starts. `run_agent`
@@ -175,8 +174,8 @@ text. The fixture currently returns the same synthetic thread ID for both accoun
    a capture only when absent. Native spawn requires an attachment; missing
    provenance no longer selects the remote-client path. Explicit remote endpoints
    are checked against the saved AgentProcess, and client spawn holds its attachment
-   fence without recording provider exit. The library slice is not complete:
-   the account-failover regression above fails. Raw `Harness::start` also remains: its
+   fence without recording provider exit. Library account failover now uses the
+   replacement above. Raw `Harness::start` remains: its
    optional config/open_owner/headless spawn still
    permits unrecorded children. Admission belongs at the invocation entry, not in
    a spawn callback inventing a parent. Keep the lock across admission/recording;
@@ -273,10 +272,12 @@ external networking denied. No configured-provider acceptance is claimed.
 Integration EnvGuard now pins the compiled CLI inside the boundary. Source review
 also removed the eager cwd lookup when an explicit working directory is supplied.
 
-Prior admission checks and the retained 13-pass/one-failure `agent_tests` result:
-`91d184b1c:scratch/introduce-agentprocess-record-the-provider.md`. Compression
-moves OS observation below presentation and deletes the native-client copy of
-elapsed-time parsing. Invalid ages report unavailability instead of disappearing
-from the sample. Missing PID/birth rows still require visible unknown nodes.
+Prior admission checks: `91d184b1c:scratch/introduce-agentprocess-record-the-provider.md`.
+Compression moves OS observation below presentation and deletes the native-client
+elapsed-time parser. Invalid ages report unavailability; missing PID/birth rows
+still need visible unknown nodes. Replacement review preserved the generic stop
+boundary, corrected closing against mutable Session provider settings and kept
+telemetry loss nonfatal after the durable replacement transaction. The live-close
+fixture's invalid trace identity was repaired before its passing run.
 
-Check: `git diff --check` passes; prose-only reconciliation, no runtime rerun. Prior focused sync pass: `48aaf72a1`, this plan; failing account-failover proof: `91d184b1c`; broader Rust/Swift/DTO/materialized and Linux checks remain gate/CI-owned.
+Check: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, isolated lib filters `invocation_`, `saved_thread_rejection`, `subscription_limit_fails_over_without_resuming`, `telemetry_loss_cannot_keep_retry` (7 tests) and `agent_tests` (14 tests) pass; broader Rust/Swift/DTO/materialized and Linux checks remain gate/CI-owned.

@@ -27,5 +27,8 @@ provider-written input before interrupting, not merely successful pipe dispatch.
 Captured native launch now follows the same replacement rule, retaining an exact
 wait snapshot and pre-exec recording without headless process-group setup. Native
 foreground orphan cleanup, other providers and optional launches remain open.
+Invocation retry now also settles/replaces the record before advancing metadata;
+account failover selects a fresh native thread, while same-account retry retains it.
+This extends the existing exact-owner rule, not generic harness-stop authority.
 The native PTY fixture covers inherited descriptors/group, not configured terminal
 interaction. Focused runtime results are recorded in the plan.

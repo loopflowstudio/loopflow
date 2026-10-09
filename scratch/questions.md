@@ -19,7 +19,7 @@ at `b040c7c8d:scratch/questions.md`.
   change-ID tie-break. No initiating host has blanket preference over collaborators;
   positive Linear-origin observations win concurrent peer writes. Preserve losing
   mutations. Public setup now provisions/recovers an explicit user key and binds an empty
-  destination. Local-only foreground exchange is now connected; mixed-provider composition remains unfinished.
+  destination. Local-only foreground exchange and Desktop destination status are connected; mixed-provider composition remains unfinished.
 - `new_migration.py` identified the inherited LOO-406 draft as this Task's draft.
   Git's explicit stack boundary establishes that it belongs to the parent;
   LOO-412 therefore has one separate `planning_peers.sql` draft depending on it.
@@ -80,7 +80,7 @@ remain separate. No new product decision is selected.
   groups remain journal history, not reacquisition. Common no-op upserts preserve
   readback idempotence. The October 9 storage suite covers these regressions. Grouped
   receipts and removal/archive/Team transport are implemented. Public invalidation
-  verification, legacy association and Desktop presentation remain. No mixed-provider
+  verification, legacy association and per-Work Desktop presentation remain. No mixed-provider
   completion or compare-and-swap is claimed.
 
 - October 8 foreground safety choice: until all provider paths are composed and
@@ -91,7 +91,7 @@ remain separate. No new product decision is selected.
   lock. Current eligible-export digests distinguish later saves from confirmation
   of an earlier revision. Provider launch now owns the lifetime independently of Task attribution;
   short Task saves and Project edits attempt exchange after committing. Desktop
-  peer-status presentation remains. Review caught two issues repaired inline:
+  destination status is implemented; per-Work sharing/recovery presentation remains. Review caught two issues repaired inline:
   cancellation/status writes must retain the worker's lock, and target-only machine
   dispatch must not require a repository on the initiating machine.
 

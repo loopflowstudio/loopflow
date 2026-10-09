@@ -205,31 +205,16 @@ this heading. Keep these replacements deleted:
   head replay loops. The greatest retained revision supplies the same floor;
   one outstanding-head handler runs before and after scalar acquisition. Freshness
   reconciliation reads only the cached revision, not another complete entity body.
-- Repeated provider-evidence decoding, validation and removal-age sorting inside
-  projection retries. `ObjectChanges` retains typed evidence histories beside
-  borrowed order histories; document validation remains the malformed-input owner.
-  Peer Team acquisition reuses the common cached-Project reader. Independent
-  fact savepoints, causal heads, original ages and sharing holds stay unchanged.
-- Parallel order-history/head maps and the second next-delivery selection query.
-  Each receipt owns its history and heads together; the common delivery view already
-  excludes superseded settled intentions. Projection reuses one membership read.
-- The peer validator's requirement to rewrite both sort keys. Common moves between
-  priority groups intentionally retain the secondary key; transport keeps that exact
-  input rather than inventing an additional write.
-- Wave reads requiring Machine placement and Rust/Swift fixtures rejecting its
-  absence. Optional reads reuse the existing placement query; execution requirements
-  and dangling-Machine errors remain distinct from unplaced planning.
-- Status's intermediate `(DTO, digest)` vector and duplicated reconnect execution
-  readers. Destination rows stream within the same read transaction. One fixture
-  reader compares full rows and explicitly selected retained Process IDs; new CLI
-  inspection Processes remain outside that comparison.
 
-- Order acquisition's duplicate pre-settlement delivery read, copied retained lists
-  and per-member SQL preparation. Borrow the same receipts for completeness and
-  first settlement; reread after receipt updates because delivery eligibility changes.
-- Desktop peer refresh's separate success/error application and duplicate reply
-  guards. The existing reading reducer retains last-good values behind one
-  scope/generation check; stream and Machine fences remain unchanged.
+Compression through `6442085a3` removes repeated provider-evidence decoding,
+parallel order-history maps, duplicate pre-settlement reads and Desktop reply
+reducers. Typed histories retain independent savepoints and original ages; order
+settlement rereads delivery eligibility after updates. Primary-only moves retain
+their exact input. Optional Wave placement stays distinct from execution's required
+placement. Desktop keeps one scope/generation fence and last-good reading reducer.
+Exact deletion inventory and focused results:
+`5b8eda933:scratch/work-on-another-machine-name.md`, this heading and **Acceptance
+for review**. These reductions add neither a planner nor execution authority.
 
 Test-only `export`/`import` helpers remove repeated successful-call plumbing, not
 assertions or failure-path checks. No predecessor path or second planner is added.
@@ -238,9 +223,13 @@ and retained conflicts are not convergence.
 
 ## Remaining integration — October 9
 
-Creation discovery/readback exists at `a002e4060`, with status assertions corrected
-at `098de8033`. Prepared receipt transport is no longer the frontier; the evidence
-below distinguishes public acquisition from storage-only proof.
+Current boundary at `ce1750393`: destination-level Desktop status is implemented
+and has focused headless proof; per-Work membership, authorship/assignees and
+losing-edit recovery do not. Legacy identity association and composed public
+Git/Linear acquisition remain implementation/acceptance work. The temporary
+mixed-provider refusal in `ops/planning_peer.rs` stays enabled; retained storage
+receipts are not an end-to-end result. No additional product decision is needed
+for those remaining cuts under Jack Heart's recorded direction.
 
 Deletion composition and its counterexamples remain at
 `506efbbfe:scratch/work-on-another-machine-name.md`, **Remaining integration**.
@@ -249,16 +238,12 @@ uncertain effects and explicit active/trash conflicts; scalar clocks, mappings a
 absence cannot settle removal. Focused storage proofs preserve populated execution,
 not running controls or public mixed-provider lifetime behavior.
 
-**October 9 implemented: Desktop peer status.** The destination status
-reader is reused in a repository-scoped Work stream part, independent of roadmap availability.
-Desktop shows selected routing for future Waves, retained membership counts,
-pending/unknown publication, fetch/import receipts and projection holds. It retains
-last-good status across reader failure and rejects old scope/Machine frames. One-shot
-transports use the same CLI reader. No setup mutation, transport activation, new
-poller or cached claim of convergence is added. Authorship/assignees, per-Work
-membership and losing-edit recovery remain separate presentation work.
-The CLI-only status boundary is removed; the common Linear sync display stays: Git
-publication and Linear delivery are independent facts. No schema change is needed.
+Desktop status uses one repository-scoped Work part, independent of roadmap
+availability. It displays future-Wave routing, membership counts, publication,
+fetch/import receipts and holds; failures retain last-good readings and old
+scope/Machine frames are fenced. One-shot transports share the reader. No setup
+action, new poller, schema or transport activation is added. Git publication and
+Linear delivery remain independent. Detailed proof: `c20e4ad13`.
 
 The latest sync includes issue-scoped comments and child-readiness repair.
 TESTING.md requires comment acquisition in a different order from Task creation.
@@ -299,7 +284,7 @@ Executable feedback exposed two distinct presentation/execution boundaries:
   and absence. The public fixture retains the six-table comparison above that
   exposed this failure rather than relaxing it.
 
-Remaining composition, reconciled October 9 against `6ccbbabe3`:
+Remaining composition, reconciled October 9 against `ce1750393`:
 
 `358f7fa08` implements alternate removal/archive/Team acquisition;
 `25cbc0a09` prepares typed histories before projection retries. `4acd37ec8` adds
@@ -470,9 +455,11 @@ invalidation) remain. The diagnostic is temporary, not product policy.
    and exactly one provider launch per Session. It selects destinations after
    launch, so startup cannot freeze an empty selection. The work-watch test passes
    in isolated Linux; the provider-lifetime test remains unexecuted.
-   Native reconnect uses the same new lifetime, but has no composed peer regression
-   yet. The taskless test forces `-i` with null stdin and a stand-in provider: it
-   proves neither a native PTY nor reconnect, even when it passes. Short commands await one bounded transport attempt after
+   Native reconnect starts the same foreground sync owner, but has no composed
+   peer regression yet; the main integration below distinguishes live handoff from
+   resume after driver death. The taskless test forces `-i` with null stdin and a
+   stand-in provider: it proves neither a native PTY nor reconnect, even when it
+   passes. Short commands await one bounded transport attempt after
    committing; unavailable or busy destinations stay pending. Cached Task mutations
    do not wait for acquisition before saving. Cold completion/cancellation/deletion
    now use the same planning resolver as edits/comments, retaining historical branch
@@ -537,7 +524,9 @@ invalidation) remain. The diagnostic is temporary, not product policy.
 
 ## Committed integration boundary — 2026-10-09
 
-Jack Heart requested stacking on LOO-406 and continuing pursue. `225b8c95f`
+Jack Heart requested stacking on LOO-406 and continuing pursue. The parent is
+now integrated into main; this PR is rooted on main, not waiting on a separate
+stack parent. `225b8c95f`
 integrates main's LOO-406 cut `d20c56daf` (#1503). Its tree is identical
 to `97bba1869`: this sync added ancestry, not another implementation or test change.
 Earlier parent integrations, restored scratch checkpoint `1ad5e1267` and retained
@@ -546,6 +535,22 @@ The common cut `84664e661` removed `PlanningAuthority`, personal-plan storage an
 split writers. Creation/export, ordering, common sync presentation and foreground
 lifetime owners are integrated; LOO-412's remaining peer composition is independent
 work, not a missing parent dependency or permission to add another planner.
+
+`ce1750393` integrates main `3e1e6245c` (#1512). Local cleanup now consults
+unfinished Process evidence, not pending turns or reservations. Codex/OpenCode
+lifelines follow live drivers; resume after a dead driver ends the exact abandoned
+engine and starts a fresh engine on the saved native thread. Live connect still
+hands off the engine. This supersedes surviving-engine recovery expectations,
+not planning's exclusion of execution or the prohibition on automatic turn retry.
+The existing taskless peer fixture uses a Claude stand-in and proves neither
+embedded-engine handoff nor dead-driver resume. Combined acceptance still needs
+planning exchange during a live connection and explicit native resume, with no
+extra provider launch caused by exchange; legitimate local resume is not an
+imported execution mutation. No engine-lifecycle code is added to LOO-412.
+
+Readback of historical Flow `93d4d4f6-4723-4027-951b-b3aee2e696a2` still leaves
+step `e94edd38-2a26-4047-9650-41a65ab814f7` without completion or exit evidence.
+The new local recovery implementation does not settle that history.
 
 Jack's destination policy uses a stable user key across machines, never Git display
 names or per-machine random users. Ref separation is not access control: private
@@ -562,7 +567,7 @@ and disposable remotes. Installed-release behavior remains separate. Release's c
 records a recovery path missed by lower-level fixtures and a successful failure
 report mistaken for operation success. The same lessons require public command
 coverage here, and status that distinguishes retained conflicts from convergence.
-October 9 reconciliation at `6ccbbabe3` reread Release's GOAL.md and full MEMORY.md;
+October 9 reconciliation at `ce1750393` reread Release's GOAL.md and full MEMORY.md;
 filesystem inspection found no other immediate child memory. Its operation-entry and
 result-accounting lessons remain in parent memory: storage readback cannot prove
 foreground acquisition, and a successful report cannot replace operation success.
@@ -612,7 +617,7 @@ and limitations: `9b59e9b71:scratch/work-on-another-machine-name.md`,
 **Acceptance for review**. They do not establish this ordering cut, public
 combined behavior or Desktop acceptance.
 
-Check: `cargo build -p loopflow --lib` / `cargo test -p loopflow --lib --no-run`, network-isolated `planning_order_` (11) + `peer_ordering` (3), `scripts/test_desktop.sh -Xswiftc -gnone --filter 'WorkModelStreamTests/peerPlanningFrames|DesktopHeadlessTests/peerPlanningStatus|DesktopHeadlessTests/roadmapPeerPlanning'` (3), fmt/diff and all-target Clippy pass. Gate retains combined public/partial-list, native provider, legacy association and mixed-provider acceptance. Prior Desktop proof: `c20e4ad13`; unplaced Waves: `506efbbfe`, this heading.
+Check (realign, prose only): `git diff --check` passes; focused Rust/order and headless Desktop passes remain at `5b8eda933`, **Acceptance for review**; combined foreground/native-resume, partial-list and mixed-provider checks remain with gate.
 
 Earlier SQL proofs, macOS startup limitations and the retained historical Flow
 without a recorded exit remain at

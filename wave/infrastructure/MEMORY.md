@@ -642,7 +642,7 @@ and public composition remain; mixed exchange stays disabled. Focused proofs exc
 live controls/composed partial lists. Plan: `scratch/work-on-another-machine-name.md`;
 prior evidence: `ce1750393`, this heading.
 
-## Driver recovery (#1512)
+## Driver recovery
 
 Main #1512 (`3e1e6245c`) replaces dead-driver engine adoption with native-thread
 resume on a fresh engine; live connect still hands off. Cleanup consults Process

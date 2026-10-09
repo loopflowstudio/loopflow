@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import Loopflow
 import Observation
@@ -91,6 +92,7 @@ struct TaskReadings<Value> {
 
 /// One pending view request: its companion must never outlive or drift from the Session.
 struct LinkedSession: Equatable {
+    let generation: Int
     let record: SessionRecord
     let changesTask: RoadmapTask?
 }
@@ -106,15 +108,18 @@ final class WorkModel {
     var linkedSession: LinkedSession?
     private(set) var taskOpening: DesktopOpening?
     @ObservationIgnored private var destinationGeneration = 0
+    @ObservationIgnored private var openingSessionObservation: AnyCancellable?
 
     @ObservationIgnored private var taskLinkExpectedID: String?
 
     func openTaskLink(_ url: URL, expectedTaskID: String? = nil) async {
         guard !Task.isCancelled else { return }
-        destinationGeneration &+= 1
+        dismissTaskLink()
         let generation = destinationGeneration
-        if linkedSession != nil { linkedSession = nil }
         taskOpening = DesktopOpening(url: url.absoluteString, status: .opening, reason: nil)
+        defer {
+            if Task.isCancelled, destinationGeneration == generation { dismissTaskLink() }
+        }
         // Observation invalidates on every write, changed or not. Reopening
         // what is already open must not redraw the window.
         if taskLinkURL != url { taskLinkURL = url }
@@ -154,6 +159,10 @@ final class WorkModel {
     }
 
     func dismissTaskLink() {
+        if let opening = taskOpening, opening.status == .opening {
+            taskOpening = DesktopOpening(url: opening.url, status: .failed, reason: "Opening canceled by navigation or a newer request.")
+        }
+        openingSessionObservation = nil
         destinationGeneration &+= 1
         if showsTaskLink { showsTaskLink = false }
         if linkedSession != nil { linkedSession = nil }
@@ -161,8 +170,12 @@ final class WorkModel {
 
     func chooseLinkedTask(wave: WaveRoadmap, task: RoadmapTask) async {
         guard let taskLinkURL else { return }
+        dismissTaskLink()
         let generation = destinationGeneration
         taskOpening = DesktopOpening(url: taskLinkURL.absoluteString, status: .opening, reason: nil)
+        defer {
+            if Task.isCancelled, destinationGeneration == generation { dismissTaskLink() }
+        }
         do {
             try await openLinkedTask(wave: wave, task: task, link: TaskLink(url: taskLinkURL), generation: generation)
         } catch {
@@ -196,7 +209,7 @@ final class WorkModel {
             return
         }
         guard link.session != nil || link.diff else {
-            openTaskDestination(wave: wave, task: task)
+            openTaskDestination(wave: wave, task: task, preservingOpening: true)
             return
         }
         let sameRepo = repoPath?.normalizedFilePath == wave.wave.repo.normalizedFilePath
@@ -244,27 +257,108 @@ final class WorkModel {
                 throw RegistryQueryError("The Session and Task do not share a recorded checkout; no Changes pane was opened.")
             }
         }
-        openTaskDestination(wave: wave, task: task)
+        openTaskDestination(wave: wave, task: task, preservingOpening: true)
         supersedeSessions()
         sessions = .available(records)
         navigation.selectedSessionId = record.id
         navigation.content = .terminals
-        linkedSession = LinkedSession(record: record, changesTask: link.diff ? task : nil)
+        linkedSession = LinkedSession(generation: generation, record: record, changesTask: link.diff ? task : nil)
+    }
+
+    /// Observe the existing Session and Files owners, never a second readiness store.
+    /// Each callback retains the request generation, including repeated identical URLs.
+    func connectLinkedOpening(_ destination: LinkedSession, store: SessionsStore, workspace: SessionsWorkspace, files: TaskFilesStore?) async {
+        guard destination.generation == destinationGeneration, taskOpening?.status == .opening else { return }
+        let layout = workspace.multiplexer.layout
+        let sessionPane: PaneState?
+        if case .shell(let id, _) = store.localTerminal(for: destination.record) {
+            sessionPane = layout.pane(for: id)
+        } else { sessionPane = layout.allPanes.first { $0.content == .session(id: destination.record.id) } }
+        var panes = [PaneState]()
+        if let sessionPane { panes.append(sessionPane) }
+        if let task = destination.changesTask,
+           let pane = layout.allPanes.first(where: { $0.content == .files(taskId: task.id) }) { panes.append(pane) }
+        guard panes.count == (destination.changesTask == nil ? 1 : 2) else {
+            taskOpening = taskOpening.map { DesktopOpening(url: $0.url, status: .failed, reason: "Opening panes are no longer available.") }
+            return
+        }
+        await store.select(destination.record.id)
+        guard !Task.isCancelled, destination.generation == destinationGeneration, taskOpening?.status == .opening else { return }
+        if let files { await files.refreshChanges() }
+        guard !Task.isCancelled, destination.generation == destinationGeneration, taskOpening?.status == .opening else { return }
+        openingSessionObservation = store.$sessions.dropFirst().sink { [weak self, weak store, weak workspace, weak files] items in
+            // @Published emits before assignment; use that exact reading.
+            MainActor.assumeIsolated {
+                guard let self, let store, let workspace else { return }
+                self.updateLinkedOpening(destination, store: store, workspace: workspace, panes: panes, files: files, items: items)
+            }
+        }
+        observeOpeningOwners(destination, store: store, workspace: workspace, panes: panes, files: files)
+    }
+
+    private func observeOpeningOwners(_ destination: LinkedSession, store: SessionsStore, workspace: SessionsWorkspace, panes: [PaneState], files: TaskFilesStore?) {
+        guard destination.generation == destinationGeneration, taskOpening?.status == .opening else { return }
+        withObservationTracking {
+            updateLinkedOpening(destination, store: store, workspace: workspace, panes: panes, files: files)
+        } onChange: { [weak self, weak store, weak workspace, weak files] in
+            Task { @MainActor in
+                guard let self, let store, let workspace else { return }
+                self.observeOpeningOwners(destination, store: store, workspace: workspace, panes: panes, files: files)
+            }
+        }
+    }
+
+    private func updateLinkedOpening(_ destination: LinkedSession, store: SessionsStore, workspace: SessionsWorkspace, panes: [PaneState], files: TaskFilesStore?, items: [SessionItem]? = nil) {
+        guard destination.generation == destinationGeneration,
+              let opening = taskOpening, opening.status == .opening else { return }
+        guard let item = (items ?? store.sessions).first(where: { $0.id == destination.record.id }) else { return }
+        let layout = workspace.multiplexer
+        let panesVisible = panes.allSatisfy { pane in
+            layout.layout.pane(for: pane.id) == pane && !layout.collapsedPaneIds.contains(pane.id)
+                && (layout.zoomedPaneId == nil || layout.zoomedPaneId == pane.id)
+        }
+        let reason: String?
+        if !panesVisible {
+            reason = "Opening panes were hidden, closed or replaced."
+        } else if item.record.workspace?.machineId == nil {
+            reason = "Session Machine unavailable."
+        } else if item.record.workspace?.identity != destination.record.workspace?.identity {
+            reason = "The Session checkout changed while opening; retry its current location."
+        } else {
+            switch item.state {
+            case .failed(let message): reason = message
+            case .elsewhere: reason = "Session is open elsewhere; use Move here explicitly."
+            case .pending where item.record.action(.open) == nil:
+                reason = "Session has no available opening action."
+            default: reason = files?.isRefreshingChanges == true ? nil : files?.changesError
+            }
+        }
+        if let reason {
+            taskOpening = DesktopOpening(url: opening.url, status: .failed, reason: reason)
+        } else if item.state == .live,
+                  destination.changesTask == nil || (files?.changes != nil && files?.isRefreshingChanges == false) {
+            taskOpening = DesktopOpening(url: opening.url, status: .usable, reason: nil)
+        }
+        if taskOpening?.status != .opening { openingSessionObservation = nil }
     }
 
     func openTaskDestination(wave: WaveRoadmap, task: RoadmapTask) {
+        openTaskDestination(wave: wave, task: task, preservingOpening: false)
+    }
+
+    private func openTaskDestination(wave: WaveRoadmap, task: RoadmapTask, preservingOpening: Bool) {
         if let openRepository, repoPath?.normalizedFilePath != wave.wave.repo.normalizedFilePath {
             openRepository(wave.wave.repo, TaskLink(issue: task.task.identifier, repo: wave.wave.repo).url)
             return
         }
-        setRepoPath(wave.wave.repo)
+        setRepoPath(wave.wave.repo, preservingOpening: preservingOpening)
         if navigation.selectedTaskEvidence.map({ $0.wave != wave || $0.task != task }) ?? true {
             navigation.selectedTaskEvidence = (wave, task)
         }
         // Reopening a Task must not clear its focused Session or retrigger entry.
         let isSelected = selection?.kind == .task
             && (selection?.id == task.id || selection?.id == task.runtime?.workId)
-        if !isSelected { select(.task(id: task.id)) }
+        if !isSelected { select(.task(id: task.id), preservingOpening: preservingOpening) }
         remember(.task(task.id))
     }
 
@@ -998,12 +1092,16 @@ final class WorkModel {
     }
 
     func setRepoPath(_ path: String?) {
+        setRepoPath(path, preservingOpening: false)
+    }
+
+    private func setRepoPath(_ path: String?, preservingOpening: Bool) {
         if let openRepository, let path,
            repoPath?.normalizedFilePath != WaveOrigin.resolve(path).normalizedFilePath {
             openRepository(path, nil)
             return
         }
-        dismissTaskLink()
+        if !preservingOpening { dismissTaskLink() }
         let path = path.map(WaveOrigin.resolve)
         if repoPath?.normalizedFilePath != path?.normalizedFilePath {
             historyLookup?.cancel()
@@ -1050,7 +1148,11 @@ final class WorkModel {
     }
 
     func select(_ requested: WorkReference?) {
-        dismissTaskLink()
+        select(requested, preservingOpening: false)
+    }
+
+    func select(_ requested: WorkReference?, preservingOpening: Bool) {
+        if !preservingOpening { dismissTaskLink() }
         historyLookup?.cancel()
         historyLookup = nil
         if let requested, requested.kind != .project {

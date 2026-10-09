@@ -280,6 +280,7 @@ final class TaskFilesStore {
     private(set) var changes: TaskChangesSnapshot?
     private(set) var directories: [String: TaskDirectory] = [:]
     private(set) var directoryErrors: [String: String] = [:]
+    private(set) var isRefreshingChanges = false
     private(set) var changesError: String?
     var expandedDirectories: Set<String> = []
     var showIgnored = false
@@ -442,6 +443,8 @@ final class TaskFilesStore {
     func refreshChanges() async {
         refreshGeneration += 1
         let generation = refreshGeneration
+        isRefreshingChanges = true
+        defer { if generation == refreshGeneration { isRefreshingChanges = false } }
         let base = base
         do {
             let changes = try await query.taskChanges(issue: issue, base: base, cwd: cwd)

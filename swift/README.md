@@ -565,8 +565,12 @@ child. Neither token authorizes terminal input.
 `desktop open` delivers the resolved Task/Session link to this same repository
 window. `--diff` reveals the existing Changes browser beside the conversation,
 retaining file selection and drafts. Launch acceptance returns `opening`; it does
-not prove a usable native endpoint. Inspection exposes lookup failures separately.
-Native readiness and downstream connection/comparison receipts remain unfinished.
+not prove a usable native endpoint. Inspection retains the latest request's outcome:
+`usable` requires the Session's native-surface callback and a loaded Changes reading
+when requested. Connection, surface and comparison failures remain `failed` on that
+request. Navigation cancels an unfinished opening; late results cannot settle a newer
+request, even for the same URL. This is endpoint readiness, not provider-turn completion
+or proof of compositor rendering. Plain-repository and remote opening remain separate.
 
 `lf desktop hide --target "$target"` and `lf desktop restore --target "$target"`
 change retained pane visibility. Focus, split, move, resize and zoom use that same

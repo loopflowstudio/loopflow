@@ -133,12 +133,14 @@ final class SessionsWorkspaceRegistry {
 
     /// Shares the Files pane and document cache with toolbar/CLI companions.
     /// Repeated opens retain both the conversation draft and file selection.
-    func showChanges(task: RoadmapTask, in identity: WorkspaceIdentity, query: RegistryQuery) {
+    @discardableResult
+    func showChanges(task: RoadmapTask, in identity: WorkspaceIdentity, query: RegistryQuery) -> TaskFilesStore {
         let workspace = workspace(for: identity)
         let key = task.runtime?.workId ?? task.task.identifier
         let files = workspace.files(taskId: key, issue: key, cwd: identity.worktree, query: query)
         files.showsChanges = true
         workspace.multiplexer.show(.files(taskId: task.id), focus: false)
+        return files
     }
 
     func readText(_ request: DesktopTextRequest) throws -> DesktopTextReading {
@@ -397,6 +399,11 @@ final class SessionsStore: ObservableObject {
         if let index = _index(id), case .prepared = sessions[index].state {
             sessions[index].state = .live
         }
+    }
+
+    func recordPaneFailure(_ id: String, reason: String) {
+        guard let index = _index(id), sessions[index].state == .prepared else { return }
+        sessions[index].state = .failed(reason)
     }
 
     /// A retained surface's child ended — provider exit or an external
@@ -711,15 +718,7 @@ struct SessionsContentView: View {
             }
         }
         .onChange(of: model.linkedSession, initial: true) { _, destination in
-            guard let destination,
-                  model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath else { return }
-            let record = destination.record
-            model.linkedSession = nil
-            store.reconcile(model.sessions.value ?? [])
-            openSession(record)
-            if let changesTask = destination.changesTask, let identity = record.workspace?.identity {
-                workspaces.showChanges(task: changesTask, in: identity, query: query)
-            }
+            if let destination { openLinkedSession(destination) }
         }
         .onReceive(NotificationCenter.default.publisher(for: .ghosttySurfaceClosed)) { notification in
             guard let terminal = notification.object as? TerminalIdentity else { return }
@@ -831,9 +830,31 @@ struct SessionsContentView: View {
         model.remember(destination)
     }
 
+    private func openLinkedSession(_ destination: LinkedSession) {
+        guard model.linkedSession == destination,
+              model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath else { return }
+        let record = destination.record
+        model.linkedSession = nil
+        store.reconcile(model.sessions.value ?? [])
+        openSession(record, preservingOpening: true)
+        var files: TaskFilesStore?
+        if let task = destination.changesTask, let identity = record.workspace?.identity {
+            files = workspaces.showChanges(task: task, in: identity, query: query)
+        }
+        let openingWorkspace = workspace
+        if files != nil, let zoomed = openingWorkspace.multiplexer.zoomedPaneId {
+            openingWorkspace.multiplexer.setZoom(zoomed, enabled: false)
+        }
+        Task { await model.connectLinkedOpening(destination, store: store, workspace: openingWorkspace, files: files) }
+    }
+
     private func openSession(_ record: SessionRecord) {
+        openSession(record, preservingOpening: false)
+    }
+
+    private func openSession(_ record: SessionRecord, preservingOpening: Bool) {
         let subject = model.projection.subject(for: record.id)
-        model.select(subject)
+        model.select(subject, preservingOpening: preservingOpening)
         Perf.begin(Perf.taskWorkspaceReady, "session", id: record.id)
         navigation.selectedSessionId = record.id
         navigation.content = .terminals
@@ -853,7 +874,7 @@ struct SessionsContentView: View {
             }
         }
         store.beginPaneLoad(record.id)
-        Task { @MainActor in await store.select(record.id) }
+        if !preservingOpening { Task { @MainActor in await store.select(record.id) } }
     }
 
     private func openTask(_ work: WorkReference) {
@@ -866,6 +887,9 @@ struct SessionsContentView: View {
     /// `lf session ensure --task` has chosen or started it; until then this
     /// asks, once per Task in this window.
     private func enterTask(_ work: WorkReference) {
+        // The exact linked Session is already chosen; ordinary primary entry
+        // must not race it when planning and Session observations arrive together.
+        guard model.linkedSession == nil else { return }
         guard let identity = taskIdentity, let task = fileTask else { return }
         let panes = workspaces.workspace(for: identity).multiplexer
         if let session = focusedPaneSessions.first {
@@ -1644,6 +1668,7 @@ private struct SessionPaneView: View {
                 onSurfaceCreated: {
                     sessions.recordPaneLive(item.id)
                 },
+                onSurfaceFailed: { reason in sessions.recordPaneFailure(item.id, reason: reason) },
                 onFocus: focusPane
             )
             .id(surface.id)

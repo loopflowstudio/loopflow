@@ -187,6 +187,136 @@ struct WorkDestinationTests {
         #expect(model.linkedSession == nil)
     }
 
+    @Test(arguments: ["usable", "connection", "surface", "comparison", "closed"])
+    func composedOpeningWaitsForNativeSessionAndComparison(outcome: String) async throws {
+        let (model, record, url, query) = try openingFixture(outcome: outcome)
+        await model.openTaskLink(url)
+        let request = try #require(model.linkedSession)
+        let workspace = SessionsWorkspace(identity: try #require(record.workspace?.identity))
+        workspace.multiplexer.load(sessionId: record.id)
+        workspace.multiplexer.show(.files(taskId: try #require(request.changesTask?.id)), focus: false)
+        let store = SessionsStore(repoPath: try #require(model.repoPath), query: query)
+        store.reconcile([record])
+        let files = TaskFilesStore(issue: "LOO-427", cwd: "/fixture", query: query)
+        files.selection = "retained-draft.rs"
+        await model.connectLinkedOpening(request, store: store, workspace: workspace, files: files)
+        if outcome == "comparison" {
+            #expect(model.taskOpening?.reason == "Comparison unavailable")
+        } else {
+            if outcome == "connection" {
+                #expect(model.taskOpening?.reason == "Connection unavailable")
+            } else {
+                #expect(store.sessions.first?.state == .prepared)
+                #expect(model.taskOpening?.status == .opening)
+                if outcome == "closed" {
+                    workspace.multiplexer.close(workspace.multiplexer.focusedPaneId)
+                    store.recordPaneLive(record.id)
+                    #expect(model.taskOpening?.reason == "Opening panes were hidden, closed or replaced.")
+                } else if outcome == "surface" {
+                    store.recordPaneFailure(record.id, reason: "Native surface unavailable")
+                    #expect(model.taskOpening?.reason == "Native surface unavailable")
+                } else {
+                    // Exercise the native owner's callback, not a fabricated prepared=usable rule.
+                    store.recordPaneLive(record.id)
+                }
+            }
+        }
+        #expect(model.taskOpening?.status == (outcome == "usable" ? .usable : .failed))
+        #expect(model.taskOpening?.url == url.absoluteString)
+        #expect(files.selection == "retained-draft.rs")
+    }
+
+    @Test(arguments: [false, true])
+    func supersededOpeningCannotSettleRepeatedURL(cancel: Bool) async throws {
+        let (model, record, url, query) = try openingFixture(outcome: "usable")
+        await model.openTaskLink(url)
+        let oldRequest = try #require(model.linkedSession)
+        let workspace = SessionsWorkspace(identity: try #require(record.workspace?.identity))
+        workspace.multiplexer.load(sessionId: record.id)
+        workspace.multiplexer.show(.files(taskId: try #require(oldRequest.changesTask?.id)), focus: false)
+        let oldStore = SessionsStore(repoPath: try #require(model.repoPath), query: query)
+        oldStore.reconcile([record])
+        await oldStore.select(record.id)
+        await model.connectLinkedOpening(oldRequest, store: oldStore, workspace: workspace, files: nil)
+        await model.openTaskLink(url)
+        let newRequest = try #require(model.linkedSession)
+        #expect(oldRequest.generation != newRequest.generation)
+        let newStore = SessionsStore(repoPath: try #require(model.repoPath), query: query)
+        newStore.reconcile([record])
+        await newStore.select(record.id)
+        let files = TaskFilesStore(issue: "LOO-427", cwd: "/fixture", query: query)
+        await model.connectLinkedOpening(newRequest, store: newStore, workspace: workspace, files: files)
+        if cancel { model.dismissTaskLink() }
+        let before = model.taskOpening
+        oldStore.recordPaneFailure(record.id, reason: "Late old failure")
+        await model.connectLinkedOpening(oldRequest, store: oldStore, workspace: workspace, files: nil)
+        #expect(model.taskOpening == before)
+        newStore.recordPaneLive(record.id)
+        #expect(model.taskOpening?.status == (cancel ? .failed : .usable))
+        #expect(model.taskOpening?.reason != "Late old failure")
+    }
+
+    @Test func canceledComparisonCannotSettleNewOpening() async throws {
+        let barrier = LinkedDestinationBarrier()
+        let (model, record, url, query) = try openingFixture(outcome: "usable", comparisonBarrier: barrier)
+        await model.openTaskLink(url)
+        let request = try #require(model.linkedSession)
+        let workspace = SessionsWorkspace(identity: try #require(record.workspace?.identity))
+        workspace.multiplexer.load(sessionId: record.id)
+        workspace.multiplexer.show(.files(taskId: try #require(request.changesTask?.id)), focus: false)
+        let store = SessionsStore(repoPath: try #require(model.repoPath), query: query)
+        store.reconcile([record])
+        await store.select(record.id)
+        store.recordPaneLive(record.id)
+        let files = TaskFilesStore(issue: "LOO-427", cwd: "/fixture", query: query)
+        let reading = Task { await model.connectLinkedOpening(request, store: store, workspace: workspace, files: files) }
+        while !(await barrier.contains("comparison")) { await Task.yield() }
+        #expect(model.taskOpening?.status == .opening)
+        await model.openTaskLink(url)
+        let next = try #require(model.linkedSession)
+        await barrier.release("comparison")
+        await reading.value
+        #expect(model.taskOpening?.status == .opening)
+        #expect(model.linkedSession == next)
+        model.dismissTaskLink()
+        #expect(model.taskOpening?.status == .failed)
+    }
+
+    private func openingFixture(outcome: String, comparisonBarrier: LinkedDestinationBarrier? = nil) throws -> (WorkModel, SessionRecord, URL, RegistryQuery) {
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(try fixture().utf8))
+        let wave = try #require(snapshot.waves.first)
+        let task = try #require(wave.tasks.items.first)
+        var record = try renameFixtureRecord("ready-session", title: "Review", work: .task(id: #require(task.runtime?.workId)))
+        let identity = try #require(task.reference.workspace?.identity)
+        record.workspace = try JSONDecoder().decode(SessionWorkspace.self, from: JSONSerialization.data(withJSONObject: [
+            "machine_id": identity.machineId, "worktree": identity.worktree, "task_id": try #require(task.runtime?.workId)
+        ]))
+        var sessionJSON = try JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as! [String: Any]
+        sessionJSON["actions"] = sessionActionFixture(state: "closed")
+        record = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: sessionJSON))
+        let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
+        let fixtureURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("tests/fixtures/dto/task_files.json")
+        let root = try JSONSerialization.jsonObject(with: Data(contentsOf: fixtureURL)) as! [String: Any]
+        let changes = String(decoding: try JSONSerialization.data(withJSONObject: #require(root["changes"])), as: UTF8.self)
+        let query = RegistryQuery { args, _ in
+            if args.starts(with: ["session", "list"]) { return #"{"entries":[\#(encoded)],"next":null}"# }
+            if args.starts(with: ["session", "connect"]) {
+                if outcome == "connection" { throw RegistryQueryError("Connection unavailable") }
+                return encoded
+            }
+            if args.starts(with: ["task", "diff"]) {
+                if let comparisonBarrier { await comparisonBarrier.wait("comparison") }
+                if outcome == "comparison" { throw RegistryQueryError("Comparison unavailable") }
+                return changes
+            }
+            throw RegistryQueryError("Unexpected fixture operation")
+        }
+        let model = WorkModel(query: query, repoPath: wave.wave.repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        return (model, record, try #require(TaskLink(issue: task.task.identifier, repo: wave.wave.repo, session: record.id, diff: true).url), query)
+    }
+
     @Test func delayedPrimarySessionPreparationDoesNotOpenChangesInAnotherTask() async throws {
         let data = try fixture()
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))

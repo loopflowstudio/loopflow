@@ -19,6 +19,7 @@ struct GhosttyTerminalView: View {
     let surfacePool: GhosttySurfacePool?
     let isFocused: Bool
     let onSurfaceCreated: () -> Void
+    let onSurfaceFailed: (String) -> Void
     let onFocus: () -> Void
     @ObservedObject var manager: GhosttyManager
 
@@ -30,6 +31,7 @@ struct GhosttyTerminalView: View {
         surfacePool: GhosttySurfacePool? = nil,
         isFocused: Bool = false,
         onSurfaceCreated: @escaping () -> Void = {},
+        onSurfaceFailed: @escaping (String) -> Void = { _ in },
         onFocus: @escaping () -> Void = {},
         manager: GhosttyManager = .shared
     ) {
@@ -40,6 +42,7 @@ struct GhosttyTerminalView: View {
         self.surfacePool = surfacePool
         self.isFocused = isFocused
         self.onSurfaceCreated = onSurfaceCreated
+        self.onSurfaceFailed = onSurfaceFailed
         self.onFocus = onFocus
         self.manager = manager
     }
@@ -53,6 +56,7 @@ struct GhosttyTerminalView: View {
                 surfacePool: surfacePool,
                 isFocused: isFocused,
                 onSurfaceCreated: onSurfaceCreated,
+                onSurfaceFailed: onSurfaceFailed,
                 onFocus: onFocus,
                 size: geo.size,
                 manager: manager
@@ -76,6 +80,7 @@ struct GhosttyTerminalRepresentable: NSViewRepresentable {
     let surfacePool: GhosttySurfacePool?
     let isFocused: Bool
     let onSurfaceCreated: () -> Void
+    let onSurfaceFailed: (String) -> Void
     let onFocus: () -> Void
     let size: CGSize
     @ObservedObject var manager: GhosttyManager
@@ -103,6 +108,7 @@ struct GhosttyTerminalRepresentable: NSViewRepresentable {
             nsView.workingDirectory = workingDirectory
             nsView.command = command
             nsView.onSurfaceCreated = onSurfaceCreated
+            nsView.onSurfaceFailed = onSurfaceFailed
             nsView.onFocus = onFocus
             nsView.sizeDidChange(size)
 
@@ -110,6 +116,7 @@ struct GhosttyTerminalRepresentable: NSViewRepresentable {
                size.width > 0, size.height > 0 {
                 nsView.createSurface(manager: manager)
             }
+            if case .failed(let reason) = manager.state { onSurfaceFailed(reason) }
             nsView.updateFocus(isFocused: isFocused, isEnabled: enabled)
         }
         guard nsView.superview === mount else { return }
@@ -395,6 +402,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     var command: String?
     let terminal: TerminalIdentity
     var onSurfaceCreated: () -> Void = {}
+    var onSurfaceFailed: (String) -> Void = { _ in }
     var onFocus: () -> Void = {}
     weak var pool: GhosttySurfacePool?
     /// Set when the surface's child ended; blocks implicit relaunch — reopening
@@ -479,6 +487,8 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             if window != nil { setupDisplayLink() }
             setupTrackingArea()
             onSurfaceCreated()
+        } else {
+            onSurfaceFailed("Could not create the native terminal surface.")
         }
     }
 
@@ -1399,6 +1409,7 @@ struct GhosttyTerminalView: View {
     let surfacePool: GhosttySurfacePool?
     let isFocused: Bool
     let onSurfaceCreated: () -> Void
+    let onSurfaceFailed: (String) -> Void
     let onFocus: () -> Void
     @ObservedObject var manager: GhosttyManager
 
@@ -1410,6 +1421,7 @@ struct GhosttyTerminalView: View {
         surfacePool: GhosttySurfacePool? = nil,
         isFocused: Bool = false,
         onSurfaceCreated: @escaping () -> Void = {},
+        onSurfaceFailed: @escaping (String) -> Void = { _ in },
         onFocus: @escaping () -> Void = {},
         manager: GhosttyManager = .shared
     ) {
@@ -1420,6 +1432,7 @@ struct GhosttyTerminalView: View {
         self.surfacePool = surfacePool
         self.isFocused = isFocused
         self.onSurfaceCreated = onSurfaceCreated
+        self.onSurfaceFailed = onSurfaceFailed
         self.onFocus = onFocus
         self.manager = manager
     }
@@ -1437,6 +1450,7 @@ struct GhosttyTerminalView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(TerminalPalette.background)
+        .onAppear { onSurfaceFailed("Embedded terminal not available in this build.") }
     }
 }
 

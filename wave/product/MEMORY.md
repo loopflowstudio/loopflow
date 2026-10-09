@@ -19,10 +19,9 @@ LOO-389's brief was read; comments failed on an unbound Initiative.
   and display machines differ; takeover is explicit. Partial below.
 - Jack: delegation applies to open, unstarted and future Tasks. Started Tasks stay
   on their machine across later runs. Inheritance remains proposed.
-- Jack specified macOS-only Desktop launching/control, with actionable Linux
-  errors and a terminal alternative before launch or Work mutation (LOO-426/427).
-  Ordinary lf remains cross-platform; the displaying Mac and execution machine
-  are distinct.
+- Jack: Desktop control is macOS-only (LOO-426/427); Linux errors name a terminal
+  alternative before launch or Work mutation. Ordinary lf remains cross-platform;
+  displaying and execution machines differ.
 - LOO-416 owns saved per-Task panes and reattachment; LOO-426 owns Task/Session
   opening; LOO-402 owns Waiting navigation, including blocked shell panes through
   shared Swift while Session Waiting stays in Rust. LOO-403 owns shortcuts and
@@ -60,8 +59,8 @@ removed; Task skill/Flow selection survives. History owns activity, Process page
 show/replay and usage; Desktop owns open/list. Bare `open` conflicts with PR opening;
 Sessions use `connect`. October 9 local Task/Session-plus-Changes opening bypasses
 execution routing and CLI preparation. Session/companion intent travels together; a partial Session inventory must not
-retire other panes. `opening` stops before native readiness or downstream failures;
-those outcomes must retain their originating request. Wave planning, remote/Flow
+retire other panes. Opening generations now follow Session/Files/pane readiness and failures; repeated
+URLs are distinct requests. Native usability remains unproved. Wave planning, remote/Flow
 input and full action explanation remain. Discord is unchanged;
 `--steers-after` filters nodes, not restarts.
 `repo_root` (default `~/src`) and paths resolve on the selected Machine, never as

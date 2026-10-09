@@ -140,6 +140,10 @@ association remains unfinished; neither IDs nor execution histories are merged.
 Replacing a rejected mapping with null cannot hide its earlier claim against
 another local owner. Creation receipts also retain their original Work-derived
 provider UUID and captured model identity: a lookup alias cannot rekey them.
+Task creation currently has one receipt per Task; Project creation/link fields
+live on the Project row. Association must preserve each original attempt rather
+than overwrite either origin in that single projection slot. This common receipt
+representation remains unfinished; the shared retained-claim query only defers effects.
 
 `ops/planning_delivery.rs` consumes mapped Task titles, descriptions, nullable
 assignees and membership, and Project names, summaries, statuses and structured

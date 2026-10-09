@@ -529,15 +529,9 @@ The archived file-binding design is superseded by SQLite selection below.
 Its output-handle leak remains unresolved; seeded ensure recovery proves no crash
 recovery. Exact evidence remains in the preserved October 5 notes above.
 
-October 5 rotation retains exact-ID input, selected issue membership and settled
-history. Whole-input preflight includes accepted facts and legacy conversion;
-all pairs reserve before provider writes. Creation intent survives retry; unfinished KRs stay editable.
-Before switching, reclassify new work; afterward reconcile only saved selections,
-preserving later starts and external moves. Planning updates preserve names,
-summaries and unrelated text. Queued membership/conversion writers retain guards.
-Operation fixtures cover partial settlement and both sides of the switch;
-CLI crashes, Desktop and configured Intelligence acceptance remain open.
-Earlier counterexamples: `fc6df439424bd341ec3cd8182c19b13ed45cffd7:wave/infrastructure/MEMORY.md`.
+October 5 rotation preserves exact input, unfinished KRs, later starts and external
+moves. Public crash/Desktop acceptance remains open; detailed source proofs and
+counterexamples: `bb51446f4:wave/infrastructure/MEMORY.md`, this heading.
 
 October 6: Jack Heart authorized SQLite selection and LOO-382's stream, deleting
 the YAML selector and `ProjectPreparation`. Dependency `e887a21c1` entered through

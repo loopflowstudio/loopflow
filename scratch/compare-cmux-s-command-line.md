@@ -236,17 +236,17 @@ resolution: repository IDs (including historical locators) resolve to a path bef
 Task aliases/prefixes. The post-routing identity comparison is deleted; scope does
 not depend on globally unique aliases. Unknown Tasks retain ordinary acquisition.
 
-Receipt import no longer synthesizes `task_creation_intents`; only local creation
-requests own idempotence. Full-ID correspondence extends the existing resolver,
-not a second Work registry or execution alias. Task/Project lookup no longer
-releases its connection between physical lookup, correspondence and record reads:
-the common resolver and row readers share one read snapshot. Later lookups recheck
-mapping changes; the snapshot grants no execution or synchronization authority.
+Receipt imports never synthesize `task_creation_intents`. Task/Project correspondence,
+physical lookup and record reads share one snapshot, granting neither execution nor
+sync authority. Projection retains per-origin heads, accepted-only save parents,
+private holds and separate provider savepoints. Foreground fixtures replace direct
+transport tests. Detail: `4688a4d85`, this section; `263d1f7d7` retains earlier deletions.
 
-Ancestry/projection and foreground-fixture deletions: `263d1f7d7`, this section.
-The surviving owners retain per-origin heads, accepted-only save parents, private
-holds and separate provider savepoints. Public foreground fixtures replace direct
-transport tests; one typed WorkFrame reader and shared SQLite seeds retain coverage.
+Task preview selection now precedes action dispatch; remove per-action selector
+comparisons, not the shared resolver. `read_local_task` replaces the duplicated
+Task lookup plus `read_local_execution` wrapper for run/move explanations. It
+retains unavailable location and remote refusals before reading Workflow intent;
+no preparation or admission is added.
 
 Input reuses `insertTerminalText` and the pane event. Registry, multiplexer and
 surface owners remain authoritative: Close/Undo renews content tokens; filtered
@@ -398,7 +398,7 @@ completions. Utility windows and retained surfaces keep their own lifetimes.
 Inspection forwards Task and Session actions independently, retaining Task dates;
 Session observation time stays unavailable. Saved/failed readings grant no actions.
 Shared peer identity, remote observations/opening and configured proof remain.
-Outside Task run, Desktop open and Session connect/resume, supported previews
+Outside Task run/move/restart, Desktop open and Session connect/resume, supported previews
 mostly explain identity rather than effects; unsupported commands refuse. Broader
 action explanation must reuse each operation's validation, not report the generic
 Work resolution as an invocation plan.
@@ -525,4 +525,4 @@ identity/delegation, open them, add shell/Files panes, retain an unfinished draf
 change focus, target a harmless command, read output, hide/restore, and verify the
 original input target and draft survive. Demo owns native usability; preserve comparison evidence and use no real accounts or live user terminals.
 
-Check: network-isolated `global_commands task_move_explain` + Task-run regression PASS (3); `dto_fixtures task_move_explanations` / headless Swift counterpart PASS (1 each); build/fmt/Clippy PASS; full suites: gate; native: demo.
+Check: network-isolated `global_commands task_` PASS (8; installation ignored → CI); build/fmt/Clippy PASS. Full suites: gate; native: demo. Earlier DTO passes: `4688a4d85`, this line.

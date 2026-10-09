@@ -1366,6 +1366,24 @@ fn task_run_explain_reports_remote_unknown_and_refused_evidence_without_effects(
             }
             _ => unreachable!(),
         }
+        if matches!(condition, "remote" | "unknown") {
+            let movement: serde_json::Value = serde_json::from_str(&success(
+                command(
+                    home.path(),
+                    repo.path(),
+                    &["task", "move", "INF-123", "end", "--explain", "--json"],
+                )
+                .output()
+                .unwrap(),
+            ))
+            .unwrap();
+            assert!(movement["action"].is_null());
+            assert_eq!(movement["unavailable"], report["unavailable"]);
+            assert_eq!(
+                movement["resolution"]["execution_machine"],
+                report["resolution"]["execution_machine"]
+            );
+        }
         db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
         assert!(
             fs::read(&path).unwrap() == before,
@@ -1900,6 +1918,18 @@ fn task_move_explain_validates_the_captured_graph_without_moving_or_reconciling(
         "--json",
     ]);
     assert_eq!(scoped["action"], preview["action"]);
+    for action in [
+        vec!["task", "run", "INF-123"],
+        vec!["task", "move", "INF-123", "start"],
+        vec!["task", "workflow", "restart", "INF-123"],
+        vec!["task", "workflow", "show", "INF-123"],
+    ] {
+        let mut args = vec!["--task", "UNKNOWN-1", "--explain"];
+        args.extend(action);
+        let output = command(home.path(), repo.path(), &args).output().unwrap();
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("conflicting Task selections"));
+    }
     let cases = [
         (vec!["task", "move", "INF-123", "missing"], "has no node"),
         (

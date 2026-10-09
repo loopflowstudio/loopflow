@@ -207,10 +207,7 @@ delegation and remote/native proof remain; neither refusal was lifted.
 
 ## Workflow movement explanation — October 9
 
-Identity-only previews skipped node/force validation. Movement/restart now reuse
-execution's captured graph and location readers, preserving exact prior edges.
-End intent leaves reconciliation/cleanup unperformed. Review removed duplicate
-missing-Workflow errors. The first CLI test rejected an ID and alias for the same
-Task: simultaneous selectors now normalize through the shared resolver without
-requiring `--repo`. Failed log: `/tmp/loo427-move-first-failure.log`; recovered
-scratch conflict/notes: `/tmp/loo427-implement-9Chixx/`, checkpoint `6ce198b75`.
+Run/move readers share Task selection/location; movement/restart retain captured
+graph validation and exact prior edges. End intent does not reconcile or clean up.
+The ID-versus-alias failure and recovery remain at `4688a4d85`, this heading
+(`/tmp/loo427-move-first-failure.log`, `/tmp/loo427-implement-9Chixx/`).

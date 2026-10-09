@@ -132,10 +132,10 @@ readers and suppresses fallback Process writes. Parsed transport retains scoped 
 Checkpoint both stores: an effect-free receiver cannot undo a sender's write.
 Two-CLI fixtures cover routing/Flow previews, not configured SSH or exclusive start.
 
-Session explanation reuses opening without probing endpoints; reachability stays
-unavailable; opening re-resolves. JSON preparation grants no takeover. Move previews
-share captured-node validation and prior edges, moving/stopping nothing. End intent grants no completion: reconciliation/cleanup remain unperformed.
-No native proof (`859c414d1`).
+Session explanation reuses opening without endpoint probes; opening re-resolves.
+JSON preparation grants no takeover. Task previews share selector/location reads;
+move validation preserves prior edges without effects. End intent grants no
+completion: reconciliation/cleanup remain unperformed. No native proof (`859c414d1`).
 
 ## Terminal-host adoption (2026-10-07)
 

@@ -99,24 +99,13 @@ async fn read_task_run(
     options: &TaskProcessOptions,
     report: &mut TaskRunExplanation,
 ) -> anyhow::Result<()> {
-    let id = match &report.resolution.task {
-        ContextFact::Bound { value, .. } => crate::durable::TaskId::parse(value)?,
-        ContextFact::Unbound => {
-            anyhow::bail!("No Task selected; name a Task or run from its checkout")
-        }
-        ContextFact::Unavailable { reason } => anyhow::bail!("{reason}"),
-    };
-    let task = store
-        .get_task(&id)
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("Task {id} is missing"))?;
-    read_local_execution(store, &id, &mut report.resolution).await?;
+    let task = read_local_task(store, &mut report.resolution).await?;
     if task.worktree.is_none() {
         report.unavailable.push("Future checkout and peer-exclusive first-start admission are not observed; definitions are read from the local repository before preparation".into());
     }
     // The launch owner's read-only check includes planning validity, current
     // chapter, completion and cancellation, rather than a status approximation.
-    if let Err(error) = store.sqlite.require_task_launch(&id) {
+    if let Err(error) = store.sqlite.require_task_launch(&task.id) {
         match error {
             crate::store::StoreError::InvalidAuthority(_) => {
                 report.impediments.push(error.to_string())
@@ -284,17 +273,8 @@ async fn read_task_move(
     end: &super::EndOptions,
     report: &mut TaskMoveExplanation,
 ) -> anyhow::Result<()> {
-    let id = match &report.resolution.task {
-        ContextFact::Bound { value, .. } => crate::durable::TaskId::parse(value)?,
-        ContextFact::Unbound => anyhow::bail!("No Task selected"),
-        ContextFact::Unavailable { reason } => anyhow::bail!("{reason}"),
-    };
-    let task = store
-        .get_task(&id)
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("Task {id} is missing"))?;
-    read_local_execution(store, &id, &mut report.resolution).await?;
-    let workflow = store.sqlite.workflow(&id)?;
+    let task = read_local_task(store, &mut report.resolution).await?;
+    let workflow = store.sqlite.workflow(&task.id)?;
     if let Err(error) =
         super::validate_workflow_move(workflow.as_ref(), &task.plan.identifier, node, end)
     {
@@ -320,12 +300,22 @@ async fn read_task_move(
 }
 
 // Workflow position stays on the execution Machine, never in portable planning.
-async fn read_local_execution(
+async fn read_local_task(
     store: &SharedStore,
-    id: &crate::durable::TaskId,
     resolution: &mut ContextExplanation,
-) -> anyhow::Result<()> {
-    let route = match store.task_execution_route(id).await {
+) -> anyhow::Result<crate::work::task::Task> {
+    let id = match &resolution.task {
+        ContextFact::Bound { value, .. } => crate::durable::TaskId::parse(value)?,
+        ContextFact::Unbound => {
+            anyhow::bail!("No Task selected; name a Task or run from its checkout")
+        }
+        ContextFact::Unavailable { reason } => anyhow::bail!("{reason}"),
+    };
+    let task = store
+        .get_task(&id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("Task {id} is missing"))?;
+    let route = match store.task_execution_route(&id).await {
         Ok(route) => route,
         Err(error) => {
             resolution.execution_machine = ContextFact::Unavailable {
@@ -345,5 +335,5 @@ async fn read_local_execution(
     if route.machine_id != store.local_machine().await?.id {
         anyhow::bail!("Execution state belongs to Machine {}; no peer read or remote preparation was performed", route.machine_id);
     }
-    Ok(())
+    Ok(task)
 }

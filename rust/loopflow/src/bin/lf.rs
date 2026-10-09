@@ -1721,6 +1721,19 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
             None => break,
         }
     }
+    // Entry resolution has normalized known selectors to exact Task IDs.
+    // Every Task preview uses that same selection, regardless of its action.
+    let task = if let Some(Commands::Task { cmd }) = &cli.command {
+        if let (Some(global), Some(subject)) = (cli.task.as_deref(), cmd.selector()) {
+            anyhow::ensure!(
+                global == subject,
+                "conflicting Task selections: {global} and {subject}"
+            );
+        }
+        cmd.selector().or(cli.task.as_deref())
+    } else {
+        cli.task.as_deref()
+    };
     if let Some(Commands::Desktop {
         cmd: loopflow::lf::DesktopCommand::Open { session, diff, .. },
     }) = &cli.command
@@ -1740,13 +1753,13 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
     if let Some(Commands::Task {
         cmd:
             TaskCommand::Run {
-                issue,
                 flow,
                 name,
                 stack_on,
                 directive,
                 reason,
                 force,
+                ..
             },
     }) = &cli.command
     {
@@ -1754,14 +1767,8 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
             !cli.context,
             "--context requires a skill, Flow or inline agent request; nothing was executed"
         );
-        if let (Some(global), Some(subject)) = (cli.task.as_deref(), issue.as_deref()) {
-            anyhow::ensure!(
-                global == subject,
-                "conflicting Task selections: {global} and {subject}"
-            );
-        }
         let report = loopflow::lf::commands::context::explain_task_run(
-            issue.as_deref().or(cli.task.as_deref()),
+            task,
             &loopflow::ops::task::TaskProcessOptions {
                 wave: cli.wave.clone(),
                 reason: reason.clone(),
@@ -1803,12 +1810,6 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
             !cli.context,
             "--context requires an agent invocation; nothing was executed"
         );
-        if let Some(global) = cli.task.as_deref() {
-            anyhow::ensure!(
-                global == task,
-                "conflicting Task selections: {global} and {task}"
-            );
-        }
         let report = loopflow::lf::commands::context::explain_task_move(
             task,
             cli.wave.as_deref(),
@@ -1860,22 +1861,12 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
         }
         return Ok(());
     }
-    let mut task = cli.task.as_deref();
     let wave = cli.wave.as_deref();
     let mut process = None;
     let invocation = definition_invocation(cli)?;
     let mut message = None;
     match &cli.command {
-        Some(Commands::Task { cmd }) => {
-            if let (Some(global), Some(subject)) = (task, cmd.selector()) {
-                anyhow::ensure!(
-                    global == subject,
-                    "conflicting Task selections: {global} and {subject}"
-                );
-            }
-            task = cmd.selector().or(task);
-        }
-        None => {}
+        Some(Commands::Task { .. }) | None => {}
         Some(Commands::History {
             cmd: Some(loopflow::lf::commands::history::HistoryCommand::Show { id, .. }),
             ..

@@ -1967,6 +1967,14 @@ impl SqliteStore {
         wave_id: &WaveId,
     ) -> StoreResult<Vec<String>> {
         let mut blockers = Vec::new();
+        let documents: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM wave_documents WHERE wave_id=?1",
+            [wave_id],
+            |row| row.get(0),
+        )?;
+        if documents > 0 {
+            blockers.push("stored definitions".to_string());
+        }
         let projects: i64 = conn.query_row(
             "SELECT COUNT(*) FROM projects WHERE wave_id = ?1",
             params![wave_id],

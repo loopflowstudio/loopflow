@@ -65,7 +65,8 @@ pub async fn relocate_wave(
                 let blockers = store.wave_retirement_blockers(existing.id()).await?;
                 if !blockers.is_empty() {
                     return Err(anyhow!(
-                        "destination Wave {} retains {}",
+                        "cannot relocate Wave {}: destination Wave {} retains {}",
+                        planned.wave.id(),
                         existing.id(),
                         blockers.join(", ")
                     ));

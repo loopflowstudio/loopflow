@@ -542,9 +542,12 @@ fn gather_wave_docs(repo_root: &Path, wave: Option<&str>) -> Result<Vec<Document
     let Some(wave) = wave else {
         return Ok(docs);
     };
-    let store =
-        crate::store::sqlite::SqliteStore::open_read_only(&crate::store::database_path_from_env()?)
-            .map_err(|error| CoreError::IoError(error.to_string()))?;
+    let database = crate::store::database_path_from_env()?;
+    if !database.exists() {
+        return Ok(docs);
+    }
+    let store = crate::store::sqlite::SqliteStore::open_read_only(&database)
+        .map_err(|error| CoreError::IoError(error.to_string()))?;
     let repo = crate::repository::CanonicalRepo::discover(repo_root)
         .map_err(|error| CoreError::IoError(error.to_string()))?;
     let mut prefix = String::new();

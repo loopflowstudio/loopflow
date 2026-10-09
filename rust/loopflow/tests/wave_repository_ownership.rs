@@ -1,3 +1,5 @@
+mod support;
+
 #[path = "support/planning.rs"]
 mod planning;
 
@@ -157,6 +159,7 @@ fn lf(home: &Path, repo: &Path, args: &[&str]) -> serde_json::Value {
 async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path().join("home");
+    let _env = support::EnvGuard::with_lf_home(&[], &home);
     let repo_a = tmp.path().join("alpha");
     let repo_b = tmp.path().join("beta");
     let repo_c = tmp.path().join("gamma");
@@ -177,6 +180,9 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     let beta = registered_wave(&repo_b, "infrastructure");
     store.create_wave(&alpha).await.unwrap();
     store.create_wave(&beta).await.unwrap();
+    let definitions = loopflow::store::sqlite::SqliteStore::new(&database).unwrap();
+    definitions.ensure_wave(alpha.repo(), alpha.slug()).unwrap();
+    definitions.ensure_wave(beta.repo(), beta.slug()).unwrap();
     assert_ne!(alpha.id(), beta.id());
 
     #[cfg(unix)]
@@ -402,7 +408,7 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     )
     .await
     .unwrap_err();
-    assert!(overlap.to_string().contains("paths overlap"));
+    assert!(overlap.to_string().contains("parent"), "{overlap}");
     assert!(repo_a.join("wave/infrastructure/GOAL.md").is_file());
 
     for (repo, team) in [
@@ -425,9 +431,15 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     author_wave(&repo_a, "infrastructure/child", "child");
     let child = registered_wave(&repo_a, "child").with_parent(alpha.id().clone());
     store.create_wave(&child).await.unwrap();
+    definitions
+        .ensure_wave(alpha.repo(), "infrastructure/child")
+        .unwrap();
     author_wave(&repo_a, "infrastructure/child/leaf", "grandchild");
     let grandchild = registered_wave(&repo_a, "leaf").with_parent(child.id().clone());
     store.create_wave(&grandchild).await.unwrap();
+    definitions
+        .ensure_wave(alpha.repo(), "infrastructure/child/leaf")
+        .unwrap();
 
     let occupied = registered_wave(&repo_a, "occupied");
     store.create_wave(&occupied).await.unwrap();
@@ -455,13 +467,7 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     assert!(collision.to_string().contains("PM snapshot"));
 
     author_wave(&repo_a, "platform", "divergent");
-    let divergence = relocate_wave(&store, alpha.id(), &repo_a, None, Some("platform"))
-        .await
-        .unwrap_err();
-    assert!(divergence.to_string().contains("diverges"));
-    assert!(repo_a.join("wave/infrastructure").is_dir());
-    std::fs::remove_dir_all(repo_a.join("wave/platform")).unwrap();
-    commit(&repo_a, "remove divergent target");
+    // Unimported repository files neither select nor block the saved plan.
 
     rusqlite::Connection::open(&database)
         .unwrap()
@@ -481,7 +487,10 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     );
     assert!(repo_a.join("wave/infrastructure").is_dir());
     assert!(repo_a.join("wave/platform").is_dir());
-    commit(&repo_a, "record staged relocation");
+    assert_eq!(
+        std::fs::read_to_string(repo_a.join("wave/platform/GOAL.md")).unwrap(),
+        "# divergent\n"
+    );
     rusqlite::Connection::open(&database)
         .unwrap()
         .execute_batch("DROP TRIGGER fail_wave_relocation")
@@ -504,17 +513,23 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     let renamed = store.get_wave(alpha.id()).await.unwrap().unwrap();
     assert_eq!(renamed.slug(), "platform");
     assert_eq!(
-        std::fs::read_to_string(repo_a.join("wave/platform/GOAL.md")).unwrap(),
+        definitions.wave_documents(alpha.id()).unwrap()["GOAL.md"],
         "# alpha\n"
     );
-    assert!(!repo_a.join("wave/infrastructure").exists());
+    assert!(repo_a.join("wave/infrastructure").exists());
     let renamed_child = store.get_wave(child.id()).await.unwrap().unwrap();
     assert_eq!(renamed_child.slug(), "platform/child");
-    assert!(repo_a.join("wave/platform/child/GOAL.md").is_file());
+    assert_eq!(
+        definitions.wave_documents(child.id()).unwrap()["GOAL.md"],
+        "# child\n"
+    );
     let renamed_grandchild = store.get_wave(grandchild.id()).await.unwrap().unwrap();
     assert_eq!(renamed_grandchild.slug(), "platform/child/leaf");
     assert_eq!(renamed_grandchild.parent_wave_id(), Some(child.id()));
-    assert!(repo_a.join("wave/platform/child/leaf/GOAL.md").is_file());
+    assert_eq!(
+        definitions.wave_documents(grandchild.id()).unwrap()["GOAL.md"],
+        "# grandchild\n"
+    );
     assert_eq!(
         store
             .get_wave_at(&WaveLocator::discover(&repo_b, "infrastructure").unwrap())
@@ -524,14 +539,13 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
             .id(),
         beta.id()
     );
-    commit(&repo_a, "record Wave rename");
 
     relocate_wave(&store, alpha.id(), &repo_a, Some(&repo_c), None)
         .await
         .unwrap();
-    assert!(!repo_a.join("wave/platform").exists());
+    assert!(repo_a.join("wave/platform").exists());
     assert_eq!(
-        std::fs::read_to_string(repo_c.join("wave/platform/GOAL.md")).unwrap(),
+        definitions.wave_documents(alpha.id()).unwrap()["GOAL.md"],
         "# alpha\n"
     );
 
@@ -556,7 +570,7 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     assert_eq!(moved_grandchild.repo(), moved.repo());
     assert_eq!(moved_grandchild.slug(), "platform/child/leaf");
     assert_eq!(moved_grandchild.parent_wave_id(), Some(child.id()));
-    assert!(repo_d.join("wave/platform/child/leaf/GOAL.md").is_file());
+    assert!(!repo_d.join("wave/platform").exists());
     assert_eq!(
         store
             .pm_snapshot(alpha.id())
@@ -613,6 +627,7 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
 async fn missing_repository_wave_can_be_disabled_and_relocated_from_its_target() {
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path().join("home");
+    let _env = support::EnvGuard::with_lf_home(&[], &home);
     let source = tmp.path().join("missing-source");
     let target = tmp.path().join("surviving-target");
     repository(&source);
@@ -660,10 +675,10 @@ async fn relocation_retires_an_empty_destination_shadow_without_losing_identity(
     repository(&target);
     for slug in ["core", "ear", "theory"] {
         author_wave(&source, slug, slug);
-        author_wave(&target, slug, slug);
     }
     author_wave(&target, "scores", "scores");
     let home = tmp.path().join("home");
+    let _env = support::EnvGuard::with_lf_home(&[], &home);
     std::fs::create_dir_all(&home).unwrap();
     let database = home.join("loopflow.db");
     let store = loopflow::store::open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
@@ -691,7 +706,11 @@ async fn relocation_retires_an_empty_destination_shadow_without_losing_identity(
             .await
             .unwrap();
         assert_eq!(receipt.wave_id, established.id().as_str());
-        commit(&source, &format!("relocate {}", established.slug()));
+        assert!(source
+            .join("wave")
+            .join(established.slug())
+            .join("GOAL.md")
+            .is_file());
 
         let active = store
             .get_wave_at(&WaveLocator::discover(&target, established.slug()).unwrap())
@@ -775,6 +794,7 @@ async fn relocation_refuses_meaningful_destination_history() {
     repository(&source);
     repository(&target);
     author_wave(&source, "core", "core");
+    let _env = support::EnvGuard::with_lf_home(&[], tmp.path());
     let database = tmp.path().join("loopflow.db");
     let store = loopflow::store::open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
         .await
@@ -830,19 +850,22 @@ async fn relocation_refuses_meaningful_destination_history() {
         .await
         .unwrap();
 
-    let receipt_shadow = registered_wave(&target, "with-receipt");
+    let receipt_shadow = registered_wave(&target, "with-definition");
     store.create_wave(&receipt_shadow).await.unwrap();
-    let receipt_path = target
-        .join(".lf/tmp/wave-relocations")
-        .join(format!("{}.json", receipt_shadow.id()));
-    std::fs::create_dir_all(receipt_path.parent().unwrap()).unwrap();
-    std::fs::write(&receipt_path, "{}\n").unwrap();
+    loopflow::store::sqlite::SqliteStore::new(&database)
+        .unwrap()
+        .update_wave_document(
+            receipt_shadow.id(),
+            "GOAL.md",
+            "Retain this independently authored plan",
+        )
+        .unwrap();
 
     for (slug, shadow, evidence) in [
         ("with-task", &project_shadow, "Tasks"),
         ("with-child", &child_shadow, "child Waves"),
         ("with-pm", &pm_shadow, "PM snapshot"),
-        ("with-receipt", &receipt_shadow, "relocation receipt"),
+        ("with-definition", &receipt_shadow, "stored definitions"),
     ] {
         let error = relocate_wave(&store, established.id(), &source, Some(&target), Some(slug))
             .await

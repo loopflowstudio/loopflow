@@ -46,6 +46,12 @@ fn task_creation_in(conn: &Connection, task: &TaskId) -> StoreResult<Option<NewT
 }
 
 impl SqliteStore {
+    /// Apply the placement transaction's admission rule before preparing Git work.
+    pub fn validate_task_planning(&self, task: &Task) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        require_task_planning(&conn, task)
+    }
+
     pub(crate) fn task_deleted(&self, task: &Task) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         task_deleted_on(&conn, task)
@@ -297,7 +303,7 @@ impl SqliteStore {
         .then(|| prefix.to_ascii_lowercase());
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(
-            "SELECT t.id, t.issue_title FROM tasks t
+            "SELECT t.id, COALESCE(t.issue_title, t.issue_identifier, t.id) FROM tasks t
              LEFT JOIN projects p ON p.id=t.project_id LEFT JOIN waves w ON w.id=p.wave_id
              WHERE t.id=?1 OR ((t.external_issue_id=?1 OR t.issue_identifier=?1
                 OR substr(lower(t.id), 6, length(?2))=?2) AND (?3 IS NULL OR w.repo=?3))
@@ -2229,7 +2235,11 @@ mod local_planning_tests {
         ];
         let rows = |conn: &rusqlite::Connection, table: &str| {
             let mut query = conn.prepare(&format!("SELECT * FROM {table}")).unwrap();
-            let columns = query.column_count();
+            // Preserve every released column; the migration adds the ordering baseline.
+            let columns = query.column_count()
+                - usize::from(
+                    table == "pm_projects" && query.column_names().contains(&"task_order_json"),
+                );
             query
                 .query_map([], |row| {
                     (0..columns)
@@ -2256,6 +2266,13 @@ mod local_planning_tests {
         for (table, expected) in tables.iter().zip(before) {
             assert_eq!(rows(&conn, table), expected, "{table}");
         }
+        let order: String = conn
+            .query_row(
+                "SELECT task_order_json FROM pm_projects WHERE id='current'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         let store = SqliteStore {
             conn: Arc::new(Mutex::new(conn)),
         };
@@ -2274,6 +2291,10 @@ mod local_planning_tests {
         );
         assert_eq!(observation.observed_at, 7);
         let imported = store.task_by_issue("LOO-318").unwrap().unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&order).unwrap(),
+            serde_json::json!([imported.id.as_str()])
+        );
         assert_eq!(imported.project_id, imported_project);
         assert!(imported.worktree.is_none());
         assert!(store.task_prs(&imported.id).unwrap().is_empty());

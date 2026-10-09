@@ -34,7 +34,7 @@ fn success(output: Output) -> String {
 }
 
 #[test]
-fn context_budget_preview_reads_authored_wave_without_registration() {
+fn context_budget_preview_reads_saved_wave_and_refreshes_local_edits() {
     let home = tempfile::tempdir().unwrap();
     let repo = TestRepo::new();
     fs::create_dir_all(home.path().join(".lf")).unwrap();
@@ -64,6 +64,13 @@ fn context_budget_preview_reads_authored_wave_without_registration() {
     )
     .unwrap();
     fs::write(&scratch, "Pending work. ".repeat(500)).unwrap();
+    let store = SqliteStore::new(&home.path().join(".lf/loopflow.db")).unwrap();
+    let wave = store
+        .ensure_wave(
+            repo.path().canonicalize().unwrap().to_str().unwrap(),
+            "local",
+        )
+        .unwrap();
     let query = || -> serde_json::Value {
         serde_json::from_str(&success(
             command(
@@ -99,7 +106,9 @@ fn context_budget_preview_reads_authored_wave_without_registration() {
         assert!(source["submitted_tokens"].as_u64().unwrap() <= limit);
     }
     assert!(usage.last().unwrap()["submitted_tokens"].as_u64().unwrap() > 100);
-    fs::write(memory, "Live decision retained.").unwrap();
+    store
+        .update_wave_document(&wave, "MEMORY.md", "Live decision retained.")
+        .unwrap();
     fs::write(scratch, "Pending work retained.").unwrap();
     let refreshed = query();
     for source in &refreshed["context"]["usage"].as_array().unwrap()[..2] {

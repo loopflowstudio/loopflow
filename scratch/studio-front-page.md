@@ -213,3 +213,7 @@ Then: "this is probably a little more on the cmux-y feel" and "in this world wer
 Built: headline, install command, the command list, one plain `- Name: detail` list, "It works wherever you work." as a second list, install without the Mac download. The Task / Workflow / Wave / Project rows are gone; the first list carries them.
 
 On the video: "legified" meant "made more legible, optimized for the audience rather than the author". So the recording uses a copy of kata whose Wave and Task names read well to a stranger, not kata as it stands.
+
+Jack Heart, next pass on `/cli`: cut the Checks item; "move sessions to the top and make it make sense there". His copy, which he called "like 85% there":
+"lf makes it easy to define and share workflows around agents. lf's most basic function is an agent launcher and session manager. lf can be used anywhere you would launch an agent. for example, you can resume a codex session in claude by using lf. lf is also a project manager. lf organizes your work into waves (long-lived streams) and tasks (concrete outcomes, i.e. PRs). it encodes all the stages that a task goes through in order to turn into a shipped and validated PR, and allows you to customize on a project-by-project basis how and when to get involved with the work being done in those areas. lf also provides a programmable desktop UX optimized around waves and tasks. lf is free, open-source, and can be used inside any terminal, or alongside tools like cmux and herdr."
+Applied as the page's lede and list items, lightly tightened.

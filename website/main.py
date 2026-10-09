@@ -1043,6 +1043,7 @@ def build_cli_page() -> tuple:
         "/cli",
         Section(
             H1(hero["heading"]),
+            P(*_inline_code(hero["introduction"]), cls="intro"),
             _install_row(),
             P(hero["cost"], cls="cost"),
             cls="home-hero",

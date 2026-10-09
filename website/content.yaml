@@ -90,38 +90,38 @@ studio:
 cli:
   hero:
     heading: Loopflow is the CLI for software engineering.
+    introduction: '`lf` makes it easy to define and share workflows around agents.'
     cost: >-
       Free and open source. The coding agent it drives (Claude Code, Codex, or OpenCode) runs on
       your own account and has its own cost.
   agents:
     commands: |-
+      $ lf session list                   # every conversation
+      $ lf session resume                 # pick one back up
       $ lf wave status exports            # the plan
       $ lf task create --wave exports --title "Add CSV export"
       $ lf task run EXP-12                # a task's next step
-      $ lf task status EXP-12
       $ lf skill design "Add CSV export"  # one session
       $ lf run ship-api                   # a Flow: sessions in order
       $ lf pr land                        # merge it
-      $ lf session list                   # every conversation
     items:
-    - name: Repo → Wave → Task
-      text: Your agent sessions line up under the work. A Wave is a lasting objective with its plan
-        and its memory, a Task is one outcome, and every session is filed under one of them.
+    - name: Sessions
+      text: At its most basic, `lf` is an agent launcher and session manager. Use it anywhere you
+        would launch an agent. For example, you can resume a Codex session in Claude.
+    - name: Waves and Tasks
+      text: '`lf` is also a project manager. It organizes your work into Waves (long-lived streams)
+        and Tasks (concrete outcomes, i.e. PRs).'
     - name: Task = worktree = branch
       text: Each Task gets its own working copy, its own branch, and one pull request. Agents on
         different Tasks never share a checkout.
-    - name: Skills
-      text: One instruction, written in Markdown, kept in your repository. `lf skill design` runs
-        one in its own session.
-    - name: Flows and workflows
-      text: A Flow runs Skills in order, with a commit between them, up to the pull request. A
-        workflow names the points where you take part and the Flow that runs between each.
-    - name: Checks
-      text: Checks run on each change. After a pull request is handed off for landing, a failed
-        required check can start a repair in the same Task.
-    - name: Sessions
-      text: '`lf` starts Claude Code, Codex, or OpenCode for you. The session knows its Task and its
-        Wave, carries the Wave’s reviewed notes, and can be found and picked back up later.'
+    - name: Workflows
+      text: '`lf` encodes the stages a Task goes through to become a shipped and validated PR. You
+        customize, project by project, how and when you get involved in the work.'
+    - name: Skills and Flows
+      text: A Skill is one instruction, written in Markdown. A Flow runs Skills in order, with a
+        commit between them. Both are files in your repository, so a team can share them.
+    - name: Desktop
+      text: '`lf` also provides a programmable desktop UX optimized around Waves and Tasks.'
     links:
     - label: Tasks and Waves ↗
       href: /docs/waves
@@ -133,8 +133,8 @@ cli:
     heading: It works wherever you work.
     items:
     - name: Your terminal
-      text: '`lf` is a command. Run it in cmux, herdr, or whatever terminal you already use, locally
-        or over SSH.'
+      text: '`lf` is free, open-source, and can be used inside any terminal, or alongside tools like
+        cmux and herdr.'
     - name: Use as much as you want
       text: Run one Skill, one Flow, or a whole Task. Stay in the session and steer, come in at
         design and demo, or let it run.

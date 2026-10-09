@@ -55,8 +55,8 @@ negative observation cannot reserve first start against a peer. One store's SQLi
 synchronize runtime to solve it. Peer exchange, observation/admission, complete
 routing, Desktop control and composed proof remain.
 
-LOO-427 keys windows/queues by plan; canceled completions are fenced. Task/Session
-actions stay separate; Session time unknown; saved/failed reads grant none.
+LOO-427 keys windows/queues by plan, fences cancellation, separates Task/Session
+actions. Session time unknown; saved/failed reads grant none.
 Move retains leaves/commands/surfaces; Undo renews only closed tokens.
 `df3e43fb3` shares pruning and reveal-through-focus; zoom grants no focus.
 Companions reuse retained owners, preserving selection.

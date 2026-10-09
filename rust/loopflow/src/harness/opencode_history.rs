@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde_json::{json, Value};
 
 use crate::chat::types::{ConversationEvent, Lifecycle};
@@ -13,7 +13,7 @@ use crate::store::sqlite::SqliteStore;
 #[derive(Debug, Default)]
 pub(super) struct History {
     pub(super) owner: Option<(SqliteStore, String, SessionAttachment)>,
-    requests: HashSet<String>,
+    requests: BTreeMap<String, Option<crate::session::SessionTurnOrigin>>,
     started: HashSet<String>,
     completed: HashSet<String>,
     attention: super::attention::Attention,
@@ -38,10 +38,15 @@ impl History {
         }
     }
 
-    pub(super) fn request(&mut self) -> String {
+    pub(super) fn request(&mut self) -> Result<String> {
         let id = format!("msg_{}", uuid::Uuid::new_v4().simple());
-        self.requests.insert(id.clone());
-        id
+        let origin = self
+            .owner
+            .as_ref()
+            .map(|(store, session, attachment)| store.session_turn_origin(session, attachment))
+            .transpose()?;
+        self.requests.insert(id.clone(), origin);
+        Ok(id)
     }
 
     pub(super) fn observe(
@@ -52,19 +57,11 @@ impl History {
         let mut events = Vec::new();
         let receipts = native_receipts(thread, messages);
         for (request, receipt) in receipts {
-            if self.requests.contains(&request) && !self.started.contains(&request) {
-                if let Some((store, session, driver)) = &self.owner {
-                    let process = driver
-                        .process_lfid
-                        .as_ref()
-                        .context("OpenCode request has no driving Process")?;
-                    store.record_session_turn_origin(
-                        session,
-                        thread,
-                        &request,
-                        driver.provider_generation,
-                        process,
-                    )?;
+            if self.requests.contains_key(&request) && !self.started.contains(&request) {
+                if let (Some((store, _, _)), Some(Some(origin))) =
+                    (&self.owner, self.requests.get(&request))
+                {
+                    store.record_session_turn_origin(thread, &request, origin)?;
                 }
                 self.started.insert(request.clone());
                 events.push(ConversationEvent::TurnStarted {
@@ -74,7 +71,7 @@ impl History {
             if let Some((store, session, _)) = &self.owner {
                 record_receipts(store, session, thread, &request, &receipt)?;
             }
-            if self.requests.contains(&request)
+            if self.requests.contains_key(&request)
                 && !receipt.completion.is_null()
                 && self.completed.insert(request.clone())
             {
@@ -105,7 +102,7 @@ impl History {
     }
 
     pub(super) fn admitted(&self, request: &str) -> bool {
-        self.requests.contains(request) && self.started.contains(request)
+        self.requests.contains_key(request) && self.started.contains(request)
     }
 }
 
@@ -300,7 +297,7 @@ mod tests {
             .claim_session_attachment("session", None, &process, false)
             .unwrap();
         let mut history = History::new(Some((store.clone(), "session".into(), driver.clone())));
-        let request = history.request();
+        let request = history.request().unwrap();
         let message = |id: &str, input: u64, finish: &str| {
             json!({
             "info":{"id":id,"sessionID":"thread","parentID":request,"role":"assistant",
@@ -308,15 +305,6 @@ mod tests {
                 "finish":finish,"tokens":{"input":input,"output":5,"reasoning":0,"cache":{"read":0,"write":0}}},
             "parts":[]})
         };
-        for input in [20, 40, 30] {
-            let events = history
-                .observe("thread", &[message("assistant-a", input, "tool-calls")])
-                .unwrap();
-            assert!(!events.iter().any(|event| matches!(
-                event,
-                crate::chat::types::ConversationEvent::TurnCompleted { .. }
-            )));
-        }
         let session = store.session("session").unwrap().unwrap();
         let mut replacement = session.clone();
         replacement.artifact_key = crate::session_record::new_artifact_key();
@@ -332,6 +320,15 @@ mod tests {
         store
             .claim_session_attachment("session", Some(&driver), &second, true)
             .unwrap();
+        for input in [20, 40, 30] {
+            let events = history
+                .observe("thread", &[message("assistant-a", input, "tool-calls")])
+                .unwrap();
+            assert!(!events.iter().any(|event| matches!(
+                event,
+                crate::chat::types::ConversationEvent::TurnCompleted { .. }
+            )));
+        }
         let messages = [
             message("assistant-a", 30, "tool-calls"),
             message("assistant-b", 10, "stop"),

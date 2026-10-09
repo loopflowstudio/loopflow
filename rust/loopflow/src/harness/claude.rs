@@ -1,4 +1,4 @@
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -44,7 +44,7 @@ pub struct ClaudeHarness {
     /// The runner turn id every provider turn in the current coalesced boundary
     /// reports under. Set by `send_input`, read by the reader.
     current_turn_id: Arc<Mutex<Option<String>>>,
-    requests: Arc<Mutex<HashSet<String>>>,
+    requests: Arc<Mutex<HashMap<String, Option<crate::session::SessionTurnOrigin>>>>,
     child: Option<Child>,
     stdin: Option<ChildStdin>,
     reader_task: Option<JoinHandle<()>>,
@@ -81,7 +81,7 @@ impl ClaudeHarness {
             turn_in_progress: Arc::new(AtomicBool::new(false)),
             pending_results: Arc::new(AtomicI64::new(0)),
             current_turn_id: Arc::new(Mutex::new(None)),
-            requests: Arc::new(Mutex::new(HashSet::new())),
+            requests: Arc::new(Mutex::new(HashMap::new())),
             child: None,
             stdin: None,
             reader_task: None,
@@ -89,6 +89,19 @@ impl ClaudeHarness {
             shutdown_requested: Arc::new(AtomicBool::new(false)),
             interrupt_requested: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    fn turn_origin(&self) -> Result<Option<crate::session::SessionTurnOrigin>> {
+        self.config
+            .as_ref()
+            .and_then(|config| config.session_attachment.as_ref())
+            .map(|(session, attachment)| {
+                let store = crate::store::sqlite::SqliteStore::new(
+                    &crate::store::database_path_from_env()?,
+                )?;
+                Ok(store.session_turn_origin(session, attachment)?)
+            })
+            .transpose()
     }
 
     /// Spawn the persistent stream-json process and its reader, if not already
@@ -434,11 +447,12 @@ impl Harness for ClaudeHarness {
         self.interrupt_requested.store(false, Ordering::SeqCst);
         self.ensure_process().await?;
 
+        let origin = self.turn_origin()?;
         let turn_id = uuid::Uuid::new_v4().to_string();
         self.requests
             .lock()
             .expect("Claude request lock poisoned")
-            .insert(turn_id.clone());
+            .insert(turn_id.clone(), origin);
         *self
             .current_turn_id
             .lock()
@@ -470,9 +484,9 @@ impl Harness for ClaudeHarness {
     }
 
     async fn send_current(&mut self, content: &str) -> SendCurrentOutcome {
-        let Some(stdin) = self.stdin.as_mut() else {
+        if self.stdin.is_none() {
             return SendCurrentOutcome::NotSteerable;
-        };
+        }
         // Atomically join the open boundary. A separate bool check followed by
         // `fetch_add` races the reader's final `fetch_sub`: a steer could be
         // accepted after TurnCompleted and escape as a second boundary.
@@ -485,11 +499,21 @@ impl Harness for ClaudeHarness {
         {
             return SendCurrentOutcome::NotSteerable;
         }
+        let origin = match self.turn_origin() {
+            Ok(origin) => origin,
+            Err(error) => {
+                self.pending_results.fetch_sub(1, Ordering::SeqCst);
+                return SendCurrentOutcome::Failed {
+                    error: error.to_string(),
+                };
+            }
+        };
+        let stdin = self.stdin.as_mut().expect("steer requires open stdin");
         let request = uuid::Uuid::new_v4().to_string();
         self.requests
             .lock()
             .expect("Claude request lock poisoned")
-            .insert(request.clone());
+            .insert(request.clone(), origin);
         if let Err(error) = stdin
             .write_all(user_message_line(content, &request).as_bytes())
             .await

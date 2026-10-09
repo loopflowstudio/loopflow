@@ -1181,10 +1181,23 @@ impl CodexHarness {
                         json!({ "jsonrpc": "2.0", "id": id, "result": result })
                     }
                 };
-                writer_history
+                let recorded = writer_history
                     .lock()
                     .expect("codex history lock poisoned")
-                    .request(&payload);
+                    .request(
+                        &payload,
+                        authority.as_ref().map(|(store, session, attachment)| {
+                            (store, session.as_str(), attachment)
+                        }),
+                    );
+                if let Err(error) = recorded {
+                    let _ = writer_events.send(ConversationEvent::Error {
+                        code: "codex_dispatch_rejected".into(),
+                        message: error.to_string(),
+                        evidence: None,
+                    });
+                    break;
+                }
                 let message = Message::Text(payload.to_string().into());
                 let outcome = if let Some((store, session, expected)) = authority.clone() {
                     let dispatched = tokio::task::spawn_blocking(move || {

@@ -223,17 +223,17 @@ unpublished code retained, without deletion or delivery authorization.
 
 Jack Heart requested one process inventory, deleting Session columns and duplicate
 owners. #1512 is `3e1e6245c`. Jack authorized parallel LOO-441 work and rename
-integration before publication. Records/installed acceptance remain unproved;
-`cad03fe6d` supplies pre-exec lifelines.
+integration before publication. Records/installed acceptance remain unproved.
+Pre-exec lifeline and attachment proofs: `6f96a964c`, this heading.
 
-`0f1280b80` fences A → B → A with opaque attachment tokens, still Session-owned.
-Takeover preserves provider identity/parent. `69f88f30d` retains exact exit-event
-references without rewriting history. Late provider observations survive transfer;
-they grant no current control. Delayed-start capture attribution remains unaudited.
-FIFO holders survive transfer until OS exit, so both takeover death orders need
-record-based proof. Close inherited writers before exec; preserve native terminals,
-dash-compatible signals and throwaway-only signaling. Release's lesson applies:
-helper proofs establish neither top/Task agreement nor scheduled settlement.
+Fresh tokens fence A → B → A; takeover retains provider identity/parent and
+exact exit history. Freeze Work/capture before each native request, not its delayed
+start. Neither the current Session nor AgentProcess's original capture identifies
+later turns. Correlation retains late history without current control; unknown
+broadcasts cannot borrow newer input. Source fixtures prove no installed outcome.
+FIFO holders survive transfer until OS exit; both takeover death orders still
+need record-based proof. Close inherited writers before exec; preserve native
+terminals, dash-compatible signals and throwaway-only signaling.
 
 ## Process vocabulary (LOO-400, curated 2026-10-09)
 

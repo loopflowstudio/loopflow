@@ -5,6 +5,18 @@ use serde::{Deserialize, Serialize};
 use crate::durable::TaskId;
 use crate::id::WaveId;
 
+/// Attribution captured before a native request, never from its delayed reply.
+/// This is observation context, not a capability to write to the provider.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SessionTurnOrigin {
+    pub session_id: String,
+    pub process_lfid: crate::id::ProcessLfid,
+    pub provider_generation: i64,
+    pub captured_event: Option<i64>,
+    pub task_id: Option<String>,
+    pub wave_id: Option<String>,
+}
+
 /// Immutable native evidence. Missing start, attribution or usage stays missing.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SessionEvent {

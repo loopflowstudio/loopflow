@@ -256,7 +256,7 @@ impl CodexConnection {
                         }
                         _ => false,
                     };
-                    history.request(&rpc);
+                    history.request(&rpc, self.driver.as_ref().map(|driver| (&self.store,self.session_id.as_str(),driver)))?;
                     let message = Message::Text(serde_json::to_string(&rpc)?.into());
                     if passive {
                         upstream.send(message).await?;

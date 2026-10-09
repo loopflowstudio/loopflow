@@ -467,7 +467,7 @@ impl Harness for OpenCodeHarness {
         let mut payload = build_turn_payload(&turn_content, config, first_turn);
         let (request, owner) = {
             let mut history = self.history.lock().expect("OpenCode history lock poisoned");
-            (history.request(), history.owner.clone())
+            (history.request()?, history.owner.clone())
         };
         payload["messageID"] = json!(request);
 
@@ -508,7 +508,15 @@ impl Harness for OpenCodeHarness {
         let mut payload = build_turn_payload(text, &config, false);
         let (provider_turn_id, owner) = {
             let mut history = self.history.lock().expect("OpenCode history lock poisoned");
-            (history.request(), history.owner.clone())
+            let request = match history.request() {
+                Ok(request) => request,
+                Err(error) => {
+                    return SendCurrentOutcome::Failed {
+                        error: error.to_string(),
+                    }
+                }
+            };
+            (request, history.owner.clone())
         };
         payload["messageID"] = json!(provider_turn_id);
         let steer_url = format!("{base_url}/session/{provider_session_id}/prompt_async");

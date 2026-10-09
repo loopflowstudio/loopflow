@@ -814,43 +814,6 @@ def _install_row() -> FT:
     )
 
 
-def _claims_section(content: dict, section_id: str, first_number: int, *opening) -> FT:
-    """One group of numbered claims; numbers run on across groups."""
-
-    def claim(number: int, item: dict) -> FT:
-        return Article(
-            Div(f"{number:02}", cls="number"),
-            Div(
-                H3(item["title"]),
-                P(*_inline_code(item["text"])) if "text" in item else None,
-                Div(
-                    *[Article(H4(kind["title"]), P(kind["text"])) for kind in item["kinds"]],
-                    cls="kinds",
-                )
-                if "kinds" in item
-                else None,
-                P(A(item["link"]["label"], href=item["link"]["href"]), cls="needs")
-                if "link" in item
-                else None,
-            ),
-            _terminal(item["commands"], item["title"]) if "commands" in item else None,
-            cls="claim" if "commands" in item else "claim wide",
-        )
-
-    return Section(
-        P(content["label"], cls="eyebrow") if "label" in content else None,
-        H2(content["heading"]) if "heading" in content else None,
-        *[P(line, cls="lede") for line in content.get("introduction", [])],
-        *opening,
-        Div(
-            *[claim(first_number + index, item) for index, item in enumerate(content["claims"])],
-            cls="claims",
-        ),
-        id=section_id,
-        cls="group",
-    )
-
-
 def _faq_section() -> FT:
     return Section(
         H2(FAQ_CONTENT["heading"]),
@@ -1024,7 +987,7 @@ def build_homepage() -> tuple:
         "Loopflow — " + HERO_CONTENT["heading"],
         "/",
         _hero_section(),
-        _claims_section(YOU_CONTENT, "mac", 1),
+        Section(_plain_list(YOU_CONTENT["items"]), id="mac", cls="reading"),
         _faq_section(),
         _install_section(),
     )

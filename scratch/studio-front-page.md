@@ -287,3 +287,11 @@ Jack Heart: "so we need a slightly different angle and intention here". Angle
 proposed back: the reader already has a coding agent; the page promises
 engineering-grade results from it and shows the app doing that, with no
 promise to make starting easy.
+
+Jack Heart confirmed the angle: "Right. Build something that you can actually
+ship to users. im not convince replit apps go to real users". `/` now leads
+with "Build something you can actually ship to users.", keeps his "You need"
+list and paragraph, and replaces the numbered claims with one plain list of
+five; the FAQ is cut to four. "Loopflow lets anyone craft software." is off
+the page. Left to settle: Tasks need a Linear workspace and the "You need"
+list does not say so; the video; a structural pass on both pages.

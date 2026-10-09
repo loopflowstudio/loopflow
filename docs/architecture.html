@@ -1395,9 +1395,6 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
 .home-hero .actions { font-size: 13px; }
 .home-hero .actions a:not(.button) { text-decoration: underline; text-underline-offset: 4px; }
 .home-hero .window { margin-top: 48px; }
-.home-page .group > .lede + .lede { margin-top: -20px; }
-.home-page .group > .install-row { margin-bottom: 18px; }
-.home-page .group > .term { max-width: 680px; }
 /* The engineers' page: a narrow column of plain lists. */
 .home-page .home-hero:has(.rotating) { padding-bottom: 0; }
 .home-page .reading.closing { padding: 56px 0 80px; }
@@ -1449,25 +1446,6 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
 .home-page .cost { font-size: 13px; color: var(--text-secondary); margin: 14px 0 0; max-width: 680px; }
 .home-page .cost a, .home-page .faq a { text-decoration: underline; text-underline-offset: 4px; }
 
-/* Numbered claims, in two groups. */
-.home-page .group { padding: 90px 0 0; }
-.home-page .group > .eyebrow { color: var(--burgundy); margin-bottom: 14px; }
-.home-page .group > h2 { max-width: 780px; margin-bottom: 18px; }
-.home-page .group > .lede { max-width: 660px; font-size: 18px; color: #333; margin-bottom: 34px; }
-.home-page .claims { border-top: 1px solid var(--border); margin-top: 44px; }
-.home-page .claim { display: grid; grid-template-columns: 90px 1fr 1.1fr; gap: 34px; padding: 44px 0; border-bottom: 1px solid var(--border); align-items: start; }
-.home-page .claim.wide { grid-template-columns: 90px 1fr; }
-.home-page .claim > * { min-width: 0; }
-.home-page .number { font: 500 13px var(--font-mono); letter-spacing: .1em; color: var(--burgundy); padding-top: 9px; }
-.home-page .claim h3 { font: 400 clamp(26px, 2.5vw, 34px)/1.12 var(--font-serif); letter-spacing: -.015em; margin: 0 0 14px; }
-.home-page .claim p { font-size: 16px; color: #333; max-width: 470px; margin-bottom: 10px; }
-.home-page .claim.wide p { max-width: 640px; }
-.home-page .claim .needs { font: 12px var(--font-mono); color: var(--text-secondary); margin: 0; }
-.home-page .claim .term { font-size: 12.5px; padding: 16px 18px; }
-.home-page .kinds { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid var(--border); margin-top: 18px; }
-.home-page .kinds article { padding: 24px 24px 14px 0; }
-.home-page .kinds h4 { font: 600 16px var(--font-sans); margin: 0 0 8px; }
-.home-page .kinds p { max-width: 460px; }
 
 .home-page .faq { margin: 0; max-width: 900px; border-top: 1px solid var(--border); }
 .home-page .faq > div { padding: 22px 0; border-bottom: 1px solid var(--border); }
@@ -1542,11 +1520,7 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
     .home-hero .intro { font-size: 18px; }
     .home-page .install-row .term { font-size: 12px; padding: 14px; }
     .home-page .copy { min-width: 72px; padding: 0 12px; }
-    .home-page .group { padding-top: 56px; }
     .home-page .plain { font-size: 12.5px; }
-    .home-page .claim, .home-page .claim.wide { grid-template-columns: 1fr; gap: 12px; padding: 30px 0; }
-    .home-page .number { padding-top: 0; }
-    .home-page .kinds { grid-template-columns: 1fr; }
     .home-page .start { padding: 56px 0 48px; margin-top: 56px; }
     .home-page .strip { grid-template-columns: 1fr 1fr; }
     .home-page .work-row, .home-page .efforts .work-row { grid-template-columns: 1fr; gap: 14px; }

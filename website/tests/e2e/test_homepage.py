@@ -7,15 +7,13 @@ from playwright.sync_api import Page, expect
 
 
 def test_approved_homepage_sections(homepage: Page) -> None:
-    expect(homepage.locator("h1")).to_have_text("Loopflow lets anyone craft software.")
+    expect(homepage.locator("h1")).to_have_text("Build something you can actually ship to users.")
     assert homepage.locator(".home-hero .needs-list li").count() == 2
     assert homepage.locator("main > section[id]").evaluate_all(
         "sections => sections.map(section => section.id)"
     ) == ["mac", "faq", "start"]
-    assert homepage.locator(".claim .number").all_text_contents() == [
-        f"{number:02}" for number in range(1, 5)
-    ]
-    expect(homepage.locator(".faq dt")).to_have_count(9)
+    expect(homepage.locator("#mac .plain li")).to_have_count(5)
+    expect(homepage.locator(".faq dt")).to_have_count(4)
 
 
 def test_hero_leads_with_the_mac_app(homepage: Page) -> None:
@@ -111,8 +109,8 @@ def test_page_fits_and_terminals_scroll_within_their_cells(
 
 
 def test_body_command_names_use_monospace(homepage: Page) -> None:
-    names = homepage.locator(".claim p code, .faq code")
-    assert names.count() >= 4
+    names = homepage.locator(".faq code")
+    assert names.count() >= 1
     for name in names.all():
         assert name.text_content().startswith("lf")
         assert "JetBrains Mono" in name.evaluate("el => getComputedStyle(el).fontFamily")

@@ -626,26 +626,24 @@ or real public-remote planning export. Joining publishes nothing. Malformed inpu
 aborts import; contradictions isolate objects. Execution stays local.
 
 Common owners retain disposition, comments/authorship without steer/echo and semantic
-Project content. Selected Linear winners retire losers; unchanged acquisition preserves
-saves. Mapping is not acknowledgement: accepted Task creation readback reconciles
-only captured saves on an existing receipt, retaining later saves and uncertainty.
-Creation/link attempt transport and Project readback remain unfinished.
+Project content. Prepared creation/link receipts now travel with captured save IDs, original
+parent and uncertain attempts. Project effect columns move from local transitions
+to Projects; import fabricates no rotation or settlement. Accepted Task/Project
+readback reconciles captured saves, never mapping alone. Competing effects retain
+both histories. Foreground creation composition remains unfinished.
 
-Peer acquisition retains provider age. Entity revisions never order relationships;
-missing inventory is not negative membership. Archive, unresolved membership and
+Peer acquisition preserves provider age; entity revisions do not order relationships.
+Missing inventory is not negative membership; archive, unresolved membership and
 configured-Initiative contradictions still block. Lookup and launch freshness stay
-separate. Imports stay unplaced; first local placement uses this machine for an
-unplaced parent and preserves existing placements.
+separate. Imports stay unplaced; unplaced parents use this machine for first local
+placement. Existing placements survive.
 
-Linux storage and public work-watch proofs cover offline planning, reconnect and
-execution preservation, not connected-Linear, SSH or installed acceptance. Storage
-passes do not certify later Task-admission changes. Checkpoint CI skips product
-suites with scratch.
+Linux storage/common-export fixtures prove receipt retention; earlier work-watch
+proves offline propagation. Mixed-provider, SSH and installed acceptance remain open.
 
-Fetch/import/publication stay separate; worker-held effect locks block neither
-saves nor acquisition. Damaged journals retain unknown pending state without hiding
-independent plans. Private moves hold whole histories/dependents, including retained
-Git documents, until explicit selection; omission is not convergence. Recovery and
+Fetch/import/publication stay separate; effect locks block neither saves nor
+acquisition. Damaged journals retain unknown pending state without hiding plans.
+Private moves hold whole histories/dependents, including retained Git documents, until explicit selection; omission is not convergence. Recovery and
 losing-edit UX need review. Order/deletion receipts, alternate paths, relationship
 ordering, legacy association and Desktop remain before mixed-provider activation.
 Design: `scratch/work-on-another-machine-name.md`; earlier evidence:

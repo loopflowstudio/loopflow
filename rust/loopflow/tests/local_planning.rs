@@ -2661,7 +2661,7 @@ fn planning_sync_tracks_creation_errors_uncertainty_conflicts_and_settlement() {
     let before = revision();
     conn.execute("UPDATE task_creation_intents SET export_attempted=1,export_error='Lost creation reply' WHERE task_id=?1", [id]).unwrap();
     assert!(revision() > before);
-    conn.execute("UPDATE project_transitions SET export_attempted=1,export_link_attempted=1,export_error='Lost attachment reply' WHERE successor_id=?1", [project]).unwrap();
+    conn.execute("UPDATE projects SET export_attempted=1,export_link_attempted=1,export_error='Lost attachment reply' WHERE id=?1", [project]).unwrap();
     conn.execute(
         "UPDATE task_changes SET attempted=1,error='Lost field reply' WHERE task_id=?1",
         [id],

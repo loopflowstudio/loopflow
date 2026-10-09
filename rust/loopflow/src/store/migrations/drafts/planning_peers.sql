@@ -303,3 +303,67 @@ BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; EN
 
 CREATE TRIGGER store_revision_planning_peer_imports_delete AFTER DELETE ON planning_peer_imports
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+
+-- Project creation is planning, not a local rotation or activation receipt.
+ALTER TABLE projects ADD COLUMN export_json TEXT CHECK(export_json IS NULL OR json_valid(export_json));
+ALTER TABLE projects ADD COLUMN export_attempted INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE projects ADD COLUMN export_link_attempted INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE projects ADD COLUMN export_error TEXT;
+UPDATE projects SET (export_json,export_attempted,export_link_attempted,export_error)=(
+    SELECT export_json,export_attempted,export_link_attempted,export_error FROM project_transitions c
+    WHERE c.successor_id=projects.id AND c.wave_id=projects.wave_id)
+WHERE EXISTS(SELECT 1 FROM project_transitions c WHERE c.successor_id=projects.id AND c.wave_id=projects.wave_id AND c.export_json IS NOT NULL);
+ALTER TABLE project_transitions DROP COLUMN export_json;
+ALTER TABLE project_transitions DROP COLUMN export_attempted;
+ALTER TABLE project_transitions DROP COLUMN export_link_attempted;
+ALTER TABLE project_transitions DROP COLUMN export_error;
+
+-- Creation receipts share the planning journal, never the local activation state.
+UPDATE task_creation_intents SET export_json=json_remove(json_set(export_json,'$.parent',(SELECT p.id FROM projects p WHERE p.id=json_extract(task_creation_intents.export_json,'$.model.project_id') OR p.external_project_id=json_extract(task_creation_intents.export_json,'$.model.project_id')),'$.captured',json((
+    SELECT json_group_array(id) FROM task_changes WHERE task_id=task_creation_intents.task_id
+    AND seq<=json_extract(task_creation_intents.export_json,'$.through')))),'$.through')
+WHERE export_json IS NOT NULL;
+CREATE TRIGGER peer_task_creation_insert AFTER INSERT ON task_creation_intents
+WHEN NEW.export_json IS NOT NULL AND (SELECT importing FROM planning_peer_context)=0
+BEGIN
+    INSERT INTO planning_peer_changes(id,kind,object_id,field,value,clock,linear,parents)
+    SELECT lower(hex(randomblob(16))),'task',NEW.task_id,'creation',json_object('export',json(NEW.export_json),'attempted',json(CASE WHEN NEW.export_attempted THEN 'true' ELSE 'false' END),'link_attempted',json(CASE WHEN 0 THEN 'true' ELSE 'false' END),'error',NEW.export_error),
+        max(CAST(unixepoch('subsec')*1000 AS INTEGER),COALESCE((SELECT max(clock)+1 FROM planning_peer_changes),0)),NULL,
+        (SELECT json_group_array(id) FROM planning_peer_heads WHERE kind='task' AND object_id=NEW.task_id AND field='creation');
+END;
+CREATE TRIGGER peer_task_creation_update AFTER UPDATE ON task_creation_intents
+WHEN NEW.export_json IS NOT NULL AND (SELECT importing FROM planning_peer_context)=0 AND (NEW.export_json IS NOT OLD.export_json OR NEW.export_attempted IS NOT OLD.export_attempted OR NEW.export_error IS NOT OLD.export_error)
+BEGIN
+    INSERT INTO planning_peer_changes(id,kind,object_id,field,value,clock,linear,parents)
+    SELECT lower(hex(randomblob(16))),'task',NEW.task_id,'creation',json_object('export',json(NEW.export_json),'attempted',json(CASE WHEN NEW.export_attempted THEN 'true' ELSE 'false' END),'link_attempted',json(CASE WHEN 0 THEN 'true' ELSE 'false' END),'error',NEW.export_error),
+        max(CAST(unixepoch('subsec')*1000 AS INTEGER),COALESCE((SELECT max(clock)+1 FROM planning_peer_changes),0)),NULL,
+        (SELECT json_group_array(id) FROM planning_peer_heads WHERE kind='task' AND object_id=NEW.task_id AND field='creation');
+END;
+INSERT INTO planning_peer_changes(id,kind,object_id,field,value,clock,linear,parents)
+SELECT lower(hex(randomblob(16))),'task',NEW.task_id,'creation',json_object('export',json(NEW.export_json),'attempted',json(CASE WHEN NEW.export_attempted THEN 'true' ELSE 'false' END),'link_attempted',json(CASE WHEN 0 THEN 'true' ELSE 'false' END),'error',NEW.export_error),0,NULL,'[]'
+FROM task_creation_intents AS NEW WHERE NEW.export_json IS NOT NULL;
+
+-- Creation receipts share the planning journal, never the local activation state.
+UPDATE projects SET export_json=json_remove(json_set(export_json,'$.parent',wave_id,'$.captured',json((
+    SELECT json_group_array(id) FROM project_changes WHERE project_id=projects.id
+    AND seq<=json_extract(projects.export_json,'$.through')))),'$.through')
+WHERE export_json IS NOT NULL;
+CREATE TRIGGER peer_project_creation_insert AFTER INSERT ON projects
+WHEN NEW.export_json IS NOT NULL AND (SELECT importing FROM planning_peer_context)=0
+BEGIN
+    INSERT INTO planning_peer_changes(id,kind,object_id,field,value,clock,linear,parents)
+    SELECT lower(hex(randomblob(16))),'project',NEW.id,'creation',json_object('export',json(NEW.export_json),'attempted',json(CASE WHEN NEW.export_attempted THEN 'true' ELSE 'false' END),'link_attempted',json(CASE WHEN NEW.export_link_attempted THEN 'true' ELSE 'false' END),'error',NEW.export_error),
+        max(CAST(unixepoch('subsec')*1000 AS INTEGER),COALESCE((SELECT max(clock)+1 FROM planning_peer_changes),0)),NULL,
+        (SELECT json_group_array(id) FROM planning_peer_heads WHERE kind='project' AND object_id=NEW.id AND field='creation');
+END;
+CREATE TRIGGER peer_project_creation_update AFTER UPDATE ON projects
+WHEN NEW.export_json IS NOT NULL AND (SELECT importing FROM planning_peer_context)=0 AND (NEW.export_json IS NOT OLD.export_json OR NEW.export_attempted IS NOT OLD.export_attempted OR NEW.export_error IS NOT OLD.export_error OR NEW.export_link_attempted IS NOT OLD.export_link_attempted)
+BEGIN
+    INSERT INTO planning_peer_changes(id,kind,object_id,field,value,clock,linear,parents)
+    SELECT lower(hex(randomblob(16))),'project',NEW.id,'creation',json_object('export',json(NEW.export_json),'attempted',json(CASE WHEN NEW.export_attempted THEN 'true' ELSE 'false' END),'link_attempted',json(CASE WHEN NEW.export_link_attempted THEN 'true' ELSE 'false' END),'error',NEW.export_error),
+        max(CAST(unixepoch('subsec')*1000 AS INTEGER),COALESCE((SELECT max(clock)+1 FROM planning_peer_changes),0)),NULL,
+        (SELECT json_group_array(id) FROM planning_peer_heads WHERE kind='project' AND object_id=NEW.id AND field='creation');
+END;
+INSERT INTO planning_peer_changes(id,kind,object_id,field,value,clock,linear,parents)
+SELECT lower(hex(randomblob(16))),'project',NEW.id,'creation',json_object('export',json(NEW.export_json),'attempted',json(CASE WHEN NEW.export_attempted THEN 'true' ELSE 'false' END),'link_attempted',json(CASE WHEN NEW.export_link_attempted THEN 'true' ELSE 'false' END),'error',NEW.export_error),0,NULL,'[]'
+FROM projects AS NEW WHERE NEW.export_json IS NOT NULL;

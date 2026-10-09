@@ -52,9 +52,9 @@ impl SqliteStore {
         let connected = crate::ops::linear_observe::connected(&repo);
         let mut changes = fields(&tx, "project", project.as_str(), connected, false)?;
         append(&tx, &mut changes,
-            "SELECT c.successor_id,'creation',COALESCE(json_extract(c.export_json,'$.input'),c.local_plan_json),c.export_attempted OR c.export_link_attempted,c.export_error,NULL
-             FROM project_transitions c JOIN projects p ON p.id=c.successor_id
-             WHERE p.id=?1 AND ?2 AND p.external_project_id IS NULL AND c.local_plan_json IS NOT NULL",
+            "SELECT p.id,'creation',COALESCE(json_extract(p.export_json,'$.input'),c.local_plan_json),p.export_attempted OR p.export_link_attempted,p.export_error,NULL
+             FROM projects p LEFT JOIN project_transitions c ON p.id=c.successor_id AND p.wave_id=c.wave_id
+             WHERE p.id=?1 AND ?2 AND p.external_project_id IS NULL AND (c.local_plan_json IS NOT NULL OR p.export_json IS NOT NULL)",
             project.as_str(), connected)?;
         tx.commit()?;
         Ok(PlanningSyncStatus { connected, changes })

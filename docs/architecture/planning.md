@@ -180,7 +180,10 @@ Terminal, archived, paused or foreign Projects retain their history. Names, cont
 and an empty workflow remain intact. Binding accepts the durable or mapped ID of
 an already saved Project; it does not fetch a missing Project. Legacy YAML import
 retains the original bytes and requires that exact Project's saved record.
-Project export uses the original transition receipt on the foreground connection.
+Project export keeps its captured input and creation/attachment attempts on the
+Project row; transition receipts own only local selection and rotation. Peer
+exchange carries the creation evidence, never a transition or activation. Captured
+save IDs—not machine-local sequence positions—bound readback acknowledgement.
 Creation and Initiative attachment retain separate attempted effects and exact
 readback; a missing response never permits another create or attachment.
 Mapped status receipts use foreground delivery;

@@ -255,7 +255,11 @@ impl PlanningSnapshot {
             if id.is_empty()
                 || change.object.id.is_empty()
                 || change.clock < 0
-                || !change.object.kind.fields().contains(&change.field.as_str())
+                || !(change.object.kind.fields().contains(&change.field.as_str())
+                    || (matches!(
+                        change.object.kind,
+                        PlanningKind::Task | PlanningKind::Project
+                    ) && change.field == "creation"))
             {
                 return Err(PlanningExchangeError::Invalid("invalid planning mutation"));
             }
@@ -316,6 +320,10 @@ fn validate_value(change: &PlanningMutation) -> Result<(), PlanningExchangeError
                     && serde_json::to_value(&content)
                         .is_ok_and(|roundtrip| roundtrip[&change.field] == *value)
             })
+        }
+        "creation" => {
+            crate::store::sqlite::planning_export::validate_peer_receipt(&change.object, value)
+                .is_ok()
         }
         "planning_rank" => value.as_u64().is_some_and(|rank| rank <= u32::MAX as u64),
         "planning_deleted_at" => value.is_null() || value.as_i64().is_some_and(|at| at >= 0),

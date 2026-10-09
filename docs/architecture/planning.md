@@ -321,6 +321,16 @@ Complete responses must include nullable fields; omission cannot clear known dat
 Stored change receipts invalidate planning even without execution. A complete read
 at or beyond the receipt's revision repairs the invalidation. Removal receipts fence
 later reads, including when the receipt arrived before the issue was cached.
+Peer invalidation uses causal notification/detail heads in the existing journal.
+A successful detail read acknowledges only notifications it observed; replaying
+those notifications cannot invalidate that read again. Concurrent unseen notices
+remain outstanding. Revision floors survive acknowledgement; arrival time supplies
+neither ordering nor a provider revision. Scalar/list replay alone never clears
+freshness, and detail acknowledgement requires an accepted matching-or-newer
+frontier. Null-detail invalidation follows the same capture path. Migration keeps
+unknown-age invalidation without inventing a readback. Private-selection holds and
+execution isolation apply to this history too.
+
 Receipts do not replace complete planning entities. The former daemon webhook
 ingress is removed; these store operations do not establish live event delivery. Project facts also
 carry `revision`; a newer Project observation updates independently of the issue's

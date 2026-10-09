@@ -625,29 +625,30 @@ Jack Heart selected custom-ref sync: review-only, no landing/public export.
 Joining publishes nothing; execution stays local and imports unplaced.
 Malformed input aborts import; contradictions isolate objects.
 
-Common receipts retain saves, baselines, uncertainty and losers, never transitions.
-Readback acknowledges effects, not mappings or errors; creation cannot settle removal.
-Explicit active evidence retains losing removals. Fixtures prove no live controls.
+Receipts retain saves, baselines, uncertainty and losers, never transitions.
+Readback acknowledges effects, not mappings/errors; creation cannot settle removal.
+Active evidence retains losing removals; fixtures prove no live controls.
 
-`08a285872` defers effects when rejected/skipped projection retains receipts only
-in journals. Saves/acquisition stay independent; selection cannot release effects
-before import. `30b476328`'s public fixture awaits gate. `fcd64901f` transports order
-receipts; `357090d4b` preserves primary-only moves. Only complete lists settle
-progress; effect updates cannot promote losers.
+`08a285872` defers rejected/held effects until import, never saves/acquisition.
+Public `30b476328` awaits gate. `fcd64901f`/`357090d4b` retain primary-only moves;
+only complete lists settle progress. Effect updates cannot promote losers.
 
-**Independent facts need independent rollback.** Common acquisition gives removal,
-archive and Teams separate savepoints. Prepare validated histories before retries;
-preserve ages and Team baselines. Legacy ages stay unknown. Entity revisions never
-order relationships; replay cannot clear membership uncertainty. The Team proof has no list acquisition; cold empty-list
-rejection is separate. Neither proves composed partial-list behavior.
+**Independent facts need independent rollback.** Removal, archive and Teams use
+separate savepoints; prepare validated histories before retries. Preserve original
+ages and Team baselines; legacy ages stay unknown. Entity revisions cannot order
+relationships. Team and cold-list fixtures prove no composed partial-list acceptance.
+
+**Invalidation needs causal acknowledgement.** Detail retires observed notices,
+not unseen notices. Replay cannot reinvalidate that readback. Revision floors
+survive; clocks create no provider revision. Scalar/list replay cannot clear
+freshness; acknowledgement requires its accepted frontier.
 
 Acquisition/saves bypass effect locks; unreadable journals mean unknown pending.
-Private histories/dependents remain held until explicit selection. Omission is not
-convergence. Non-removal invalidations remain local: safe replay after later detail,
-legacy association, unplaced-Wave/Desktop recovery and public verification remain.
+Private histories/dependents stay held until selection; omission is not convergence.
+Legacy association, unplaced-Wave/Desktop and public verification remain.
 Mixed-provider exchange stays disabled.
-Design: `scratch/work-on-another-machine-name.md`. History:
-`5624151a3:wave/infrastructure/MEMORY.md`, this heading.
+Design: `scratch/work-on-another-machine-name.md`. Earlier proofs:
+`7f206cd0e:wave/infrastructure/MEMORY.md`, this heading.
 
 ## Synced planning integration (LOO-334)
 

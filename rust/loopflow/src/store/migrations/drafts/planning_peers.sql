@@ -1,5 +1,5 @@
 -- depends_on: local_planning
--- The migration data hook seeds retained provider removal/archive evidence with unknown age.
+-- The migration data hook seeds retained provider invalidation/removal/archive evidence with unknown age.
 -- One mutation journal on the common planning writer. No execution is exported.
 CREATE TABLE planning_peer_context (
     singleton INTEGER PRIMARY KEY CHECK(singleton=1),

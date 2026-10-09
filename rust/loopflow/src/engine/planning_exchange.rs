@@ -187,8 +187,10 @@ impl PlanningMutation {
     pub(crate) fn provider_evidence(&self) -> bool {
         matches!(
             (self.object.kind, self.field.as_str()),
-            (PlanningKind::Task, "provider_removal")
-                | (PlanningKind::Project, "provider_archive" | "provider_teams")
+            (
+                PlanningKind::Task,
+                "provider_removal" | "provider_invalidation"
+            ) | (PlanningKind::Project, "provider_archive" | "provider_teams")
         )
     }
 

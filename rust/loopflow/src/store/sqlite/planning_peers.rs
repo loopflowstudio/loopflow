@@ -1411,6 +1411,30 @@ fn acquire_provider_evidence(
         return Err(mapping_conflict());
     }
     match field {
+        "provider_invalidation" => {
+            // Revision floors survive acknowledgement, but unversioned notices
+            // only invalidate while causally outstanding. Arrival time is irrelevant.
+            for fact in &history.values {
+                if matches!(
+                    fact,
+                    ProviderEvidence::IssueChange {
+                        revision_ns: Some(_),
+                        ..
+                    } | ProviderEvidence::IssueDetail {
+                        revision_ns: Some(_),
+                        ..
+                    }
+                ) {
+                    super::planning::observe_issue_change_in(conn, fact)?;
+                }
+            }
+            for head in &history.heads {
+                if matches!(head, ProviderEvidence::IssueChange { .. }) {
+                    super::planning::observe_issue_change_in(conn, head)?;
+                }
+            }
+        }
+
         "provider_removal" => {
             for fact in &history.values {
                 super::planning::observe_issue_change_in(conn, fact)?;
@@ -1555,11 +1579,7 @@ fn acquire_linear_frontier(
         accepted = match object.kind {
             PlanningKind::Task => {
                 let item = serde_json::from_value(observation.body.clone())?;
-                let accepted = super::planning::put_item(conn, repo, "linear", observed_at, &item)?;
-                if accepted {
-                    conn.execute("UPDATE pm_items SET needs_refresh=0 WHERE repo=?1 AND provider='linear' AND id=?2 AND needs_refresh!=0", params![repo, provider_id])?;
-                }
-                accepted
+                super::planning::put_item(conn, repo, "linear", observed_at, &item)?
             }
             PlanningKind::Project => {
                 let mut project = serde_json::from_value(observation.body.clone())?;
@@ -1574,6 +1594,15 @@ fn acquire_linear_frontier(
     // unresolved relationship evidence. These facts have independent ordering.
     match object.kind {
         PlanningKind::Task => {
+            // Cold import may have created the cache after independent evidence
+            // acquisition. Replay outstanding notices, never retired history.
+            if let Some(history) = changes.evidence.get("provider_invalidation") {
+                for head in &history.heads {
+                    if matches!(head, ProviderEvidence::IssueChange { .. }) {
+                        super::planning::observe_issue_change_in(conn, head)?;
+                    }
+                }
+            }
             let removed: bool = conn.query_row(
                 "SELECT EXISTS(SELECT 1 FROM pm_issue_changes WHERE issue_id=?1 AND removed=1)",
                 [provider_id],
@@ -1627,6 +1656,32 @@ fn acquire_linear_frontier(
         return Err(invalid(
             "peer provider frontier is older than retained evidence",
         ));
+    }
+    if object.kind == PlanningKind::Task {
+        if let Some(history) = changes.evidence.get("provider_invalidation") {
+            // Only a successfully acquired frontier can consume a causal detail
+            // acknowledgement. Scalar/list replay alone never restores freshness.
+            let outstanding = history
+                .heads
+                .iter()
+                .any(|fact| matches!(fact, ProviderEvidence::IssueChange { .. }));
+            if !outstanding {
+                let body: Option<String> = conn
+                    .query_row(
+                        "SELECT body FROM pm_items WHERE repo=?1 AND provider='linear' AND id=?2",
+                        params![repo, provider_id],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                if let Some(body) = body {
+                    let item: crate::pm::PmItem = serde_json::from_str(&body)?;
+                    let revision = super::planning::revision_nanos(item.revision.as_deref())?;
+                    if history.heads.iter().any(|fact| matches!(fact, ProviderEvidence::IssueDetail { revision_ns, .. } if revision >= *revision_ns)) {
+                        conn.execute("UPDATE pm_items SET needs_refresh=0 WHERE repo=?1 AND provider='linear' AND id=?2 AND needs_refresh!=0", params![repo,provider_id])?;
+                    }
+                }
+            }
+        }
     }
     // A mapping is not a creation acknowledgement. Only an accepted provider
     // body can reconcile the original attempt, including after a peer supplied
@@ -4424,6 +4479,223 @@ mod tests {
     }
 
     #[test]
+    fn peer_invalidation_replay_cannot_undo_detail_but_new_notices_still_invalidate() {
+        for revision in [None, Some("2026-10-08T11:00:00Z")] {
+            let (_source_home, source) = store();
+            let (_target_home, target) = store();
+            let (wave, row, task) = linear_seed(&source);
+            let base = export(&source, "/source");
+            import(&target, "/target", "base", &base);
+            preserve_execution(&target, &wave, &task);
+            let execution = execution_rows(&target);
+            let item = &row.snapshot.items[0];
+            source
+                .observe_pm_issue_change(&item.id, revision, false)
+                .unwrap();
+            let notice = export(&source, "/source");
+            import(&target, "/target", "notice", &notice);
+            assert_eq!(
+                target
+                    .pm_task_observation("/target", "linear", &item.id)
+                    .unwrap()
+                    .state,
+                crate::store::PlanningState::Invalid
+            );
+            // Detail retains the provider revision, not a receiving-time version.
+            let mut detail = crate::store::PmTaskRecord {
+                item: item.clone(),
+                project: None,
+                observed_at: 60,
+            };
+            detail.item.revision = Some("2026-10-08T11:00:00Z".into());
+            target
+                .put_pm_task("/target", "linear", &detail, None)
+                .unwrap();
+            // A cache-only detail does not transport a new entity frontier.
+            // Its acknowledgement cannot make the source's older body fresh.
+            let (_fresh_home, fresh) = store();
+            import(&fresh, "/target", "base", &base);
+            import(&fresh, "/target", "ack-only", &export(&target, "/target"));
+            assert_eq!(
+                fresh
+                    .pm_task_observation("/target", "linear", &item.id)
+                    .unwrap()
+                    .state,
+                crate::store::PlanningState::Invalid
+            );
+            // The real revision in that readback also fences a stale local read.
+            fresh
+                .put_pm_task(
+                    "/target",
+                    "linear",
+                    &crate::store::PmTaskRecord {
+                        item: item.clone(),
+                        project: None,
+                        observed_at: 90,
+                    },
+                    None,
+                )
+                .unwrap();
+            assert_eq!(
+                fresh
+                    .pm_task_observation("/target", "linear", &item.id)
+                    .unwrap()
+                    .state,
+                crate::store::PlanningState::Invalid
+            );
+            import(&source, "/source", "ack-only", &export(&target, "/target"));
+            assert_eq!(
+                source
+                    .pm_task_observation("/source", "linear", &item.id)
+                    .unwrap()
+                    .state,
+                crate::store::PlanningState::Invalid
+            );
+            target
+                .put_pm_task("/target", "linear", &detail, Some((&wave, "initiative")))
+                .unwrap();
+            let refreshed = export(&target, "/target");
+            target
+                .put_pm_task("/target", "linear", &detail, Some((&wave, "initiative")))
+                .unwrap();
+            assert_eq!(export(&target, "/target"), refreshed);
+            import(&target, "/target", "notice", &notice);
+            assert_eq!(
+                target
+                    .pm_task_observation("/target", "linear", &item.id)
+                    .unwrap()
+                    .state,
+                crate::store::PlanningState::Available
+            );
+            let revisions = target.revisions().unwrap();
+            import(&target, "/target", "notice", &notice);
+            assert_eq!(target.revisions().unwrap(), revisions);
+            assert_eq!(export(&target, "/target"), refreshed);
+            import(&source, "/source", "refreshed", &refreshed);
+            assert_eq!(
+                source
+                    .pm_task_observation("/source", "linear", &item.id)
+                    .unwrap()
+                    .state,
+                crate::store::PlanningState::Available
+            );
+            // A genuinely new unversioned event follows that detail causally.
+            source
+                .observe_pm_issue_change(&item.id, None, false)
+                .unwrap();
+            import(
+                &target,
+                "/target",
+                "new-notice",
+                &export(&source, "/source"),
+            );
+            assert_eq!(
+                target
+                    .pm_task_observation("/target", "linear", &item.id)
+                    .unwrap()
+                    .state,
+                crate::store::PlanningState::Invalid
+            );
+            import(&target, "/target", "old-detail", &refreshed);
+            assert_eq!(
+                target
+                    .pm_task_observation("/target", "linear", &item.id)
+                    .unwrap()
+                    .state,
+                crate::store::PlanningState::Invalid
+            );
+            assert_eq!(execution_rows(&target), execution);
+            assert_eq!(
+                target.task(&task).unwrap().unwrap().worktree.as_deref(),
+                Some(std::path::Path::new("/retained/work"))
+            );
+        }
+    }
+
+    #[test]
+    fn peer_invalidation_survives_cold_import_and_concurrent_detail() {
+        let (_source_home, source) = store();
+        let (_target_home, target) = store();
+        let (_wave, row, _task) = linear_seed(&source);
+        let item = &row.snapshot.items[0];
+        source
+            .observe_pm_issue_change(&item.id, None, false)
+            .unwrap();
+        let notice = export(&source, "/source");
+        import(&target, "/target", "cold", &notice);
+        assert_eq!(
+            target
+                .pm_task_observation("/target", "linear", &item.id)
+                .unwrap()
+                .state,
+            crate::store::PlanningState::Invalid
+        );
+        let detail = crate::store::PmTaskRecord {
+            item: item.clone(),
+            project: None,
+            observed_at: 60,
+        };
+        target
+            .put_pm_task("/target", "linear", &detail, None)
+            .unwrap();
+        let refreshed = export(&target, "/target");
+        // Neither receiving age nor a concurrent detail retires an unseen notice.
+        source
+            .observe_pm_issue_change(&item.id, None, false)
+            .unwrap();
+        import(
+            &target,
+            "/target",
+            "concurrent",
+            &export(&source, "/source"),
+        );
+        import(&source, "/source", "concurrent-detail", &refreshed);
+        for (store, repo) in [(&source, "/source"), (&target, "/target")] {
+            assert_eq!(
+                store
+                    .pm_task_observation(repo, "linear", &item.id)
+                    .unwrap()
+                    .state,
+                crate::store::PlanningState::Invalid
+            );
+        }
+        // An actual detail observing both heads retires both, including equal bodies.
+        target
+            .put_pm_task("/target", "linear", &detail, None)
+            .unwrap();
+        import(&source, "/source", "settled", &export(&target, "/target"));
+        assert_eq!(
+            source
+                .pm_task_observation("/source", "linear", &item.id)
+                .unwrap()
+                .state,
+            crate::store::PlanningState::Available
+        );
+        // A failed/null detail is also a new invalidation, not erased by replay.
+        let retained = source
+            .pm_task_observation("/source", "linear", &item.id)
+            .unwrap()
+            .record
+            .unwrap();
+        source
+            .invalidate_pm_task("/source", "linear", &retained)
+            .unwrap();
+        import(
+            &target,
+            "/target",
+            "null-detail",
+            &export(&source, "/source"),
+        );
+        assert_eq!(
+            target
+                .pm_task_observation("/target", "linear", &item.id)
+                .unwrap()
+                .state,
+            crate::store::PlanningState::Invalid
+        );
+    }
+
+    #[test]
     fn peer_provider_removal_and_archive_precede_stale_detail_without_losing_work() {
         for (archive, unknown_age) in [(false, false), (false, true), (true, false)] {
             let (_source_home, source) = store();
@@ -5400,6 +5672,9 @@ mod tests {
         }
         preserve_execution(&store, wave.id(), &task.id);
         let workflow = store.workflow(&task.id).unwrap();
+        store
+            .observe_pm_issue_change(&row.snapshot.items[0].id, None, false)
+            .unwrap();
         let mut item = row.snapshot.items[0].clone();
         item.project_id = Some(project.id.clone());
         item.project = Some(project.slug.clone());
@@ -5420,6 +5695,8 @@ mod tests {
             store.task(&task.id).unwrap().unwrap().project_id,
             private_id
         );
+        let retained: i64 = store.conn.lock().unwrap().query_row("SELECT count(*) FROM planning_peer_changes WHERE object_id=?1 AND field='provider_invalidation'", [task.id.as_str()], |row| row.get(0)).unwrap();
+        assert_eq!(retained, 2); // notification and detail stay in the held journal
         let outgoing = export(&store, "/source");
         assert!(!outgoing.objects().iter().any(|o| o.id == task.id.as_str()));
         assert!(outgoing
@@ -5964,6 +6241,8 @@ mod tests {
         )
         .unwrap();
         conn.execute("INSERT INTO pm_projects(repo,provider,id,observed_at,body,archived) VALUES('/fixture','linear',?1,42,?2,1)", params![fixture.projects[0].id,serde_json::to_string(&fixture.projects[0]).unwrap()]).unwrap();
+        conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,created_at,issue_identifier,issue_title,workspace_slug) VALUES('invalid-task','project',?1,1,'INVALID-1','Retain invalidation','')", [&fixture.items[0].id]).unwrap();
+        conn.execute("INSERT INTO pm_items(repo,provider,id,identifier,project_id,observed_at,body,needs_refresh) VALUES('/fixture','linear',?1,?2,?3,42,?4,1)", params![fixture.items[0].id,fixture.items[0].identifier,fixture.items[0].project_id,serde_json::to_string(&fixture.items[0]).unwrap()]).unwrap();
         conn.execute_batch(&upgrade.expect("peer draft or materialized migration"))
             .unwrap();
         super::super::project_content::seed_peer_content(&conn).unwrap();
@@ -5972,6 +6251,10 @@ mod tests {
             (
                 crate::engine::planning_exchange::PlanningKind::Task,
                 "provider_removal",
+            ),
+            (
+                crate::engine::planning_exchange::PlanningKind::Task,
+                "provider_invalidation",
             ),
             (
                 crate::engine::planning_exchange::PlanningKind::Project,

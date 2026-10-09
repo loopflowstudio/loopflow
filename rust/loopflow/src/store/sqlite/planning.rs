@@ -21,6 +21,11 @@ pub(crate) enum ProviderEvidence {
         removed: bool,
         observed_at: Option<i64>,
     },
+    IssueDetail {
+        id: String,
+        revision_ns: Option<i64>,
+        observed_at: i64,
+    },
     Archive {
         project: PmProject,
         observed_at: Option<i64>,
@@ -35,7 +40,10 @@ pub(crate) enum ProviderEvidence {
 impl ProviderEvidence {
     pub(crate) fn field(&self) -> &'static str {
         match self {
-            Self::IssueChange { .. } => "provider_removal",
+            Self::IssueChange { removed: true, .. } => "provider_removal",
+            Self::IssueChange { removed: false, .. } | Self::IssueDetail { .. } => {
+                "provider_invalidation"
+            }
             Self::Archive { .. } => "provider_archive",
             Self::Teams { .. } => "provider_teams",
         }
@@ -44,6 +52,7 @@ impl ProviderEvidence {
     pub(super) fn id(&self) -> &str {
         match self {
             Self::IssueChange { id, .. } => id,
+            Self::IssueDetail { id, .. } => id,
             Self::Archive { project, .. } | Self::Teams { project, .. } => &project.id,
         }
     }
@@ -55,18 +64,8 @@ impl ProviderEvidence {
     ) -> StoreResult<Self> {
         let evidence: Self = serde_json::from_value(value.clone())?;
         let (expected, age) = match &evidence {
-            Self::IssueChange {
-                observed_at,
-                removed,
-                ..
-            } => {
-                if !removed {
-                    return Err(StoreError::InvalidData(
-                        "only confirmed removal is portable".into(),
-                    ));
-                }
-                (PlanningKind::Task, *observed_at)
-            }
+            Self::IssueChange { observed_at, .. } => (PlanningKind::Task, *observed_at),
+            Self::IssueDetail { observed_at, .. } => (PlanningKind::Task, Some(*observed_at)),
             Self::Archive {
                 project,
                 observed_at,
@@ -176,14 +175,21 @@ pub(super) fn observe_issue_change_in(
     conn: &Connection,
     evidence: &ProviderEvidence,
 ) -> StoreResult<()> {
-    let ProviderEvidence::IssueChange {
-        id,
-        revision_ns,
-        removed,
-        observed_at,
-    } = evidence
-    else {
-        unreachable!("issue invalidation takes issue evidence")
+    let (id, revision_ns, removed, observed_at) = match evidence {
+        ProviderEvidence::IssueChange {
+            id,
+            revision_ns,
+            removed,
+            observed_at,
+        } => (id, *revision_ns, *removed, *observed_at),
+        // A completed detail carries a real entity revision even when its body
+        // has not projected here. It fences stale reads, never invents a revision.
+        ProviderEvidence::IssueDetail {
+            id,
+            revision_ns,
+            observed_at,
+        } => (id, *revision_ns, false, Some(*observed_at)),
+        _ => unreachable!("issue invalidation takes issue evidence"),
     };
     conn.execute(
         "INSERT INTO pm_issue_changes(issue_id,revision_ns,removed) VALUES(?1,?2,?3)
@@ -195,7 +201,7 @@ pub(super) fn observe_issue_change_in(
              (excluded.revision_ns IS NOT NULL AND (revision_ns IS NULL OR excluded.revision_ns>revision_ns))",
         params![id, revision_ns, removed],
     )?;
-    if *removed {
+    if removed {
         conn.execute(
             "UPDATE tasks SET planning_deleted_at=?2 WHERE external_issue_id=?1 AND planning_deleted_at IS NULL AND ?2 IS NOT NULL",
             params![id, observed_at],
@@ -210,7 +216,7 @@ pub(super) fn observe_issue_change_in(
         let (repo, body) = row?;
         let item: PmItem = serde_json::from_str(&body)?;
         let cached = revision_nanos(item.revision.as_deref())?;
-        if *removed || revision_ns.is_none() || cached < *revision_ns {
+        if removed || revision_ns.is_none() || cached < revision_ns {
             conn.execute("UPDATE pm_items SET needs_refresh=1 WHERE repo=?1 AND provider='linear' AND id=?2 AND needs_refresh=0", params![repo,id])?;
         }
     }
@@ -222,16 +228,13 @@ fn capture_provider_evidence(
     provider: &str,
     evidence: &ProviderEvidence,
 ) -> StoreResult<()> {
-    if provider != "linear"
-        || matches!(
-            evidence,
-            ProviderEvidence::IssueChange { removed: false, .. }
-        )
-    {
+    if provider != "linear" {
         return Ok(());
     }
     let (kind, table, mapping) = match evidence {
-        ProviderEvidence::IssueChange { .. } => ("task", "tasks", "external_issue_id"),
+        ProviderEvidence::IssueChange { .. } | ProviderEvidence::IssueDetail { .. } => {
+            ("task", "tasks", "external_issue_id")
+        }
         _ => ("project", "projects", "external_project_id"),
     };
     conn.execute(&format!("INSERT INTO planning_peer_changes(id,kind,object_id,field,value,clock,linear,parents)
@@ -258,6 +261,23 @@ pub(crate) fn seed_peer_evidence(conn: &Connection) -> StoreResult<()> {
     })?;
     for row in rows {
         capture_provider_evidence(conn, "linear", &row?)?;
+    }
+    let mut query = conn.prepare("SELECT DISTINCT i.id,c.revision_ns FROM pm_items i LEFT JOIN pm_issue_changes c ON c.issue_id=i.id WHERE i.provider='linear' AND i.needs_refresh=1")?;
+    let rows = query.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, Option<i64>>(1)?))
+    })?;
+    for row in rows {
+        let (id, revision_ns) = row?;
+        capture_provider_evidence(
+            conn,
+            "linear",
+            &ProviderEvidence::IssueChange {
+                id,
+                revision_ns,
+                removed: false,
+                observed_at: None,
+            },
+        )?;
     }
     let mut query =
         conn.prepare("SELECT body FROM pm_projects WHERE provider='linear' AND archived=1")?;
@@ -383,6 +403,18 @@ impl SqliteStore {
                 "UPDATE pm_items SET needs_refresh=0 WHERE repo=?1 AND provider=?2 AND id=?3",
                 params![repo, provider, record.item.id],
             )?;
+            let invalidation: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM planning_peer_heads h JOIN planning_peer_changes c ON c.id=h.id JOIN tasks t ON t.id=h.object_id WHERE h.kind='task' AND h.field='provider_invalidation' AND json_extract(c.value,'$.kind')='issue_change' AND t.external_issue_id=?1)", [&record.item.id], |row| row.get(0))?;
+            if invalidation {
+                capture_provider_evidence(
+                    &tx,
+                    provider,
+                    &ProviderEvidence::IssueDetail {
+                        id: record.item.id.clone(),
+                        revision_ns: revision_nanos(record.item.revision.as_deref())?,
+                        observed_at: record.observed_at,
+                    },
+                )?;
+            }
         }
         if let Some((wave, initiative)) = confirmed_wave {
             let project_id = record.item.project_id.as_deref().ok_or_else(|| {
@@ -447,10 +479,11 @@ impl SqliteStore {
         provider: &str,
         expected: &PmTaskRecord,
     ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
         // A null detail response invalidates cached admission, not provider history.
         // Only a complete detail observation can repair it; list omission is ambiguous.
-        conn.execute(
+        let changed = tx.execute(
             "UPDATE pm_items SET needs_refresh=1 WHERE repo=?1 AND provider=?2 AND id=?3
             AND observed_at=?4 AND json_extract(body,'$.revision') IS ?5",
             params![
@@ -461,6 +494,19 @@ impl SqliteStore {
                 expected.item.revision
             ],
         )?;
+        if changed != 0 {
+            capture_provider_evidence(
+                &tx,
+                provider,
+                &ProviderEvidence::IssueChange {
+                    id: expected.item.id.clone(),
+                    revision_ns: None,
+                    removed: false,
+                    observed_at: Some(super::super::rows::now_unix()),
+                },
+            )?;
+        }
+        tx.commit()?;
         Ok(())
     }
 

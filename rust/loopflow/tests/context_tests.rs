@@ -1,3 +1,5 @@
+mod support;
+
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
@@ -5,10 +7,8 @@ use std::sync::Arc;
 use loopflow::engine::{
     format_prompt, gather_context, DocumentSource, GatherContextOpts, PromptComponents, Surface,
 };
-use loopflow::id::WaveId;
 use loopflow::ops::resolve_work_binding;
 use loopflow::store::{open_ephemeral_store, StorageConfig};
-use loopflow::work::wave::Wave;
 use tempfile::TempDir;
 
 fn init_repo(dir: &Path) {
@@ -48,6 +48,13 @@ fn write_skill(repo: &Path, name: &str, content: &str) {
     fs::write(path, content).unwrap();
 }
 
+fn import_wave(repo: &Path, name: &str) {
+    loopflow::store::sqlite::SqliteStore::new(&loopflow::store::database_path_from_env().unwrap())
+        .unwrap()
+        .ensure_wave(repo.canonicalize().unwrap().to_str().unwrap(), name)
+        .unwrap();
+}
+
 fn render_prompt(components: PromptComponents) -> String {
     format_prompt(&components)
 }
@@ -58,6 +65,7 @@ fn render_prompt(components: PromptComponents) -> String {
 
 #[test]
 fn gather_context_with_skill() {
+    let _env = support::EnvGuard::new(&[]);
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     init_repo(repo);
@@ -85,6 +93,7 @@ fn gather_context_with_skill() {
 
 #[test]
 fn gather_context_with_inline_prompt() {
+    let _env = support::EnvGuard::new(&[]);
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     init_repo(repo);
@@ -114,6 +123,7 @@ fn gather_context_with_inline_prompt() {
 
 #[test]
 fn gather_context_includes_explicit_readme_docs_target() {
+    let _env = support::EnvGuard::new(&[]);
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     init_repo(repo);
@@ -147,6 +157,7 @@ fn gather_context_includes_explicit_readme_docs_target() {
 
 #[test]
 fn gather_context_includes_scratch_docs() {
+    let _env = support::EnvGuard::new(&[]);
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     init_repo(repo);
@@ -189,6 +200,7 @@ fn gather_context_includes_scratch_docs() {
 
 #[test]
 fn gather_context_with_wave() {
+    let _env = support::EnvGuard::new(&[]);
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     init_repo(repo);
@@ -198,6 +210,7 @@ fn gather_context_with_wave() {
     write_skill(repo, "implement", "Do work.");
     make_commit(repo, "initial");
 
+    import_wave(repo, "auth");
     let components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
         skill: Some("implement".to_string()),
@@ -221,6 +234,7 @@ fn gather_context_with_wave() {
 
 #[test]
 fn gather_context_preserves_surface() {
+    let _env = support::EnvGuard::new(&[]);
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     init_repo(repo);
@@ -265,6 +279,7 @@ fn gather_context_preserves_surface() {
 
 #[test]
 fn format_prompt_includes_skill_content() {
+    let _env = support::EnvGuard::new(&[]);
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     init_repo(repo);
@@ -292,6 +307,7 @@ fn format_prompt_includes_skill_content() {
 
 #[test]
 fn format_prompt_includes_auto_mode_header() {
+    let _env = support::EnvGuard::new(&[]);
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     init_repo(repo);
@@ -319,6 +335,7 @@ fn format_prompt_includes_auto_mode_header() {
 
 #[test]
 fn format_prompt_includes_wave_context() {
+    let _env = support::EnvGuard::new(&[]);
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     init_repo(repo);
@@ -332,6 +349,7 @@ fn format_prompt_includes_wave_context() {
     write_skill(repo, "implement", "Do work.");
     make_commit(repo, "initial");
 
+    import_wave(repo, "payments");
     let components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
         skill: Some("implement".to_string()),
@@ -393,6 +411,7 @@ fn setup_multi_wave_repo(repo: &Path) {
 
 #[test]
 fn wave_filtering_includes_only_specified_wave() {
+    let _env = support::EnvGuard::new(&[]);
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     init_repo(repo);
@@ -400,6 +419,7 @@ fn wave_filtering_includes_only_specified_wave() {
     write_skill(repo, "implement", "Do work.");
     make_commit(repo, "initial");
 
+    import_wave(repo, "auth");
     let components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
         skill: Some("implement".to_string()),
@@ -448,6 +468,7 @@ fn wave_filtering_includes_only_specified_wave() {
 
 #[test]
 fn wave_filtering_excludes_all_waves_when_no_wave() {
+    let _env = support::EnvGuard::new(&[]);
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     init_repo(repo);
@@ -493,6 +514,7 @@ fn wave_filtering_excludes_all_waves_when_no_wave() {
 
 #[test]
 fn wave_filtering_handles_nonexistent_wave() {
+    let _env = support::EnvGuard::new(&[]);
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     init_repo(repo);
@@ -535,6 +557,7 @@ fn wave_filtering_handles_nonexistent_wave() {
 
 #[test]
 fn wave_filtering_includes_all_files_in_wave_directory() {
+    let _env = support::EnvGuard::new(&[]);
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     init_repo(repo);
@@ -565,6 +588,7 @@ fn wave_filtering_includes_all_files_in_wave_directory() {
     write_skill(repo, "implement", "Do work.");
     make_commit(repo, "initial");
 
+    import_wave(repo, "features");
     let components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
         skill: Some("implement".to_string()),
@@ -600,8 +624,9 @@ fn wave_filtering_includes_all_files_in_wave_directory() {
 }
 
 #[test]
-fn nested_wave_reads_all_ancestor_markdown_in_checkout_order() {
-    // No registry or git history is needed, including in a fresh checkout.
+fn nested_wave_reads_stored_ancestor_markdown_in_order() {
+    let _env = support::EnvGuard::new(&[]);
+    // Import the definition once; context reads the stored hierarchy.
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     for (path, content) in [
@@ -625,6 +650,7 @@ fn nested_wave_reads_all_ancestor_markdown_in_checkout_order() {
         fs::create_dir_all(file.parent().unwrap()).unwrap();
         fs::write(file, content).unwrap();
     }
+    import_wave(repo, "infrastructure/release");
     let mut components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
         wave: Some("infrastructure/release".into()),
@@ -648,9 +674,9 @@ fn nested_wave_reads_all_ancestor_markdown_in_checkout_order() {
         paths,
         [
             "MEMORY.md",
-            "wave/infrastructure/README.md",
             "wave/infrastructure/GOAL.md",
             "wave/infrastructure/MEMORY.md",
+            "wave/infrastructure/README.md",
             "wave/infrastructure/release/GOAL.md",
             "wave/infrastructure/release/MEMORY.md",
             "wave/infrastructure/release/notes.md",
@@ -683,6 +709,7 @@ fn nested_wave_reads_all_ancestor_markdown_in_checkout_order() {
 
 #[test]
 fn context_delivery_repository_memory_is_included_once_without_a_wave() {
+    let _env = support::EnvGuard::new(&[]);
     let temp = TempDir::new().unwrap();
     fs::write(temp.path().join("MEMORY.md"), "Repository decisions.").unwrap();
     let mut components = gather_context(&GatherContextOpts {
@@ -705,6 +732,7 @@ fn context_delivery_repository_memory_is_included_once_without_a_wave() {
 
 #[test]
 fn run_outside_any_wave_assembles_no_memory_section() {
+    let _env = support::EnvGuard::new(&[]);
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     init_repo(repo);
@@ -723,7 +751,8 @@ fn run_outside_any_wave_assembles_no_memory_section() {
 }
 
 #[tokio::test]
-async fn worktree_reads_its_own_wave_memory() {
+async fn worktree_reads_shared_stored_wave_memory() {
+    let _env = support::EnvGuard::new(&[]);
     let temp = TempDir::new().unwrap();
     let origin = temp.path().join("repo");
     fs::create_dir_all(&origin).unwrap();
@@ -750,7 +779,7 @@ async fn worktree_reads_its_own_wave_memory() {
         .current_dir(&origin)
         .output()
         .expect("git worktree add");
-    // Uncommitted memory in the executing checkout wins over the origin.
+    // Checkout edits do not replace the stored plan.
     fs::write(
         worktree.join("wave/goals/MEMORY.md"),
         "- checkout-local decisions",
@@ -758,13 +787,14 @@ async fn worktree_reads_its_own_wave_memory() {
     .unwrap();
 
     fs::write(worktree.join("wave/goals/GOAL.md"), "Checkout goal.").unwrap();
+    import_wave(&origin, "goals");
     let store = Arc::new(
-        open_ephemeral_store(&StorageConfig::sqlite(temp.path().join("registry.db")))
-            .await
-            .unwrap(),
+        open_ephemeral_store(&StorageConfig::sqlite(
+            loopflow::store::database_path_from_env().unwrap(),
+        ))
+        .await
+        .unwrap(),
     );
-    let wave = Wave::new(WaveId::new(), "goals".into(), origin.display().to_string());
-    store.create_wave(&wave).await.unwrap();
     let binding = resolve_work_binding(&store, &worktree, "wave:goals")
         .await
         .unwrap();
@@ -782,10 +812,10 @@ async fn worktree_reads_its_own_wave_memory() {
     .unwrap();
 
     let prompt = render_prompt(components);
-    assert_eq!(prompt.matches("checkout-local decisions").count(), 1);
-    assert_eq!(prompt.matches("Checkout goal.").count(), 1);
+    assert_eq!(prompt.matches("previous committed memory").count(), 1);
+    assert_eq!(prompt.matches("Origin goal.").count(), 1);
     assert_eq!(prompt.matches("<lf:loopflow>").count(), 1);
-    assert!(prompt.contains("Curate wave/goals/MEMORY.md in this checkout."));
-    assert!(!prompt.contains("previous committed memory"));
-    assert!(!prompt.contains("Origin goal."));
+    assert!(prompt.contains("Curate stored Wave memory with `lf wave edit goals --memory <file>`."));
+    assert!(!prompt.contains("checkout-local decisions"));
+    assert!(!prompt.contains("Checkout goal."));
 }

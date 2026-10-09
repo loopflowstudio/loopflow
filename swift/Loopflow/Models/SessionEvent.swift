@@ -34,7 +34,7 @@ public struct SessionEvent: Codable, Sendable, Equatable, Identifiable {
 }
 
 /// Lossless JSON structure for provider-authored receipt payloads.
-public enum JSONValue: Codable, Sendable, Equatable {
+public enum JSONValue: Codable, Sendable, Hashable {
     case null
     case bool(Bool)
     case integer(Int64)

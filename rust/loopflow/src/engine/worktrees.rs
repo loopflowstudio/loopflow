@@ -1679,20 +1679,6 @@ pub fn is_persistent_worktree(repo: &Path) -> Result<bool, GitError> {
     }
 }
 
-pub(crate) fn existing_agent_worktree(
-    main_repo: &Path,
-    segment: WorktreeSegment,
-) -> Result<Option<AgentWorktree>, GitError> {
-    let plan = plan_placement(main_repo, segment)?;
-    match plan.strategy {
-        PlacementStrategy::UseExistingWorktree => Ok(Some(AgentWorktree {
-            path: plan.worktree_path,
-            branch: plan.branch,
-        })),
-        PlacementStrategy::Create | PlacementStrategy::CheckoutExisting => Ok(None),
-    }
-}
-
 /// Move a bare/default `lf` session off canonical main while preserving both
 /// local commits and uncommitted files. A deliberate non-default checkout and
 /// an existing linked worktree are left alone.

@@ -9,7 +9,8 @@
       "completed": false,
       "state": "canceled",
       "completed_at": null,
-      "assignee": null
+      "assignee": null,
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -58,7 +59,8 @@
       "completed": false,
       "state": "canceled",
       "completed_at": null,
-      "assignee": null
+      "assignee": null,
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -107,7 +109,8 @@
       "completed": false,
       "state": "canceled",
       "completed_at": null,
-      "assignee": null
+      "assignee": null,
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -156,7 +159,8 @@
       "completed": false,
       "state": "canceled",
       "completed_at": null,
-      "assignee": null
+      "assignee": null,
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -205,7 +209,8 @@
       "completed": false,
       "state": "canceled",
       "completed_at": null,
-      "assignee": null
+      "assignee": null,
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -254,7 +259,8 @@
       "completed": false,
       "state": "canceled",
       "completed_at": null,
-      "assignee": null
+      "assignee": null,
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -303,7 +309,8 @@
       "completed": false,
       "state": "canceled",
       "completed_at": null,
-      "assignee": null
+      "assignee": null,
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -352,7 +359,8 @@
       "completed": false,
       "state": "unstarted",
       "completed_at": null,
-      "assignee": null
+      "assignee": null,
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -401,7 +409,8 @@
       "completed": false,
       "state": "unstarted",
       "completed_at": null,
-      "assignee": null
+      "assignee": null,
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -450,7 +459,8 @@
       "completed": false,
       "state": "unstarted",
       "completed_at": null,
-      "assignee": null
+      "assignee": null,
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -499,7 +509,8 @@
       "completed": false,
       "state": "unstarted",
       "completed_at": null,
-      "assignee": null
+      "assignee": null,
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -548,7 +559,8 @@
       "completed": true,
       "state": "completed",
       "completed_at": "2026-10-01T12:00:00Z",
-      "assignee": null
+      "assignee": null,
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -597,7 +609,8 @@
       "completed": true,
       "state": "completed",
       "completed_at": "2026-09-12T12:00:00Z",
-      "assignee": null
+      "assignee": null,
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -646,7 +659,8 @@
       "completed": true,
       "state": "completed",
       "completed_at": null,
-      "assignee": null
+      "assignee": null,
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -695,7 +709,8 @@
       "completed": false,
       "state": "unstarted",
       "completed_at": "2026-09-01T12:00:00Z",
-      "assignee": null
+      "assignee": null,
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -744,7 +759,8 @@
       "completed": false,
       "state": "canceled",
       "completed_at": null,
-      "assignee": null
+      "assignee": null,
+      "sync": null
     },
     "reference": {
       "issue_url": null,

@@ -311,16 +311,7 @@ pub(crate) async fn list(
     workspace::associate(store, &mut sessions).await?;
     if association_filter {
         let task = if let Some(selector) = &filter.task {
-            store
-                .task_checkouts()
-                .await?
-                .into_iter()
-                .find(|task| {
-                    task.task_id.as_str() == selector
-                        || task.issue_id == *selector
-                        || task.issue_identifier == *selector
-                })
-                .map(|task| task.task_id)
+            store.sqlite.resolve_task_id(selector, None)?
         } else {
             None
         };

@@ -1,0 +1,85 @@
+{
+  "comments": {
+    "comments": [
+      {
+        "author": {
+          "kind": "person",
+          "name": "Fixture Person"
+        },
+        "body": "Preserve the escaped quote\n\n<!-- loopflow-requester:\"Fixture Person\" -->\n\n<!-- loopflow-steer:00000000-0000-4000-8000-000000000001 -->",
+        "created_at": "2026-10-08T00:00:00Z",
+        "id": "00000000-0000-4000-8000-000000000001"
+      }
+    ],
+    "identifier": "lf-0123456",
+    "pending_sync": [],
+    "refresh_error": null,
+    "conflicts": {}
+  },
+  "task": {
+    "actions": {
+      "reason": "run the next work with `lf task run`; inspect earlier Flows and independent Sessions first",
+      "recommended": "resume"
+    },
+    "active_pr": null,
+    "condition": {
+      "evidence_age_secs": 0,
+      "local_progress": {
+        "authored_commits": null,
+        "dirty": null,
+        "reason": null,
+        "recovery_required": null,
+        "state": "not_applicable",
+        "unsettled": false
+      },
+      "observed_at": "2026-10-08T00:00:00Z",
+      "reason": "ready",
+      "state": "waiting",
+      "unresolved_execution": false
+    },
+    "execution": {
+      "captured": null,
+      "reason": "No Task Flow has run; independent Sessions may still be active",
+      "state": "idle",
+      "step": null
+    },
+    "latest_flow_process": null,
+    "next_move": {
+      "owner": "wave",
+      "reason": "ready"
+    },
+    "reference": {
+      "issue_url": null,
+      "workspace": null
+    },
+    "run_control": {
+      "unavailable": null
+    },
+    "runtime": {
+      "planning_conflict": null,
+      "provider": "codex",
+      "reason": "No Task Flow has run; independent Sessions may still be active",
+      "started": false,
+      "status": "not_ready",
+      "updated_at": "2026-10-08T00:00:00Z",
+      "work_id": "task_0123456789ab40008000000000000001"
+    },
+    "section": "waiting",
+    "task": {
+      "assignee": null,
+      "completed": false,
+      "completed_at": null,
+      "description": "Keep the escaped quote",
+      "id": "task_0123456789ab40008000000000000001",
+      "identifier": "lf-0123456",
+      "name": "Retain quoted input",
+      "rank": 0,
+      "state": "unstarted",
+      "sync": {
+        "connected": false,
+        "changes": []
+      }
+    },
+    "workflow_name": null
+  }
+}

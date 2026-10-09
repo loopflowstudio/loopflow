@@ -1600,6 +1600,7 @@ mod cron_catalog_tests {
 
     #[test]
     fn declared_cron_flow_cannot_fall_back_to_builtin_skill() {
+        let machine = crate::journal::TestLedgerGuard::new();
         let repo = tempfile::tempdir().unwrap();
         fs::create_dir_all(repo.path().join("wave/infrastructure")).unwrap();
         fs::create_dir_all(repo.path().join(".lf/flows")).unwrap();
@@ -1621,6 +1622,10 @@ mod cron_catalog_tests {
             placed_machine: home,
             repo: repo.path().to_path_buf(),
         };
+        crate::store::sqlite::SqliteStore::new(&machine.home().join("loopflow.db"))
+            .unwrap()
+            .ensure_wave(repo.path().to_str().unwrap(), "infrastructure")
+            .unwrap();
         let specs = cron_specs(&authority, "infrastructure").unwrap();
         assert_eq!(specs.len(), 1);
         assert_eq!(specs[0].target_kind, CronTargetKind::Flow);
@@ -2331,7 +2336,7 @@ fn protected_worktree_paths() -> Result<HashSet<PathBuf>> {
                     status,
                     crate::durable::WorkStatus::Done | crate::durable::WorkStatus::Abandoned
                 ) {
-                    protected.insert(task.worktree);
+                    protected.extend(task.worktree);
                 }
             }
         }

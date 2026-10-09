@@ -93,16 +93,20 @@ ages/baselines and causal frontiers. Import reuses portable fields.
 Entity revisions cannot order relationships; scalar/list replay cannot clear
 freshness or unseen notices. Prior evidence: `7d12ab10a`, this heading.
 
-October 9: `repo identity --bind` associates established roots; old IDs remain
-local locators. Work, mappings, effects and execution survive. Fixture roots precede
-binding. Resolve locators to paths before scoped Task lookup. Imports allocate identity; journals exclude RepositoryId/delegation.
-Live-window reassociation remains. Binding publishes nothing and grants no admission;
-shared Tasks without checkouts refuse start.
+October 9: `d4fbca0ae` associates established roots; `a73198197` scopes Task
+lookup through retained repository locators. Work, mappings, effects and execution
+survive. Both fixture roots own Work before binding. Binding publishes nothing. Journals exclude RepositoryId/delegation.
+Imports allocate identity. Live windows capture the old ID: aliases alone cannot
+converge windows or preserve drafts across reassociation.
 
-Composition excludes LOO-412's transfer/preparing resolver, preserving Jack Heart's
-recorded-Machine retention and effect-free selection. **Unmapping is not association:**
-preserve IDs, lookup, effects and execution. Peer reads use Machine/repository keys.
-Live legacy association, sharing/recovery and remote/native acceptance remain unproved.
+Repository association does not associate divergent Task/Project provider IDs.
+**Unmapping is not association.** LOO-412's newer provider claims cross IDs;
+`19e31f64d` separates effect origin from projection ownership.
+Inspected, not composed: LOO-427 retains same-ID holds. Correspondence remains
+unfinished there too; mixed exchange stays disabled. Exclude transfer/preparing
+resolution, preserving Jack Heart's recorded-Machine retention and effect-free
+selection. Peer reads use Machine/repository keys. Sharing/recovery and remote/native
+acceptance remain unproved.
 
 Integrated #1512 (`3e1e6245c`): live connect hands off; dead-driver resume starts a
 fresh engine on native history. Peer proof must separate local resume from
@@ -200,20 +204,14 @@ Jack Heart approved LOO-386/#1492, retaining Workflow/Flow and restart-to-start,
 then requested gate and Task-completing landing. Review/approval:
 `9669d67d5:scratch/workflow-review.md`; earlier detail: `97bf9dbcb`, this heading.
 
-Definitions have independent namespaces; navigation carries kind and name.
-Project selection affects future take-up; restart retains the captured graph and
-history. Workflow selection, latest FlowProcessDetail, execution evidence and
-TaskRunControl stay separate; latest grants no authority. LOO-400's landed
-`e467ea995` supplies Process/LFID and the migration; old captures remain readable.
-
-Wave-owned planning supersedes Project commands. Catalog/diagram/restart history:
-`942dab5d8`, this heading. An active Flow's arrival cannot advance a reset Task.
-
-Gate repaired fixtures missed by focused checks: absent
-execution is null, and every Task needs run_control. A nested macOS sandbox
-failed to launch; the test passed under its own restrictions. Rust and Swift
-failures passed focused reruns. Approval establishes no native Desktop, live
-planning, configured-provider proof or chapter KR.
+Independent namespaces retain kind/name. Restart keeps the graph/history;
+Project selection affects future take-up. Latest FlowProcessDetail grants no
+control authority; selection, execution and TaskRunControl stay separate.
+LOO-400's `e467ea995` supplies Process/LFID; old captures remain readable.
+Wave-owned commands supersede Project commands. A reset Task cannot advance
+from an older Flow's arrival. Catalog, gate failures/repairs and reruns:
+`a73198197:wave/product/MEMORY.md`, this heading. Approval proves no native,
+live-planning, configured-provider acceptance or chapter KR.
 
 ## Task conversation and Workflows (LOO-353, PR #1439; 2026-10-04 to 10-06)
 

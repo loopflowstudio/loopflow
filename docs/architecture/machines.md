@@ -109,7 +109,9 @@ LOO-412 supplies user/shared destination selection and portable Work exchange.
 That journal does not carry RepositoryId or delegation: unbound import creates
 a local repository ID. Explicit association converges established roots on a
 selected ID without rewriting Work; delegation exchange and live-window
-reassociation remain unfinished.
+reassociation remain unfinished. This associates repository roots, not divergent
+Task/Project IDs for one provider object; provider correspondence and uncertain
+effect ownership remain with the common planning writer.
 
 This is not complete distributed routing: a peer's absence of a checkout is not
 proof of an unstarted Task. Planning exchange excludes execution. An observed

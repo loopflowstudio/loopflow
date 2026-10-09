@@ -146,9 +146,13 @@ Keep these replacements deleted:
 - Repository-wide export, alias-addressed transport and selection coupled to
   moves. One destination-scoped selection/hold calculation protects whole private
   histories and dependents; it does not veto independent exchange.
-- Value-only projection indexes and copied causal-head indexes. One borrowed,
-  field-keyed winner index now feeds completeness, projection and delivery across
-  retries; stable IDs and provider provenance stay attached.
+- Value-only projection indexes, copied causal-head indexes and per-object scans
+  of the full journal. One borrowed object view groups history and field winners
+  once per import; projection retries reuse it. The immutable snapshot still owns
+  causal links, losing mutations and provider provenance. Frontier selection drops
+  superseded revisions before sorting acquisitions; same-revision contradictions
+  remain. The existing comment regression now retains a second comment with an
+  independently newer frontier, including across edit/readback; it is unexecuted.
 - Raw Project Markdown mutations and duplicate workflow representation are
   removed. The existing semantic content owner captures all three fields and
   renders their combined winners; retained Markdown storage and original migration
@@ -192,7 +196,7 @@ original acquisition times travel in the journal; imported authorship creates no
 local steer. Authored regressions cover lost replies, later edits, conflicts,
 no echo, migration and execution preservation. Rust execution remains unavailable.
 
-October 8 semantic Project content now replaces the raw Markdown mutation and its
+October 8 semantic Project content (`a518b985b`) replaces the raw Markdown mutation and its
 separately duplicated workflow. The common content owner captures workflow, KRs
 and metric targets independently in the existing journal, then renders their
 combined winners. Creation, selection, rotation and accepted acquisition capture
@@ -493,7 +497,7 @@ Infrastructure child memory exists in this checkout.
 7. Replace PR copy and create a walkthrough of final behavior and evidence;
    publish #1491 for Jack Heart's review and stop without landing.
 
-Check (October 8 semantic content): `cargo fmt --all --check`, `git diff --check` and canonical/draft SQL plus source-extracted capture pass; `lf context --skill implement` fits. Build, focused `peer_project_content`/malformed-content/migration tests and Clippy remain with capable isolated gate/CI; unchanged build-script startup stalls were not reprobed.
+Check (October 8 compression): `cargo fmt --all --check` and `git diff --check` pass; `lf context --skill compress` fits. Build, focused `cargo test -p loopflow --lib peer_comments_acquired_without_local_delivery_never_echo` (broader peer suites at gate) and `cargo clippy --all-targets -- -D warnings` remain with capable isolated gate/CI; unchanged build-script startup stalls were not reprobed. Prior SQL/capture evidence is retained at `a518b985b` in this section.
 
 Prior fmt and source-extracted SQL passes, focused-test/Clippy timeouts and their
 startup samples are preserved at `e77d2d1c8:scratch/work-on-another-machine-name.md`.

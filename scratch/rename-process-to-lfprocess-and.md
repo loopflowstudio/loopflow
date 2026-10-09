@@ -24,5 +24,8 @@ Review: the compiler and remaining-token audit distinguish the model from enum
 variants and Foundation processes. No aliases or second owners remain. Rustfmt
 collapses three shortened signatures, accounting for ten removed lines beyond
 the defining-sentence edits; do not add filler to force balanced diff counts.
+Compression found no further code reduction within the pure-rename boundary.
+The command reference now matches Clap's short Session wording for `--caller`.
+No deletion targets remain; provider-owned types stay with LOO-442.
 
 Checks: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `swift build --package-path swift`, network-isolated Rust `dto_fixtures` (22) and Swift `DTOFixtureTests` (23), and README/index sync (1) pass; full Rust tests remain with gate. Swift tests use `--disable-sandbox` inside the network wrapper to avoid nested sandbox denial.

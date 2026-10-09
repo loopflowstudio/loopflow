@@ -628,8 +628,8 @@ uncertainty and losers. Readback cannot settle mappings/errors or removal via cr
 Desktop retains last-good scoped status; per-Work recovery remains. Mixed exchange
 stays disabled. Omission is not convergence. Earlier proofs: `9dfb95451`, this heading.
 
-Creation origins (`39dba32c1`) retain exact readback; joint scalar winners
-(`1cbbba625`/`01769ea0d`) reuse accepted observations on explicit correspondence.
+Creation origins retain exact readback; joint winners reuse accepted observations
+on explicit correspondence. Earlier cuts: `521c7040f`, this heading.
 Causality precedes ranking; portable parents prove observation, not identity or
 authority. Private references hold groups. Membership delivery/readback resolves
 aliases without rewriting inputs (`79e478550`/`521c7040f`); exact readback rebases

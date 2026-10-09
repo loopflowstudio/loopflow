@@ -60,10 +60,10 @@ leaves/commands/surfaces; Undo renews closed tokens. Zoom grants no focus.
 Lost replies grant no replay; view tokens grant no input. `13cf98bf5` qualifies
 terminals/readings by Machine; `6fec74d2d` prunes membership moves without releasing
 surfaces. Filtered absence proves no deletion; same-ID peers stay separate.
-Passive inspection uses ProgramStatusSurface's lifetime, never allocating lookup
-or exit cleanup. Bounded extraction needs a Ghostty patch: truncating Swift's copy
-cannot bound C allocation. Empty differs from unavailable. Text I/O, peer composition
-and packaged/native proof remain.
+Inspection uses ProgramStatusSurface's lifetime without allocation/cleanup.
+`3321ff419` bounds Ghostty extraction; Linux tests pass, framework unbuilt/unpublished.
+Swift truncation cannot bound C allocation; empty differs from unavailable.
+Text I/O, peer composition and packaged/native proof remain.
 
 Jack selected local operations and Git-ref Task sync: 406 owns writes/Linear,
 412 exchange. Imported completion cannot move local Workflow or clean execution.

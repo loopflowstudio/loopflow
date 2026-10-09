@@ -73,10 +73,10 @@ installed help or reviewed Desktop code, not proof that no external tool exists.
   existing native surface lifetime without allocation or exit cleanup; `6fec74d2d`
   removes dormant Session-list cleanup. Membership moves prune panes/Undo without
   releasing surfaces or touching another Machine's same-ID Session. Focused fixtures
-  typecheck; native exited/replaced-surface reads remain unproved. The pinned reader
-  allocates its whole result, so bounded extraction needs a Ghostty patch, not Swift
-  truncation. Terminal reads/input, peer composition and native acceptance remain
-  unfinished. The command tables still describe October 7's baseline.
+  typecheck; native exited/replaced-surface reads remain unproved. `3321ff419` adds
+  a local Ghostty patch for caller-bounded extraction, with terminal-only Linux proof. The framework remains unbuilt/unpublished;
+  packaged lf2 still allocates the full result. Swift truncation is no fallback.
+  Terminal reads/input, peer composition and native acceptance remain unfinished. The command tables still describe October 7's baseline.
   No cmux/herdr behavior was re-exercised for these deltas.
 - Public [cmux API](https://cmux.com/docs/api) and
   [concepts](https://cmux.com/docs/concepts) provide context, but the tables below

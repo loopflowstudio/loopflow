@@ -64,7 +64,7 @@
  selected_command: ?*Pin = null,
  
  /// The charset state
-@@ -3045,6 +3045,28 @@
+@@ -3045,6 +3045,32 @@
      return try aw.toOwnedSliceSentinel(0);
  }
  
@@ -83,17 +83,21 @@
 +    });
 +    formatter.content = .{ .selection = opts.sel };
 +    const truncated = if (formatter.format(&writer)) |_| false else |_| true;
-+    // A byte-limited destination can end in the middle of a UTF-8 scalar.
-+    // Keep only complete scalars, without allocating a repaired copy.
++    // The formatter emits valid UTF-8; only the final scalar can be partial.
++    // Inspect at most four bytes, not the entire extracted prefix.
 +    var len = writer.end;
-+    while (len > 0 and !std.unicode.utf8ValidateSlice(destination[0..len])) : (len -= 1) {}
++    if (truncated and len > 0) {
++        var start = len - 1;
++        while (start > 0 and destination[start] & 0xc0 == 0x80) : (start -= 1) {}
++        if (!std.unicode.utf8ValidateSlice(destination[start..len])) len = start;
++    }
 +    return .{ .len = len, .truncated = truncated };
 +}
 +
  pub const SelectLine = struct {
      /// The pin of some part of the line to select.
      pin: Pin,
-@@ -3544,9 +3566,9 @@
+@@ -3544,9 +3570,9 @@
      self.selected_command = null;
  }
  
@@ -106,7 +110,7 @@
      const tracked = self.selected_command orelse return null;
      if (!tracked.garbage) {
          if (self.commandBlock(tracked.*)) |block| {
-@@ -3554,7 +3576,6 @@
+@@ -3554,7 +3580,6 @@
                  block.prompt.y == tracked.y) return block;
          }
      }
@@ -114,30 +118,35 @@
      return null;
  }
  
-@@ -12963,3 +12984,79 @@
+@@ -12963,3 +12988,73 @@
          try testing.expectEqualStrings("world", contents);
      }
  }
 +
-+test "Screen: bounded text preserves UTF-8 and reports truncation" {
++test "Screen: bounded text matches complete text at every byte limit" {
 +    const testing = std.testing;
-+    var s = try init(testing.io, testing.allocator, .{ .cols = 80, .rows = 5 });
-+    defer s.deinit();
-+    try s.testWriteString("aé界z");
-+    const sel: Selection = .init(s.pages.getTopLeft(.screen), s.pages.getBottomRight(.screen).?, false);
-+    var full: [512]u8 = undefined;
-+    const complete = s.selectionStringBounded(.{ .sel = sel, .trim = false }, &full);
-+    try testing.expect(!complete.truncated);
-+    try testing.expectEqualStrings("aé界z", full[0..complete.len]);
-+    var buffer: [16]u8 = @splat(0xaa);
-+    for (0..complete.len + 1) |capacity| {
-+        const result = s.selectionStringBounded(.{ .sel = sel, .trim = false }, buffer[0..capacity]);
-+        try testing.expect(result.len <= capacity);
-+        try testing.expect(std.unicode.utf8ValidateSlice(buffer[0..result.len]));
-+        try testing.expectEqualStrings(full[0..result.len], buffer[0..result.len]);
-+        try testing.expectEqual(capacity < complete.len, result.truncated);
-+        try testing.expectEqual(@as(u8, 0xaa), buffer[capacity]);
-+        @memset(&buffer, 0xaa);
++    // Empty, all scalar widths, combining characters, and soft-wrapped text.
++    for ([_][]const u8{ "", "ascii", "aé界😀z", "e\u{301}", "wrapped text crosses rows" }) |text| {
++        var s = try init(testing.io, testing.allocator, .{ .cols = 10, .rows = 5 });
++        defer s.deinit();
++        try s.testWriteString(text);
++        const opts: SelectionString = .{
++            .sel = .init(s.pages.getTopLeft(.screen), s.pages.getBottomRight(.screen).?, false),
++            .trim = false,
++        };
++        const full = try s.selectionString(testing.allocator, opts);
++        defer testing.allocator.free(full);
++        try testing.expectEqualStrings(text, full);
++        var buffer: [64]u8 = undefined;
++        for (0..full.len + 2) |capacity| {
++            @memset(&buffer, 0xaa);
++            const result = s.selectionStringBounded(opts, buffer[0..capacity]);
++            var expected = @min(capacity, full.len);
++            while (!std.unicode.utf8ValidateSlice(full[0..expected])) : (expected -= 1) {}
++            try testing.expectEqualStrings(full[0..expected], buffer[0..result.len]);
++            try testing.expectEqual(capacity < full.len, result.truncated);
++            for (buffer[capacity..]) |byte| try testing.expectEqual(@as(u8, 0xaa), byte);
++        }
 +    }
 +}
 +
@@ -162,17 +171,6 @@
 +    try testing.expect(!allocator.has_induced_failure);
 +    try testing.expectEqual(allocated, allocator.allocated_bytes);
 +    try testing.expectEqual(freed, allocator.freed_bytes);
-+}
-+
-+test "Screen: bounded text empty succeeds" {
-+    const testing = std.testing;
-+    var s = try init(testing.io, testing.allocator, .{ .cols = 80, .rows = 5 });
-+    defer s.deinit();
-+    const sel: Selection = .init(s.pages.getTopLeft(.screen), s.pages.getBottomRight(.screen).?, false);
-+    var buffer: [0]u8 = .{};
-+    const result = s.selectionStringBounded(.{ .sel = sel, .trim = false }, &buffer);
-+    try testing.expectEqual(@as(usize, 0), result.len);
-+    try testing.expect(!result.truncated);
 +}
 +
 +test "Screen: bounded text reads selected blocks without cleanup" {

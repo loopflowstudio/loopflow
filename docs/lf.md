@@ -241,8 +241,9 @@ lf planning associate <incoming-work-id> --with <local-work-id> --linear <provid
 ```
 
 Both IDs remain intact. The incoming full ID resolves to existing local Work;
-no execution or private history moves. **Joint planning projection is unfinished:**
-association retains sharing/effect holds visible in status, not convergence.
+no execution or private history moves. Scalar fields project jointly, but receipt
+composition is unfinished. Association retains sharing/effect holds visible in
+status, not convergence.
 
 Setup is local: these commands neither fetch nor publish planning. In local-only
 repositories, interactive and headless sessions exchange selected planning, even

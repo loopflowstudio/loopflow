@@ -630,7 +630,8 @@ stays disabled. Omission is not convergence. Earlier proofs: `9dfb95451`, this h
 
 `39dba32c1` retains creation origins; common acquisition owns exact readback.
 The joint scalar cut reuses `dac02060a`–`96f714bd6`'s accepted-observation writer.
-Explicit correspondence groups local owners; causal ancestry precedes ranking.
+Explicit correspondence groups local owners; traverse foreign predecessors without
+combining unassociated owners. Causal ancestry precedes ranking.
 Portable peer-authored predecessors record observation, never identity or authority.
 Private references still hold the whole group. Relationship/non-creation receipt
 composition and public acceptance remain unfinished; association exchange/effects

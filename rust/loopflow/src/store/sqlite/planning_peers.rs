@@ -1194,6 +1194,7 @@ fn selection_conflicts(
     snapshot: &PlanningSnapshot,
     hold_associations: bool,
 ) -> StoreResult<BTreeMap<PlanningObject, String>> {
+    let objects = snapshot.objects();
     let mut dependents: BTreeMap<PlanningObject, BTreeSet<&PlanningObject>> = BTreeMap::new();
     for change in snapshot.changes.values() {
         for parent in references(change).into_iter().chain(
@@ -1213,7 +1214,7 @@ fn selection_conflicts(
         }
     }
     let mut held = BTreeMap::new();
-    for object in snapshot.objects() {
+    for &object in &objects {
         if member_destination(conn, repo, object)?.as_deref() != Some(destination) {
             held.insert(object.clone(), "planning exchange held: causal predecessor is outside this selection; private history is retained".into());
             pending.insert(object.clone());
@@ -1228,11 +1229,7 @@ fn selection_conflicts(
                 id: local,
             };
             dependents.entry(local.clone()).or_default().insert(object);
-            if let Some(local) = snapshot
-                .objects()
-                .into_iter()
-                .find(|other| **other == local)
-            {
+            if let Some(&local) = objects.get(&local) {
                 dependents.entry(object.clone()).or_default().insert(local);
             }
             if member_destination(conn, repo, &local)?.as_deref() != Some(destination) {
@@ -2199,26 +2196,22 @@ fn project_delivery_fields(
 }
 
 fn linear_predecessor(snapshot: &PlanningSnapshot, change: &PlanningMutation) -> Option<Value> {
-    let mut pending: Vec<_> = change.parents.iter().map(String::as_str).collect();
-    let mut visited = BTreeSet::new();
-    let mut latest = None;
-    while let Some(id) = pending.pop() {
-        if !visited.insert(id) {
-            continue;
-        }
-        let prior = &snapshot.changes[id];
-        if let Some(observation) = &prior.linear {
-            let candidate = (observation.revision_time(), prior.clock, id);
-            if latest.is_none_or(|previous| candidate > previous) {
-                latest = Some(candidate);
-            }
-        }
-        pending.extend(prior.parents.iter().map(String::as_str));
-    }
-    latest.map(|(_, _, id)| {
-        let prior = &snapshot.changes[id];
-        serde_json::json!({"value":prior.value,"revision":prior.linear.as_ref().and_then(LinearObservation::revision)})
-    })
+    let (_, prior) = snapshot
+        .ancestors(change.parents.iter().map(String::as_str))
+        .filter(|(_, prior)| prior.linear.is_some())
+        .max_by_key(|(id, prior)| {
+            (
+                prior
+                    .linear
+                    .as_ref()
+                    .and_then(LinearObservation::revision_time),
+                prior.clock,
+                *id,
+            )
+        })?;
+    Some(
+        serde_json::json!({"value":prior.value,"revision":prior.linear.as_ref().and_then(LinearObservation::revision)}),
+    )
 }
 
 fn projection_conflict(error: &StoreError) -> bool {

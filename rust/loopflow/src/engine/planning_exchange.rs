@@ -290,25 +290,47 @@ impl PlanningSnapshot {
         owner: impl Fn(&'a PlanningObject) -> &'a PlanningObject,
     ) -> Vec<(&'a str, &'a PlanningMutation)> {
         let heads: Vec<_> = self.heads().collect();
-        let mut retired = BTreeSet::new();
+        let mut parents = BTreeMap::<_, Vec<_>>::new();
         for (_, change) in &heads {
-            let mut pending: Vec<_> = change.parents.iter().map(String::as_str).collect();
-            let mut visited = BTreeSet::new();
-            while let Some(id) = pending.pop() {
-                if !visited.insert(id) {
-                    continue;
-                }
-                let parent = &self.changes[id];
-                if owner(&parent.object) == owner(&change.object) {
+            parents
+                .entry(owner(&change.object))
+                .or_default()
+                .extend(change.parents.iter().map(String::as_str));
+        }
+        let mut retired = BTreeSet::new();
+        // Shared ancestry is walked once per resolved owner, not per head.
+        // Traverse foreign owners too: they may lead back to this owner's past.
+        for (object, parents) in parents {
+            for (id, parent) in self.ancestors(parents) {
+                if owner(&parent.object) == object {
                     retired.insert(id);
                 }
-                pending.extend(parent.parents.iter().map(String::as_str));
             }
         }
         heads
             .into_iter()
             .filter(|(id, _)| !retired.contains(id))
             .collect()
+    }
+
+    /// Walk retained predecessor IDs once. The validated journal owns every
+    /// predecessor; callers decide whether it supplies causality or a baseline.
+    pub(crate) fn ancestors<'a>(
+        &'a self,
+        parents: impl IntoIterator<Item = &'a str>,
+    ) -> impl Iterator<Item = (&'a str, &'a PlanningMutation)> {
+        let mut pending: Vec<_> = parents.into_iter().collect();
+        let mut visited = BTreeSet::new();
+        std::iter::from_fn(move || {
+            while let Some(id) = pending.pop() {
+                if visited.insert(id) {
+                    let change = &self.changes[id];
+                    pending.extend(change.parents.iter().map(String::as_str));
+                    return Some((id, change));
+                }
+            }
+            None
+        })
     }
 
     pub fn validate(&self) -> Result<(), PlanningExchangeError> {
@@ -482,4 +504,73 @@ pub enum PlanningExchangeError {
     Invalid(&'static str),
     #[error("planning change {0} has conflicting contents; retain the original write")]
     ReusedChange(String),
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use super::{PlanningKind, PlanningMutation, PlanningObject, PlanningSnapshot};
+
+    #[test]
+    fn joint_frontier_follows_shared_ancestry_without_combining_unassociated_owners() {
+        let mut snapshot = PlanningSnapshot::default();
+        for (clock, (id, owner, parents)) in [
+            ("a", "local", vec![]),
+            ("b", "peer", vec!["a"]),
+            ("c", "local", vec!["b"]),
+            ("d", "local", vec!["b"]),
+            ("e", "independent", vec!["b"]),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            snapshot.changes.insert(
+                id.into(),
+                PlanningMutation {
+                    object: PlanningObject {
+                        kind: PlanningKind::Task,
+                        id: owner.into(),
+                    },
+                    field: "issue_title".into(),
+                    value: id.into(),
+                    clock: clock as i64,
+                    linear: None,
+                    parents: parents.into_iter().map(str::to_owned).collect(),
+                },
+            );
+        }
+        snapshot.validate().unwrap();
+        let frontier = |associated| {
+            snapshot
+                .frontier_by(|object| {
+                    if associated && object.id == "peer" {
+                        &snapshot.changes["a"].object
+                    } else {
+                        object
+                    }
+                })
+                .into_iter()
+                .map(|(id, _)| id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(frontier(false), ["b", "c", "d", "e"]);
+        assert_eq!(frontier(true), ["c", "d", "e"]);
+        // Retiring a head from the joint projection never deletes its origin's
+        // frontier or losing edits. Multiple paths still visit each cause once.
+        assert_eq!(
+            snapshot.heads().map(|(id, _)| id).collect::<Vec<_>>(),
+            ["a", "b", "c", "d", "e"]
+        );
+        let ancestors = snapshot
+            .ancestors(["b", "a", "b"])
+            .map(|(id, _)| id)
+            .collect::<Vec<_>>();
+        assert_eq!(ancestors.len(), 2);
+        assert_eq!(
+            ancestors.into_iter().collect::<BTreeSet<_>>(),
+            BTreeSet::from(["a", "b"])
+        );
+        assert_eq!(snapshot.changes.len(), 5);
+    }
 }

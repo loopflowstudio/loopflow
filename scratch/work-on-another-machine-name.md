@@ -190,6 +190,11 @@ this heading. Keep these replacements deleted:
   Provider/work-watch lifetimes drive exchange; each worker holds its effect lock
   through readback/status. Short saves commit and release planning locks first.
 
+- Status's intermediate `(DTO, digest)` vector and duplicated reconnect execution
+  readers. Destination rows stream within the same read transaction. One fixture
+  reader compares full rows and explicitly selected retained Process IDs; new CLI
+  inspection Processes remain outside that comparison.
+
 Test-only `export`/`import` helpers remove repeated successful-call plumbing, not
 assertions or failure-path checks. No predecessor path or second planner is added.
 Remaining grouped owners, legacy association and acceptance are below; omission
@@ -258,7 +263,8 @@ cross-machine creation authority.
 
 The fixture compares complete rows in six tables: Sessions, Workflows, Workflow
 moves, Task PRs, placements and Project transitions. Its peer-born records are
-unrun, and it does not compare Process rows. It proves no fabricated placement or
+unrun. The shared reader now also queries Processes, but this creation case
+passes an empty retained-ID list. This proves no fabricated placement or
 transition, not populated execution/control preservation. That separate acceptance
 remains with the two-store foreground fixture and combined gate.
 
@@ -274,29 +280,27 @@ Executable feedback exposed two distinct presentation/execution boundaries:
   and absence. The public fixture retains the six-table comparison above that
   exposed this failure rather than relaxing it.
 
-Remaining composition, reconciled October 9 against `225b8c95f`:
+Remaining composition, reconciled October 9 against `30b476328`:
 
-1. **Retained-effect eligibility is implemented at common attempt boundaries.**
-   Rejected projection still retains the whole journal/conflict without promoting
-   its stale entity or fabricating local receipts. Field/deletion, creation/link,
-   state and ordering attempts now check that object's active projection conflicts
-   in the same immediate transaction as their attempt receipt.
-   No second effect queue or provider frontier is added. Pending readers and
-   acquisition stay independent; a fresh observation alone cannot erase the conflict.
-   Successful later import must project the retained receipts before releasing it.
-   Held private references remain private; attempts do not rescan journals.
-   Review caught selection releasing a hold before skipped receipts projected:
-   import now retains that skipped projection as an existing conflict until a
-   successful import, even after explicit selection releases publication.
-   The focused storage regression seeds a cache-only newer frontier, rejects a
-   stale peer carrying an uncertain deletion, permits acquisition, and then imports
-   the attempt on recovery without issuing another effect. It compares seven
-   execution tables and the checkout. The public work-watch regression uses that
-   real importer before `task delete`, requires the delivery error, independent
-   title/comment acquisition and no deletion mutation, preserving populated local
-   execution rows. Its synthetic provider/cache setup is not mixed-provider
-   transport, running-control or installed acceptance. Current checks are below.
-2. **Ordering still lacks receipt transport.** The peer field catalog and draft
+`08a285872` implements the earlier iteration's effect repair. `30b476328`
+simplifies status and shares the fixture reader. Main's `d20c56daf` is integrated;
+remaining composition is not blocked on its writer.
+
+1. **Retained-effect eligibility is implemented, with bounded proof.**
+   Common field/deletion, creation/link, state and ordering attempt transactions
+   consult active projection conflicts. Saves, pending reads and acquisition do
+   not. Skipped sharing-held projections retain conflicts even after selection;
+   only successful import releases them after incorporating the retained receipts.
+   `08a285872` records passing storage and public retained-effect regressions:
+   a stale frontier carrying an uncertain deletion prevents another delivery,
+   while independent title/comment acquisition and populated execution survive.
+   The public fixture imports directly before connecting its synthetic provider;
+   it proves neither mixed-provider Git transport nor running-control preservation.
+   `30b476328` changed its shared snapshot reader without rerunning that Linux
+   public case; the combined gate must cover it. Exact earlier proof and rationale:
+   `08a285872:scratch/work-on-another-machine-name.md`, **Remaining integration**
+   and **Acceptance for review**.
+2. **Next implementation: ordering receipt transport.** The peer field catalog and draft
    capture `planning_rank`, not Project `task_order` or `order_effects_json`.
    Replicating ranks cannot preserve one move's baseline, before/after lists,
    attempted input, partial settlement and losing desired order. Composition belongs
@@ -320,15 +324,10 @@ to gate; publication still requires the acceptance below, with no landing author
 Earlier cut-by-cut evidence: `3f7d9f2da:scratch/work-on-another-machine-name.md`,
 **Remaining integration**.
 
-Executable feedback took priority over creation/link composition on October 8.
-The isolated Linux build exposed invalid registry-error conversion and SQLite
-integer/ID bindings. The focused comment test then found imported Tasks missing
-required local `workspace_slug` and `updated_at` initialization. New peer Tasks
-now use the common writer's empty placement and local timestamps; existing
-execution remains untouched. Fixtures retain those same valid local defaults.
-Review kept the strict reader and portable-field exclusion rather than adding
-fallback values or exporting placement. Prior global Rust-unavailability claims
-are superseded by the focused results below, not by full composed acceptance.
+October 8 executable repairs (registry error conversion, SQLite bindings and
+required local Task defaults) remain at `08a285872:scratch/work-on-another-machine-name.md`,
+**Remaining integration**. Imported planning stays unplaced; those focused results
+supersede Rust-unavailability claims, not composed acceptance.
 
 Earlier October 9 readback, acquisition-age and readiness findings are now
 part of the creation composition above. Exact intermediate evidence remains at
@@ -655,7 +654,9 @@ Deletion-cut check evidence at `97bba1869`, this heading: focused compile,
 network-isolated peer-storage (55), all-target Clippy and fmt passed. The subsequent
 ancestry-only merge preserves that tested tree, not public/combined acceptance.
 
-Check (October 9): isolated Linux `cargo test` (3 receipt/hold regressions + public retained-effect delivery), all-target Clippy, fmt, Ruff and `git diff --check` pass; context fits. Combined/Desktop acceptance: gate.
+Retained-effect checks: `08a285872:scratch/work-on-another-machine-name.md`, **Acceptance for review**.
+
+Check (compression, October 9): `cargo test --lib --no-run`, three exact status/hold tests via `test_network.py`, SQLite snapshot sanity, all-target Clippy, fmt, Ruff and `git diff --check` pass. Linux reconnect/combined/Desktop acceptance: gate. Realign: `git diff --check` passes; prose-only, no product rerun.
 
 Earlier SQL proofs, macOS startup limitations and the retained historical Flow
 without a recorded exit remain at

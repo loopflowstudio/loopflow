@@ -107,23 +107,23 @@ These are reversible lookup choices, not shared Work identity or publication.
 Primary and stack-parent Task selectors now carry repository-scoped full IDs through
 dispatch; an unscoped ambiguous prefix still fails.
 
-October 9 `lf context --skill implement`: generated goal 27,022/16,000 tokens
-(11,022 over), mostly file inventory; supplied complete source was read.
-Authored-note curation cannot shrink it; context-producer work remains separate.
+October 9 `lf context --skill realign`: generated goal 27,030/16,000 tokens
+(11,030 over); the supplied complete source contains the Work seed and 203-file
+inventory. Authored-note curation cannot remove generated inventory. Context-producer
+work remains separate; no limit was raised.
 
 ## Reversible preview limits — October 9
 
-Local skill/inline `--context` uses the stored snapshot; real launch may refresh Task
-comments first. Flow-wide context remains undefined. Bare-agent/new operator-checkout
-previews cannot create their future checkout to manufacture input. Explicit-Machine
-preview now skips probes and credentials; missing/changed identity fails before
-input assembly. Existing SSH authentication remains required. These remaining gaps
-stay in the one-PR scope. Task-run action/impediment explanation now uses the launch owners. Desktop opening also explains its proposed URL and impediments; other command
-action explanation remains. Its reversible JSON shape uses nullable `url`, not an
-opening receipt; on unsupported platforms the proposal may coexist with a blocker. Omitting a Task from `task run` uses checkout/declaration
-inference in preview and execution; naming a Flow still uses the explicit Task
-positional form. A remote preview observes only its selected Machine;
-local absence never grants first-start admission.
+Skill/inline context uses stored planning; launch may refresh Task comments.
+Flow-wide context remains undefined. Bare-agent/new operator-checkout previews
+cannot prepare future checkouts. Remote previews observe only the selected Machine;
+identity failure precedes assembly. Authentication is outside preparation; local
+absence grants no first-start admission.
+
+Task-run and opening explanation share launch owners; broader actions remain.
+Opening JSON uses nullable `url`, not a receipt; unsupported platforms may show
+a proposal beside a blocker. Omitted Task-run subjects use checkout/declaration
+inference in both modes; naming a Flow requires the explicit Task positional form.
 
 ## Reversible exact-input choices — October 8
 

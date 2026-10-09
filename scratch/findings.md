@@ -49,40 +49,33 @@ proof remains.
 
 ### Committed exchange update — October 9
 
-LOO-412 through `5624151a3` was inspected through Git, not integrated.
-Creation discovery and common deletion receipts remain implemented; earlier evidence
-and the rejected-projection gap survive at `af34dd20c:scratch/findings.md`, this
-heading. That was a source gap, not an observed production duplicate.
+LOO-412 through `7f206cd0e` was inspected through Git, not integrated.
+Creation/deletion, retained-effect eligibility and ordering receipt evidence remains
+at `942dab5d8:scratch/findings.md`, this heading. `08a285872` defers effects while
+projection conflicts retain journals; `fcd64901f` orders intentions by save clocks,
+and `357090d4b` accepts valid primary-only moves. Complete lists alone settle order
+progress. Those mechanisms remain dependency code, not mixed-provider acceptance.
 
-`08a285872` now calls `require_projected_effects` inside common field/deletion,
-creation/link, state and ordering attempt transactions. Active object projection
-conflicts defer effects; saves, pending reads and acquisition remain independent.
-Sharing-held objects retain conflicts even after selection until successful import
-projects their receipts. The dependency records storage/public regression passes
-for rejected stale deletion history, independent title/comment acquisition and
-populated execution. `30b476328` changed the public snapshot reader; its revised
-Linux run remains with gate. Direct import before connecting a synthetic provider
-is not mixed-provider Git transport or running-control proof.
+`358f7fa08` adds removal/archive/Team evidence to the existing journal and common
+acquisition helpers. `25cbc0a09` prepares typed histories before projection retries.
+Source inspection confirms one savepoint per independent fact before scalar
+projection: contradictory Teams cannot roll back an archive. Original acquisition
+ages and Team baselines survive; migration leaves legacy ages unknown.
+`ProviderEvidence::validate` rejects non-removal notifications. Replay-safe
+invalidation after later detail is still implementation work, not a retired contract.
 
-`fcd64901f` adds ordering receipt transport to `planning_order.rs` and the existing
-peer draft. `planning_order_current` selects intentions by their first mutation
-clock and receipt ID; `planning_order_deliveries` retains unresolved losing effects,
-not settled superseded partial moves. Import preserves baseline, desired list,
-effects, acknowledgement and conflicts; complete-list acquisition alone recognizes
-progress. Malformed effects abort import; competing effect chains isolate the
-object. Historical order lists participate in private-history sharing holds.
-`357090d4b` repairs a narrower receipt mismatch: common delivery can change only
-`prioritySortOrder`, but import required `sortOrder` too. The added lost-reply
-fixture imports that effect and settles via acquisition without another write.
-This is inspected fixture source, not mixed-provider activation.
+The dependency records 63 peer-storage passes. Inspected Team coverage preserves
+newer entity facts, original ages, populated execution and an uncertain order,
+but never acquires a list. Cold empty-list rejection is separate; combined partial
+list acquisition and public paths remain unproved. `ops/planning_peer.rs` still
+refuses connected Linear exchange. Legacy association and unplaced-Wave/Desktop
+remain; no peer admission or live-control proof follows. Dependency plan/memory:
+`7f206cd0e`, **Remaining integration** and **Tasks across machines**.
 
-`ops/planning_peer.rs` still refuses connected Linear exchange; the plan retains
-remaining composition and preservation limits. Dependency plan and Infrastructure
-memory inspected at `5624151a3`, **Remaining integration** and **Tasks across machines**.
-
-October 9 coverage: filesystem inspection found no Product child directories/memories. Related Infrastructure planning,
-peer and Intelligence context/check-ownership sections were read; unrelated sibling
-history was not re-audited.
+October 9 coverage: no Product child directories/memories. Infrastructure
+planning/Machine sections, LOO-412’s committed peer memory
+and Intelligence context/check-ownership sections were read; unrelated sibling
+history was not re-audited. Main remains `3a0aa5ca4`, already integrated.
 
 ## Arrangement evidence — October 8
 
@@ -190,13 +183,13 @@ Pre-edit conflicted notes and checks: `/tmp/loo427-desktop-explain/`.
 
 ## Remote preview — October 9
 
-`machine id` probes initialize/journal; preview now validates identity inside the
-receiving read-only invocation and skips account preparation at the sender.
-Checkpointed populated registries on both ends catch Process writes, including
-failed reads. The first repository-name fixture failed because config was written
-outside its explicit `LF_HOME`; correcting the fixture preserves selected-Machine
-lookup, not a production workaround. A second assertion expected arguments in
-`task_prompt`; system input owns them. Relative-path coverage also exposed the SSH
-substitute retaining the caller's cwd; it now enters the simulated login directory.
-Pre-edit notes and checks:
-`/tmp/loo427-remote-preview/`. No live SSH/provider or peer-admission proof.
+Original fixture corrections (`LF_HOME`, system input, simulated login cwd):
+`31dbb3a68:scratch/findings.md`, this heading; logs: `/tmp/loo427-remote-preview/`.
+Two real CLIs with simulated SSH prove no configured SSH/provider or peer admission.
+
+Entry-level identity validation replaces three dispatch checks and the shell's
+`machine id` call. Early planning reads had bypassed the old check; refusals now
+suppress fallback Process writes too. Transport consumes the parsed CLI, preserving
+scoped selection. Launch retains sender probes/credentials; previews skip them.
+Populated-store coverage includes rejected reads, writes, help and forwarding.
+Executable quoting/effect tests replace the removed shell-check fixture.

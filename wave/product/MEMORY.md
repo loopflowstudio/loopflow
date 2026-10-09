@@ -85,15 +85,19 @@ Multiple destinations must not split the repository window.
 Private-ancestry holds retain journals/dependents and local moves;
 peers keep old values, so omission is not convergence.
 
-LOO-412 through `5624151a3` is inspected, not integrated; mixed Linear/Git stays disabled.
-**Retained uncertainty constrains effects.** Journal-only conflicts defer attempts,
-not saves/acquisition; selection cannot release them (`08a285872`). Save clocks
-order intentions; unresolved losing effects hold delivery, and only complete lists
-settle progress. `357090d4b` fixes rejection of valid primary-only moves;
-validate receipts against writer effects.
-Alternate/relationship acquisition, legacy association and unplaced-Wave/Desktop
-remain. Entity revisions cannot order relationships; imports stay unplaced.
-Mixed transport, live controls and peer admission remain unproved.
+LOO-412 through `7f206cd0e` is inspected, not integrated; mixed Linear/Git stays
+disabled. **Retained uncertainty constrains effects.** Journal-only conflicts defer
+attempts, not saves/acquisition; selection cannot release them (`08a285872`). Save
+clocks order intentions; unresolved losing effects hold delivery. Only complete
+lists settle order progress. `357090d4b` preserves valid primary-only moves.
+
+**Independent facts need independent rollback.** `358f7fa08`/`25cbc0a09` acquire
+removal/archive/Teams through common writers with separate savepoints, original
+ages and Team baselines. Contradictory Teams cannot erase an archive. Entity
+revisions cannot order relationships; old evidence cannot clear membership
+uncertainty. Partial-list composition is unproved. Replay-safe invalidation, legacy
+association and unplaced-Wave/Desktop remain. Imports stay unplaced; mixed
+transport, live controls and peer admission remain unproved.
 
 October 9 (`e3ca861b1`): observe pane visibility before Session readings; a callback
 had masked missed closure. MultiplexerStore owns visibility for readiness and reads.
@@ -191,11 +195,9 @@ history. Workflow selection, latest FlowProcessDetail, execution evidence and
 TaskRunControl stay separate; latest grants no authority. LOO-400's landed
 `e467ea995` supplies Process/LFID and the migration; old captures remain readable.
 
-Choices: list/customize under `project workflow`, Project IDs or unique name/slug,
-and Flow inspection `--processes`. Failed catalogs stay errors; single-definition
-reads skip enumeration. Diagrams read FlowProcessDetail directly. Process success
-is `succeeded`, not `ok`. Restart leaves an active Flow running but prevents its
-arrival from advancing the reset Task.
+October 9's Wave-owned planning supersedes Project command spelling. Earlier
+catalog/diagram/restart choices and proofs: `942dab5d8:wave/product/MEMORY.md`,
+this heading. Restart cannot let an active Flow's arrival advance the reset Task.
 
 Gate repaired fixtures missed by focused checks: absent
 execution is null, and every Task needs run_control. A nested macOS sandbox
@@ -284,10 +286,7 @@ heading. Task Workflow and Flow execution remain separate owners.
   checkout; an empty unpublished PR is retired at `end` (reverses part of
   W2-151). Risk: if Linear completes an issue when its PR merges before `lf`
   settles the landing, the Task stays active and flagged until forced.
-- The earlier `feature` without a design-review pause is superseded: inspected
-  at `6448e3c9e` on October 7, its nodes are `design` and `demo`, with `ship`
-  reaching `end`. `code` equals `pursue`. Main's `lf flow end` (#1435) is
-  dropped. `lf commit -p` pushes; plain commit stays local.
+- Earlier `feature`/`code` recipe and commit-push decisions: `942dab5d8:wave/product/MEMORY.md`, this heading. Historical recipes grant no review or delivery authority.
 - Waiting is one reading per Session, saved at most every 5 s: an unanswered
   question, or no open tool call and a hand-back or 120 s of quiet. Codex
   approvals count as questions; OpenCode permissions do not.

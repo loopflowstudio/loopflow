@@ -27,7 +27,8 @@ The Wave retains its objective, memory, cadence, budget, chat, and metric
 instruments. Exactly one internal Project owns the current chapter's Tasks, KRs,
 metric targets, and Workflow selection. Present the plan through the Wave; ordinary
 navigation and steering select Waves and Tasks. Historical chapters remain readable.
-Linear owns authored planning; the local registry supplies shared reads.
+The common local planning writer owns records and APIs; optional Linear sync
+adopts observed Linear conflicts. Portable Git planning exchange excludes execution.
 
 Chapter changes use the deterministic `lf wave new-chapter` operation after the
 concrete plan is accepted. Started unfinished Tasks keep their identity, checkout,
@@ -47,9 +48,10 @@ Build the desktop incrementally with the human. One compressible outline and
 the existing pane multiplexer organize work. Preserve native input and useful
 context while inspecting planning or monitoring Runs. Measure hierarchy navigation
 and Task workspace opening/switching at rendered, usable endpoints before choosing
-optimizations. Publish measured budgets before scoring; retain failed attempts,
-configured Session continuation and Task review completion proof, and human
-usability confirmation.
+optimizations. Jack Heart retired numeric performance and soak acceptance on
+October 7 while the surface changes. Retain failed attempts, configured Session
+continuation, Task review proof and usability confirmation; authored historical
+chapter KRs remain readable, not silently rewritten.
 
 Long-lived implementation pursuit and PR ownership belong to Tasks. Wave operation
 selects and steers the current chapter's work; its internal Project is not another

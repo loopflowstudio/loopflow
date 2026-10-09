@@ -8,8 +8,8 @@ lf2 cannot extract bounded text; the verified native artifact remains required.
 Focused local Rust and model evidence establish neither native acceptance nor delivery.
 
 LOO-406 is integrated through main’s `d20c56daf` (#1503). LOO-412 through
-`5624151a3` was inspected, not integrated: common receipt transport includes
-`357090d4b`’s primary-only ordering repair. Mixed-provider acquisition remains open.
+`7f206cd0e` was inspected, not integrated: removal/archive/Team acquisition now
+exists alongside common receipts. Replay-safe invalidation remains unfinished.
 Mixed Linear/Git stays disabled pending the remaining composition.
 Local Task/Session-plus-Changes opening follows request-scoped readiness; native proof remains.
 Remaining implementation: Flow input and broader explanation, shared identity/exchange and first-start
@@ -204,9 +204,11 @@ These boundaries are integration constraints, not separate replacement projects.
 
 ## Delete — do not maintain
 
-Removed: `lf.rs`'s blanket remote-preview refusal and writable receiver identity
-lookup. Preview bypasses probe/credential preparation in the existing transport;
-launch retains its checks. No parallel preview protocol or planning reader.
+Removed: blanket remote-preview refusal, writable receiver identity lookup,
+SSH's repeated command parse, and shell-side `machine id` recheck/`probe_identity`
+switch. Entry validates addressed identity once before help, scope lookup or
+admission; rejection suppresses fallback Process writes. Transport consumes the
+parsed CLI; launch retains its sender probe/credentials, preview skips them.
 
 Removed: launch-only opening, automatic execution routing/preparation, split Session/Changes
 intent and URL-based completion. One generation-scoped `LinkedSession` observes existing
@@ -274,17 +276,13 @@ Task-run and opening explanation share launch selection/validation; only launch
 prepares Work. Checkpointed-WAL and missing/unreadable-store fixtures preserve
 the hidden-write regressions. A proposed URL proves no native readiness.
 
-Explicit `--machine` previews now use the same SSH transport, Work routing and
-receiving preview owners. The caller reads its saved Machine without probing;
-the receiver validates expected identity read-only before repository resolution.
-Neither admits a Process or prepares credentials. Names/paths resolve on the
-selected Machine; unavailable identity/transport fails without fallback, while
-missing Work remains unavailable in text/JSON. Existing SSH authentication is
-still required. Fixtures use two actual CLIs and local-only simulated SSH;
-configured SSH and peer-exclusive first start are unproved.
-
-Remaining: broader action explanation, Flow input, exchange/admission and
-verified bounded native extraction; one PR through demo, not separate delivery.
+`31dbb3a68`/`942dab5d8` implement explicit `--machine` previews through SSH, Work
+routing and the receiving preview; the earlier iteration request is satisfied.
+No probes, credential preparation or Process writes; names/paths resolve on the
+selected Machine. Identity/transport failure has no fallback, missing Work stays
+unavailable in text/JSON. Authentication is outside preview preparation.
+Two real CLIs with simulated SSH cover this, not configured SSH or exclusive start.
+Entry-level identity validation also protects ordinary commands and early reads.
 
 ### Local composed opening — October 9
 
@@ -393,29 +391,33 @@ Pending data is not remotely durable until published. Existing execution keeps
 its own lifecycle; no automatic turn/Flow retry is introduced. Online comments
 and completion propagate semi-live through the active sync owner. Main's LOO-406
 `d20c56daf` is integrated, retaining repository-scoped foreground Linear sync.
-Readback cannot exclude unseen Linear reopening. LOO-412 through `5624151a3` is
+Readback cannot exclude unseen Linear reopening. LOO-412 through `7f206cd0e` is
 inspected, not integrated. `08a285872` repairs the previously observed source gap:
 common attempt transactions defer effects while rejected or sharing-held projections
 retain receipts only in journals. Saves and independent acquisition continue;
 selection alone cannot release the hold before successful import.
-`fcd64901f` transports captured Project move receipts through the common ordering
-owner. Original save clocks select intentions; later effect/readback clocks cannot
-revive losing orders. Unresolved losing effects still prevent another write, and
-only complete-list acquisition recognizes progress. Import and detail reads settle
-nothing. `357090d4b` also accepts common moves that change only
-`prioritySortOrder`; requiring a secondary key had rejected valid receipts.
-These mechanisms replace the earlier outstanding implementation items,
-not the mixed-operation acceptance below.
+`fcd64901f` transports common ordering receipts; save clocks select intentions,
+unresolved losing effects hold delivery, and complete-list acquisition alone settles
+progress. `357090d4b` accepts valid primary-only moves. Earlier mechanism/evidence:
+`942dab5d8:scratch/compare-cmux-s-command-line.md`, **Mixed command**.
 
-Alternate acquisition must preserve provider-only removal/archive and independently
-aged Team/Initiative/list evidence; entity revisions cannot order relationships.
-Legacy association and unplaced-Wave/Desktop presentation also remain before mixed activation. The dependency records focused storage,
-migration and common-delivery passes; revised Linux public reconnect and combined
-acceptance remain with gate. Deletion/retained-effect fixtures compare seven
-populated execution tables, while creation's retained-ID list is empty. Neither
-proves live controls, mixed-provider Git transport or peer-exclusive admission.
-[Findings](findings.md#committed-exchange-update--october-9) retains revisions,
-superseded failures and proof limits.
+`358f7fa08`/`25cbc0a09` now acquire removal, archive and Team evidence through
+common writers, with independent savepoints, original ages and Team baselines.
+Rejected scalar or Team projection cannot erase independent negative facts. This
+supersedes implementing those paths, not their composed acceptance. Entity revisions
+still cannot order relationships; imported Team evidence cannot clear retained
+membership uncertainty. Non-removal invalidations remain local: delayed replay after
+successful detail and genuinely new invalidation still need distinction without
+invented provider clocks. Legacy association and unplaced-Wave/Desktop remain.
+
+The dependency records 63 peer-storage passes, not mixed-provider activation.
+Its Team fixture preserves uncertain order without list acquisition; the separate
+cold empty-list rejection proves no composed partial-list behavior. Revised Linux
+public reconnect, mixed transport and live-control preservation remain with gate.
+Deletion/retained-effect fixtures compare seven populated execution tables;
+creation's retained Process-ID list is empty. Neither proves peer-exclusive start.
+[Findings](findings.md#committed-exchange-update--october-9) preserves source revisions
+and superseded failures.
 LOO-427 consumes the repaired common path rather than rebuilding its
 receipt machinery or narrowing acceptance to disconnected repositories. Import uses the
 common local writer, preserves causal reopening and conflicts, and avoids echoes
@@ -573,4 +575,4 @@ identity/delegation, open them, add shell/Files panes, retain an unfinished draf
 change focus, target a harmless command, read output, hide/restore, and verify the
 original input target and draft survive. Demo owns native usability; preserve comparison evidence and use no real accounts or live user terminals.
 
-Check (October 9): build/fmt/Clippy and four network-isolated `machine_commands remote_preview` fixtures PASS; combined verification stays with gate, native usability with demo.
+Check (reused October 9): `cargo build -p loopflow --bin lf`; `cargo fmt --all --check`; `cargo clippy --all-targets -- -D warnings`; `uv run --no-sync python scripts/test_network.py target/debug/deps/machine_commands-7a4e062bd344f888 --test-threads=1` — PASS (17 tests); `git diff --check` PASS (realign, prose only); combined gate and native demo remain.

@@ -181,8 +181,8 @@ async fn run_async(cmd: &AccountCommand) -> Result<()> {
     }
 }
 
-/// The only command that changes which account a provider's shared home is
-/// signed in as. Codex agents Loopflow launched keep their login until they
+/// Sign a provider's shared home in as a stored account.
+/// Codex agents Loopflow launched keep their login until they
 /// restart; Codex's own background app-server is restarted to adopt it.
 async fn use_account(raw_provider: &str, raw_email: &str) -> Result<()> {
     let provider = parse_managed_provider(raw_provider)?;
@@ -197,17 +197,18 @@ async fn use_account(raw_provider: &str, raw_email: &str) -> Result<()> {
         crate::provider_account::activation::SwitchCause::Person,
     )
     .await?;
-    let login = crate::provider_account::account_login(&account);
-    match &switched {
-        Some(_) => println!(
+    let login = account_login(&account);
+    if switched.is_some() {
+        println!(
             "{} is now signed in as {login} in {}",
             provider.display_name(),
             native.display()
-        ),
-        None => println!(
+        );
+    } else {
+        println!(
             "{} is already signed in as {login}",
             provider.display_name()
-        ),
+        );
     }
     // The login is installed; launches must not wait on the daemon's turns.
     drop(switched);
@@ -232,10 +233,16 @@ async fn restart_stale_codex_daemon(native: &Path, login: &str) -> Result<()> {
             "Codex's background app-server is still signed in as {held}; waiting up to {} minutes for its running turns before restarting it",
             CODEX_DAEMON_TURN_WAIT.as_secs() / 60
         );
-        let deadline = tokio::time::Instant::now() + CODEX_DAEMON_TURN_WAIT;
-        while tokio::time::Instant::now() < deadline && daemon_has_running_turn(native).await {
-            tokio::time::sleep(Duration::from_secs(2)).await;
-        }
+        // Bound the probes as well as the sleeps; expiry deliberately permits restart.
+        let _ = tokio::time::timeout(CODEX_DAEMON_TURN_WAIT, async {
+            loop {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                if !daemon_has_running_turn(native).await {
+                    break;
+                }
+            }
+        })
+        .await;
     }
     restart_daemon(native).await?;
     match daemon_login(native).await {

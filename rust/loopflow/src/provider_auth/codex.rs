@@ -421,8 +421,7 @@ echo '{"method":"account/login/completed","params":{"loginId":"this-login","succ
         fs::create_dir(&control).unwrap();
         let listener =
             tokio::net::UnixListener::bind(control.join("app-server-control.sock")).unwrap();
-        // The second connection sees the first thread's turn still running.
-        tokio::spawn(async move {
+        let server = tokio::spawn(async move {
             for status in ["idle", "active", "idle"] {
                 let (stream, _) = listener.accept().await.unwrap();
                 let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
@@ -431,7 +430,10 @@ echo '{"method":"account/login/completed","params":{"loginId":"this-login","succ
                     let result = match request["method"].as_str() {
                         Some("initialize") => json!({}),
                         Some("account/read") => json!({"account": {"email": "old@example.com"}}),
-                        Some("thread/loaded/list") => json!({"data": ["thread-1"]}),
+                        Some("thread/loaded/list") => json!({"data": ["idle-thread", "thread-1"]}),
+                        Some("thread/read") if request["params"]["threadId"] == "idle-thread" => {
+                            json!({"thread": {"status": {"type": "idle"}}})
+                        }
                         Some("thread/read") => json!({"thread": {"status": {"type": status}}}),
                         _ => continue,
                     };
@@ -447,5 +449,6 @@ echo '{"method":"account/login/completed","params":{"loginId":"this-login","succ
         );
         assert!(super::daemon_has_running_turn(home.path()).await);
         assert!(!super::daemon_has_running_turn(home.path()).await);
+        server.await.unwrap();
     }
 }

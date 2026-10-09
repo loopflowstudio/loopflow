@@ -633,9 +633,9 @@ sharing/recovery and public composition remain unfinished.
 
 Legacy association remains unfinished. Full-ID correspondence (`b414e8cce`)
 preserves local execution and private selection; `381c88fec` unifies holds.
-Ordinary import now retains associated creation receipts on the local owner,
-with original inputs and uncertainty; common acquisition owns exact-origin
-readback. The revised fixture is unexecuted; public Git/Linear acceptance remains.
+`39dba32c1` retains associated creation origins, inputs and uncertainty through
+ordinary import; common acquisition owns exact-origin readback. Its revised
+fixture is unexecuted; public Git/Linear acceptance remains.
 Lookup rejects contradictory incoming mappings.
 Same-ID causal capture still cannot acknowledge a peer Linear head.
 Relationships need local projection without rewriting IDs or inputs. Holds remain. Refusal evidence: `de3c84b08`, this heading.

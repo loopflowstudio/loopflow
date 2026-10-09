@@ -409,19 +409,24 @@ pub(crate) fn validate_peer_receipt(value: &Value) -> StoreResult<()> {
     Ok(())
 }
 
-pub(super) fn import_peer_receipt(
+pub(super) fn import_peer_receipt<'a>(
     conn: &Connection,
     project: &ProjectId,
     id: &str,
-    history: &[&Value],
-    heads: &[&Value],
+    history: impl Iterator<Item = &'a Value>,
+    mut heads: impl Iterator<Item = &'a Value>,
 ) -> StoreResult<()> {
     let conflict = || StoreError::PlanningReceiptConflict { effect: "ordering" };
-    let mut merged: OrderReceipt = serde_json::from_value((*heads[0]).clone())?;
+    let mut merged: OrderReceipt = serde_json::from_value(
+        heads
+            .next()
+            .expect("retained order history has a head")
+            .clone(),
+    )?;
     // Concurrent baseline changes have no list revision with which to order them.
     // Causally retired baselines stay in history but do not veto confirmed progress.
-    for head in &heads[1..] {
-        let head: OrderReceipt = serde_json::from_value((*head).clone())?;
+    for head in heads {
+        let head: OrderReceipt = serde_json::from_value(head.clone())?;
         match (&merged.base, &head.base) {
             (Some(left), Some(right)) if left["value"] != right["value"] => return Err(conflict()),
             (None, Some(_)) => merged.base = head.base,
@@ -429,7 +434,7 @@ pub(super) fn import_peer_receipt(
         }
     }
     for value in history {
-        let receipt: OrderReceipt = serde_json::from_value((*value).clone())?;
+        let receipt: OrderReceipt = serde_json::from_value(value.clone())?;
         if merged.desired != receipt.desired {
             return Err(conflict());
         }

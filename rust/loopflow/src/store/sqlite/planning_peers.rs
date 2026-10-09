@@ -39,26 +39,33 @@ struct ObjectChanges<'a> {
     evidence: BTreeMap<&'a str, FieldHistory<ProviderEvidence>>,
 }
 
+// Keep the head marker beside its value. Reordering history cannot separate
+// the causal frontier from the evidence, and each decoded body is stored once.
 struct FieldHistory<T> {
-    values: Vec<T>,
-    heads: Vec<T>,
+    entries: Vec<(T, bool)>,
 }
 
 impl<T> Default for FieldHistory<T> {
     fn default() -> Self {
         Self {
-            values: Vec::new(),
-            heads: Vec::new(),
+            entries: Vec::new(),
         }
     }
 }
 
-impl<T: Clone> FieldHistory<T> {
+impl<T> FieldHistory<T> {
     fn push(&mut self, value: T, is_head: bool) {
-        if is_head {
-            self.heads.push(value.clone());
-        }
-        self.values.push(value);
+        self.entries.push((value, is_head));
+    }
+
+    fn values(&self) -> impl Iterator<Item = &T> {
+        self.entries.iter().map(|(value, _)| value)
+    }
+
+    fn heads(&self) -> impl Iterator<Item = &T> {
+        self.entries
+            .iter()
+            .filter_map(|(value, is_head)| is_head.then_some(value))
     }
 }
 
@@ -167,7 +174,7 @@ fn changes_by_object(
     // select the first known timestamp, never random mutation-ID traversal order.
     for changes in objects.values_mut() {
         if let Some(history) = changes.evidence.get_mut("provider_removal") {
-            history.values.sort_by_key(|fact| match fact {
+            history.entries.sort_by_key(|(fact, _)| match fact {
                 ProviderEvidence::IssueChange { observed_at, .. } => *observed_at,
                 _ => None,
             });
@@ -1394,8 +1401,8 @@ fn insert_and_project(
                 conn,
                 &ProjectId::from_raw(&object.id),
                 receipt,
-                &history.values,
-                &history.heads,
+                history.values().copied(),
+                history.heads().copied(),
             )?;
         }
     }
@@ -1420,21 +1427,21 @@ fn insert_and_project(
     project_fields(
         conn,
         object,
-        winners
-            .values()
-            .filter(|(_, change)| {
-                !(change.field == "creation"
-                    || change.deletion_receipt().is_some()
-                    || change.order_receipt().is_some()
-                    || change.provider_evidence()
-                    || change.field == "planning_teams"
-                        && changes.evidence.contains_key("provider_teams")
-                    || pending_order && change.field == "planning_rank"
-                    || deletion_receipts && change.field == "planning_deleted_at"
-                    || object.kind == PlanningKind::Wave && change.field == "current_project_id"
-                    || object.kind == PlanningKind::Project && content_field(&change.field))
+        // Only scalar fields enter SQL. Receipt/evidence fields retain their
+        // common writers without a second, hand-maintained exclusion list.
+        object
+            .kind
+            .fields()
+            .iter()
+            .copied()
+            .filter(|field| {
+                !(*field == "planning_teams" && changes.evidence.contains_key("provider_teams")
+                    || pending_order && *field == "planning_rank"
+                    || deletion_receipts && *field == "planning_deleted_at"
+                    || object.kind == PlanningKind::Wave && *field == "current_project_id"
+                    || object.kind == PlanningKind::Project && content_field(field))
             })
-            .map(|(_, change)| (change.field.as_str(), &change.value)),
+            .map(|field| (field, &winners[field].1.value)),
     )?;
     if object.kind == PlanningKind::Project {
         let content = serde_json::from_value(serde_json::json!({
@@ -1603,7 +1610,7 @@ fn acquire_provider_evidence(
         entity: "planning mapping",
         id: object.id.clone(),
     };
-    for fact in &history.values {
+    for fact in history.values() {
         if Some(fact.id()) != provider_id {
             return Err(mapping_conflict());
         }
@@ -1613,8 +1620,7 @@ fn acquire_provider_evidence(
             // Only the greatest known revision affects the common floor. Keep
             // every fact in the journal, without rereading the cache for each one.
             let floor = history
-                .values
-                .iter()
+                .values()
                 .filter_map(|fact| match fact {
                     ProviderEvidence::IssueChange {
                         revision_ns: Some(revision),
@@ -1634,23 +1640,23 @@ fn acquire_provider_evidence(
         }
 
         "provider_removal" => {
-            for fact in &history.values {
+            for fact in history.values() {
                 super::planning::observe_issue_change_in(conn, fact)?;
             }
         }
         "provider_archive" => {
-            for fact in &history.values {
+            for fact in history.values() {
                 super::planning::confirm_project_archival_in(conn, repo, "linear", fact)?;
             }
         }
         "provider_teams" => {
-            let Some(ProviderEvidence::Teams { project, .. }) = history.heads.first() else {
+            let Some(ProviderEvidence::Teams { project, .. }) = history.heads().next() else {
                 return Ok(());
             };
             let conflict = || StoreError::ProjectMembershipConflict {
                 project_id: project.id.clone(),
             };
-            for head in &history.heads {
+            for head in history.heads() {
                 let ProviderEvidence::Teams { project: other, .. } = head else {
                     unreachable!("validated Team evidence")
                 };
@@ -1671,13 +1677,13 @@ fn acquire_provider_evidence(
                 super::planning::cached_project(conn, repo, "linear", &project.id)?
             {
                 if !super::planning::same_ids(&retained.initiative_ids, &project.initiative_ids)
-                    || !team_history_contains(&history.values, &retained.team_ids)
+                    || !team_history_contains(history.values(), &retained.team_ids)
                 {
                     return Err(conflict());
                 }
             }
             // Apply only the causal heads. Older entity bodies remain history.
-            for head in &history.heads {
+            for head in history.heads() {
                 super::planning::reconcile_project_teams_in(conn, repo, "linear", head)?;
             }
             project_confirmed_teams(conn, object, history)?;
@@ -1694,7 +1700,7 @@ fn invalidate_from_heads(
     history: &FieldHistory<ProviderEvidence>,
 ) -> StoreResult<bool> {
     let mut outstanding = false;
-    for head in &history.heads {
+    for head in history.heads() {
         if matches!(head, ProviderEvidence::IssueChange { .. }) {
             super::planning::observe_issue_change_in(conn, head)?;
             outstanding = true;
@@ -1723,7 +1729,7 @@ fn reconcile_task_freshness(
         return Ok(());
     };
     let revision = super::planning::revision_nanos(revision.as_deref())?;
-    if history.heads.iter().any(|fact| matches!(fact, ProviderEvidence::IssueDetail { revision_ns, .. } if revision >= *revision_ns)) {
+    if history.heads().any(|fact| matches!(fact, ProviderEvidence::IssueDetail { revision_ns, .. } if revision >= *revision_ns)) {
         conn.execute("UPDATE pm_items SET needs_refresh=0 WHERE repo=?1 AND provider='linear' AND id=?2 AND needs_refresh!=0", params![repo,provider_id])?;
     }
     Ok(())
@@ -1734,7 +1740,7 @@ fn project_confirmed_teams(
     object: &PlanningObject,
     history: &FieldHistory<ProviderEvidence>,
 ) -> StoreResult<()> {
-    let Some(ProviderEvidence::Teams { project, .. }) = history.heads.first() else {
+    let Some(ProviderEvidence::Teams { project, .. }) = history.heads().next() else {
         return Ok(());
     };
     conn.execute(
@@ -1744,8 +1750,11 @@ fn project_confirmed_teams(
     Ok(())
 }
 
-fn team_history_contains(evidence: &[ProviderEvidence], teams: &[String]) -> bool {
-    evidence.iter().any(|fact| match fact {
+fn team_history_contains<'a>(
+    mut evidence: impl Iterator<Item = &'a ProviderEvidence>,
+    teams: &[String],
+) -> bool {
+    evidence.any(|fact| match fact {
         ProviderEvidence::Teams {
             project, previous, ..
         } => {
@@ -1765,14 +1774,14 @@ fn retain_confirmed_teams(
     let Some(history) = changes.evidence.get("provider_teams") else {
         return Ok(());
     };
-    if !team_history_contains(&history.values, &project.team_ids) {
+    if !team_history_contains(history.values(), &project.team_ids) {
         return Err(StoreError::ProjectMembershipConflict {
             project_id: project.id.clone(),
         });
     }
     if let Some(ProviderEvidence::Teams {
         project: confirmed, ..
-    }) = history.heads.first()
+    }) = history.heads().next()
     {
         if !super::planning::same_ids(&project.initiative_ids, &confirmed.initiative_ids) {
             return Err(StoreError::ProjectMembershipConflict {

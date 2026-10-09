@@ -123,25 +123,25 @@ cli:
     - label: Worktrees and delivery ↗
       href: /architecture/delivery
   flows:
-    heading: Flows run the work between your turns.
+    heading: Focus on the stages that matter most to you.
     commands: |-
       # .lf/flows/ship-api.yaml
       - implement
       - compress
       - gate
+      - loop: implement
+      - cmd: pr land
 
       $ lf run ship-api                   # run it
       $ lf flow list                      # the Flows you have
     items:
-    - name: Skills
-      text: A Skill is one instruction, written in Markdown. `lf skill design` runs one in its
-        own session.
     - name: Flows
-      text: A Flow is a YAML list of steps, each one a Skill or another Flow, with a commit between
-        them. One command runs the whole list.
-    - name: Shared
-      text: Skills and Flows are files in your repository, so a team reviews and shares how it
-        works with agents the way it shares code. Built-ins cover the common cases.
+      text: '`lf` runs Flows. A Flow is a sequence of Skills, and it can loop.'
+    - name: Steps
+      text: Each step can be interactive or autonomous, run on a particular model, and so on.
+    - name: Built-ins
+      text: '`lf` comes with many reasonable Flows for software engineering. You are encouraged to
+        build your own and share them with others.'
     links:
     - label: Skills and Flows ↗
       href: /docs/authoring#flows

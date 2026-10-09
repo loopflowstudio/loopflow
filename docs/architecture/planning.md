@@ -155,10 +155,16 @@ Contradictory receipts stay held with their original journal values. Common
 acquisition can settle the exact origin without releasing new effects; it never
 replaces an existing different provider mapping. Cross-origin field projection
 and relationship recovery remain unfinished.
-Correspondence is not causal acknowledgement: local capture and delivery baselines
-still follow same-object journal parents. Non-creation receipt projection also
-still uses incoming IDs. Resolving a lookup or retaining creation origins does
-not make either boundary safe to release.
+Correspondence alone is not causal acknowledgement. Common scalar/content
+acquisition can link an exact Linear fact across associated origins in the existing
+journal. Validation requires the same kind, field, value and provider body, not
+merely equal text or a local alias. Later saves retain that observed predecessor;
+delivery baselines traverse it. Heads remain per-origin, so a foreign child cannot
+erase another origin's complete record. Export validates causal dependency closure
+but holds unselected origins and dependents without sharing their history.
+Joint winner projection must still account for those links; peer-authored winners,
+relationships and non-creation receipts remain unfinished. Retaining the journal
+does not release projection or effect holds.
 
 `ops/planning_delivery.rs` consumes mapped Task titles, descriptions, nullable
 assignees and membership, and Project names, summaries, statuses and structured

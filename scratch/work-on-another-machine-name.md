@@ -229,6 +229,12 @@ holds. Historical conflict rows survive; no correspondence or mixed-provider
 authority is added. The association fixture checks one current explanation for
 each Task/Project after reversed and repeated imports.
 
+Delete same-origin-only capture and blanket cross-origin rejection for exact
+Linear observations. One derived capture-head view serves scalar/content writers;
+no alias payload or second journal is added. Preserve per-origin heads, source
+mutation IDs, baseline traversal and private-history holds. Joint projection is
+still the remaining deletion below, not enabled by this cut.
+
 ## Remaining integration — October 9
 
 Receipt origins and full-ID correspondence exist. Ordinary import now projects
@@ -491,20 +497,32 @@ invalidation) remain. The diagnostic is temporary, not product policy.
    Its corrected `execution.task_id` assertion awaits rerun; `381c88fec`'s revised
    Store hold assertions remain gate-deferred.
 
-   October 9 source reconciliation at `f2a5c94e8` leaves this implementation order:
-   - Replace `insert_and_project`'s incoming-ID-only projection with deterministic
-     planning projection across origins, preserving mutation IDs,
-     causal heads, baselines and losers rather than last-projected-ID wins.
-     Concrete causal constraint: `PlanningSnapshot::validate` currently requires
-     each parent to have the same object ID, and common capture reads only that
-     ID's heads. Grouping current winners alone would keep an observed peer Linear
-     head concurrent with a later local save. Resolve cross-origin observation in
-     the journal before enabling projection; a higher local clock alone is wrong.
-     `linear_predecessor` follows those same parents for delivery baselines.
-     Local correspondence alone is not portable causal evidence: exported saves
-     must retain valid predecessors without publishing an unselected origin.
-     Keep the journal, head index and import validator consistent; merely relaxing
-     the same-object check would accept unrelated predecessors.
+   **October 9 portable observation cut (`8f3472eda`, source only).** Common
+   scalar/content acquisition can capture an exact Linear fact with a parent on
+   another associated origin. Validation requires identical kind, field, value
+   and provider body plus ascending clocks; a local lookup or equal text is not
+   evidence. The later local save retains that parent through its own observed
+   mutation, and `linear_predecessor` traverses the existing links. Per-origin
+   heads remain complete; a foreign child cannot erase another origin's frontier.
+   Export reads causal dependency closure for validation, then holds unselected
+   origins and their dependents without enrolling or publishing them.
+
+   The new fixture enters ordinary association and common acquisition, checks
+   unchanged readback after a local save, Task/Project predecessor and baseline
+   readback after serialization, repeat import, private destination separation and
+   populated execution preservation. Execution remains deferred. It does **not**
+   prove joint import observes a winner: held import still acquires no associated
+   scalar frontier. The earlier same-object limitation and counterexample remain
+   at `8f3472eda:scratch/work-on-another-machine-name.md`, item 3.
+
+   Remaining association implementation order:
+   - Replace incoming-ID-only projection with deterministic joint planning winners.
+     Group selection must traverse cross-origin ancestry while preserving each
+     origin's complete journal and heads; comparing the current per-origin winners
+     by Linear priority/clock alone would still resurrect an observed peer fact.
+     Compose actual accepted peer acquisition with the common observation capture
+     before releasing holds. Peer-authored winners also need portable observed
+     causality; the exact-Linear-fact bridge alone does not acknowledge them.
    - Resolve planning references as well as the object being projected. Current
      `insert_and_project`/`project_comment` and post-pass Wave selection/order
      projection use incoming IDs directly. Associated parents may have no physical
@@ -678,7 +696,7 @@ and limitations: `9b59e9b71:scratch/work-on-another-machine-name.md`,
 **Acceptance for review**. They do not establish this ordering cut, public
 combined behavior or Desktop acceptance.
 
-Check: `git diff --check` passes (prose only); preceding `cargo fmt`/`cargo clippy --all-targets -- -D warnings` passed, but resource recovery did not meet the build reserve; build, focused ordering/provider-evidence/correspondence execution and combined acceptance remain with capable gate.
+Check: `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, changed SQL parse and `git diff --check` pass; resource recovery leaves 30.3 GiB below the 32 GiB reserve, so build/focused causal-observation and prior correspondence tests remain with capable gate, alongside combined acceptance.
 
 Earlier SQL proofs, macOS startup limitations and the retained historical Flow
 without a recorded exit remain at

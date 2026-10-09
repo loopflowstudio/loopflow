@@ -7375,23 +7375,37 @@ mod tests {
                 || o.id == local.project_id.as_str()
                 || o.id == private.id().as_str()));
 
-        // An explicit selection makes the retained journal inspectable here; it
-        // still cannot release the association hold or publish private parents.
+        // Selecting the local plan elsewhere must not pull the observed origin's
+        // history into that destination. Validation can read it; export cannot.
+        let separate = PlanningDestination::new(
+            "/synthetic/separate",
+            "refs/loopflow/planning/shared/separate",
+        )
+        .unwrap();
+        target.bind_peer_planning("/target", &separate).unwrap();
         target
             .select_peer_waves(
                 "/target",
-                &destination(),
+                &separate.id(),
                 std::slice::from_ref(private.id()),
             )
             .unwrap();
         let retained =
-            super::export_in(&target.conn.lock().unwrap(), "/target", &destination()).unwrap();
+            super::export_in(&target.conn.lock().unwrap(), "/target", &separate.id()).unwrap();
         let exchanged = PlanningSnapshot::from_bytes(&retained.to_bytes().unwrap()).unwrap();
+        let public = target
+            .export_peer_planning("/target", &separate.id())
+            .unwrap();
+        public.validate().unwrap();
+        assert!(!public.objects().iter().any(|o| o.id == local.id.as_str()
+            || o.id == incoming_task.as_str()
+            || o.id == local.project_id.as_str()
+            || o.id == incoming_project.as_str()));
         // An unchanged readback must preserve the subsequent local intention,
         // without relabeling it as Linear or repeatedly capturing the bridge.
         target.put_pm_snapshot(&local_row).unwrap();
         assert_eq!(
-            super::export_in(&target.conn.lock().unwrap(), "/target", &destination()).unwrap(),
+            super::export_in(&target.conn.lock().unwrap(), "/target", &separate.id()).unwrap(),
             retained
         );
         for (kind, origin, owner, field, value) in [
@@ -7433,7 +7447,7 @@ mod tests {
         import(&target, "/target", "repeat", &incoming);
         assert_eq!(execution_rows(&target), execution);
         assert_eq!(
-            super::export_in(&target.conn.lock().unwrap(), "/target", &destination()).unwrap(),
+            super::export_in(&target.conn.lock().unwrap(), "/target", &separate.id()).unwrap(),
             retained
         );
         assert!(!export(&target, "/target")

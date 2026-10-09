@@ -73,54 +73,12 @@ remain separate. No new product decision is selected.
   Saves commit first; bounded worker-owned attempts retain locks through cancellation.
   Active connections supply reconnect; setup never publishes or retries a turn.
 
-- October 8 conflict classification: valid contradictory/unordered Task/Project
-  provider observations use `ProviderObservationConflict`, not malformed-input
-  `InvalidData`. Peer imports retain the existing accepted frontier and the entire
-  mutation union while isolating projection; direct provider acquisition still
-  rejects. Malformed documents and unexpected SQL remain transaction-wide errors.
-  Review strengthened the regressions to assert attempted/acknowledged/conflict/error
-  receipt state, not only the pending value reader, which omits those fields.
-
-- October 8 disposition cut reuses the common state receipt/reconciliation owner,
-  preserving causal baselines and uncertain attempts without inventing a local
-  Workflow move. Review caught unchanged-baseline preservation incorrectly retaining
-  a losing intention after a peer Linear winner; peer-winner reconciliation now
-  explicitly retires it. Cached non-lifecycle states still project without minting
-  unsupported lifecycle deliveries; the common writer still owns its three targets.
-  No new product policy is selected. Grouped receipts now exist; composed checks
-  stay in the design. Mixed-provider exchange is still disabled and not ready
-  for publication.
-
-- October 8 comment composition uses the existing comment ID as delivery identity,
-  raw provider observations as journal provenance, and the common thread/receipt
-  owners. Acquired migration rows without a raw observation stay local until read;
-  they cannot be exported as authored comments. Local append remains immutable:
-  conflicting reuse of a comment ID isolates projection and preserves its journal,
-  rather than inventing a comment-edit delivery protocol. These are reversible
-  representation choices, not new product policy. Review removed incomplete-record
-  export and corrected grouped JSON ordering; public composed acceptance remains.
-
-- October 8 status choice: pending local changes become unknown when a destination's
-  journal cannot be read. Conflicts belong inside that destination's status, read in
-  the same transaction. Retained receipts/conflicts survive; unavailable sharing holds
-  are not reported as empty convergence. Only malformed journal errors are isolated;
-  database failures still fail status. This replaces the second global conflict reader,
-  not the journal or its validation. `de9470d5a` also shares the destination-scoped
-  conflict query with import settlement. Storage checks passed; public/DTO execution
-  remains with gate.
-
-- October 8 semantic-content choice: retain existing common Markdown storage,
-  but remove it from peer ordering. Rust's content owner captures workflow, the
-  KR list and the target list in the existing journal; each list keeps its common
-  receipt granularity. All production creation/acquisition/content writers capture
-  before committing. The existing migration data-hook pattern seeds populated
-  content with that parser in the same transaction, rather than adding a SQL
-  parser, a second table or export-time edits. Malformed retained content fails
-  migration without discarding its bytes. This is an implementation choice, not
-  new policy from Jack Heart. Review removed an incorrect test expectation that
-  an observed concurrent Linear winner must preserve a losing local field; the
-  selected winner retires its intention and retains the losing receipt. Independent
-  edits without a competing observation remain covered by the passing storage suite.
+- October 8 conflict, disposition, comment, status and semantic-content choices
+  are consolidated in the design's implemented boundaries. Detailed rationale and
+  counterexamples: `8f3472eda:scratch/questions.md`, the five October 8 entries.
+  Valid contradictions isolate projection; malformed input aborts import. Retain
+  losing receipts, provider authorship, destination-scoped unknown status and the
+  common content parser. No mixed-provider activation follows.
 
 - October 9 executable feedback exposed two missing common-writer boundaries:
   accepted peer provider facts lacked their original acquisition age on local rows,
@@ -174,3 +132,15 @@ remain separate. No new product decision is selected.
   local mapping/repository and contradictory incoming scalar claims. This is a
   reversible composition choice, not new policy. Tests now enter through ordinary
   association/import/acquisition; execution remains gate-deferred.
+
+- October 9 causal representation: retain the existing journal rather than export
+  machine-local correspondence. Common acquisition may capture a cross-origin parent
+  only for the same kind, field, value and exact Linear body under an explicit
+  association. The provider fact, not identical text or the association row, is
+  portable evidence. Heads remain per-origin; delivery baselines traverse the links.
+  Dependency closure is validation-only: unselected origins and dependents remain
+  held, never enrolled. Review caught a preserved local value incorrectly borrowing
+  provider parents; both scalar and content capture now require accepted equality.
+  This is a partial implementation choice, not new policy from Jack Heart. Held
+  import still does not project a winner or acknowledge it; peer-authored winner
+  causality and joint projection remain in item 3.

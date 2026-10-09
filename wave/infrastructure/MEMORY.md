@@ -631,14 +631,15 @@ Ordering, causal freshness, private-history holds and unknown-journal proofs:
 scoped status. Mixed exchange stays disabled;
 sharing/recovery and public composition remain unfinished.
 
-Legacy association remains unfinished. Correspondence preserves execution and
-private selection, but is not causal acknowledgement. `39dba32c1` retains creation
-origins through ordinary import; common acquisition owns exact-origin readback.
-The revised fixture is unexecuted. Same-object capture and delivery baselines cannot
-acknowledge another origin's Linear head; lookup cannot repair that. Non-creation
-receipts and relationships still project incoming IDs. Preserve original inputs
-and private history while resolving local owners; holds remain. Earlier proofs:
-`f2a5c94e8`, this heading. Public Git/Linear acceptance remains.
+`39dba32c1` retains creation origins through
+ordinary import; common acquisition owns exact-origin readback. `8f3472eda` adds
+portable exact-Linear-fact parents without exporting correspondence. Equal text
+grants no causality; heads remain per-origin and baselines traverse the links.
+Unselected origins stay held. Static checks prove neither fixture execution nor
+joint recovery. Deterministic joint winners,
+peer-authored causality, relationships and non-creation receipts remain unfinished.
+Preserve execution, inputs, private selection and losers.
+Earlier evidence: `f2a5c94e8`, this heading. Public Git/Linear acceptance remains.
 Plan: `scratch/work-on-another-machine-name.md`.
 
 ## Driver recovery

@@ -629,12 +629,12 @@ Desktop retains last-good scoped status; per-Work recovery remains. Mixed exchan
 stays disabled. Omission is not convergence. Earlier proofs: `9dfb95451`, this heading.
 
 `39dba32c1` retains creation origins; common acquisition owns exact readback.
-`8f3472eda`/`b5b491099` retain exact cross-origin Linear parents, per-origin heads
-and private selection without exporting correspondence. Equal text grants no causality.
-`dac02060a` separates accepted field frontiers from retained heads at ordinary
-import: failed/held projection cannot become a local save's predecessor. No echo.
-Behavioral proof is deferred; associated acquisition stays held. Joint winners, peer-authored
-causality, relationships, non-creation receipts and public composition remain unfinished.
+`8f3472eda`/`b5b491099` retain exact Linear parents and private selection without
+exporting correspondence. Equal text grants no causality. `dac02060a`–`96f714bd6`
+record accepted same-origin frontiers without echo; rejected/held heads cannot
+become save predecessors. Behavior is unverified. Winners still group by origin;
+joint projection, peer-authored links, relationships, non-creation receipts and
+public composition remain unfinished. Both associated origins stay held.
 History: `f2a5c94e8`, this heading. Plan: `scratch/work-on-another-machine-name.md`.
 
 ## Driver recovery

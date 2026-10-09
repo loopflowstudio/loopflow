@@ -2,20 +2,20 @@
 //! settle its own capture but cannot close the new owner's provider. A driver
 //! that died without closing leaves its engine to whoever replaces it.
 
-use crate::process::SessionDriver;
+use crate::process::SessionAttachment;
 use crate::store::sqlite::SqliteStore;
 use crate::store::{StoreError, StoreResult};
 
-pub(crate) fn finish_session_driver(
+pub(crate) fn finish_session_attachment(
     store: &SqliteStore,
     session: &str,
-    driver: &SessionDriver,
+    driver: &SessionAttachment,
     outcome: &str,
 ) -> StoreResult<()> {
     let connection = store.session_connection(session)?;
     let process = store.session_provider_process(session)?;
     let provider = store.session(session)?.and_then(|session| session.provider);
-    store.finish_session_driver(session, driver, outcome, || {
+    store.finish_session_attachment(session, driver, outcome, || {
         // Native terminal providers own their own teardown. Codex app-server
         // runs in its own group so a connecting driver can take it over live.
         #[cfg(unix)]
@@ -44,9 +44,9 @@ pub(crate) fn finish_session_driver(
 pub(super) fn end_abandoned_engine(
     store: &SqliteStore,
     session: &str,
-    dead: &SessionDriver,
+    dead: &SessionAttachment,
 ) -> StoreResult<()> {
-    store.with_session_driver(session, dead, || {
+    store.with_session_attachment(session, dead, || {
         let Some((pid, started)) = store.session_provider_process(session)? else {
             return Ok(());
         };

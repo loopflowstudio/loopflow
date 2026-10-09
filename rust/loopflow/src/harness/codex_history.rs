@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde_json::{json, Value};
 
-use crate::process::SessionDriver;
+use crate::process::SessionAttachment;
 use crate::session::SessionEventKind;
 use crate::store::sqlite::SqliteStore;
 use crate::store::StoreResult;
@@ -20,7 +20,7 @@ pub(super) struct History {
     known: HashMap<String, u64>,
     requests: HashMap<String, u64>,
     started: HashSet<String>,
-    replies: HashMap<String, SessionDriver>,
+    replies: HashMap<String, SessionAttachment>,
     attributed: HashSet<String>,
     attention: super::attention::Attention,
 }
@@ -43,7 +43,7 @@ impl History {
         &mut self,
         store: &SqliteStore,
         session: &str,
-        driver: Option<&SessionDriver>,
+        driver: Option<&SessionAttachment>,
         expected_thread: Option<&str>,
         rpc: &Value,
     ) -> StoreResult<()> {
@@ -215,7 +215,7 @@ fn completion(store: &SqliteStore, session: &str, thread: &str, turn: &Value) ->
 mod tests {
     use super::History;
     use crate::id::ProcessLfid;
-    use crate::process::SessionDriver;
+    use crate::process::SessionAttachment;
     use crate::session::SessionEventKind;
     use crate::store::sqlite::SqliteStore;
     use serde_json::json;
@@ -236,15 +236,15 @@ mod tests {
             )
             .unwrap();
         }
-        let original = SessionDriver {
+        let original = SessionAttachment {
             process_lfid: Some(first.clone()),
-            generation: 1,
+            token: crate::id::AttachmentToken::new(),
             provider_generation: 1,
             provider_process_lfid: first.clone(),
         };
-        let replacement = SessionDriver {
+        let replacement = SessionAttachment {
             process_lfid: Some(second.clone()),
-            generation: 2,
+            token: crate::id::AttachmentToken::new(),
             ..original.clone()
         };
         for (turn, reply_first) in [("notification-first", false), ("reply-first", true)] {

@@ -131,7 +131,7 @@ fn settle_dead_drivers(
     report: &mut EngineReapReport,
 ) -> StoreResult<()> {
     for session in store.driven_sessions()? {
-        let Some(driver) = store.session_driver(&session)? else {
+        let Some(driver) = store.session_attachment(&session)? else {
             continue;
         };
         let dead = driver
@@ -147,7 +147,7 @@ fn settle_dead_drivers(
         if !dead || !engine_gone {
             continue;
         }
-        match store.finish_session_driver(&session, &driver, "interrupted", || Ok(false)) {
+        match store.finish_session_attachment(&session, &driver, "interrupted", || Ok(false)) {
             Ok(()) => report.settled_drivers += 1,
             // Another driver claimed the conversation since it was read.
             Err(StoreError::InvalidAuthority(_)) => {}
@@ -311,7 +311,7 @@ mod tests {
             )
             .unwrap();
             let claim = store
-                .claim_session_driver("orphan", None, &driver, true)
+                .claim_session_attachment("orphan", None, &driver, true)
                 .unwrap();
             let engine = fake_engine();
             let started_at = process_started_at(engine.id()).unwrap().unwrap();
@@ -370,8 +370,8 @@ mod tests {
         assert_eq!((report.reaped, report.errors.len()), (1, 0));
         // The killed driver's exit is recorded once its engine is gone.
         assert_eq!(report.settled_drivers, 1);
-        let driver = fixture.store.session_driver("orphan").unwrap().unwrap();
-        assert_eq!((driver.process_lfid, driver.generation), (None, 2));
+        let driver = fixture.store.session_attachment("orphan").unwrap().unwrap();
+        assert!(driver.process_lfid.is_none());
         let deadline = Instant::now() + Duration::from_secs(5);
         while fixture.engine_alive() && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(20));
@@ -400,7 +400,7 @@ mod tests {
         let payload: serde_json::Value = serde_json::from_str(&payload).unwrap();
         assert_eq!(payload["reaped"]["pid"], pid);
         assert_eq!(
-            payload["reaped"]["driver_process_lfid"],
+            payload["reaped"]["attached_process_lfid"],
             fixture.driver.as_str()
         );
         // Nothing is left to reap.
@@ -477,7 +477,7 @@ mod tests {
         fixture.sql("UPDATE agent_sessions SET provider='codex',interactive=0 WHERE id='sibling'");
         let claim = fixture
             .store
-            .claim_session_driver("sibling", None, &sibling, true)
+            .claim_session_attachment("sibling", None, &sibling, true)
             .unwrap();
         fixture
             .store

@@ -168,8 +168,8 @@ impl Machine {
         self.raw()
             .execute_batch(&format!(
                 "BEGIN;
-                 INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,repo,driver_generation)
-                 VALUES('conversation','Conversation','human',1,1,'{repo}','{repo}',1);
+                 INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,repo,attachment_token)
+                 VALUES('conversation','Conversation','human',1,1,'{repo}','{repo}','00000000-0000-4000-8000-000000000001');
                  INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
                  VALUES('conversation','captured','{INPUT}',1,'{{}}');
                  UPDATE agent_sessions SET current_capture=last_insert_rowid() WHERE id='conversation';
@@ -523,8 +523,8 @@ fn every_displayed_session_fact_committed_elsewhere_is_shown() {
 
     // A question the stream reported is Waiting; its answer ends that.
     write(
-        "INSERT INTO session_activity(session_id,driver_generation,provider_generation,observed_at,open_tools,pending_input,yielded)
-         SELECT id,driver_generation,provider_generation,CAST(strftime('%s','now') AS INTEGER),0,1,0
+        "INSERT INTO session_activity(session_id,attachment_token,provider_generation,observed_at,open_tools,pending_input,yielded)
+         SELECT id,attachment_token,provider_generation,CAST(strftime('%s','now') AS INTEGER),0,1,0
          FROM agent_sessions WHERE id='conversation'",
     );
     watch.session(|record| record["attention"] == "waiting");
@@ -537,6 +537,7 @@ fn every_displayed_session_fact_committed_elsewhere_is_shown() {
         None,
         serde_json::json!({"outcome": "interrupted"}),
     );
+    write("UPDATE agent_sessions SET attachment_exit_seq=(SELECT seq FROM session_events WHERE session_id='conversation' AND receipt_key='driver:0:exit') WHERE id='conversation'");
     watch.session(|record| record["state"] == "interrupted");
 
     // Transcript lines between those facts were never a reason to read.

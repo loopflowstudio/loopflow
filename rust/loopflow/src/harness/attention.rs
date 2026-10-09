@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 
 use serde_json::Value;
 
-use crate::process::SessionDriver;
+use crate::process::SessionAttachment;
 use crate::session::SessionActivity;
 use crate::store::sqlite::SqliteStore;
 
@@ -96,7 +96,7 @@ impl Attention {
         &mut self,
         store: &SqliteStore,
         session: &str,
-        driver: &SessionDriver,
+        driver: &SessionAttachment,
         signals: Vec<Signal>,
     ) {
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
@@ -107,7 +107,7 @@ impl Attention {
         &mut self,
         store: &SqliteStore,
         session: &str,
-        driver: &SessionDriver,
+        driver: &SessionAttachment,
         signals: Vec<Signal>,
         now: i64,
     ) {
@@ -271,7 +271,7 @@ mod tests {
 
     use super::{claude, codex, opencode, Attention, Signal};
     use crate::id::ProcessLfid;
-    use crate::process::SessionDriver;
+    use crate::process::SessionAttachment;
     use crate::store::sqlite::SqliteStore;
 
     /// A conversation whose driver saves what a recorded stream says, one
@@ -279,7 +279,7 @@ mod tests {
     struct Driven {
         _home: tempfile::TempDir,
         store: SqliteStore,
-        driver: SessionDriver,
+        driver: SessionAttachment,
         attention: Attention,
         now: i64,
     }
@@ -317,7 +317,7 @@ mod tests {
             conn.execute("UPDATE agent_sessions SET interactive=?1", [interactive])
                 .unwrap();
             let driver = store
-                .claim_session_driver("conversation", None, &process, false)
+                .claim_session_attachment("conversation", None, &process, false)
                 .unwrap();
             Self {
                 _home: home,
@@ -492,7 +492,7 @@ mod tests {
         assert!(session.waiting_after(0));
         session
             .store
-            .release_session_driver("conversation", &session.driver)
+            .release_session_attachment("conversation", &session.driver)
             .unwrap();
         assert!(!session.waiting_after(QUIET));
     }

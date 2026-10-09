@@ -72,7 +72,7 @@ fn project(
     snapshot.gaps.extend(live.gaps);
     let mut drivers = BTreeMap::new();
     for session in &ownership.sessions {
-        let Some(driver) = &session.driver_process_lfid else {
+        let Some(driver) = &session.attached_process_lfid else {
             continue;
         };
         let receipts = live
@@ -485,9 +485,8 @@ mod tests {
             id: id.into(),
             title: format!("Conversation {id}"),
             work: None,
-            driver_process_lfid: Some(process.clone()),
+            attached_process_lfid: Some(process.clone()),
             driver_trace_id: Some("trace".into()),
-            driver_generation: 1,
             provider_process_lfid: Some(process.clone()),
             provider_pid: None,
             provider_started_at: None,
@@ -528,7 +527,7 @@ mod tests {
     fn sequential_sessions_do_not_borrow_a_retained_engine() {
         let process = ProcessLfid::new();
         let mut first = session("first", &process);
-        first.driver_process_lfid = None;
+        first.attached_process_lfid = None;
         first.driver_trace_id = None;
         first.provider_pid = Some(51);
         first.provider_started_at = Some(100);
@@ -578,7 +577,7 @@ mod tests {
             .gaps
             .iter()
             .any(|gap| gap.contains("earlier Session")));
-        first.driver_process_lfid = Some(process);
+        first.attached_process_lfid = Some(process);
         first.driver_trace_id = Some("trace".into());
         let mut reused_pid = first.clone();
         reused_pid.provider_started_at = Some(1);
@@ -645,9 +644,9 @@ mod tests {
         let snapshot = observe(vec![first.clone(), second.clone()], &processes);
         assert!(snapshot.sessions.is_empty());
         assert!(snapshot.gaps.iter().any(|g| g.contains("2 possible")));
-        first.driver_process_lfid = None;
+        first.attached_process_lfid = None;
         first.driver_trace_id = None;
-        second.driver_process_lfid = None;
+        second.attached_process_lfid = None;
         second.driver_trace_id = None;
         processes.receipts.clear();
         processes.processes.remove(0);

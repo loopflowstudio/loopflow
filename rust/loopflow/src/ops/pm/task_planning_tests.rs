@@ -604,7 +604,7 @@ fn task_deletion_active_sync_reconnect_retains_execution_and_history() {
         )
         .unwrap();
         conn.execute("INSERT INTO processes(lfid,trace_id,command,cwd,started_at) VALUES('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222','lf run code',?1,2)",[repo.to_str().unwrap()]).unwrap();
-        conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,cwd,task_id,wave_id,driver_process_lfid,provider_thread,input_published) VALUES('session-retained','Conversation','human',2,?1,?2,?3,'11111111-1111-4111-8111-111111111111','native-retained',1)",rusqlite::params![repo.to_str().unwrap(),task.id.as_str(),task.wave_id.as_str()]).unwrap();
+        conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,cwd,task_id,wave_id,attached_process_lfid,provider_thread,input_published) VALUES('session-retained','Conversation','human',2,?1,?2,?3,'11111111-1111-4111-8111-111111111111','native-retained',1)",rusqlite::params![repo.to_str().unwrap(),task.id.as_str(),task.wave_id.as_str()]).unwrap();
         conn.execute("INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,created_at,updated_at) VALUES('pr-retained',?1,1,'task','retain/branch','retained-base',1,7)",[task.id.as_str()]).unwrap();
         let graph = json!({"name":"code", "nodes":[{"name":"review","skill":"review","description":null}],
             "edges":[{"from":"start","to":"review","flow":"implement"},{"from":"review","to":"end","flow":null}]});

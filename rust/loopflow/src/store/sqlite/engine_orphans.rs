@@ -28,11 +28,11 @@ impl SqliteStore {
     pub(crate) fn recorded_engines(&self) -> StoreResult<Vec<RecordedEngine>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(
-            "SELECT id,provider,interactive,provider_pid,provider_started_at,driver_process_lfid
+            "SELECT id,provider,interactive,provider_pid,provider_started_at,attached_process_lfid
              FROM agent_sessions
              WHERE (provider_pid,provider_started_at) IN (
                 SELECT provider_pid,provider_started_at FROM agent_sessions
-                WHERE driver_process_lfid IS NOT NULL AND provider_pid IS NOT NULL
+                WHERE attached_process_lfid IS NOT NULL AND provider_pid IS NOT NULL
                     AND provider_started_at IS NOT NULL)
              ORDER BY id",
         )?;
@@ -73,7 +73,7 @@ impl SqliteStore {
     pub(crate) fn driven_sessions(&self) -> StoreResult<Vec<String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(
-            "SELECT id FROM agent_sessions WHERE driver_process_lfid IS NOT NULL ORDER BY id",
+            "SELECT id FROM agent_sessions WHERE attached_process_lfid IS NOT NULL ORDER BY id",
         )?;
         let rows = statement.query_map([], |row| row.get(0))?;
         Ok(rows.collect::<Result<_, _>>()?)
@@ -91,14 +91,14 @@ impl SqliteStore {
         engine: &RecordedEngine,
         terminate: impl FnOnce() -> StoreResult<()>,
     ) -> StoreResult<bool> {
-        let _dispatch = self.lock_session_driver(&engine.session)?;
+        let _dispatch = self.lock_session_attachment(&engine.session)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let generation: Option<i64> = tx
             .query_row(
                 "SELECT provider_generation FROM agent_sessions WHERE id=?1
                  AND provider_pid=?2 AND provider_started_at=?3
-                 AND driver_process_lfid IS ?4 AND interactive=?5",
+                 AND attached_process_lfid IS ?4 AND interactive=?5",
                 params![
                     engine.session,
                     engine.pid,
@@ -118,7 +118,7 @@ impl SqliteStore {
             "reaped": {
                 "reason": "driver exited without closing its engine",
                 "pid": engine.pid, "started_at": engine.started_at,
-                "driver_process_lfid": engine.driver,
+                "attached_process_lfid": engine.driver,
                 "reaped_by": crate::journal::current_process_lfid(),
             },
         });

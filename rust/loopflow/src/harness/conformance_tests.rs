@@ -388,7 +388,7 @@ fn opencode_native_history_preserves_output_tools_and_usage_missingness() {
         let session = format!("session-{measured:?}");
         store.test_session(&session, &input);
         let driver = store
-            .claim_session_driver(&session, None, &process, false)
+            .claim_session_attachment(&session, None, &process, false)
             .unwrap();
         let mut history = History::new(Some((store.clone(), session.clone(), driver)));
         let request = history.request();

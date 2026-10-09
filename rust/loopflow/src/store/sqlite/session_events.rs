@@ -98,19 +98,19 @@ impl SqliteStore {
     pub(crate) fn record_session_activity(
         &self,
         session: &str,
-        driver: &crate::process::SessionDriver,
+        driver: &crate::process::SessionAttachment,
         activity: &crate::session::SessionActivity,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "INSERT INTO session_activity(session_id,driver_generation,observed_at,open_tools,pending_input,yielded,provider_generation)
-             SELECT ?1,?2,?3,?4,?5,?6,?7 FROM agent_sessions WHERE id=?1 AND driver_generation=?2 AND provider_generation=?7
-             ON CONFLICT(session_id) DO UPDATE SET driver_generation=excluded.driver_generation,
+            "INSERT INTO session_activity(session_id,attachment_token,observed_at,open_tools,pending_input,yielded,provider_generation)
+             SELECT ?1,?2,?3,?4,?5,?6,?7 FROM agent_sessions WHERE id=?1 AND attachment_token=?2 AND provider_generation=?7
+             ON CONFLICT(session_id) DO UPDATE SET attachment_token=excluded.attachment_token,
                 observed_at=excluded.observed_at,open_tools=excluded.open_tools,
                 pending_input=excluded.pending_input,yielded=excluded.yielded,
                 program_status=CASE WHEN session_activity.provider_generation=excluded.provider_generation THEN session_activity.program_status END,
                 provider_generation=excluded.provider_generation",
-            params![session, driver.generation, activity.observed_at,
+            params![session, driver.token, activity.observed_at,
                 activity.open_tools as i64, activity.pending_input as i64, activity.yielded, driver.provider_generation],
         )?;
         Ok(())
@@ -124,7 +124,7 @@ impl SqliteStore {
         Ok(conn.query_row(
             "SELECT MIN(act.observed_at)+?2 FROM session_activity act
              JOIN agent_sessions s ON s.id=act.session_id
-             WHERE s.completed_at IS NULL AND act.driver_generation=s.driver_generation
+             WHERE s.completed_at IS NULL AND act.attachment_token=s.attachment_token
              AND act.provider_generation=s.provider_generation AND act.program_status IS NULL
              AND act.pending_input=0 AND act.open_tools=0
              AND NOT (s.interactive=1 AND act.yielded=1) AND ?1-act.observed_at<?2",
@@ -711,10 +711,10 @@ mod tests {
             )
             .unwrap();
         let claim = store
-            .claim_session_driver("conversation-1", None, &driver, true)
+            .claim_session_attachment("conversation-1", None, &driver, true)
             .unwrap();
         store
-            .finish_session_driver("conversation-1", &claim, "interrupted", || Ok(false))
+            .finish_session_attachment("conversation-1", &claim, "interrupted", || Ok(false))
             .unwrap();
         assert_eq!(
             store
@@ -874,7 +874,7 @@ mod tests {
                 .unwrap();
             }
             let original = store
-                .claim_session_driver(&session.id, None, &first, true)
+                .claim_session_attachment(&session.id, None, &first, true)
                 .unwrap();
             let mut child = Command::new("sleep")
                 .arg("30")
@@ -898,10 +898,10 @@ mod tests {
                 .unwrap();
             let current = if transfer {
                 let replacement = store
-                    .claim_session_driver(&session.id, Some(&original), &second, false)
+                    .claim_session_attachment(&session.id, Some(&original), &second, false)
                     .unwrap();
                 assert!(matches!(
-                    crate::session_record::finish_session_driver(
+                    crate::session_record::finish_session_attachment(
                         &store,
                         &session.id,
                         &original,
@@ -915,7 +915,7 @@ mod tests {
             } else {
                 original
             };
-            crate::session_record::finish_session_driver(
+            crate::session_record::finish_session_attachment(
                 &store,
                 &session.id,
                 &current,
@@ -933,7 +933,7 @@ mod tests {
                 Some("saved-thread")
             );
             assert!(store
-                .session_driver(&session.id)
+                .session_attachment(&session.id)
                 .unwrap()
                 .unwrap()
                 .process_lfid
@@ -992,10 +992,10 @@ mod tests {
                 }
             }
             let driver = store
-                .claim_session_driver(id, None, &process, true)
+                .claim_session_attachment(id, None, &process, true)
                 .unwrap();
             store
-                .finish_session_driver(id, &driver, "interrupted", || Ok(false))
+                .finish_session_attachment(id, &driver, "interrupted", || Ok(false))
                 .unwrap();
             let saved = store.session(id).unwrap().unwrap();
             assert_eq!(saved.completed_at.is_some(), retired);
@@ -1005,7 +1005,7 @@ mod tests {
             let history = store.session_history(id, 0, 100).unwrap();
             assert!(history
                 .iter()
-                .any(|event| event.payload["type"] == "driver_exit"
+                .any(|event| event.payload["type"] == "attachment_exit"
                     && event.payload["outcome"] == "interrupted"));
             assert!(!history
                 .iter()
@@ -1064,7 +1064,7 @@ mod tests {
                 .unwrap();
         }
         let original = store
-            .claim_session_driver(&session.id, None, &first, true)
+            .claim_session_attachment(&session.id, None, &first, true)
             .unwrap();
         store
             .record_session_event(
@@ -1091,10 +1091,10 @@ mod tests {
             .completed_at
             .is_none());
         let resumed = store
-            .claim_session_driver(&session.id, Some(&original), &second, true)
+            .claim_session_attachment(&session.id, Some(&original), &second, true)
             .unwrap();
         assert!(store
-            .finish_session_driver(&session.id, &original, "interrupted", || Ok(false))
+            .finish_session_attachment(&session.id, &original, "interrupted", || Ok(false))
             .is_err());
         assert!(store
             .session(&session.id)
@@ -1102,9 +1102,12 @@ mod tests {
             .unwrap()
             .completed_at
             .is_none());
-        assert_eq!(store.session_driver(&session.id).unwrap().unwrap(), resumed);
+        assert_eq!(
+            store.session_attachment(&session.id).unwrap().unwrap(),
+            resumed
+        );
         store
-            .finish_session_driver(&session.id, &resumed, "completed", || Ok(false))
+            .finish_session_attachment(&session.id, &resumed, "completed", || Ok(false))
             .unwrap();
         assert!(store
             .session(&session.id)
@@ -1137,7 +1140,7 @@ mod tests {
                 .unwrap();
         }
         let driver = store
-            .claim_session_driver(&session.id, None, &first, false)
+            .claim_session_attachment(&session.id, None, &first, false)
             .unwrap();
         store
             .record_session_turn_origin(&session.id, "thread", "turn", 1, &first)
@@ -1161,7 +1164,7 @@ mod tests {
             .replace_session_input(session.captured, replacement.clone())
             .unwrap();
         store
-            .claim_session_driver(&session.id, Some(&driver), &second, true)
+            .claim_session_attachment(&session.id, Some(&driver), &second, true)
             .unwrap();
         // Gen 2 observes the surviving Gen 1 turn. The recorder never saw its usage.
         store
@@ -1461,7 +1464,7 @@ mod tests {
                 .unwrap();
         }
         let original = store
-            .claim_session_driver("conversation", None, &first, false)
+            .claim_session_attachment("conversation", None, &first, false)
             .unwrap();
         store
             .record_session_connection("conversation", &original, "/original.sock", "thread")
@@ -1473,7 +1476,7 @@ mod tests {
             .record_session_turn_origin("conversation", "thread", "later", 1, &first)
             .unwrap();
         let replacement = store
-            .claim_session_driver("conversation", Some(&original), &second, true)
+            .claim_session_attachment("conversation", Some(&original), &second, true)
             .unwrap();
         assert_eq!(replacement.provider_generation, 2);
         assert!(store.session_connection("conversation").unwrap().is_none());

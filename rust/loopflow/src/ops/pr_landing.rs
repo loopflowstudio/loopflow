@@ -245,7 +245,7 @@ fn admit_ci_fix(
             // A bound driver's engine is judged by its own OS identity.
             let bound = store
                 .sqlite
-                .session_driver(session)
+                .session_attachment(session)
                 .map_err(repair_error)?
                 .is_some();
             let engine = store

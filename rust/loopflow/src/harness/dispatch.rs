@@ -78,7 +78,7 @@ pub(super) fn off_reactor<T>(work: impl FnOnce() -> T) -> T {
 mod tests {
     use super::{off_reactor, within};
     use crate::id::ProcessLfid;
-    use crate::process::SessionDriver;
+    use crate::process::SessionAttachment;
     use crate::store::sqlite::SqliteStore;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{mpsc, Arc};
@@ -86,7 +86,7 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::UnixStream;
 
-    fn fenced_session(home: &tempfile::TempDir) -> (SqliteStore, SessionDriver) {
+    fn fenced_session(home: &tempfile::TempDir) -> (SqliteStore, SessionAttachment) {
         let path = home.path().join("dispatch.db");
         let store = SqliteStore::open_ephemeral(&path).unwrap();
         store.test_session("conversation", "run_00000000000000000000000000000001");
@@ -99,7 +99,7 @@ mod tests {
             )
             .unwrap();
         let driver = store
-            .claim_session_driver("conversation", None, &process, false)
+            .claim_session_attachment("conversation", None, &process, false)
             .unwrap();
         (store, driver)
     }
@@ -136,7 +136,7 @@ mod tests {
             let ticked = Arc::new(AtomicBool::new(false));
             let writer_store = store.clone();
             let writer = tokio::task::spawn_blocking(move || {
-                writer_store.with_session_driver("conversation", &driver, || {
+                writer_store.with_session_attachment("conversation", &driver, || {
                     held.send(()).unwrap();
                     // Let the reader reach the fence before the write needs
                     // the runtime.
@@ -184,7 +184,7 @@ mod tests {
             let (held, holding) = tokio::sync::oneshot::channel();
             let writer_store = store.clone();
             let writer = tokio::task::spawn_blocking(move || {
-                writer_store.with_session_driver("conversation", &driver, || {
+                writer_store.with_session_attachment("conversation", &driver, || {
                     held.send(()).unwrap();
                     Ok(within(
                         Duration::from_millis(300),

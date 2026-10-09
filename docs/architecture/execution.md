@@ -93,20 +93,27 @@ Recovery preserves recorded inputs and exact native evidence. File publication
 and SQLite settlement have an explicit recoverable boundary; neither alone is a
 claim of successful execution.
 
-## Connect and transfer the driver
+## Connect and transfer attachment
 
 Codex's private Unix WebSocket supports multiple clients on one active native
 thread. Attachment alone does not revoke the old client's writes. Loopflow's
-conversation-scoped relay therefore checks the Session driver at actual socket
+conversation-scoped relay therefore checks the exact Session attachment at socket
 dispatch, including queued requests and approval replies. A bounded native send
-and driver transfer serialize through the same SQLite transaction. A send timeout
+and attachment transfer hold the same per-Session OS lock, without holding a
+SQLite transaction over transport I/O. A send timeout
 has an unknown outcome and is not retried automatically.
 
 A passive viewer subscribes without claiming the Session. A former driver can
 keep receiving events after transfer but cannot start or steer a turn or mutate
 Session state. The continuing engine retains its provider generation while the
-new driver receives a new driver generation. Engine ownership and driver ownership
-must not be collapsed into one counter.
+new attachment receives a fresh opaque token, including reattachment of the same
+lf Process. Release revokes that token as well. The token is a compare-and-swap
+witness, not another process identity or lifecycle owner. The AgentProcess
+record cutover remains unfinished; provider identity still uses its generation.
+
+Attachment exit retains an exact history-event reference rather than deriving a
+receipt from counter arithmetic. Migration preserves old event keys and payloads,
+including captured input, native identity and historical outcomes.
 
 `session connect --replace` stops the exact owned clients and reconnects to the
 live engine, preserving the active turn and sibling conversations.

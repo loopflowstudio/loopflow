@@ -716,7 +716,7 @@ async fn connect_live_codex(
     provider: &crate::session_record::ProviderSessionRef,
     replace_clients: bool,
 ) -> Result<bool> {
-    let expected = store.sqlite.session_driver(&session.id)?;
+    let expected = store.sqlite.session_attachment(&session.id)?;
     let Some((endpoint, thread)) = store.sqlite.session_connection(&session.id)? else {
         return Ok(false);
     };
@@ -740,7 +740,7 @@ async fn connect_live_codex(
     let driver =
         match store
             .sqlite
-            .claim_session_driver(&session.id, expected.as_ref(), &process, false)
+            .claim_session_attachment(&session.id, expected.as_ref(), &process, false)
         {
             Ok(driver) => driver,
             Err(crate::store::StoreError::InvalidAuthority(_))
@@ -751,7 +751,7 @@ async fn connect_live_codex(
             }
             Err(error) => return Err(error.into()),
         };
-    crate::session_record::register_session_driver_interrupt(
+    crate::session_record::register_session_attachment_interrupt(
         &store.sqlite,
         session.id.clone(),
         driver.clone(),
@@ -802,7 +802,7 @@ async fn connect_live_codex(
         result??;
         Ok::<_, anyhow::Error>(true)
     }.await;
-    match crate::session_record::finish_session_driver(
+    match crate::session_record::finish_session_attachment(
         &store.sqlite,
         &session.id,
         &driver,

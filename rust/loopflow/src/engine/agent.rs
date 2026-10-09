@@ -204,7 +204,7 @@ pub struct AgentConfig {
     pub env: BTreeMap<String, String>,
     /// Exact conversational driver selected before provider launch. Never
     /// inherited by provider tools or serialized into replay input.
-    pub session_driver: Option<(String, crate::process::SessionDriver)>,
+    pub session_attachment: Option<(String, crate::process::SessionAttachment)>,
 }
 
 impl AgentConfig {
@@ -1214,7 +1214,7 @@ pub fn run_agent(
         capture.0.claim_conversation_driver().map_err(|error| {
             CoreError::ExecutionFailed(format!("conversation admission failed: {error}"))
         })?;
-        launch.session_driver = capture.0.session_driver();
+        launch.session_attachment = capture.0.session_attachment();
         if launch.resume_token.is_none() {
             launch.resume_token = capture.0.conversation_resume_token().map_err(|error| {
                 CoreError::ExecutionFailed(format!("conversation recovery failed: {error}"))

@@ -571,7 +571,7 @@ fn headless_resume_preserves_a_held_owners_capture_on_both_harnesses() {
             )
             .unwrap();
         let driver = store
-            .claim_session_driver(&id, None, &process, true)
+            .claim_session_attachment(&id, None, &process, true)
             .unwrap();
         let before = store.session(&id).unwrap().unwrap();
         let history = store.session_history(&id, 0, 0).unwrap();
@@ -600,7 +600,7 @@ fn headless_resume_preserves_a_held_owners_capture_on_both_harnesses() {
         assert!(error.contains("already has a driver"), "{harness}: {error}");
         assert!(!error.contains("unexpected-provider-launch"), "{error}");
         assert_eq!(store.session(&id).unwrap().unwrap(), before);
-        assert_eq!(store.session_driver(&id).unwrap(), Some(driver));
+        assert_eq!(store.session_attachment(&id).unwrap(), Some(driver));
         assert_eq!(store.session_history(&id, 0, 0).unwrap(), history);
         assert_eq!(std::fs::read(dir.join("manifest.json")).unwrap(), manifest);
         assert!(dir.join("prepared").exists());
@@ -758,8 +758,8 @@ fn waiting_lists_only_conversations_waiting_on_a_person() {
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     for (id, pending) in [(&working, 0), (&asked, 1)] {
         db.execute(
-            "INSERT INTO session_activity(session_id,driver_generation,provider_generation,observed_at,open_tools,pending_input,yielded)
-             SELECT id,driver_generation,provider_generation,unixepoch(),1,?2,0 FROM agent_sessions WHERE id=?1",
+            "INSERT INTO session_activity(session_id,attachment_token,provider_generation,observed_at,open_tools,pending_input,yielded)
+             SELECT id,attachment_token,provider_generation,unixepoch(),1,?2,0 FROM agent_sessions WHERE id=?1",
             rusqlite::params![id, pending],
         )
         .unwrap();
@@ -1697,9 +1697,9 @@ fn program_status_cli_observes_waiting_without_completing_work() {
         wait_for("done")["program_status"]["records"][0]["state"],
         "done"
     );
-    let driver = store.session_driver(&id).unwrap();
+    let driver = store.session_attachment(&id).unwrap();
     store
-        .claim_session_driver(&id, driver.as_ref(), &process_lfid, true)
+        .claim_session_attachment(&id, driver.as_ref(), &process_lfid, true)
         .unwrap();
     let stale = run(
         home.path(),

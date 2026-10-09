@@ -561,7 +561,7 @@ fn sigint_records_session_interruption_and_retires_the_orphan() {
         .as_array()
         .unwrap()
         .iter()
-        .any(|event| event["payload"]["type"] == "driver_exit"
+        .any(|event| event["payload"]["type"] == "attachment_exit"
             && event["payload"]["outcome"] == "interrupted"));
 }
 
@@ -1117,11 +1117,14 @@ fn provider_parentage_does_not_assign_work_outside_its_checkout() {
         )
         .unwrap();
     let origin = loopflow::id::ProcessLfid::parse(&origin).unwrap();
-    let driver = store.session_driver(&session).unwrap().unwrap_or_else(|| {
-        store
-            .claim_session_driver(&session, None, &origin, true)
-            .unwrap()
-    });
+    let driver = store
+        .session_attachment(&session)
+        .unwrap()
+        .unwrap_or_else(|| {
+            store
+                .claim_session_attachment(&session, None, &origin, true)
+                .unwrap()
+        });
     let caller = serde_json::to_string(&driver.caller(session.clone())).unwrap();
     fixture.json(&["session", "bind", &session, "--task", "INF-123", "--json"]);
     // Synthetic provider provenance crosses real public CLI admission. The
@@ -1176,7 +1179,7 @@ fn provider_parentage_does_not_assign_work_outside_its_checkout() {
     }
     // A stale provider keeps its original causal parent and grants no Work.
     store
-        .claim_session_driver(&session, Some(&driver), &origin, true)
+        .claim_session_attachment(&session, Some(&driver), &origin, true)
         .unwrap();
     let before = fixture.launches().len();
     let stale = fixture

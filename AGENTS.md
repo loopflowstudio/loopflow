@@ -268,9 +268,9 @@ including to done/landed Tasks. Prospective attribution preserves earlier usage 
 owns that single choice. Actual work
 reservation sets Started once; logging an inspection Process does not. Every
 denormalization is removed or validated on writes. Causal ancestry grants neither
-process control nor Flow settlement. Current driver and provider generations
-are separate: an unchanged engine survives driver handoff while old clients lose
-write authority. Passive display acquires no claim.
+process control nor Flow settlement. Attachment claims and provider identity
+are separate: a fresh claim token fences every attachment and release, including
+A → B → A, while an unchanged provider survives handoff. Passive display acquires no claim.
 
 The full contract and current cutover status live in
 [Architecture Reference](docs/architecture-reference.md#core-models-and-apis).

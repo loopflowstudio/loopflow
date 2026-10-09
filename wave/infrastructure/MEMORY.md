@@ -228,12 +228,12 @@ its rename before publication. `cad03fe6d` is only a pre-exec lifeline slice;
 the record cutover and installed acceptance remain.
 
 Takeover preserves AgentProcess identity/parent but revokes old attachment
-control. AgentProcess/LfProcess IDs alone repeat on A → B → A; the replacement
-fence remains unresolved. FIFO holders survive transfer until OS exit, so a
-lifeline is not current attachment authority. Prove both takeover death orders.
-CLOEXEC cannot protect a stalled pre-exec child; close its inherited writer first.
-Preserve native terminals and dash-compatible signals. Tests signal throwaway
-children only.
+control. The attachment slice uses a fresh opaque claim token for A → B → A,
+replacing the driver counter/type; it is not a new process or lifecycle owner.
+Provider records and both takeover death orders remain unfinished. FIFO holders survive
+transfer until OS exit; a lifeline is not current attachment authority. Close
+inherited writers before exec, preserve native terminals and dash-compatible
+signals, and signal throwaway children only.
 
 ## Process vocabulary (LOO-400, curated 2026-10-09)
 

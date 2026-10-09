@@ -221,7 +221,7 @@ pub(crate) fn resume_session_with_env(
                 crate::process::AGENT_CALLER_ENV.into(),
                 serde_json::to_string(&driver.caller(session.id.clone()))?,
             );
-            crate::session_record::register_session_driver_interrupt(
+            crate::session_record::register_session_attachment_interrupt(
                 &store,
                 session.id.clone(),
                 driver.clone(),
@@ -246,7 +246,7 @@ pub(crate) fn resume_session_with_env(
         } else {
             "failed"
         };
-        match crate::session_record::finish_session_driver(&store, &session, &driver, outcome) {
+        match crate::session_record::finish_session_attachment(&store, &session, &driver, outcome) {
             Ok(()) | Err(crate::store::StoreError::InvalidAuthority(_)) => {}
             Err(error) => return Err(error.into()),
         }
@@ -603,7 +603,7 @@ fn record_interactive_opened(environment: &BTreeMap<String, String>) -> Result<(
 
 fn native_provider_driver(
     environment: &BTreeMap<String, String>,
-) -> Result<Option<(SqliteStore, String, crate::process::SessionDriver)>> {
+) -> Result<Option<(SqliteStore, String, crate::process::SessionAttachment)>> {
     let Some(caller) = environment.get(crate::process::AGENT_CALLER_ENV) else {
         return Ok(None);
     };
@@ -613,7 +613,7 @@ fn native_provider_driver(
     };
     let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
     let driver = store
-        .session_driver(&caller.session_id)?
+        .session_attachment(&caller.session_id)?
         .ok_or_else(|| anyhow!("Session has no admitted driver"))?;
     if driver.process_lfid.as_ref() != Some(&process)
         || driver.caller(caller.session_id.clone()) != caller

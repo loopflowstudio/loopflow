@@ -6,13 +6,13 @@ use anyhow::{Context, Result};
 use serde_json::{json, Value};
 
 use crate::chat::types::{ConversationEvent, Lifecycle};
-use crate::process::SessionDriver;
+use crate::process::SessionAttachment;
 use crate::session::SessionEventKind;
 use crate::store::sqlite::SqliteStore;
 
 #[derive(Debug, Default)]
 pub(super) struct History {
-    pub(super) owner: Option<(SqliteStore, String, SessionDriver)>,
+    pub(super) owner: Option<(SqliteStore, String, SessionAttachment)>,
     requests: HashSet<String>,
     started: HashSet<String>,
     completed: HashSet<String>,
@@ -20,7 +20,7 @@ pub(super) struct History {
 }
 
 impl History {
-    pub(super) fn new(owner: Option<(SqliteStore, String, SessionDriver)>) -> Self {
+    pub(super) fn new(owner: Option<(SqliteStore, String, SessionAttachment)>) -> Self {
         Self {
             owner,
             ..Self::default()
@@ -244,7 +244,7 @@ pub(super) async fn read_messages(
 // Native submission is bounded and serialized with driver transfer. An
 // uncertain HTTP result is retained as uncertain; never submit it twice here.
 pub(super) async fn post(
-    owner: Option<(SqliteStore, String, SessionDriver)>,
+    owner: Option<(SqliteStore, String, SessionAttachment)>,
     url: String,
     payload: Value,
 ) -> Result<()> {
@@ -264,7 +264,7 @@ pub(super) async fn post(
                 })
         };
         if let Some((store, session, driver)) = owner {
-            store.with_session_driver(&session, &driver, write)
+            store.with_session_attachment(&session, &driver, write)
         } else {
             write()
         }
@@ -297,7 +297,7 @@ mod tests {
         .unwrap();
         store.test_session("session", &input);
         let driver = store
-            .claim_session_driver("session", None, &process, false)
+            .claim_session_attachment("session", None, &process, false)
             .unwrap();
         let mut history = History::new(Some((store.clone(), "session".into(), driver.clone())));
         let request = history.request();
@@ -330,7 +330,7 @@ mod tests {
         )
         .unwrap();
         store
-            .claim_session_driver("session", Some(&driver), &second, true)
+            .claim_session_attachment("session", Some(&driver), &second, true)
             .unwrap();
         let messages = [
             message("assistant-a", 30, "tool-calls"),

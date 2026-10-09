@@ -5,13 +5,13 @@ use std::sync::{Arc, Mutex};
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 
-use crate::process::SessionDriver;
+use crate::process::SessionAttachment;
 use crate::session::SessionEventKind;
 use crate::store::sqlite::SqliteStore;
 
 #[derive(Debug)]
 pub(super) struct History {
-    pub owner: Option<(SqliteStore, String, SessionDriver)>,
+    pub owner: Option<(SqliteStore, String, SessionAttachment)>,
     pub requests: Arc<Mutex<HashSet<String>>>,
     pub pending: VecDeque<(String, String)>,
     pub attention: super::attention::Attention,
@@ -127,7 +127,7 @@ mod tests {
         )
         .unwrap();
         let driver = store
-            .claim_session_driver("conversation", None, &process, false)
+            .claim_session_attachment("conversation", None, &process, false)
             .unwrap();
         let mut history = History {
             owner: Some((store.clone(), "conversation".into(), driver)),

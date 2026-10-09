@@ -667,7 +667,7 @@ async fn actual_engine_children_follow_driver_handoff_but_not_provider_replaceme
     let session_id = "engine-ownership-fixture";
     reserve_session(&store, session_id, repo.path());
     let first = store
-        .claim_session_driver(session_id, None, &original.id, false)
+        .claim_session_attachment(session_id, None, &original.id, false)
         .unwrap();
     let control = home.path().join("control");
     std::fs::create_dir(&control).unwrap();
@@ -696,27 +696,29 @@ async fn actual_engine_children_follow_driver_handoff_but_not_provider_replaceme
         .spawn()
         .unwrap();
     wait_file(&control.join("before.done"), &mut engine);
-    let vacant = store.release_session_driver(session_id, &first).unwrap();
+    let vacant = store
+        .release_session_attachment(session_id, &first)
+        .unwrap();
     assert_eq!(vacant.process_lfid, None);
     assert_eq!(vacant.provider_generation, first.provider_generation);
     assert_eq!(vacant.provider_process_lfid, first.provider_process_lfid);
     assert_eq!(
-        store.session_driver(session_id).unwrap(),
+        store.session_attachment(session_id).unwrap(),
         Some(vacant.clone())
     );
     let handed_off = store
-        .claim_session_driver(session_id, Some(&vacant), &replacement.id, false)
+        .claim_session_attachment(session_id, Some(&vacant), &replacement.id, false)
         .unwrap();
     assert_eq!(handed_off.provider_generation, first.provider_generation);
-    assert_ne!(handed_off.generation, first.generation);
+    assert_ne!(handed_off.token, first.token);
     assert!(store
-        .claim_session_driver(session_id, Some(&first), &original.id, false)
+        .claim_session_attachment(session_id, Some(&first), &original.id, false)
         .is_err());
     drop(original);
     std::fs::write(control.join("handoff.go"), "").unwrap();
     wait_file(&control.join("after.done"), &mut engine);
     let restarted = store
-        .claim_session_driver(session_id, Some(&handed_off), &restart.id, true)
+        .claim_session_attachment(session_id, Some(&handed_off), &restart.id, true)
         .unwrap();
     assert_ne!(
         restarted.provider_generation,
@@ -803,7 +805,7 @@ async fn retained_native_client_loses_writes_but_keeps_display_after_transfer() 
     let session = "native-client-transfer";
     reserve_session(&store, session, repo.path());
     let first = store
-        .claim_session_driver(session, None, &original.id, false)
+        .claim_session_attachment(session, None, &original.id, false)
         .unwrap();
     let control = home.path().join("gate");
     std::fs::create_dir(&control).unwrap();
@@ -844,12 +846,12 @@ async fn retained_native_client_loses_writes_but_keeps_display_after_transfer() 
     std::fs::write(control.join("sockets.go"), "").unwrap();
     wait_file(&control.join("attached.done"), &mut probe);
     assert_eq!(
-        store.session_driver(session).unwrap(),
+        store.session_attachment(session).unwrap(),
         Some(first.clone()),
         "passive display must not claim the conversation"
     );
     let second = store
-        .claim_session_driver(session, Some(&first), &replacement.id, false)
+        .claim_session_attachment(session, Some(&first), &replacement.id, false)
         .unwrap();
     let mut current = connection;
     current.driver = Some(second.clone());
@@ -869,7 +871,7 @@ async fn retained_native_client_loses_writes_but_keeps_display_after_transfer() 
             .len(),
         4
     );
-    assert_eq!(store.session_driver(session).unwrap(), Some(second));
+    assert_eq!(store.session_attachment(session).unwrap(), Some(second));
     let conn = rusqlite::Connection::open(database).unwrap();
     let parents: Vec<String> = conn.prepare(
         "SELECT parent_process_lfid FROM processes WHERE caller_session_id=?1 AND via_agent=1 ORDER BY rowid"

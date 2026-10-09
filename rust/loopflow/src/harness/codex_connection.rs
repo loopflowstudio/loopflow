@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 use tokio::net::UnixStream;
 use tokio_tungstenite::{accept_async, client_async, tungstenite::Message, WebSocketStream};
 
-use crate::process::SessionDriver;
+use crate::process::SessionAttachment;
 use crate::store::sqlite::SqliteStore;
 use crate::store::{StoreError, StoreResult};
 
@@ -168,7 +168,7 @@ pub struct CodexConnection {
     pub store: SqliteStore,
     pub session_id: String,
     pub thread_id: String,
-    pub driver: Option<SessionDriver>,
+    pub driver: Option<SessionAttachment>,
 }
 
 impl CodexConnection {
@@ -311,7 +311,7 @@ impl CodexConnection {
         // Keep the driver comparison and bounded socket dispatch under the
         // Session lock. History and other Sessions can still use the database.
         tokio::task::spawn_blocking(move || {
-            let outcome = store.with_session_driver(&session, &driver, || {
+            let outcome = store.with_session_attachment(&session, &driver, || {
                 super::dispatch::send_fenced(&mut upstream, message)
             });
             (upstream, outcome)

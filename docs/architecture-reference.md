@@ -245,8 +245,9 @@ member. `lf session ensure --task` keeps an explicit choice, else selects the
 sole unfinished interactive conversation, else the most recently used by
 `lf resume`'s ranking, and creates one only when the Task has none.
 
-An AgentSession can have many historical driving Processes and at most one current
-driver. Driver compare-and-set increments its driver generation. A continuing
+An AgentSession can have many historical attached Processes and at most one current
+attachment. Compare-and-set issues a fresh opaque token on every claim and release,
+including A → B → A. The token has no independent lifecycle. A continuing
 engine keeps its provider generation and origin through handoff and a driverless
 interval. Old clients may display events but cannot start/steer turns or write
 Session state. Passive connection acquires no claim. Dispatch fences include
@@ -1095,8 +1096,8 @@ dated evidence, excluded from live vocabulary and compatibility-seam discovery.
   separate facts. Missing terminal evidence stays unknown.
 - Causal parentage and Task attribution confer neither process control nor Flow
   settlement. Exact process identity and native scope govern signaling.
-- An authoritative conversation driver is singular; provider generation differs
-  from driver generation. Passive readers acquire neither claim.
+- An authoritative conversation attachment is singular; its claim token differs
+  from provider identity. Passive readers acquire neither claim.
 - A Flow consumes its selected successful native completion under version/claim
   fencing. Failed turns cannot donate verdicts or routes to successful retries.
 - Complete closes a conversation or returns review feedback. Readiness and provider

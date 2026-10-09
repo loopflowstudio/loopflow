@@ -111,7 +111,7 @@ fn waiting_sql(session: &str, now: i64) -> String {
                 EXISTS(SELECT 1 FROM json_each(act.program_status,'$.records') r
                     WHERE json_extract(r.value,'$.state')='blocked'
                     OR ({session}.interactive=1 AND json_extract(r.value,'$.state')='idle'))
-            ELSE act.driver_generation={session}.driver_generation
+            ELSE act.attachment_token={session}.attachment_token
                 AND (act.pending_input>0 OR (act.open_tools=0 AND (({session}.interactive=1 AND act.yielded=1)
                     OR {now}-act.observed_at>={quiet}))) END)",
         quiet = crate::session::WAITING_QUIET_SECONDS
@@ -209,8 +209,8 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
          AND kind='observed' AND substr(receipt_key,-14)=':manifest.json')='independent'),
         (SELECT json_group_array(id) FROM ({})),
         a.primary_scope,
-        (SELECT CASE WHEN json_valid(e.payload) THEN json_extract(e.payload,'$.outcome') END FROM session_events e INDEXED BY session_driver_exit
-            WHERE e.session_id=s.id AND e.receipt_key='driver:'||(a.driver_generation-1)||':exit' AND e.kind='observed'),
+        (SELECT CASE WHEN json_valid(e.payload) THEN json_extract(e.payload,'$.outcome') END FROM session_events e
+            WHERE e.session_id=s.id AND e.seq=a.attachment_exit_seq AND e.kind='observed'),
         {waiting},
         COALESCE(({task_state}) IN ('done','abandoned'),0),
         EXISTS(SELECT 1 FROM tasks p WHERE p.primary_session_id=s.id),
@@ -541,13 +541,13 @@ impl SqliteStore {
                             SELECT 1 FROM session_events done WHERE done.session_id=origin.session_id
                             AND done.provider_thread=origin.provider_thread AND done.provider_turn=origin.provider_turn
                             AND done.kind='completed')
-                        AND NOT EXISTS (SELECT 1 FROM session_events x WHERE x.session_id=s.id AND x.kind='observed' AND x.receipt_key>='driver:' AND x.receipt_key<'driver;' AND substr(x.receipt_key,-5)=':exit' AND x.seq>origin.seq)) THEN NULL ELSE
+                        AND NOT EXISTS (SELECT 1 FROM session_events x WHERE x.session_id=s.id AND x.kind='observed' AND ((x.receipt_key>='driver:' AND x.receipt_key<'driver;') OR (x.receipt_key>='attachment:' AND x.receipt_key<'attachment;')) AND substr(x.receipt_key,-5)=':exit' AND x.seq>origin.seq)) THEN NULL ELSE
                         COALESCE(terminal.observed_at,(
                             SELECT MAX(done.observed_at) FROM session_events origin JOIN session_events done
                             ON done.session_id=origin.session_id AND done.provider_thread=origin.provider_thread
                             AND done.provider_turn=origin.provider_turn AND done.kind='completed'
                             WHERE origin.session_id=s.id AND origin.captured_event=i.seq AND origin.kind='started'),(
-                            SELECT MIN(x.observed_at) FROM session_events x WHERE x.session_id=s.id AND x.kind='observed' AND x.receipt_key>='driver:' AND x.receipt_key<'driver;' AND substr(x.receipt_key,-5)=':exit' AND x.seq>i.seq)) END AS ended, NULL AS thread, NULL AS turn
+                            SELECT MIN(x.observed_at) FROM session_events x WHERE x.session_id=s.id AND x.kind='observed' AND ((x.receipt_key>='driver:' AND x.receipt_key<'driver;') OR (x.receipt_key>='attachment:' AND x.receipt_key<'attachment;')) AND substr(x.receipt_key,-5)=':exit' AND x.seq>i.seq)) END AS ended, NULL AS thread, NULL AS turn
                 FROM session_events i JOIN agent_sessions s ON s.id=i.session_id
                 LEFT JOIN session_events m ON m.session_id=s.id AND m.kind='observed'
                     AND m.receipt_key=i.receipt_key||':manifest.json'
@@ -560,7 +560,7 @@ impl SqliteStore {
                 UNION ALL
                 SELECT NULL,NULL,e.session_id,NULL,MIN(e.observed_at),origin.task_id,origin.wave_id,
                     COALESCE(MAX(CASE WHEN e.kind='completed' THEN e.observed_at END),(
-                        SELECT MIN(x.observed_at) FROM session_events x WHERE x.session_id=e.session_id AND x.kind='observed' AND x.receipt_key>='driver:' AND x.receipt_key<'driver;' AND substr(x.receipt_key,-5)=':exit' AND x.seq>MIN(e.seq))),e.provider_thread,e.provider_turn
+                        SELECT MIN(x.observed_at) FROM session_events x WHERE x.session_id=e.session_id AND x.kind='observed' AND ((x.receipt_key>='driver:' AND x.receipt_key<'driver;') OR (x.receipt_key>='attachment:' AND x.receipt_key<'attachment;')) AND substr(x.receipt_key,-5)=':exit' AND x.seq>MIN(e.seq))),e.provider_thread,e.provider_turn
                 FROM session_events e LEFT JOIN session_events origin
                     ON origin.session_id=e.session_id AND origin.provider_thread=e.provider_thread
                     AND origin.provider_turn=e.provider_turn AND origin.kind='started'
@@ -954,12 +954,12 @@ impl SqliteStore {
     pub(crate) fn claim_session_input(
         &self,
         mut next: AgentSession,
-        expected_driver: Option<&crate::process::SessionDriver>,
+        expected_driver: Option<&crate::process::SessionAttachment>,
         process: &crate::id::ProcessLfid,
         replace_provider: bool,
-    ) -> StoreResult<(AgentSession, crate::process::SessionDriver)> {
+    ) -> StoreResult<(AgentSession, crate::process::SessionAttachment)> {
         let _admission = self.lock_session_checkouts(&next)?;
-        let _dispatch = self.lock_session_driver(&next.id)?;
+        let _dispatch = self.lock_session_attachment(&next.id)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let previous = session_in(&tx, &next.id)?.ok_or(StoreError::NotFound)?;
@@ -974,13 +974,8 @@ impl SqliteStore {
             ));
         }
         replace_input_in(&tx, &mut next, Some(process))?;
-        let driver = super::processes::claim_driver_in(
-            &tx,
-            &next.id,
-            expected_driver,
-            process,
-            replace_provider,
-        )?;
+        let driver =
+            super::processes::attach_in(&tx, &next.id, expected_driver, process, replace_provider)?;
         let next = session_in(&tx, &next.id)?.ok_or(StoreError::NotFound)?;
         tx.commit()?;
         Ok((next, driver))
@@ -1190,7 +1185,7 @@ fn require_current_actor_in(conn: &Connection, id: &str) -> StoreResult<()> {
         let current: bool = conn.query_row(
             "SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE id=?1
                 AND provider_generation=?2 AND provider_process_lfid=?3
-                AND driver_process_lfid IS NOT NULL)",
+                AND attached_process_lfid IS NOT NULL)",
             params![id, caller.provider_generation, caller.origin_process_lfid],
             |row| row.get(0),
         )?;

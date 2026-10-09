@@ -72,7 +72,7 @@ impl OpenCodeHarness {
 
     async fn start_inner(&mut self, config: &AgentConfig) -> Result<()> {
         let owner = config
-            .session_driver
+            .session_attachment
             .as_ref()
             .map(|(session, driver)| {
                 Ok::<_, anyhow::Error>((
@@ -1089,7 +1089,7 @@ mod tests {
     fn live_config() -> AgentConfig {
         AgentConfig {
             chrome: false,
-            session_driver: None,
+            session_attachment: None,
             system_prompt: String::new(),
             task_prompt: String::new(),
             skill_invocation: None,

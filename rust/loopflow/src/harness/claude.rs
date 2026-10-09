@@ -126,7 +126,7 @@ impl ClaudeHarness {
         self.shutdown_requested.store(false, Ordering::SeqCst);
 
         let owner = config
-            .session_driver
+            .session_attachment
             .as_ref()
             .map(|(session, driver)| {
                 let path = crate::store::database_path_from_env()?;
@@ -650,19 +650,19 @@ mod tests {
         for id in ["first", "second"] {
             store.test_session(id, &crate::session_record::new_artifact_key());
             let driver = store
-                .claim_session_driver(id, None, &process, true)
+                .claim_session_attachment(id, None, &process, true)
                 .unwrap();
             let (tx, _rx) = mpsc::unbounded_channel();
             let mut harness = ClaudeHarness::new(tx);
             let mut config = live_config();
-            config.session_driver = Some((id.into(), driver.clone()));
+            config.session_attachment = Some((id.into(), driver.clone()));
             harness.config = Some(config);
             harness.send_input("one turn").await.unwrap();
             recorded.push((
                 harness.process_id().unwrap(),
                 store.session_provider_process(id).unwrap(),
             ));
-            store.release_session_driver(id, &driver).unwrap();
+            store.release_session_attachment(id, &driver).unwrap();
             // Retain the first process while the same Process starts the next step.
             harnesses.push(harness);
         }
@@ -683,7 +683,7 @@ mod tests {
         let mut harness = ClaudeHarness::new(tx);
         harness.config = Some(AgentConfig {
             chrome: false,
-            session_driver: None,
+            session_attachment: None,
             system_prompt: String::new(),
             task_prompt: "task".to_string(),
             skill_invocation: None,
@@ -740,7 +740,7 @@ mod tests {
     fn live_config() -> AgentConfig {
         AgentConfig {
             chrome: false,
-            session_driver: None,
+            session_attachment: None,
             system_prompt: String::new(),
             task_prompt: String::new(),
             skill_invocation: None,

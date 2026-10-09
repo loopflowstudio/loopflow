@@ -598,10 +598,10 @@ pub struct CodexHarness {
     child_group: Arc<AtomicU32>,
     engine_directory: Option<tempfile::TempDir>,
     endpoint: Option<PathBuf>,
-    session_driver: Option<(
+    session_attachment: Option<(
         crate::store::sqlite::SqliteStore,
         String,
-        crate::process::SessionDriver,
+        crate::process::SessionAttachment,
     )>,
 }
 
@@ -639,7 +639,7 @@ impl CodexHarness {
             child_group: Arc::new(AtomicU32::new(0)),
             engine_directory: None,
             endpoint: None,
-            session_driver: None,
+            session_attachment: None,
         }
     }
 
@@ -926,7 +926,7 @@ impl Harness for CodexHarness {
     async fn stop(&mut self) -> Result<()> {
         self.shutdown_requested.store(true, Ordering::Relaxed);
 
-        if self.session_driver.is_some() && self.thread_id().is_some() {
+        if self.session_attachment.is_some() && self.thread_id().is_some() {
             // Managed engines close when the invocation settles its driver, under
             // the same ownership transaction as takeover. Harness teardown
             // only drops this connection; a replaced driver cannot stop work.
@@ -949,9 +949,9 @@ impl Harness for CodexHarness {
             }
             Ok(())
         };
-        if let Some((store, session, expected)) = &self.session_driver {
+        if let Some((store, session, expected)) = &self.session_attachment {
             if store
-                .with_session_driver(session, expected, terminate)
+                .with_session_attachment(session, expected, terminate)
                 .is_err()
             {
                 self.child.take();
@@ -998,8 +998,8 @@ impl Harness for CodexHarness {
 
 impl CodexHarness {
     async fn start_inner(&mut self, launch: &AgentConfig) -> Result<()> {
-        self.session_driver = launch
-            .session_driver
+        self.session_attachment = launch
+            .session_attachment
             .as_ref()
             .map(|(session, driver)| {
                 let path = crate::store::database_path_from_env()?;
@@ -1011,13 +1011,13 @@ impl CodexHarness {
             })
             .transpose()?;
         let connection = self
-            .session_driver
+            .session_attachment
             .as_ref()
             .map(|(store, session, _)| store.session_connection(session))
             .transpose()?
             .flatten();
         let saved_thread = self
-            .session_driver
+            .session_attachment
             .as_ref()
             .map(|(store, session, _)| store.session_thread(session))
             .transpose()?
@@ -1096,7 +1096,7 @@ impl CodexHarness {
         }
 
         if connection.is_none() {
-            if let Some((store, session, driver)) = &self.session_driver {
+            if let Some((store, session, driver)) = &self.session_attachment {
                 store.record_session_provider_launch(session, driver, true)?;
             }
         }
@@ -1117,7 +1117,7 @@ impl CodexHarness {
         // ends, by return, signal, panic or SIGKILL, the group is terminated.
         if let Some(pid) = child.as_ref().and_then(tokio::process::Child::id) {
             self.child_group.store(pid, Ordering::Release);
-            if let Some((store, session, driver)) = &self.session_driver {
+            if let Some((store, session, driver)) = &self.session_attachment {
                 if let Some(started_at) = crate::journal::process_started_at(pid)? {
                     store.record_session_provider_process(session, driver, pid, started_at)?;
                 }
@@ -1164,7 +1164,7 @@ impl CodexHarness {
         let stderr = child.as_mut().and_then(|child| child.stderr.take());
 
         let (outbound_tx, mut outbound_rx) = mpsc::channel::<OutboundRpc>(128);
-        let authority = self.session_driver.clone();
+        let authority = self.session_attachment.clone();
         let writer_events = self.events.clone();
         let native_history = Arc::new(Mutex::new(super::codex_history::History::default()));
         let writer_history = native_history.clone();
@@ -1188,7 +1188,7 @@ impl CodexHarness {
                 let message = Message::Text(payload.to_string().into());
                 let outcome = if let Some((store, session, expected)) = authority.clone() {
                     let dispatched = tokio::task::spawn_blocking(move || {
-                        let outcome = store.with_session_driver(&session, &expected, || {
+                        let outcome = store.with_session_attachment(&session, &expected, || {
                             super::dispatch::send_fenced(&mut writer, message)
                         });
                         (writer, outcome)
@@ -1231,7 +1231,7 @@ impl CodexHarness {
         let pending_requests = self.pending_requests.clone();
         let retired_requests = self.retired_requests.clone();
         let account_route = self.account_route.clone();
-        let history = self.session_driver.clone();
+        let history = self.session_attachment.clone();
         let reader_task = tokio::spawn(async move {
             let mut initialized_tx = Some(initialized_tx);
             let mut state = NotificationState::new(
@@ -1482,7 +1482,7 @@ impl CodexHarness {
         // returning None rather than failing startup.
         match tokio::time::timeout(Duration::from_secs(10), thread_id_rx).await {
             Ok(Ok(thread_id)) => {
-                if let Some((store, session, driver)) = &self.session_driver {
+                if let Some((store, session, driver)) = &self.session_attachment {
                     store.record_session_connection(
                         session,
                         driver,
@@ -1528,18 +1528,18 @@ mod tests {
         )
         .unwrap();
         let old = store
-            .claim_session_driver("saved", None, &process, true)
+            .claim_session_attachment("saved", None, &process, true)
             .unwrap();
         store
             .record_session_connection("saved", &old, "/missing.sock", "saved-thread")
             .unwrap();
         let driver = store
-            .claim_session_driver("saved", Some(&old), &process, true)
+            .claim_session_attachment("saved", Some(&old), &process, true)
             .unwrap();
         let (tx, _rx) = mpsc::unbounded_channel();
         let mut harness = CodexHarness::new(tx, ApprovalPolicy::AutoApprove);
         let config = AgentConfig {
-            session_driver: Some(("saved".into(), driver.clone())),
+            session_attachment: Some(("saved".into(), driver.clone())),
             // Even a mistakenly reached spawn cannot launch a real provider.
             cwd: Some(ledger.home().join("absent")),
             ..Default::default()
@@ -1552,13 +1552,13 @@ mod tests {
         assert!(error
             .to_string()
             .contains("Saved conversation thread differs"));
-        let released = store.release_session_driver("saved", &driver).unwrap();
+        let released = store.release_session_attachment("saved", &driver).unwrap();
         let retry = store
-            .claim_session_driver("saved", Some(&released), &process, true)
+            .claim_session_attachment("saved", Some(&released), &process, true)
             .unwrap();
         harness.resume_provider_session_id = Some("saved-thread".into());
         let config = AgentConfig {
-            session_driver: Some(("saved".into(), retry)),
+            session_attachment: Some(("saved".into(), retry)),
             ..config
         };
         let error = runtime.block_on(harness.start_inner(&config)).unwrap_err();

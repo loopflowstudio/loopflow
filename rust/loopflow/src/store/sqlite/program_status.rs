@@ -15,11 +15,11 @@ impl SqliteStore {
     ) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn.execute(
-            "INSERT INTO session_activity(session_id,driver_generation,observed_at,open_tools,pending_input,yielded,provider_generation,status_stream,status_sequence)
-             SELECT id,-1,0,0,0,0,provider_generation,?3,0 FROM agent_sessions
+            "INSERT INTO session_activity(session_id,attachment_token,observed_at,open_tools,pending_input,yielded,provider_generation,status_stream,status_sequence)
+             SELECT id,NULL,0,0,0,0,provider_generation,?3,0 FROM agent_sessions
              WHERE id=?1 AND provider_generation=?2 AND completed_at IS NULL
              ON CONFLICT(session_id) DO UPDATE SET
-                driver_generation=CASE WHEN session_activity.provider_generation=?2 THEN session_activity.driver_generation ELSE -1 END,
+                attachment_token=CASE WHEN session_activity.provider_generation=?2 THEN session_activity.attachment_token ELSE NULL END,
                 program_status=CASE WHEN session_activity.provider_generation=?2 THEN session_activity.program_status END,
                 provider_generation=?2,status_stream=?3,status_sequence=0",
             params![session, provider_generation, stream],
@@ -73,7 +73,7 @@ mod tests {
             )
             .unwrap();
         let first = store
-            .claim_session_driver("session", None, &process_lfid, true)
+            .claim_session_attachment("session", None, &process_lfid, true)
             .unwrap();
         store
             .record_session_activity(
@@ -137,7 +137,7 @@ mod tests {
             )
             .unwrap());
         let second = store
-            .claim_session_driver("session", Some(&first), &process_lfid, false)
+            .claim_session_attachment("session", Some(&first), &process_lfid, false)
             .unwrap();
         assert_eq!(
             store.session_summaries(&filter, 500).unwrap()[0]
@@ -178,7 +178,7 @@ mod tests {
             .unwrap());
         assert!(store.session_summaries(&filter, 500).unwrap().is_empty());
         let third = store
-            .claim_session_driver("session", Some(&second), &process_lfid, true)
+            .claim_session_attachment("session", Some(&second), &process_lfid, true)
             .unwrap();
         assert!(!store
             .record_program_status(

@@ -101,16 +101,17 @@ pub struct AgentCaller {
     pub origin_process_lfid: ProcessLfid,
 }
 
-/// Separate fences: reconnecting a driver does not replace its live provider.
+/// An exact attachment capability, not another process or lifecycle owner.
+/// Every claim gets a new token, even when the same lf process reattaches.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SessionDriver {
+pub struct SessionAttachment {
     pub process_lfid: Option<ProcessLfid>,
-    pub generation: i64,
+    pub token: crate::id::AttachmentToken,
     pub provider_generation: i64,
     pub provider_process_lfid: ProcessLfid,
 }
 
-impl SessionDriver {
+impl SessionAttachment {
     pub fn caller(&self, session_id: String) -> AgentCaller {
         AgentCaller {
             session_id,
@@ -126,9 +127,8 @@ pub(crate) struct SessionProcessObservation {
     pub id: String,
     pub title: String,
     pub work: Option<crate::durable::WorkRef>,
-    pub driver_process_lfid: Option<ProcessLfid>,
+    pub attached_process_lfid: Option<ProcessLfid>,
     pub driver_trace_id: Option<String>,
-    pub driver_generation: i64,
     pub provider_process_lfid: Option<ProcessLfid>,
     pub provider_pid: Option<u32>,
     pub provider_started_at: Option<i64>,

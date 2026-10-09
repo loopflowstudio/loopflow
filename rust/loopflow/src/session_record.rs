@@ -4,7 +4,7 @@ pub mod active;
 pub(crate) mod activity;
 mod runtime;
 
-pub(crate) use runtime::finish_session_driver;
+pub(crate) use runtime::finish_session_attachment;
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, File, OpenOptions};
@@ -1966,14 +1966,14 @@ fn max_u64(values: impl Iterator<Item = Option<u64>>, gaps: &mut usize) -> Optio
 #[derive(Debug, Clone)]
 pub(crate) struct CaptureHandle(Arc<Mutex<SessionCapture>>);
 
-pub(crate) fn register_session_driver_interrupt(
+pub(crate) fn register_session_attachment_interrupt(
     store: &crate::store::sqlite::SqliteStore,
     session: String,
-    driver: crate::process::SessionDriver,
+    driver: crate::process::SessionAttachment,
 ) {
     let store = store.clone();
     crate::engine::agent::register_interrupt_cleanup(move || {
-        match finish_session_driver(&store, &session, &driver, "interrupted") {
+        match finish_session_attachment(&store, &session, &driver, "interrupted") {
             Ok(()) | Err(StoreError::InvalidAuthority(_)) => {}
             Err(error) => tracing::warn!(%error, %session, "record interrupted Session connection"),
         }
@@ -2111,7 +2111,7 @@ impl CaptureHandle {
             Some(process),
             context,
             |_| {
-                store.with_session_driver(session, &driver, || {
+                store.with_session_attachment(session, &driver, || {
                     store.publish_capture(session, next.captured)
                 })
             },
@@ -2129,7 +2129,7 @@ impl CaptureHandle {
             Err(error) => {
                 // Publication did not start a provider or complete a turn. Keep
                 // the reservation and release only the driver acquired above.
-                if let Err(release) = store.release_session_driver(session, &driver) {
+                if let Err(release) = store.release_session_attachment(session, &driver) {
                     tracing::warn!(%release, %session, "release driver after capture publication failure");
                 }
                 Err(error)
@@ -2372,7 +2372,7 @@ impl CaptureHandle {
         Ok(())
     }
 
-    pub(crate) fn session_driver(&self) -> Option<(String, crate::process::SessionDriver)> {
+    pub(crate) fn session_attachment(&self) -> Option<(String, crate::process::SessionAttachment)> {
         self.0
             .lock()
             .expect("Session capture mutex poisoned")
@@ -2509,7 +2509,7 @@ impl Drop for CaptureHandle {
 
 #[derive(Debug)]
 struct SessionCapture {
-    driver: Option<(String, crate::process::SessionDriver)>,
+    driver: Option<(String, crate::process::SessionAttachment)>,
     manifest: SessionCaptureManifest,
     dir: PathBuf,
     provider: String,
@@ -2832,7 +2832,7 @@ impl SessionCapture {
         self.recorder.drain_after_settlement();
         if let Some((session, driver)) = self.driver.take() {
             match row_store(&self.dir)
-                .and_then(|store| finish_session_driver(&store, &session, &driver, outcome))
+                .and_then(|store| finish_session_attachment(&store, &session, &driver, outcome))
             {
                 Ok(_) | Err(StoreError::InvalidAuthority(_)) => {}
                 Err(error) => return Err(std::io::Error::other(error)),
@@ -2876,17 +2876,17 @@ pub(crate) fn claim_provider_driver(
     store: &crate::store::sqlite::SqliteStore,
     session: &str,
     process_lfid: &crate::id::ProcessLfid,
-) -> StoreResult<crate::process::SessionDriver> {
+) -> StoreResult<crate::process::SessionAttachment> {
     let expected = replaceable_driver(store, session)?;
-    store.claim_session_driver(session, expected.as_ref(), process_lfid, true)
+    store.claim_session_attachment(session, expected.as_ref(), process_lfid, true)
 }
 
 /// The driver a new one may replace, after ending any engine it left behind.
 fn replaceable_driver(
     store: &crate::store::sqlite::SqliteStore,
     session: &str,
-) -> StoreResult<Option<crate::process::SessionDriver>> {
-    let expected = store.session_driver(session)?;
+) -> StoreResult<Option<crate::process::SessionAttachment>> {
+    let expected = store.session_attachment(session)?;
     let Some((previous, process)) = expected
         .as_ref()
         .and_then(|driver| Some((driver, driver.process_lfid.as_ref()?)))
@@ -4061,7 +4061,7 @@ mod tests {
         let command = vec!["lf".into(), "skill".into()];
         crate::journal::with_runtime(ledger.home(), &command, || {
             original.claim_conversation_driver()?;
-            let (_, driver) = original.session_driver().unwrap();
+            let (_, driver) = original.session_attachment().unwrap();
             store.record_session_connection(
                 &session.id,
                 &driver,
@@ -4074,11 +4074,11 @@ mod tests {
                 std::process::id(),
                 crate::journal::process_started_at(std::process::id())?.unwrap(),
             )?;
-            store.release_session_driver(&session.id, &driver)?;
+            store.release_session_attachment(&session.id, &driver)?;
             Ok(())
         })
         .unwrap();
-        let driver = store.session_driver(&session.id).unwrap().unwrap();
+        let driver = store.session_attachment(&session.id).unwrap().unwrap();
         let manifest = fs::read(original.artifact_dir().join("manifest.json")).unwrap();
         let request = AgentProcessRequest::from_prepared(
             &AgentConfig {
@@ -4095,7 +4095,7 @@ mod tests {
                 &context,
                 request.clone(),
             )?;
-            let (id, next_driver) = next.session_driver().unwrap();
+            let (id, next_driver) = next.session_attachment().unwrap();
             assert_eq!(id, session.id);
             assert_eq!(
                 next.conversation_resume_token()?.as_deref(),
@@ -4112,7 +4112,7 @@ mod tests {
             );
             assert!(store.session_connection(&session.id)?.is_none());
             assert!(store.session_provider_process(&session.id)?.is_none());
-            assert!(next_driver.generation > driver.generation);
+            assert_ne!(next_driver.token, driver.token);
             let saved = super::read_manifest(&next.artifact_dir()).unwrap();
             assert_eq!(
                 serde_json::to_value(saved.process).unwrap(),
@@ -4176,7 +4176,7 @@ mod tests {
             assert!(!next.input_published);
             assert!(next.completed_at.is_none());
             assert!(store
-                .session_driver(&session.id)?
+                .session_attachment(&session.id)?
                 .unwrap()
                 .process_lfid
                 .is_none());
@@ -4207,7 +4207,7 @@ mod tests {
         ledger: &crate::journal::TestLedgerGuard,
     ) -> (
         crate::store::sqlite::SqliteStore,
-        crate::process::SessionDriver,
+        crate::process::SessionAttachment,
         std::process::Child,
         crate::id::ProcessLfid,
     ) {
@@ -4247,7 +4247,7 @@ mod tests {
         )
         .unwrap();
         let driver = store
-            .claim_session_driver("conversation", None, &first, true)
+            .claim_session_attachment("conversation", None, &first, true)
             .unwrap();
         (store, driver, process, second)
     }
@@ -4337,7 +4337,7 @@ mod tests {
         assert!(error.to_string().contains("is still running"), "{error}");
         assert!(provider.try_wait().unwrap().is_none());
         assert_eq!(
-            store.session_driver("conversation").unwrap(),
+            store.session_attachment("conversation").unwrap(),
             Some(driver.clone())
         );
 

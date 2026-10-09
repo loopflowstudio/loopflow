@@ -95,6 +95,9 @@ uuid_id!(WaveId);
 uuid_id!(TraceId);
 uuid_id!(ProcessLfid);
 
+// One claim, not a Process identity. Never reused after attachment transfer.
+uuid_id!(AttachmentToken);
+
 #[cfg(test)]
 mod tests {
     use super::{ProcessLfid, TraceId, WaveId};

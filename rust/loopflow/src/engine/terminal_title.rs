@@ -8,7 +8,7 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use crate::engine::process::wait_for_exit;
-use crate::process::SessionDriver;
+use crate::process::SessionAttachment;
 use crate::session::AgentSession;
 use crate::store::{sqlite::SqliteStore, StoreResult};
 
@@ -35,7 +35,7 @@ fn display_title(name: &str, task: Option<&str>) -> String {
 pub(crate) struct TerminalTitle {
     store: SqliteStore,
     session: String,
-    driver: Option<SessionDriver>,
+    driver: Option<SessionAttachment>,
     name: String,
     cmux: Option<(String, String)>,
     checked: Instant,
@@ -85,7 +85,7 @@ impl TerminalTitle {
             return Ok(None);
         };
         Ok(Some(Self {
-            driver: store.session_driver(&session.id)?,
+            driver: store.session_attachment(&session.id)?,
             name: session_title(&store, &session)?,
             store,
             session: session.id,
@@ -118,7 +118,7 @@ impl TerminalTitle {
     }
 
     fn read_name(&self) -> StoreResult<Option<String>> {
-        if self.store.session_driver(&self.session)? != self.driver {
+        if self.store.session_attachment(&self.session)? != self.driver {
             return Ok(None);
         }
         self.store
@@ -209,7 +209,7 @@ mod tests {
             )
             .unwrap();
         let driver = store
-            .claim_session_driver(&session.id, None, &process, true)
+            .claim_session_attachment(&session.id, None, &process, true)
             .unwrap();
         let title = TerminalTitle {
             store,
@@ -230,7 +230,7 @@ mod tests {
         assert_eq!(title.read_name().unwrap().as_deref(), Some("Release notes"));
         title
             .store
-            .claim_session_driver(&title.session, Some(&driver), &process, false)
+            .claim_session_attachment(&title.session, Some(&driver), &process, false)
             .unwrap();
         assert_eq!(title.read_name().unwrap(), None);
     }

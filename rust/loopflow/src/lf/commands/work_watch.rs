@@ -4,7 +4,7 @@
 //! part is projected again only then, on a read-only connection, and sent only
 //! when its content differs from the last frame. Bodies are the same wire types
 //! the one-shot `--json` reads print. Projections remain read-only. A separate
-//! foreground synchronization lifetime updates the selected Task's planning;
+//! foreground synchronization lifetime updates the selected repository's planning;
 //! those commits wake the reader just like edits from another connection.
 
 mod checkouts;

@@ -542,7 +542,7 @@ pending IDs and losing local bodies from one SQLite snapshot. An observed commen
 conflict adopts Linear’s body, author and time while the receipt retains both
 complete comments; no replacement comment is created. Connected repositories show
 pending sync, including comments on unmapped Tasks;
-a foreground Task Session or Desktop Task connection delivers saved comments and
+a foreground Task Session or Desktop repository connection delivers saved comments and
 acquires incoming comments independently. Lost replies are resolved by exact UUID,
 issue and body. Incoming comments enter the same thread without echoing locally
 saved direction. The shared skill path supplies Task context and live steers when

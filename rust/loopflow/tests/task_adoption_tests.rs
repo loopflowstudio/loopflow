@@ -311,14 +311,21 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
             for (index, (condition, expected)) in [
                 ("canceled", "terminal"),
                 ("moved", "no longer matches"),
-                ("connection", "Team"),
-                ("removed", "Removed"),
+                ("team", "Team"),
+                ("removed", "was deleted"),
             ]
             .into_iter()
             .enumerate()
             {
+                // Each refusal has its own active baseline. An observation in a
+                // foreign Project cannot reopen the preceding canceled Task.
+                let mut restored = original.clone();
+                restored.item.revision = Some(format!("2026-09-30T12:00:{:02}Z", index * 2));
+                runtime
+                    .block_on(store.put_pm_task(&scope, "linear", restored, None, None))
+                    .unwrap();
                 let mut observed = original.clone();
-                observed.item.revision = Some(format!("2026-09-30T12:00:0{index}Z"));
+                observed.item.revision = Some(format!("2026-09-30T12:00:{:02}Z", index * 2 + 1));
                 if condition == "canceled" {
                     observed.item.state = Some("canceled".into());
                 }
@@ -326,16 +333,12 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
                     observed.item.project_id = Some("project-2".into());
                     observed.project.as_mut().unwrap().id = "project-2".into();
                 }
+                if condition == "team" {
+                    observed.item.team_id = Some("another-team".into());
+                }
                 runtime
                     .block_on(store.put_pm_task(&scope, "linear", observed, None, None))
                     .unwrap();
-                if condition == "connection" {
-                    fs::write(
-                        checkout.join(".lf/config.yaml"),
-                        "agent: claude\npm:\n  provider: linear\n  linear_team: another-team\n",
-                    )
-                    .unwrap();
-                }
                 if condition == "removed" {
                     runtime
                         .block_on(store.observe_pm_issue_change("issue-1", None, true))
@@ -357,13 +360,6 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
                     runtime.block_on(store.active_task_pr(&task.id)).unwrap(),
                     pr_before
                 );
-                if condition == "connection" {
-                    fs::write(
-                        checkout.join(".lf/config.yaml"),
-                        "agent: claude\npm:\n  provider: linear\n  linear_team: team-1\n",
-                    )
-                    .unwrap();
-                }
             }
         }
         fs::remove_dir_all(&checkout).unwrap();

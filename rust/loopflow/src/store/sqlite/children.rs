@@ -331,7 +331,16 @@ impl SqliteStore {
                 "multiple stable Tasks resolve to {issue:?}; use a longer Task ID:\n{candidates}"
             )));
         }
-        Ok(tasks.pop().map(|(id, _)| id))
+        if let Some((id, _)) = tasks.pop() {
+            return Ok(Some(id));
+        }
+        super::planning_peers::associated_local_id(
+            &conn,
+            crate::engine::planning_exchange::PlanningKind::Task,
+            issue,
+            repo,
+        )
+        .map(|id| id.map(TaskId::from_raw))
     }
 
     pub fn task_by_branch(&self, branch: &str) -> StoreResult<Option<Task>> {
@@ -881,7 +890,19 @@ impl SqliteStore {
 
     pub fn project_by_project(&self, project: &str) -> StoreResult<Option<Project>> {
         if let Ok(project_id) = ProjectId::parse(project) {
-            return self.project(&project_id);
+            if let Some(project) = self.project(&project_id)? {
+                return Ok(Some(project));
+            }
+            let local = super::planning_peers::associated_local_id(
+                &self.conn.lock().expect("store mutex poisoned"),
+                crate::engine::planning_exchange::PlanningKind::Project,
+                project,
+                None,
+            )?;
+            return match local {
+                Some(id) => self.project(&ProjectId::from_raw(id)),
+                None => Ok(None),
+            };
         }
         let conn = self.conn.lock().expect("store mutex poisoned");
         let query = format!(

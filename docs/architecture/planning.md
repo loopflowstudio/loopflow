@@ -136,14 +136,18 @@ replace or clear an existing Task/Project mapping. Contradictions retain the
 journal and isolate that object while independent plans advance. Clearing a legacy
 mapping is not identity association: it makes the retained Work a provider-creation
 candidate and leaves its old selectors and effect receipts behind. Explicit legacy
-association remains unfinished; neither IDs nor execution histories are merged.
+association recovery remains unfinished. `planning associate` records exact local
+correspondence and enables full-ID lookup without merging IDs or execution histories.
+The incoming scalar journal must retain one provider mapping matching the existing
+local Work. Names, titles and attempted creation inputs do not establish it.
+Physical rows remain their own owners; lookup rechecks mapping and repository.
+Association changes no sharing membership and leaves joint projection/effects held.
 Replacing a rejected mapping with null cannot hide its earlier claim against
 another local owner. Creation receipts also retain their original Work-derived
 provider UUID and captured model identity: a lookup alias cannot rekey them.
 Common `planning_creations` separates the original Work ID from its local
 Task/Project projection, retaining each origin's input and uncertain attempts.
-This storage boundary does not implement correspondence or cross-origin field
-projection. Exact readback never replaces an existing different provider mapping;
+Receipt-origin storage does not implement cross-origin field projection. Exact readback never replaces an existing different provider mapping;
 those effects remain uncertain pending association recovery.
 
 `ops/planning_delivery.rs` consumes mapped Task titles, descriptions, nullable
@@ -529,8 +533,9 @@ One derived `planning_exports` view feeds discovery and status. Common
 errors under the original Work ID, separate from the local Task/Project foreign
 key. Multiple origins never overwrite each other's operations. Discovery locks the
 local projection, then reads each origin; status identifies each receipt by origin.
-Task request idempotence is separate from provider effects. No Project transition
-is synthesized for imported planning. Preparation creates a receipt from saved planning. A mapping alone never
+Task request idempotence stays local: importing a provider receipt creates neither
+a Task-creation request nor a Project transition. Preparation captures saved planning;
+import retains that snapshot and its original parent. A mapping alone never
 acknowledges creation. Project acknowledgement also requires the captured Initiative
 attachment; after acknowledgement, a later accepted move does not reopen creation.
 Exact observations attach mappings in the common ingestion transaction before

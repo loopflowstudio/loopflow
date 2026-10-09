@@ -32,6 +32,23 @@ pub struct PeerPlanningStatus {
 }
 
 impl Store {
+    pub async fn associate_peer_planning(
+        &self,
+        repo: &str,
+        origin: &PlanningObject,
+        local_id: &str,
+        provider_id: &str,
+    ) -> StoreResult<()> {
+        let repo = repo.to_owned();
+        let origin = origin.clone();
+        let local_id = local_id.to_owned();
+        let provider_id = provider_id.to_owned();
+        run_sqlite(&self.sqlite, move |sqlite| {
+            sqlite.associate_peer_planning(&repo, &origin, &local_id, &provider_id)
+        })
+        .await
+    }
+
     pub async fn use_peer_planning(
         &self,
         repo: &str,

@@ -625,19 +625,19 @@ contradictions defer effects, never saves/acquisition. Retain baselines, uncerta
 and losers. Readback settles effects, not mappings/errors or removal via creation.
 
 Ordering, causal freshness, private-history holds and unknown-journal proofs:
-`9dfb95451`, this heading. Retain ages, baselines and losers; omission is not
-convergence. Desktop keeps last-good scoped status. Mixed exchange stays disabled;
+`9dfb95451`, this heading. Omission is not convergence. Desktop keeps last-good
+scoped status. Mixed exchange stays disabled;
 sharing/recovery and public composition remain unfinished.
 
-Legacy association remains unfinished. Clearing mappings creates new provider-creation
-candidates; issue-name fallback persists no association. Projection and cross-ID
-effect deferral share one derived query of retained mappings/creation inputs,
-including losers; nulling a rejected mapping cannot hide ownership. This grants
-no association.
-Effect origin is not projection ownership: common creation receipts now retain
-original UUIDs/models separately from local Work foreign keys. Correspondence,
-lookup and deterministic projection remain unfinished. The earlier 68-test pass
-proves refusal/preservation, not recovery. Preserve execution and private selection.
+Legacy association remains unfinished. `b414e8cce` resolves incoming full
+Task/Project IDs without changing execution or selection; `381c88fec` unifies
+skipped-projection receipts. Status explains holds, never grants authority.
+Lookup neither projects relationships nor settles origins. Capture/validation
+require same-ID parents; grouping winners cannot acknowledge a peer Linear
+head before a later local save. Planning references also need local projection
+without rewriting original IDs or captured inputs. Receipt-origin/refusal proofs:
+`bf4c39b2e`, this heading. The CLI fixture seeds import directly, proving
+no Git acquisition, joint winners or public origin settlement.
 Plan: `scratch/work-on-another-machine-name.md`.
 
 ## Driver recovery

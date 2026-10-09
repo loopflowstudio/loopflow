@@ -49,8 +49,8 @@ creation receipts advance revision. `29777b8cb` scopes sync to repositories;
 `078a6642e`'s Linux migration, native/public Flow/work-watch reconnect and adoption
 passed after fixture/DTO repairs. `ffe986160` removes synthetic settlement;
 queue gate's 15-second lock refusal leaves receipt verification open.
-Swift/full matrix need CI. After queue, Jack Heart requested landing and CI checking.
-PR #1503's classifier proves no product acceptance; known failures remain explicit.
+Swift/full matrix need CI. After queue, Jack Heart authorized landing and CI checks.
+PR #1503's classifier proves no acceptance.
 
 Jack Heart's `8821db44-0480-4493-8609-953207663f1d` removes public creation tokens.
 Each create generates/saves/returns a distinct ID, even for identical titles;

@@ -349,32 +349,31 @@ impl<'a> DefinitionLoader<'a> {
         name: &str,
         kind: Option<DefinitionKind>,
     ) -> Result<Target, LoadError> {
-        let selected;
-        let name = if kind.is_none() {
+        if kind.is_none() {
             let catalog = SkillCatalog::discover(Some(self.repo))?;
-            let mut names = available_flow_names(self.repo)?;
-            names.extend(catalog.entries().map(|source| source.name.clone()));
-            selected = resolve_name(name, names.iter().map(String::as_str))
-                .map_err(|names| {
-                    LoadError::InvalidFlow(format!(
-                        "ambiguous definition {name:?}: {}",
-                        names.join(", ")
-                    ))
-                })?
-                .map(str::to_string);
-            let name = selected.as_deref().unwrap_or(name);
-            if !available_flow_names(self.repo)?
+            let flows = available_flow_names(self.repo)?;
+            let names = flows
                 .iter()
-                .any(|entry| entry == name)
-            {
-                if let Some(source) = catalog.exact(name) {
-                    return source.load().map(Target::Skill);
-                }
+                .map(String::as_str)
+                .chain(catalog.entries().map(|source| source.name.as_str()));
+            if let Some(selected) = resolve_name(name, names).map_err(|names| {
+                LoadError::InvalidFlow(format!(
+                    "ambiguous definition {name:?}: {}",
+                    names.join(", ")
+                ))
+            })? {
+                // Kind precedence applies only after selecting the literal identity.
+                return if flows.iter().any(|name| name == selected) {
+                    self.load_flow(selected).map(Target::Flow)
+                } else {
+                    catalog
+                        .exact(selected)
+                        .expect("selected definition is a skill")
+                        .load()
+                        .map(Target::Skill)
+                };
             }
-            name
-        } else {
-            name
-        };
+        }
         if kind != Some(DefinitionKind::Skill) {
             match self.load_flow(name) {
                 Ok(flow) => return Ok(Target::Flow(flow)),
@@ -608,18 +607,17 @@ pub fn find_flow_source_path(name: &str, repo: &Path) -> Result<Option<PathBuf>,
 
 fn find_repo_flow(name: &str, repo: &Path) -> Result<Option<(String, PathBuf)>, LoadError> {
     let mut sources = repo_flow_sources(repo)?;
-    let selected = resolve_flow_name(name, repo)?;
-    Ok(selected.and_then(|name| sources.remove_entry(&name)))
-}
-
-fn resolve_flow_name(name: &str, repo: &Path) -> Result<Option<String>, LoadError> {
-    let names = available_flow_names(repo)?;
-    Ok(resolve_name(name, names.iter().map(String::as_str))
+    let names = sources
+        .keys()
+        .map(String::as_str)
+        .chain(crate::engine::builtins::builtin_flow_names());
+    let selected = resolve_name(name, names)
         .map_err(|names| {
             LoadError::InvalidFlow(format!("ambiguous flow {name:?}: {}", names.join(", ")))
         })?
         .map(str::to_string)
-        .or_else(|| crate::engine::builtins::resolve_builtin_flow(name).map(str::to_string)))
+        .or_else(|| crate::engine::builtins::resolve_builtin_flow(name).map(str::to_string));
+    Ok(selected.and_then(|name| sources.remove_entry(&name)))
 }
 
 // -----------------------------------------------------------------------------

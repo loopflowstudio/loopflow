@@ -243,20 +243,19 @@ impl SkillCatalog {
         }
         // Keep an absolute lexical path: a symlink's native name is part of its identity.
         let path = std::path::absolute(path)?;
-        let key = name.clone();
-        if let Some(previous) = self.sources.get(&key) {
+        if let Some(previous) = self.sources.get(&name) {
             let previous = previous.path.as_ref().expect("scope contains file sources");
             if fs::canonicalize(previous)? == fs::canonicalize(&path)? {
                 return Ok(());
             }
             return Err(LoadError::InvalidSkill(format!(
-                "ambiguous skill {key:?}: {} and {}",
+                "ambiguous skill {name:?}: {} and {}",
                 previous.display(),
                 path.display()
             )));
         }
         self.sources.insert(
-            key,
+            name.clone(),
             SkillSource {
                 name,
                 path: Some(path),

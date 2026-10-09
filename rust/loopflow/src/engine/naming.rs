@@ -28,7 +28,7 @@ pub(crate) fn generated_session_title(
                 | "task-operate"
         )
     });
-    let title = [
+    [
         context.and_then(session_request),
         purpose,
         task,
@@ -37,8 +37,7 @@ pub(crate) fn generated_session_title(
     .into_iter()
     .flatten()
     .find_map(request_title)
-    .unwrap_or_else(|| "Session".to_string());
-    title
+    .unwrap_or_else(|| "Session".to_string())
 }
 
 pub(crate) fn request_title(source: &str) -> Option<String> {

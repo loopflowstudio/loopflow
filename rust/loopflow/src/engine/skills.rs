@@ -202,18 +202,25 @@ fn writable_target(root: &Path, name: &str) -> bool {
     let directory = root.join(name);
     let path = directory.join(SKILL_FILE_NAME);
     // Never write through third-party symlinks or bundle assets.
-    !directory
+    if directory
         .ancestors()
         .any(|dir| dir.is_symlink() || (dir.exists() && !dir.is_dir()))
-        && !directory.parent().into_iter().flat_map(Path::ancestors)
+        || directory
+            .parent()
+            .into_iter()
+            .flat_map(Path::ancestors)
             .take_while(|ancestor| *ancestor != root)
             .any(|ancestor| ancestor.join(SKILL_FILE_NAME).exists())
-        && !path.is_symlink()
-        && (!path.exists() || (path.is_file() && is_generated(&path)))
-        // A new bundle must not hide an existing namespace or claim its assets.
-        && (!directory.is_dir()
-            || path.exists()
-            || fs::read_dir(&directory).is_ok_and(|mut entries| entries.next().is_none()))
+        || path.is_symlink()
+    {
+        return false;
+    }
+    if path.exists() {
+        return path.is_file() && is_generated(&path);
+    }
+    // A new bundle must not hide an existing namespace or claim its assets.
+    !directory.is_dir()
+        || fs::read_dir(&directory).is_ok_and(|mut entries| entries.next().is_none())
 }
 
 fn render_flow_skill(flow: &str, name: &str, vendor: Vendor) -> String {
@@ -235,7 +242,7 @@ fn write_targets(
         let path = target_root.join(name).join(SKILL_FILE_NAME);
         if blocked.contains(name) {
             eprintln!(
-                "warning: preserving third-party skill at {}",
+                "warning: skipping export at {}: destination is occupied or needed as a namespace",
                 path.display()
             );
             report.skipped.push(path);

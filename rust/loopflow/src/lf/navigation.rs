@@ -475,7 +475,7 @@ pub(crate) fn format_target(target: &Target) -> String {
 }
 
 fn format_xor(router: Option<&str>, paths: &HashMap<String, XorPath>) -> String {
-    let label = router.map_or_else(|| "xor".to_string(), |name| format!("xor[{}]", name));
+    let label = router.map_or_else(|| "xor".to_string(), |name| format!("xor[{name}]"));
     let mut names: Vec<_> = paths.keys().collect();
     names.sort();
     let rendered = names

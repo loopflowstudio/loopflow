@@ -623,8 +623,7 @@ acceptance remain at
 
 Jack Heart selected custom-ref sync; LOO-412 owns transport/machines, LOO-406
 storage/Linear. Plan ownership above governs sharing and execution exclusion.
-Review-only publication remains stacked on `e68f2a423`/`84664e661`; no landing
-or public-remote planning export.
+Publication is review-only; no landing or public-remote planning export.
 
 Causal ordering retains losers. Scalar receipts lack provider frontiers: older
 reads/equal-value observations remain unsafe, separately from the parent's unseen

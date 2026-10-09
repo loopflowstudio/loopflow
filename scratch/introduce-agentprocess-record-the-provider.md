@@ -105,7 +105,14 @@ attribution survive.
 - Top’s private OS sampler/elapsed parser and receipt-only birth comparison are
   removed. `journal::OsProcess` owns single-PID and inventory observation, including
   zombie rejection. Malformed samples fail observation rather than inventing absence.
+- Capture's `driver` slot and `claim_conversation_driver` name are replaced by
+  attachment naming; there is no second owner. The reaper's unused
+  `settled_drivers` counter and serialization derives are removed. Its callers
+  consume orphan IDs, reaped count and errors, not a separate wire report.
 - Remaining provider-engine close names and messages (`close_engine` is removed).
+  `close_agent_process` requires the saved endpoint/thread pair; its unused
+  no-inspection branch is deleted. Missing socket handling still preserves the
+  existing exact-identity/group close rule.
   `bind_group_to_driver`, `prepare_lifeline` and the exposed prepare/retain
   lifeline type are deleted. Keep `engine/` as Loopflow machinery and the
   surviving launch-path proofs. Codex's write-only `endpoint` and OpenCode's
@@ -288,7 +295,12 @@ acceptance, all remaining lifecycle cuts above and the full gate remain open.
 Native fixtures now pin invocation and capture to the same ledger, including
 blocking workers, and supply required startup evidence. The planning
 reconnect fixture retains its original behavior and reports early launch errors.
-No installed store was opened and no configured orphan was signaled.
+Review of the surviving close/reaper paths removed an unused optional inspection
+bypass and report bookkeeping. Reaper control flow now separates process
+settlement from attachment settlement: exact provider death does not prove an
+unknown attached lf invocation dead. Capture admission and storage use the
+attachment name throughout; historical payloads and the Flow driver remain
+unchanged. No installed store was opened and no configured orphan was signaled.
 
 Check: LF_*-cleared `cargo test -p loopflow --lib` with native-util, composed-connection and planning-reconnect filters passes after fixture repairs; `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` pass; full Rust/Swift/DTO/materialized and Linux verification remains gate/CI-owned.
 
@@ -300,3 +312,7 @@ is implied. Review retained the AgentProcess endpoint owner separately from the
 LfSession's selected AgentSession. Branch-only fixtures use the typed identity.
 
 Sync check: LF_*-cleared `cargo test -p loopflow --lib harness::codex_history::tests::delayed_start_keeps_request_capture_across_a_b_a_takeover -- --exact` passes (1 test), after repairing merged fixture type errors; broader verification remains gate/CI-owned.
+
+Earlier native-util/planning-reconnect results remain at `82b5d90d5`, this plan.
+
+Check: `cargo test -p loopflow --lib --no-run` and `scripts/test_network.py target/debug/deps/loopflow-0b179d3755b15c2d harness::agent_process::tests session_record::runtime::tests native_capture_replacement_retains_each_spawn_and_rejects_late_exit codex_connection_launch_preserves_provider_and_rejects_replaced_attachment interrupted_capture_resumes_with_a_new_process_and_fences_old_snapshots --test-threads=1` pass (16 tests); fmt, all-target Clippy and diff checks pass; full Rust/Swift/DTO/materialized and Linux verification remains gate/CI-owned.

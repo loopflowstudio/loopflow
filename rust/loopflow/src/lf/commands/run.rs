@@ -51,7 +51,7 @@ pub fn preview(
     kind: Option<crate::engine::target::DefinitionKind>,
     message: Option<&str>,
     cli: &Cli,
-) -> Result<PromptPreview> {
+) -> Result<ContextPreview> {
     let runtime = tokio::runtime::Runtime::new()?;
     let mut binding = runtime.block_on(async {
         let Some(store) = crate::store::read_existing_registry()? else {
@@ -119,12 +119,6 @@ pub fn preview(
         .map(|binding| binding.cwd.as_path())
         .or(cli.bound_cwd.as_deref())
         .unwrap_or(repo);
-    anyhow::ensure!(
-        !matches!(skill, Some("repo/operate" | "wave/operate"))
-            || cli.bound_cwd.is_some() || cli.task.is_some() || cli.wt.is_some()
-            || crate::repository::CanonicalRepo::discover(cwd)?.as_path() != cwd.canonicalize()?,
-        "context unavailable before the operator's scope checkout is prepared; preview from its existing checkout"
-    );
     if let Some(name) = skill {
         let invocation = if let Some(path) = &cli.skill_input {
             let invocation = crate::engine::skill_invocation::SkillInvocation::read(path)?;
@@ -134,10 +128,19 @@ pub fn preview(
             );
             invocation
         } else {
-            let crate::engine::target::Target::Skill(skill) =
-                crate::engine::target::resolve_definition(cwd, name, kind)?
-            else {
-                anyhow::bail!("Flow context preview is not defined; preview an individual skill instead (no steps ran)");
+            let skill = match crate::engine::target::resolve_definition(cwd, name, kind)? {
+                crate::engine::target::Target::Skill(skill) => skill,
+                crate::engine::target::Target::Flow(flow) => {
+                    return crate::lf::commands::flow::preview(
+                        &flow,
+                        message,
+                        &launch,
+                        cwd,
+                        binding.as_ref(),
+                    )
+                    .map(|preview| ContextPreview::Flow(Box::new(preview)));
+                }
+                _ => unreachable!("definitions resolve to skills or Flows"),
             };
             crate::engine::skill_invocation::SkillInvocation {
                 skill,
@@ -146,15 +149,41 @@ pub fn preview(
         };
         launch.resolved_invocation = Some(invocation);
     }
-    let built = match &binding {
-        Some(binding) => build_bound_prompt(skill, message, &launch, binding)?,
+    preview_prompt(
+        cwd,
+        skill,
+        message,
+        &launch,
+        binding.as_ref(),
+        cli.skill_input.is_some(),
+    )
+    .map(|preview| ContextPreview::Prompt(Box::new(preview)))
+}
+
+pub(crate) fn preview_prompt(
+    cwd: &Path,
+    skill: Option<&str>,
+    message: Option<&str>,
+    cli: &Cli,
+    binding: Option<&crate::ops::WorkBinding>,
+    captured: bool,
+) -> Result<PromptPreview> {
+    anyhow::ensure!(
+        !matches!(skill, Some("repo/operate" | "wave/operate"))
+            || cli.bound_cwd.is_some() || cli.task.is_some() || cli.wt.is_some()
+            || crate::repository::CanonicalRepo::discover(cwd)?.as_path() != cwd.canonicalize()?,
+        "context unavailable before the operator's scope checkout is prepared; preview from its existing checkout"
+    );
+    let built = match binding {
+        Some(binding) => build_bound_prompt(skill, message, cli, binding)?,
         None => build_prompt_at(
             skill,
             message,
             message.unwrap_or_default(),
-            &launch,
+            cli,
             cwd.to_path_buf(),
             None,
+            captured,
         )?,
     };
     Ok(PromptPreview {
@@ -167,6 +196,23 @@ pub fn preview(
         context: built.budget,
         unwritten_sources: built.sources,
     })
+}
+
+/// A direct prompt or a Flow's graph and presently knowable input.
+#[derive(Debug, serde::Serialize)]
+#[serde(untagged)]
+pub enum ContextPreview {
+    Prompt(Box<PromptPreview>),
+    Flow(Box<crate::lf::commands::flow::FlowContextPreview>),
+}
+
+impl ContextPreview {
+    pub fn render(&self) -> String {
+        match self {
+            Self::Prompt(prompt) => prompt.render(),
+            Self::Flow(flow) => flow.render(),
+        }
+    }
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -222,7 +268,15 @@ pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
         .map(|wave| wave.slug().to_string());
     // Continuation belongs to the saved conversation, even when invoked from
     // another Task's checkout. Do not rediscover Work from the caller's cwd.
-    let built = build_prompt_at(None, Some(message), message, &turn, session.cwd, None)?;
+    let built = build_prompt_at(
+        None,
+        Some(message),
+        message,
+        &turn,
+        session.cwd,
+        None,
+        false,
+    )?;
     print_context_header(&built, &turn);
     run_prompt(&built, &turn).map(|_| ())
 }
@@ -405,6 +459,7 @@ fn build_prompt(
         cli,
         repo_root,
         None,
+        cli.skill_input.is_some(),
     )
 }
 
@@ -435,6 +490,7 @@ fn build_bound_prompt_at(
             crate::trace::ContextAssetKind::Goal,
             crate::trace::ContextScope::Task,
         )),
+        cli.skill_input.is_some(),
     )
 }
 
@@ -488,6 +544,7 @@ fn build_prompt_at(
     cli: &Cli,
     repo_root: PathBuf,
     message_context: Option<(crate::trace::ContextAssetKind, crate::trace::ContextScope)>,
+    captured: bool,
 ) -> Result<PromptBuild> {
     let is_interactive = is_interactive_run(cli, skill, message);
     let task_input = prepare_task_input(cli)?;
@@ -545,7 +602,7 @@ fn build_prompt_at(
     // operating manual. Captured Flows and attributed Work retain that guidance.
     let standalone_native = task_input.is_none()
         && wave.is_none()
-        && cli.skill_input.is_none()
+        && !captured
         && message_context.is_none()
         && discovered_skill.as_ref().is_some_and(|skill| {
             skill.source.as_ref().is_some_and(|source| {
@@ -1960,6 +2017,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             &cli,
             repo.path().to_path_buf(),
             None,
+            false,
         )
         .unwrap();
 
@@ -1998,6 +2056,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             &cli,
             repo.path().to_path_buf(),
             None,
+            false,
         )
         .unwrap();
 

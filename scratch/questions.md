@@ -74,7 +74,7 @@ Open choices:
   snapshot and cross-Wave `--all`/exact `--task` reads. `wave workflow set/source NAME [WAVE]`
   and `wave edit-plan [WAVE]` use current selection; `--project ID` addresses history.
   Project identity and Workflow capture stay with their existing owners.
-- Skill/Flow name collisions and Flow-wide context preview semantics.
+- Skill/Flow name collisions. Flow preview presentation below is reversible.
 - Final home for standalone prompt-budget reporting. Keep `--steers-after` and its existing filtering.
 - Remembered repository names: Jack is unsure; draft uses root/name or explicit path.
 - Discord is deferred by Jack: leave it unchanged.
@@ -107,15 +107,15 @@ These are reversible lookup choices, not shared Work identity or publication.
 Primary and stack-parent Task selectors now carry repository-scoped full IDs through
 dispatch; an unscoped ambiguous prefix still fails.
 
-October 9 `lf context --skill realign`: generated goal 27,030/16,000 tokens
-(11,030 over); the supplied complete source contains the Work seed and 203-file
+October 9 `lf context --skill implement`: generated goal 27,138/16,000 tokens
+(11,138 over); the supplied complete source contains the Work seed and 203-file
 inventory. Authored-note curation cannot remove generated inventory. Context-producer
 work remains separate; no limit was raised.
 
 ## Reversible preview limits — October 9
 
 Skill/inline context uses stored planning; launch may refresh Task comments.
-Flow-wide context remains undefined. Bare-agent/new operator-checkout previews
+Flow context uses the fresh-start snapshot choice below. Bare-agent/new operator-checkout previews
 cannot prepare future checkouts. Remote previews observe only the selected Machine;
 identity failure precedes assembly. Authentication is outside preparation; local
 absence grants no first-start admission.
@@ -152,3 +152,15 @@ shell is usable even while planning loads. A plain Task request waits for its mo
 page, not optional Session preparation. Receipts are latest-per-locator/window,
 not a durable history; locators never become repository identity. This reversible
 endpoint definition leaves native usability and remote composition unproved.
+
+## Reversible Flow preview presentation — October 9
+
+`--context` shows the compiled graph with occurrence keys and one input state per
+node. Only the initial skill/router gets current-snapshot input; later skills,
+branch bodies and repeat passes are unavailable. Commands are labeled not-agent
+and never executed, even when they could launch an agent. This previews a fresh
+Flow, not an existing cursor. Sorted alternatives and backward edges retain the
+shared graph's identity; no predicted routes or synthetic feedback are supplied.
+Native skill arguments retain the original message, separately from router
+instructions. This presentation is an implementation choice, not Jack Heart's
+approval or the one-PR acceptance boundary.

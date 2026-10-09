@@ -1745,7 +1745,7 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
     {
         anyhow::ensure!(
             !cli.context,
-            "--context requires a skill or inline agent request; nothing was executed"
+            "--context requires a skill, Flow or inline agent request; nothing was executed"
         );
         if let (Some(global), Some(subject)) = (cli.task.as_deref(), issue.as_deref()) {
             anyhow::ensure!(
@@ -1806,7 +1806,7 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
         ),
     }
     anyhow::ensure!(!cli.context || invocation.is_some() || message.is_some(),
-        "--context requires a skill or inline agent request; use --explain to inspect Work without launch");
+        "--context requires a skill, Flow or inline agent request; use --explain to inspect Work without launch");
     let explanation = cli
         .explain
         .then(|| loopflow::lf::commands::context::explain(wave, task, session, process))

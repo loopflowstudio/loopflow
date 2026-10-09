@@ -989,3 +989,132 @@ fn remote_preview_uses_the_same_work_for_explicit_and_inferred_task_selection() 
     assert_eq!(checkpoint_bytes(&remote_db), remote_before);
     assert!(!fixture.root.path().join("forbidden-effect").exists());
 }
+
+#[test]
+fn flow_context_preview_reads_selected_machine_graph_without_executing_steps() {
+    let fixture = preview_machines();
+    let remote = fixture.root.path().join("remote");
+    let repo = remote.join("projects/preview");
+    fs::create_dir_all(repo.join(".lf/skills")).unwrap();
+    fs::create_dir_all(repo.join(".lf/flows")).unwrap();
+    assert!(Command::new("git")
+        .args(["init", "-q"])
+        .arg(&repo)
+        .status()
+        .unwrap()
+        .success());
+    fs::write(remote.join("store/config.yaml"), "repo_root: ~/projects\n").unwrap();
+    fs::write(
+        fixture.root.path().join("local/config.yaml"),
+        "repo_root: /caller-only\n",
+    )
+    .unwrap();
+    fs::write(
+        repo.join(".lf/config.yaml"),
+        "diff: false\ndiff_files: false\npaste: false\n",
+    )
+    .unwrap();
+    for (skill, body) in [
+        ("route", "Remote router input."),
+        ("work", "Future work input must not be assembled."),
+        ("decide", "Future decision input."),
+    ] {
+        fs::write(repo.join(format!(".lf/skills/{skill}.md")), body).unwrap();
+    }
+    fs::write(
+        repo.join(".lf/flows/repair.yaml"),
+        "- work\n- loop: work\n  step: decide\n",
+    )
+    .unwrap();
+    fs::write(repo.join(".lf/flows/probe.yaml"), "- xor:\n    router: route\n    paths:\n      repair:\n        description: Repair the work\n        flow: repair\n      skip:\n        description: Skip repairs\n- cmd: config set repo_root /must-not-write\n- work\n").unwrap();
+    fs::write(
+        repo.join(".lf/flows/command-first.yaml"),
+        "- cmd: config set repo_root /must-not-write\n- work\n",
+    )
+    .unwrap();
+    fs::write(repo.join(".lf/flows/invalid.yaml"), "- absent-skill\n").unwrap();
+    let local_db = fixture.root.path().join("local/loopflow.db");
+    let remote_db = remote.join("store/loopflow.db");
+    let before = [checkpoint_bytes(&local_db), checkpoint_bytes(&remote_db)];
+    let args = [
+        "--machine",
+        "mini",
+        "--repo",
+        "preview",
+        "flow",
+        "probe",
+        "literal 'input'; $(false)",
+        "--context",
+    ];
+    let mut json_args = args.to_vec();
+    json_args.extend(["--explain", "--json"]);
+    let report = fixture.json(&json_args);
+    let input = &report["input"];
+    assert_eq!(
+        input["checkout"],
+        repo.canonicalize().unwrap().to_str().unwrap()
+    );
+    let graph = &input["graph"];
+    assert_eq!(graph["steps"][0]["kind"], "xor");
+    assert_eq!(graph["steps"][0]["paths"][0]["name"], "repair");
+    assert_eq!(graph["steps"][0]["paths"][1]["name"], "skip");
+    let nested = &graph["steps"][0]["paths"][0]["steps"];
+    assert_eq!(nested[1]["returns_to"], nested[0]["key"]);
+    let inputs = input["inputs"].as_array().unwrap();
+    assert_eq!(inputs.len(), 5);
+    assert_eq!(inputs[0]["state"], "current");
+    let prompt = inputs[0]["input"]["system_prompt"].as_str().unwrap();
+    assert!(prompt.contains("Remote router input."));
+    assert!(prompt.contains("literal 'input'; $(false)"));
+    assert!(prompt.contains("Repair the work"));
+    assert!(prompt.contains("Skip repairs"));
+    assert!(prompt.contains("declared JSON value"));
+    assert!(!prompt.contains("Future work input must not be assembled."));
+    for index in [1, 2, 4] {
+        assert_eq!(inputs[index]["state"], "unavailable");
+        assert!(inputs[index]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("repeat-pass"));
+        assert!(inputs[index].get("input").is_none());
+    }
+    assert_eq!(inputs[3]["state"], "not_agent");
+    let text = fixture.run(&args);
+    assert_success(&text);
+    let text = String::from_utf8_lossy(&text.stdout);
+    assert!(text.contains("path repair"));
+    assert!(text.contains("returns to"));
+    assert!(text.contains("unavailable"));
+    let command = fixture.json(&[
+        "--machine",
+        "mini",
+        "--repo",
+        "preview",
+        "flow",
+        "command-first",
+        "--context",
+        "--json",
+    ]);
+    assert_eq!(command["inputs"][0]["state"], "not_agent");
+    assert_eq!(command["inputs"][1]["state"], "unavailable");
+    let invalid = fixture.run(&[
+        "--machine",
+        "mini",
+        "--repo",
+        "preview",
+        "flow",
+        "invalid",
+        "--context",
+    ]);
+    assert!(!invalid.status.success());
+    assert_eq!(
+        [checkpoint_bytes(&local_db), checkpoint_bytes(&remote_db)],
+        before
+    );
+    assert_eq!(
+        fs::read_to_string(remote.join("store/config.yaml")).unwrap(),
+        "repo_root: ~/projects\n"
+    );
+    assert!(!fixture.root.path().join("forbidden-effect").exists());
+    assert!(!repo.join(".lf/tmp").exists());
+}

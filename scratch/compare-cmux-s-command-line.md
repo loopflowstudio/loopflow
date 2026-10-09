@@ -12,7 +12,7 @@ LOO-406 is integrated through main’s `d20c56daf` (#1503). LOO-412 through
 exists alongside common receipts. Replay-safe invalidation remains unfinished.
 Mixed Linear/Git stays disabled pending the remaining composition.
 Local Task/Session-plus-Changes opening follows request-scoped readiness; native proof remains.
-Remaining implementation: Flow input and broader explanation, shared identity/exchange and first-start
+Remaining implementation: broader explanation, shared identity/exchange and first-start
 admission, and verified native bounded extraction. Full-path proof remains.
 [Findings](findings.md), [questions](questions.md) and the
 [comparison](../docs/reviews/terminal-command-comparison.md) retain evidence and open choices.
@@ -135,9 +135,9 @@ transport, but never creates Tasks/checkouts, claims clients, syncs plans, logs 
 publishes or launches agents. Missing evidence stays unavailable. The result is
 an observation, not a reservation: execution re-resolves changing facts. Help
 explains syntax; explain describes this invocation. Unsupported combinations
-fail before effects. `--context` on a non-agent command is invalid; Flow context
-preview must define whether it shows the first step or a labeled set before it
-is exposed. It cannot execute prior steps to fabricate future input.
+fail before effects. `--context` on a non-agent command is invalid; Flow preview shows the compiled graph and labeled node inputs: only the initial
+skill/router has current-snapshot input. Future and repeat input stays unavailable;
+commands have no agent prompt. It never executes predecessors.
 
 `--docs` keeps its existing meaning: add contents from paths, globs or directories
 to agent input; it does not generate documentation. Explain can show why those
@@ -174,8 +174,9 @@ checkout and launch.
 
 Local `--context` reuses launch prompt assembly and bound Work enrichment for skills and inline requests;
 `--explain` uses WorkSelection/ContextFact before admission or preparation. JSON
-combines both on request. Primary scoped identity survives dispatch. Broader action
-explanation and complete-path composition remain unfinished. Explicit-Machine preview is implemented.
+combines both on request. Primary scoped identity survives dispatch. Flow previews share compilation, graph and prompt owners, including router contracts
+and captured native arguments. Broader action explanation and complete-path
+composition remain unfinished. Explicit-Machine preview is implemented.
 
 Headless gate separates discovery (`documented_commands`), wire shape
 (`dto_fixtures`) and routing/preview behavior, including
@@ -203,6 +204,10 @@ LOO-422 host status; LOO-402/403 Waiting/shortcuts; LOO-397 command discovery.
 These boundaries are integration constraints, not separate replacement projects.
 
 ## Delete — do not maintain
+
+Removed the blanket Flow-context refusal. Direct and Flow previews share prompt
+assembly; only the existing graph describes branches/loops. No executor or second
+planner is introduced.
 
 Removed: blanket remote-preview refusal, writable receiver identity lookup,
 SSH's repeated command parse, and shell-side `machine id` recheck/`probe_identity`
@@ -575,4 +580,4 @@ identity/delegation, open them, add shell/Files panes, retain an unfinished draf
 change focus, target a harmless command, read output, hide/restore, and verify the
 original input target and draft survive. Demo owns native usability; preserve comparison evidence and use no real accounts or live user terminals.
 
-Check (reused October 9): `cargo build -p loopflow --bin lf`; `cargo fmt --all --check`; `cargo clippy --all-targets -- -D warnings`; `uv run --no-sync python scripts/test_network.py target/debug/deps/machine_commands-7a4e062bd344f888 --test-threads=1` — PASS (17 tests); `git diff --check` PASS (realign, prose only); combined gate and native demo remain.
+Check (October 9): `cargo build -p loopflow --bin lf`, focused `context_launch_tests flow_context_preview` (2) and `machine_commands flow_context_preview` (1) PASS; `cargo clippy --all-targets -- -D warnings` PASS; `cargo fmt --all` and `git diff --check` PASS. Combined verification: gate; native usability: demo.

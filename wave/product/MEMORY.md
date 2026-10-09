@@ -61,13 +61,12 @@ Sessions use `connect`. October 9 local Task/Session-plus-Changes opening bypass
 execution routing and CLI preparation. Session/companion intent travels together; a partial Session inventory must not
 retire other panes. Opening generations follow Session/Files/pane readiness and failures. Wave-owned `show`, `workflow` and `edit-plan` replace root roadmap/Project locally;
 retained Project IDs and the snapshot/writer owners survive. Desktop sends Wave identity.
-Flow input and full action explanation remain. Discord is unchanged;
+Flow previews expose initial input; future/loop input stays unavailable. Broader explanation remains. Discord is unchanged;
 `--steers-after` filters nodes, not restarts.
 `repo_root` (default `~/src`) and paths resolve on the selected Machine, never as
 portable identity; remembered names remain open. Scoped IDs survive dispatch.
 Preview/routing use read-only SQLite; unreadable is not absent. Preview/launch share
-Work assembly; only launch writes excerpts. Fake-provider/model checks prove no
-remote/native acceptance.
+assembly; only launch writes excerpts.
 
 Jack selected local planning/Git sync: 406 owns writes/Linear, 412 exchange.
 Imported completion cannot move Workflow or clean execution. Preserve pending
@@ -114,8 +113,8 @@ Explicit-Machine previews skip probes/credentials. Entry-level identity
 validation replaces shell/dispatch checks, protecting early readers; rejection cannot
 write a fallback Process. Transport retains the parsed CLI.
 Checkpoint both stores: an effect-free receiver cannot undo a sender's write.
-Two-CLI fixtures prove repository/Work resolution, not configured SSH, native
-acceptance or peer-exclusive first start.
+Two-CLI fixtures cover routing/Flow previews, not configured SSH, native
+acceptance or exclusive start.
 
 ## Terminal-host adoption (2026-10-07)
 

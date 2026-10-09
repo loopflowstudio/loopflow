@@ -471,6 +471,7 @@ names canonical owners and arguments. [Authoring](authoring.md) explains workflo
 
 ```sh
 lf implement --context --json
+lf flow pursue --context --json
 lf implement --context --explain
 lf task run LOO-427 --explain --json
 lf --task LOO-427 desktop open --diff --explain --json
@@ -481,6 +482,13 @@ ordinary launch settings. JSON includes system/task prompts, native skill argume
 budget accounting and complete bytes for excerpt sources that were **not written**.
 It never prepares a checkout, refreshes planning, writes storage or runs a provider.
 A real launch refreshes Task direction, so parity applies to the same snapshot.
+
+For a Flow, preview shows the compiled graph and input states keyed by node.
+Only the initial skill or router gets current-snapshot input. Later nodes and
+repeat passes are unavailable: files, Work, feedback and branch choices may change.
+Command nodes are labeled `not_agent`, never executed to discover later input.
+This is a fresh-start preview, not a resumed execution. Native skill arguments and
+router instructions use the same owners as launch.
 
 `--explain` reads selected Work without executing the invocation. Task commands,
 Desktop opening, Session connection and exact Process history lookup are supported;

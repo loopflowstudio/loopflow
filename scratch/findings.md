@@ -134,44 +134,20 @@ not a complete action plan. The plan owns remaining work and the check-result li
 
 ## Composed-opening review — October 9
 
-`ef179762d`, `c633589e0`, `1dd8230d0` and `e3ca861b1` retain the local opening
-implementation. Review repaired form-encoding, partial Session inventory retirement,
-checkout mismatch and delayed primary preparation. URL equality was not request
-identity: repeated opens, lookup/registration and mounted Task content now fence
-success, failure and cancellation by generation. Pre-registration failures are
-inspectable, but obsolete errors no longer escape to utility feedback.
-
-A Session callback masked an unobserved pane closure; later, an absent Session
-reading returned before observing visibility. The regression failed with “Opening
-never settled.” Session/Files/multiplexer Observation now follows original visible
-pane occurrences, even before Session evidence. Composed Changes clears zoom but
-keeps drafts. Direct tests first failed on build ordering/concurrent edits; the
-corrected runs establish model readiness, not native/provider/remote acceptance.
-Detailed pre-edit notes and failures: `/tmp/loo427-compress-openings/`,
-`/tmp/loo427-repository-readiness/`, `/tmp/loo427-compress-readiness/`; the supplied
-uncommitted notes are preserved at `/tmp/loo427-task-run-explain/scratch/`.
+`4a59651ea:scratch/findings.md`, this heading, preserves corrections to URL encoding,
+partial Session inventory, checkout mismatch and delayed preparation. Request
+generations fence registration/readiness/failure; Session/Files/multiplexer
+Observation fixes missed closure, including before Session evidence. The failed
+“Opening never settled” regression and build-order/concurrent-edit failures remain
+evidence, not native/provider acceptance. Pre-edit notes: `/tmp/loo427-compress-openings/`,
+`/tmp/loo427-repository-readiness/`, `/tmp/loo427-compress-readiness/`.
 
 ## Invocation-level Task run explanation — October 9
 
-Workflow selection and Task option checks are shared with launch; only launch
-prepares/moves Work. Compression found preview had different empty-directive
-wording and recomputed route provenance in a later read. Options now share checks,
-and the routing transaction returns its own source. Project defaults load only
-when needed, without cloning the definition. A new retired-checkout fixture first
-failed because it fabricated Started without work; it now reserves a Session through
-the existing owner before removing the checkout. Logs: `/tmp/loo427-compress-explain/`.
-An omitted Task shares checkout/declaration selection; remote forwarding carries
-that ID. Missing local execution still cannot prove peer-exclusive first start.
-
-The first state-preservation regression failed after checkpointing SQLite's WAL:
-`journal::with_process` logged an early Process after the preview returned. Earlier
-byte comparisons without a post-read checkpoint missed those writes. Parsed previews
-now explicitly suppress that fallback observation, including failed previews;
-ordinary commands retain their Process history. The regression retains populated
-Flow/Process history and checks the complete checkpointed database, not empty tables.
-Failed build/test logs and pre-edit notes: `/tmp/loo427-task-run-explain/`.
-Neither these fixtures nor action explanation establish remote admission, native
-Desktop usability, provider acceptance or delivery.
+`4a59651ea:scratch/findings.md`, this heading, preserves the failed retired-checkout
+fixture and checkpointed-WAL regression: fallback Process logging occurred after
+preview returned. Shared selection/options and explicit fallback suppression fix
+those paths; remote admission and native acceptance remain separate.
 
 ## Desktop opening explanation — October 9
 
@@ -193,3 +169,17 @@ suppress fallback Process writes too. Transport consumes the parsed CLI, preserv
 scoped selection. Launch retains sender probes/credentials; previews skip them.
 Populated-store coverage includes rejected reads, writes, help and forwarding.
 Executable quoting/effect tests replace the removed shell-check fixture.
+
+## Flow context preview — October 9
+
+Preview compiles through the launch owner and projects its existing graph; the
+execution cursor selects only the first skill/router. The ordinary prompt owner
+assembles that current snapshot. Command nodes have no agent input; later nodes
+and repeat passes remain unavailable, without executing predecessors.
+Review found that native captured skills need operating guidance even when no
+transport file is written. Prompt assembly now takes capture provenance explicitly;
+launch still derives it from its captured input. The first loop fixture accidentally
+named its Flow and skill identically, invoking flow-first composition and correctly
+failing cycle detection; the fixture now uses distinct names. No collision policy
+changed. Local and two-CLI simulated-SSH checks do not prove configured transport,
+peer admission or the native Desktop endpoint.

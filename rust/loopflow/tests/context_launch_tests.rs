@@ -261,3 +261,94 @@ exit 23
         message
     );
 }
+
+#[test]
+fn flow_context_preview_preserves_absent_store_and_captured_first_skill() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    repo.create_file(
+        ".lf/config.yaml",
+        "diff: false\ndiff_files: false\npaste: false\n",
+    );
+    repo.create_file(".lf/skills/probe.md", "First input marker.");
+    repo.create_file(".lf/skills/decide.md", "Do not assemble future input.");
+    repo.create_file(
+        ".lf/flows/inspect.yaml",
+        "- probe\n- loop: probe\n  step: decide\n",
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .env_clear()
+        .env("HOME", home.path())
+        .env("LF_HOME", home.path().join("machine"))
+        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+        .env("PATH", "/usr/bin:/bin")
+        .current_dir(repo.path())
+        .args(["flow", "inspect", "literal input", "--context", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["graph"]["steps"][1]["returns_to"], 0);
+    assert_eq!(report["inputs"][0]["node"], 0);
+    let prompt = report["inputs"][0]["input"]["system_prompt"]
+        .as_str()
+        .unwrap();
+    assert!(prompt.contains("First input marker."));
+    assert!(prompt.contains("literal input"));
+    assert!(!prompt.contains("Do not assemble future input."));
+    assert_eq!(report["inputs"][1]["state"], "unavailable");
+    assert!(!home.path().join("machine").exists());
+    assert!(!repo.path().join(".lf/tmp").exists());
+}
+
+#[test]
+fn flow_context_preview_retains_native_arguments_and_operating_guidance() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    repo.create_file(
+        ".lf/config.yaml",
+        "diff: false\ndiff_files: false\npaste: false\n",
+    );
+    repo.create_file(
+        ".claude/skills/audit/SKILL.md",
+        "---\nname: audit\ndescription: Native audit\n---\nAudit these exact arguments.",
+    );
+    repo.create_file(".lf/flows/inspect.yaml", "- audit\n");
+    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .env_clear()
+        .env("HOME", home.path())
+        .env("LF_HOME", home.path().join("machine"))
+        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+        .env("PATH", "/usr/bin:/bin")
+        .current_dir(repo.path())
+        .args([
+            "-a",
+            "claude",
+            "flow",
+            "inspect",
+            "  literal input  ",
+            "--context",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let input = &report["inputs"][0]["input"];
+    assert_eq!(input["skill_invocation"]["skill"]["name"], "audit");
+    assert_eq!(input["skill_invocation"]["arguments"], "  literal input  ");
+    assert!(input["system_prompt"]
+        .as_str()
+        .unwrap()
+        .contains("Operating Through Loopflow"));
+    assert!(!home.path().join("machine").exists());
+    assert!(!repo.path().join(".lf/tmp").exists());
+}

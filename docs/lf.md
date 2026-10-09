@@ -529,8 +529,22 @@ never close/reopen clients or write into a draft. Replies describe model state,
 not a completed render. A lost split reply is not safe to retry blindly: inspect
 first, since each split adds a pane.
 
-Companion creation, terminal I/O and composed Session-plus-diff opening remain
-implementation work.
+Add companions without changing focus, zoom or Work selection:
+
+```sh
+lf desktop shell --target "$target"
+lf desktop files --target "$target" --task "$task_id"
+lf desktop flow-log --target "$target" --task "$task_id"
+```
+
+Shell adds a local shell (remote opening is unavailable). Files and Flow-log
+reuse the Task's existing pane or add one beside the target; `--task` is its
+Loopflow Task ID from inspection, and its recorded checkout must match.
+Existing documents and terminal drafts stay retained. An empty target is filled;
+occupied contents are never replaced. Repeating Files/Flow-log reveals the same
+pane; repeating Shell adds another shell, so inspect after a lost reply.
+
+Terminal I/O and composed Session-plus-diff opening remain implementation work.
 
 ```sh
 open 'loopflow://task/LOO-303'

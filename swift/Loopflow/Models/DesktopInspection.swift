@@ -199,14 +199,15 @@ public struct DesktopPaneCommand: Codable, Sendable, Equatable {
 }
 
 public enum DesktopPaneAction: Codable, Sendable, Equatable {
-    case hide, restore, focus
+    case hide, restore, focus, shell
+    case files(task: String), flowLog(task: String)
     case split(axis: SplitAxis)
     case move(destination: DesktopPaneTarget, axis: SplitAxis)
     case resize(toward: DesktopPaneTarget, ratio: Double)
     case zoom(enabled: Bool)
 
-    enum CodingKeys: String, CodingKey { case kind, axis, destination, toward, ratio, enabled }
-    private enum Kind: String, Codable { case hide, restore, focus, split, move, resize, zoom }
+    enum CodingKeys: String, CodingKey { case kind, axis, destination, toward, ratio, enabled, task }
+    private enum Kind: String, Codable { case hide, restore, focus, split, move, resize, zoom, shell, files; case flowLog = "flow_log" }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -214,6 +215,9 @@ public enum DesktopPaneAction: Codable, Sendable, Equatable {
         case .hide: self = .hide
         case .restore: self = .restore
         case .focus: self = .focus
+        case .shell: self = .shell
+        case .files: self = .files(task: try values.decode(String.self, forKey: .task))
+        case .flowLog: self = .flowLog(task: try values.decode(String.self, forKey: .task))
         case .split: self = .split(axis: try values.decode(SplitAxis.self, forKey: .axis))
         case .move: self = .move(destination: try values.decode(DesktopPaneTarget.self, forKey: .destination),
                                 axis: try values.decode(SplitAxis.self, forKey: .axis))
@@ -230,6 +234,13 @@ public enum DesktopPaneAction: Codable, Sendable, Equatable {
         case .hide: kind = .hide
         case .restore: kind = .restore
         case .focus: kind = .focus
+        case .shell: kind = .shell
+        case .files(let task):
+            kind = .files
+            try values.encode(task, forKey: .task)
+        case .flowLog(let task):
+            kind = .flowLog
+            try values.encode(task, forKey: .task)
         case .split(let axis):
             kind = .split
             try values.encode(axis, forKey: .axis)

@@ -88,9 +88,10 @@ public final class MultiplexerStore {
         _split(paneId, axis: axis, content: .empty, focusNewPane: focusNewPane)
     }
 
-    private func _split(_ paneId: String, axis: SplitAxis, content: PaneContent, focusNewPane: Bool = true) -> PaneState? {
+    private func _split(_ paneId: String, axis: SplitAxis, content: PaneContent, focusNewPane: Bool = true, shellCommand: [String]? = nil) -> PaneState? {
         guard layout.pane(for: paneId) != nil else { return nil }
         let pane = PaneState(content: content)
+        if let shellCommand { shellCommands[pane.id] = shellCommand }
         layout = layout.splitting(paneId, axis: axis, newPane: pane)
         if focusNewPane {
             focusedPaneId = pane.id
@@ -190,33 +191,33 @@ public final class MultiplexerStore {
         _notify()
     }
 
-    public func newShell(command: [String] = []) {
-        if focusedPane.content == .empty {
-            shellCommands[focusedPaneId] = command
-            layout = layout.replacingContent(of: focusedPaneId, with: .shell)
-        } else {
-            if let pane = _split(focusedPaneId, axis: .vertical, content: .shell) {
-                shellCommands[pane.id] = command
-                _notify()
-            }
-            return
-        }
-        closedState = nil
-        _notify()
+    public func newShell(command: [String] = [], beside paneId: String? = nil, focus: Bool = true) {
+        _insert(.shell, beside: paneId ?? focusedPaneId, focus: focus, shellCommand: command)
     }
 
     /// Reveal a Task's Flow process log or files beside existing terminals,
-    /// never replacing them.
-    public func show(_ content: PaneContent) {
+    /// never replacing them. Explicit targets do not follow later focus.
+    public func show(_ content: PaneContent, beside paneId: String? = nil, focus: Bool = true) {
         if let pane = layout.allPanes.first(where: { $0.content == content }) {
-            setFocusedPane(pane.id)
-        } else if focusedPane.content == .empty {
-            layout = layout.replacingContent(of: focusedPaneId, with: content)
-            closedState = nil
-            _notify()
+            if focus { setFocusedPane(pane.id) }
+            else { setCollapsed(paneId: pane.id, collapsed: false) }
         } else {
-            _ = _split(focusedPaneId, axis: .vertical, content: content)
+            _insert(content, beside: paneId ?? focusedPaneId, focus: focus)
         }
+    }
+
+    private func _insert(_ content: PaneContent, beside paneId: String, focus: Bool, shellCommand: [String]? = nil) {
+        guard let target = layout.pane(for: paneId) else { return }
+        if target.content != .empty {
+            _ = _split(paneId, axis: .vertical, content: content, focusNewPane: focus, shellCommand: shellCommand)
+            return
+        }
+        if let shellCommand { shellCommands[paneId] = shellCommand }
+        layout = layout.replacingContent(of: paneId, with: content)
+        collapsedPaneIds.remove(paneId)
+        if focus { setFocusedPane(paneId) }
+        closedState = nil
+        _notify()
     }
 
     /// Explicit arrangement changes visibility without selecting another Session.

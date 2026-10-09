@@ -531,6 +531,31 @@ pub enum DesktopCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Add a local shell beside an exact pane without changing selection
+    Shell {
+        #[arg(long)]
+        target: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show the recorded Task's files beside an exact pane, retaining drafts
+    Files {
+        #[arg(long)]
+        target: String,
+        #[arg(long)]
+        task: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show the recorded Task's Flow processes beside an exact pane
+    FlowLog {
+        #[arg(long)]
+        target: String,
+        #[arg(long)]
+        task: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// Add an empty split beside an exact pane, retaining selection and clients
     Split {
         #[arg(long)]

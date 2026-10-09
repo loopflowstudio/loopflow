@@ -566,5 +566,8 @@ including its content occurrence and surface key; it never closes/reopens a clie
 Split adds an empty pane. Arrangement preserves selection except explicit focus;
 zoom does not redirect input to an unselected pane. Window/content replacement
 rejects stale targets, including the second target of a move or resize. Replies
-are model readings, not native-rendering proof. Companion creation, terminal I/O
-and cross-machine composition remain unfinished.
+are model readings, not native-rendering proof. Shell, Files and Flow-log add
+companions beside the exact target without changing focus or zoom. Files and
+Flow-log reuse existing panes for the named Task; its recorded checkout must
+match. Shell opening is local-only. Terminal I/O and cross-machine composition
+remain unfinished.

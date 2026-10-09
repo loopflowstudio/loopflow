@@ -118,7 +118,7 @@ final class SessionsWorkspaceRegistry {
         }
     }
 
-    func controlPane(_ request: DesktopPaneCommand) throws {
+    func controlPane(_ request: DesktopPaneCommand, model: WorkModel) throws {
         let target = request.target
         let workspace = try retainedWorkspace(for: target)
         let store = workspace.multiplexer
@@ -133,6 +133,24 @@ final class SessionsWorkspaceRegistry {
             _ = try retainedWorkspace(for: other)
         }
         switch request.action {
+        case .shell:
+            guard target.machineId == localMachineId else {
+                throw RegistryQueryError("Open a shell on the execution Machine in a terminal; remote Desktop shell opening is unavailable.")
+            }
+            store.newShell(beside: target.pane, focus: false)
+        case .files(let task), .flowLog(let task):
+            let identity = WorkspaceIdentity(machineId: target.machineId, worktree: target.worktree)
+            guard let projection = model.task(id: task),
+                  (model.navigation.preparedTaskWorktrees[projection.task.id]
+                    ?? projection.task.reference.workspace?.identity) == identity else {
+                throw RegistryQueryError("The Task is not associated with this checkout. Inspect its recorded workspace; no pane was changed.")
+            }
+            let content: PaneContent = if case .files = request.action {
+                .files(taskId: projection.task.id)
+            } else {
+                .flowLog(taskId: projection.task.id)
+            }
+            store.show(content, beside: target.pane, focus: false)
         case .hide: workspace.setCollapsed(paneId: target.pane, collapsed: true)
         case .restore: workspace.setCollapsed(paneId: target.pane, collapsed: false)
         case .focus: store.setFocusedPane(target.pane)

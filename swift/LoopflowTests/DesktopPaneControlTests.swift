@@ -10,19 +10,83 @@ struct DesktopPaneControlTests {
     private let repository = "selected-plan"
     private let identity = WorkspaceIdentity(machineId: "machine-a", worktree: "/same/path")
 
-    private func register(_ router: WorkLinkRouter, window: UUID, registry: SessionsWorkspaceRegistry) {
+    private func register(_ router: WorkLinkRouter, window: UUID, registry: SessionsWorkspaceRegistry, model: WorkModel = WorkModel(query: RegistryQuery { _, _ in
+        throw RegistryQueryError("Pane controls must not launch Work")
+    })) {
         router.register(window, repository: repository, focus: {},
             inspect: { incarnation in
                 DesktopWindowInspection(repository: repository, window: incarnation.uuidString, path: "/repo",
                     selectionKind: nil, selectionId: nil, reading: "unavailable", reason: "Offline",
                     task: nil, session: nil, supportedOperations: ["inspect", "hide", "restore", "focus", "split", "move", "resize", "zoom"],
                     workspaces: registry.inspect(), layouts: registry.inspectLayouts())
-            }, controlPane: registry.controlPane) { _ in }
+            }, controlPane: { try registry.controlPane($0, model: model) }) { _ in }
     }
 
     private func target(_ pane: PaneState, window: UUID, machine: String = "machine-a") -> DesktopPaneTarget {
         DesktopPaneTarget(repository: repository, window: window.uuidString, machineId: machine,
             worktree: identity.worktree, pane: pane.id, incarnation: pane.incarnation)
+    }
+
+    @Test func companionsRetainDraftsAndDoNotFollowFocusOrReplaceContent() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from:
+            Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json")))
+        let wave = try #require(snapshot.waves.first)
+        let task = try #require(wave.tasks.items.first)
+        let model = WorkModel(query: RegistryQuery { _, _ in
+            throw RegistryQueryError("Companion creation must not read or launch Work")
+        }, repoPath: wave.wave.repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        model.navigation.preparedTaskWorktrees[task.id] = identity
+        let registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId), router = WorkLinkRouter(), window = UUID()
+        let workspace = registry.workspace(for: identity), store = workspace.multiplexer
+        store.load(sessionId: "retained-session")
+        let session = store.focusedPane
+        let source = target(session, window: window)
+        store.newShell(command: ["retained-shell-command"])
+        let selected = store.focusedPane
+        store.setZoom(selected.id, enabled: true)
+        register(router, window: window, registry: registry, model: model)
+        let document = workspace.files(taskId: task.id, issue: task.id, cwd: identity.worktree).document("note.txt")
+        document.editor.string = "unfinished draft"
+        document.editor.setSelectedRange(NSRange(location: 2, length: 4))
+        for action in [DesktopPaneAction.files(task: task.id), .flowLog(task: task.id)] {
+            _ = try router.controlPane(.init(target: source, action: action))
+            _ = try router.controlPane(.init(target: source, action: action))
+        }
+        #expect(store.layout.allPanes.count == 4)
+        let files = try #require(store.layout.allPanes.first { $0.content == .files(taskId: task.id) })
+        store.setCollapsed(paneId: files.id, collapsed: true)
+        _ = try router.controlPane(.init(target: source, action: .files(task: task.id)))
+        #expect(!store.collapsedPaneIds.contains(files.id))
+        #expect(store.layout.pane(for: files.id) == files)
+        _ = try router.controlPane(.init(target: source, action: .shell))
+        #expect(store.layout.allPanes.count == 5)
+        #expect(store.layout.pane(for: session.id) == session)
+        #expect(store.focusedPane == selected)
+        #expect(store.zoomedPaneId == selected.id)
+        #expect(store.shellCommands[selected.id] == ["retained-shell-command"])
+        #expect(document.editor.string == "unfinished draft")
+        #expect(document.editor.selectedRange() == NSRange(location: 2, length: 4))
+        #expect(model.selection == nil)
+        let before = store.layout
+        model.navigation.preparedTaskWorktrees[task.id] = WorkspaceIdentity(machineId: "other", worktree: identity.worktree)
+        for action in [DesktopPaneAction.files(task: task.id), .flowLog(task: task.id)] {
+            #expect(throws: RegistryQueryError.self) { try router.controlPane(.init(target: source, action: action)) }
+            #expect(store.layout == before)
+        }
+    }
+
+    @Test func remoteShellRefusalPreservesTheWorkspace() throws {
+        let registry = SessionsWorkspaceRegistry(localMachineId: "other"), router = WorkLinkRouter(), window = UUID()
+        let store = registry.workspace(for: identity).multiplexer
+        let before = store.layout
+        register(router, window: window, registry: registry)
+        #expect(throws: RegistryQueryError.self) {
+            try router.controlPane(.init(target: target(store.focusedPane, window: window), action: .shell))
+        }
+        #expect(store.layout == before)
+        #expect(store.shellCommands.isEmpty)
     }
 
     @Test func hideRestoreRetainsContentAndIgnoresLaterFocus() throws {
@@ -118,7 +182,7 @@ struct DesktopPaneControlTests {
         register(router, window: window, registry: registry)
         let before = store.layout, focus = store.focusedPaneId
         let actions: [DesktopPaneAction] = [.hide, .restore, .focus, .split(axis: .horizontal),
-            .move(destination: peer, axis: .vertical), .resize(toward: peer, ratio: 0.6), .zoom(enabled: true)]
+            .move(destination: peer, axis: .vertical), .resize(toward: peer, ratio: 0.6), .zoom(enabled: true), .shell, .files(task: "task"), .flowLog(task: "task")]
         for action in actions {
             #expect(throws: RegistryQueryError.self) { try router.controlPane(.init(target: old, action: action)) }
             #expect(store.layout == before)

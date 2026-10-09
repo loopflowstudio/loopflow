@@ -64,9 +64,10 @@ installed help or reviewed Desktop code, not proof that no external tool exists.
   `d9fa2b829` adds exact-target focus, empty split, move, resize and explicit zoom;
   `df3e43fb3` shares retained-pane pruning and reveal-through-focus. Move keeps
   the original leaf; zoom does not select it. Direct model smoke/typechecking
-  passed, but packaged test attempts timed out without results. Companion
-  creation, bounded terminal reads/input, peer composition and native acceptance
-  remain unfinished. The command tables still describe October 7's baseline.
+  passed, but packaged test attempts timed out without results. The companion cut
+  adds local Shell and Task Files/Flow-log through the same exact-target path,
+  retaining selection and drafts and reusing existing Task companions.
+  Bounded terminal reads/input, peer composition and native acceptance remain unfinished. The command tables still describe October 7's baseline.
   No cmux/herdr behavior was re-exercised for these deltas.
 - Public [cmux API](https://cmux.com/docs/api) and
   [concepts](https://cmux.com/docs/concepts) provide context, but the tables below

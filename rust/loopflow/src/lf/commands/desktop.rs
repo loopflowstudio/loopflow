@@ -111,6 +111,13 @@ pub enum DesktopPaneAction {
     Hide,
     Restore,
     Focus,
+    Shell,
+    Files {
+        task: String,
+    },
+    FlowLog {
+        task: String,
+    },
     Split {
         axis: DesktopSplitAxis,
     },
@@ -163,6 +170,17 @@ pub fn run(command: &crate::lf::DesktopCommand) -> Result<()> {
         DesktopCommand::Hide { target, json } => (target, DesktopPaneAction::Hide, json),
         DesktopCommand::Restore { target, json } => (target, DesktopPaneAction::Restore, json),
         DesktopCommand::Focus { target, json } => (target, DesktopPaneAction::Focus, json),
+        DesktopCommand::Shell { target, json } => (target, DesktopPaneAction::Shell, json),
+        DesktopCommand::Files { target, task, json } => (
+            target,
+            DesktopPaneAction::Files { task: task.clone() },
+            json,
+        ),
+        DesktopCommand::FlowLog { target, task, json } => (
+            target,
+            DesktopPaneAction::FlowLog { task: task.clone() },
+            json,
+        ),
         DesktopCommand::Split { target, axis, json } => {
             (target, DesktopPaneAction::Split { axis: *axis }, json)
         }

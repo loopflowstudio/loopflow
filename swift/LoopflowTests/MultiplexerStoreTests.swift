@@ -1,9 +1,49 @@
+import Foundation
 import Loopflow
 import Testing
 
 @Suite("Multiplexer store")
 @MainActor
 struct MultiplexerStoreTests {
+    @Test("Published shell panes already carry their launch command")
+    func shellLaunchIsPublishedTogether() {
+        let store = MultiplexerStore()
+        let observer = NotificationCenter.default.addObserver(forName: .multiplexerStoreDidChange, object: store, queue: nil) { _ in
+            MainActor.assumeIsolated {
+                for pane in store.layout.allPanes where pane.content == .shell {
+                    #expect(store.shellCommands[pane.id] == ["fixture"])
+                }
+            }
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+        store.newShell(command: ["fixture"])
+        store.newShell(command: ["fixture"])
+        #expect(store.layout.allPanes.count == 2)
+    }
+
+    @Test("Targeted companions fill empty panes and preserve unrelated focus")
+    func targetedCompanions() {
+        let store = MultiplexerStore()
+        let empty = store.focusedPane
+        store.split(empty.id, axis: .horizontal)
+        store.load(sessionId: "selected")
+        let selected = store.focusedPane
+        store.setZoom(selected.id, enabled: true)
+        store.newShell(command: ["fixture"], beside: empty.id, focus: false)
+        let shell = store.layout.pane(for: empty.id)
+        #expect(shell?.content == .shell)
+        #expect(shell?.incarnation != empty.incarnation)
+        #expect(store.shellCommands[empty.id] == ["fixture"])
+        store.show(.files(taskId: "task"), beside: empty.id, focus: false)
+        store.show(.flowLog(taskId: "task"), beside: empty.id, focus: false)
+        store.show(.files(taskId: "task"), beside: empty.id, focus: false)
+        #expect(store.layout.allPanes.count == 4)
+        #expect(store.layout.pane(for: empty.id) == shell)
+        #expect(store.layout.pane(for: selected.id) == selected)
+        #expect(store.focusedPane == selected)
+        #expect(store.zoomedPaneId == selected.id)
+    }
+
     @Test("Reopening a hidden companion reveals its retained occurrence", arguments: [
         PaneContent.files(taskId: "task"), .flowLog(taskId: "task"),
     ])

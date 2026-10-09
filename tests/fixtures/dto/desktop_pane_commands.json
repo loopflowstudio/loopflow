@@ -109,5 +109,46 @@
       "kind": "zoom",
       "enabled": true
     }
+  },
+  {
+    "target": {
+      "repository": "repo_22222222222222222222222222222222",
+      "window": "55555555-5555-5555-5555-555555555555",
+      "machine_id": "home_11111111111111111111111111111111",
+      "worktree": "/repo.task",
+      "pane": "session-pane",
+      "incarnation": "occurrence-session-pane"
+    },
+    "action": {
+      "kind": "shell"
+    }
+  },
+  {
+    "target": {
+      "repository": "repo_22222222222222222222222222222222",
+      "window": "55555555-5555-5555-5555-555555555555",
+      "machine_id": "home_11111111111111111111111111111111",
+      "worktree": "/repo.task",
+      "pane": "session-pane",
+      "incarnation": "occurrence-session-pane"
+    },
+    "action": {
+      "kind": "files",
+      "task": "task-fixture"
+    }
+  },
+  {
+    "target": {
+      "repository": "repo_22222222222222222222222222222222",
+      "window": "55555555-5555-5555-5555-555555555555",
+      "machine_id": "home_11111111111111111111111111111111",
+      "worktree": "/repo.task",
+      "pane": "session-pane",
+      "incarnation": "occurrence-session-pane"
+    },
+    "action": {
+      "kind": "flow_log",
+      "task": "task-fixture"
+    }
   }
 ]

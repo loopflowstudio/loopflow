@@ -226,3 +226,6 @@ Jack Heart: "wait thats just redundant with header". Lede removed from `/cli`; t
 
 `/cli` headline, from Jack Heart: "ok make that the header and cut the other part", then "no make the CLI for [writing, running, sharing, studying] <- these move coding agent workflows", "needs some bakground color and then like shadow or gradient or some other visual polish to make it feel smotoh", "also wants to be one lien", "maybe cut coding".
 Built: "lf is the CLI for [writing | running | sharing | studying] agent workflows." on one line at desktop width; the cycling word sits in a tinted chip and slides in. "Loopflow is the CLI for software engineering." is gone from the page.
+
+Jack Heart: "we need more flow stuff in both the list of commands and at the top of the list that follows". `/cli` commands now open with `lf flow list`, `lf flow show`, `lf run`, `lf flow customize`; the list opens with Flows, Steps, Built-ins.
+On "you can resume a Codex session in Claude": Jack asked whether it is true of lf today and not of Claude by default, then "maybe just file a task to enable doign it" and "lets check at least that you cant already just natively ask claude to resume a codex session". Checked 2026-10-09 with Claude Code 2.1.295: `claude -p --resume <Codex conversation id>` answers "No conversation found with session ID".

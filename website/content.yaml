@@ -99,15 +99,25 @@ cli:
       your own account and has its own cost.
   agents:
     commands: |-
+      $ lf flow list                      # the Flows you have
+      $ lf flow show ship-api             # its steps
+      $ lf run ship-api                   # run it
+      $ lf flow customize pursue          # copy a built-in into your repo
+      $ lf skill design "Add CSV export"  # one step on its own
+      $ lf task create --wave exports --title "Add CSV export"
+      $ lf task run EXP-12                # a task's next Flow
       $ lf session list                   # every conversation
       $ lf session resume                 # pick one back up
-      $ lf wave status exports            # the plan
-      $ lf task create --wave exports --title "Add CSV export"
-      $ lf task run EXP-12                # a task's next step
-      $ lf skill design "Add CSV export"  # one session
-      $ lf run ship-api                   # a Flow: sessions in order
       $ lf pr land                        # merge it
     items:
+    - name: Flows
+      text: '`lf` runs Flows. A Flow is a sequence of Skills, and it can loop. `lf run` starts one
+        and `lf flow show` prints its steps.'
+    - name: Steps
+      text: Each step can be interactive or autonomous, run on a particular model, and so on.
+    - name: Built-ins
+      text: '`lf` comes with many reasonable Flows for software engineering. `lf flow customize`
+        copies one into your repository to change.'
     - name: Sessions
       text: At its most basic, `lf` is an agent launcher and session manager. Use it anywhere you
         would launch an agent. For example, you can resume a Codex session in Claude.
@@ -134,17 +144,12 @@ cli:
       - gate
       - loop: implement
       - cmd: pr land
-
-      $ lf run ship-api                   # run it
-      $ lf flow list                      # the Flows you have
     items:
-    - name: Flows
-      text: '`lf` runs Flows. A Flow is a sequence of Skills, and it can loop.'
-    - name: Steps
-      text: Each step can be interactive or autonomous, run on a particular model, and so on.
-    - name: Built-ins
-      text: '`lf` comes with many reasonable Flows for software engineering. You are encouraged to
-        build your own and share them with others.'
+    - name: Skills
+      text: A Skill is one instruction, written in Markdown. Each line of a Flow names one.
+    - name: Yours
+      text: You are encouraged to build your own Flows and share them with others. They are files
+        in your repository.
     links:
     - label: Skills and Flows ↗
       href: /docs/authoring#flows

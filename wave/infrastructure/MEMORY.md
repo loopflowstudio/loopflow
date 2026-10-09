@@ -46,9 +46,10 @@ acquisition recognizes partial progress, never detail reads.
 pending-only projections, retaining baselines. Configuration selects pending display;
 creation receipts advance revision. `29777b8cb` scopes sync to repositories;
 `b6f34a6f8` separates Linux reconnect and portable abandonment fixtures.
-Gate repaired fixtures, DTOs and ownership docs. Linux migration, native/public
-Flow/work-watch reconnect and adoption pass; Swift startup remains unavailable. Jack waived no checks.
-PR #1503's scratch checkpoint skips product CI. Installed acceptance is unproved.
+`078a6642e` repairs gate fixtures, DTOs and ownership docs. Linux migration,
+native/public Flow/work-watch reconnect and adoption pass; Swift remains unavailable.
+Jack requires queue before landing, with no check waiver or landing authority here.
+PR #1503's scratch checkpoint skips product CI; installed acceptance is unproved.
 
 Jack Heart's `8821db44-0480-4493-8609-953207663f1d` removes public creation tokens.
 Each create generates/saves/returns a distinct ID, even for identical titles;
@@ -58,35 +59,35 @@ No rewrite is authorized; Linear Done beside a running Flow remains unanswered.
 
 The enabled `task_completion_preserves_linear_reopening_during_delivery` regression
 still fails: an unseen reopening is overwritten and matching readback falsely
-settles delivery. Linear's schema at `7d2bc4279f` exposes no expected-revision
-issue update. More reads cannot prove atomic preservation; Linear-wins selects
-precedence, not atomicity. The design retains exact race and schema evidence.
+settles delivery. Its atomic-preservation/pending-retention assertion exceeds accepted
+observed Linear-wins with retired losing intentions; it stays enabled, not waived.
+Linear's schema at `7d2bc4279f` exposes no expected-revision issue update. More reads
+cannot prove atomic preservation. State settlement now has no test-only success
+shortcut: observations settle; failures retain uncertainty. The design retains evidence.
 
-Comments retain provider body/author/time and the loser without echo.
-`67ee4024a` delivers cancellation; resolve the Team's lowest-position state
-before marking attempted so failed discovery stays retryable.
-`fc056bb6b` delivers deletion: trash/acknowledgement settles; absence permits no replay.
-A newer explicitly active Linear revision
-restores visibility, retaining the loser. Inventory proves neither trash nor
-restoration. Fixtures preserve execution/history; composed/installed acceptance is unproved.
+Comments retain provider authorship and losing edits without echo. Cancellation
+resolves the Team's lowest-position state before attempting; failed discovery stays
+retryable. Deletion settles only on trash or acknowledgement, never absence.
+Newer explicitly active Linear evidence restores visibility and retains the loser;
+inventory grants neither restoration nor execution authority. Exact slice proofs:
+`078a6642e:wave/infrastructure/MEMORY.md`, this heading; installed acceptance is unproved.
 
-Ownership/cutover proofs: `bbc6eb8d3:wave/infrastructure/MEMORY.md`, this heading;
-LOO-412 boundary: `84664e661`. SQLite owns Wave documents/relocation, preserving
-IDs/files, execution, PRs, checkouts and uncertain effects. Personal owners and
-provider-first deletion stay removed. Exact Project IDs precede slugs.
-`e68f2a423` exports saved UUIDs through creation receipts; separate creation/link
-attempts retain uncertainty without replay. Identity attachment precedes inventory
-and preserves later saves. Operation reconnect/lost-reply proofs establish no
-composed CLI/Desktop or installed acceptance; historical uncertainty remains.
+SQLite owns Wave definitions/relocation, preserving IDs, files, execution, PRs,
+checkouts and uncertain effects. Personal owners and provider-first deletion stay
+removed; Project IDs precede slugs. Common-writer boundary: `84664e661`;
+earlier proofs: `bbc6eb8d3:wave/infrastructure/MEMORY.md`, this heading.
+`e68f2a423` exports saved UUIDs. Separate creation/link attempts retain uncertainty
+without replay; identity attachment precedes inventory and preserves later saves.
+Composed/installed export acceptance is unproved.
 
 Jack selected Git-like Task prefixes: four or more hex digits, bare or prefixed;
 reject ambiguity, retain full IDs and lengthen display abbreviations as needed.
-Identity, creation receipts, mapping and placement stay distinct. Publication is
-for review only; no landing or installation. Design: `scratch/explore-loopflow-s-own-store.md`.
+Identity, receipts, mappings and placement stay distinct. No landing/installation.
+Design: `scratch/explore-loopflow-s-own-store.md`.
 
 Superseded split proofs and recovery evidence: `dfe18ab6060901992b55e64842e23c4295673b08:wave/infrastructure/MEMORY.md`.
 
-Laptop authorship and disposable workers prove neither backup nor private, unique export.
+Disposable workers prove no backup or private export.
 
 ## Session titles (LOO-439, 2026-10-08)
 

@@ -1,9 +1,11 @@
 //! Scans the builtins directory and generates registration code so that
 //! adding a new .md or .yaml file is all you need — no manual HashMap insert.
 
+// Build registration only uses the portable projection.
+#[allow(dead_code)]
 #[path = "src/engine/definition_name.rs"]
 mod definition_name;
-use definition_name::definition_key;
+use definition_name::portable_name;
 
 use std::env;
 use std::fmt::Write as _;
@@ -297,7 +299,7 @@ fn generate_builtins(builtins_dir: &Path, out_dir: &Path, kind: &str, extension:
                 categories
                     .entry(title_case(&cat_name))
                     .or_default()
-                    .push(definition_key(&name));
+                    .push(portable_name(&name));
                 entries.push((name, path));
             }
         }
@@ -324,7 +326,7 @@ fn compose_sessions(entries: &mut [(String, PathBuf)], out_dir: &Path) {
         let index = |name: &str| {
             entries
                 .iter()
-                .position(|(entry, _)| definition_key(entry) == name)
+                .position(|(entry, _)| portable_name(entry) == name)
                 .unwrap_or_else(|| panic!("builtin skill `{name}` is missing"))
         };
         let read = |path: &Path| {
@@ -359,11 +361,11 @@ fn emit_map(entries: &mut [(String, PathBuf)], map_name: &str, out_path: &Path) 
             shortcuts
                 .entry(bare.into())
                 .or_default()
-                .push(definition_key(name));
+                .push(portable_name(name));
         }
     }
     for (name, _) in entries.iter_mut() {
-        *name = definition_key(name);
+        *name = portable_name(name);
     }
     entries.sort_by(|a, b| a.0.cmp(&b.0));
 

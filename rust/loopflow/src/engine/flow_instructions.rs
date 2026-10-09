@@ -1,11 +1,10 @@
 //! Render the compiler's captured plan for execution in the current conversation.
-use crate::engine::definition_name::definition_key;
 use crate::engine::flow::return_target;
 use crate::engine::flow_output::FlowOutput;
 use crate::engine::{ConcreteStep, LoadError, Skill};
 
 pub fn render_flow_instructions(name: &str, steps: &[ConcreteStep]) -> Result<String, LoadError> {
-    let mut output = format!("# Flow: {}\n\n", definition_key(name));
+    let mut output = format!("# Flow: {}\n\n", name);
     output.push_str("Carry out this frozen plan in the current conversation using the current request and accumulated evidence. Apply the resolved skill bodies below here; naming another slash command is not execution. Do not launch `lf run`, new Sessions, or workers to carry out these steps.\n\n\
 Track the current occurrence, loop pass, decision and pending input in the transcript. Follow every command, loop, branch and review boundary. Stop on command failure. Never automatically replay a successful side effect after interruption: inspect evidence first; if the position is uncertain, ask here.\n\n\
 A review requires the participant's response in this conversation; never fabricate approval or substitute an agent. If no participant is available, explain the missing input and stop. A blocked decision stops here pending new direction. Correct invalid decisions at that decision, without rerunning preceding work. There is no arbitrary iteration limit.\n\n\
@@ -14,11 +13,7 @@ The current model performs the work. Agent preferences and native declarations b
     render_steps(steps, "", &mut bodies, &mut output)?;
     output.push_str("\n## Resolved skill bodies\n");
     for (index, skill) in bodies.iter().enumerate() {
-        output.push_str(&format!(
-            "\n### Body {}: {}\n\n",
-            index + 1,
-            definition_key(&skill.name)
-        ));
+        output.push_str(&format!("\n### Body {}: {}\n\n", index + 1, skill.name));
         if let Some(source) = &skill.source {
             output.push_str(&format!(
                 "Source: {} ({:?})\nBase directory for this skill: {}\n\n",
@@ -58,7 +53,7 @@ fn render_steps<'a>(
                 let body = body_number(&occurrence.skill, bodies);
                 output.push_str(&format!(
                     "{position}. Apply **{}** (body {body})",
-                    definition_key(&occurrence.skill.name)
+                    occurrence.skill.name
                 ));
                 if let Some(id) = &occurrence.id {
                     output.push_str(&format!("; occurrence ID `{id}`"));
@@ -89,7 +84,7 @@ fn render_steps<'a>(
                 let body = body_number(&branch.router, bodies);
                 let mut paths: Vec<_> = branch.paths.keys().cloned().collect();
                 paths.sort();
-                output.push_str(&format!("{position}. Route with **{}** (body {body}). Choose exactly one declared path, complete it, then rejoin after {position}. An invalid route never defaults to a branch.\n   Route contract: {}\n", definition_key(&branch.router.name), FlowOutput::Route(paths.clone()).schema()));
+                output.push_str(&format!("{position}. Route with **{}** (body {body}). Choose exactly one declared path, complete it, then rejoin after {position}. An invalid route never defaults to a branch.\n   Route contract: {}\n", branch.router.name, FlowOutput::Route(paths.clone()).schema()));
                 for name in paths {
                     let path = &branch.paths[&name];
                     output.push_str(&format!("\nPath `{name}`: {}\n\n", path.description));

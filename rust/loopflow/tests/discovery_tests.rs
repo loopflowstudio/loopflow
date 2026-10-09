@@ -50,7 +50,7 @@ fn discover_builtin_skills() {
     let _home = HomeGuard::new();
     let catalog = SkillCatalog::discover(None).unwrap();
     for skill in builtin_skill_names() {
-        assert!(catalog.resolve(skill).unwrap().path.is_none());
+        assert!(catalog.resolve(skill).unwrap().unwrap().path.is_none());
     }
 }
 
@@ -84,7 +84,7 @@ fn discover_repo_skills() {
     let catalog = SkillCatalog::discover(Some(repo.path())).unwrap();
     for name in ["custom", "team/review"] {
         assert_eq!(
-            catalog.resolve(name).unwrap().path,
+            catalog.resolve(name).unwrap().unwrap().path,
             Some(skills_dir.join(format!("{name}.md")))
         );
     }
@@ -165,7 +165,7 @@ fn repo_skill_shadows_builtin() {
 
     let catalog = SkillCatalog::discover(Some(repo.path())).unwrap();
     assert_eq!(
-        catalog.resolve("qa").unwrap().path,
+        catalog.resolve("qa").unwrap().unwrap().path,
         Some(skills_dir.join("qa.md"))
     );
 }
@@ -307,10 +307,10 @@ fn installed_skills_share_listing_execution_and_flow_resolution() {
     }
     let catalog = SkillCatalog::discover(Some(repo.path())).unwrap();
     assert_eq!(
-        catalog.resolve("explain-code").unwrap().path,
+        catalog.resolve("explain-code").unwrap().unwrap().path,
         Some(skills.join("explain-code/SKILL.md"))
     );
-    assert!(catalog.resolve("design").unwrap().path.is_none());
+    assert!(catalog.resolve("design").unwrap().unwrap().path.is_none());
     assert_eq!(
         load_skill("explain-code", repo.path())
             .unwrap()

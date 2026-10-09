@@ -3,7 +3,7 @@
 //! Registration is automatic: drop a file into the right builtins/
 //! subdirectory and build.rs generates the HashMap entries.
 
-use crate::engine::definition_name::definition_key;
+use crate::engine::definition_name::portable_name;
 
 /// Bundled LOOPFLOW.md - the one loopflow operating document every launched
 /// agent receives, including the Work and Session vocabulary.
@@ -21,7 +21,7 @@ pub const SURFACE_CHAT: &str = include_str!("builtins/surfaces/chat.md");
 
 /// Returns the content of a built-in skill, if it exists.
 pub fn get_builtin_skill(name: &str) -> Option<&'static str> {
-    BUILTIN_SKILLS.get(definition_key(name).as_str()).copied()
+    BUILTIN_SKILLS.get(portable_name(name).as_str()).copied()
 }
 
 /// One-line description for a built-in skill. Prefers the `description:` frontmatter
@@ -59,13 +59,13 @@ fn flow_description_from_content(content: &str) -> String {
 
 /// Returns the content of a built-in flow, if it exists.
 pub fn get_builtin_flow(name: &str) -> Option<&'static str> {
-    BUILTIN_FLOWS.get(definition_key(name).as_str()).copied()
+    BUILTIN_FLOWS.get(portable_name(name).as_str()).copied()
 }
 
 /// Resolve a builtin skill key: exact name, `operate` for `repo-operate`, then
 /// a unique namespace suffix. Returns `None` for absent or ambiguous names.
 pub fn resolve_builtin_skill(name: &str) -> Option<&'static str> {
-    if let Some((key, _)) = BUILTIN_SKILLS.get_key_value(definition_key(name).as_str()) {
+    if let Some((key, _)) = BUILTIN_SKILLS.get_key_value(portable_name(name).as_str()) {
         return Some(key);
     }
     // Repository operation owns the short name; Wave operation stays explicit.
@@ -80,7 +80,7 @@ pub fn resolve_builtin_skill(name: &str) -> Option<&'static str> {
 /// Resolve a canonical or slash spelling, then a unique source-namespace shortcut.
 /// Hyphen suffixes do not create shortcuts. Absent or ambiguous names return `None`.
 pub fn resolve_builtin_flow(name: &str) -> Option<&'static str> {
-    if let Some((key, _)) = BUILTIN_FLOWS.get_key_value(definition_key(name).as_str()) {
+    if let Some((key, _)) = BUILTIN_FLOWS.get_key_value(portable_name(name).as_str()) {
         return Some(key);
     }
     resolve_shortcut(name, BUILTIN_FLOWS_SHORTCUTS)

@@ -307,7 +307,7 @@ fn list_preserves_kinds_overrides_sources_and_reserved_invocations() {
 }
 
 #[test]
-fn skill_catalog_lists_flat_portable_names_from_nested_sources() {
+fn skill_catalog_lists_literal_names_from_nested_sources() {
     let repo = fixture();
     let home = tempfile::tempdir().unwrap();
     fs::create_dir_all(repo.path().join(".lf/skills/team/nested")).unwrap();
@@ -322,8 +322,8 @@ fn skill_catalog_lists_flat_portable_names_from_nested_sources() {
     let catalog = json_entries(repo.path(), home.path(), &["list", "skill", "--json"]);
     assert!(catalog
         .iter()
-        .any(|row| row["name"] == "team-review" && row["kind"] == "skill"));
-    assert!(catalog.iter().any(|row| row["name"] == "team-nested-check"));
+        .any(|row| row["name"] == "team/review" && row["kind"] == "skill"));
+    assert!(catalog.iter().any(|row| row["name"] == "team/nested/check"));
     assert!(!catalog.iter().any(|row| row["kind"] == "namespace"));
     let scoped = json_entries(
         repo.path(),
@@ -333,7 +333,7 @@ fn skill_catalog_lists_flat_portable_names_from_nested_sources() {
     let all = json_entries(repo.path(), home.path(), &["list", "--json"]);
     let expected: Vec<_> = all
         .into_iter()
-        .filter(|row| row["kind"] == "skill" && row["name"].as_str().unwrap().starts_with("team-"))
+        .filter(|row| row["kind"] == "skill" && row["name"].as_str().unwrap().starts_with("team/"))
         .collect();
     assert_eq!(scoped, expected);
     assert_eq!(scoped.len(), 2);
@@ -875,7 +875,7 @@ fn portable_flow_instructions_are_read_only_and_resolve_current_overrides() {
             &["flow", "show", name, "--instructions"],
         ));
         let output = String::from_utf8(output).unwrap();
-        assert!(output.contains("# Flow: team-chat"));
+        assert!(output.contains("# Flow: team/chat"));
         assert!(output.contains("Skill solo body."));
         assert!(output.contains("pause for their response"));
     }
@@ -901,7 +901,7 @@ fn portable_flow_instructions_are_read_only_and_resolve_current_overrides() {
 }
 
 #[test]
-fn portable_same_key_help_keeps_flow_first_and_explicit_skill_selection() {
+fn portable_help_describes_exact_kind_selection() {
     let repo = fixture();
     let home = tempfile::tempdir().unwrap();
     fs::create_dir_all(repo.path().join(".lf/flows/team")).unwrap();
@@ -911,18 +911,17 @@ fn portable_same_key_help_keeps_flow_first_and_explicit_skill_selection() {
         "Explicit skill body",
     )
     .unwrap();
-    for name in ["team/check", "team-check"] {
-        let flow =
-            String::from_utf8(success(run(repo.path(), home.path(), &["help", name]))).unwrap();
-        assert!(flow.contains("team-check — flow"));
-        assert!(flow.contains("Also available: skill"));
-        let skill = String::from_utf8(success(run(
-            repo.path(),
-            home.path(),
-            &["help", "skill", name],
-        )))
-        .unwrap();
-        assert!(skill.contains("Explicit skill body"));
-        assert!(skill.contains("Untyped lookup selects the same-named flow"));
-    }
+    let help =
+        |args: &[&str]| String::from_utf8(success(run(repo.path(), home.path(), args))).unwrap();
+    let flow = help(&["help", "team/check"]);
+    assert!(flow.contains("team/check — flow"));
+    assert!(flow.contains("team-check"));
+    let skill = help(&["help", "team-check"]);
+    assert!(skill.contains("team-check — skill"));
+    assert!(!skill.contains("flow wins untyped lookup"));
+    assert!(!skill.contains("Untyped lookup selects"));
+    fs::write(repo.path().join(".lf/flows/team-check.yaml"), "- solo\n").unwrap();
+    assert!(help(&["help", "team-check"]).contains("team-check — flow"));
+    assert!(help(&["help", "skill", "team-check"])
+        .contains("Untyped lookup selects the same-named flow"));
 }

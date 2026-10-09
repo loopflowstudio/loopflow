@@ -101,8 +101,9 @@ lf flow show ship-api --instructions
 Select `ship-api` as a native skill to run its compiled plan in the current
 conversation. The wrapper reads the current checkout’s definitions, including
 local overrides, and returns the numbered plan plus each resolved skill body.
-No separate chat parser or authored Flow copy is involved. Skills and Flows use
-dashed public names; slash input still resolves the same definition.
+No separate chat parser or authored Flow copy is involved. Skills and Flows keep exact literal names. Slash and dash definitions can coexist;
+normalization is only a fallback when the exact name is absent. Codex retains both
+names; Claude uses the literal dashed name when flattening would collide.
 
 Follow commands in order, loop over the named range on `iterate`, continue on
 `advance`, and stop for missing input on `blocked`. XOR selects one declared
@@ -123,7 +124,7 @@ FlowProcess, step Process or new Session, and does not move the Task’s Workflo
 Explicit LF command steps retain their normal effects. Native controls and agent
 preferences are disclosed, not silently translated or used to switch models.
 
-Native names have no Flow prefix. If a skill already owns the same canonical
+Native names have no Flow prefix. If a skill already owns the same native
 name, sync skips that Flow export and preserves the skill. `lf flow show NAME
 --instructions` still reads that Flow explicitly. Newly added repository names
 need another `sync-skills --repo`; editing an existing Flow does not.

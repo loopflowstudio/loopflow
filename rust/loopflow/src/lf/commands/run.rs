@@ -109,7 +109,8 @@ fn run_bound_prompt(
 ) -> Result<Option<FinalAnswer>> {
     let mut scoped;
     let binding = if skill
-        .map(crate::engine::definition_name::definition_key)
+        .map(|name| crate::engine::load_skill(name, &binding.cwd).map(|skill| skill.name))
+        .transpose()?
         .as_deref()
         == Some("wave-operate")
         && cli.bound_cwd.is_none()
@@ -221,7 +222,8 @@ fn build_prompt(
     let start = Instant::now();
     let repo_root = repo_root.to_path_buf();
     let repo_root = if skill
-        .map(crate::engine::definition_name::definition_key)
+        .map(|name| crate::engine::load_skill(name, &repo_root).map(|skill| skill.name))
+        .transpose()?
         .as_deref()
         == Some("repo-operate")
         && cli.bound_cwd.is_none()
@@ -1610,7 +1612,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         std::fs::create_dir_all(native.parent().unwrap()).unwrap();
         std::fs::write(&native, "Original audit instructions").unwrap();
         let catalog = SkillCatalog::load(Some(repo.path()), None, false).unwrap();
-        let skill = catalog.resolve("audit").unwrap().load().unwrap();
+        let skill = catalog.resolve("audit").unwrap().unwrap().load().unwrap();
         std::fs::remove_file(&native).unwrap();
         let replacement = repo.path().join(".lf/skills/audit.md");
         std::fs::create_dir_all(replacement.parent().unwrap()).unwrap();

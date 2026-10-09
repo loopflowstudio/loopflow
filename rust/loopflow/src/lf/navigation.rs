@@ -475,15 +475,7 @@ pub(crate) fn format_target(target: &Target) -> String {
 }
 
 fn format_xor(router: Option<&str>, paths: &HashMap<String, XorPath>) -> String {
-    let label = router.map_or_else(
-        || "xor".to_string(),
-        |name| {
-            format!(
-                "xor[{}]",
-                crate::engine::definition_name::definition_key(name)
-            )
-        },
-    );
+    let label = router.map_or_else(|| "xor".to_string(), |name| format!("xor[{}]", name));
     let mut names: Vec<_> = paths.keys().collect();
     names.sort();
     let rendered = names
@@ -545,10 +537,12 @@ fn definition_help(
     }
     if kind == DefinitionKind::Flow {
         match resolve_definition(repo, name, Some(DefinitionKind::Skill)) {
-            Ok(_) => output.push_str(&format!(
-                "\nAlso available: skill (flow wins untyped lookup)\n  {} [message]\n",
-                definition_invocation(tree, name, DefinitionKind::Skill)
+            Ok(Target::Skill(skill)) => output.push_str(&format!(
+                "\nAlso available: skill {} (flow wins untyped lookup for {name})\n  {} [message]\n",
+                skill.name,
+                definition_invocation(tree, &skill.name, DefinitionKind::Skill)
             )),
+            Ok(_) => unreachable!("typed skill lookup returns a skill"),
             Err(crate::engine::LoadError::SkillNotFound(_)) => {}
             Err(error) => output.push_str(&format!("\nSame-named skill unavailable: {error}\n")),
         }

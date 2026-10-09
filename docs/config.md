@@ -545,18 +545,21 @@ go to the corresponding checkout directories, never home. Release promotion’s
 skill sync includes builtin Flows. Sync again after adding or removing repository
 definitions. Flow content changes and overrides resolve at invocation time.
 
-Keep hierarchy in sources: `.lf/skills/wave/session.md` has the public name
-`wave-session`; `wave/session` remains accepted input. The same rule applies to
-Flows. A nested source and a dashed filename at the same precedence are ambiguous;
-the error names both paths. Repository, personal and provider-root precedence
-remain unchanged. Only existing unique bare shortcuts resolve; a hyphen suffix
-does not create a new shortcut. Original native declarations and resource paths
-remain attached to the selected source.
+Exact names win: `.lf/skills/wave/session.md` and `.lf/skills/wave-session.md`
+are distinct definitions. `lf skill wave/session` selects the first; `lf skill
+wave-session` selects the second. When no exact name exists, `/` → `-` provides a
+fallback. Multiple fallback candidates produce an ambiguity naming the candidates.
+The same rules apply to Flows. Repository, personal and provider-root precedence
+apply to identical literal names. Existing unique bare shortcuts remain; hyphen
+suffixes do not create new shortcuts. Untyped lookup checks exact names before
+fallbacks, with Flow-first precedence for the same literal name.
 
-Each native export occupies one flat directory matching its dashed name. A Flow
-uses its own name, without a prefix, and yields to any same-key skill (Loopflow or
-third-party), with a reported skip. Typed and untyped LF resolution are unchanged.
-Invalid portable names are reported, never silently rewritten. Third-party files
-and bundles are preserved. Sync prunes only generated exports; a blocked flat
-replacement preserves its old nested export. Cross-harness exports retain native
-declarations without claiming to enforce or translate their controls.
+Codex exports retain slash and dash names, plus dashed fallbacks where unoccupied.
+Claude exports are flat: a literal dashed name wins over a flattened hierarchical
+name, with unrepresentable exports reported as skipped. Flow exports have no
+prefix and yield to skills at each provider's projected name. Each wrapper loads
+its original exact Flow name. Invalid provider names are reported, never silently
+rewritten. Third-party files and bundles are preserved. Sync prunes only generated
+exports after replacements are writable; desired nested Codex exports survive.
+Original native declarations and resource paths remain attached to each source;
+cross-harness exports do not claim to enforce or translate native controls.

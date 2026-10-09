@@ -66,11 +66,9 @@ fn collect_entries(tree: &Command, path: &[String], repo: &Path) -> Result<Vec<E
     }
     if path.is_empty() || path.first().is_some_and(|name| name == "skill") {
         let catalog = crate::engine::skill_catalog::SkillCatalog::discover(Some(repo))?;
-        let prefix = path
-            .get(1)
-            .map(|name| format!("{}-", crate::engine::definition_name::definition_key(name)));
+        let prefix = path.get(1).map(|name| format!("{name}/"));
         for source in catalog.entries() {
-            let name = crate::engine::definition_name::definition_key(&source.name);
+            let name = source.name.clone();
             if prefix
                 .as_ref()
                 .is_some_and(|prefix| !name.starts_with(prefix))

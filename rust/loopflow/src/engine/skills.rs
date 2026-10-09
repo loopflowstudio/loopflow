@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::engine::definition_name::definition_key;
+use crate::engine::definition_name::portable_name;
 use crate::engine::flow::split_frontmatter;
 use crate::engine::skill_catalog::{is_generated, SkillCatalog, SkillDialect, SkillSource};
 use crate::engine::LoadError;
@@ -60,10 +60,6 @@ pub fn sync_skills(options: &SkillSyncOptions) -> Result<SkillSyncReport, LoadEr
             .map(str::to_string)
             .collect(),
     };
-    let skill_names: BTreeSet<_> = catalog
-        .entries()
-        .map(|skill| definition_key(&skill.name))
-        .collect();
     let repo = options.repo.as_ref().map(std::path::absolute).transpose()?;
     let mut targets = Vec::new();
     let mut report = SkillSyncReport::default();
@@ -74,7 +70,14 @@ pub fn sync_skills(options: &SkillSyncOptions) -> Result<SkillSyncReport, LoadEr
     ] {
         let root = base.join(folder);
         let mut exports = BTreeMap::new();
-        for skill in catalog.entries() {
+        let skills = project_names(
+            catalog.entries().map(|skill| skill.name.as_str()),
+            vendor,
+            &root,
+            &mut report,
+        )?;
+        for (name, source) in &skills {
+            let skill = catalog.exact(source).expect("projected source exists");
             if repo.as_ref().is_some_and(|repo| {
                 !skill
                     .path
@@ -83,27 +86,30 @@ pub fn sync_skills(options: &SkillSyncOptions) -> Result<SkillSyncReport, LoadEr
             }) {
                 continue;
             }
-            let name = definition_key(&skill.name);
-            validate_export_name(&name)?;
-            exports.insert(name, render_skill(skill, vendor)?);
+            exports.insert(name.clone(), render_skill(skill, name, vendor)?);
         }
-        for flow in &flows {
-            let name = definition_key(flow);
-            validate_export_name(&name)?;
-            if skill_names.contains(&name) {
+        for (name, flow) in
+            project_names(flows.iter().map(String::as_str), vendor, &root, &mut report)?
+        {
+            if skills.contains_key(&name) {
                 let path = root.join(&name).join(SKILL_FILE_NAME);
                 eprintln!(
-                    "warning: skipping Flow {flow:?}: skill {name:?} owns the native name at {}",
+                    "warning: skipping Flow {flow:?}: skill owns the native name {name:?} at {}",
                     path.display()
                 );
                 report.skipped.push(path);
                 continue;
             }
-            exports.insert(name, render_flow_skill(flow, vendor));
+            exports.insert(name.clone(), render_flow_skill(&flow, &name, vendor));
         }
         let blocked = exports
             .keys()
-            .filter(|name| !writable_target(&root, name))
+            .filter(|name| {
+                !writable_target(&root, name)
+                    || exports
+                        .keys()
+                        .any(|other| other.starts_with(&format!("{name}/")))
+            })
             .cloned()
             .collect::<BTreeSet<_>>();
         targets.push((root, exports, blocked));
@@ -121,6 +127,60 @@ pub fn sync_skills(options: &SkillSyncOptions) -> Result<SkillSyncReport, LoadEr
     report.pruned.sort();
     report.skipped.sort();
     Ok(report)
+}
+
+/// Provider projection is independent of discovery order: literal targets win.
+fn project_names<'a>(
+    names: impl Iterator<Item = &'a str>,
+    vendor: Vendor,
+    root: &Path,
+    report: &mut SkillSyncReport,
+) -> Result<BTreeMap<String, String>, LoadError> {
+    let mut candidates = BTreeMap::<String, BTreeSet<String>>::new();
+    for name in names {
+        let portable = portable_name(name);
+        candidates
+            .entry(portable)
+            .or_default()
+            .insert(name.to_string());
+        if vendor == Vendor::Codex {
+            candidates
+                .entry(name.to_string())
+                .or_default()
+                .insert(name.to_string());
+        }
+    }
+    let mut selected = BTreeMap::new();
+    for (target, sources) in candidates {
+        for component in target.split('/') {
+            validate_export_name(component)?;
+        }
+        let winner = if sources.contains(&target) {
+            Some(target.clone())
+        } else if sources.len() == 1 {
+            sources.first().cloned()
+        } else {
+            None
+        };
+        if winner.is_none() || (vendor == Vendor::Claude && sources.len() > 1) {
+            eprintln!(
+                "warning: skipping unrepresentable exports at {target:?}: {}",
+                sources
+                    .iter()
+                    .filter(|source| Some(*source) != winner.as_ref())
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+            report
+                .skipped
+                .push(root.join(&target).join(SKILL_FILE_NAME));
+        }
+        if let Some(source) = winner {
+            selected.insert(target, source);
+        }
+    }
+    Ok(selected)
 }
 
 fn validate_export_name(name: &str) -> Result<(), LoadError> {
@@ -145,6 +205,9 @@ fn writable_target(root: &Path, name: &str) -> bool {
     !directory
         .ancestors()
         .any(|dir| dir.is_symlink() || (dir.exists() && !dir.is_dir()))
+        && !directory.parent().into_iter().flat_map(Path::ancestors)
+            .take_while(|ancestor| *ancestor != root)
+            .any(|ancestor| ancestor.join(SKILL_FILE_NAME).exists())
         && !path.is_symlink()
         && (!path.exists() || (path.is_file() && is_generated(&path)))
         // A new bundle must not hide an existing namespace or claim its assets.
@@ -153,14 +216,13 @@ fn writable_target(root: &Path, name: &str) -> bool {
             || fs::read_dir(&directory).is_ok_and(|mut entries| entries.next().is_none()))
 }
 
-fn render_flow_skill(flow: &str, vendor: Vendor) -> String {
-    let key = definition_key(flow);
+fn render_flow_skill(flow: &str, name: &str, vendor: Vendor) -> String {
     let user_only = if vendor == Vendor::Claude {
         "disable-model-invocation: true\n"
     } else {
         ""
     };
-    format!("---\nname: {key}\ndescription: Follow the {key} Flow in this conversation.\nloopflow: true\nloopflow-kind: flow\nloopflow-flow: {}\n{user_only}---\nCarry out this Flow in the current conversation using the current request.\nRun `lf flow show {key} --instructions` to read its resolved instructions.\nFollow that frozen plan here, including its loop decisions, commands, branches and review boundaries.\nDo not launch `lf run` or new Sessions to carry out its skill steps.\n", yaml_string(flow))
+    format!("---\nname: {name}\ndescription: Follow the {name} Flow in this conversation.\nloopflow: true\nloopflow-kind: flow\nloopflow-flow: {}\n{user_only}---\nCarry out this Flow in the current conversation using the current request.\nRun `lf flow show {flow} --instructions` to read its resolved instructions.\nFollow that frozen plan here, including its loop decisions, commands, branches and review boundaries.\nDo not launch `lf run` or new Sessions to carry out its skill steps.\n", yaml_string(flow))
 }
 
 fn write_targets(
@@ -200,7 +262,11 @@ fn prune_targets(
             let Some(name) = synced_skill_name_from_path(target_root, &path) else {
                 continue;
             };
-            if exports.contains_key(&name) || blocked.contains(&definition_key(&name)) {
+            if exports.contains_key(&name)
+                || blocked
+                    .iter()
+                    .any(|blocked| portable_name(blocked) == portable_name(&name))
+            {
                 continue;
             }
             fs::remove_file(&path)?;
@@ -211,7 +277,7 @@ fn prune_targets(
     Ok(())
 }
 
-fn render_skill(skill: &SkillSource, vendor: Vendor) -> Result<String, LoadError> {
+fn render_skill(skill: &SkillSource, name: &str, vendor: Vendor) -> Result<String, LoadError> {
     if matches!(
         (skill.dialect, vendor),
         (SkillDialect::Claude, Vendor::Codex) | (SkillDialect::Codex, Vendor::Claude)
@@ -230,10 +296,7 @@ fn render_skill(skill: &SkillSource, vendor: Vendor) -> Result<String, LoadError
     });
     let mut declarations = String::new();
     let mut frontmatter = Vec::new();
-    frontmatter.push(format!(
-        "name: {}",
-        yaml_string(&definition_key(&skill.name))
-    ));
+    frontmatter.push(format!("name: {}", yaml_string(name)));
     frontmatter.push(format!("description: {}", yaml_string(&description)));
     frontmatter.push(LOOPFLOW_MARKER.to_string());
     frontmatter.push("loopflow-kind: skill".into());
@@ -482,7 +545,7 @@ mod tests {
         for provider in [".agents", ".claude"] {
             let root = repo.path().join(provider).join("skills");
             let wrapper = fs::read_to_string(root.join("team-ship/SKILL.md")).unwrap();
-            assert!(wrapper.contains("lf flow show team-ship --instructions"));
+            assert!(wrapper.contains("lf flow show team/ship --instructions"));
             assert!(wrapper.contains("loopflow-kind: flow"));
             assert!(wrapper.contains("Do not launch `lf run`"));
             assert!(root.join("team-check/SKILL.md").exists());
@@ -490,7 +553,53 @@ mod tests {
         }
         assert!(sync_skills(&options).unwrap().written.is_empty());
         fs::remove_file(repo.path().join(".lf/flows/team/ship.yaml")).unwrap();
-        assert_eq!(sync_skills(&options).unwrap().pruned.len(), 2);
+        assert_eq!(sync_skills(&options).unwrap().pruned.len(), 3);
+    }
+
+    #[test]
+    fn portable_codex_preserves_literal_pairs_and_claude_prefers_dashed() {
+        let home = TempDir::new().unwrap();
+        let repo = TempDir::new().unwrap();
+        for (kind, extension) in [("skills", "md"), ("flows", "yaml")] {
+            for (name, body) in [("team/check", "Slash"), ("team-check", "Dash")] {
+                let name = if kind == "flows" {
+                    name.replace("check", "ship")
+                } else {
+                    name.to_string()
+                };
+                let path = repo.path().join(format!(".lf/{kind}/{name}.{extension}"));
+                fs::create_dir_all(path.parent().unwrap()).unwrap();
+                fs::write(path, body).unwrap();
+            }
+        }
+        let options = SkillSyncOptions {
+            repo: Some(repo.path().to_path_buf()),
+            ..options_for(&home)
+        };
+        let report = sync_skills(&options).unwrap();
+        assert!(report
+            .skipped
+            .contains(&repo.path().join(".claude/skills/team-check/SKILL.md")));
+        for name in ["team/check", "team-check", "team/ship", "team-ship"] {
+            let path = repo.path().join(format!(".agents/skills/{name}/SKILL.md"));
+            let body = fs::read_to_string(path).unwrap();
+            assert!(body.contains(&format!("name: {name}\n")));
+            if name.contains("ship") {
+                assert!(body.contains(&format!("lf flow show {name} --instructions")));
+            } else {
+                assert!(body.contains(if name.contains('/') { "Slash" } else { "Dash" }));
+            }
+        }
+        let root = repo.path().join(".claude/skills");
+        assert!(!root.join("team/check/SKILL.md").exists());
+        assert!(fs::read_to_string(root.join("team-check/SKILL.md"))
+            .unwrap()
+            .contains("Dash"));
+        assert!(fs::read_to_string(root.join("team-ship/SKILL.md"))
+            .unwrap()
+            .contains("lf flow show team-ship --instructions"));
+        let again = sync_skills(&options).unwrap();
+        assert!(again.written.is_empty() && again.pruned.is_empty());
     }
 
     #[test]

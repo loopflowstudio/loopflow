@@ -90,8 +90,13 @@ installed help or reviewed Desktop code, not proof that no external tool exists.
   fence superseded requests, including repeated URLs. Session, Files and multiplexer
   observations replace notification/revision bridges. The recorded 48 headless tests
   include 15 opening cases with simulated native callbacks, not rendered endpoints.
-  Plain-repository/pre-registration outcomes, plain Task-page readiness and remote
-  composition remain. Historical tables and cmux/herdr judgments are unchanged.
+  `1dd8230d0`/`e3ca861b1` then add inspectable pre-registration repository failures
+  and mounted Task-page readiness. Registration retains validated request IDs;
+  superseded success/failure/cancellation cannot settle newer requests. Pane
+  closure remains observable before Session readings arrive. The later direct
+  headless run records 60 passing tests, not native or remote acceptance.
+  Remote composition and native endpoints remain. Historical tables and
+  cmux/herdr judgments are unchanged.
 - Public [cmux API](https://cmux.com/docs/api) and
   [concepts](https://cmux.com/docs/concepts) provide context, but the tables below
   use the installed command discovery and our local observations. The public API

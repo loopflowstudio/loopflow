@@ -179,6 +179,7 @@ fn _initialize_experiment_in(
     apply_set(conn, MIGRATIONS)?;
     for draft in drafts {
         conn.execute_batch(draft.sql)?;
+        seed_peer_planning(conn, draft.sql)?;
     }
     validate_foreign_keys(conn)?;
     validate_persisted_json(conn)?;
@@ -729,6 +730,7 @@ fn apply_set(conn: &rusqlite::Connection, set: &[Migration]) -> StoreResult<()> 
         let parent_history = migration_prefix_fingerprint(&set[..applied.len() + offset]);
         migration_preflight(conn, migration)?;
         conn.execute_batch(migration.sql)?;
+        seed_peer_planning(conn, migration.sql)?;
         if migration.sql.contains("CREATE TABLE wave_documents (") {
             super::sqlite::wave_documents::import_registered_documents(conn)?;
         }
@@ -738,6 +740,14 @@ fn apply_set(conn: &rusqlite::Connection, set: &[Migration]) -> StoreResult<()> 
 
     validate_applied_checksums(conn, set)?;
     validate_schema(conn, set)
+}
+
+fn seed_peer_planning(conn: &rusqlite::Connection, sql: &str) -> StoreResult<()> {
+    if sql.contains("CREATE TABLE planning_peer_changes (") {
+        super::sqlite::project_content::seed_peer_content(conn)?;
+        super::sqlite::planning::seed_peer_evidence(conn)?;
+    }
+    Ok(())
 }
 
 fn migration_preflight(conn: &rusqlite::Connection, migration: &Migration) -> StoreResult<()> {

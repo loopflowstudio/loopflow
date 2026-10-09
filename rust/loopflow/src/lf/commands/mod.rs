@@ -18,6 +18,7 @@ mod machine_credentials;
 pub mod monitor;
 pub mod ops;
 pub mod placement;
+pub mod planning;
 pub mod profile;
 pub mod replay;
 pub mod run;

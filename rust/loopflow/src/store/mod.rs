@@ -18,6 +18,7 @@ mod metrics;
 mod migration_catalog;
 mod migration_schema;
 pub mod migrations;
+mod planning_peers;
 mod pr_landings;
 mod processes;
 pub(crate) mod project_transitions;
@@ -26,6 +27,8 @@ pub mod rows;
 mod sessions;
 pub mod sqlite;
 mod token_crypto;
+
+pub use planning_peers::{PeerPlanningStatus, PeerProjectionConflict};
 
 /// One Wave's planning view, assembled from shared entities and membership.
 #[derive(Debug, Clone, PartialEq)]
@@ -86,6 +89,12 @@ pub enum StoreError {
     NotFound,
     #[error("invalid data: {0}")]
     InvalidData(String),
+    #[error("unordered or conflicting {entity} facts for {id}; refresh planning")]
+    ProviderObservationConflict { entity: &'static str, id: String },
+    #[error("competing planning {effect} receipts")]
+    PlanningReceiptConflict { effect: &'static str },
+    #[error("Project {project_id} membership changed without relationship ordering evidence")]
+    ProjectMembershipConflict { project_id: String },
     #[error("development store is incompatible: {0}")]
     IncompatibleDevelopment(String),
     #[error("invalid control authority: {0}")]

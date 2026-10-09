@@ -1,0 +1,37 @@
+[
+  {
+    "id": "unreadable-plan",
+    "reference": "refs/loopflow/planning/shared/review",
+    "active": false,
+    "selected_records": 3,
+    "imported_revision": "retained-import",
+    "fetched_revision": "newer-fetch",
+    "acquisition_error": null,
+    "publication_revision": "attempted-publication",
+    "publication_state": "unconfirmed",
+    "publication_error": "reply lost",
+    "pending_local": null,
+    "local_error": "Local planning journal is invalid; pending changes and sharing holds are unknown. Retained plans and sync receipts are unchanged.",
+    "conflicts": [
+      {
+        "object": {"kind": "task", "id": "retained-task"},
+        "reason": "retained projection conflict"
+      }
+    ]
+  },
+  {
+    "id": "healthy-plan",
+    "reference": "refs/loopflow/planning/shared/team",
+    "active": true,
+    "selected_records": 1,
+    "imported_revision": null,
+    "fetched_revision": null,
+    "acquisition_error": null,
+    "publication_revision": null,
+    "publication_state": null,
+    "publication_error": null,
+    "pending_local": true,
+    "local_error": null,
+    "conflicts": []
+  }
+]

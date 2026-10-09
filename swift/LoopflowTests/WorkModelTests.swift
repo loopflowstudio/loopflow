@@ -470,6 +470,59 @@ struct WorkModelTests {
 @Suite("Work observation stream", .serialized)
 @MainActor
 struct WorkModelStreamTests {
+    @Test("Peer status updates independently, preserves failures and rejects old scopes")
+    func peerPlanningFrames() async throws {
+        let fixture = try WorkTestFixture.load()
+        let feed = WorkFeed()
+        let model = WorkModel(query: fixture.streaming(feed), repoPath: "/src/loopflow")
+        let keeping = Task { await model.keepWorkCurrent() }
+        defer { keeping.cancel() }
+        try await feed.opened(1)
+        let scope = try await feed.request(1)
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("tests/fixtures/dto/peer_planning_status.json")
+        let statuses = String(decoding: try Data(contentsOf: url), as: UTF8.self)
+        func peers(_ sequence: Int, _ answers: Int, repo: String, statuses: String) throws -> WorkFrame {
+            let body = #"{"repo":"\#(repo)","destinations":\#(statuses)}"#
+            return try fixture.frame("peer_planning", sequence: sequence, answers: answers, body: body)
+        }
+        await feed.send(try fixture.planningFrame(sequence: 1, answers: scope.id))
+        await feed.send(try peers(2, scope.id, repo: "/src/loopflow", statuses: statuses))
+        try await eventually { model.peerPlanning.value?.count == 2 }
+        #expect(model.peerPlanning.value?[0].pendingLocal == nil)
+        #expect(model.peerPlanning.value?[1].active == true)
+        #expect(model.roadmap.value != nil)
+
+        await feed.send(WorkFrame(sequence: 3, answers: scope.id, home: "/home", revisions: nil,
+                                 unavailable: "sync read failed", content: .peerPlanning(nil), wire: nil))
+        try await eventually { model.peerPlanning.errorMessage == "sync read failed" }
+        #expect(model.peerPlanning.value?.count == 2)
+        #expect(model.roadmap.errorMessage == nil)
+        await feed.send(try peers(4, scope.id, repo: "/src/loopflow", statuses: statuses))
+        try await eventually { model.peerPlanning.errorMessage == nil }
+
+        model.setRepoPath("/src/context")
+        model.syncWorkScope()
+        let changed = try await feed.request(2)
+        // Even a later sequence cannot publish an answer from the old scope.
+        await feed.send(try peers(5, scope.id, repo: "/src/loopflow", statuses: statuses))
+        await feed.send(try peers(6, changed.id, repo: "/src/loopflow", statuses: statuses))
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(model.peerPlanning.value == nil)
+        await feed.send(try peers(7, changed.id, repo: "/src/context", statuses: "[]"))
+        try await eventually { model.peerPlanning.value == [] }
+        await feed.fail(RegistryQueryError("reader exited"))
+        try await eventually { model.peerPlanning.errorMessage == "reader exited" }
+        #expect(model.peerPlanning.value == [])
+        try await feed.opened(2, within: .seconds(5))
+        let reopened = try await feed.request(3)
+        await feed.send(try peers(1, reopened.id, repo: "/src/context", statuses: statuses))
+        try await eventually { model.peerPlanning.value?.count == 2 && model.peerPlanning.errorMessage == nil }
+        await feed.send(try fixture.planningFrame(sequence: 2, answers: reopened.id, home: "/other-machine"))
+        try await eventually { model.peerPlanning.isLoading }
+    }
+
     @Test("Frames update planning in place and an older frame cannot replace a newer one")
     func framesReplaceReadings() async throws {
         let fixture = try WorkTestFixture.load()
@@ -696,6 +749,7 @@ private struct WorkTestFixture {
         let query = RegistryQuery { args, _ in
             switch args.first {
             case "wave" where args.dropFirst().first == "show": return roadmapJSON
+            case "planning": return #"{"destinations":[]}"#
             case "wave" where args.dropFirst().first == "list": return wavesJSON
             case "session": return #"{"entries":[],"next":null}"#
             case "history":
@@ -723,7 +777,7 @@ private struct WorkTestFixture {
         }
     }
 
-    private func frame(
+    func frame(
         _ part: String, sequence: Int, answers: Int?, home: String = "/home", body: String
     ) throws -> WorkFrame {
         let answers = answers.map(String.init) ?? "null"

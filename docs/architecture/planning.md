@@ -31,6 +31,9 @@ repository-wide Linear synchronization. Creation without a Wave uses `inbox`.
 Wave provisioning imports existing Markdown and repository Workflow definitions,
 preserving stable authored IDs and source bytes. Saved documents, including ancestor
 context, serve both connection modes. Reads never provision or fall back to files.
+Imported Waves remain readable without execution placement: Wave list, status
+and roadmap emit `machine: null` and display “unplaced,” not a fabricated local
+Machine. Desktop consumes the same optional placement.
 Explicit edits and relocation change stored planning without rewriting the checkout.
 The released-frontier migration imports available registered definitions; unavailable
 sources can be imported later with `lf wave ensure`.
@@ -115,6 +118,23 @@ unchanged baselines without acknowledging them. Attempts recheck the stored prov
 revision and local deletion. Lost replies retain attempt/error evidence and use
 observation before any further effect; an unresolved attempt is never blindly replayed.
 
+Peer imports can retain uncertain effects in their journal while rejecting the
+object's projection. Common field/deletion, creation/attachment, state and order
+attempts therefore check retained projection conflicts in the same SQLite
+transaction that acquires the effect. Import records skipped sharing-held objects
+as conflicts too; selecting their history permits exchange, not new effects. Local receipt absence cannot
+authorize another write. Pending reads, local saves and provider acquisition remain
+independent; successful peer projection incorporates retained receipts before
+releasing the conflict. Local sharing selection alone never acquires an effect.
+
+The same provider-mapping check precedes peer scalar projection and independent
+provider evidence. Initial attachment is allowed; ordinary peer edits cannot
+replace or clear an existing Task/Project mapping. Contradictions retain the
+journal and isolate that object while independent plans advance. Clearing a legacy
+mapping is not identity association: it makes the retained Work a provider-creation
+candidate and leaves its old selectors and effect receipts behind. Explicit legacy
+association remains unfinished; neither IDs nor execution histories are merged.
+
 `ops/planning_delivery.rs` consumes mapped Task titles, descriptions, nullable
 assignees and membership, and Project names, summaries, statuses and structured
 content. Content patches retain unrelated provider prose. The foreground lifetime
@@ -126,6 +146,16 @@ partial progress, advances later saves' baselines and preserves their desired or
 Lost replies require matching list readback; an unchanged list after an attempt stays
 uncertain without replay. Observed competing order adopts Linear and retains the
 losing list. New members survive; omission alone cannot retire a retained Task.
+Peer exchange transports each common order receipt under its saved identity,
+including exact effects, losing desired lists and partial settlement. Intentions
+are selected by the first journal mutation's logical clock and receipt ID, not
+receiving-machine sequence or later effect-update clocks. Unresolved losing effects
+still hold delivery; settled superseded partial moves do not revive their desired
+lists. Incompatible effect chains or unordered baseline heads retain projection
+conflicts. Referenced Tasks in every retained list participate in private-selection
+holds. Import projects the chosen pending list after Task rows without creating a
+complete-list observation. Captured baseline/effect members still prevent an empty
+or partial list from settling a cold peer's attempt without local list inventory.
 Detail reads never change rank. Project scalar fields continue during uncertain
 ordering. These observations do not provide an atomic provider snapshot or write fence.
 
@@ -145,6 +175,13 @@ CLI and Desktop project creation, field/order edits, state and comments through
 pending in connected repositories; attempted effects retain uncertainty and errors.
 Observed conflicts show both values after adopting Linear. Disconnected repositories
 show no pending Linear delivery; retained losing values remain inspectable.
+The repository-scoped `peer_planning` Work frame reads the same destination status
+as `lf planning status`. It is independent of roadmap/Session availability and wakes
+on planning revisions, not execution or usage updates. Desktop retains last-good
+status on reader failure, fences replies by scope and Machine, and distinguishes
+unknown local changes from no additional eligible changes. Git publication is not
+Linear delivery; retained imports and sharing holds never imply convergence.
+
 A foreground connection synchronizes its repository, independent of Desktop Task
 selection. Inventory, comments and delivery use separate bounded loops; closing
 or clearing the repository connection ends them. Read projections stay read-only.
@@ -180,7 +217,10 @@ Terminal, archived, paused or foreign Projects retain their history. Names, cont
 and an empty workflow remain intact. Binding accepts the durable or mapped ID of
 an already saved Project; it does not fetch a missing Project. Legacy YAML import
 retains the original bytes and requires that exact Project's saved record.
-Project export uses the original transition receipt on the foreground connection.
+Project export keeps its captured input and creation/attachment attempts on the
+Project row; transition receipts own only local selection and rotation. Peer
+exchange carries the creation evidence, never a transition or activation. Captured
+save IDs—not machine-local sequence positions—bound readback acknowledgement.
 Creation and Initiative attachment retain separate attempted effects and exact
 readback; a missing response never permits another create or attachment.
 Mapped status receipts use foreground delivery;
@@ -299,6 +339,16 @@ Complete responses must include nullable fields; omission cannot clear known dat
 Stored change receipts invalidate planning even without execution. A complete read
 at or beyond the receipt's revision repairs the invalidation. Removal receipts fence
 later reads, including when the receipt arrived before the issue was cached.
+Peer invalidation uses causal notification/detail heads in the existing journal.
+A successful detail read acknowledges only notifications it observed; replaying
+those notifications cannot invalidate that read again. Concurrent unseen notices
+remain outstanding. Revision floors survive acknowledgement; arrival time supplies
+neither ordering nor a provider revision. Scalar/list replay alone never clears
+freshness, and detail acknowledgement requires an accepted matching-or-newer
+frontier. Null-detail invalidation follows the same capture path. Migration keeps
+unknown-age invalidation without inventing a readback. Private-selection holds and
+execution isolation apply to this history too.
+
 Receipts do not replace complete planning entities. The former daemon webhook
 ingress is removed; these store operations do not establish live event delivery. Project facts also
 carry `revision`; a newer Project observation updates independently of the issue's
@@ -343,6 +393,16 @@ relationships. A contradictory relationship set stays unresolved, retains its
 last-good facts, and blocks managed readers. Replaying a list or detail does not
 clear that uncertainty. Explicit reteam reconciles the exact confirmed Team set
 under acquisition ownership; it cannot reconcile a changed Initiative.
+
+Peer transport retains confirmed removal, archive and Team observations as optional
+fields in the same mutation journal. The common acquisition owners apply each
+independent fact before scalar projection: rejecting a stale entity cannot erase
+an accepted removal or archive. Team confirmations retain their prior set and
+acquisition time. Contradictory concurrent confirmations isolate projection;
+entity revisions never choose a Team set or settle an order effect. Replaying old
+confirmation cannot clear retained membership uncertainty. Migration preserves
+negative evidence with unknown age and fabricates no historical Team confirmation.
+These storage boundaries do not enable mixed-provider foreground exchange.
 
 Chapter rollover transfers started work and retains unreviewed backlog in its
 predecessor Project. The same local transaction marks the predecessor completed,
@@ -450,9 +510,14 @@ unknown or live execution prevents cleanup before provider inspection. Cancellat
 uses the same state delivery path as completion and reopening. Resolve the issue
 team and target state before marking a receipt attempted, so failed reads remain
 retryable. A lost mutation reply retains uncertainty until provider observation.
-An independent foreground export loop selects unmapped local Projects and Tasks,
-using their saved UUIDs. Project transitions and Task creation receipts retain the
-captured payload, attempted effects and errors; no second creation owner exists.
+An independent foreground export loop selects unmapped local or peer-born Projects
+and Tasks, plus mapped creations still awaiting readback, using their saved UUIDs.
+One derived `planning_exports` view feeds discovery and status. Project rows and
+Task creation receipts retain captured payloads, attempts, acknowledgement and
+errors; no Project transition is synthesized for imported planning. Preparation
+creates a missing Task receipt from its saved planning. A mapping alone never
+acknowledges creation. Project acknowledgement also requires the captured Initiative
+attachment; after acknowledgement, a later accepted move does not reopen creation.
 Exact observations attach mappings in the common ingestion transaction before
 inventory can allocate another local identity. The creation snapshot establishes
 field baselines without acknowledging later edits. Observed Linear conflicts still

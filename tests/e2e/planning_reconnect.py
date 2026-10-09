@@ -61,6 +61,90 @@ class Handler(BaseHTTPRequestHandler):
             return {"errors": [{"message": "fixture offline"}]}
         issue = next((i for i in state["issues"] if i["id"] == variables.get("id")), None)
         project = state["project"]
+        if state.get("exports"):
+            exports = state["exports"]
+            if (
+                "query ListInitiativeProjects" in query
+                and variables["initiativeId"] == "initiative-peer"
+            ):
+                # Creation recovery must not depend on complete-list acquisition.
+                return {"data": {"initiative": {"projects": _page([])}}}
+            if "query ListProjectIssues" in query and variables["projectId"] != project["id"]:
+                return {"data": {"project": {"issues": _page([])}}}
+            if "mutation DeliverProjectCreation" in query:
+                exports["project_writes"] += 1
+                value = variables["input"]
+                exports["project"] = {
+                    **copy.deepcopy(project),
+                    "id": value["id"],
+                    "name": value["name"],
+                    "description": value["description"],
+                    "content": value["content"],
+                    "status": {"type": value["statusId"]},
+                    "initiatives": _page([]),
+                }
+                return {"errors": [{"message": "lost project creation response"}]}
+            if "mutation DeliverProjectAttachment" in query:
+                exports["link_writes"] += 1
+                exports["initiative"] = variables["input"]["initiativeId"]
+                return {"errors": [{"message": "lost attachment response"}]}
+            if "mutation DeliverTaskCreation" in query:
+                exports["task_writes"] += 1
+                value = variables["input"]
+                exports["issue"] = {
+                    **copy.deepcopy(state["issues"][0]),
+                    "id": value["id"],
+                    "identifier": "PEER-1",
+                    "title": value["title"],
+                    "description": value["description"],
+                    "project": exports["project"],
+                }
+                return {"errors": [{"message": "lost task creation response"}]}
+            if "query ProjectStatuses" in query:
+                return {
+                    "data": {
+                        "projectStatuses": _page(
+                            [
+                                {"id": "planned", "type": "planned", "teamId": None, "position": 0},
+                                {"id": "started", "type": "started", "teamId": None, "position": 1},
+                            ]
+                        )
+                    }
+                }
+            if "query FindProject" in query:
+                candidate = exports.get("project")
+                nodes = (
+                    [candidate]
+                    if candidate
+                    and exports["project_visible"]
+                    and candidate["id"] == variables["id"]
+                    else []
+                )
+                return {"data": {"projects": _page(nodes)}}
+            if "query FindExportIssue" in query:
+                candidate = exports.get("issue")
+                nodes = (
+                    [candidate]
+                    if candidate and exports["task_visible"] and candidate["id"] == variables["id"]
+                    else []
+                )
+                return {"data": {"issues": _page(nodes)}}
+            if "mutation DeliverProjectField" in query:
+                return {"errors": [{"message": "unrelated summary write rejected"}]}
+            if (
+                "query IssueOwnership" in query
+                or "query IssueObservation" in query
+                or "query IssueTeam" in query
+            ):
+                candidate = exports.get("issue")
+                if candidate and candidate["id"] == variables["id"]:
+                    if not exports["task_visible"]:
+                        return {"errors": [{"message": "readback withheld"}]}
+                    return {"data": {"issue": {**candidate, "comments": _page([])}}}
+            if "query ProjectOwnership" in query:
+                candidate = exports.get("project")
+                if candidate and candidate["id"] == variables["id"]:
+                    return {"data": {"project": candidate}}
         if "query ListTeams" in query:
             data = {
                 "teams": _page(
@@ -97,6 +181,11 @@ class Handler(BaseHTTPRequestHandler):
             data = {"project": project}
         elif "query FindProject" in query:
             data = {"projects": _page([project])}
+        elif "query IssueTrash" in query:
+            data = {"issue": {**issue, "trashed": False}}
+        elif "mutation DeliverTaskDeletion" in query:
+            state["delete_writes"] += 1
+            data = {"issueDelete": {"success": True}}
         elif "query IssueOwnership" in query:
             data = {"issue": issue}
         elif "query IssueObservation" in query or "query IssueComments" in query:
@@ -420,6 +509,226 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
         db.close()
 
 
+def _execution_rows(db: sqlite3.Connection, processes: tuple[str, ...]) -> dict[str, list[tuple]]:
+    rows = {
+        table: db.execute(f"SELECT * FROM {table} ORDER BY rowid").fetchall()
+        for table in [
+            "agent_sessions",
+            "task_workflows",
+            "task_workflow_moves",
+            "task_prs",
+            "work_placements",
+            "project_transitions",
+        ]
+    }
+    # CLI inspection adds Processes; compare the retained identities, not their count.
+    rows["processes"] = db.execute(
+        "SELECT * FROM processes WHERE lfid IN (SELECT value FROM json_each(?)) ORDER BY rowid",
+        (json.dumps(processes),),
+    ).fetchall()
+    return rows
+
+
+def _assert_execution_unchanged(
+    db: sqlite3.Connection, before: dict[str, list[tuple]], processes: tuple[str, ...]
+) -> None:
+    after = _execution_rows(db, processes)
+    assert after == before, {k: (before[k], v) for k, v in after.items() if before[k] != v}
+
+
+def _exercise_exports(fixture: dict, env: dict, server: ThreadingHTTPServer) -> None:
+    root, repo = Path(fixture["home"]), Path(fixture["repo"])
+    peer = fixture["peer"]
+    db = sqlite3.connect(root / "loopflow.db", timeout=5)
+
+    def run(*args: str) -> str:
+        result = subprocess.run(
+            [fixture["lf"], *args], cwd=repo, env=env, capture_output=True, text=True, timeout=30
+        )
+        assert result.returncode == 0, result.stderr
+        return result.stdout
+
+    def acknowledged(table: str, key: str, identity: str) -> bool:
+        return db.execute(
+            f"SELECT export_acknowledged FROM {table} WHERE {key}=?", (identity,)
+        ).fetchone() == (1,)
+
+    def uncertain(kind: str, identity: str) -> bool:
+        command = ("project", "workflow", "show") if kind == "project" else ("task", "status")
+        changes = json.loads(run(*command, identity, "--json"))["sync"]["changes"]
+        return any(
+            c["field"] == "creation" and c["id"] == identity and c["state"] == "uncertain"
+            for c in changes
+        )
+
+    wave_name = db.execute("SELECT name FROM waves WHERE id=?", (peer["wave"],)).fetchone()[0]
+    run("wave", "edit", wave_name, "--goal", str(repo / "wave" / wave_name / "GOAL.md"))
+    before = _execution_rows(db, ())
+    with server.lock:
+        server.state["exports"] = dict(
+            project_writes=0,
+            task_writes=0,
+            link_writes=0,
+            project_visible=False,
+            task_visible=False,
+        )
+        exports = server.state["exports"]
+    watch = Watch(fixture, env)
+    try:
+        watch.scope(str(repo))
+        _await(lambda: exports["project_writes"] == 1, "unprepared peer Project was not exported")
+        # Simulate a mapping-only peer acquisition after the response was lost.
+        # This grants no acknowledgement and must not hide recovery or status.
+        with server.lock:
+            project_id = exports["project"]["id"]
+        db.execute(
+            "UPDATE projects SET external_project_id=? WHERE id=?", (project_id, peer["project"])
+        )
+        db.commit()
+        assert uncertain("project", peer["project"])
+        with server.lock:
+            exports["project_visible"] = True
+        _await(lambda: exports["link_writes"] == 1, "mapped Project bypassed attachment recovery")
+        assert not acknowledged("projects", "id", peer["project"])
+        assert uncertain("project", peer["project"])
+        run("project", "edit", peer["project"], "--summary", "Later peer summary")
+        with server.lock:
+            exports["project"]["initiatives"] = _page([{"id": exports["initiative"]}])
+        _await(
+            lambda: acknowledged("projects", "id", peer["project"]),
+            "attachment readback did not settle",
+        )
+        _await(lambda: exports["task_writes"] == 1, "unprepared peer Task was not exported")
+        with server.lock:
+            issue_id = exports["issue"]["id"]
+        db.execute("UPDATE tasks SET external_issue_id=? WHERE id=?", (issue_id, peer["task"]))
+        db.commit()
+        assert uncertain("task", peer["task"])
+        run("task", "edit", peer["task"], "--title", "Later peer title")
+        with server.lock:
+            exports["task_visible"] = True
+        _await(
+            lambda: acknowledged("task_creation_intents", "task_id", peer["task"]),
+            "mapped Task bypassed creation readback",
+        )
+        assert not uncertain("task", peer["task"])
+        assert not uncertain("project", peer["project"])
+        for table, key, identity, field, value in [
+            ("task_changes", "task_id", peer["task"], "name", "Later peer title"),
+            ("project_changes", "project_id", peer["project"], "summary", "Later peer summary"),
+        ]:
+            assert (
+                db.execute(
+                    f"SELECT count(*) FROM {table} WHERE {key}=? AND field=? AND value_json=? "
+                    "AND acknowledged=0 AND conflict_json IS NULL",
+                    (identity, field, json.dumps(value)),
+                ).fetchone()[0]
+                == 1
+            )
+        _assert_execution_unchanged(db, before, ())
+        # Reopening the real foreground connection reobserves settled receipts.
+        watch.close()
+        watch = Watch(fixture, env)
+        watch.scope(str(repo))
+        watch.frame(lambda f: f["part"] == "planning")
+        _assert_execution_unchanged(db, before, ())
+        with server.lock:
+            assert [exports[k] for k in ["project_writes", "task_writes", "link_writes"]] == [
+                1,
+                1,
+                1,
+            ]
+            assert not server.state["unexpected"], server.state["unexpected"]
+    except Exception as error:
+        pending = db.execute("SELECT kind,attempted,error FROM planning_exports").fetchall()
+        raise AssertionError(
+            f"{error}; pending creations: {pending}; unexpected: {server.state['unexpected']}"
+        ) from error
+    finally:
+        watch.close()
+        db.close()
+
+
+def _exercise_effects(fixture: dict, env: dict, server: ThreadingHTTPServer) -> None:
+    db = sqlite3.connect(Path(fixture["home"]) / "loopflow.db", timeout=5)
+
+    processes = ("00000000-0000-4000-8000-000000000001",)
+    before = _execution_rows(db, processes)
+    checkout = db.execute("SELECT worktree FROM tasks WHERE id=?", (fixture["task"],)).fetchone()
+    saved = subprocess.run(
+        [fixture["lf"], "task", "delete", fixture["task"]],
+        cwd=fixture["repo"],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert saved.returncode == 0, saved.stderr
+    watch = Watch(fixture, env)
+    try:
+        watch.scope(fixture["repo"])
+        _await(
+            lambda: (
+                db.execute(
+                    "SELECT count(*) FROM task_changes WHERE task_id=? AND field='deleted' "
+                    "AND attempted=0 AND error LIKE '%retained peer projection conflict%'",
+                    (fixture["task"],),
+                ).fetchone()
+                == (1,)
+            ),
+            "public delivery did not reach the retained-effect boundary",
+        )
+        # Mutate an unrelated provider record after observing the deferred write.
+        # Ongoing acquisition must still bring in its new body and a new comment.
+        with server.lock:
+            other = server.state["issues"][1]
+            other["title"] = "Independent acquisition continues"
+            other["updatedAt"] = "2026-10-08T13:00:00Z"
+            comment = _comment("While deletion is held", other["id"])
+            server.state["comments"].append(comment)
+        _await(
+            lambda: (
+                db.execute(
+                    "SELECT count(*) FROM tasks WHERE external_issue_id=? AND issue_title=?",
+                    (other["id"], other["title"]),
+                ).fetchone()
+                == (1,)
+            ),
+            "retained effect blocked independent acquisition",
+        )
+        _await(
+            lambda: (
+                db.execute(
+                    "SELECT count(*) FROM task_comments WHERE id=?",
+                    (comment["id"],),
+                ).fetchone()
+                == (1,)
+            ),
+            "retained effect blocked comment acquisition",
+        )
+        assert db.execute(
+            "SELECT count(*) FROM task_changes WHERE id=?", (fixture["effects"]["receipt"],)
+        ).fetchone() == (0,)
+        assert (
+            db.execute(
+                "SELECT count(*) FROM planning_peer_conflicts WHERE object_id=? AND active=1",
+                (fixture["task"],),
+            ).fetchone()[0]
+            > 0
+        )
+        _assert_execution_unchanged(db, before, processes)
+        assert (
+            db.execute("SELECT worktree FROM tasks WHERE id=?", (fixture["task"],)).fetchone()
+            == checkout
+        )
+        with server.lock:
+            assert server.state["delete_writes"] == 0
+            assert not server.state["unexpected"], server.state["unexpected"]
+    finally:
+        watch.close()
+        db.close()
+
+
 def main() -> None:
     fixture = json.loads(Path(sys.argv[1]).read_text())
     root, repo = Path(fixture["home"]), Path(fixture["repo"])
@@ -507,13 +816,19 @@ printf '%s\\n' '{"type":"result","subtype":"success","result":"Done"}'
             comments=[],
             offline=False,
             state_writes=0,
+            delete_writes=0,
             unexpected=[],
         )
         env["HTTPS_PROXY"] = f"http://127.0.0.1:{server.server_port}"
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
-            _exercise(fixture, env, server, sys.argv[2])
+            if sys.argv[2] == "exports":
+                _exercise_exports(fixture, env, server)
+            elif sys.argv[2] == "effects":
+                _exercise_effects(fixture, env, server)
+            else:
+                _exercise(fixture, env, server, sys.argv[2])
         finally:
             server.shutdown()
             thread.join()

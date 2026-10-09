@@ -133,6 +133,11 @@ impl SqliteStore {
         Ok(())
     }
 
+    pub fn find_placement(&self, work: &WorkRef) -> StoreResult<Option<Placement>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        find_placement_in(&conn, work)
+    }
+
     pub fn placement(&self, work: &WorkRef) -> StoreResult<Placement> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let snapshot = conn.transaction()?;

@@ -195,7 +195,7 @@ fn planning_order_active_connection_delivers_after_outage() {
 }
 
 #[test]
-fn planning_order_lost_reply_recovers_partial_reorder_after_reopen() {
+fn planning_order_peers_recover_lost_reply_and_preserve_later_save() {
     with_order(|runtime, fixture, repo, tasks, state| {
         runtime.block_on(async {
             reorder(&fixture.store, &tasks[3], 0);
@@ -212,11 +212,47 @@ fn planning_order_lost_reply_recovers_partial_reorder_after_reopen() {
             assert_eq!(state.lock().await.field_writes, 1);
             assert!(deliver(&fixture.store, repo, &tasks[0]).await.is_err());
             assert_eq!(state.lock().await.field_writes, 1);
+            let destination = crate::engine::planning_git::PlanningDestination::new(
+                "/synthetic/order-remote", "refs/loopflow/planning/shared/order-test").unwrap();
+            let repo_name = repo.to_string_lossy();
+            let destination_id = fixture.store.sqlite.bind_peer_planning(&repo_name, &destination).unwrap();
+            fixture.store.sqlite.select_peer_waves(&repo_name, &destination_id,
+                std::slice::from_ref(&tasks[0].wave_id)).unwrap();
+            let home = tempfile::tempdir().unwrap();
+            let database = home.path().join("peer.db");
             let reopened = crate::store::open_ephemeral_store(
-                &crate::store::StorageConfig::sqlite(fixture.database.clone()),
-            )
-            .await
-            .unwrap();
+                &crate::store::StorageConfig::sqlite(database.clone()),
+            ).await.unwrap();
+            reopened.sqlite.bind_peer_planning(&repo_name, &destination).unwrap();
+            let exchange = |source: &Store, target: &Store| {
+                let snapshot = source.sqlite.export_peer_planning(&repo_name, &destination_id).unwrap();
+                target.sqlite.import_peer_planning(&repo_name, &destination_id, "fixture", &snapshot).unwrap();
+                assert!(target.sqlite.peer_planning_status(&repo_name).unwrap()[0].conflicts.is_empty());
+            };
+            exchange(&fixture.store, &reopened);
+            // The peer imported the exact attempt, not just the rendered ranks.
+            let conn = rusqlite::Connection::open(&database).unwrap();
+            let receipt_body = |connection: &rusqlite::Connection| -> (String, Option<String>, String, bool, bool) {
+                connection.query_row("SELECT value_json,base_json,order_effects_json,attempted,acknowledged FROM project_changes WHERE id=?1",
+                    [&receipt], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?))).unwrap()
+            };
+            let source_conn = rusqlite::Connection::open(&fixture.database).unwrap();
+            assert_eq!(receipt_body(&conn), receipt_body(&source_conn));
+            assert!(!reopened.sqlite.put_pm_project_order(&repo_name,
+                fixture.store.get_project(&tasks[0].project_id).await.unwrap().unwrap().plan.linear_id().unwrap().as_str(), &[]).unwrap());
+            assert_eq!(receipt_body(&conn), receipt_body(&source_conn));
+            assert!(deliver(&reopened, repo, &tasks[0]).await.is_err());
+            assert_eq!(state.lock().await.field_writes, 1);
+            // A later local save must survive the older effect's confirmation,
+            // even when those receipts arrive in a different local sequence.
+            reorder(&reopened, &tasks[1], 0);
+            let later = reopened.sqlite.pending_project_changes(&tasks[0].project_id).unwrap()
+                .into_iter().find(|change| change.field == "task_order").unwrap();
+            assert_ne!(later.id, receipt);
+            let journal = reopened.sqlite.export_peer_planning(&repo_name, &destination_id).unwrap();
+            exchange(&reopened, &fixture.store);
+            exchange(&fixture.store, &reopened);
+            assert_eq!(reopened.sqlite.export_peer_planning(&repo_name, &destination_id).unwrap(), journal);
             assert_eq!(
                 reopened
                     .sqlite
@@ -226,13 +262,26 @@ fn planning_order_lost_reply_recovers_partial_reorder_after_reopen() {
                     .id,
                 receipt
             );
+            drop(reopened);
+            let reopened = crate::store::open_ephemeral_store(
+                &crate::store::StorageConfig::sqlite(database.clone()),
+            ).await.unwrap();
             state.lock().await.field_reads_blocked = false;
             deliver(&reopened, repo, &tasks[0]).await.unwrap();
             assert_eq!(
                 remote_order(&state).await,
-                ["issue-3", "issue-4", "issue-1", "issue-2"]
+                ["issue-2", "issue-3", "issue-4", "issue-1"]
             );
-            assert_eq!(state.lock().await.field_writes, 2);
+            assert_eq!(state.lock().await.field_writes, 3);
+            exchange(&reopened, &fixture.store);
+            assert_eq!(local_order(&fixture.store, &tasks), remote_order(&state).await);
+            assert!(fixture.store.sqlite.project_order_delivery(&tasks[0].project_id).unwrap().is_none());
+            assert_eq!(receipt_body(&conn), receipt_body(&source_conn));
+            deliver(&fixture.store, repo, &tasks[0]).await.unwrap();
+            assert_eq!(state.lock().await.field_writes, 3);
+            // Both the superseded desired order and the later save remain recoverable.
+            assert_eq!(conn.query_row("SELECT value_json FROM project_changes WHERE id=?1", [&later.id],
+                |row| row.get::<_, String>(0)).unwrap(), later.value.to_string());
             assert_eq!(local_order(&reopened, &tasks), remote_order(&state).await);
             assert!(reopened
                 .sqlite
@@ -240,6 +289,84 @@ fn planning_order_lost_reply_recovers_partial_reorder_after_reopen() {
                 .unwrap()
                 .is_none());
             assert_no_conflicts(fixture);
+        });
+    });
+}
+
+#[test]
+fn planning_order_peers_retain_primary_key_only_moves() {
+    with_order(|runtime, fixture, repo, tasks, state| {
+        runtime.block_on(async {
+            // Insert D between the two priority groups. The common delivery
+            // changes only its primary key, retaining its existing sortOrder.
+            reorder(&fixture.store, &tasks[3], 2);
+            state.lock().await.field_reply_lost = true;
+            assert!(deliver(&fixture.store, repo, &tasks[0]).await.is_err());
+            assert_eq!(state.lock().await.field_writes, 1);
+            let project = &tasks[0].project_id;
+            let source = fixture
+                .store
+                .sqlite
+                .project_order_delivery(project)
+                .unwrap()
+                .unwrap();
+            assert_eq!(source.effects[0].input, json!({"prioritySortOrder": 5.0}));
+
+            let destination = crate::engine::planning_git::PlanningDestination::new(
+                "/synthetic/order-remote",
+                "refs/loopflow/planning/shared/order-test",
+            )
+            .unwrap();
+            let repo_name = repo.to_string_lossy();
+            let id = fixture
+                .store
+                .sqlite
+                .bind_peer_planning(&repo_name, &destination)
+                .unwrap();
+            fixture
+                .store
+                .sqlite
+                .select_peer_waves(&repo_name, &id, std::slice::from_ref(&tasks[0].wave_id))
+                .unwrap();
+            let home = tempfile::tempdir().unwrap();
+            let peer = crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
+                home.path().join("peer.db"),
+            ))
+            .await
+            .unwrap();
+            peer.sqlite
+                .bind_peer_planning(&repo_name, &destination)
+                .unwrap();
+            let snapshot = fixture
+                .store
+                .sqlite
+                .export_peer_planning(&repo_name, &id)
+                .unwrap();
+            peer.sqlite
+                .import_peer_planning(&repo_name, &id, "lost-reply", &snapshot)
+                .unwrap();
+            let imported = peer
+                .sqlite
+                .project_order_delivery(project)
+                .unwrap()
+                .unwrap();
+            assert_eq!(imported.id, source.id);
+            assert_eq!(imported.effects, source.effects);
+            assert!(deliver(&peer, repo, &tasks[0]).await.is_err());
+            assert_eq!(state.lock().await.field_writes, 1);
+
+            state.lock().await.field_reads_blocked = false;
+            deliver(&peer, repo, &tasks[0]).await.unwrap();
+            assert_eq!(state.lock().await.field_writes, 1);
+            assert!(peer
+                .sqlite
+                .project_order_delivery(project)
+                .unwrap()
+                .is_none());
+            assert_eq!(
+                local_order(&peer, &tasks),
+                ["issue-1", "issue-2", "issue-4", "issue-3"]
+            );
         });
     });
 }

@@ -96,7 +96,18 @@ can set `repo_root: ~/projects` instead of the default `~/src`. Absolute paths,
 keeps the current directory. Linked worktrees retain their checkout and share
 canonical repository identity. Missing/non-Git paths fail without creating work.
 Repository selection does not register a plan, join peers, or change saved defaults.
+For a new peer checkout, read `lf repo identity` on the source, then use
+`lf repo identity --bind repo_ID` on the peer before creating or importing Work.
+Binding selects identity only: it does not connect, select, fetch or publish planning.
+An existing different repository identity is retained and reported, never replaced;
+association of already divergent repository identities remains unavailable.
 An explicit Task from another repository is rejected rather than silently retargeted.
+
+[Select Git planning](#select-git-planning) to exchange planning. Import never
+moves local Workflows or transfers a started Task to another Machine. Remote
+first-start admission remains unavailable; absence on a peer is not a reservation.
+Shared Tasks without a retained local checkout refuse first start. Local-only Tasks
+and retained execution remain usable; planning saves and acquisition still work.
 
 `--task` and `--wt` select a location. `--wave` supplies context and identity;
 it cannot override a Task's owning Wave. `task run` places the Task's
@@ -221,6 +232,53 @@ Placement, native Sessions, workflow skills and GitHub delivery use the same Tas
 identity. `lf land -c` requests completion after a verified merge; `lf pr reconcile`
 settles it. A repository without a code remote supports local work and refuses
 hosted landing. Local planning does not require Linear at any of these boundaries.
+
+## Select Git planning
+
+```bash
+lf planning key --new               # once; prints the user key to recover elsewhere
+lf planning key --recover <uuid>    # on another machine, instead of --new
+lf planning connect --remote plans # pin an explicitly chosen, controlled Git remote
+lf planning use <destination-id>    # route future root Waves to the printed destination
+lf planning select <destination-id> --wave <wave-uuid>
+lf planning status --json
+```
+
+Setup is local: these commands neither fetch nor publish planning. In local-only
+repositories, interactive and headless sessions exchange selected planning, even
+without a Task. Desktop's work connection does the same. Task saves and Project
+edits commit locally, then attempt exchange before returning; failed exchange
+leaves pending state, not a failed save. Machine dispatch publishes first; cold
+Task resolution acquires before placement. No resident or turn retry runs.
+
+Status separates fetched revisions, retained imports, pending local edits and
+pending/unconfirmed/confirmed publication. Confirmation covers the recorded revision,
+not future edits or held records. Each destination includes its sharing holds and
+retained projection conflicts. An invalid local journal reports unknown pending
+changes (`pending_local: null` in JSON), without hiding other destinations or
+changing sync receipts. Status does not repair the journal. In Desktop, open **Git planning** in the
+repository roadmap for the same destination, pending state and held records. Its
+foreground reader updates these receipts without a manual refresh; a failed
+reading keeps the last status visibly stale. Import retention is not convergence.
+Git exchange
+in Linear-connected repositories awaits complete provider acquisition and delivery
+receipt integration; it reports that limitation without changing local plans.
+
+Connection defaults to `refs/loopflow/planning/users/<uuid>`; `--shared <name>`
+explicitly joins `refs/loopflow/planning/shared/<name>`. Joining selects no existing
+work and does not change the destination for new Waves. Select existing Waves
+explicitly; selection includes descendants and retained history. A private reference
+holds that record and its dependents out of exchange. Selecting its referenced Wave
+may release that history for sharing; moving back alone does not.
+
+`use` affects future root Waves only. Children inherit their parent's selection,
+not the currently active destination. `lf planning use local` leaves future roots
+unshared without withdrawing already selected work. Existing membership survives
+switches, reconnects and remote-alias edits. Selection is shared by this machine's
+checkouts of the repository; execution stays local.
+
+Ref separation is not privacy. Use a controlled remote; the code remote is never
+selected implicitly. Status omits endpoint URLs because they may contain credentials.
 
 ## Connect planning and create work
 

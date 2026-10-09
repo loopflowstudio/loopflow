@@ -174,6 +174,7 @@ impl SqliteStore {
                     VALUES(?1,?2,?3,?3,?4,?4,'','started','')",
                     params![id.as_str(), wave, now, name],
                 )?;
+                super::planning_peers::capture_project_content(&tx, &id)?;
                 if pending.is_none() {
                     tx.execute("INSERT INTO project_transitions(wave_id,successor_id,created_at,local_plan_json)
                         VALUES(?1,?2,?3,?4)",params![wave,id.as_str(),now,serde_json::json!({"name":name}).to_string()])?;
@@ -328,7 +329,8 @@ impl SqliteStore {
 }
 
 // Saved planning supplies values and age; retained provider evidence can invalidate
-// selection, but absent inventory does not erase an owned Project.
+// selection, but absent inventory does not erase an owned Project. A peer can
+// supply an accepted entity without claiming a complete provider membership list.
 fn readiness_in(conn: &Connection, wave: &WaveId) -> StoreResult<ProjectReadiness> {
     Ok(conn.query_row(
             "SELECT COALESCE(p.external_project_id,p.id), p.pm_snapshot_synced_at,
@@ -336,7 +338,6 @@ fn readiness_in(conn: &Connection, wave: &WaveId) -> StoreResult<ProjectReadines
                   WHEN p.id IS NULL OR p.project_name IS NULL OR p.project_slug IS NULL OR p.project_prompt_context IS NULL THEN 'unavailable'
                   WHEN f.id IS NOT NULL AND NOT json_valid(f.body) THEN 'unavailable'
                   WHEN f.id IS NOT NULL AND (f.archived OR f.membership_unresolved OR p.pm_snapshot_synced_at IS NOT f.observed_at
-                    OR NOT EXISTS(SELECT 1 FROM pm_wave_projects m WHERE m.wave_id=w.id AND m.project_id=f.id)
                     OR (s.wave_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM json_each(f.body,'$.initiative_ids') WHERE value=s.initiative)))
                     THEN 'unavailable'
                   WHEN p.status IN ('completed','canceled') THEN 'terminal'

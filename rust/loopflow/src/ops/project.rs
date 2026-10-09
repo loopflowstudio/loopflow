@@ -91,6 +91,8 @@ pub async fn update_plan(
         .sqlite
         .update_project_content(&project.id, &content)
         .map_err(project_error)?;
+    drop(_acquisition);
+    super::planning_peer::sync_after_save(&store, wave.repo()).await;
     planning(&store, &project)
 }
 
@@ -304,6 +306,8 @@ pub async fn edit(
         .sqlite
         .edit_project(&project.id, name, summary)
         .map_err(project_error)?;
+    drop(_acquisition);
+    super::planning_peer::sync_after_save(&store, wave.repo()).await;
     planning(&store, &project)
 }
 
@@ -337,6 +341,8 @@ pub async fn set_workflow(
         .sqlite
         .select_project_workflow(&project.id, name, &definition)
         .map_err(project_error)?;
+    drop(_acquisition);
+    super::planning_peer::sync_after_save(&store, wave.repo()).await;
     planning(&store, &project)
 }
 

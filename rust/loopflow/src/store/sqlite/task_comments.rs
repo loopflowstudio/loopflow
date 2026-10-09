@@ -12,73 +12,83 @@ pub(super) fn ingest_task_comment(
     conn: &Connection,
     task: &TaskId,
     comment: &crate::pm::IssueComment,
-) -> StoreResult<()> {
-    let existing: Option<(String, Option<String>)> = conn
+    observed_at: i64,
+) -> StoreResult<bool> {
+    let incoming = TaskComment::from(comment);
+    let incoming_revision = super::planning::revision_nanos(comment.revision.as_deref())?;
+    let existing = conn
         .query_row(
-            "SELECT task_id,provider_revision FROM task_comments WHERE id=?1",
+            "SELECT c.id,c.body,c.author,c.created_at,c.task_id,c.provider_revision,
+                json_extract(d.comment_json,'$.body'),d.acknowledged
+         FROM task_comments c LEFT JOIN task_comment_deliveries d
+            ON d.comment_id=c.id AND d.conflicting_comment_json IS NULL
+         WHERE c.id=?1",
             [&comment.id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| {
+                Ok((
+                    read_comment(row)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, Option<bool>>(7)?
+                        .map(|acknowledged| {
+                            row.get::<_, String>(6).map(|body| (body, acknowledged))
+                        })
+                        .transpose()?,
+                ))
+            },
         )
         .optional()?;
-    if let Some((owner, revision)) = existing {
+    if let Some((saved, owner, revision, delivery)) = existing {
         if owner != task.as_str() {
             return Err(StoreError::InvalidData(
                 "comment belongs to another Task".into(),
             ));
         }
-        if revision.as_deref().is_some_and(|revision| {
-            comment
-                .revision
-                .as_deref()
-                .is_none_or(|incoming| incoming <= revision)
-        }) {
-            return Ok(());
+        let previous = super::planning::revision_nanos(revision.as_deref())?;
+        if previous.is_some() && incoming_revision < previous {
+            return Ok(false);
+        }
+        let acquired = delivery
+            .as_ref()
+            .is_none_or(|(_, acknowledged)| *acknowledged);
+        if (previous.is_some() || acquired) && incoming_revision == previous && saved != incoming {
+            return Err(StoreError::ProviderObservationConflict {
+                entity: "comment",
+                id: comment.id.clone(),
+            });
+        }
+        if let Some((body, acknowledged)) = delivery {
+            if body == comment.body {
+                conn.execute(
+                    "UPDATE task_comment_deliveries SET acknowledged=1,error=NULL WHERE comment_id=?1 AND (acknowledged=0 OR error IS NOT NULL)",
+                    [&comment.id],
+                )?;
+            } else if !acknowledged {
+                // Adopt Linear and retain the complete losing comment and observation.
+                conn.execute(
+                    "UPDATE task_comment_deliveries SET conflicting_comment_json=?2,error=NULL WHERE comment_id=?1",
+                    params![comment.id, serde_json::to_string(comment)?],
+                )?;
+            }
         }
     }
-    let delivery: Option<(String, bool)> = conn
-        .query_row(
-            "SELECT json_extract(comment_json,'$.body'),acknowledged FROM task_comment_deliveries
-             WHERE comment_id=?1 AND conflicting_comment_json IS NULL",
-            [&comment.id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .optional()?;
-    if let Some((body, acknowledged)) = delivery {
-        if body == comment.body {
-            conn.execute(
-                "UPDATE task_comment_deliveries SET acknowledged=1,error=NULL WHERE comment_id=?1",
-                [&comment.id],
-            )?;
-        } else if !acknowledged {
-            // Adopt Linear and retain the complete losing comment and observation.
-            conn.execute(
-                "UPDATE task_comment_deliveries SET conflicting_comment_json=?2,error=NULL WHERE comment_id=?1",
-                params![comment.id, serde_json::to_string(comment)?],
-            )?;
-        }
-    }
-    let author = comment_author(comment);
+    super::planning_peers::observe_comment(conn, task, comment, observed_at)?;
     conn.execute(
         "INSERT INTO task_comments(id,task_id,body,author,created_at,provider_revision)
          VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(id) DO UPDATE SET body=excluded.body,
-         author=excluded.author,created_at=excluded.created_at,provider_revision=excluded.provider_revision",
-        params![comment.id, task.as_str(), comment.body, serde_json::to_string(&author)?,
+         author=excluded.author,created_at=excluded.created_at,provider_revision=excluded.provider_revision
+         WHERE body IS NOT excluded.body OR author IS NOT excluded.author
+            OR created_at IS NOT excluded.created_at OR provider_revision IS NOT excluded.provider_revision
+            OR ((SELECT importing FROM planning_peer_context)=0 AND NOT EXISTS(
+                SELECT 1 FROM planning_peer_heads h JOIN planning_peer_changes c ON c.id=h.id
+                WHERE h.kind='comment' AND h.object_id=excluded.id AND h.field='content'
+                    AND c.linear IS NOT NULL
+                    AND json_extract(c.linear,'$.body.revision') IS excluded.provider_revision))",
+        params![comment.id, task.as_str(), comment.body, serde_json::to_string(&incoming.author)?,
             comment.created_at, comment.revision],
     )?;
-    Ok(())
-}
-
-fn comment_author(comment: &crate::pm::IssueComment) -> TaskCommentAuthor {
-    if comment.author_id.is_some() || crate::ops::linear_observe::is_steer(&comment.body) {
-        TaskCommentAuthor::Person {
-            name: crate::ops::linear_observe::comment_requester(
-                &comment.body,
-                comment.author_name.as_deref(),
-            ),
-        }
-    } else {
-        TaskCommentAuthor::Integration
-    }
+    super::planning_peers::clear_observation(conn)?;
+    Ok(true)
 }
 
 fn read_comment(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskComment> {
@@ -99,11 +109,27 @@ fn read_comment(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskComment> {
 
 // Every locally authored comment retains its delivery identity in the same
 // transaction. Acquired provider comments enter through ingest_task_comment.
-fn insert_authored_comment(
+pub(super) fn insert_authored_comment(
     conn: &Connection,
     task: &TaskId,
     comment: &TaskComment,
-) -> StoreResult<()> {
+) -> StoreResult<bool> {
+    let existing = conn
+        .query_row(
+            "SELECT id,body,author,created_at,task_id FROM task_comments WHERE id=?1",
+            [&comment.id],
+            |row| Ok((read_comment(row)?, row.get::<_, String>(4)?)),
+        )
+        .optional()?;
+    if let Some((saved, owner)) = existing {
+        if owner == task.as_str() && saved == *comment {
+            // In particular, never reset a lost reply or recreate an acquired delivery.
+            return Ok(false);
+        }
+        return Err(StoreError::InvalidData(
+            "comment identity already belongs to another comment".into(),
+        ));
+    }
     conn.execute(
         "INSERT INTO task_comments(id,task_id,body,author,created_at) VALUES(?1,?2,?3,?4,?5)",
         params![
@@ -118,7 +144,7 @@ fn insert_authored_comment(
         "INSERT INTO task_comment_deliveries(comment_id,comment_json) VALUES(?1,?2)",
         params![comment.id, serde_json::to_string(comment)?],
     )?;
-    Ok(())
+    Ok(true)
 }
 
 impl SqliteStore {
@@ -171,7 +197,7 @@ impl SqliteStore {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let task = super::children::task_on(&tx, task)?.ok_or(StoreError::NotFound)?;
         super::children::require_task_not_deleted(&tx, &task)?;
-        let created_at = comment.created_at.as_deref().ok_or_else(|| {
+        comment.created_at.as_deref().ok_or_else(|| {
             StoreError::InvalidData("local comments require a creation time".into())
         })?;
         if comment.body.trim().is_empty() {
@@ -179,30 +205,9 @@ impl SqliteStore {
                 "Task comment cannot be empty".into(),
             ));
         }
-        let author = serde_json::to_string(&comment.author)?;
-        let previous: Option<(String, String, String, String)> = tx
-            .query_row(
-                "SELECT task_id,body,author,created_at FROM task_comments WHERE id=?1",
-                [&comment.id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-            )
-            .optional()?;
-        if let Some(previous) = previous {
-            if previous
-                != (
-                    task.id.to_string(),
-                    comment.body.clone(),
-                    author,
-                    created_at.to_string(),
-                )
-            {
-                return Err(StoreError::InvalidData(
-                    "comment identity already belongs to another comment".into(),
-                ));
-            }
+        if !insert_authored_comment(&tx, &task.id, comment)? {
             return Ok(());
         }
-        insert_authored_comment(&tx, &task.id, comment)?;
         if let TaskCommentAuthor::Person { name } = &comment.author {
             if crate::ops::linear_observe::is_direction_comment(&comment.body, Some("local")) {
                 let text = match name {
@@ -290,7 +295,7 @@ mod tests {
         {
             let mut conn = store.conn.lock().unwrap();
             let tx = conn.transaction().unwrap();
-            super::ingest_task_comment(&tx, &task, &observed).unwrap();
+            super::ingest_task_comment(&tx, &task, &observed, 42).unwrap();
             tx.rollback().unwrap();
         }
         assert_eq!(
@@ -301,7 +306,7 @@ mod tests {
             store.pending_task_comments(&task).unwrap(),
             vec![original.clone()]
         );
-        super::ingest_task_comment(&store.conn.lock().unwrap(), &task, &observed).unwrap();
+        super::ingest_task_comment(&store.conn.lock().unwrap(), &task, &observed, 42).unwrap();
         drop(store);
         let store = SqliteStore::open_ephemeral(&database).unwrap();
         store.record_comment_delivery(&original.id, None).unwrap();
@@ -338,7 +343,7 @@ mod tests {
             revision: Some("2026-10-08T01:00:00Z".into()),
             ..observed.clone()
         };
-        super::ingest_task_comment(&store.conn.lock().unwrap(), &task, &stale).unwrap();
+        super::ingest_task_comment(&store.conn.lock().unwrap(), &task, &stale, 42).unwrap();
         assert_eq!(
             store.task_comments(&task).unwrap().comments,
             thread.comments
@@ -348,7 +353,7 @@ mod tests {
             revision: Some("2026-10-08T01:04:00Z".into()),
             ..observed
         };
-        super::ingest_task_comment(&store.conn.lock().unwrap(), &task, &amended).unwrap();
+        super::ingest_task_comment(&store.conn.lock().unwrap(), &task, &amended, 42).unwrap();
         assert_eq!(
             store.task_comments(&task).unwrap().comments[0].body,
             amended.body

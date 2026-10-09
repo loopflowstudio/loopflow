@@ -795,7 +795,7 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskProcessOptions) -> OpsRes
     block_on_task(async {
         let store = task_store().await?;
         let main = crate::engine::worktrees::main_repo_root(repo).map_err(task_error)?;
-        let saved = store.get_task_by_issue(issue).await.map_err(task_error)?;
+        let saved = super::planning_peer::find_task(&store, &main.to_string_lossy(), issue).await?;
         let acquired = saved.is_none();
         let task = match saved {
             Some(task) => task,
@@ -929,9 +929,7 @@ async fn restore_task_checkout(store: &SharedStore, task: &Task) -> OpsResult<()
     // A different registered path was rejected above; no branch is reset.
     if !crate::engine::worktrees::branch_exists(&repo, &pr.branch)? {
         let remote = format!("refs/remotes/origin/{}", pr.branch);
-        if !ref_exists(&repo, &remote)? && pr.github().is_some() {
-            fetch(&repo, "origin", &pr.branch)?;
-        }
+        fetch_task_refs(&repo)?;
         let base = if ref_exists(&repo, &remote)? {
             remote
         } else {
@@ -1066,6 +1064,7 @@ async fn prepare_task_placement(
     let recorded_branch = recorded_branch.filter(|branch| !branch.is_empty());
     let generated_branch = format!("lf/{uuid}/{}", title.as_str());
     let branch = recorded_branch.unwrap_or(&generated_branch);
+    fetch_task_refs(main_repo)?;
     let mut plan = plan_branch_placement(main_repo, segment, Some(branch))
         .map_err(|error| task_error(format!("failed to plan task worktree: {error}")))?;
     // Plan without touching an occupied checkout; restoration consumes the saved placement.
@@ -1106,12 +1105,6 @@ async fn prepare_task_placement(
     };
     let mut base_commit = match &stack_parent {
         Some(parent) => {
-            fetch(main_repo, "origin", &parent.branch).map_err(|error| {
-                task_error(format!(
-                    "failed to fetch parent branch {}: {error}",
-                    parent.branch
-                ))
-            })?;
             let base_ref = format!("origin/{}", parent.branch);
             rev_parse(main_repo, &base_ref).map_err(|error| {
                 task_error(format!("failed to resolve task base {base_ref}: {error}"))
@@ -1135,19 +1128,6 @@ async fn prepare_task_placement(
     } else {
         None
     };
-    if plan.strategy == PlacementStrategy::Create && github.is_some() {
-        // A fresh clone may know the PR before fetching its branch.
-        fetch(
-            main_repo,
-            "origin",
-            &format!(
-                "refs/heads/{}:refs/remotes/origin/{}",
-                plan.branch, plan.branch
-            ),
-        )
-        .map_err(task_error)?;
-        plan.strategy = PlacementStrategy::CheckoutExisting;
-    }
     if plan.strategy != PlacementStrategy::Create {
         let branch_ref = if ref_exists(main_repo, &format!("refs/heads/{}", plan.branch))? {
             format!("refs/heads/{}", plan.branch)
@@ -1345,6 +1325,7 @@ pub fn task_create(
             )
             .await
             .map_err(task_error)?;
+        super::planning_peer::sync_after_save(&store, wave.repo()).await;
         task_planning_item(&store, &task)
     })
 }
@@ -2120,6 +2101,22 @@ pub(crate) fn request_task_pr_merge(
 /// Whether the repository has at least one configured git remote.
 fn has_remote(repo: &Path) -> OpsResult<bool> {
     Ok(!git_output(repo, &["remote"])?.trim().is_empty())
+}
+
+pub(crate) fn fetch_task_refs(repo: &Path) -> OpsResult<()> {
+    if crate::engine::git::has_origin(repo)? {
+        git_output(
+            repo,
+            &[
+                "fetch",
+                "--prune",
+                "origin",
+                "+refs/heads/*:refs/remotes/origin/*",
+            ],
+        )
+        .map_err(|error| task_error(format!("failed to fetch task base and branches: {error}")))?;
+    }
+    Ok(())
 }
 
 /// Resolve `(base_ref, base_commit)` for a new Task PR. With a remote, fetch and
@@ -3683,26 +3680,7 @@ pub fn task_follow_up(
 pub fn task_end(repo: &Path, issue: &str, note: Option<&str>, end: &EndOptions) -> OpsResult<Task> {
     let note = note.map(str::trim).filter(|note| !note.is_empty());
     block_on_task(async {
-        let store = task_store().await?;
-        let task = store
-            .get_task_by_issue(issue)
-            .await
-            .map_err(|error| task_error(format!("failed to read Task: {error}")))?;
-        let mut task = match task {
-            Some(task) => task,
-            None => {
-                let resolved =
-                    super::task_pm::resolve_task_async(repo, issue, super::pm::PmRefresh::Force)
-                        .await?;
-                store
-                    .get_task_by_issue(&resolved.item.id)
-                    .await
-                    .map_err(task_error)?
-                    .ok_or_else(|| {
-                        task_error("accepted planning did not retain the Task identity")
-                    })?
-            }
-        };
+        let (store, mut task) = super::pm::resolve_saved_task(repo, None, issue).await?;
         reach_end(&store, &mut task, EndMove::Set, note, end).await?;
         Ok(task)
     })
@@ -3811,6 +3789,8 @@ async fn reach_end(
         .await
         .map_err(task_error)?
         .ok_or_else(|| task_error("completed Task is missing"))?;
+    let wave = owning_wave(store, task).await?;
+    super::planning_peer::sync_after_save(store, wave.repo()).await;
     if keeps_checkout {
         eprintln!(
             "Task {} is complete; retained its checkout.",
@@ -4141,6 +4121,8 @@ pub(crate) async fn reconcile_task_completion(
         .await
         .map_err(task_error)?
         .ok_or_else(|| task_error("completed Task is missing"))?;
+    let wave = owning_wave(store, task).await?;
+    super::planning_peer::sync_after_save(store, wave.repo()).await;
     Ok(())
 }
 
@@ -4842,6 +4824,7 @@ pub fn task_edit(
             .await
             .map_err(task_error)?;
         let owner = owning_wave(&store, &edited).await?;
+        super::planning_peer::sync_after_save(&store, owner.repo()).await;
         Ok(TaskEdit {
             wave: owner.slug().into(),
             id: edited.id.to_string(),
@@ -4898,6 +4881,8 @@ pub fn task_refile(repo: &Path, issue: &str, wave: &str) -> OpsResult<super::pm:
         {
             eprintln!("Saved locally; pending Linear sync.");
         }
+        drop(guards);
+        super::planning_peer::sync_after_save(&store, destination.repo()).await;
         Ok(super::pm::PmUpdateResult {
             wave: destination.slug().into(),
             id: task.id.to_string(),

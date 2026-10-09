@@ -82,6 +82,18 @@ pub(crate) struct PlanningSync {
 }
 
 impl PlanningSync {
+    /// Repository planning follows every foreground provider, not Task attribution.
+    pub(crate) fn start_for_directory(directory: &std::path::Path) -> OpsResult<Self> {
+        super::task::block_on_task(async {
+            let store = super::pm::pm_store().await?;
+            let repo = crate::repository::CanonicalRepo::discover(directory)
+                .map_err(|error| OpsError::Message(error.to_string()))?
+                .to_string();
+            Self::start(std::sync::Arc::new(store), repo)
+                .map_err(|error| OpsError::Message(error.to_string()))
+        })
+    }
+
     pub(crate) fn start(store: SharedStore, repo: String) -> std::io::Result<Self> {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -95,6 +107,12 @@ impl PlanningSync {
                 let drive = async {
                     tokio::select! {
                         _ = stopped => {},
+                        _ = repeat_sync("Git planning acquisition", Duration::from_secs(5), || {
+                            super::planning_peer::acquire_repository(&store, &repo)
+                        }) => {},
+                        _ = repeat_sync("Git planning publication", Duration::from_secs(1), || {
+                            super::planning_peer::publish_repository(&store, &repo)
+                        }) => {},
                         _ = repeat_sync("comment acquisition", Duration::from_secs(15), || {
                             refresh_repository_comments(&store, &repo)
                         }) => {},

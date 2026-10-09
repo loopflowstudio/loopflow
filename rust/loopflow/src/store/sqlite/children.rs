@@ -593,7 +593,14 @@ impl SqliteStore {
         let observed_at = observed_at.unix_timestamp();
         let mut follow_ups_created = Vec::new();
         for comment in &observation.comments {
-            super::task_comments::ingest_task_comment(&transaction, task_id, comment)?;
+            if !super::task_comments::ingest_task_comment(
+                &transaction,
+                task_id,
+                comment,
+                observed_at,
+            )? {
+                continue;
+            }
             if !crate::ops::linear_observe::is_direction_comment(
                 &comment.body,
                 comment.author_id.as_deref(),
@@ -856,6 +863,7 @@ impl SqliteStore {
                 project.plan.summary,
             ],
         )?;
+        super::planning_peers::capture_project_content(&transaction, &project.id)?;
         transaction.commit()?;
         Ok(())
     }
@@ -1041,6 +1049,20 @@ pub(super) fn require_task_not_deleted(conn: &Connection, task: &Task) -> StoreR
 /// evidence still applies; missing inventory cannot erase the saved Task.
 pub(super) fn require_task_planning(conn: &Connection, task: &Task) -> StoreResult<()> {
     require_task_not_deleted(conn, task)?;
+    if task.worktree.is_none()
+        && conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM planning_members WHERE kind='task' AND object_id=?1)",
+            [task.id.as_str()],
+            |row| row.get::<_, bool>(0),
+        )?
+    {
+        // Planning exchange excludes execution. Neither a local absence nor a
+        // negative peer reading can reserve first start across Machines.
+        return Err(StoreError::InvalidAuthority(
+            "shared Task first-start admission is unavailable; planning is retained and no checkout was allocated"
+                .into(),
+        ));
+    }
     let (state, completed): (Option<String>, bool) = conn.query_row(
         "SELECT planning_state,planning_completed FROM tasks WHERE id=?1",
         [task.id.as_str()],

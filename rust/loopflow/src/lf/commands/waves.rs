@@ -58,8 +58,8 @@ pub struct WaveSnapshot {
     pub retired_at: Option<String>,
     pub superseded_by_wave_id: Option<String>,
     pub retirement_reason: Option<String>,
-    /// Stable execution authority and its currently observed route.
-    pub machine: Machine,
+    /// Local execution placement and its route; absent for unplaced planning.
+    pub machine: Option<Machine>,
 }
 
 /// `lf wave status <wave>`: current planning, Task conditions and Session history.
@@ -986,8 +986,7 @@ fn wave_repository(wave: &Wave, repositories: &mut HashMap<String, PathBuf>) -> 
         .clone()
 }
 
-/// Build the registry snapshot for one wave, probing its discovery endpoint
-/// for liveness.
+/// Read planning and optional placement without allocating execution.
 pub(crate) async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<WaveSnapshot> {
     let repo = wave.repo().to_string();
     let tasks = store
@@ -1000,14 +999,19 @@ pub(crate) async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<Wa
         active_tasks += u32::from(!state.is_terminal());
     }
     let placement = store
-        .placement(&WorkRef::Wave(wave.id().clone()))
+        .find_placement(&WorkRef::Wave(wave.id().clone()))
         .await
         .map_err(|error| anyhow!("failed to read Wave Machine placement: {error}"))?;
-    let machine = store
-        .machine_by_id(&placement.machine_id)
-        .await
-        .map_err(|error| anyhow!("failed to read Wave Machine: {error}"))?
-        .ok_or_else(|| anyhow!("Machine {} was not found", placement.machine_id))?;
+    let machine = match placement {
+        Some(placement) => Some(
+            store
+                .machine_by_id(&placement.machine_id)
+                .await
+                .map_err(|error| anyhow!("failed to read Wave Machine: {error}"))?
+                .ok_or_else(|| anyhow!("Machine {} was not found", placement.machine_id))?,
+        ),
+        None => None,
+    };
     let status = store
         .work_status(&WorkRef::Wave(wave.id().clone()))
         .await
@@ -1864,7 +1868,12 @@ fn print_wave_table(snapshots: &[WaveSnapshot]) {
             repo = truncate_start(&wave.repo, 28),
             status = wave.status.label(),
             tasks = wave.active_tasks,
-            machine = truncate(&wave.machine.route, 16),
+            machine = truncate(
+                wave.machine
+                    .as_ref()
+                    .map_or("unplaced", |machine| &machine.route),
+                16
+            ),
         );
     }
 }
@@ -1895,10 +1904,10 @@ fn print_status(status: &WaveDetailSnapshot) {
         );
     }
     println!("  goal      {}", wave.goal);
-    println!(
-        "  machine      {} ({})",
-        wave.machine.id, wave.machine.route
-    );
+    match &wave.machine {
+        Some(machine) => println!("  machine      {} ({})", machine.id, machine.route),
+        None => println!("  machine      unplaced"),
+    }
     print_projects(&status.projects);
     print_metric_portfolio(&status.metric_portfolio);
     match &status.tasks {

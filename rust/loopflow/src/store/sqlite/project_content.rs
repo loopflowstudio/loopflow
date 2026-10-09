@@ -123,9 +123,6 @@ impl SqliteStore {
         project: &ProjectId,
         content: &ProjectContent,
     ) -> StoreResult<()> {
-        content
-            .validate()
-            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let current = super::plan_read::project_in(&tx, project)?;
@@ -160,6 +157,19 @@ pub(super) fn write_content(
     ] {
         PlanningChanges::Project(project).record(conn, field, previous, value)?;
     }
+    save_content(conn, project, content)
+}
+
+/// Persist the combined semantic winners without minting another delivery receipt.
+/// Local edits and peer projection use the same content representation.
+pub(super) fn save_content(
+    conn: &Connection,
+    project: &ProjectId,
+    content: &ProjectContent,
+) -> StoreResult<()> {
+    content
+        .validate()
+        .map_err(|error| StoreError::InvalidData(error.to_string()))?;
     conn.execute(
         "UPDATE projects SET project_prompt_context=?2,workflow=?3,updated_at=?4
          WHERE id=?1 AND (project_prompt_context IS NOT ?2 OR workflow IS NOT ?3)",
@@ -170,6 +180,31 @@ pub(super) fn write_content(
             now_unix()
         ],
     )?;
+    super::planning_peers::capture_project_content(conn, project)
+}
+
+pub(super) fn read_content(conn: &Connection, project: &ProjectId) -> StoreResult<ProjectContent> {
+    let (body, workflow): (String, String) = conn.query_row(
+        "SELECT COALESCE(project_prompt_context,''),workflow FROM projects WHERE id=?1",
+        [project.as_str()],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    let mut content = crate::pm::parse_project_content(&body)
+        .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+    // Match the common reader: the saved selection owns workflow, not old prose.
+    content.workflow = workflow;
+    Ok(content)
+}
+
+/// Released-frontier backfill, called by the same migration transaction as SQL.
+pub(crate) fn seed_peer_content(conn: &Connection) -> StoreResult<()> {
+    let mut query = conn.prepare("SELECT id FROM projects ORDER BY id")?;
+    let ids = query
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    for id in ids {
+        super::planning_peers::capture_project_content(conn, &ProjectId::from_raw(id))?;
+    }
     Ok(())
 }
 
@@ -270,9 +305,11 @@ mod tests {
                 store.project(&project).unwrap().unwrap().plan.workflow,
                 "review"
             );
-            assert!(store
-                .select_project_workflow(&project, "review", "changed")
-                .is_err());
+            for (name, source) in [("invalid/review", definition), ("review", "changed")] {
+                assert!(store
+                    .select_project_workflow(&project, name, source)
+                    .is_err());
+            }
             assert_eq!(
                 store.wave_workflow(&wave, "review").unwrap().as_deref(),
                 Some(definition)

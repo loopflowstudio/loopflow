@@ -436,7 +436,7 @@ final class WorkModel {
         switch sessions {
         case .loading: (state, reason) = ("loading", "Sessions have not been read")
         case .unavailable(_, let error): (state, reason) = ("unavailable", error)
-        case .available where savedSessionRepos.contains(sessionReadingKey(repoPath ?? "")):
+        case .available where savedSessionRepos.contains(repositoryReadingKey(repoPath ?? "")):
             (state, reason) = ("saved", "Saved Sessions are not a current action reading")
         case .available where sessionsRefresh?.repo == repoPath:
             (state, reason) = ("updating", "Session enumeration is not complete")
@@ -509,17 +509,23 @@ final class WorkModel {
     }
     private(set) var waves: WorkReading<[Wave]> = .loading
     private(set) var processActivity: WorkReading<ActivitySnapshot> = .loading
-    private struct SessionReadingKey: Hashable {
+    private struct RepositoryReadingKey: Hashable {
         let machineId: String?
         let repository: String
     }
-    private func sessionReadingKey(_ repo: String) -> SessionReadingKey {
-        SessionReadingKey(machineId: workMachine ?? savedMachineId, repository: repo)
+    private func repositoryReadingKey(_ repo: String) -> RepositoryReadingKey {
+        RepositoryReadingKey(machineId: workMachine ?? savedMachineId, repository: repo)
     }
-    private var sessionReadings: [SessionReadingKey: WorkReading<[SessionRecord]>] = [:]
+    private var sessionReadings: [RepositoryReadingKey: WorkReading<[SessionRecord]>] = [:]
+    private var peerPlanningReadings: [RepositoryReadingKey: WorkReading<[PeerPlanningStatus]>] = [:]
+    private(set) var peerPlanning: WorkReading<[PeerPlanningStatus]> {
+        get { peerPlanningReadings[repositoryReadingKey(repoPath ?? "")] ?? .loading }
+        set { peerPlanningReadings[repositoryReadingKey(repoPath ?? "")] = newValue }
+    }
+    private var peerPlanningGeneration = 0
     private(set) var sessions: WorkReading<[SessionRecord]> {
-        get { sessionReadings[sessionReadingKey(repoPath ?? "")] ?? .loading }
-        set { sessionReadings[sessionReadingKey(repoPath ?? "")] = newValue }
+        get { sessionReadings[repositoryReadingKey(repoPath ?? "")] ?? .loading }
+        set { sessionReadings[repositoryReadingKey(repoPath ?? "")] = newValue }
     }
     private(set) var workActivity: WorkReading<WorkActivitySnapshot> = .loading
     /// Selectable Flows per repository, read once on demand; never per repaint.
@@ -575,7 +581,7 @@ final class WorkModel {
     @ObservationIgnored private(set) var savedMachineId: String?
     /// Parts still showing saved text instead of a read from this launch.
     private var showsSavedPlanning = false
-    private var savedSessionRepos: Set<SessionReadingKey> = []
+    private var savedSessionRepos: Set<RepositoryReadingKey> = []
     private var usesFixedFixture = false
     private var sessionsGeneration = 0
     @ObservationIgnored private var sessionsRefresh: (repo: String, generation: Int, task: Task<Void, Never>)?
@@ -658,7 +664,7 @@ final class WorkModel {
 
     /// Whether any part shown is saved text instead of a read from this launch.
     var showsSavedWork: Bool {
-        showsSavedPlanning || savedSessionRepos.contains(sessionReadingKey(repoPath ?? ""))
+        showsSavedPlanning || savedSessionRepos.contains(repositoryReadingKey(repoPath ?? ""))
     }
 
     /// Show the saved workspace before any read. Text that no longer decodes is skipped.
@@ -674,8 +680,8 @@ final class WorkModel {
         for (repo, entry) in saved.repositories {
             if let pages = entry.sessionPages,
                let records = try? pages.flatMap({ try RegistryQuery.decode(SessionPage.self, from: $0).entries }) {
-                sessionReadings[SessionReadingKey(machineId: saved.machineId, repository: repo)] = .available(records)
-                savedSessionRepos.insert(SessionReadingKey(machineId: saved.machineId, repository: repo))
+                sessionReadings[RepositoryReadingKey(machineId: saved.machineId, repository: repo)] = .available(records)
+                savedSessionRepos.insert(RepositoryReadingKey(machineId: saved.machineId, repository: repo))
             }
             guard let selection = entry.selection, let waves = roadmap.value?.waves else { continue }
             let evidence = waves.lazy.compactMap { wave in
@@ -877,6 +883,10 @@ final class WorkModel {
         if let value = roadmap.value { roadmap = .unavailable(lastGood: value, reason: reason) }
         if let value = waves.value { waves = .unavailable(lastGood: value, reason: reason) }
         if repoPath != nil, let value = sessions.value { sessions = .unavailable(lastGood: value, reason: reason) }
+        peerPlanningReadings = peerPlanningReadings.mapValues {
+            .unavailable(lastGood: $0.value, reason: reason)
+        }
+        if repoPath != nil { peerPlanning = .unavailable(lastGood: peerPlanning.value, reason: reason) }
         if let value = processActivity.value { processActivity = .unavailable(lastGood: value, reason: reason) }
     }
 
@@ -897,6 +907,16 @@ final class WorkModel {
             await applyPlanning(body, wire: frame.wire, reason: reason)
             planningSequence = frame.sequence
             resumePlanningWaiters(through: answers)
+        case .peerPlanning(let body):
+            guard answers >= max(planningFloor, scopeFloor), let repoPath else { return }
+            guard let body else {
+                peerPlanning = .unavailable(lastGood: peerPlanning.value, reason: reason)
+                break
+            }
+            guard body.repo.normalizedFilePath == repoPath.normalizedFilePath else { return }
+            peerPlanningGeneration &+= 1
+            let next = WorkReading.available(body.destinations)
+            if peerPlanning != next { peerPlanning = next }
         case .sessions(let body):
             guard answers >= max(sessionsFloor, scopeFloor), let repoPath else { return }
             guard let body else {
@@ -907,7 +927,7 @@ final class WorkModel {
                   body.includesHeadless == navigation.showsHeadlessSessions else { return }
             let next = WorkReading.available(body.entries)
             if sessions != next { sessions = next }
-            if savedSessionRepos.remove(sessionReadingKey(repoPath)) != nil {
+            if savedSessionRepos.remove(repositoryReadingKey(repoPath)) != nil {
                 LaunchJournal.home.refreshed("sessions", ms: workOpened.elapsedMs, ok: true)
             }
             endLaunchWhenCurrent()
@@ -998,6 +1018,8 @@ final class WorkModel {
             navigation.content = .overview
         }
         sessionReadings = [:]
+        peerPlanningReadings = [:]
+        peerPlanningGeneration &+= 1
         savedSessionRepos = []
         waveDetail = nil
         taskWork = TaskReadings<TaskWork>()
@@ -1014,8 +1036,22 @@ final class WorkModel {
             return
         }
         async let sessions: Void = refreshSessions()
+        async let peers: Void = refreshPeerPlanning()
         await refreshPlanning()
         await sessions
+        await peers
+    }
+
+    private func refreshPeerPlanning() async {
+        guard !usesFixedFixture, let repo = repoPath else { return }
+        peerPlanningGeneration &+= 1
+        let generation = peerPlanningGeneration
+        let key = repositoryReadingKey(repo)
+        let result: Result<[PeerPlanningStatus], Error>
+        do { result = .success(try await query.peerPlanningStatus(cwd: repo)) }
+        catch { result = .failure(error) }
+        guard generation == peerPlanningGeneration, repo == repoPath, key == repositoryReadingKey(repo) else { return }
+        peerPlanning = reading(from: result, lastGood: peerPlanning.value)
     }
 
     func refreshPlanning() async {
@@ -1114,6 +1150,7 @@ final class WorkModel {
             historyLookup?.cancel()
             historyLookup = nil
             sessionsGeneration &+= 1
+            peerPlanningGeneration &+= 1
             workActivityGeneration &+= 1
             if !usesFixedFixture { workActivity = .loading }
         }
@@ -1252,7 +1289,7 @@ final class WorkModel {
     }
 
     private func readSessions(repoPath: String, generation: Int) async {
-        let key = sessionReadingKey(repoPath)
+        let key = repositoryReadingKey(repoPath)
         let initialIDs = Set((sessions.value ?? []).map(\.id))
         var records: [SessionRecord] = []
         var after: String?
@@ -1264,7 +1301,7 @@ final class WorkModel {
             repeat {
                 let page = try await query.sessionPage(includingHeadless: includingHeadless, after: after, cwd: repoPath)
                 guard sessionsGeneration == generation, self.repoPath == repoPath,
-                      sessionReadingKey(repoPath) == key,
+                      repositoryReadingKey(repoPath) == key,
                       navigation.showsHeadlessSessions == includingHeadless,
                       !Task.isCancelled else { return }
                 records += page.entries
@@ -1278,14 +1315,14 @@ final class WorkModel {
                 if sessions != next { sessions = next }
                 after = page.next
             } while after != nil
-            savedSessionRepos.remove(sessionReadingKey(repoPath))
+            savedSessionRepos.remove(repositoryReadingKey(repoPath))
             LaunchJournal.home.refreshed("sessions", ms: started.elapsedMs, ok: true)
             endLaunchWhenCurrent()
             // Explicit history is read on request, never restored at launch.
             if !includingHeadless { cache?.saveSessions(wire.texts, repo: repoPath) }
         } catch {
             guard sessionsGeneration == generation, self.repoPath == repoPath,
-                      sessionReadingKey(repoPath) == key,
+                      repositoryReadingKey(repoPath) == key,
                   !Task.isCancelled else { return }
             LaunchJournal.home.refreshed("sessions", ms: started.elapsedMs, ok: false)
             let next = WorkReading.unavailable(lastGood: sessions.value, reason: error.localizedDescription)
@@ -1441,7 +1478,7 @@ final class WorkModel {
     func commitSessionRename() async {
         guard let repo = repoPath, let draft = navigation.renaming, !draft.submitting else { return }
         let owner = navigation
-        let key = sessionReadingKey(repo)
+        let key = repositoryReadingKey(repo)
         let target = draft.sessionId
         owner.renaming?.submitting = true
         owner.renaming?.error = nil
@@ -1490,7 +1527,7 @@ final class WorkModel {
         guard let repo = repoPath, let draft = navigation.binding, !draft.submitting,
               let preview = draft.preview, preview.sessionId == draft.sessionId else { return }
         let owner = navigation
-        let key = sessionReadingKey(repo)
+        let key = repositoryReadingKey(repo)
         owner.binding?.submitting = true
         owner.binding?.error = nil
         do {
@@ -1511,7 +1548,7 @@ final class WorkModel {
         navigation.binding = nil
     }
 
-    private func replaceSession(_ record: SessionRecord, key: SessionReadingKey) {
+    private func replaceSession(_ record: SessionRecord, key: RepositoryReadingKey) {
         let replace = { (records: [SessionRecord]) in
             records.map { $0.id == record.id ? record : $0 }
         }

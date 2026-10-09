@@ -52,6 +52,7 @@ never in environment variables. Detached Session shells scrub transient credenti
 | Variable | Policy |
 |---|---|
 | `LF_ACCOUNT_SELECTION` | Account preference/restriction for this invocation and its children; contains no credential. |
+| `LF_TASK_SOURCE` | One SSH invocation's saved Task ID, identifier, branch and required commit. Contains no planning payload, local paths or execution authority. |
 | `LF_DISCORD_TOKEN` | Chat bridge token; removed before any provider child. |
 | `LF_CREDENTIAL_SOCKET`, `LF_AUTH_BROWSER_FIFO` | Local credential broker and browser handoff for login. |
 | `GH_TOKEN`, `OPENCODE_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `CODEX_ACCESS_TOKEN`, `OPENAI_API_KEY` | Provider credentials, applied per program. |

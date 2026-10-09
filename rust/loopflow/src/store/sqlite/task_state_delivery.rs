@@ -40,14 +40,40 @@ pub(super) fn queue_in(conn: &Connection, task: &TaskId, target: &str) -> StoreR
          planning_completed_at=?3,planning_revision=planning_revision+1 WHERE id=?1",
         params![task.as_str(), target, completed_at],
     )?;
+    let move_seq = conn.query_row(
+        "SELECT max(seq) FROM task_workflow_moves WHERE task_id=?1",
+        [task.as_str()],
+        |row| row.get(0),
+    )?;
+    record_in(
+        conn,
+        task,
+        &uuid::Uuid::new_v4().to_string(),
+        target,
+        move_seq,
+        None,
+    )
+}
+
+/// Save delivery separately from the planning value. Peer imports have their own
+/// stable mutation identity and no local Workflow move; retries retain attempts.
+pub(super) fn record_in(
+    conn: &Connection,
+    task: &TaskId,
+    receipt: &str,
+    target: &str,
+    move_seq: Option<i64>,
+    baseline: Option<&serde_json::Value>,
+) -> StoreResult<()> {
     conn.execute(
         "INSERT INTO task_state_deliveries(id,task_id,move_seq,target,base_revision,base_state)
-         SELECT ?2,t.id,(SELECT max(seq) FROM task_workflow_moves WHERE task_id=t.id),?3,
-             json_extract(i.body,'$.revision'),json_extract(i.body,'$.state')
+         SELECT ?2,t.id,?4,?3,
+             CASE WHEN ?5 IS NULL THEN json_extract(i.body,'$.revision') ELSE json_extract(?5,'$.revision') END,
+             CASE WHEN ?5 IS NULL THEN json_extract(i.body,'$.state') ELSE json_extract(?5,'$.value.planning_state') END
          FROM tasks t JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id
          LEFT JOIN pm_items i ON i.id=t.external_issue_id AND i.repo=w.repo AND i.provider='linear'
-         WHERE t.id=?1",
-        params![task.as_str(), uuid::Uuid::new_v4().to_string(), target],
+         WHERE t.id=?1 ON CONFLICT(id) DO NOTHING",
+        params![task.as_str(), receipt, target, move_seq, baseline.map(serde_json::Value::to_string)],
     )?;
     Ok(())
 }
@@ -57,6 +83,25 @@ pub(super) fn reconcile_in(
     conn: &Connection,
     task: &TaskId,
     observed: &crate::pm::PmItem,
+) -> StoreResult<bool> {
+    reconcile_observation(conn, task, observed, false)
+}
+
+/// The journal selected a concurrent provider winner. Unlike acquisition alone,
+/// this retires a losing intention even when the provider baseline is unchanged.
+pub(super) fn adopt_peer_in(
+    conn: &Connection,
+    task: &TaskId,
+    observed: &crate::pm::PmItem,
+) -> StoreResult<()> {
+    reconcile_observation(conn, task, observed, true).map(|_| ())
+}
+
+fn reconcile_observation(
+    conn: &Connection,
+    task: &TaskId,
+    observed: &crate::pm::PmItem,
+    peer_winner: bool,
 ) -> StoreResult<bool> {
     let pending: Option<(TaskStateDelivery, Option<String>)> = conn.query_row(
         "SELECT d.id,d.task_id,d.target,d.attempted,d.base_revision,d.base_state,t.planning_provider_revision
@@ -94,7 +139,10 @@ pub(super) fn reconcile_in(
     }
     // An unrelated provider revision does not conflict with an unattempted save.
     // After an uncertain write, a changed revision may represent completion/reopening.
-    if observed.state == base_state && !(attempted && observed.revision != base_revision) {
+    if !peer_winner
+        && observed.state == base_state
+        && !(attempted && observed.revision != base_revision)
+    {
         return Ok(true);
     }
     conn.execute(
@@ -196,13 +244,20 @@ impl SqliteStore {
     /// Acquire the effect only while the captured decision is still current.
     /// A canceled request remains attempted, so a later read must resolve it.
     pub(crate) fn attempt_task_state(&self, delivery: &TaskStateDelivery) -> StoreResult<bool> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.execute(
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        super::planning_peers::require_projected_effects(
+            &tx,
+            super::planning_changes::PlanningChanges::Task(&delivery.task_id),
+        )?;
+        let attempted = tx.execute(
             "UPDATE task_state_deliveries SET attempted=1
              WHERE id=?1 AND attempted=0 AND settled=0 AND conflict_json IS NULL
              AND seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=?2)",
             params![delivery.id, delivery.task_id.as_str()],
-        )? == 1)
+        )? == 1;
+        tx.commit()?;
+        Ok(attempted)
     }
 
     /// Failed delivery retains its receipt; only provider observation settles state.

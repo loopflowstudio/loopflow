@@ -107,10 +107,21 @@ These are reversible lookup choices, not shared Work identity or publication.
 Primary and stack-parent Task selectors now carry repository-scoped full IDs through
 dispatch; an unscoped ambiguous prefix still fails.
 
-October 9 `lf context --skill realign --json`: generated goal 27,854/16,000 tokens
-(11,854 over; generated inventory sizes vary). The complete launch source was read: Task/steer history plus 211
-changed-file records. Authored-note curation cannot remove that generated payload;
-the context-producer gap remains. No limit was raised.
+October 9 `lf context --skill implement --json`: generated goal 31,454/16,000
+ tokens (15,454 over before note edits). The complete launch source contains Task
+ direction and the generated changed-file inventory; authored-note curation cannot
+ remove that payload. This remains a context-producer gap; no limit was raised.
+
+## Explicit repository association — October 9
+
+`repo identity --bind ID` uses the existing owner only for an unbound checkout or
+an identical binding. It precedes independent local creation/import and does not
+select/publish planning. Existing different roots remain intact and unavailable
+for implicit merging. Their explicit association, delegation exchange and peer
+first-start admission remain required. Shared Tasks lacking a retained checkout
+refuse first start; import cannot supply a reservation.
+LOO-412's started-Task source-transfer path conflicts with Jack Heart's retained-
+Machine decision and is excluded; dependent remote launch work stays unfinished.
 
 ## Reversible preview limits — October 9
 

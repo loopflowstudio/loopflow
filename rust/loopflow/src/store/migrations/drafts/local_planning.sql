@@ -420,3 +420,11 @@ CREATE TRIGGER store_revision_task_changes_update AFTER UPDATE ON task_changes
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
 CREATE TRIGGER store_revision_task_changes_delete AFTER DELETE ON task_changes
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+
+-- Creation attempt errors are visible before a provider mapping exists.
+CREATE TRIGGER store_revision_task_creation_intents_insert AFTER INSERT ON task_creation_intents
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+CREATE TRIGGER store_revision_task_creation_intents_update AFTER UPDATE ON task_creation_intents
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+CREATE TRIGGER store_revision_task_creation_intents_delete AFTER DELETE ON task_creation_intents
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;

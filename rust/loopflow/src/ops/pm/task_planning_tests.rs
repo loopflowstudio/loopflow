@@ -422,6 +422,30 @@ async fn planning_graphql(
         json!({"issue":issue})
     } else if query.contains("query IssueComments") {
         json!({"issue":{"comments":page(state.comments.clone())}})
+    } else if query.contains("query CommentDelivery") {
+        let mut comment = state
+            .comments
+            .iter()
+            .find(|c| c["id"] == vars["id"])
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        if !comment.is_null() {
+            comment["issue"] = json!({"id":"issue-1"});
+        }
+        json!({"comment":comment})
+    } else if query.contains("mutation SyncComment") {
+        let id = vars["id"].as_str().unwrap();
+        if state.comments.iter().any(|c| c["id"] == id) {
+            return axum::Json(json!({"errors":[{"message":"ID already exists"}]}));
+        }
+        state
+            .comments
+            .push(json!({"id":id,"body":vars["body"],"user":null,
+            "createdAt":"2026-10-08T12:00:01Z","updatedAt":"2026-10-08T12:00:01Z"}));
+        if std::mem::take(&mut state.lose_comment) {
+            return axum::Json(json!({"errors":[{"message":"lost comment response"}]}));
+        }
+        json!({"commentCreate":{"comment":{"id":id}}})
     } else if query.contains("mutation CreateComment") {
         let id = format!("comment-{}", state.comments.len() + 1);
         state
@@ -1556,6 +1580,252 @@ fn task_completion_active_sync_acquires_membership_while_delivery_is_pending() {
         });
         drop(sync);
     });
+}
+
+#[test]
+fn native_runner_reconnects_planning_without_another_turn() {
+    for (agent, auto) in [("codex", false), ("claude", false), ("claude", true)] {
+        with_planning_task(|runtime, fixture, repo, task, state| {
+            seed_provider_task(runtime, &state, repo, "Remote work", "Keep execution local")
+                .unwrap();
+            let other = runtime
+                .block_on(fixture.store.get_task_by_issue("FIX-2"))
+                .unwrap()
+                .unwrap();
+            let _environment = crate::test_ambient::EnvGuard::clear(&[
+                "HOME",
+                "LF_HOME",
+                "LF_BIN",
+                "PATH",
+                "CODEX_HOME",
+                "CLAUDE_CONFIG_DIR",
+            ]);
+            let home = fixture.directory.path().join("provider-home");
+            let bin = fixture.directory.path().join("bin");
+            std::fs::create_dir_all(&home).unwrap();
+            std::fs::create_dir_all(&bin).unwrap();
+            std::env::set_var("HOME", &home);
+            std::env::set_var("LF_HOME", fixture.directory.path());
+            std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
+            let path = format!("{}:/usr/bin:/bin", bin.display());
+            std::env::set_var("PATH", &path);
+            let started = home.join("started");
+            let stop = home.join("stop");
+            let executable = bin.join(agent);
+            std::fs::write(
+                &executable,
+                r#"#!/bin/sh
+: > "$FIXTURE_STARTED"
+i=0
+while [ ! -e "$FIXTURE_STOP" ] && [ "$i" -lt 600 ]; do
+    /bin/sleep 0.1
+    i=$((i+1))
+done
+exit 0
+"#,
+            )
+            .unwrap();
+            std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+            runtime.block_on(async { state.lock().await.field_outage = true });
+            // Unrelated rejected text delivery must not hold state or comment acquisition.
+            fixture
+                .store
+                .sqlite
+                .edit_task(
+                    &task.id,
+                    task.plan.revision,
+                    &crate::pm::PmItemUpdate {
+                        name: Some("Pending local title".into()),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+            crate::ops::task::task_end(
+                repo,
+                task.id.as_str(),
+                Some("Saved offline"),
+                &Default::default(),
+            )
+            .unwrap();
+            let comment =
+                crate::ops::task::append_task_comment(&fixture.store, task, "Saved offline", true)
+                    .unwrap();
+            let receipt = fixture
+                .store
+                .sqlite
+                .pending_task_state(&task.id)
+                .unwrap()
+                .unwrap();
+            let workflow = fixture.store.sqlite.workflow(&task.id).unwrap();
+            let other_workflow = fixture.store.sqlite.workflow(&other.id).unwrap();
+            let process = crate::engine::agent::ProcessConfig {
+                auto,
+                task_input: Some(crate::ops::task_input::TaskInput::new(
+                    fixture.store.clone(),
+                    crate::ops::task_input::TaskSeed {
+                        task: task.clone(),
+                        message: String::new(),
+                        steers: Vec::new(),
+                        steer: 0,
+                        interrupt: 0,
+                    },
+                )),
+                ..Default::default()
+            };
+            let launch = crate::engine::agent::AgentConfig {
+                agent: Some(agent.into()),
+                cwd: Some(repo.to_path_buf()),
+                env: std::collections::BTreeMap::from([
+                    ("PATH".into(), path),
+                    ("FIXTURE_STARTED".into(), started.display().to_string()),
+                    ("FIXTURE_STOP".into(), stop.display().to_string()),
+                ]),
+                ..Default::default()
+            };
+            let context = PM_TEST_CONTEXT.with(Clone::clone);
+            runtime.block_on(async {
+                let running = tokio::task::spawn_blocking(move || {
+                    PM_TEST_CONTEXT.sync_scope(context, || {
+                        crate::engine::agent::run_agent(
+                            &launch,
+                            &process,
+                            &crate::engine::agent::AgentCapabilities::default(),
+                        )
+                    })
+                });
+                let observed = tokio::time::timeout(std::time::Duration::from_secs(45), async {
+                    loop {
+                        let sync = fixture.store.sqlite.task_planning_sync(&task.id).unwrap();
+                        if started.exists()
+                            && sync
+                                .changes
+                                .iter()
+                                .any(|c| c.id == receipt.id && c.error.is_some())
+                        {
+                            break;
+                        }
+                        assert!(!running.is_finished(), "provider exited during outage");
+                        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+                    }
+                    assert_eq!(
+                        fixture
+                            .store
+                            .sqlite
+                            .pending_task_state(&task.id)
+                            .unwrap()
+                            .unwrap()
+                            .id,
+                        receipt.id
+                    );
+                    assert!(fixture
+                        .store
+                        .sqlite
+                        .task_comments(&task.id)
+                        .unwrap()
+                        .pending_sync
+                        .contains(&comment));
+                    {
+                        let mut provider = state.lock().await;
+                        provider.field_outage = false;
+                        provider.field_reject_write = true;
+                        provider.lose_completion = true;
+                        provider.lose_comment = true;
+                        provider.issues[1]["state"] = json!({"type":"completed"});
+                        mark_issue_updated(&mut provider.issues[1]);
+                        let mut added = provider.issues[1].clone();
+                        added["id"] = json!("issue-3");
+                        added["identifier"] = json!("FIX-3");
+                        added["state"] = json!({"type":"unstarted"});
+                        provider.issues.push(added);
+                        provider.comments.push(
+                            json!({"id":"incoming-reconnect", "body":"Arrived during outage",
+                            "createdAt":"2026-10-08T12:00:00Z", "updatedAt":"2026-10-08T12:00:00Z",
+                            "user":{"id":"fixture-person","displayName":"Maya","name":"Maya"}}),
+                        );
+                    }
+                    loop {
+                        let thread = fixture.store.sqlite.task_comments(&task.id).unwrap();
+                        let remote = fixture
+                            .store
+                            .sqlite
+                            .planning_task(&other.id)
+                            .unwrap()
+                            .record
+                            .unwrap();
+                        if fixture
+                            .store
+                            .sqlite
+                            .pending_task_state(&task.id)
+                            .unwrap()
+                            .is_none()
+                            && thread.pending_sync.is_empty()
+                            && thread.comments.iter().any(|c| c.id == "incoming-reconnect")
+                            && remote.item.completed
+                            && fixture
+                                .store
+                                .get_task_by_issue("FIX-3")
+                                .await
+                                .unwrap()
+                                .is_some()
+                        {
+                            break;
+                        }
+                        assert!(!running.is_finished(), "provider exited before catch-up");
+                        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+                    }
+                })
+                .await;
+                // Always release the exact stub before asserting the bounded observation.
+                std::fs::write(&stop, "stop").unwrap();
+                assert_eq!(running.await.unwrap().unwrap().exit_code, 0);
+                observed.expect("active native runner did not catch up after reconnect");
+                let provider = state.lock().await;
+                assert_eq!(provider.completion_writes, 1);
+                assert_eq!(
+                    provider
+                        .comments
+                        .iter()
+                        .filter(|c| c["id"] == comment)
+                        .count(),
+                    1
+                );
+                assert_eq!(provider.issues[0]["state"]["type"], "completed");
+                assert_ne!(provider.issues[0]["title"], "Pending local title");
+            });
+            assert_eq!(
+                fixture
+                    .store
+                    .sqlite
+                    .pending_task_changes(&task.id)
+                    .unwrap()
+                    .len(),
+                1
+            );
+            assert_eq!(fixture.store.sqlite.workflow(&task.id).unwrap(), workflow);
+            assert_eq!(
+                fixture.store.sqlite.workflow(&other.id).unwrap(),
+                other_workflow
+            );
+            assert_eq!(
+                runtime
+                    .block_on(
+                        fixture
+                            .store
+                            .work_status(&crate::durable::WorkRef::Task(other.id.clone()))
+                    )
+                    .unwrap(),
+                WorkStatus::Ready
+            );
+            assert!(fixture
+                .store
+                .sqlite
+                .task(&other.id)
+                .unwrap()
+                .unwrap()
+                .worktree
+                .is_none());
+        });
+    }
 }
 
 #[test]

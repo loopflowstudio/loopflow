@@ -38,6 +38,20 @@ private final class Feed {
 @Suite("Desktop without a display")
 @MainActor
 struct DesktopHeadlessTests {
+    @Test("Planning sync shows saves, uncertainty and retained losing edits, then clears settled work")
+    func planningSync() throws {
+        let data = try Data(contentsOf: fixtures.appendingPathComponent("planning_sync.json"))
+        let sync = try JSONDecoder().decode(PlanningSyncStatus.self, from: data)
+        let view = PlanningSyncView(sync: sync)
+        for change in sync.changes {
+            #expect(try view.inspect().find(text: change.text).string() == change.text)
+        }
+        for connected in [true, false] {
+            let settled = try JSONDecoder().decode(PlanningSyncStatus.self, from: Data("{\"connected\":\(connected),\"changes\":[]}".utf8))
+            #expect(try PlanningSyncView(sync: settled).inspect().findAll(ViewType.Text.self).isEmpty)
+        }
+    }
+
     @Test("Workflows render and save through the store without creating a repository file")
     func storedWorkflow() async throws {
         var roadmap = try #require(JSONSerialization.jsonObject(with: Data(contentsOf:

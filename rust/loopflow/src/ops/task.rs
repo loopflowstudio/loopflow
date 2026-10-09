@@ -3444,6 +3444,7 @@ pub fn pr_next(repo: &Path, slug: Option<&str>) -> OpsResult<TaskPr> {
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TaskStatus {
+    pub sync: Option<crate::planning::PlanningSyncStatus>,
     pub planning: Option<crate::store::PmTaskRecord>,
     pub planning_error: Option<String>,
     pub planning_stale: bool,
@@ -3461,7 +3462,15 @@ pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
                 refresh_error: None,
             })
         })?;
+        let sync = block_on_task(async {
+            let store = task_store().await?;
+            store
+                .sqlite
+                .task_planning_sync(&task.id)
+                .map_err(task_error)
+        })?;
         return Ok(TaskStatus {
+            sync: Some(sync),
             planning_stale: task.plan.linear_id.is_some() && read.is_stale(),
             planning_state: read.observation.state,
             planning: read.observation.record,
@@ -3495,6 +3504,7 @@ pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
     let planning_error = read.refresh_error;
     let execution = task.as_ref().map(task_snapshot).transpose()?;
     Ok(TaskStatus {
+        sync: None,
         planning,
         planning_error,
         planning_stale,

@@ -7,6 +7,21 @@ import Testing
 /// the Mac app.
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
+    @Test("Planning delivery retains uncertainty, errors and both conflict values")
+    func planningSyncFixture() throws {
+        let sync = try JSONDecoder().decode(PlanningSyncStatus.self, from: loadFixtureData("planning_sync.json"))
+        #expect(sync.connected)
+        #expect(sync.changes[0].state == .pending)
+        #expect(sync.changes[1].state == .uncertain)
+        #expect(sync.changes[1].error == "Reply lost; awaiting readback")
+        #expect(sync.changes[2].localValue == .string("Local title"))
+        #expect(sync.changes[2].linearValue == .string("Linear title"))
+        #expect(sync.changes[3].text.contains("Linear: null"))
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(PlanningSyncStatus.self, from: Data("{}".utf8))
+        }
+    }
+
     @Test("Task work retains conversations, Flows and command history")
     func taskWorkFixture() throws {
         let data = try loadFixtureData("task_work.json")
@@ -238,12 +253,13 @@ struct DTOFixtureTests {
 
 
         #expect(detail.currentProject?.workflow == "task-design")
+        #expect(detail.currentProject?.sync?.changes[1].field == "task_order")
         #expect(detail.unavailableTasks[0].taskIdentifier == "W2-127")
         #expect(detail.unavailableTasks[0].status == .ready)
         #expect(detail.unavailableTasks[0].owner == .wave)
         #expect(detail.tasks.items.map(\.task.identifier) == ["INF-123", "INF-124"])
         #expect(detail.tasks.items[0].task.state == "unstarted")
-        #expect(detail.tasks.items[0].runtime?.pendingSync == "Saved locally; pending Linear synchronization")
+        #expect(detail.tasks.items[0].task.sync?.changes[0].field == "creation")
         #expect(detail.tasks.items[0].task.completedAt == nil)
         #expect(detail.tasks.items[0].prs.compactMap(\.publication?.github?.number) == [912])
         #expect(detail.tasks.items[0].activePr == "pr_33333333333333333333333333333333")

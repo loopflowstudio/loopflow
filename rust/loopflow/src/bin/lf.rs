@@ -1056,6 +1056,11 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                         println!("No Project assigned; managed work requires ownership.");
                     }
                 }
+                if let Some(sync) = &status.sync {
+                    for line in sync.lines() {
+                        println!("{line}");
+                    }
+                }
                 if let Some(error) = &status.planning_error {
                     println!("Planning: {error}");
                 }
@@ -2009,11 +2014,8 @@ fn finish_command(result: anyhow::Result<()>) -> anyhow::Result<()> {
 }
 
 fn print_project_sync(saved: &loopflow::ops::project::ProjectPlanning) {
-    if saved.sync_enabled && !saved.pending_changes.is_empty() {
-        eprintln!(
-            "Saved locally; pending Linear sync ({} fields).",
-            saved.pending_changes.len()
-        );
+    for line in saved.sync.lines() {
+        eprintln!("{line}");
     }
 }
 

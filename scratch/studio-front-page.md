@@ -230,3 +230,14 @@ Built: "lf is the CLI for [writing | running | sharing | studying] agent workflo
 Jack Heart: "we need more flow stuff in both the list of commands and at the top of the list that follows". `/cli` commands now open with `lf flow list`, `lf flow show`, `lf run`, `lf flow customize`; the list opens with Flows, Steps, Built-ins.
 On "you can resume a Codex session in Claude": Jack asked whether it is true of lf today and not of Claude by default, then "maybe just file a task to enable doign it" and "lets check at least that you cant already just natively ask claude to resume a codex session". Checked 2026-10-09 with Claude Code 2.1.295: `claude -p --resume <Codex conversation id>` answers "No conversation found with session ID".
 Source check: `lf session resume` relaunches the provider that owns the conversation; nothing converts or carries history across providers. The claim is not true today. Sentence replaced with what resume does; LOO-445 filed in the product Wave to build it.
+
+## Which commands `/cli` shows (2026-10-09)
+
+Jack Heart asked for a subagent "to really try to study the question of what cmds should we put here". His brief, condensed from his words:
+- "a very technical audience. We have the other page for less experienced engineers."
+- "We're trying to own the idea that we encode the concepts that matter around software. Therefore you should use us as your glue language and API for this sort of simple thing that you can do lots of ways and we don't necessarily do anything magical with it"
+- "progressive disclosure … introduce concepts in an order that makes it so that you can easily understand each command having read the previous one"
+- "express some of the width and depth of the product and help people understand the different way that Loopflow connects pieces that might otherwise be thought to be independent"
+- "there's this lower-level API agent launcher and there's this higher-level API, which then has things on top of it that are nice that you would want an agent launcher to have, like usage tracking or auth/login management. Those are things around engaging with the agent, but not the actual agent itself"
+- "then also we have this higher-level API that is about working around organizing around the work, which is basically saying we're doing project management. Maybe we want to mention having a linear integration"
+- "something about how you can mix and match and use what you like and not use what you don't like"

@@ -73,23 +73,10 @@ earlier adoption and pre-cut storage evidence, with their limitations, remain at
   losing receipts, provider authorship, destination-scoped unknown status and the
   common content parser. No mixed-provider activation follows.
 
-- October 9 executable feedback exposed two missing common-writer boundaries:
-  accepted peer provider facts lacked their original acquisition age on local rows,
-  and readiness treated missing list inventory as negative membership evidence.
-  Import now retains the accepted age; readiness still rejects explicit archive,
-  unresolved membership and configured-Initiative contradictions, not missing lists.
-  Imported planning remains unplaced. A later local placement operation uses the
-  local machine when its parent is unplaced and preserves existing placements.
-  Task creation readback uses the original common receipt even if a peer mapping arrived
-  first; mapping alone neither acknowledges nor clears uncertainty. Review rejected
-  freezing Project membership to its creation snapshot: later accepted moves must
-  remain possible. Project/link readback therefore stays with its existing
-  owner pending full receipt composition. The later receipt-transport cut below
-  supersedes the missing-transport finding;
-  foreground creation has focused proof. Ordering and removal/archive/Team transport
-  now exist; public invalidation verification and mixed-provider activation remain
-  unfinished.
-  No new product policy is selected.
+- October 9 acquisition-age/readiness and placement findings are implemented in
+  the design. Original counterexamples: `610b13869:scratch/questions.md`, executable
+  feedback entry. Preserve original ages, accepted later membership moves, exact
+  creation readback and absent placement; mappings never acknowledge effects.
 
 - Effect-eligibility and deletion representation choices are consolidated in the
   design's implemented boundaries; full rationale remains at
@@ -152,3 +139,12 @@ earlier adoption and pre-cut storage evidence, with their limitations, remain at
   an unattempted effect; unchanged baselines still preserve saves. This replaces
   the old membership-test assertion, not Jack Heart's Linear-wins policy. Public
   creation/link origins and broader combined acceptance remain distinct.
+
+- October 9 #1499 integration keeps Task due dates in the existing peer journal,
+  not follow-through events or completion requests. Retained creation inputs may
+  omit optional null fields; their model is normalized during the peer migration,
+  without changing attempted provider payloads. No new policy or old-peer support.
+- Context budgeting: authored memory/scratch fit. The generated launch inventory
+  remains about 28,300 tokens against 16,000; it is not an authored goal to rewrite.
+  Its full source is the supplied `.lf/tmp/context/963daa180f3520df9ed19b6ff63d421815358119d388d25c36c982c21b3ce19a.md`;
+  omitted content is the PR file inventory, not additional Task direction.

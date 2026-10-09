@@ -105,8 +105,8 @@ errors; an intermediate missing-parent error must not survive a later cycle diag
 Historical published reasons survive resolution. Invalid documents, reused IDs, cross-repository ownership and unexpected
 SQL failures still roll back the whole import. The common writer suppresses echo,
 advances Task optimistic revisions only on changed planning and calls no execution
-writer. Paths stay local. The single `planning_peers.sql` draft still depends on
-`local_planning`. Destination binding and membership now live in the same draft. Joining is empty;
+writer. Paths stay local. The single `planning_peers.sql` draft depends on #1499’s
+`optional_task_pr`, which depends on `local_planning`. Destination binding and membership now live in the same draft. Joining is empty;
 export joins the mutation journal to explicit selected-record membership, never to
 all repository rows. Selecting a Wave includes its descendants; new descendants
 inherit that membership. Imports reserve incoming identities transactionally and
@@ -151,10 +151,12 @@ this heading. Keep these replacements deleted:
   share `resolved_owners`; export status and recovery start from one validated
   journal. Only recovery expands private dependencies. Its failure cannot obscure
   readable export status; its values never become publication content.
-- Duplicate creation-payload renderers in `planning_export.rs` are replaced by
-  `task_creation_input` and `project_creation_input`, shared by capture and peer
-  validation. Complete model/input comparisons still reject unknown payload;
-  Team shape, parent mapping and origin identity remain independently checked.
+- Capture/validation share `task_creation_input` and `project_creation_input`;
+  exact captured inputs, Team/parent mapping and origin identity remain checked.
+- #1499 integration removes follow-through's duplicate Task acquisition and its
+  references to retired export columns. Common resolution and `planning_creations`
+  own those reads. Remote source selection uses the Task's checkout branch, not a PR.
+  Due dates join the same planning journal; completion requests remain local.
 - Acquisition-side `inherit_project_placement`: provider readback is planning,
   not first local execution. Explicit placement retains its existing owner.
 - State delivery's cache-only readback, which settled its local receipt without
@@ -162,10 +164,8 @@ this heading. Keep these replacements deleted:
   projection in the same transaction; retain the exact-current-receipt fence.
 - Physical-only membership delivery lookup and raw-ID readback/baseline comparisons.
   Reuse explicit correspondence at delivery/comparison; keep captured IDs unchanged.
-- Repeated baseline normalization and decoding entire later receipts just to rebase
-  them. One comparison helper retains absent-versus-null baselines; read only IDs
-  and baselines and serialize readback once. Reuse the peer head index for per-origin
-  completeness and creation winners, without merging creation ownership.
+- Baseline/head-index compression: `610b13869:scratch/work-on-another-machine-name.md`,
+  this heading. Preserve absent/null distinctions and separate creation origins.
 - Task creation receipt bypass after mapping-only import, missing-list readiness
   rejection and required ancestor placement on first local use. Readback reconciles
   captured saves, not later intentions; local execution placement stays local.
@@ -348,10 +348,7 @@ to gate; publication still requires the acceptance below, with no landing author
 Earlier cut-by-cut evidence: `3f7d9f2da:scratch/work-on-another-machine-name.md`,
 **Remaining integration**.
 
-Earlier registry, acquisition-age/readiness and parent-integration evidence:
-`08a285872`, `fcd64901f`, `9b59e9b71:scratch/work-on-another-machine-name.md`,
-**Remaining integration**. Planning stays unplaced; observations, not errors,
-settle effects. These proofs establish neither composed acceptance nor SSH.
+Earlier acquisition-age/readiness and integration proofs: `610b13869:scratch/work-on-another-machine-name.md`, **Remaining integration**. Planning remains unplaced; observations, not errors, settle effects.
 
 Source reconciliation at `4e3cb2160` supersedes the earlier no-production-caller
 finding: `6c0f2256f` connects exchange and `4e3cb2160` isolates destination attempts.
@@ -608,12 +605,22 @@ planning exchange during a live connection and explicit native resume, with no
 extra provider launch caused by exchange; legitimate local resume is not an
 imported execution mutation. No engine-lifecycle code is added to LOO-412.
 
-`2df907de7` integrates #1516's LfSession/LfProcess naming without wire/storage
-changes. `6fdd7f09e` integrates #1511's native Codex `--no-daemon` path and
-explicit-selection daemon reconciliation (five-minute turn grace). Gate's combined
-native peer-lifetime proof needs supported Codex 0.161.0, not earlier 0.160.1 or
-Claude stand-in evidence. Planning grants no account, daemon or retry authority.
-Full merge boundaries: `d6049af97:scratch/work-on-another-machine-name.md`, this heading.
+`2df907de7`/#1516 and `6fdd7f09e`/#1511 integration details remain at
+`610b13869:scratch/work-on-another-machine-name.md`, this heading. Native peer
+acceptance still needs supported Codex 0.161.0, not the Claude stand-in.
+
+`610b13869` integrates #1499: checkout branches no longer require a PR;
+completion requests remain local, independent of planning disposition. Retained
+sync repairs update receipt queries to `planning_creations` and historical
+follow-through capture. The combined cut removes duplicate acquisition,
+preserves exact old creation inputs, and carries due dates through the existing peer
+journal. Counterexamples: a placed unpublished Task has no active PR; a captured
+creation can omit optional null fields; a peer-born follow-up otherwise loses its
+due date. No follow-through event, completion request or PR authority is exported.
+Six focused checks cover due-date acquisition/removal, preserved execution and
+completion requests, captured due dates, old receipt migration, historical filing,
+lost creation/relation readback, and unpublished source-code refusal. This is not
+public two-store creation/link-origin or running-control acceptance.
 
 Readback of historical Flow `93d4d4f6-4723-4027-951b-b3aee2e696a2` still leaves
 step `e94edd38-2a26-4047-9650-41a65ab814f7` without completion or exit evidence.
@@ -679,17 +686,11 @@ this heading; earlier Project-content/public work-watch evidence remains at
 this heading. Public status/DTO, cold-worker and provider-lifetime execution remain
 with gate, alongside Desktop and mixed-provider acceptance.
 
-Earlier checks and limits: `9b59e9b71` and `b5b491099`, this file's
-**Acceptance for review**. They do not prove this ordering cut, combined public
-behavior or Desktop acceptance.
+Earlier scalar Git/HTTPS, state/comment/Wave, compression and 77-test evidence:
+`610b13869:scratch/work-on-another-machine-name.md`, **Acceptance for review**.
+Those results predate #1499 integration and prove no combined native launch path.
 
-State/comment/Wave and completion checks remain at `8a6f8f807`, this heading;
-creation-payload compression checks remain at `1012a6cad`, this heading. Both
-precede the #1511 merge; neither proves the combined native launch path.
-
-Earlier Git/HTTPS and focused proofs: `81df09092:scratch/work-on-another-machine-name.md`, **Acceptance for review**.
-
-Check: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, Rust lib test build and `uv run python scripts/test_network.py target/debug/deps/loopflow-0b179d3755b15c2d store::sqlite::planning_peers::tests:: --test-threads=4` pass (77 tests); `git diff --check` passes. Gate owns materialized schema, public creation/link/negative-evidence and combined lifetimes; review owns recovery UX.
+Check: fmt, all-target Clippy, lib/remote test builds and diff check pass; `uv run python scripts/test_network.py <lib-test> peer_due_date_readback peer_creation_prepares_unprepared peer_migration_preserves historical_filing_converts follow_up_export_recovers --test-threads=1` passes (5), as does `<remote-test> machine_selector_names_unpushed_source_work_before_connecting_and_keeps_legacy_identity --exact` (1). Gate owns materialized/public composition and lifetimes; review owns recovery UX.
 
 SQL/macOS and unresolved Flow-exit evidence: `eeb98aa89`, this file's
 **Acceptance for review**. No provider death, replacement authority or installed

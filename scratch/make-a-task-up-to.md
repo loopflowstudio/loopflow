@@ -1,6 +1,6 @@
 # One Task, up to one PR
 
-LOO-418 · local planning and completed-delivery recovery · reconciled 2026-10-08
+LOO-418 · local planning and completed-delivery recovery · reconciled 2026-10-09
 
 Jack Heart authorized stacking on LOO-406 and continuing. The merge is recorded
 at `9f54c5b43`, with repairs at `07eeef61d` and focused Docker proof.
@@ -12,9 +12,9 @@ without discarding unresolved delivery. The prior iteration's filing refusal is
 repaired, not remaining implementation.
 Task completion remains independent of Workflow position and Process liveness.
 Focused Docker evidence covers that recovery and its resolved-disposition guards;
-it does not verify the combined branch. Combined gate, populated upgrade,
-stacked/due-return proof and Jack's demo remain. Historical export recovery needs
-a decision; the enabled concurrent-reopening regression still fails. Landing and
+the combined Rust gate and populated upgrades now pass. Swift remains with capable
+CI; configured stacked/due-return proof and Jack's complete demo remain. Jack Heart accepted usable local Tasks with historical export pending; unseen
+Linear concurrency remains a documented best-effort limit. Landing and
 Task completion are unauthorized.
 
 ## Decision and intended experience
@@ -82,7 +82,8 @@ Integration update (2026-10-08):
   Conversion conservatively retains an attempted/unknown export. If the issue is
   absent remotely, it stays pending rather than issuing a potentially repeated
   create. Local filing can finish; automatically delivering an uncreated historical
-  issue still needs evidence or a reviewed retry rule. No second creator is added.
+  issue still needs evidence. Jack Heart accepted keeping the local Task usable
+  while export is pending; a new retry rule is not required. No second creator is added.
 - `lf task reopen ISSUE [--reason TEXT]` uses common planning state delivery,
   clears superseded completion intent, and retains PR, Workflow, checkout and
   Processes. It starts nothing and does not restart the Workflow. The spelling is
@@ -127,13 +128,15 @@ child. Separate cases refuse first filing/recovery without a merged delivery.
 These are headless fixtures, not Jack's acceptance or live provider proof.
 
 LOO-406's design records Jack Heart's Linear-wins policy for observed conflicts.
-Its enabled `task_completion_preserves_linear_reopening_during_delivery` regression
-retains the unseen-write race: an edit between read and unconditional mutation can
+Its enabled `task_completion_documents_unseen_linear_reopening_overwrite` test
+retains the unseen-write counterexample: an edit between read and unconditional mutation can
 be overwritten, and matching readback cannot prove preservation. Conditional-write
-research does not block source integration. Neither the merge nor local acceptance
-claims that race is fixed. The known failure remains in acceptance, not an
-ignored test. Linear-wins precedence supplies no atomic-write guarantee; any
-relaxation of concurrent-edit preservation still requires an explicit decision.
+research does not block progress. Jack Heart reaffirmed the existing policy on October 8: no additional Linear-race decision is needed. Observed Linear
+conflicts win; unseen concurrency remains best effort. The agent-added demand for
+zero concurrent overwrite is withdrawn. Preserve the counterexample as evidence
+of the limitation, and align automated expectations with the accepted policy:
+prove observed conflict precedence and durable uncertain effects, without claiming atomic writes. The gate now asserts the demonstrated overwrite
+explicitly, alongside separate observed-conflict and uncertain-effect coverage.
 
 ## Demo
 
@@ -499,7 +502,7 @@ Historical missing targets and repeated link presentations retain their source.
 The skill and delivery guide no longer require provider relation confirmation
 before local disposition. Historical conversion now uses the common receipt;
 unknown remote creation stays pending. No separate creator is restored and the
-provider race remains unresolved.
+unseen concurrency remains best effort.
 Planning-lookup fixtures exposed two reads outside their scoped store: Wave discovery
 and saved Wave configuration. Discovery now uses the existing PM selector, and
 the test-only configuration path reads that fixture’s saved documents, not the
@@ -543,18 +546,14 @@ The common planning integration and crash/local-reopening repairs exist;
 historical remote-creation uncertainty, combined acceptance and the complete
 demo remain within that same boundary.
 
-**Remaining work:** resolve the historical remote-export choice and the concurrent-write
-preservation gap; run the unified lifecycle acceptance population below and Jack's
-complete demo. The enabled unseen-write regression remains a real failure: more
-readback is not a repair. Acceptance stays unchanged unless Jack explicitly revises
-that guarantee. Completion and filing now
-use local planning; the earlier evidence does not verify the combined source. The affected
-gate ran against the earlier model; its failures have passing focused repairs.
-Those results do not verify the newly accepted completion contract.
-No-PR research now retains dirty files and committed findings; merged Tasks need
-the filing disposition. The implementation defaults below are reversible choices,
-not additional decisions attributed to Jack. Disposable Docker installation checks
-passed; configured/native acceptance is absent and landing is unauthorized.
+**Remaining work:** capable-CI Swift build/tests and Jack's complete configured
+lifecycle demo, including stacked delivery and the dated follow-up return path.
+The combined Rust population and disposable installation proofs now pass. The
+race test matches Jack's existing policy and retains the overwrite counterexample;
+additional reads do not guarantee atomic writes. Historical export stays pending
+without blocking the local Task. No-PR research retains drafts and findings;
+merged Tasks need their filing disposition. The defaults below remain implementation
+choices, not separate decisions attributed to Jack. Native acceptance is unproven; landing is unauthorized.
 
 1. **Truthful Flow launch.**
    `task_flow_launch_tests` holds a real mechanical Flow in a disposable Home:
@@ -608,7 +607,7 @@ also run `cargo test -p loopflow --lib engine::flow_graph::tests`.
 | Observed Done before first filing still permits accepted follow-through without reopening; retries retain one child and one disposition | Public CLI completion-before-filing and builtin finishing-Flow fixture; unchanged Workflow, PR, placement and prior Process outcomes |
 | Accepted Linear completion while a real held Process is running preserves its Process identity, liveness, Workflow edge, Session and checkout; later driver exit records its true result | Public Task/Flow case plus PM observation tests and CLI/monitor/Desktop projection |
 | End is durable before a failed completion; crash/retry finishes only completion, keeps successful Flow history, and exposes the reason; repeated completion is harmless | Task launch, store transactions and operator guidance; verify gate/Flow invocation counts |
-| Newer Linear reopening changes status without Workflow movement; old end and pending retries cannot re-complete it; stale provider observations do not undo newer state; reopening between outbound read and mutation survives | PM revision/writeback and completion trigger tests, including LOO-406's enabled failing concurrent-reopening regression |
+| Newer Linear reopening changes status without Workflow movement; old end and pending retries cannot re-complete it; stale provider observations do not undo newer state; unseen reopening between outbound read and mutation remains a documented best-effort limit | PM revision/writeback and completion trigger tests, including the enabled unseen-overwrite counterexample and observed-conflict precedence tests |
 | Real Git fixture plus simulated GitHub merge and Linear mutation crosses store, public CLI JSON, monitor projection and Swift decode/view; no live provider or display is required | Composed case in `ops::task::follow_through::tests::lifecycle`, with a real CLI/Flow and simulated providers; its captured wire population is checked by Rust `dto_fixtures` and Swift `DTOFixtureTests`/headless Task view assertions |
 | Lost creation response, crash before local receipt, simultaneous finishing callers, issue edited/moved and chapter rotated all reuse one child; provider failure leaves explicit pending state | PM/Linear tests, `task_pr_authority_tests` and Task launch integration; assert issue population and Task state, not mock calls |
 | Bare land, waited land and out-of-band merge all converge; wait timeout/interruption does not clear intent, replay gate or complete early; reconciliation between merge and filing retains the checkout for the next step | `land_tests`, `pr_landing` tests and a public CLI held-Flow case |
@@ -638,7 +637,9 @@ Jack's zero-or-one PR and normal post-merge follow-through contract remain
 accepted. October 8 supersedes the alias: end triggers independent completion,
 and Linear completion preserves Workflow and Process state. The current code
 separates completion and position through the shared local planning writer.
-Combined acceptance and the historical export decision precede the complete demo.
+Combined acceptance precedes the complete demo. Jack Heart decided that local
+Tasks remain usable while historical export is pending; no new retry policy is
+required for this change.
 
 The implementation uses the proposed polling limits and filing interface,
 removes `-c` and `--next`, and provides explicit `--design` handoff. Dated follow-ups return on the owning Wave's next operation; filing
@@ -681,7 +682,7 @@ walkthrough remains part of the complete demo preparation.
 Reconciliation (2026-10-08): the delivery guide still described Linear as the
 planning owner and prerequisite for checkout. It now matches the common local
 writer and saved-Task placement path. Infrastructure's LOO-406 memory retains
-the unseen-write counterexample; no newer accepted decision resolves it. Product
+the unseen-write counterexample; Jack reaffirmed that the existing policy is sufficient, so it is not an unresolved policy question. Product
 has no child Wave Markdown in this checkout. No code or live planning changed.
 
 ## Composed headless lifecycle
@@ -709,8 +710,8 @@ That evidence includes Docker proof of atomic reservation recovery across rotati
 historical export uncertainty, local reopening and live-edge preservation; native
 compilation stalled in the build-script loader. The fixture's Project alias,
 unsupported started-state write and unimported Workflow assumptions were corrected.
-The enabled unseen-write regression remains unresolved; combined gate, Swift,
-populated installation and Jack's demo remain separate.
+At that checkpoint the incompatible unseen-write expectation still failed. The
+policy-aligned gate below supersedes it; Swift and Jack's demo remain separate.
 
 The new fixture initially failed to compile (private Store field, then the moved
 account helper's missing import); its first Flow attempt stopped without a
@@ -719,4 +720,37 @@ stalled in `_dyld_start` before the build script ran and was stopped; disposable
 Docker supplied focused compilation and execution instead. Earlier focused
 evidence remains at `b92683789:scratch/make-a-task-up-to.md`.
 
-Check (2026-10-08): `git diff --check` passes; prose-only reconciliation reuses focused Docker/fmt/Clippy results at `0865e43a9:scratch/make-a-task-up-to.md`, final check line. Combined gate/Swift/populated installation and Jack's demo remain; unseen-write preservation remains an enabled failure.
+## Combined gate (2026-10-09)
+
+The final combined Rust population passes. Real repairs mark Started through the
+shared checkout association, propagate ambient Wave selection, read Wave policy
+from the supplied store, handle an absent store without inventing planning, and
+resolve historical Task identity without requiring a missing title. Fixture repairs
+stop treating placement as publication, Workflow movement as completion/reopening,
+status reads as remote reconciliation, or edited files as mutable captured Workflows.
+Saved definitions and native profile hooks now use the integrated LOO-406 contract.
+Its accepted stored-definition cut is recorded at
+`558a39232:scratch/explore-loopflow-s-own-store.md`; no file-backed reader was restored.
+
+The populated upgrade starts before both drafts, preserving historical PR links,
+pending delivery, Workflow, Process and Session identity. All seven disposable
+installed-CLI proofs pass, including delegated launch and captured loop returns.
+The Linux harness uses Git 2.47 (trixie): bookworm's Git 2.39 lacked the merge-tree
+option used by stacked sync. No installed Home was touched.
+
+The earlier gate had 1,884 passes/111 failures; the first continuation population
+had 2,308 passes/20 failures. Those failures and intermediate fixture repairs remain
+in `.lf/tmp/gate-loo418/` and `.lf/tmp/gate-repair-continued/`. One completed-Session
+liveness assertion failed in the first population, then passed focused and combined
+runs with diagnostic-only changes; its original failure remains unexplained, not
+claimed fixed. Earlier Python harness attempts lacked jq/a fixture repository;
+final isolated Python passes. Prior native helpers and Swift stalled in `_dyld_start`;
+Swift compilation/testing remains a capable-CI deferral, not a pass.
+
+Review: the unseen-write test is enabled and asserts the overwrite that actually
+occurs; observed conflicts and uncertain effects have separate passing coverage.
+No atomic-write guarantee, live provider acceptance, scheduled Wave operation,
+rendered Desktop proof or chapter KR follows. Historical export remains usable
+locally. Jack's full demo remains; no publication, landing or Task completion occurred.
+
+Check: Docker `cargo test -p loopflow --lib --tests --no-fail-fast -- --test-threads=1` 2,328 passed/15 ignored; `cargo clippy --all-targets -- -D warnings` passed; `scripts/test_task_installation.py` two populated upgrades and seven installed-CLI proofs passed; isolated `pytest python/tests/` 407 passed/1 skipped; website 76 passed; architecture coverage and Swift boundary lint passed; `cargo fmt --all -- --check` and `git diff --check` passed. Native Swift remains with capable CI; configured acceptance remains with Jack's demo.

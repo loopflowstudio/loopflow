@@ -222,10 +222,10 @@ unpublished code retained, without deletion or delivery authorization.
 ## Execution ownership names (LOO-441, 2026-10-09)
 
 Jack Heart selected LfSession/LfProcess; provider names remain LOO-442. He approved
-#1516 landing. The rename preserves wire/storage/fixtures, ProcessLfid,
-variants and product Session/Process; SQL/profiling retain historical names.
-`2b183c547` implements Rust/Swift/docs. Gate: fmt/Clippy pass; disk-blocked suites
-defer to CI. Installation unproved.
+#1516 landing; main `461577746` integrates it. Wire/storage, ProcessLfid and
+product Session/Process stay unchanged; SQL/profiling keep historical names.
+`2b183c547`: fmt/Clippy passed; disk-blocked suites deferred to CI.
+Installation and composed peer acceptance remain unproved.
 LFID durable; PID reusable. LOO-400 history, mapping, placement and proofs:
 `6130a4eed:wave/infrastructure/MEMORY.md`, “Process vocabulary.”
 
@@ -630,15 +630,12 @@ Desktop retains last-good scoped status; per-Work recovery remains. Mixed exchan
 stays disabled. Earlier proofs: `9dfb95451`, this heading.
 
 Creation origins retain exact readback; joint winners reuse accepted observations
-on explicit correspondence. Cuts: `521c7040f`, this heading.
-Causality precedes ranking; portable parents prove observation, not identity or
-authority. Private references hold groups. Membership delivery/readback resolves
-aliases without rewriting inputs (`79e478550`/`521c7040f`); exact readback rebases
-later saves. Journal origins survive capture/ranking; list comparison resolves
-aliases without rewriting inputs. Equal revisions can carry different list ranks;
-capture bodies. Association/mixed exchange stays held. Storage proves
+on explicit correspondence. Causality precedes ranking; portable parents prove observation, not identity or
+authority. Private references hold groups. Membership aliases preserve inputs; readback rebases later saves
+(`79e478550`/`521c7040f`). Journal origins survive capture/ranking. Equal revisions can carry different list
+ranks; capture bodies. Association/mixed exchange stays held. Storage proves
 no public/installed acceptance.
-Proofs: `163362aad`, this heading.
+Origin/readback proofs: `e422eca8b`/`19ed9a5a1`; earlier: `163362aad`, this heading.
 Plan: `scratch/work-on-another-machine-name.md`.
 
 ## Driver recovery

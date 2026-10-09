@@ -241,3 +241,4 @@ Jack Heart asked for a subagent "to really try to study the question of what cmd
 - "there's this lower-level API agent launcher and there's this higher-level API, which then has things on top of it that are nice that you would want an agent launcher to have, like usage tracking or auth/login management. Those are things around engaging with the agent, but not the actual agent itself"
 - "then also we have this higher-level API that is about working around organizing around the work, which is basically saying we're doing project management. Maybe we want to mention having a linear integration"
 - "something about how you can mix and match and use what you like and not use what you don't like"
+Jack Heart on the separate Flows section of `/cli`: "I think this should mostly be covered by the previous seciton". Section removed; its share-your-own line folded into Built-ins.

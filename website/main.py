@@ -1055,7 +1055,6 @@ def _rotating_heading(heading: dict) -> FT:
 
 def build_cli_page() -> tuple:
     hero, agents, where = CLI_CONTENT["hero"], CLI_CONTENT["agents"], CLI_CONTENT["where"]
-    flows = CLI_CONTENT["flows"]
     return _product_page(
         "Loopflow — " + hero["title"],
         "/cli",
@@ -1070,14 +1069,6 @@ def build_cli_page() -> tuple:
             _plain_list(agents["items"]),
             P(*[A(link["label"], href=link["href"]) for link in agents["links"]], cls="more"),
             id="flows",
-            cls="reading",
-        ),
-        Section(
-            H2(flows["heading"]),
-            _terminal(flows["commands"], "Flow example"),
-            _plain_list(flows["items"]),
-            P(*[A(link["label"], href=link["href"]) for link in flows["links"]], cls="more"),
-            id="flow-files",
             cls="reading",
         ),
         Section(

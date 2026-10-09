@@ -117,7 +117,7 @@ cli:
       text: Each step can be interactive or autonomous, run on a particular model, and so on.
     - name: Built-ins
       text: '`lf` comes with many reasonable Flows for software engineering. `lf flow customize`
-        copies one into your repository to change.'
+        copies one into your repository to change. Build your own and share them; they are files.'
     - name: Sessions
       text: At its most basic, `lf` is an agent launcher and session manager. Use it anywhere you
         would launch an agent. For example, `lf session resume` picks a Claude Code or Codex
@@ -132,28 +132,12 @@ cli:
       text: '`lf` encodes the stages a Task goes through to become a shipped and validated PR. You
         customize, project by project, how and when you get involved in the work.'
     links:
+    - label: Skills and Flows ↗
+      href: /docs/authoring#flows
     - label: Tasks and Waves ↗
       href: /docs/waves
     - label: Worktrees and delivery ↗
       href: /architecture/delivery
-  flows:
-    heading: Focus on the stages that matter most to you.
-    commands: |-
-      # .lf/flows/ship-api.yaml
-      - implement
-      - compress
-      - gate
-      - loop: implement
-      - cmd: pr land
-    items:
-    - name: Skills
-      text: A Skill is one instruction, written in Markdown. Each line of a Flow names one.
-    - name: Yours
-      text: You are encouraged to build your own Flows and share them with others. They are files
-        in your repository.
-    links:
-    - label: Skills and Flows ↗
-      href: /docs/authoring#flows
   where:
     heading: It works wherever you work.
     items:

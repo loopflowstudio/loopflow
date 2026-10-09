@@ -45,3 +45,23 @@ class InspectDesktopCommand: NSScriptCommand {
         }
     }
 }
+
+/// The direct parameter is data, not an evaluated script or a focus selector.
+class SetPaneVisibilityCommand: NSScriptCommand {
+    override func performDefaultImplementation() -> Any? {
+        do {
+            guard let json = directParameter as? String else {
+                throw RegistryQueryError("Expected a JSON pane visibility request.")
+            }
+            let request = try JSONDecoder().decode(DesktopPaneVisibility.self, from: Data(json.utf8))
+            return try MainActor.assumeIsolated {
+                let reading = try WorkLinkRouter.shared.setVisibility(request)
+                return String(decoding: try JSONEncoder().encode(reading), as: UTF8.self)
+            }
+        } catch {
+            scriptErrorNumber = NSInternalScriptError
+            scriptErrorString = error.localizedDescription
+            return nil
+        }
+    }
+}

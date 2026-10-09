@@ -132,7 +132,12 @@ public final class MultiplexerStore {
 
     public func undoClose() {
         guard let closedState else { return }
+        // Restoring a removed/replaced occurrence must not revive a stale target.
+        let current = layout
         layout = closedState.layout
+        for pane in layout.allPanes where current.pane(for: pane.id)?.incarnation != pane.incarnation {
+            layout = layout.replacingContent(of: pane.id, with: pane.content)
+        }
         focusedPaneId = closedState.focusedPaneId
         zoomedPaneId = closedState.zoomedPaneId
         collapsedPaneIds = closedState.collapsedPaneIds

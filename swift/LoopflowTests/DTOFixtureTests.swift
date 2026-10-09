@@ -21,6 +21,24 @@ struct DTOFixtureTests {
         }
     }
 
+    @Test func paneVisibilityRequiresEveryTargetComponent() throws {
+        let data = try loadFixtureData("desktop_pane_visibility.json")
+        let request = try JSONDecoder().decode(DesktopPaneVisibility.self, from: data)
+        #expect(request.hidden)
+        #expect(request.target.incarnation == "occurrence-session-pane")
+        #expect(try JSONDecoder().decode(DesktopPaneVisibility.self, from: JSONEncoder().encode(request)) == request)
+        let wire = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        for field in ["repository", "window", "machine_id", "worktree", "pane", "incarnation"] {
+            var missing = wire
+            var target = try #require(missing["target"] as? [String: Any])
+            target.removeValue(forKey: field)
+            missing["target"] = target
+            #expect(throws: DecodingError.self) {
+                try JSONDecoder().decode(DesktopPaneVisibility.self, from: JSONSerialization.data(withJSONObject: missing))
+            }
+        }
+    }
+
     @Test func desktopInspectionRetainsUnavailableWorkAndExactPanes() throws {
         let data = try loadFixtureData("desktop_inspection.json")
         let report = try JSONDecoder().decode(DesktopInspection.self, from: data)

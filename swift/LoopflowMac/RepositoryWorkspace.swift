@@ -22,6 +22,7 @@ final class WorkLinkRouter {
         let focus: () -> Void
         let receive: (URL) async -> Void
         let inspect: (UUID) -> DesktopWindowInspection
+        let setVisibility: (DesktopPaneVisibility) throws -> Void
     }
     private var targets: [String: Target] = [:]
     private var pending: [String: [URL]] = [:]
@@ -34,11 +35,12 @@ final class WorkLinkRouter {
     func register(_ incarnation: UUID, repository: String,
                   focus: @escaping () -> Void,
                   inspect: @escaping (UUID) -> DesktopWindowInspection,
+                  setVisibility: @escaping (DesktopPaneVisibility) throws -> Void,
                   receive: @escaping (URL) async -> Void) {
         if targets[repository]?.incarnation != incarnation {
             delivering.removeValue(forKey: repository)?.task.cancel()
         }
-        targets[repository] = Target(incarnation: incarnation, focus: focus, receive: receive, inspect: inspect)
+        targets[repository] = Target(incarnation: incarnation, focus: focus, receive: receive, inspect: inspect, setVisibility: setVisibility)
         deliverPending(repository)
     }
 
@@ -47,6 +49,16 @@ final class WorkLinkRouter {
         DesktopInspection(observedAt: Int64(Date().timeIntervalSince1970), windows: targets.keys.sorted().compactMap { key in
             targets[key].map { $0.inspect($0.incarnation) }
         })
+    }
+
+    /// Validation and mutation stay in this MainActor turn; no focus fallback.
+    func setVisibility(_ request: DesktopPaneVisibility) throws -> DesktopInspection {
+        guard let receiver = targets[request.target.repository],
+              receiver.incarnation.uuidString == request.target.window else {
+            throw RegistryQueryError("The repository window was closed or replaced. Inspect Desktop again; no pane was changed.")
+        }
+        try receiver.setVisibility(request)
+        return inspect()
     }
 
     func remove(_ incarnation: UUID, repository: String) {

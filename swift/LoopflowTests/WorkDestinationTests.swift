@@ -551,9 +551,9 @@ struct WorkDestinationTests {
         let router = WorkLinkRouter()
         let first = UUID(), replacement = UUID()
         var focused = false
-        router.register(first, repository: "plan", focus: { focused = true }, inspect: windowInspection) { _ in }
+        router.register(first, repository: "plan", focus: { focused = true }, inspect: windowInspection, setVisibility: { _ in throw RegistryQueryError("No panes in this fixture") }) { _ in }
         #expect(router.inspect().windows.map(\.window) == [first.uuidString])
-        router.register(replacement, repository: "plan", focus: { focused = true }, inspect: windowInspection) { _ in }
+        router.register(replacement, repository: "plan", focus: { focused = true }, inspect: windowInspection, setVisibility: { _ in throw RegistryQueryError("No panes in this fixture") }) { _ in }
         router.remove(first, repository: "plan")
         #expect(router.inspect().windows.map(\.window) == [replacement.uuidString])
         router.remove(replacement, repository: "plan")
@@ -571,11 +571,11 @@ struct WorkDestinationTests {
         #expect(!router.deliver(a2, repository: "plan-a"))
         var first: [URL] = []
         var second: [URL] = []
-        router.register(UUID(), repository: "plan-b", focus: {}, inspect: windowInspection) { second.append($0) }
+        router.register(UUID(), repository: "plan-b", focus: {}, inspect: windowInspection, setVisibility: { _ in throw RegistryQueryError("No panes in this fixture") }) { second.append($0) }
         while second.isEmpty { await Task.yield() }
         #expect(second == [b])
         #expect(first.isEmpty)
-        router.register(UUID(), repository: "plan-a", focus: {}, inspect: windowInspection) { first.append($0) }
+        router.register(UUID(), repository: "plan-a", focus: {}, inspect: windowInspection, setVisibility: { _ in throw RegistryQueryError("No panes in this fixture") }) { first.append($0) }
         while first.count < 2 { await Task.yield() }
         #expect(first == [a, a2])
         #expect(second == [b])
@@ -590,8 +590,8 @@ struct WorkDestinationTests {
         var focused: [String] = []
         var received: [URL] = []
         let url = try #require(URL(string: "loopflow://task/A"))
-        router.register(UUID(), repository: a.id, focus: { focused.append("retained") }, inspect: windowInspection) { received.append($0) }
-        router.register(UUID(), repository: "other", focus: { focused.append("other") }, inspect: windowInspection) { _ in
+        router.register(UUID(), repository: a.id, focus: { focused.append("retained") }, inspect: windowInspection, setVisibility: { _ in throw RegistryQueryError("No panes in this fixture") }) { received.append($0) }
+        router.register(UUID(), repository: "other", focus: { focused.append("other") }, inspect: windowInspection, setVisibility: { _ in throw RegistryQueryError("No panes in this fixture") }) { _ in
             Issue.record("A repository must never receive another repository's link")
         }
         #expect(router.deliver(url, repository: b.id))
@@ -604,9 +604,9 @@ struct WorkDestinationTests {
     @Test func lateWindowRemovalDoesNotRemoveItsReplacement() async throws {
         let router = WorkLinkRouter()
         let old = UUID(), replacement = UUID()
-        router.register(old, repository: "plan", focus: {}, inspect: windowInspection) { _ in }
+        router.register(old, repository: "plan", focus: {}, inspect: windowInspection, setVisibility: { _ in throw RegistryQueryError("No panes in this fixture") }) { _ in }
         var received: [URL] = []
-        router.register(replacement, repository: "plan", focus: {}, inspect: windowInspection) { received.append($0) }
+        router.register(replacement, repository: "plan", focus: {}, inspect: windowInspection, setVisibility: { _ in throw RegistryQueryError("No panes in this fixture") }) { received.append($0) }
         router.remove(old, repository: "plan")
         let url = try #require(URL(string: "loopflow://task/A"))
         #expect(router.deliver(url, repository: "plan"))
@@ -625,7 +625,7 @@ struct WorkDestinationTests {
         let old = UUID(), replacement = UUID()
         let barrier = LinkedDestinationBarrier()
         var delivered: [URL] = []
-        router.register(old, repository: "plan", focus: {}, inspect: windowInspection) { link in
+        router.register(old, repository: "plan", focus: {}, inspect: windowInspection, setVisibility: { _ in throw RegistryQueryError("No panes in this fixture") }) { link in
             await barrier.wait("first")
             guard !Task.isCancelled else { return }
             delivered.append(link)
@@ -636,11 +636,11 @@ struct WorkDestinationTests {
         #expect(delivered.isEmpty)
         router.remove(old, repository: "plan")
         #expect(!router.deliver(third, repository: "plan"))
-        router.register(replacement, repository: "plan", focus: {}, inspect: windowInspection) { delivered.append($0) }
+        router.register(replacement, repository: "plan", focus: {}, inspect: windowInspection, setVisibility: { _ in throw RegistryQueryError("No panes in this fixture") }) { delivered.append($0) }
         router.remove(old, repository: "plan")
 
         // A slow repository never blocks another repository's opening.
-        router.register(UUID(), repository: "other", focus: {}, inspect: windowInspection) { delivered.append($0) }
+        router.register(UUID(), repository: "other", focus: {}, inspect: windowInspection, setVisibility: { _ in throw RegistryQueryError("No panes in this fixture") }) { delivered.append($0) }
         router.deliver(other, repository: "other")
         while delivered.count < 4 { await Task.yield() }
         #expect(delivered.filter { $0 != other } == [first, second, third])
@@ -657,11 +657,11 @@ struct WorkDestinationTests {
         let second = try #require(URL(string: "loopflow://task/second"))
         let barrier = LinkedDestinationBarrier()
         var delivered: [URL] = []
-        router.register(id, repository: "plan", focus: {}, inspect: windowInspection) { _ in await barrier.wait("old") }
+        router.register(id, repository: "plan", focus: {}, inspect: windowInspection, setVisibility: { _ in throw RegistryQueryError("No panes in this fixture") }) { _ in await barrier.wait("old") }
         router.deliver(first, repository: "plan")
         while !(await barrier.contains("old")) { await Task.yield() }
         router.remove(id, repository: "plan")
-        router.register(id, repository: "plan", focus: {}, inspect: windowInspection) { link in
+        router.register(id, repository: "plan", focus: {}, inspect: windowInspection, setVisibility: { _ in throw RegistryQueryError("No panes in this fixture") }) { link in
             if link == first { await barrier.wait("new") }
             delivered.append(link)
         }

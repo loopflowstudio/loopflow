@@ -121,6 +121,19 @@ final class SessionsWorkspaceRegistry {
         }
     }
 
+    func setVisibility(_ request: DesktopPaneVisibility) throws {
+        let target = request.target
+        let identity = WorkspaceIdentity(machineId: target.machineId, worktree: target.worktree)
+        guard let workspace = workspaces[identity],
+              let pane = workspace.multiplexer.layout.pane(for: target.pane),
+              pane.incarnation == target.incarnation else {
+            throw RegistryQueryError("The pane content was removed or replaced. Inspect Desktop again; no pane was changed.")
+        }
+        // Hide is not close: keep the tree, native surface, drafts and membership.
+        // Restore does not select another Task, focus a window or acquire a client.
+        workspace.setCollapsed(paneId: pane.id, collapsed: request.hidden)
+    }
+
     func path(containingShell id: String) -> WorkspaceIdentity? {
         workspaces.first { $0.value.multiplexer.layout.pane(for: id)?.content == .shell }?.key
     }

@@ -109,6 +109,7 @@ public struct DesktopWorkspaceInspection: Codable, Sendable, Equatable {
 /// from MultiplexerStore at inspection, never written back as layout authority.
 public struct DesktopLayoutInspection: Codable, Sendable, Equatable {
     public let pane: String?
+    public let incarnation: String?
     public let content: String?
     public let subject: String?
     public let axis: String?
@@ -118,7 +119,7 @@ public struct DesktopLayoutInspection: Codable, Sendable, Equatable {
     public init(_ layout: LayoutNode) {
         switch layout {
         case .leaf(let state):
-            pane = state.id; axis = nil; ratio = nil; children = []
+            pane = state.id; incarnation = state.incarnation; axis = nil; ratio = nil; children = []
             switch state.content {
             case .empty: content = "empty"; subject = nil
             case .shell: content = "shell"; subject = nil
@@ -127,7 +128,7 @@ public struct DesktopLayoutInspection: Codable, Sendable, Equatable {
             case .flowLog(let id): content = "flow_log"; subject = id
             }
         case .split(let splitAxis, let first, let second, let splitRatio):
-            pane = nil; content = nil; subject = nil; axis = splitAxis.rawValue; ratio = splitRatio
+            pane = nil; incarnation = nil; content = nil; subject = nil; axis = splitAxis.rawValue; ratio = splitRatio
             children = [Self(first), Self(second)]
         }
     }
@@ -165,4 +166,34 @@ public struct DesktopWorktreeNode: Codable, Sendable, Equatable {
         }
     }
     enum CodingKeys: String, CodingKey { case slot, worktree, axis, children, machineId = "machine_id" }
+}
+
+/// An exact retained view, never a selector that follows current focus.
+/// This authorizes visibility only, not input into a native terminal surface.
+public struct DesktopPaneTarget: Codable, Sendable, Equatable {
+    public let repository: String
+    public let window: String
+    public let machineId: String
+    public let worktree: String
+    public let pane: String
+    public let incarnation: String
+
+    public init(repository: String, window: String, machineId: String, worktree: String,
+                pane: String, incarnation: String) {
+        self.repository = repository; self.window = window; self.machineId = machineId
+        self.worktree = worktree; self.pane = pane; self.incarnation = incarnation
+    }
+    enum CodingKeys: String, CodingKey {
+        case repository, window, worktree, pane, incarnation
+        case machineId = "machine_id"
+    }
+}
+
+public struct DesktopPaneVisibility: Codable, Sendable, Equatable {
+    public let target: DesktopPaneTarget
+    public let hidden: Bool
+
+    public init(target: DesktopPaneTarget, hidden: Bool) {
+        self.target = target; self.hidden = hidden
+    }
 }

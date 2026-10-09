@@ -459,24 +459,31 @@ fn context_explanation_works_outside_git_and_preserves_unavailable_registry() {
 #[test]
 fn desktop_inspection_rejects_linux_before_machine_routing_or_work_preparation() {
     let home = tempfile::tempdir().unwrap();
-    let output = command(
-        home.path(),
-        home.path(),
-        &[
-            "--machine",
-            "unregistered",
-            "--task",
-            "absent",
-            "desktop",
-            "inspect",
-            "--json",
-        ],
-    )
-    .output()
-    .unwrap();
-    assert!(!output.status.success());
-    let error = String::from_utf8_lossy(&output.stderr);
-    assert!(error.contains("require macOS"), "{error}");
-    assert!(error.contains("lf task status"), "{error}");
-    assert!(!home.path().join(".lf/loopflow.db").exists());
+    for operation in ["inspect", "hide", "restore"] {
+        let output = command(
+            home.path(),
+            home.path(),
+            &[
+                "--machine",
+                "unregistered",
+                "--task",
+                "absent",
+                "desktop",
+                operation,
+                "--json",
+            ],
+        )
+        .args(if operation == "inspect" {
+            vec![]
+        } else {
+            vec!["--target", "invalid-json"]
+        })
+        .output()
+        .unwrap();
+        assert!(!output.status.success());
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(error.contains("require macOS"), "{error}");
+        assert!(error.contains("lf task status"), "{error}");
+        assert!(!home.path().join(".lf/loopflow.db").exists());
+    }
 }

@@ -266,7 +266,7 @@ final class WorkModel {
             path: repoPath, selectionKind: selection?.kind.rawValue, selectionId: selection?.id,
             reading: reading, reason: workStatus.message,
             task: inspectSelectedTask(), session: inspectSelectedSession(),
-            supportedOperations: ["inspect"], workspaces: workspaces.inspect(), layouts: workspaces.inspectLayouts())
+            supportedOperations: ["inspect", "hide", "restore"], workspaces: workspaces.inspect(), layouts: workspaces.inspectLayouts())
     }
 
     private func inspectSelectedTask() -> DesktopTaskInspection? {

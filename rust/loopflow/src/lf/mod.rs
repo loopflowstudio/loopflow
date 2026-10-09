@@ -509,6 +509,21 @@ pub enum Commands {
 
 #[derive(Subcommand, Debug)]
 pub enum DesktopCommand {
+    /// Hide an exact retained pane without closing its Session or process
+    Hide {
+        /// JSON object with repository, window, machine_id, worktree, pane and incarnation
+        #[arg(long)]
+        target: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Restore an exact hidden pane without selecting Work or acquiring a client
+    Restore {
+        #[arg(long)]
+        target: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// Read actual windows and panes without launching, focusing, or acquiring clients
     Inspect {
         #[arg(long)]

@@ -556,5 +556,11 @@ Task recommendations/run legality and Session actions retain their separate
 source availability. Saved or failed readings supply no actions. Inspection
 preserves Task source dates; Session observation time remains unavailable rather
 than borrowing the UI snapshot time. This reports model state, not rendered
-usability or provider readiness. Pane controls and composed opening remain separate
-implementation work.
+usability or provider readiness.
+
+`lf desktop hide --target "$target"` and `lf desktop restore --target "$target"`
+change only retained pane visibility. The [CLI example](../docs/lf.md#desktop-navigation)
+extracts an exact target from inspection. Window and content incarnations reject
+stale requests; Machine/checkout keys never follow current focus. Hiding retains
+the layout and native surface. Restore does not navigate, leave zoom or acquire
+a client. Remaining arrangement, terminal I/O and composed opening are unfinished.

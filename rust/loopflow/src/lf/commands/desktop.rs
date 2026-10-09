@@ -63,6 +63,7 @@ pub struct DesktopWorkspaceInspection {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DesktopLayoutInspection {
     pub pane: Option<String>,
+    pub incarnation: Option<String>,
     pub content: Option<String>,
     pub subject: Option<String>,
     pub axis: Option<String>,
@@ -87,29 +88,67 @@ pub struct DesktopWorktreeNode {
     pub children: Vec<DesktopWorktreeNode>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DesktopPaneTarget {
+    pub repository: String,
+    pub window: String,
+    pub machine_id: String,
+    pub worktree: String,
+    pub pane: String,
+    pub incarnation: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DesktopPaneVisibility {
+    pub target: DesktopPaneTarget,
+    pub hidden: bool,
+}
+
 // Raw event spelling avoids loading an installed scripting dictionary during
 // compilation. Checking running state precedes the tell: inspection never opens
 // an app or an unrelated workspace. No caller-controlled text enters the script.
-const INSPECT: &str = r#"
-if application id "com.loopflow.mac" is not running then
-    error "Loopflow Desktop is not running. Open it with lf open, or inspect Work with lf task status <task>."
-end if
-with timeout of 5 seconds
-    tell application id "com.loopflow.mac" to «event CNRTinsp»
-end timeout
+const DESKTOP_EVENT: &str = r#"
+on run argv
+    if application id "com.loopflow.mac" is not running then
+        error "Loopflow Desktop is not running. Open it with lf open, or inspect Work with lf task status <task>."
+    end if
+    with timeout of 5 seconds
+        if (count of argv) is 0 then
+            tell application id "com.loopflow.mac" to return «event CNRTinsp»
+        else
+            set request to item 1 of argv
+            tell application id "com.loopflow.mac" to return «event CNRTpvis» request
+        end if
+    end timeout
+end run
 "#;
 
 pub fn inspect(json: bool) -> Result<()> {
+    invoke(None, json)
+}
+
+pub fn set_visibility(target: &str, hidden: bool, json: bool) -> Result<()> {
+    super::open::require_supported()?;
+    let target = serde_json::from_str::<DesktopPaneTarget>(target)
+        .context("expected the exact pane target from `lf desktop inspect --json`")?;
+    let request = serde_json::to_string(&DesktopPaneVisibility { target, hidden })?;
+    invoke(Some(&request), json)
+}
+
+fn invoke(request: Option<&str>, json: bool) -> Result<()> {
     super::open::require_supported()?;
     let output = std::process::Command::new("/usr/bin/osascript")
-        .args(["-e", INSPECT])
+        .args(["-e", DESKTOP_EVENT, "--"])
+        .args(request)
         .output()
-        .context("read Loopflow Desktop via macOS automation")?;
+        .context("contact Loopflow Desktop via macOS automation")?;
     if !output.status.success() {
-        bail!("Desktop inspection unavailable: {}. No workspace was opened or changed; `lf task status <task>` remains available in this terminal.", String::from_utf8_lossy(&output.stderr).trim());
+        // A lost reply does not prove the command had no effect. Visibility is
+        // idempotent; inspect again before deciding whether to repeat it.
+        bail!("Desktop request failed: {}. Inspect again before retrying; `lf task status <task>` remains available in this terminal.", String::from_utf8_lossy(&output.stderr).trim());
     }
     let reading: DesktopInspection = serde_json::from_slice(&output.stdout)
-        .context("Desktop returned an invalid inspection reading")?;
+        .context("Desktop returned an invalid reading; inspect again before retrying")?;
     if json {
         println!("{}", serde_json::to_string_pretty(&reading)?);
     } else {
@@ -227,10 +266,11 @@ impl DesktopLayoutInspection {
     fn render(&self, indent: usize, lines: &mut Vec<String>) {
         if let Some(pane) = &self.pane {
             lines.push(format!(
-                "{:indent$}{pane}: {} {}",
+                "{:indent$}{pane}: {} {} · content occurrence {}",
                 "",
                 self.content.as_deref().unwrap_or("unknown"),
-                self.subject.as_deref().unwrap_or("")
+                self.subject.as_deref().unwrap_or(""),
+                self.incarnation.as_deref().unwrap_or("unavailable")
             ));
         } else {
             lines.push(format!(

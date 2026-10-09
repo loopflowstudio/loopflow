@@ -14,7 +14,10 @@ struct MultiplexerStoreTests {
         store.updateRatio(between: left, and: right, ratio: 0.35)
         let arrangement = store.layout
         store.load(sessionId: "ask")
-        #expect(store.layout == arrangement.replacingContent(of: right, with: .session(id: "ask")))
+        #expect(store.layout.allPanes.map(\.id) == arrangement.allPanes.map(\.id))
+        #expect(store.layout.pane(for: left) == arrangement.pane(for: left))
+        #expect(store.layout.pane(for: right)?.content == .session(id: "ask"))
+        #expect(store.layout.pane(for: right)?.incarnation != arrangement.pane(for: right)?.incarnation)
         store.load(sessionId: "design")
         #expect(store.focusedPaneId == left)
         #expect(store.visibleLayout?.allPanes.count == 2)
@@ -25,8 +28,13 @@ struct MultiplexerStoreTests {
         #expect(store.visibleLayout?.allPanes.count == 1)
         #expect(store.layout.pane(for: right)?.content == .session(id: "design"))
         store.reveal(sessionId: "design")
-        #expect(store.layout == arrangement.replacingContent(of: left, with: .session(id: "ask"))
-            .replacingContent(of: right, with: .session(id: "design")))
+        #expect(store.layout.allPanes.map(\.id) == arrangement.allPanes.map(\.id))
+        #expect(store.layout.allPanes.map(\.content) == [.session(id: "ask"), .session(id: "design")])
+        guard case .split(.vertical, _, _, let ratio) = store.layout else {
+            Issue.record("Opening a Session must preserve the split")
+            return
+        }
+        #expect(ratio == 0.35)
         #expect(store.visibleLayout == store.layout)
         store.setCollapsed(paneId: left, collapsed: true)
         store.setCollapsed(paneId: right, collapsed: true)

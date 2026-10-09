@@ -62,11 +62,10 @@ runtime to solve it. Peer exchange, observation/admission, complete routing, Des
 control and composed proof remain.
 
 LOO-427 keys windows/queues by plan; delivery tokens fence canceled completions.
-Context/launch/status/PR reads share recorded Machine/path, not branch names.
-Inspection forwards Task/run control and Session actions independently,
-retaining Task dates; Session time stays unknown. Saved/failed readings grant no
-actions. Stub checks prove neither freshness nor usable content.
-Rust, SwiftPM and native/remote proof remain.
+Inspection separates Task/Session actions; Session time stays unknown. Saved/failed
+readings grant none. Exact hide/restore retains panes; Undo must not revive replaced content tokens. View identity grants no terminal
+input authority. Rust/Swift, native/remote proof and remaining controls remain
+unverified.
 
 Jack selected execution-machine local operations and Git-ref Task sync: 406 owns
 writes/Linear, 412 exchange. Workflow, Sessions, Processes, checkouts and control

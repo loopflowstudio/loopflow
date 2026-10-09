@@ -6,6 +6,11 @@
             <cocoa class="LoopflowMac.InspectDesktopCommand"/>
             <result type="text" description="JSON reading of retained windows and panes"/>
         </command>
+        <command name="set pane visibility" code="CNRTpvis" description="Hide or restore an exact retained pane without closing its client">
+            <cocoa class="LoopflowMac.SetPaneVisibilityCommand"/>
+            <direct-parameter type="text" description="JSON exact target and hidden boolean"/>
+            <result type="text" description="JSON reading after the visibility change"/>
+        </command>
         <command name="capture screenshot" code="CNRTcapt" description="Capture Loopflow window screenshot and save to repository">
             <cocoa class="LoopflowMac.CaptureScreenshotCommand"/>
             <direct-parameter type="text" description="Repository path for saving screenshot"/>

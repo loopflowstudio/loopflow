@@ -10,7 +10,9 @@
       "reading": "unavailable",
       "reason": "Registry read failed; retained views remain available",
       "supported_operations": [
-        "inspect"
+        "inspect",
+        "hide",
+        "restore"
       ],
       "workspaces": [
         {
@@ -34,7 +36,8 @@
                 "subject": "session-one",
                 "axis": null,
                 "ratio": null,
-                "children": []
+                "children": [],
+                "incarnation": "occurrence-session-pane"
               },
               {
                 "pane": "files-pane",
@@ -42,9 +45,11 @@
                 "subject": "task_44444444444444444444444444444444",
                 "axis": null,
                 "ratio": null,
-                "children": []
+                "children": [],
+                "incarnation": "occurrence-files-pane"
               }
-            ]
+            ],
+            "incarnation": null
           }
         }
       ],
@@ -102,7 +107,9 @@
       "reading": "current",
       "reason": null,
       "supported_operations": [
-        "inspect"
+        "inspect",
+        "hide",
+        "restore"
       ],
       "workspaces": [],
       "layouts": [],

@@ -1551,11 +1551,16 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
     // Remote commands prove they reached the saved machine before dispatch.
     loopflow::lf::commands::machine::validate_expected_machine_process()?;
 
-    if let Some(Commands::Desktop {
-        cmd: loopflow::lf::DesktopCommand::Inspect { json },
-    }) = &cli.command
-    {
-        return loopflow::lf::commands::desktop::inspect(*json);
+    if let Some(Commands::Desktop { cmd }) = &cli.command {
+        use loopflow::lf::commands::desktop;
+        use loopflow::lf::DesktopCommand;
+        return match cmd {
+            DesktopCommand::Inspect { json } => desktop::inspect(*json),
+            DesktopCommand::Hide { target, json } => desktop::set_visibility(target, true, *json),
+            DesktopCommand::Restore { target, json } => {
+                desktop::set_visibility(target, false, *json)
+            }
+        };
     }
     // Explanation reads the selected local records, including remote checkout
     // evidence. It must not route, bind a launch, or require a PR/checkout.

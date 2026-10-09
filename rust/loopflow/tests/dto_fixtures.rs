@@ -686,7 +686,8 @@ fn planning_sync_preserves_delivery_and_losing_values() {
         "../../../tests/fixtures/dto/planning_sync.json"
     ))
     .unwrap();
-    let sync: loopflow::planning::PlanningSyncStatus = serde_json::from_value(value.clone()).unwrap();
+    let sync: loopflow::planning::PlanningSyncStatus =
+        serde_json::from_value(value.clone()).unwrap();
     assert!(sync.connected);
     assert_eq!(
         sync.changes[1].state,
@@ -699,4 +700,33 @@ fn planning_sync_preserves_delivery_and_losing_values() {
     );
     assert_eq!(serde_json::to_value(&sync).unwrap(), value);
     assert!(sync.lines()[3].contains("Linear: null"));
+}
+
+#[test]
+fn desktop_pane_visibility_requires_an_exact_content_occurrence() {
+    use loopflow::lf::commands::desktop::DesktopPaneVisibility;
+    let json = include_str!("../../../tests/fixtures/dto/desktop_pane_visibility.json");
+    let request: DesktopPaneVisibility = serde_json::from_str(json).unwrap();
+    assert!(request.hidden);
+    assert_eq!(request.target.incarnation, "occurrence-session-pane");
+    let wire = serde_json::to_value(request).unwrap();
+    assert_eq!(
+        wire,
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+    for field in [
+        "repository",
+        "window",
+        "machine_id",
+        "worktree",
+        "pane",
+        "incarnation",
+    ] {
+        let mut missing = wire.clone();
+        missing["target"].as_object_mut().unwrap().remove(field);
+        assert!(serde_json::from_value::<DesktopPaneVisibility>(missing).is_err());
+    }
+    let mut missing = wire;
+    missing.as_object_mut().unwrap().remove("hidden");
+    assert!(serde_json::from_value::<DesktopPaneVisibility>(missing).is_err());
 }

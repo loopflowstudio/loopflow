@@ -481,8 +481,29 @@ Task readings retain roadmap-generation and condition-observation dates. Session
 observation time is explicitly unavailable; the UI snapshot time is not source
 freshness. Inspection neither focuses windows nor opens clients.
 It requires macOS and a running app with automation access; failure leaves
-`lf task status <task>` available in the terminal. Arrangement, terminal I/O and
-composed Session-plus-diff opening are not yet exposed by this command.
+`lf task status <task>` available in the terminal.
+
+Hide and restore an exact retained pane, without closing its Session or shell:
+
+```sh
+lf desktop inspect --json > /tmp/desktop.json
+# Set pane to a pane ID from that reading.
+target=$(jq -c --arg pane "$pane" '
+  .windows[] as $w | $w.workspaces[] as $s |
+  $s.layout | .. | objects | select(.pane? == $pane) |
+  {repository: $w.repository, window: $w.window, machine_id: $s.machine_id,
+   worktree: $s.worktree, pane, incarnation}
+' /tmp/desktop.json)
+lf desktop hide --target "$target" --json
+lf desktop restore --target "$target" --json
+```
+
+The target stays attached to that window, Machine, checkout and content occurrence
+while focus changes. Replaced windows/content reject the old target. Restore removes
+only the hidden flag: it does not select a Task, leave zoom, focus a window or acquire
+a client. Hidden shell commands and native surfaces remain retained. If a reply is
+lost, inspect again; repeating hide or restore is safe. Focus/split/move/resize/zoom,
+terminal I/O and composed Session-plus-diff opening remain implementation work.
 
 ```sh
 open 'loopflow://task/LOO-303'

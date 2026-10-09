@@ -23,6 +23,8 @@ public enum PaneContent: Codable, Sendable, Equatable {
 public struct PaneState: Codable, Sendable, Identifiable, Equatable {
     public let id: String
     public let content: PaneContent
+    /// The content occurrence, distinct from the reusable pane slot.
+    public let incarnation: String
 
     public init(
         id: String = UUID().uuidString,
@@ -30,6 +32,7 @@ public struct PaneState: Codable, Sendable, Identifiable, Equatable {
     ) {
         self.id = id
         self.content = content
+        self.incarnation = UUID().uuidString
     }
 }
 

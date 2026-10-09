@@ -1,6 +1,6 @@
 # Flows in chat, portable skill names
 
-Implementation — 2026-10-08. Jack Heart requested both changes and accepted the naming rule and unprefixed Flow exports below. The supplied implement step selects the complete change; sync timing remains the reversible assumption in `scratch/questions.md`.
+Realigned — 2026-10-08. Jack Heart requested both changes and accepted the naming rule and unprefixed Flow exports below. Both are implemented; automated acceptance and native-provider demo/review remain. Sync timing remains the reversible assumption in `scratch/questions.md`.
 
 ## What to build
 
@@ -8,9 +8,9 @@ Export every available Flow as a native chat skill that follows its compiled seq
 
 Jack Heart's intent: “automatically got skills in claude code (or codex, etc) for every flow that just instructed to invoke the skills in order, basically. (make sure to handle loops)”. Naming direction: “we accept / where we can but do - everywhere too”. After raising “i do like hierarchy but i also like one canonical way HMMM”, Jack Heart accepted hierarchical sources with dashed public names and slash input normalization (“ok i guess”).
 
-Placement: unresolved; no Wave was supplied. No PM lookup is needed for this design.
+Placement: unresolved; no Wave was supplied, so no Wave memory was selected or curated.
 
-## Proposed experience and demo
+## Implemented experience and pending demo
 
 ```text
 Author:  .lf/skills/wave/session.md
@@ -82,9 +82,9 @@ Keep generated ownership markers and source kind/name. Preflight destinations an
 
 `definition_name::definition_key` owns portable keys for builtin registration, catalog selection, Flow lookup, loops, help and exports. Builtin shortcuts are derived from source namespaces before flattening; hyphen suffixes do not create aliases. `SkillSource` and `SkillOrigin` retain original names, paths and declarations. New captures use canonical names; stored graphs are not rewritten.
 
-`flow_instructions::render_flow_instructions` consumes `compile_flow` output, emits the numbered topology and deduplicates captured bodies. `flow show --instructions` is local inspection, incompatible with JSON/process inspection. `SkillSyncOptions::repo` selects repository destinations. Sync preflights names/collisions, writes replacements before pruning, preserves blocked nested exports, and reports skipped Flow names without prefixes.
+`flow_instructions::render_flow_instructions` consumes `compile_flow` output, emits the numbered topology and borrows distinct captured bodies. `Skill::source_text` owns captured text for both native invocation and chat rendering; rendering does not manufacture an invocation. `flow show --instructions` is local inspection, incompatible with JSON/process inspection. `SkillSyncOptions::repo` selects repository destinations. Sync preflights names/collisions, writes replacements before pruning, preserves blocked nested exports, and reports skipped Flow names without prefixes.
 
-**Delete — do not maintain (replaced in this diff):** raw-name export paths and nested-path expectations; exact-string-only skill deduplication; literal Flow path lookup; slash-only builtin registration and runtime comparisons; namespace rows in native-facing listings. Retain hierarchical source paths, generated-only pruning, source precedence, derived unique shortcuts, session composition, native invocation names and recorded history. Scoped Session creation and operation checks also use canonical names; no storage migration.
+Implementation removed raw-name export paths and nested-path expectations; exact-string-only skill deduplication; literal Flow path lookup; slash-only builtin registration and runtime comparisons; namespace rows in native-facing listings; `build.rs`'s separate category discovery and empty-map emitter; `find_flow_path` and its redundant builtin-override fallback; `SkillInvocation::source_text` and dummy invocations used only to reconstruct text. Builtin registration, shortcuts and categories now share one discovery pass; repository Flow selection returns its canonical key with the original path. Hierarchical source paths, generated-only pruning, source precedence, derived unique shortcuts, session composition, native invocation names and recorded history remain. Scoped Session creation and operation checks also use canonical names; no storage migration.
 
 Forbidden outcomes: an export-only rename, different definitions selected by spelling, two authored Flow representations, a second Flow parser, executing a Workflow as a Flow, ignored loop/command/review nodes, overwritten third-party bundles, or chat completion counted as Task completion.
 
@@ -94,14 +94,20 @@ One integrated native-skill change, implemented in internal slices and shipped a
 
 All three implementation slices are present: canonical resolution/export, compiled instruction rendering, and unprefixed global/repository Flow wrappers. Remaining work is gate's automated acceptance and native-provider demo/review. Rendering fixtures do not prove model adherence.
 
-Review repairs: preserve old exports until both providers finish replacements; do not prune through third-party symlinks or turn existing namespaces into bundles; preserve unfamiliar native declarations as text; report counterpart lookup errors rather than treating ambiguity as absence; migrate scoped operation comparisons and new Session names with discovery.
+Review repairs are present: writes precede pruning across both providers; blocked replacements preserve their old nested exports; pruning avoids third-party symlinks and export does not turn existing namespaces into bundles; unfamiliar native declarations remain text; counterpart lookup errors propagate rather than becoming absence; scoped operation comparisons and new Session names use canonical keys. Sync is not transactional: an I/O failure may leave earlier writes in place, but prevents pruning and permits retry.
 
-Gate: `cargo test -p loopflow --lib`, `cargo test -p loopflow --test documented_commands --test flow_discovery_tests --test discovery_tests --test cli_discovery --test flow_tests`, `cargo fmt --check`, and `cargo clippy --all-targets -- -D warnings` must pass. Add behavior fixtures to the existing modules: both filename layouts in isolation; both together; cross-scope overrides; same-key Flow/skill help and explicit/untyped lookup; recursive composition through alternate spelling; repeated skills with exact occurrence IDs; export pruning/collisions/idempotence; and rendered loop/XOR/review/command plans with original skill bodies.
+Existing fixtures cover both filename layouts, same-root ambiguity, cross-scope overrides, same-key Flow/skill help and explicit/untyped lookup, recursive composition through alternate spelling, repeated skills with exact occurrence IDs, export pruning/collisions/idempotence, and rendered loop/XOR/review/command plans with original skill bodies. They live in `skill_catalog`, `flow`, `skills`, `flow_instructions`, and `cli_discovery`; builtin inventory coverage lives in `builtins` and `discovery_tests`. Fixture presence is not a full acceptance result.
+
+Remaining automated acceptance belongs to gate: `cargo test -p loopflow --lib`, `cargo test -p loopflow --test documented_commands --test flow_discovery_tests --test discovery_tests --test cli_discovery --test flow_tests --test session_lifecycle_tests`, `cargo fmt --check`, and `cargo clippy --all-targets -- -D warnings`. The Session lifecycle suite covers the changed scoped Session skill names. Unavailable platform checks belong to capable CI; actual failures still require repair.
 
 Native chat demo is judgment, not a headless gate dependency. Use harmless fixture flows in Claude and Codex, including a local override. Capture observed behavior; do not claim instruction rendering proves model adherence. Other providers can consume the portable format but are outside this first delivery's integration proof.
 
 ## Evidence
 
+2026-10-08 publication review: inspected the complete change against base `04a4a296b`, including the uncommitted realignment. No new concrete repair was identified. Publish as a checkpoint with scratch retained, not a landing candidate: focused implementation evidence supports review, while merged-tree acceptance remains gate-owned and Claude/Codex adherence remains demo/review-owned. Hosted checkpoint CI defers the matrix until scratch is cleared; a published PR is not a verification pass.
+
+2026-10-08 realignment: inspected implementation `1d85d836f`, simplification `72e46f7fb`, and sync merge `87758c3f8`. The merged upstream change `04a4a296b` alters macOS installer process discovery and CI, not Flow resolution or skill export; no approach change follows from that merge. The current `pursue`/`refresh` sources match the expanded sequence above. No bounded code mismatch was found in this inspection. Prior focused results remain evidence for the earlier source state, not a gate pass for the merged tree.
+
 2026-10-08: repository inspection established the paths and behavior above; no provider reproduction was run. The naming incompatibility is grounded in the [Agent Skills specification](https://agentskills.io/specification#name-field), which requires dashed names matching their containing directories. [Claude's skill documentation](https://code.claude.com/docs/en/skills#control-who-invokes-a-skill) documents user-only invocation controls. [OpenAI's skill documentation](https://learn.chatgpt.com/docs/build-skills) documents explicit skill selection and lazy body loading. Neither establishes that every historical Claude release rejects the current nested export in the same way.
 
-Check: Linux `cargo test -p loopflow --lib` with focused `portable_`, `engine::skills::tests`, `engine::skill_catalog::tests`, `engine::flow::tests`, `engine::builtins::tests`, and `engine::naming::tests` filters plus `cargo test -p loopflow --test cli_discovery portable_` PASS; `cargo clippy --all-targets -- -D warnings` and local `cargo fmt --check` PASS. Native macOS dependency build scripts stalled; broader suites remain gate-owned and native-provider adherence remains demo/review.
+Check: realignment `git diff --check` PASS (prose only); prior Linux `cargo test -p loopflow --lib` filters `portable_`, `portable_repository_flow_overrides_builtin_in_either_layout`, `engine::skill_invocation::tests`, and `engine::builtins::tests`, plus `cargo test -p loopflow --test discovery_tests every_builtin_`, `cargo clippy --all-targets -- -D warnings`, and local `cargo fmt --check` PASS; macOS dependency build scripts stalled; merged-tree acceptance remains gate/CI-owned and native-provider adherence remains demo/review.

@@ -47,9 +47,9 @@ state, comments, errors and losing values; `086d3560c` removes pending-only
 projections, retaining baselines. Configuration, not mapping, selects pending display.
 Creation receipts advance planning revision. SQL prepares; Rust/Swift stalled
 before tests. Native reconnect is unexecuted.
-At `93a587539`, Desktop sync requires a selected Task; repository/Wave scope alone
-starts none. Public Flow/work-watch reconnect remains unproved. Release's lesson:
-helper proofs establish neither every connection's lifetime nor installed acceptance.
+Foreground sync follows the repository, not Desktop Task selection. Work-watch/Flow reconnect tests remain
+unexecuted; builds stall at `_dyld_start`. Helper proofs establish
+neither composed nor installed acceptance.
 
 Jack Heart's `8821db44-0480-4493-8609-953207663f1d` removes public creation tokens.
 Each create generates/saves/returns a distinct ID, even for identical titles;

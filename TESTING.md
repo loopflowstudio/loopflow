@@ -590,6 +590,14 @@ accounts or installed data. Ordinary retry, usage, binding and review behavior
 belong in `session_lifecycle_tests`; Chapter convergence belongs in
 `ops::chapter::tests`, including interrupted rotation and second-Machine sync.
 
+`task_deletion_tests` also runs the public work-watch and Flow reconnect fixtures
+on Linux, using disposable TLS trust and synthetic Linear state. They exercise
+repository/Wave scope without Task selection, selection changes, stdin close/reopen,
+lost replies and independent propagation during rejected field delivery. The
+portable `work_watch` offline-completion test requires a foreground delivery error
+with no Task selected; local frame propagation alone cannot establish sync lifetime.
+Run these through the same external-network denial wrapper as other CLI fixtures.
+
 Task-planning fixtures also need an explicit `LF_BIN`: Task status validates
 launch authority before reconciling a user merge. Pin the test executable when
 no child is launched; an installed `lf` on PATH can hide this missing fixture.

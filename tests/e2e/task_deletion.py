@@ -3,7 +3,6 @@
 import json
 import os
 import sqlite3
-import ssl
 import subprocess
 import sys
 import threading
@@ -12,6 +11,8 @@ import uuid
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+
+from linear_fixture import tls_context
 
 
 def _next_revision(value: str) -> str:
@@ -156,76 +157,7 @@ def _abandon_retains_execution(
 def main() -> None:
     fixture = json.loads(Path(sys.argv[1]).read_text())
     root, repo = Path(fixture["home"]), Path(fixture["repo"])
-    cert, key = root / "cert.pem", root / "tls.key"
-    subprocess.run(
-        [
-            "openssl",
-            "req",
-            "-x509",
-            "-newkey",
-            "rsa:2048",
-            "-nodes",
-            "-days",
-            "1",
-            "-keyout",
-            str(key),
-            "-out",
-            str(cert),
-            "-subj",
-            "/CN=api.linear.app",
-            "-addext",
-            "subjectAltName=DNS:api.linear.app",
-            "-addext",
-            "basicConstraints=critical,CA:TRUE",
-        ],
-        check=True,
-        capture_output=True,
-    )
-    tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    leaf, leaf_key, csr = root / "leaf.pem", root / "leaf.key", root / "leaf.csr"
-    subprocess.run(
-        [
-            "openssl",
-            "req",
-            "-new",
-            "-newkey",
-            "rsa:2048",
-            "-nodes",
-            "-keyout",
-            str(leaf_key),
-            "-out",
-            str(csr),
-            "-subj",
-            "/CN=api.linear.app",
-        ],
-        check=True,
-        capture_output=True,
-    )
-    extensions = root / "extensions"
-    extensions.write_text("basicConstraints=critical,CA:FALSE\nsubjectAltName=DNS:api.linear.app\n")
-    subprocess.run(
-        [
-            "openssl",
-            "x509",
-            "-req",
-            "-in",
-            str(csr),
-            "-CA",
-            str(cert),
-            "-CAkey",
-            str(key),
-            "-CAcreateserial",
-            "-out",
-            str(leaf),
-            "-days",
-            "1",
-            "-extfile",
-            str(extensions),
-        ],
-        check=True,
-        capture_output=True,
-    )
-    tls.load_cert_chain(leaf, leaf_key)
+    tls, cert = tls_context(root)
     subprocess.run(
         ["git", "remote", "set-url", "origin", "https://github.com/loopflowstudio/fixture.git"],
         cwd=repo,
@@ -277,6 +209,7 @@ def main() -> None:
     }
     env.update(
         LF_HOME=str(root),
+        LF_BIN=fixture["lf"],
         LF_PROVIDER_TOKEN_KEY_PATH=str(root / "provider.key"),
         SSL_CERT_FILE=str(cert),
         SSL_CERT_DIR=str(root / "empty-certs"),

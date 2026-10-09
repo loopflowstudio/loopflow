@@ -11,28 +11,41 @@ use support::{register_unrun_task, EnvGuard};
 
 #[test]
 fn task_abandon_binary_preserves_unresolved_execution() {
-    task_management_fixture();
+    task_management_fixture("task_deletion.py", None);
 }
 
-fn task_management_fixture() {
+#[test]
+fn work_watch_reconnects_repository_planning() {
+    task_management_fixture("planning_reconnect.py", Some("watch"));
+}
+
+#[test]
+fn public_flow_reconnects_planning_without_another_turn() {
+    task_management_fixture("planning_reconnect.py", Some("flow"));
+}
+
+fn task_management_fixture(script: &str, mode: Option<&str>) {
     let home = tempfile::tempdir().unwrap();
     let _env = EnvGuard::with_lf_home(&[], home.path());
     let repo = TestRepo::new();
+    support::bind_task_planning(&repo);
     let mut registered = register_unrun_task(home.path(), repo.path(), "main", &repo.head_sha());
     let runtime = tokio::runtime::Runtime::new().unwrap();
-    registered.pr.publication = Some(PrPublication {
-        requested_at: time::OffsetDateTime::now_utc(),
-        presentation: None,
-        github: Some(GithubPr {
-            number: 1,
-            url: "https://github.com/loopflowstudio/fixture/pull/1".into(),
-            head_sha: None,
-        }),
-        merge: None,
-    });
-    runtime
-        .block_on(registered.store.update_task_pr(&registered.pr))
-        .unwrap();
+    if mode.is_none() {
+        registered.pr.publication = Some(PrPublication {
+            requested_at: time::OffsetDateTime::now_utc(),
+            presentation: None,
+            github: Some(GithubPr {
+                number: 1,
+                url: "https://github.com/loopflowstudio/fixture/pull/1".into(),
+                head_sha: None,
+            }),
+            merge: None,
+        });
+        runtime
+            .block_on(registered.store.update_task_pr(&registered.pr))
+            .unwrap();
+    }
     let key = home.path().join("provider.key");
     std::fs::write(&key, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA").unwrap();
     let previous_key = std::env::var_os("LF_PROVIDER_TOKEN_KEY_PATH");
@@ -66,11 +79,13 @@ fn task_management_fixture() {
     std::fs::write(&input, serde_json::to_vec(&fixture).unwrap()).unwrap();
     let output = Command::new("uv")
         .args(["run", "python"])
-        .arg(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../tests/e2e/task_deletion.py"
-        ))
+        .arg(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../tests/e2e")
+                .join(script),
+        )
         .arg(input)
+        .args(mode)
         .output()
         .unwrap();
     assert!(

@@ -418,7 +418,16 @@ async fn planning_graphql(
             .find(|issue| issue["id"] == vars["id"])
             .unwrap()
             .clone();
-        issue["comments"] = page(state.comments.clone());
+        issue["comments"] = page(
+            state
+                .comments
+                .iter()
+                .filter(|comment| {
+                    comment.get("issue").is_none() || comment["issue"]["id"] == vars["id"]
+                })
+                .cloned()
+                .collect::<Vec<_>>(),
+        );
         json!({"issue":issue})
     } else if query.contains("query IssueComments") {
         json!({"issue":{"comments":page(state.comments.clone())}})
@@ -632,9 +641,11 @@ fn task_deletion_active_sync_reconnect_retains_execution_and_history() {
             .pending_task_changes(&task.id)
             .unwrap()
             .remove(0);
-        let sync =
-            crate::ops::linear_observe::PlanningSync::start(fixture.store.clone(), task.clone())
-                .unwrap();
+        let sync = crate::ops::linear_observe::PlanningSync::start(
+            fixture.store.clone(),
+            repo.to_string_lossy().into_owned(),
+        )
+        .unwrap();
         runtime.block_on(async {
             tokio::time::timeout(std::time::Duration::from_secs(8), async {
                 loop {
@@ -730,9 +741,12 @@ fn task_deletion_lost_reply_requires_positive_trash_evidence_without_replay() {
             crate::ops::planning_delivery::sync_fields(&fixture.store, repo, &work)
                 .await
                 .unwrap();
-            crate::ops::planning_delivery::sync_repository_fields(&fixture.store, task)
-                .await
-                .unwrap();
+            crate::ops::planning_delivery::sync_repository_fields(
+                &fixture.store,
+                repo.to_str().unwrap(),
+            )
+            .await
+            .unwrap();
             assert_eq!(state.lock().await.deletion_writes, 1);
         });
         assert!(fixture
@@ -949,9 +963,11 @@ fn task_abandonment_active_sync_delivers_after_reconnect() {
             .pending_task_state(&task.id)
             .unwrap()
             .unwrap();
-        let sync =
-            crate::ops::linear_observe::PlanningSync::start(fixture.store.clone(), task.clone())
-                .unwrap();
+        let sync = crate::ops::linear_observe::PlanningSync::start(
+            fixture.store.clone(),
+            repo.to_string_lossy().into_owned(),
+        )
+        .unwrap();
         runtime.block_on(async {
             // Observe the foreground connection's failed attempt, then restore the
             // provider without another command, agent turn or manual refresh.
@@ -1529,9 +1545,11 @@ fn task_completion_active_sync_acquires_membership_while_delivery_is_pending() {
             added["state"] = json!({"type":"completed"});
             provider.issues.push(added);
         });
-        let sync =
-            crate::ops::linear_observe::PlanningSync::start(fixture.store.clone(), task.clone())
-                .unwrap();
+        let sync = crate::ops::linear_observe::PlanningSync::start(
+            fixture.store.clone(),
+            repo.to_string_lossy().into_owned(),
+        )
+        .unwrap();
         runtime.block_on(async {
             tokio::time::timeout(std::time::Duration::from_secs(8), async {
                 loop {
@@ -1579,6 +1597,72 @@ fn task_completion_active_sync_acquires_membership_while_delivery_is_pending() {
             );
         });
         drop(sync);
+    });
+}
+
+#[test]
+fn repository_sync_acquires_comments_without_a_task_anchor() {
+    with_planning_task(|runtime, fixture, repo, task, state| {
+        let item = seed_provider_task(
+            runtime,
+            &state,
+            repo,
+            "Unselected work",
+            "Keep local execution",
+        )
+        .unwrap();
+        let other = runtime
+            .block_on(fixture.store.get_task_by_issue(&item.id))
+            .unwrap()
+            .unwrap();
+        runtime.block_on(async {
+            state.lock().await.comments.push(json!({
+                "id":"unselected-comment", "body":"Incoming repository direction",
+                "issue":{"id":item.id}, "user":{"id":"maya", "name":"Maya"},
+                "createdAt":"2026-10-08T12:00:00Z", "updatedAt":"2026-10-08T12:00:00Z"
+            }));
+        });
+        let workflow = fixture.store.sqlite.workflow(&other.id).unwrap();
+        let sync = crate::ops::linear_observe::PlanningSync::start(
+            fixture.store.clone(),
+            repo.to_string_lossy().into_owned(),
+        )
+        .unwrap();
+        runtime.block_on(async {
+            tokio::time::timeout(std::time::Duration::from_secs(8), async {
+                loop {
+                    if fixture
+                        .store
+                        .sqlite
+                        .task_comments(&other.id)
+                        .unwrap()
+                        .comments
+                        .iter()
+                        .any(|comment| comment.id == "unselected-comment")
+                    {
+                        break;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+                }
+            })
+            .await
+            .unwrap();
+        });
+        drop(sync);
+        assert!(fixture
+            .store
+            .sqlite
+            .task_comments(&task.id)
+            .unwrap()
+            .comments
+            .is_empty());
+        assert_eq!(fixture.store.sqlite.workflow(&other.id).unwrap(), workflow);
+        assert!(runtime
+            .block_on(fixture.store.get_task(&other.id))
+            .unwrap()
+            .unwrap()
+            .worktree
+            .is_none());
     });
 }
 
@@ -2837,12 +2921,12 @@ impl crate::ops::Progress for LifecycleMessages {
 
 #[test]
 fn planning_fields_active_connection_delivers_offline_saves_after_recovery() {
-    with_planning_task(|runtime, fixture, _repo, task, state| {
+    with_planning_task(|runtime, fixture, repo, task, state| {
         runtime.block_on(async {
             state.lock().await.field_outage = true;
             let sync = crate::ops::linear_observe::PlanningSync::start(
                 fixture.store.clone(),
-                task.clone(),
+                repo.to_string_lossy().into_owned(),
             )
             .unwrap();
             fixture
@@ -3487,9 +3571,11 @@ fn planning_export_foreground_reconnect_keeps_distinct_saved_identities() {
             })
             .unwrap();
         state.blocking_lock().field_outage = true;
-        let sync =
-            crate::ops::linear_observe::PlanningSync::start(fixture.store.clone(), task.clone())
-                .unwrap();
+        let sync = crate::ops::linear_observe::PlanningSync::start(
+            fixture.store.clone(),
+            repo.to_string_lossy().into_owned(),
+        )
+        .unwrap();
         runtime.block_on(async {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             assert_eq!(state.lock().await.creation_writes, 0);

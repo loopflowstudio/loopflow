@@ -7,15 +7,11 @@ implemented locally. Passive reads use the published, checksum-verified lf3
 fixed-buffer reader with exact pane/surface validation; native proof remains.
 Focused local Rust and model evidence establish neither native acceptance nor delivery.
 
-LOO-406 is integrated through main’s `d20c56daf` (#1503). LOO-412 through
-`de3c84b08` is composed locally: common receipts, unplaced-Wave reads and
-destination-level Desktop status survive. Established repository roots can now be
-explicitly associated. Explicit provider correspondence/full-ID lookup is composed;
-joint provider projection remains unfinished.
-Mixed Linear/Git stays disabled pending the remaining composition.
-Local Task/Session-plus-Changes opening follows request-scoped readiness; native proof remains.
-Remaining implementation: broader explanation, delegation
-exchange, first-start admission and remote opening. Integrated provider-effect repairs do not establish correspondence or native proof.
+LOO-406/#1503 and LOO-412 through `96f714bd6` are composed locally;
+`1ece5cc52` reconciles transitive ancestry. Section 2 retains remaining composition.
+Remaining: mixed-path proof, delegation exchange, first-start admission, remote
+opening and broader explanation. Mixed Linear/Git stays disabled; native proof
+remains, including request-scoped Task/Session-plus-Changes opening.
 [Findings](findings.md), [questions](questions.md) and the
 [comparison](../docs/reviews/terminal-command-comparison.md) retain evidence and open choices.
 
@@ -112,14 +108,12 @@ Within launch flags, context inputs are `--docs`/`--clipboard`/`--diff`;
 agent/account selection is separate from execution settings `--chrome`/`--yolo`.
 Jack requests removing `--max-turns` and probably `--no-loopflow`; the draft
 removes both public switches while retaining normal operating guidance.
-Keep `--steers-after`: Jack recalled context-budget blowups and requested checking
-its continued use. Source tracing confirms `flow.rs` records a cursor per node,
-passes it through `Cli::step_args`, and `run.rs` applies it in `task_input::read_seed`.
-The existing `a_repeated_node_receives_only_task_direction_newer_than_its_last_run`
-fixture checks first-visit inclusion, repeated-node omission and later new direction.
-It was inspected, not rerun. The map resets with a fresh Flow driver; this is not
-cross-restart deduplication. Removing `--no-loopflow` must migrate that fixture's
-setup without dropping its context-growth assertions. Retain the advanced launch flag.
+Keep `--steers-after`: Jack recalled context-budget blowups. Flow records a cursor
+per node, passed through `Cli::step_args` to `task_input::read_seed`. Preserve
+`a_repeated_node_receives_only_task_direction_newer_than_its_last_run`'s inclusion,
+omission and later-direction assertions when removing `--no-loopflow`. The fixture
+was inspected, not rerun; fresh drivers reset cursors, so this is not cross-restart
+deduplication. Prior trace: `859c414d1`, this section.
 
 Jack explicitly proposes `--context` as “show me the context that would be used
 here, dont actually launche”; `--explain` applies to more commands. Neither claim
@@ -174,11 +168,10 @@ no registration, missing/non-Git paths and another Task's ID refusing edit,
 checkout and launch.
 ### Cutover and acceptance
 
-Local `--context` reuses launch prompt assembly and bound Work enrichment for skills and inline requests;
-`--explain` uses WorkSelection/ContextFact before admission or preparation. JSON
-combines both on request. Primary scoped identity survives dispatch. Flow previews share compilation, graph and prompt owners, including router contracts
-and captured native arguments. Broader action explanation and complete-path
-composition remain unfinished. Explicit-Machine preview is implemented.
+Local skill/inline `--context` shares launch assembly and Work enrichment; Flow
+previews share compilation and initial input, including native arguments. Read-only
+`--explain` precedes admission/preparation and supports JSON and explicit Machines.
+Broader action explanation and complete-path composition remain unfinished.
 
 Headless gate separates discovery (`documented_commands`), wire shape
 (`dto_fixtures`) and routing/preview behavior, including
@@ -254,11 +247,10 @@ releases its connection between physical lookup, correspondence and record reads
 the common resolver and row readers share one read snapshot. Later lookups recheck
 mapping changes; the snapshot grants no execution or synchronization authority.
 
-Peer import no longer mutates its prepared object index in the retry loop or
-maintains a second receipt-exclusion list for scalar writes. Index construction
-validates complete records and selects provider frontiers once; scalar projection
-uses `PlanningKind::fields()`. Independent evidence retains field-level savepoints
-before object projection. Shared-start refusal and mixed-provider restrictions remain.
+Ancestry/projection and foreground-fixture deletions: `263d1f7d7`, this section.
+The surviving owners retain per-origin heads, accepted-only save parents, private
+holds and separate provider savepoints. Public foreground fixtures replace direct
+transport tests; one typed WorkFrame reader and shared SQLite seeds retain coverage.
 
 Input reuses `insertTerminalText` and the pane event. Registry, multiplexer and
 surface owners remain authoritative: Close/Undo renews content tokens; filtered
@@ -268,15 +260,10 @@ native/artifact evidence and the plan below retains incomplete composition.
 
 ## Implementation sequence — one PR
 
-### Completed local command/opening slices — October 9
-
-Local opening/preview proof and failures: `3f143cd65`, this heading.
-Read-only previews expose initial Flow input only; native/remote acceptance remains.
-
 ### 2. Shared Work identity, delegation and routing
 
 **Locally composed, incomplete.** LOO-406's common writer and LOO-412 through
-`de3c84b08` supply exchange, foreground sync and repository Work-stream receipts.
+`96f714bd6` supply exchange, foreground sync and repository Work-stream receipts.
 Peers use Machine/repository keys. `repo identity --bind ID` associates established
 roots, preserving prior local locators, Work, mappings, effects and execution;
 it selects/publishes nothing. Imported Waves remain unplaced. Independent-root
@@ -288,12 +275,11 @@ use effective delegation. Neither changes Machine defaults. LOO-412's TaskSource
 transfer/preparing selector stays excluded: cold planning acquisition and ordinary
 Task preparation survive, but remote first start still needs exclusive admission.
 
-First-start admission remains unresolved. Git-selected Tasks (including user-keyed
-refs) without a retained local checkout refuse start through the common planning/
-admission check, before Git preparation and again at placement. Local-only Tasks, saves, acquisition and
-retained execution remain usable. Neither local absence, a negative peer reading
-nor a local SQLite transaction supplies a cross-Machine reservation.
-Delegation inheritance remains proposed, not accepted from source code alone.
+Git-selected Tasks, including user-keyed refs, without retained checkouts refuse
+first start before Git preparation and at placement. Local-only work, saves,
+acquisition and retained execution remain usable. Local absence, negative peer
+readings and SQLite transactions provide no cross-Machine reservation.
+Jack Heart accepted nearest-ancestor inheritance with narrower overrides (Q2, October 9).
 
 **Repository association is not provider-Work association.** `d4fbca0ae` and
 `a73198197` retain root locators and repository-scoped lookup. `66dd3c44f` separately
@@ -315,8 +301,8 @@ Machine-local locators, not exported aliases. One selected ID serves every desti
   view owners and in-flight links survive headless fixtures. No native surface or
   automatic background identity-refresh proof follows.
 - Exchange authored delegation through the common journal/Placement owners, retaining
-  explicit/legacy provenance, conflicts and pending state. Nearest-ancestor inheritance
-  is still proposed (Q2); the code cannot approve it.
+  explicit/legacy provenance, conflicts and pending state. Apply accepted nearest-
+  ancestor inheritance and narrower overrides (Q2); started Tasks stay put.
 - Observe recorded execution location separately, with freshness/unavailability,
   before interpreting an imported Task's missing local checkout as unstarted.
   Couple first-start allocation to exclusive admission, not a negative peer read.
@@ -339,14 +325,11 @@ execution Machine using its ordinary local store: Workflow selection, departure,
 Flow execution and arrival all stay there. Nested create/edit/comment/completion
 use the same local planning writer; operations do not call back to another store.
 
-LOO-406 owns local planning mutations and optional Linear sync. LOO-412 owns
-portable planning exchange separately from code branches. Its committed prototype
-uses `refs/loopflow/planning/users/<uuid>` by default and explicit
+LOO-406 owns local writes/Linear; LOO-412 exchanges planning separately from code,
+using `refs/loopflow/planning/users/<uuid>` by default and explicit
 `refs/loopflow/planning/shared/<name>` destinations. Connection selects no existing
 Work and publishes nothing; explicit Wave selection includes descendants/history.
-The selected remote, user key, scope and merge protocol remain with that owner.
-This is dependency source evidence, not an integrated CLI promise or authorization
-to publish real plan data to the public code remote.
+LOO-412 owns destination, scope and merge policy; no real plan publication is authorized.
 
 Planning changes (identity, brief, membership, comments, completion) are locally
 committed with stable mutation identity and pending synchronization. Execution
@@ -365,35 +348,37 @@ integrated locally, excluding the incompatible started-Task transfer path. Its r
 causal invalidation replace no local owner; prior mechanisms and contrary evidence:
 `2c23acbb8:scratch/compare-cmux-s-command-line.md`, **Mixed command**.
 
-The dependency now reads imported Waves with nullable Machine placement
-(`60d113a70`), without allocating it on acquisition. `c20e4ad13` adds repository-scoped
-Git destination receipts/holds through the existing Work stream, retaining last-good
-readings and fencing stale scope/Machine frames. Reuse those readers when composing
-Wave-owned planning and repository-keyed windows; do not add another poller or infer
-repository identity from a destination. Per-Work sharing/authorship/assignee and
-losing-edit recovery presentation remain, distinct from implemented destination status.
+Imported Waves stay unplaced; the existing repository Work stream carries scoped
+last-good destination receipts/holds (`60d113a70`/`c20e4ad13`). No second poller or
+destination-derived repository identity. Per-Work sharing/authorship/assignee and
+losing-edit recovery presentation remain. Earlier composition and receipt/CLI
+proof: `e021858ec`, this heading; those checks are not Git acquisition.
 
-**Composed October 9 through `de3c84b08` (`66dd3c44f`):** receipts create no
-Task-creation requests. Correspondence/full-ID lookup preserves physical IDs,
-private selection, captured effects and execution; foreign-repository edits refuse.
-Store/CLI and migration checks cover these boundaries, not Git acquisition or
-configured providers. TaskSource stays deleted. Earlier evidence and unmapping
-counterexamples: `18d02a610`, this heading and `scratch/findings.md`.
+Creation-origin retention, accepted-observation repair and their failed attempts:
+[findings](findings.md#shared-planning-composition). Rejected heads
+remain recoverable, never save parents. Snapshot lookup and TaskSource exclusion survive.
 
-**Committed dependency ahead, inspected October 9; not composed:** LOO-412 through
-`3c67b29b1` adds ordinary-import retention of associated creation origins and
-exact-origin readback (`39dba32c1`), plus exact-Linear-fact cross-origin predecessors
-(`8f3472eda`). Lookup also rejects contradictory incoming mappings. Local composition
-must preserve `2afcfba1a`'s read snapshot and the TaskSource exclusion. Dependency
-fmt/Clippy and SQL checks are reported passing; new fixture execution is deferred,
-not inherited as a pass. The causal fixture includes private-dependency export holds.
+**Joint projection, October 9:** `7165f9a62`/`dffdbaaa5` project explicitly associated
+origins through one local owner, retaining original mutations/creation inputs and
+`d62003e0f`'s separate accepted-observation query. Common writers resolve relationship
+IDs; only joint accepted frontiers parent later saves. Both origins require explicit
+selection; correspondence never enrolls private Work. Conflicting provider inputs
+remain held, not rewritten. Store coverage and failed attempts:
+`859c414d1:scratch/findings.md`, **Shared planning composition**. Foreground evidence
+below supersedes the transport-only fixture, not these constraints.
 
-After that composition, joint winners, peer-authored causality, Task membership,
-comments/order and non-creation receipts still need the common planning owners.
-Equal text or correspondence alone cannot acknowledge a peer head. Preserve exact
-captured inputs, private selection and recoverable losers. Mixed-provider and
-shared first-start refusals remain; dependency integration cannot lift them.
-Combined Git/Linear/Desktop proof and the complete remote/native path remain.
+**Ancestry and foreground composition, October 9:** `1ece5cc52` retires transitive
+ancestors while retaining original heads, mapping validation, accepted-only save
+parents and private holds. `b9e7013ad` replaces direct transport proof with public
+association, Task saves and repository `monitor work --watch`: offline/reconnect,
+causal reopening and lost-publication-receipt recovery preserve captured comment
+input and seeded execution. Git confirmation never acknowledges Linear delivery.
+[Findings](findings.md#shared-planning-composition) retain failed attempts and exact
+limits; no live Linear, running provider or mounted Desktop proof follows.
+
+Remaining: foreground Git/Linear/Desktop composition, delegation exchange,
+exclusive admission, remote opening and broader explanation. Mixed-provider and
+shared first-start refusals remain.
 
 **Required mixed-operation proofs:** local `task run` writes its own Workflow and
 runs locally while Task comments/follow-ups/completion synchronize to a second
@@ -436,7 +421,6 @@ collapse without navigation, focus or zoom changes. Move relocates the retained 
 within one Machine/checkout; resize gives the target side its divider share. Split
 preserves selection/zoom; move/resize preserve visibility too. Zoom grants no focus;
 explicit focus reveals/selects only the addressed pane in its retained workspace.
-Q2 remains open.
 
 Lost replies leave uncertain outcomes. Hide/restore are idempotent; split and Shell
 can allocate again, so inspection must precede any deliberate retry. Close/Undo
@@ -539,4 +523,4 @@ identity/delegation, open them, add shell/Files panes, retain an unfinished draf
 change focus, target a harmless command, read output, hide/restore, and verify the
 original input target and draft survive. Demo owns native usability; preserve comparison evidence and use no real accounts or live user terminals.
 
-Check: `cargo test -p loopflow --test process_ownership_tests process_discovery_pages_real_commands_and_preserves_unknown_history -- --exact` PASS (1); prior checks: `18d02a610`; broader proof: gate/CI; native: demo.
+Check: focused history PASS (1, `33377eaa5`); foreground planning PASS (5, `263d1f7d7`); full suites: gate/CI; native: demo.

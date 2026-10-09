@@ -116,86 +116,44 @@ A proposed URL establishes no window, surface or usable endpoint. Fixture launch
 and preview compare URLs; checkpointed populated storage checks catch hidden writes.
 Pre-edit conflicted notes and checks: `/tmp/loo427-desktop-explain/`.
 
-## Remote preview — October 9
+## Remote and Flow preview — October 9
 
-Entry identity validation and parsed transport supersede shell/dispatch checks;
-preview skips sender probes/credentials and fallback writes. Populated-store and
-simulated-SSH evidence, including failed attempts: `c106dc719:scratch/findings.md`,
-this heading. Configured SSH and exclusive admission remain unproved.
-
-## Flow context preview — October 9
-
-`49effe9bf`/`82f9ed087` satisfy the supplied preview direction through shared graph
-and prompt owners. Same-named Flow/skill fixture cycle failure and repair:
-`bdb008907`, this heading. Resolved `operator_scope` fixes aliases/captured steps
-without refusing literal hierarchical overrides. Two-CLI simulated SSH proves
-neither configured transport, admission nor native endpoints. The plan owns the
-current mechanism and evidence limits.
+Entry identity validation, parsed transport and shared prompt/graph owners replace
+sender probes, fallback writes and preview-only assembly. Resolved operator scope
+retains aliases/captured steps and hierarchical overrides. Failed attempts and
+two-CLI simulated-SSH evidence: `6072b1eca:scratch/findings.md`, **Remote preview**
+and **Flow context preview**. Configured transport, admission and native endpoints
+remain unproved.
 
 ## Shared planning composition — October 9
 
-The committed dependency's common journal, receipt writer, Git transport,
-foreground lifetime and Desktop Work stream are reused. Merge review found
-`TaskSource` transfer and preparation inside Work selection incompatible with
-started-Machine retention and effect-free previews. They are excluded rather than
-silently changing those contracts. Copied child placement remains deleted.
+Dependency journal, receipts, transport, foreground lifetime and Work stream are
+reused. Merge review excluded `TaskSource` transfer/preparation: it violated
+started-Machine retention and effect-free preview. Copied placements stay deleted.
 
-`d4fbca0ae` replaces the earlier different-ID refusal and pre-bound fixture.
-Both roots now own Work and distinct repository IDs before explicit association.
-Prior IDs remain local locators; journals, selections, provider lookup, uncertain
-effects and local execution survive. The provider fixture initially omitted the
-expected revision and correctly failed attempt admission; it now uses the retained
-observation. Earlier empty-workspace-slug and pre-binding evidence remains at
-`d4fbca0ae:scratch/findings.md`, this heading. No mixed-provider activation follows.
-
-Compression review found routing still resolved Task prefixes globally before
-checking repository paths, unlike entry dispatch's scoped lookup. A shared scoped
-resolver removes that second policy: historical locators select the path before
-Task lookup. The fixture distinguishes two same-prefix Tasks, retains the selected
-plan after association, rejects another repository's Work and leaves unknown
-Tasks for acquisition. Missing-locator guidance now names explicit binding rather
-than suggesting planning sync supplies identity. These are local resolver proofs,
-not configured SSH or exclusive admission.
+Established-root/scoped-routing evidence: `dffdbaaa5:scratch/findings.md`, this
+heading. Locators, Work, effects and execution survive; the missing-revision failure,
+same-prefix/foreign-repository refusals and unknown-Task acquisition are retained
+there. Store/resolver proofs establish neither configured SSH nor admission.
 
 Import preparation remains immutable; scalar projection uses the portable schema.
 Per-field savepoints remain inline: the outer conflict handler must not soften a
 commit/release failure into a projection hold. Mutation identity precedes complete-
 record validation, and creation readback reconciles old and new delivery receipts.
 
-October 9 realignment distinguished repository-root association from divergent
-Task/Project correspondence, now composed below with projection still held. Its window
-counterexample is now repaired on opening/restoration through common locator
-readings and existing scene/router owners. Identity changes renew targeting tokens,
-not receiver or delivery lifetimes. Headless fixtures retain document selection,
-pane state and native view ownership, not mounted surfaces. A test initially waited
-forever on the worktree URL after canonical-root rewriting; sampling exposed the
-fixture error. Corrected expected URLs pass. Initial Swift/Rust compilation failures
-were stale constructor/scalar assumptions and were repaired.
+Repository/Work correspondence, creation claims and window association are separate
+boundaries. Their implementation/failure evidence is retained at
+`dffdbaaa5:scratch/findings.md`, this heading (`d378f31ae`, `28fc5274a`,
+`f898be5a8`). Opening/restoration share locator readings and an observation fence;
+A→B→A and parent-symlink counterexamples invalidated scene/per-path fences. Target
+identity renews without replacing receivers, delivery or native owners. Headless
+fixtures preserve pane/document state, not mounted surfaces. TaskSource remains
+excluded; no mixed-provider or first-start activation follows.
 
-`d378f31ae` composes common provider claims and origin-keyed creation receipts;
-its resolver conflict kept TaskSource deleted. Merge detail: `28fc5274a`, this
-heading. Mixed-provider and first-start refusals remain.
-
-Prior cross-Wave inspection: `b83d3e2a9`, this heading.
-
-`f898be5a8` repairs cross-locator opening rollback after `28fc5274a` repaired
-restoration. Opening/restoration share an observation fence and retained-locator
-matching. Parent-symlink regressions reproduce identity/token rollback and cold-open
-divergence; corrected request IDs pass. Failed leaf-symlink and pending-delivery
-attempts: `15663bd45`, this heading. Headless router proof is not native acceptance.
-
-Merge `66dd3c44f` composes LOO-412 through `de3c84b08`, retaining the common
-resolver, receipt and migration owners. Only scratch conflicted; this Task’s
-questions survived and dependency notes remain in dependency history. Earlier
-inspection account: `15663bd45`, this heading. Correspondence and receipt tests
-now pass locally, including repository-scoped CLI selection and foreign-repo edit
-refusal. The imported CLI fixture is explicitly Store-seeded, not Git acquisition.
-Joint causal/relationship projection and origin settlement remain held; mixed
-exchange and first-start refusals are unchanged.
-
-CLI-reference attempts and integration review: `75fff9cb0`, this heading.
-No installed runtime or production plan changed. Generated Work-seed overflow
-remains; no limit was raised.
+`66dd3c44f` composes correspondence through `de3c84b08`; Store-seeded CLI
+fixtures prove scoped lookup and foreign-repo edit refusal, not Git acquisition.
+Historical integration/CLI-reference attempts: `dffdbaaa5:scratch/findings.md`,
+this heading. No installed runtime or production plan changed.
 
 `2afcfba1a`: correspondence lookup mixed physical absence, mapping and record content across
 observations. The real-WAL fixture fails on `75fff9cb0` (lookup returns null), then
@@ -204,9 +162,45 @@ mapping. Imports are Store-seeded, not Git acquisition. The initial unqualified
 `--exact` filter ran zero tests; the qualified filter ran the regression.
 Resource-recovery limits: `18d02a610`, this heading.
 
-October 9 dependency inspection found LOO-412 ahead through `3c67b29b1`:
-ordinary-import creation-origin retention, contradictory incoming-mapping refusal,
-and exact-Linear-fact causal links. These are not in this checkout. Its new fixture
-execution remains deferred; static checks do not prove joint recovery. The plan
-separates this composition from still-unbuilt winners/relationships and remote start.
-Filesystem inspection found no Product child directories or child memories.
+Merge `663f78256` retains creation origins/exact-fact links through `3c67b29b1`,
+prepared validation and snapshot lookup. Import/readback creates no local requests.
+
+October 9's rejected-import counterexample: `29fa9a90e:wave/product/MEMORY.md`,
+**Current direction**, and `/tmp/loo427-realign-1n6oVz/`. `44d73dbcd` composes
+`ccdd273d0`; `d62003e0f` shares decoding without conflating retained and accepted
+queries. Import suppression precedes retention; successful projection alone advances
+observations in its savepoint. Rejection/repair, replay, populated-frontier seeding,
+equal-value and associated-readback fixtures retain execution and private ancestry.
+Those observation fixtures prove neither Git acquisition nor joint projection. Failed duplicate-column/origin
+references and full pre-reconciliation notes: `/tmp/loo427-realign-CaxZkz/scratch/`
+and `/tmp/loo427-before-observations.patch`.
+
+Joint-projection setup failures and the foreign-bridge regression remain at
+`859c414d1:scratch/findings.md`, this heading. The regression failed before
+`1ece5cc52`; transitive retirement preserves original heads, mapping validation,
+accepted-only save parents and private holds. Prior Git proof called transport/Store
+directly, bypassing foreground exchange; it did not lift the mixed-provider refusal.
+
+**Foreground composition, October 9.** The transport-only association fixture is
+replaced in `planning_foreground_tests`: two isolated Homes, file-only Git, public
+association/Task edits/comments and repository `monitor work --watch`. Connected
+Linear stays off. Seeded provider observations establish distinct local Task/Project
+IDs; association enables projection only after import. Offline saves remain pending
+with last-good stream receipts; reconnect converges title/description/comment changes.
+Local → foreign → local title ancestry survives, completion then observed reopening
+converges, and a fresh connection repairs an unconfirmed publication without another
+mutation or commit. Captured Workflow/Session/Process rows remain unchanged; the PR
+and placement tables remain empty. No executing provider, checkout cleanup, real
+Linear acquisition or mounted Desktop acceptance is established.
+
+Review replaced a weak repeat-exchange assertion (saved status could satisfy it
+before exchange) with a lost-publication-receipt fixture requiring fresh confirmation.
+Git confirmation preserves the pending provider comment's original input and local
+lost-reply error. An initial assertion wrongly expected that diagnostic on the peer:
+comment error text is local, while stable comment identity/input is portable. No
+protocol expansion followed. A private-API compile failure led to SQL seeding of the lost receipt.
+Clippy caught a forward scan for the last frame; the reader scans backward.
+Logs: `/tmp/loo427-foreground-{build,test,clippy}.log`, failed receipt assertion:
+`/tmp/loo427-foreground-receipt-failure.log`. Pre-edit scratch/diff:
+`/tmp/loo427-foreground-before-AgmlKJ/`. Mixed exchange, exclusive admission,
+delegation and remote/native proof remain; neither refusal was lifted.

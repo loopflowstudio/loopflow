@@ -14,12 +14,12 @@ exchange: LOO-406 owns the writer/Linear, LOO-412 Git-ref merge/scope. Workflow,
 Processes and cleanup stay local; imported completion changes planning only.
 Disconnect retains local work and pending sync. Q1 is resolved; composition proof remains.
 
-## Q2 — Delegation inheritance
+## Q2 — Selected: nearest explicit assignment (October 9)
 
-Jack accepted that started Tasks stay on their Machine for later runs/resumes.
-Delegation applies only to open, unstarted and future Tasks. Nearest explicit
-ancestor with narrower overrides remains proposed. Historical assignment
-provenance stays unknown where copied and explicit values cannot be distinguished.
+Jack Heart accepted nearest-explicit-ancestor Machine inheritance for unstarted
+Tasks, with narrower Task/sub-Wave overrides. Started Tasks stay on their recorded
+Machine for later runs/resumes. Historical explicit/inherited provenance stays
+unknown where indistinguishable. Exchange/admission proof remains.
 
 ## Q3 — Selected: combine with the existing draft (October 8)
 
@@ -33,8 +33,7 @@ surface targeting is implemented; native text/key fidelity proof remains.
 
 Hide/restore address an existing retained view through the selected plan/window,
 Machine/checkout and pane/content occurrence. Restore removes collapse without
-selecting Work, focusing a window, changing zoom or acquiring a client. This
-implementation choice leaves Q2 open. View occurrence tokens grant no
+selecting Work, focusing a window, changing zoom or acquiring a client. View occurrence tokens grant no
 terminal-surface or composer-input authority.
 
 ## Reversible arrangement choices — October 8
@@ -52,7 +51,7 @@ authorizes native input.
 CLI companions preserve focus, zoom and Work selection. An empty exact target is
 filled; occupied content is never replaced. Files/Flow-log reuse and unhide the
 named Task's pane only in its recorded/prepared checkout. Shell always allocates
-and remains local-only until remote opening is composed. This does not decide Q2 or grant native-input authority. The verified lf3 artifact now supplies fixed-buffer extraction; native pane acceptance remains. Full-buffer reads followed by truncation are not a fallback.
+and remains local-only until remote opening is composed. lf3 supplies fixed-buffer extraction; native acceptance remains. Full-buffer reads followed by truncation are not a fallback.
 
 ## Reversible bounded-read choice — October 8
 
@@ -107,9 +106,9 @@ These are reversible lookup choices, not shared Work identity or publication.
 Primary and stack-parent Task selectors now carry repository-scoped full IDs through
 dispatch; an unscoped ambiguous prefix still fails.
 
-Pre-edit October 9 query: generated Work seed 31,624/16,000 tokens (15,624 over),
-including the Task-workspace inventory. Complete launch source inspected. Authored
-notes cannot shrink this separate producer gap; no limit was raised.
+October 9 pre-compression query: generated Work seed 31,909/16,000 tokens (15,909 over),
+including the workspace inventory. Complete launch source inspected; authored
+notes cannot shrink this producer gap. No limit was raised.
 
 ## Explicit repository association — October 9
 
@@ -120,10 +119,10 @@ effects, journals and execution stay unchanged. It selects/publishes no destinat
 An ID already locating another local checkout is not reassigned. This associates
 two Machines' established roots, not two same-Machine stores or duplicate Work.
 Divergent Task/Project IDs now have separate explicit correspondence/full-ID lookup;
-joint projection remains unfinished. Repository binding grants no correspondence or effect rekeying.
+joint projection now uses explicit correspondence. Binding alone grants none and never rekeys effects.
 Desktop reassociation on open/restore is local; delegation exchange and peer
 first-start admission remain. Neither binding nor a retained alias authorizes start; Git-selected Tasks
-without retained checkouts still refuse. Inheritance remains unresolved.
+without retained checkouts still refuse.
 LOO-412's started-Task source-transfer path conflicts with Jack Heart's retained-
 Machine decision and is excluded; dependent remote launch work stays unfinished.
 

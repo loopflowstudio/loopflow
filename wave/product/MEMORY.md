@@ -55,13 +55,13 @@ negative observation cannot reserve first start against a peer. One store's SQLi
 synchronize runtime to solve it. Peer exchange, observation/admission, complete
 routing, Desktop control and composed proof remain.
 
-LOO-427 keys windows/queues by plan; delivery tokens fence canceled completions.
-Inspection separates Task/Session actions; Session time stays unknown. Saved/failed
-readings grant none. Arrangement moves retained leaves, never close/load: shell
-commands, surface keys and content occurrences survive. Undo renews only closed-pane
-tokens. Enlarging a pane must not mark it focused merely because the workspace is
-active. View identity grants no input authority. Seeded shared IDs prove routing,
-not exchange or exclusive start. Packaged Rust/Swift and native/remote proof remain.
+LOO-427 keys windows/queues by plan; tokens fence canceled completions.
+Task/Session actions stay separate; Session time stays unknown. Saved/failed reads
+grant none. Move retains leaves/commands/surfaces; Undo renews only closed tokens.
+`df3e43fb3` shares visibility/removal pruning; focus owns hidden-pane reveal.
+Zoom grants no focus; view identity grants no input. Lost replies cannot authorize
+split replay. Seeded IDs prove routing, not exchange/exclusive start. Companions,
+terminal I/O, peer composition and packaged/native proof remain.
 
 Jack selected local operations and Git-ref Task sync: 406 owns writes/Linear,
 412 exchange. Imported completion cannot move local Workflow or clean execution.

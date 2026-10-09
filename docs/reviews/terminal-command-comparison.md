@@ -61,6 +61,12 @@ installed help or reviewed Desktop code, not proof that no external tool exists.
   remaining pane control and terminal I/O remain unfinished. `940e0e078` adds
   exact-target hide/restore through retained panes, without closing clients;
   Undo cannot revive an old content target. Native/composed proof remains absent.
+  `d9fa2b829` adds exact-target focus, empty split, move, resize and explicit zoom;
+  `df3e43fb3` shares retained-pane pruning and reveal-through-focus. Move keeps
+  the original leaf; zoom does not select it. Direct model smoke/typechecking
+  passed, but packaged test attempts timed out without results. Companion
+  creation, bounded terminal reads/input, peer composition and native acceptance
+  remain unfinished. The command tables still describe October 7's baseline.
   No cmux/herdr behavior was re-exercised for these deltas.
 - Public [cmux API](https://cmux.com/docs/api) and
   [concepts](https://cmux.com/docs/concepts) provide context, but the tables below

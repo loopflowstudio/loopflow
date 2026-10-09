@@ -71,19 +71,7 @@ impl OpenCodeHarness {
     }
 
     async fn start_inner(&mut self, config: &AgentConfig) -> Result<()> {
-        let owner = config
-            .session_attachment
-            .as_ref()
-            .map(|(session, driver)| {
-                Ok::<_, anyhow::Error>((
-                    crate::store::sqlite::SqliteStore::new(
-                        &crate::store::database_path_from_env()?
-                    )?,
-                    session.clone(),
-                    driver.clone(),
-                ))
-            })
-            .transpose()?;
+        let owner = super::agent_process::open_owner(config.session_attachment.as_ref())?;
         self.history = Arc::new(Mutex::new(opencode_history::History::new(owner.clone())));
         let port = allocate_port()?;
         let mut command = Command::new("opencode");

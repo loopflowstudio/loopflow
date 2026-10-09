@@ -926,9 +926,9 @@ impl Harness for CodexHarness {
         self.shutdown_requested.store(true, Ordering::Relaxed);
 
         if self.session_attachment.is_some() && self.thread_id().is_some() {
-            // Managed engines close when the invocation settles its driver, under
-            // the same ownership transaction as takeover. Harness teardown
-            // only drops this connection; a replaced driver cannot stop work.
+            // The invocation closes its AgentProcess under the attachment lock
+            // during settlement, without holding SQLite across provider I/O.
+            // Harness teardown only drops this connection after takeover.
             self.child.take();
             self.child_group.store(0, Ordering::Release);
             if let Some(directory) = self.engine_directory.take() {
@@ -997,18 +997,8 @@ impl Harness for CodexHarness {
 
 impl CodexHarness {
     async fn start_inner(&mut self, launch: &AgentConfig) -> Result<()> {
-        self.session_attachment = launch
-            .session_attachment
-            .as_ref()
-            .map(|(session, driver)| {
-                let path = crate::store::database_path_from_env()?;
-                Ok::<_, anyhow::Error>((
-                    crate::store::sqlite::SqliteStore::new(&path)?,
-                    session.clone(),
-                    driver.clone(),
-                ))
-            })
-            .transpose()?;
+        self.session_attachment =
+            super::agent_process::open_owner(launch.session_attachment.as_ref())?;
         let connection = self
             .session_attachment
             .as_ref()

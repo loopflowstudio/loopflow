@@ -722,8 +722,8 @@ impl SqliteStore {
         Ok(current)
     }
 
-    /// Close the exact driver's runtime and record its exit under the same
-    /// transaction as ownership transfer, without settling a Flow review.
+    /// Close and settle the exact attachment under the transfer lock. Provider
+    /// I/O holds no SQLite lock; the terminal writes commit together afterward.
     pub(crate) fn finish_session_attachment(
         &self,
         session: &str,
@@ -732,14 +732,17 @@ impl SqliteStore {
         close_provider: impl FnOnce() -> StoreResult<bool>,
     ) -> StoreResult<()> {
         let _dispatch = self.lock_session_attachment(session)?;
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if attachment_in(&tx, session)?.as_ref() != Some(expected) {
-            return Err(StoreError::InvalidAuthority(
-                "Session attachment changed".into(),
-            ));
+        {
+            let conn = self.conn.lock().expect("store mutex poisoned");
+            if attachment_in(&conn, session)?.as_ref() != Some(expected) {
+                return Err(StoreError::InvalidAuthority(
+                    "Session attachment changed".into(),
+                ));
+            }
         }
         let closed = close_provider()?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
         let payload = serde_json::json!({
             "type": "attachment_exit", "outcome": outcome, "attachment_token": expected.token
@@ -1272,6 +1275,90 @@ mod attachment_tests {
     use crate::session::SessionActivity;
     use crate::store::sqlite::SqliteStore;
     use crate::store::StoreError;
+
+    #[test]
+    fn attachment_close_keeps_transfer_fenced_without_blocking_store_writes() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("store.db");
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        store.test_session("conversation", &crate::session_record::new_artifact_key());
+        store.test_session("unrelated", &crate::session_record::new_artifact_key());
+        let parent = insert_process(&store, 1, 1);
+        let attachment = store
+            .claim_session_attachment("conversation", None, &parent, true)
+            .unwrap();
+        let history = store.session_history("conversation", 0, 0).unwrap();
+        let lock_path = std::fs::read_dir(path.with_extension("session-locks"))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        let lock = std::fs::File::open(lock_path).unwrap();
+
+        let close = || -> crate::store::StoreResult<()> {
+            // Fail immediately on the old nested-lock shape instead of hanging.
+            drop(store.conn.try_lock().expect("close must release SQLite"));
+            assert_eq!(
+                fs2::FileExt::try_lock_exclusive(&lock).unwrap_err().kind(),
+                std::io::ErrorKind::WouldBlock
+            );
+            store.rename_session(
+                "unrelated",
+                "Saved during close",
+                crate::session::TitleSource::Human,
+            )?;
+            assert_eq!(
+                store.session_attachment("conversation")?,
+                Some(attachment.clone())
+            );
+            Ok(())
+        };
+        assert!(store
+            .finish_session_attachment("conversation", &attachment, "completed", || {
+                close()?;
+                Err(StoreError::InvalidData("provider close failed".into()))
+            })
+            .is_err());
+        assert_eq!(
+            store.session_history("conversation", 0, 0).unwrap(),
+            history
+        );
+        assert_eq!(
+            store.session_attachment("conversation").unwrap(),
+            Some(attachment.clone())
+        );
+        assert!(store
+            .process(&attachment.agent_process_lfid)
+            .unwrap()
+            .unwrap()
+            .completed_at
+            .is_none());
+
+        store
+            .finish_session_attachment("conversation", &attachment, "completed", || {
+                close()?;
+                Ok(true)
+            })
+            .unwrap();
+        assert!(store
+            .session_attachment("conversation")
+            .unwrap()
+            .unwrap()
+            .process_lfid
+            .is_none());
+        assert!(store
+            .process(&attachment.agent_process_lfid)
+            .unwrap()
+            .unwrap()
+            .completed_at
+            .is_some());
+        assert_eq!(
+            store.session("unrelated").unwrap().unwrap().title,
+            "Saved during close"
+        );
+        fs2::FileExt::try_lock_exclusive(&lock).unwrap();
+    }
 
     #[test]
     fn respawn_requires_positive_exit_and_preserves_uncertain_attempts() {

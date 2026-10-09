@@ -77,7 +77,9 @@ attribution survive.
 - Per-harness spawn recording is replaced by `harness::agent_process::spawn`.
   Native post-spawn writers (`begin_provider_spawn`, `record_provider_process`
   and terminal util's post-spawn block) are deleted; `spawn_native` owns native
-  admission. Both use one parent-side pre-exec recording channel.
+  admission. Both use one parent-side pre-exec recording channel. Shared
+  `open_owner` replaces three harness-local store-opening sequences without
+  refreshing their attachment snapshots.
 - Remaining provider-engine close names and messages, including `close_engine`.
   `bind_group_to_driver`, `prepare_lifeline` and the exposed prepare/retain
   lifeline type are deleted. Keep `engine/` as Loopflow machinery and the
@@ -265,10 +267,17 @@ workers but runs inline on a current-thread runtime; synchronous admission must
 not require that reactor. This comment correction changes no runtime behavior.
 
 Review caught a late-wait counterexample: reading the capture's current attachment
-at exit could end a replacement. Native launch now returns its immutable attachment
+at exit could end a replacement. Native launch returns its immutable attachment
 to the waiter; the capture rejects late exit reports. Sharing the pre-exec channel
-also keeps the parent's recording endpoint closed before the watchdog forks.
-Release child memory was inspected through its operation-entry lesson; public
-entry agreement remains open, not inferred from these internal fixtures.
+keeps the parent's recording endpoint closed before the watchdog forks.
 
-Check: `cargo fmt --all -- --check` and `git diff --check` pass; `resource_envelope.py --recover` refuses at 30.1/32 GiB, so build/Clippy and Claude/admission/native tests remain deferred to gate/CI. Source checkpoint: `4f7d21ff7`; no publication.
+Compression also removes SQLite's mutex/transaction from provider close in
+`finish_session_attachment`: the existing Session lock excludes takeover, then
+terminal writes commit together after close. Failure retains the attachment and
+history; nested reads and unrelated saves no longer block behind provider I/O.
+The new focused fixture checks those boundaries and lock release but remains
+unrun. This follows the orphan-settlement boundary rather than adding an owner.
+A proposed eager typed-row conversion was discarded: parsing historical parent
+IDs before checking for an attachment token would change unclaimed-row reads.
+
+Check: `cargo fmt --all -- --check` and `git diff --check` pass; `resource_envelope.py --recover` refuses at 30.1/32 GiB and `UV_LOCK_TIMEOUT=0 uv cache prune` is busy. Build, `cargo clippy --all-targets -- -D warnings` and focused `attachment_close_keeps_transfer_fenced_without_blocking_store_writes` plus Claude/admission/native fixtures remain gate/CI-owned. Prior source: `4f7d21ff7`; no publication.

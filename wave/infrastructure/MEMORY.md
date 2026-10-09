@@ -221,18 +221,19 @@ unpublished code retained, without deletion or delivery authorization.
 
 ## AgentProcess (LOO-443, 2026-10-09)
 
-Jack Heart requested one inventory. #1512: `3e1e6245c`; records: `446cfb2b5`;
-reads: `ea205e3d0`. Integrate LOO-441 before publication. Retain detached rows;
-duplicate PID/birth and late history grant no control. Tokens fence A → B → A.
+Jack Heart requested one inventory (#1512 `3e1e6245c`; record/read cuts
+`446cfb2b5`, `ea205e3d0`). Integrate LOO-441 before publication.
+Detached rows survive; duplicate PID/birth and late history grant no control.
+Tokens fence A → B → A.
 
-Claude replacement: `6fe75717f`; admission: `a81397932`. Native pre-exec
-recording preserves terminal groups; exact wait attachments fence late exits.
-Runtime untested. Synchronous admission must survive cancellation without
-blocking its reactor. Hold the Session lock, not SQLite across I/O.
-Only Codex has FIFO handoff; orphan termination covers noninteractive Codex/OpenCode.
-Optional launches, foreground cleanup, generation removal, death orders and
-public-entry agreement remain. Two-second removal and installed settlement are
-unproved. Earlier proofs: `a55f5345b`.
+Claude/headless/native: `6fe75717f` / `a81397932` / `4f7d21ff7`.
+Native pre-exec keeps terminal groups; wait snapshots reject late exits.
+Runtime/close fixture untested; admission must survive cancellation without reactor dependence.
+Close/orphan settlement hold only the Session lock across I/O, then commit writes.
+Only Codex has FIFO handoff; live-orphan termination covers noninteractive Codex/OpenCode.
+Unfinished: optional launches, foreground cleanup, generations, death orders,
+public-entry agreement, two-second removal and installed settlement.
+Earlier proofs: `a55f5345b`.
 
 ## Process vocabulary (LOO-400, curated 2026-10-09)
 
@@ -453,8 +454,6 @@ threshold such as 90% redirects future launches only; actual exhaustion triggers
 automatic shared failover. Isolated agents retain their own account/fallback.
 The updated Linear brief owns the current scope; stop-bundling's branch evidence
 does not yet establish shipment.
-
-Renamed from `systems` July 8; current schedules supersede history.
 
 The 2026-09-30 [LOO-298 decisions](#data-model-and-performance-decisions-reconciled-2026-09-30)
 supersede older Run-owner, historical-import, pinned-development-Home and

@@ -354,19 +354,11 @@ impl ClaudeHarness {
             crate::process::SessionAttachment,
         )>,
     > {
-        self.config
-            .as_ref()
-            .and_then(|config| config.session_attachment.as_ref())
-            .map(|(session, attachment)| {
-                Ok((
-                    crate::store::sqlite::SqliteStore::new(
-                        &crate::store::database_path_from_env()?
-                    )?,
-                    session.clone(),
-                    attachment.clone(),
-                ))
-            })
-            .transpose()
+        super::agent_process::open_owner(
+            self.config
+                .as_ref()
+                .and_then(|config| config.session_attachment.as_ref()),
+        )
     }
 
     async fn send_line(&mut self, line: String) -> Result<()> {

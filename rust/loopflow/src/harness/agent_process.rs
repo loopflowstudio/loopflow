@@ -12,6 +12,21 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::process::Command;
 
+/// Open the configured attachment without refreshing its authority from the store.
+pub(super) fn open_owner(
+    attachment: Option<&(String, SessionAttachment)>,
+) -> Result<Option<(SqliteStore, String, SessionAttachment)>> {
+    attachment
+        .map(|(session, attachment)| {
+            Ok((
+                SqliteStore::new(&crate::store::database_path_from_env()?)?,
+                session.clone(),
+                attachment.clone(),
+            ))
+        })
+        .transpose()
+}
+
 /// One headless launch sequence for every harness. Keep the attachment fence
 /// through pre-exec recording, and retain failed attempts without inventing an
 /// observed exit. Synchronous admission cannot detach a launch on async cancellation.

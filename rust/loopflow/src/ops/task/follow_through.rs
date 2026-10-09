@@ -1,8 +1,8 @@
-use super::{block_on_task, owning_wave, task_error, task_store};
+use super::{acquire_task, block_on_task, owning_wave, task_error, task_store};
 use crate::ops::OpsResult;
 use crate::store::Store;
 use crate::work::task::follow_through::{FollowThroughIntent, FollowThroughLink};
-use crate::work::task::PrPhase;
+use crate::work::task::{PrPhase, TaskId};
 use std::path::Path;
 
 #[derive(Debug, Clone, Default)]
@@ -24,7 +24,7 @@ pub fn task_follow_up(repo: &Path, issue: &str, options: &FollowUpOptions) -> Op
             .get_task_by_issue(issue)
             .await
             .map_err(task_error)?
-            .ok_or_else(|| task_error("follow-through needs a placed Task"))?;
+            .ok_or_else(|| task_error("follow-through needs a saved Task"))?;
         let pr = store.active_task_pr(&task.id).await.map_err(task_error)?;
         if let Some(pr) = &pr {
             if pr.phase() != PrPhase::Merged {
@@ -40,15 +40,7 @@ pub fn task_follow_up(repo: &Path, issue: &str, options: &FollowUpOptions) -> Op
         if let Some(reason) = options.none.as_ref().or(options.finish.as_ref()) {
             if options.finish.is_some() {
                 for intent in &prior.intents {
-                    let intent = store
-                        .sqlite
-                        .reserve_follow_through(&task.id, intent)
-                        .map_err(task_error)?;
-                    let link = confirm_intent(&store, repo, &intent).await?;
-                    store
-                        .sqlite
-                        .link_follow_through(&task.id, &link)
-                        .map_err(task_error)?;
+                    link_intent(&store, repo, &task.id, intent).await?;
                 }
             }
             store
@@ -82,26 +74,7 @@ pub fn task_follow_up(repo: &Path, issue: &str, options: &FollowUpOptions) -> Op
                 .map_err(task_error)?
                 .ok_or_else(|| task_error("follow-up destination Project is unavailable"))?;
             let (issue_id, title, existing) = if let Some(selector) = &options.existing {
-                let saved = match store
-                    .get_task_by_issue(selector)
-                    .await
-                    .map_err(task_error)?
-                {
-                    Some(saved) => saved,
-                    None => {
-                        let acquired = crate::ops::task_pm::resolve_task_async(
-                            repo,
-                            selector,
-                            crate::ops::pm::PmRefresh::Force,
-                        )
-                        .await?;
-                        store
-                            .get_task_by_issue(&acquired.item.id)
-                            .await
-                            .map_err(task_error)?
-                            .ok_or_else(|| task_error("follow-up Task was not retained"))?
-                    }
-                };
+                let saved = acquire_task(&store, repo, selector).await?;
                 if saved.id == task.id {
                     return Err(task_error("a Task cannot follow up itself"));
                 }
@@ -158,53 +131,37 @@ pub fn task_follow_up(repo: &Path, issue: &str, options: &FollowUpOptions) -> Op
                 existing,
             }
         };
-        let intent = store
-            .sqlite
-            .reserve_follow_through(&task.id, &intent)
-            .map_err(task_error)?;
-        let link = confirm_intent(&store, repo, &intent).await?;
-        store
-            .sqlite
-            .link_follow_through(&task.id, &link)
-            .map_err(task_error)?;
+        let link = link_intent(&store, repo, &task.id, &intent).await?;
         Ok(format!("Follow-up {} linked. Record the disposition with --finish REASON. Due checks return on the next Wave pass; filing schedules no automatic check.", link.identifier))
     })
 }
 
-async fn confirm_intent(
+async fn link_intent(
     store: &Store,
     repo: &Path,
+    task: &TaskId,
     intent: &FollowThroughIntent,
 ) -> OpsResult<FollowThroughLink> {
-    let saved = if let Some(saved) = store
-        .get_task_by_issue(&intent.issue_id)
-        .await
-        .map_err(task_error)?
-    {
-        saved
-    } else {
-        // An explicitly linked existing issue may not have been acquired yet.
-        // New and historical filings already have a local creation receipt.
-        let acquired = crate::ops::task_pm::resolve_task_async(
-            repo,
-            &intent.issue_id,
-            crate::ops::pm::PmRefresh::Force,
-        )
-        .await?;
-        store
-            .get_task_by_issue(&acquired.item.id)
-            .await
-            .map_err(task_error)?
-            .ok_or_else(|| task_error("historical follow-up filing remains unconfirmed"))?
-    };
+    let intent = store
+        .sqlite
+        .reserve_follow_through(task, intent)
+        .map_err(task_error)?;
+    // Filing reservations already retain their child locally. Acquisition remains
+    // necessary only for historical links to an existing, not-yet-retained issue.
+    let saved = acquire_task(store, repo, &intent.issue_id).await?;
     let item = super::task_planning_item(store, &saved)?;
-    Ok(FollowThroughLink {
+    let link = FollowThroughLink {
         key: intent.key.clone(),
         issue_id: intent.issue_id.clone(),
         identifier: saved.plan.identifier,
         url: item.url,
         due: item.due_date,
-    })
+    };
+    store
+        .sqlite
+        .link_follow_through(task, &link)
+        .map_err(task_error)?;
+    Ok(link)
 }
 
 #[cfg(test)]

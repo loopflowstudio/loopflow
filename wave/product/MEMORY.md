@@ -12,10 +12,9 @@ are independent. Linear completion preserves execution. Failed end requests
 retry without replaying the Flow; reopening supersedes old completion intent.
 
 Jack authorized stacking on LOO-406 `558a39232`: one local planning owner,
-optional placement and independent completion.
-Observed conflicts adopt Linear; the enabled unseen read/write-race regression
-still fails. Matching readback proves no concurrency guarantee. Integration
-proves no acceptance. LOO-385 overlaps without closure authority; full lifecycle
+optional placement and independent completion. Observed conflicts adopt Linear;
+the enabled unseen-write regression still fails. Matching readback and integration
+prove neither concurrency safety nor acceptance. LOO-385 overlaps without closure authority; full lifecycle
 proof on #1499 precedes Jack’s demo, and landing remains unauthorized.
 
 Task owns placement and one optional PR, retaining history and unresolved scope.
@@ -25,10 +24,11 @@ foreground export owns optional issue creation and relations after mapping, even
 after source completion. Lost replies retain identity. Links read current saved
 names/dates, including removal, without changing immutable filing input.
 
-Stable IDs do not close a reservation/creation crash gap: after rotation,
-creation rejects the pinned Project. Recovery and historical filing conversion
-remain unbuilt. Independent local reopening also lacks a CLI path; Workflow
-restart correctly retains completion. Repairs keep the common planning owner.
+Reservation and child commit together; older reservations recover in their
+pinned Project after rotation. Historical intents retain unknown remote creation
+in common export; absence cannot authorize another create. `task reopen`
+supersedes completion intent, preserving execution/PR. Docker: `7671f8e9f`;
+combined acceptance remains.
 
 Failed promotion retains confirmed copy; handoffs preserve child edits. Admission
 records performed location; Flow/Started commit atomically. Docker’s integrated

@@ -24,7 +24,6 @@ struct Linear {
     unavailable: bool,
     relations_unavailable: bool,
     lose_responses: bool,
-    completed: bool,
 }
 
 async fn respond(
@@ -40,17 +39,8 @@ async fn respond(
     let data = if query.contains("ListTeams") {
         json!({"teams": {"nodes": [{"id": "team-1", "name": "Fixture", "key": "FIX",
             "description": "<!-- loopflow-repository: loopflowstudio/fixture -->"}]}})
-    } else if query.contains("IssueTeam") {
-        json!({"issue": {"team": {"id": "team-1"}}})
-    } else if query.contains("CompletedWorkflowStates") {
-        json!({"workflowStates": {"nodes": [{"id": "completed"}]}})
-    } else if query.contains("SetIssueState") {
-        linear.completed = true;
-        json!({"issueUpdate": {"issue": {"id": "source-issue"}}})
     } else if query.contains("IssueComments") {
         json!({"issue": {"comments": {"nodes": [], "pageInfo": {"hasNextPage": false, "endCursor": null}}}})
-    } else if query.contains("CreateComment") {
-        json!({"commentCreate": {"comment": {"id": "completion-comment"}}})
     } else if query.contains("workflowStates") {
         json!({"workflowStates": {"nodes": [{"id": "todo", "position": 1.0}]}})
     } else if query.contains("FindExportIssue") {
@@ -100,11 +90,10 @@ async fn respond(
         } else {
             &linear.issues[id]
         };
-        let completed = source && linear.completed;
         json!({"issue": {"id": if source { "source-issue" } else { id }, "identifier": if source { "FIX-1" } else { "FIX-2" }, "url": "https://linear.app/fixture/issue/FIX-2",
             "title": issue["title"], "description": issue["description"], "dueDate": issue["dueDate"],
-            "updatedAt": if completed { "2026-10-08T00:00:00Z" } else { "2026-10-07T00:00:00Z" }, "completedAt": if completed { json!("2026-10-08T00:00:00Z") } else { Value::Null }, "branchName": null,
-            "prioritySortOrder": 1.0, "sortOrder": 1.0, "assignee": null, "state": {"type": if completed { "completed" } else { "unstarted" }},
+            "updatedAt": "2026-10-07T00:00:00Z", "completedAt": null, "branchName": null,
+            "prioritySortOrder": 1.0, "sortOrder": 1.0, "assignee": null, "state": {"type": "unstarted"},
             "team": {"id": issue["teamId"]}, "project": {"id": issue["projectId"],
                 "name": "Provider destination", "description": "", "content": "workflow: feature",
                 "status": {"type": "started"}, "updatedAt": "2026-10-07T00:00:00Z", "archivedAt": null,
@@ -743,10 +732,9 @@ fn historical_filing_converts_to_one_local_child_and_preserves_export_uncertaint
                     .unwrap()
                     .unwrap();
                 assert_eq!(child.project_id, task.project_id);
-                let link = runtime
-                    .block_on(super::confirm_intent(&store, repo.path(), &intent))
+                runtime
+                    .block_on(super::link_intent(&store, repo.path(), &task.id, &intent))
                     .unwrap();
-                store.sqlite.link_follow_through(&task.id, &link).unwrap();
                 assert!(store
                     .sqlite
                     .follow_up_sources()

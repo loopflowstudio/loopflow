@@ -1001,7 +1001,7 @@ async fn prepare_task_placement(
         Some(name) => parse_workspace_slug(name)?,
         None => parse_workspace_slug(&format!(
             "{}-{}",
-            derive_workspace_slug(&task.plan.title)?.as_str(),
+            title.as_str(),
             uuid.chars().take(12).collect::<String>(),
         ))?,
     };
@@ -2944,25 +2944,25 @@ fn task_execution_status(repo: &Path, issue: Option<&str>) -> OpsResult<Option<T
         Ok(Some(task))
     })
 }
+// Reuse local identity first; provider acquisition is only for an unknown selector.
+async fn acquire_task(store: &Store, repo: &Path, issue: &str) -> OpsResult<Task> {
+    if let Some(task) = store.get_task_by_issue(issue).await.map_err(task_error)? {
+        return Ok(task);
+    }
+    let resolved =
+        super::task_pm::resolve_task_async(repo, issue, super::pm::PmRefresh::Force).await?;
+    store
+        .get_task_by_issue(&resolved.item.id)
+        .await
+        .map_err(task_error)?
+        .ok_or_else(|| task_error("accepted planning did not retain the Task identity"))
+}
+
 /// Complete the Task without changing its Workflow or Processes.
 pub fn task_complete(repo: &Path, issue: &str, note: Option<&str>) -> OpsResult<Task> {
     block_on_task(async {
         let store = task_store().await?;
-        let mut task = match store.get_task_by_issue(issue).await.map_err(task_error)? {
-            Some(task) => task,
-            None => {
-                let resolved =
-                    super::task_pm::resolve_task_async(repo, issue, super::pm::PmRefresh::Force)
-                        .await?;
-                store
-                    .get_task_by_issue(&resolved.item.id)
-                    .await
-                    .map_err(task_error)?
-                    .ok_or_else(|| {
-                        task_error("accepted planning did not retain the Task identity")
-                    })?
-            }
-        };
+        let mut task = acquire_task(&store, repo, issue).await?;
         if let Some(request) = store
             .sqlite
             .request_task_completion(&task.id, note)

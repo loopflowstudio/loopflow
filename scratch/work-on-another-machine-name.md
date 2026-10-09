@@ -33,7 +33,7 @@ unconfirmed synchronization when disconnected.
 Execution stays local. Never replicate Workflow position, Sessions, Processes,
 claims, controls, checkout paths or PR execution state. Imported completion cannot
 move a local Workflow, settle execution, signal a process or claim an exit.
-The selected machine owns account and machine operations. Jack excluded shared
+Machine selection also routes account and machine operations. Jack excluded shared
 residents, terminal relays, automatic turn/Flow retries, hidden arguments, cross-version
 compatibility, and code, tests, help or config lifted from herdr/cmux.
 
@@ -57,14 +57,14 @@ winner selection: Linear wins observed planning conflicts. Without Linear, prefe
 the host where appropriate, otherwise last-write-wins with try-not-to-clobber and
 recoverable losing edits. Independent creations/comments accumulate and different
 fields survive. A delayed completion must not overwrite an observed newer reopening.
-The existing causal exchange module is an implementation starting point, not an
-accepted requirement to expose manual conflicts or to block on LOO-406 APIs.
-Simplify or replace it to implement the selected policy; retain original evidence.
+The implemented causal exchange selects winners and retains losing mutations;
+it is not a manual-conflict-only protocol. Projection conflicts describe records
+that cannot enter the local tables, independently of field winner selection.
 
-Extend the common SQLite writers here with the peer ordering, stable identities and
-atomic import/export checkpoint needed by Git synchronization. Export must not mint
-new mutation identities. Import and projection commit together; fetched Git history
-is not an import acknowledgement. Crashes before commit leave import retryable.
+The common SQLite writers now retain peer ordering, stable mutation identities and
+an atomic import checkpoint. Foreground Git synchronization remains unimplemented.
+Export reads existing identities rather than minting edits. Import and projection
+commit together; fetched Git history is not an import acknowledgement. Crashes before commit leave import retryable.
 Pending state distinguishes local save, Git publication and optional Linear delivery.
 
 `engine/planning_git.rs` requires an explicit user-keyed or shared ref under
@@ -113,14 +113,16 @@ The manual-conflict-only `PlanningField` model is replaced by immutable mutation
 and deterministic projection. No full-store callback or second planning store
 exists. Docs describe the unfinished public path rather than claiming adoption.
 
-Compression removes the second SSH CLI parse/argument scan, the duplicate Task
-preparation branch, and parallel mutation decoders. One decoder serves export and
-global change-ID comparison; validated field groups project without another schema
-list. Regression coverage retains literal `--task` prompt text and cross-repository
-ID conflicts. Review also found the source-commit rejection fixture pushing the
-retired root ref instead of the selected user ref; it now uses one selected-ref
-constant. Per-object savepoints replace whole-document rollback for expected
-projection conflicts; immediate foreign keys replace blanket deferred checks.
+Earlier reductions removed the duplicate SSH parse, Task preparation path and
+mutation decoder; exact rationale and ref-rejection repair are retained at
+`81fcf66e3:scratch/work-on-another-machine-name.md`. The importer now checks only
+new receipts against global mutation identities; the snapshot merge already checks
+retained local receipts. Explicit inserts replace silent conflict ignores. Projection
+borrows fields instead of cloning each object's values, and Wave validation is
+explicit rather than inferred from a field's presence. Per-object savepoints and
+immediate foreign keys retain conflict isolation. Conflict revision triggers now
+use the store's table-based naming contract and cover deletion as well as saves.
+The missing-code fixture no longer installs unrelated Linear/Wave configuration.
 Automatic exchange remains unfinished.
 
 ## Remaining integration — October 8
@@ -128,19 +130,32 @@ Automatic exchange remains unfinished.
 1. Bind an explicitly selected planning remote/ref locally, provision/recover one
    stable user key across machines, and implement safe shared joining. A code remote
    is never an implicit destination. Existing local plans must not be silently
-   exported or merged when joining.
+   exported or merged when joining. `export_peer_planning(repo)` currently selects
+   every planning object in that repository, not a selected destination. Separate Git
+   refs alone therefore do not implement safe joining. Binding must define the
+   selected records before publication and preserve unselected local work; a changed
+   remote alias must not silently redirect retained publication.
 2. Compose Git fetch, transactional import/export, retained publication and readback
    with foreground invocation lifetimes. Add selected-plan and pending/unconfirmed
-   presentation. The current library components do not exchange on ordinary commands.
+   presentation, authorship and assignees. No production command currently calls
+   `PlanningGit` or peer import/export. Acquisition must precede cold Task resolution;
+   a foreground observer must continue during a long-running command, without a
+   resident or automatic turn retry. A successful fetch, retained import checkpoint
+   and confirmed publication are separate outcomes.
 3. Resolve divergent legacy IDs through explicit provider associations without
    renumbering stored Work. Conflict isolation is implemented with new regressions
    for duplicate mappings, dependent comments, retained Sessions, selection and
    idempotent retry, but Rust execution remains unproved. Wire the conflict reader
    into foreground status; a durable import checkpoint is not completed projection.
-4. Complete optional Linear composition: peer imports must preserve/settle the common
-   pending receipts correctly, including unchanged observed baselines and late local
-   saves. Verify every provider-projection entry point supplies Linear provenance;
-   migration baselines are not fresh provider observations.
+4. Complete optional Linear composition. `project_fields` updates planning rows
+   directly; it neither creates nor reconciles `task_changes`, `project_changes` or
+   comment/disposition delivery receipts. Retaining those tables unchanged is not
+   enough: an older pending write must not later replace a peer winner, and imported
+   local edits need delivery through the common writer without echoing Linear.
+   Preserve attempted identities, uncertainty, unchanged baselines and late saves.
+   Only `project_accepted_planning` currently sets the Linear-origin context; cover
+   other provider projection paths and equal-value observations, which the peer
+   update triggers omit. Migration baselines are not fresh provider observations.
 5. Finish public cold-worker dispatch after automatic acquisition, local-born IDs,
    legacy aliases and populated execution preservation. The earlier callback path
    is gone; unknown remote planning currently produces a synchronization diagnostic.
@@ -169,8 +184,11 @@ and the remaining integration above are required before review-only publication.
 
 Use CLIs built from this worktree, isolated stores, synthetic plans and disposable
 remotes. Installed-release behavior remains separate. Release's child memory
-records a recovery path missed by lower-level fixtures; the same lesson requires
-public command coverage here, not only exchange and transport tests.
+records a recovery path missed by lower-level fixtures and a successful failure
+report mistaken for operation success. The same lessons require public command
+coverage here, and status that distinguishes retained conflicts from convergence.
+Its GOAL.md and full MEMORY.md were reviewed on October 8; no other immediate
+Infrastructure child memory exists in this checkout.
 
 1. Create/edit/comment/read from either machine through public commands. Replicate
    the same ID without placement from creation. Repeated deliveries create no
@@ -185,6 +203,8 @@ public command coverage here, not only exchange and transport tests.
    Apply the selected deterministic policy and retain losing edits; delayed
    completion cannot undo observed reopening. Cover
    equal-value concurrent writes, conflicting ID reuse, omission and deletion.
+   Joining with unrelated existing plans must neither export nor merge them;
+   changing a remote alias must not publish to a newly pointed destination.
 5. Public `--machine` launches by issue/local selector and label/ID on a blank
    worker see pushed code and reuse placement. Cover local-born identity,
    divergent legacy IDs, unpushed source, missing branch and behind/dirty target.
@@ -194,4 +214,4 @@ public command coverage here, not only exchange and transport tests.
 7. Replace PR copy and create a walkthrough of final behavior and evidence;
    publish #1491 for Jack Heart's review and stop without landing.
 
-Check (October 8): `cargo fmt --all` and `git diff --check` pass; populated released-schema/parent/peer SQL replay and savepoint preservation pass, not Rust importer execution. `cargo test -p loopflow --lib store::sqlite::planning_peers::tests -- --test-threads=1` expired during compilation at 180 s (build script sampled at `_dyld_start`); `cargo clippy --all-targets -- -D warnings` expired at 60 s. Gate/CI own Rust checks and public acceptance. Earlier compression and post-sync migration checks also expired during compilation at 150 s; prior details: `318881140:scratch/work-on-another-machine-name.md` and `b6acfb9ee`.
+Check (October 8 realign): `git diff --check` and `lf context --skill realign --json` pass; prose-only reconciliation, no Rust rerun. Retained implementation evidence: `cargo fmt --all` and `git diff --check` pass; `uv run python` in-memory canonical/parent/peer SQL replay passes populated preservation and conflict revision insert/update/delete effects. `cargo test -p loopflow --lib store::sqlite::planning_peers::tests -- --test-threads=1` and `cargo clippy --all-targets -- -D warnings` each timed out during compilation at 180 s; both build scripts sampled at `_dyld_start`. Rust importer execution, `store_revisions_cover_every_table` and the reduced `task_remote_tests` fixture remain for gate/CI, alongside public acceptance. Earlier checks: `81fcf66e3:scratch/work-on-another-machine-name.md`.

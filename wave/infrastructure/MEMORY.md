@@ -635,17 +635,16 @@ Workflow position or controls. Imported completion grants no execution authority
 Jack authorized review-only publication and stacking on `e68f2a423`/`84664e661`,
 not public-remote planning export or landing. Plan ownership above governs sharing.
 
-Source replaces copied planning and issue-derived IDs with transactional mutations
-and destination-specific refs. Causality precedes Linear preference, then clock/ID;
-losers survive. Rust and installed behavior remain unverified. Ref-rejection fixtures
-must target the selected ref, not its retired root. Destination binding, safe joining,
-foreground exchange/presentation and legacy-ID association remain unfinished.
-Projection conflicts retain rejected records while independent objects commit;
-checkpoints acknowledge retention, not full projection. Compression separates receipt
-retention from projection and repairs conflict revision-trigger coverage. SQL replay
-is not Rust or public-entry proof; composed Linear/execution preservation remains
-required. Design: `scratch/work-on-another-machine-name.md`; prior evidence:
-`81fcf66e3`, this heading.
+Source removes copied planning/issue-derived IDs. Causality precedes Linear,
+then clock/ID; losers survive. Projection conflicts retain records without blocking
+independent objects; checkpoints acknowledge retention, not convergence. Release's
+entry-point lesson applies: fetch, import and publication need distinct outcomes.
+Destination-scoped Git refs cannot make repository-wide SQLite export safe to join.
+Peer projection does not reconcile Linear delivery receipts. Destination binding, joining, foreground exchange/status, legacy association
+and composed Linear/execution preservation remain unfinished. SQL replay proves
+neither Rust importer nor public/installed behavior. Ref-rejection fixtures must
+use the selected ref. Design: `scratch/work-on-another-machine-name.md`; compression
+and revision-trigger evidence: `9ae9c6a22`, this heading.
 
 ## Synced planning integration (LOO-334)
 

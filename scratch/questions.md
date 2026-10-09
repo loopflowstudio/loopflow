@@ -5,9 +5,9 @@ Jack Heart's custom-ref steers supersede host callbacks. The
 deletion cut and remaining acceptance. Earlier callback assumptions are retained
 at `b040c7c8d:scratch/questions.md`.
 
-- LOO-406's common writer is now integrated from published `e68f2a423`.
-  LOO-412 must add peer import/export and ordering here; those are not prerequisites
-  for the parent. Do not wait for its remaining Linear delivery work.
+- LOO-406's common writer is integrated from published `e68f2a423`. Peer
+  import/export and ordering exist in source; foreground composition remains
+  LOO-412's work, independent of the parent's unfinished Linear delivery.
 - Follow Jack Heart's newer policy: Linear wins observed conflicts; otherwise host
   preference where appropriate, then last-write-wins with retained losing edits.
   Use user-keyed destination selection by default, explicit opt-in shared planning.

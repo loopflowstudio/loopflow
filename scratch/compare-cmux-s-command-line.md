@@ -296,12 +296,10 @@ nor a local SQLite transaction supplies a cross-Machine reservation.
 Delegation inheritance remains proposed, not accepted from source code alone.
 
 **Repository association is not provider-Work association.** `d4fbca0ae` and
-`a73198197` address the previous iteration's divergent-root request: existing roots
-select one repository ID, retain old locators and resolve Task prefixes within that
-repository. They do not associate two Task/Project IDs for the same Linear object.
-The provider fixture preserves one mapping and attempted edit, not divergent-Work
-recovery. LOO-412’s explicit correspondence/full-ID lookup is composed; joint projection
-and recovery remain unfinished.
+`a73198197` retain root locators and repository-scoped lookup. `66dd3c44f` separately
+composes explicit Task/Project correspondence; `2afcfba1a` keeps physical lookup,
+mapping validation and record reads in one snapshot. Later lookups recheck changes.
+Neither boundary supplies joint projection, recovery or first-start authority.
 
 **Remaining identity/routing composition (October 9).**
 `PlanningKind::fields()` carries neither RepositoryId nor authored delegation.
@@ -375,29 +373,27 @@ Wave-owned planning and repository-keyed windows; do not add another poller or i
 repository identity from a destination. Per-Work sharing/authorship/assignee and
 losing-edit recovery presentation remain, distinct from implemented destination status.
 
-Earlier provider-claim/creation composition: `75fff9cb0`, this heading;
-unmapping counterexamples: `28fc5274a:scratch/findings.md`, **Shared planning
-composition**. Never turn legacy Work into duplicate creation candidates or trigger
-main's legitimate native-history resume through import.
+**Composed October 9 through `de3c84b08` (`66dd3c44f`):** receipts create no
+Task-creation requests. Correspondence/full-ID lookup preserves physical IDs,
+private selection, captured effects and execution; foreign-repository edits refuse.
+Store/CLI and migration checks cover these boundaries, not Git acquisition or
+configured providers. TaskSource stays deleted. Earlier evidence and unmapping
+counterexamples: `18d02a610`, this heading and `scratch/findings.md`.
 
-**Composed October 9 through `de3c84b08` (`66dd3c44f`):** common receipts no
-longer manufacture local Task-creation requests. `planning associate` records exact
-provider correspondence; full-ID lookup rechecks repository and mapping. Physical
-IDs, private selection, captured effects and local execution stay intact. Shared
-entry dispatch consumes the same scoped lookup; a foreign-repository edit refuses
-before mutation. TaskSource remains deleted. Dependency scratch stays in its history.
+**Committed dependency ahead, inspected October 9; not composed:** LOO-412 through
+`3c67b29b1` adds ordinary-import retention of associated creation origins and
+exact-origin readback (`39dba32c1`), plus exact-Linear-fact cross-origin predecessors
+(`8f3472eda`). Lookup also rejects contradictory incoming mappings. Local composition
+must preserve `2afcfba1a`'s read snapshot and the TaskSource exclusion. Dependency
+fmt/Clippy and SQL checks are reported passing; new fixture execution is deferred,
+not inherited as a pass. The causal fixture includes private-dependency export holds.
 
-Focused Store/CLI fixtures cover correspondence, repeated/reordered receipts,
-original creation inputs, no synthesized execution and the populated migration.
-The CLI fixture seeds import through Store APIs; it is not Git acquisition or
-configured-provider proof. Joint projection/effects remain visibly held.
-
-LOO-412's remaining recovery must resolve cross-origin causal parents/capture,
-project Task membership, comments and order through local planning owners, and
-settle each exact creation origin without changing captured inputs or enrolling
-private Work. Grouping winners alone cannot make a later local save acknowledge
-an observed peer Linear head. Mixed exchange and shared first-start refusals stay;
-lookup is not permission to activate either. Combined peer/Desktop proof remains.
+After that composition, joint winners, peer-authored causality, Task membership,
+comments/order and non-creation receipts still need the common planning owners.
+Equal text or correspondence alone cannot acknowledge a peer head. Preserve exact
+captured inputs, private selection and recoverable losers. Mixed-provider and
+shared first-start refusals remain; dependency integration cannot lift them.
+Combined Git/Linear/Desktop proof and the complete remote/native path remain.
 
 **Required mixed-operation proofs:** local `task run` writes its own Workflow and
 runs locally while Task comments/follow-ups/completion synchronize to a second
@@ -543,4 +539,4 @@ identity/delegation, open them, add shell/Files panes, retain an unfinished draf
 change focus, target a harmless command, read output, hide/restore, and verify the
 original input target and draft survive. Demo owns native usability; preserve comparison evidence and use no real accounts or live user terminals.
 
-Check: `cargo test -p loopflow --lib --no-run`, network-isolated lib filters `correspondence_lookup_*`, `explicit_correspondence_*`, `routing_resolves_task_prefixes_*` PASS (3); `cargo fmt --all --check`, `cargo clippy --all-targets -- -D warnings` PASS; prior receipt/CLI/migration checks: `b0cda0896`; full suites: gate; native usability: demo.
+Check: `git diff --check` PASS; prose-only reconciliation; prior focused Rust/fmt/Clippy and receipt/CLI/migration results: `18d02a610`, this heading; full suites: gate; native usability: demo.

@@ -93,20 +93,23 @@ ages/baselines and causal frontiers. Import reuses portable fields.
 Entity revisions cannot order relationships; scalar/list replay cannot clear
 freshness or unseen notices. Prior evidence: `7d12ab10a`, this heading.
 
-October 9: `d4fbca0ae` associates established roots; `a73198197` scopes Task
-lookup through retained repository locators. Binding retains existing Work, mappings, effects and execution, publishing nothing.
-Journals exclude RepositoryId/delegation; imports allocate identity. Desktop reads locators atomically, retaining native owners and renewing targets. Scene equality cannot fence observations: A→B→A is still a newer
-binding. Per-path request IDs also miss concurrent filesystem locators; opening
-and restoration must share the observation fence. Headless fixtures retain
-drafts/views and reject stale reads, not native usability.
+October 9: `d4fbca0ae`/`a73198197` bind roots, retaining locators, Work and execution,
+publishing nothing. Journals exclude RepositoryId/delegation; imports allocate identity.
+Desktop reads locators atomically, retaining native owners. Scene equality misses
+A→B→A; per-path fences miss concurrent locators. Opening/restoration share one
+observation fence; headless fixtures prove no native usability.
 
-**Unmapping is not association:** it can make legacy Work eligible for duplicate
-creation. `66dd3c44f` composes LOO-412 through `de3c84b08`: provider correspondence/
-full-ID lookup retains physical IDs, private selection, effects and execution.
-Receipt import creates no local Task-creation requests. Store/CLI and migration checks pass; foreign-repo edits refuse.
-Store-seeded lookup proves no Git acquisition. Joint causal/relationship projection and exact-
-origin settlement remain held. Mixed exchange stays disabled; TaskSource stays
-deleted. Remote/native and exclusive-start proof remain.
+**Unmapping is not association:** it can enable duplicate creation. `66dd3c44f`
+composes LOO-412 through `de3c84b08`: correspondence/full-ID lookup preserves
+physical IDs, private selection, effects and execution; import creates no requests.
+Store/CLI/migration checks pass, not Git acquisition.
+`2afcfba1a`: lookup, mapping and record reads share one snapshot;
+subsequent calls recheck. Observation reserves nothing.
+
+Uncomposed `3c67b29b1`: creation-origin import and exact-Linear-fact causal links;
+fixtures unexecuted. Equal text is not causality; links retain per-origin heads and
+private dependencies. Joint projection remains unfinished; mixed exchange/first-start
+refusals and TaskSource exclusion stay.
 
 #1512 (`3e1e6245c`): live connect hands off; dead-driver resume starts an engine
 on native history. Local resume is not import-triggered launch; native proof remains.

@@ -163,7 +163,7 @@ commit/release failure into a projection hold. Mutation identity precedes comple
 record validation, and creation readback reconciles old and new delivery receipts.
 
 October 9 realignment distinguished repository-root association from divergent
-Task/Project provider correspondence; the latter remains unresolved. Its window
+Task/Project correspondence, now composed below with projection still held. Its window
 counterexample is now repaired on opening/restoration through common locator
 readings and existing scene/router owners. Identity changes renew targeting tokens,
 not receiver or delivery lifetimes. Headless fixtures retain document selection,
@@ -176,10 +176,7 @@ were stale constructor/scalar assumptions and were repaired.
 its resolver conflict kept TaskSource deleted. Merge detail: `28fc5274a`, this
 heading. Mixed-provider and first-start refusals remain.
 
-Prior cross-Wave/dependency inspection and pre-edit evidence:
-`b83d3e2a9:scratch/findings.md`, this heading. Product still has no child memories.
-Delegation exchange, exclusive admission and remote/native composition remain;
-Jack Heart's inheritance choice is unresolved and cursor insertion is settled.
+Prior cross-Wave inspection: `b83d3e2a9`, this heading.
 
 `f898be5a8` repairs cross-locator opening rollback after `28fc5274a` repaired
 restoration. Opening/restoration share an observation fence and retained-locator
@@ -200,10 +197,16 @@ CLI-reference attempts and integration review: `75fff9cb0`, this heading.
 No installed runtime or production plan changed. Generated Work-seed overflow
 remains; no limit was raised.
 
-Correspondence lookup mixed physical absence, mapping and record content across
+`2afcfba1a`: correspondence lookup mixed physical absence, mapping and record content across
 observations. The real-WAL fixture fails on `75fff9cb0` (lookup returns null), then
 passes with one read snapshot for Tasks/Projects. The next lookup sees the changed
 mapping. Imports are Store-seeded, not Git acquisition. The initial unqualified
 `--exact` filter ran zero tests; the qualified filter ran the regression.
-Resource recovery left 30.3 GiB below its 32 GiB reserve; uv-cache pruning was
-locked. No other checkout was cleaned.
+Resource-recovery limits: `18d02a610`, this heading.
+
+October 9 dependency inspection found LOO-412 ahead through `3c67b29b1`:
+ordinary-import creation-origin retention, contradictory incoming-mapping refusal,
+and exact-Linear-fact causal links. These are not in this checkout. Its new fixture
+execution remains deferred; static checks do not prove joint recovery. The plan
+separates this composition from still-unbuilt winners/relationships and remote start.
+Filesystem inspection found no Product child directories or child memories.

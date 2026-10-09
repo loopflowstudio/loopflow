@@ -107,7 +107,7 @@ These are reversible lookup choices, not shared Work identity or publication.
 Primary and stack-parent Task selectors now carry repository-scoped full IDs through
 dispatch; an unscoped ambiguous prefix still fails.
 
-October 9 context query: generated Work seed 31,633/16,000 tokens (15,633 over),
+Pre-edit October 9 query: generated Work seed 31,630/16,000 tokens (15,630 over),
 including the Task-workspace inventory. Complete launch source inspected. Authored
 notes cannot shrink this separate producer gap; no limit was raised.
 
@@ -119,8 +119,8 @@ locators in the same `repository_plans` table; Work, provider mappings, uncertai
 effects, journals and execution stay unchanged. It selects/publishes no destination.
 An ID already locating another local checkout is not reassigned. This associates
 two Machines' established roots, not two same-Machine stores or duplicate Work.
-Divergent Task/Project IDs for one provider object remain LOO-412's separate
-association problem; repository binding grants no correspondence or effect rekeying.
+Divergent Task/Project IDs now have separate explicit correspondence/full-ID lookup;
+joint projection remains unfinished. Repository binding grants no correspondence or effect rekeying.
 Desktop reassociation on open/restore is local; delegation exchange and peer
 first-start admission remain. Neither binding nor a retained alias authorizes start; Git-selected Tasks
 without retained checkouts still refuse. Inheritance remains unresolved.

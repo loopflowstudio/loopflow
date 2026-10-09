@@ -6705,6 +6705,26 @@ mod tests {
             .unwrap();
         super::super::project_content::seed_peer_content(&conn).unwrap();
         super::super::planning::seed_peer_evidence(&conn).unwrap();
+        // The released values seed accepted observations, not another mutation.
+        // A first edit after upgrade follows that exact retained source identity.
+        let seeded: String = conn.query_row(
+            "SELECT c.id FROM planning_peer_observed o JOIN planning_peer_changes c ON c.id=o.id
+             WHERE o.object_id='task' AND c.field='issue_title' AND c.value='\"Retain identity\"'",
+            [], |row| row.get(0),
+        ).unwrap();
+        conn.execute(
+            "UPDATE tasks SET issue_title='First edit after upgrade' WHERE id='task'",
+            [],
+        )
+        .unwrap();
+        let parents: String = conn.query_row(
+            "SELECT c.parents FROM planning_peer_observed o JOIN planning_peer_changes c ON c.id=o.id
+             WHERE o.object_id='task' AND c.field='issue_title'", [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(
+            serde_json::from_str::<Vec<String>>(&parents).unwrap(),
+            vec![seeded]
+        );
         for (kind, field) in [
             (
                 crate::engine::planning_exchange::PlanningKind::Task,

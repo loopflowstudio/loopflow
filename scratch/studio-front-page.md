@@ -378,3 +378,8 @@ splits and the Session picker are off the page. Wording draws on Jack Heart's
 earlier sentences for `/cli` and the old homepage claims.
 Jack Heart added "& outcomes". The list now opens with "Every Task ends
 shipped", and the Wave item names its goal and key results.
+
+Jack Heart: "maybe worth studying superlogical, herdr, cmux, devin, replit,
+cursor here", then "as well as linear, workday". A study of how those eight
+pages handle the text after the hero is running; it is for structure and
+emphasis only, and no wording is taken from them.

@@ -135,6 +135,14 @@ this heading. Keep these replacements deleted:
 - `81df09092` deletes the connected-provider refusal, blanket association hold
   and selector flag together. Selected Git/HTTPS round-trip and private-origin
   proofs pass; creation/link-origin and combined lifetime acceptance remain.
+- Duplicate resolved-owner grouping of scalar winners and accepted sources is
+  removed. `changes_by_object` groups the joint frontier once, then ranks fields
+  within each owner; creation, order, deletion and provider evidence keep their
+  separate protocols. Preservation cases moved to
+  `planning_peers/tests.rs`. The focused run exposed two stale #1499 assumptions:
+  PR fixtures now mirror complete Task-owned placement, shared by preservation
+  setup. Reopening asserts changed planning state and unchanged populated
+  execution, rather than freezing the planning-derived Task state.
 - Repeated JSON receipt decoding/creation validation inside dependency retries is
   removed. `ObjectChanges` prepares typed creation, deletion and order histories;
   the common receipt writers still own merges and conflicts. Snapshot validation
@@ -220,15 +228,11 @@ receipt composition boundaries are unchanged.
 
 ## Remaining integration — October 9
 
-Receipt origins and full-ID correspondence exist. Ordinary import now projects
-associated creation receipts onto their local owner without releasing private holds
-(`39dba32c1`).
-**Scalar and receipt composition have focused storage proof, including
-state/comment/Wave readback (`8a6f8f807`).** Per-Work recovery presentation now
-reads the retained journal through common status; item 3 still owns public
-Git/HTTPS composition before review-only publication. Private or failed groups never advance
-observations. The preceding state/comment/Wave direction is implemented, not a
-second implementation step.
+Scalar, receipt and state/comment/Wave composition have focused storage proof
+(`8a6f8f807`); recovery reads the same journal. Item 3 owns the remaining public
+Git/HTTPS composition. Earlier cut details:
+`b888518a5:scratch/work-on-another-machine-name.md`, **Remaining integration**.
+Private or failed groups never advance observations.
 
 Deletion composition and its counterexamples remain at
 `506efbbfe:scratch/work-on-another-machine-name.md`, **Remaining integration**.
@@ -690,7 +694,9 @@ Earlier scalar Git/HTTPS, state/comment/Wave, compression and 77-test evidence:
 `610b13869:scratch/work-on-another-machine-name.md`, **Acceptance for review**.
 Those results predate #1499 integration and prove no combined native launch path.
 
-Check: fmt, all-target Clippy, lib/remote test builds and diff check pass; `uv run python scripts/test_network.py <lib-test> peer_due_date_readback peer_creation_prepares_unprepared peer_migration_preserves historical_filing_converts follow_up_export_recovers --test-threads=1` passes (5), as does `<remote-test> machine_selector_names_unpushed_source_work_before_connecting_and_keeps_legacy_identity --exact` (1). Gate owns materialized/public composition and lifetimes; review owns recovery UX.
+Earlier optional-PR/due-date checks:
+`b888518a5:scratch/work-on-another-machine-name.md`, **Acceptance for review**.
+Check: fmt, all-target Clippy and lib build pass; `TMPDIR=/private/tmp uv run --no-sync python scripts/test_network.py <lib-test> planning_peers::tests:: --test-threads=1` passes 78 after repair. Gate owns materialized/public composition and lifetimes; review owns recovery UX.
 
 SQL/macOS and unresolved Flow-exit evidence: `eeb98aa89`, this file's
 **Acceptance for review**. No provider death, replacement authority or installed

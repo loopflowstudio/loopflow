@@ -133,18 +133,15 @@ earlier adoption and pre-cut storage evidence, with their limitations, remain at
 - Recovery-presentation choice and proof are consolidated in the design's
   implemented boundaries; full rationale: `f55d6c5b7:scratch/questions.md`, final
   entry. No restoration writer, author inference or implicit enrollment.
-- October 9 public Git/HTTPS composition exposed duplicate field delivery after
-  a lost reply: an unattempted equal-desired receipt survived provider readback.
-  The common writer now adopts a changed Linear baseline without acknowledging
-  an unattempted effect; unchanged baselines still preserve saves. This replaces
-  the old membership-test assertion, not Jack Heart's Linear-wins policy. Public
-  creation/link origins and broader combined acceptance remain distinct.
-
-- October 9 #1499 integration keeps Task due dates in the existing peer journal,
-  not follow-through events or completion requests. Retained creation inputs may
-  omit optional null fields; their model is normalized during the peer migration,
-  without changing attempted provider payloads. No new policy or old-peer support.
+- October 9 Git/HTTPS and #1499 integration choices are consolidated in the
+  design's **Public composition repair** and **Committed integration boundary**.
+  Changed baselines retire unattempted intentions without acknowledgement;
+  unchanged baselines preserve saves. Due dates use the peer journal; completion
+  requests stay local. Captured optional null inputs retain their exact bytes.
+  Earlier detail: `b888518a5:scratch/questions.md`, final two October 9 entries.
 - Context budgeting: authored memory/scratch fit. The generated launch inventory
-  remains about 28,300 tokens against 16,000; it is not an authored goal to rewrite.
-  Its full source is the supplied `.lf/tmp/context/963daa180f3520df9ed19b6ff63d421815358119d388d25c36c982c21b3ce19a.md`;
-  omitted content is the PR file inventory, not additional Task direction.
+  exceeds its 16,000-token goal limit by roughly 12,400 tokens; it is not an
+  authored goal to trim or authorization to rewrite stored steers. The complete
+  source inspected this pass is
+  `.lf/tmp/context/8f3b1e92b0a70ea4f16c257edc29a017b62f0a631587a4a29eeda8120cbea434.md`;
+  omitted content is the 236-path PR inventory, not additional Task direction.

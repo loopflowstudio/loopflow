@@ -625,29 +625,28 @@ Jack Heart selected custom-ref sync: LOO-412 owns transport/machines, LOO-406
 storage/Linear. Plan ownership above governs sharing and execution exclusion.
 Review-only publication; no landing or public-remote planning export.
 
-Causal ordering retains losers. Scalar receipts lack provider frontiers: older
-reads/equal-value observations remain unsafe, separately from the parent's unseen
-provider-write race. Grouped receipts and legacy association remain.
+Causal ordering retains losers. Scalar receipts lack provider frontiers;
+older/equal-value reads remain unsafe, distinct from the parent's unseen-write race.
+Grouped receipts and legacy association remain.
 
-Setup retains keys/empty bindings; future roots use selection, children inherit it.
-Joining publishes nothing. `6c0f2256f` connects Task-bound agents/work-watch,
-dispatch publication and cold acquisition; `4e3cb2160` isolates destinations.
-Target-only dispatch needs no source repository. Linear exchange reports its
-provenance gap without activation, not a product limit.
+Joining publishes nothing. `6c0f2256f` connects dispatch/cold acquisition;
+`e62431d0d` adds taskless/reconnect lifetimes and standalone post-save exchange.
+`4e3cb2160` isolates destinations. Target-only dispatch needs no source repository.
+Linear exchange reports its provenance gap without activation, not a product limit.
 
-Fetch/import/publication stay separate; confirmation excludes later saves.
-Readback resolves uncertainty; workers retain effect locks through cancellation.
-Acquisition/saves stay independent. A damaged journal breaks status, not exchange.
-Taskless providers sync; saves attempt exchange after commit.
-Status/publication share the held-history filter. Fixtures require
-preserved execution, reconnect and deduplication; Rust times out before
-tests. SQL proof is separate. Desktop status remains.
+Fetch/import/publication stay separate; readback settles only the attempted save.
+Workers retain effect locks through cancellation; acquisition/saves stay independent.
+`59830f149` shares winners/export filtering. Damaged journals break status, not exchange.
+CLI shows conflicts; Desktop remains. Two-store/taskless fixtures are authored;
+Rust times out before tests. Forced `-i`/null stdin proves no native PTY/reconnect.
+SQL proves no Rust behavior. Release's public-entry lesson applies; native and
+installed acceptance remain unproved.
 
-Move counterexample: `a43f3e2ea`; repairs: `b5dafd918`/`7395cf3bb`. Holds retain
-moves, private journals and dependents. Only explicit selection releases history.
-Exchange excludes held history, including retained Git documents. Independent
-exchange/selection proceeds; omission preserves peer values, not convergence.
-Recovery UX needs review. Design: `scratch/work-on-another-machine-name.md`; prior limits: `4d31254c3`.
+Move counterexample: `a43f3e2ea`; repairs: `b5dafd918`/`7395cf3bb`.
+Holds exclude moves/private history/dependents, including retained Git documents,
+until explicit selection. Independent exchange proceeds; omission is not convergence.
+Recovery UX needs review.
+Design: `scratch/work-on-another-machine-name.md`; prior limits: `4d31254c3`.
 
 ## Synced planning integration (LOO-334)
 

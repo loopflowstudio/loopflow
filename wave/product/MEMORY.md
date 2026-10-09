@@ -1,6 +1,6 @@
 # product wave memory
 
-Formerly `concerto`. Product owns API/CLI, Mac, iOS, agent and worker surfaces.
+Formerly `concerto`.
 
 ## Current direction after the October 7 Tasks
 
@@ -101,23 +101,25 @@ A→B→A and concurrent locators defeat scene/per-path fences. No native proof.
 **Unmapping is not association:** it can enable duplicate creation. `66dd3c44f`
 composes LOO-412 through `de3c84b08`: correspondence/full-ID lookup preserves
 physical IDs, private selection, effects and execution; import creates no requests.
-Store/CLI/migration checks pass, not Git acquisition.
-`2afcfba1a`: lookup, mapping and record reads share one snapshot;
-subsequent calls recheck. Observation reserves nothing.
+Store/CLI/migration checks pass.
+`2afcfba1a`: lookup/mapping/records share one snapshot, never a reservation.
 
-`3c67b29b1`: retained origins and private dependencies.
 **Retention is not observation:** `44d73dbcd`/`d62003e0f` separate accepted
-frontiers from rejected heads (counterexample: `29fa9a90e`). October 9 (`96f714bd6`): associated origins share one selected
-projection; later saves follow accepted peer heads. Common writers resolve relationships; journals and receipt inputs stay original. Private
-counterparts hold both origins. Store fixtures are not Git acquisition. Mixed
-exchange, delegation, exclusive first start and remote/native proof remain.
+frontiers from rejected heads (counterexample: `29fa9a90e`). October 9's
+`7165f9a62`/`dffdbaaa5` jointly project associated origins, preserving original
+journals/receipts and private holds. Foreign-bridge regression: direct parents left
+an old Linear fact winning over a local continuation. Transitive projection now
+retires that ancestor before ranking, retaining stricter mapping validation and
+per-origin portable/creation heads. Causality grants no identity/selection.
+Git fixture composition excludes configured Linear. Mixed exchange, delegation,
+admission and remote/native proof remain.
 
 #1512 (`3e1e6245c`): live connect hands off; dead-driver resume starts an engine
 on native history. Local resume is not import-triggered launch; native proof remains.
 
 October 9 (`e3ca861b1`): observe visibility before Session readings; callbacks
 masked closure. Expose pre-registration failures; Task links await mounted pages.
-Request IDs fence registration, not later arrivals. No native/compositor proof.
+Request IDs fence registration, not later arrivals. No native proof.
 
 October 9 planning reads use read-only storage and skip Process admission;
 missing-registry/checkpointed-WAL tests exposed fallback writes. Resolve chapters

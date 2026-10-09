@@ -2,10 +2,16 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+use loopflow::engine::planning_exchange::{PlanningKind, PlanningObject, PlanningSnapshot};
 use loopflow::engine::planning_git::{
     PlanningDestination, PlanningGit, PlanningGitError, PlanningPublication,
 };
+use loopflow::id::WaveId;
+use loopflow::store::{open_ephemeral_store, sqlite::SqliteStore, PmSnapshotRow, StorageConfig};
+use loopflow::work::wave::Wave;
 use loopflow_test_support::TestRepo;
+use rusqlite::{params, Connection};
+use serde_json::json;
 
 fn git(repo: &Path, args: &[&str]) -> String {
     let output = Command::new("git")
@@ -301,4 +307,253 @@ fn divergent_fetch_and_push_endpoints_cannot_be_bound() {
         ],
     );
     assert!(PlanningDestination::resolve(repo.path(), "origin", PLANNING_REF).is_err());
+}
+
+// Provider records here are fixture data, not a configured Linear connection.
+// Exercise the real Git bytes and common writer without enabling mixed sync.
+#[test]
+fn associated_origins_converge_through_git_without_sharing_execution_or_private_work() {
+    let left_repo = TestRepo::new();
+    left_repo.push();
+    let right_repo = tempfile::tempdir().unwrap();
+    git(
+        right_repo.path(),
+        &["clone", left_repo.bare_path().to_str().unwrap(), "."],
+    );
+    let left_home = tempfile::tempdir().unwrap();
+    let right_home = tempfile::tempdir().unwrap();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    for home in [&left_home, &right_home] {
+        runtime
+            .block_on(open_ephemeral_store(&StorageConfig::sqlite(
+                home.path().join("store.db"),
+            )))
+            .unwrap();
+    }
+    let left = SqliteStore::new(&left_home.path().join("store.db")).unwrap();
+    let right = SqliteStore::new(&right_home.path().join("store.db")).unwrap();
+    let binding = PlanningDestination::resolve(
+        left_repo.path(),
+        "origin",
+        "refs/loopflow/planning/shared/associated-fixture",
+    )
+    .unwrap();
+    let destination = binding.id();
+    let wave = WaveId::new();
+    let mut snapshot: loopflow::pm::PmSnapshot = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/task_history_planning.json"
+    ))
+    .unwrap();
+    snapshot.items.truncate(1);
+    snapshot.items[0].revision = Some("2026-10-08T10:00:00Z".into());
+    let row = PmSnapshotRow {
+        wave_id: wave.clone(),
+        provider: "linear".into(),
+        initiative: "initiative".into(),
+        synced_at: 42,
+        snapshot,
+    };
+    let private = WaveId::new();
+    for (store, repo) in [(&left, left_repo.path()), (&right, right_repo.path())] {
+        let scope = repo.to_str().unwrap();
+        store.bind_peer_planning(scope, &binding).unwrap();
+        store
+            .create_wave(&Wave::new(wave.clone(), "Shared".into(), scope.into()))
+            .unwrap();
+        store.put_pm_snapshot(&row).unwrap();
+        store
+            .select_peer_waves(scope, &destination, std::slice::from_ref(&wave))
+            .unwrap();
+        store
+            .create_wave(&Wave::new(private.clone(), "Private".into(), scope.into()))
+            .unwrap();
+    }
+    let a = left
+        .task_by_issue(&row.snapshot.items[0].id)
+        .unwrap()
+        .unwrap();
+    let b = right
+        .task_by_issue(&row.snapshot.items[0].id)
+        .unwrap()
+        .unwrap();
+    assert_ne!(a.id, b.id);
+    assert_ne!(a.project_id, b.project_id);
+    let conn = Connection::open(right_home.path().join("store.db")).unwrap();
+    conn.execute("INSERT INTO processes(lfid,trace_id,started_at) VALUES('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000002',1)", []).unwrap();
+    conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id)
+        VALUES('retained','Retained','human',1,0,'/fixture/retained',?1,?2)",
+        params![b.id.as_str(), wave.as_str()]).unwrap();
+    let graph = json!({"name":"review","nodes":[{"name":"review","skill":"review","description":null}],"edges":[]});
+    conn.execute(
+        "INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,?2,'review',1)",
+        params![b.id.as_str(), graph.to_string()],
+    )
+    .unwrap();
+    let execution = || {
+        [
+            "processes",
+            "agent_sessions",
+            "task_workflows",
+            "task_workflow_moves",
+            "work_placements",
+            "task_prs",
+        ]
+        .map(|table| {
+            let mut query = conn
+                .prepare(&format!("SELECT * FROM {table} ORDER BY rowid"))
+                .unwrap();
+            let columns = query.column_count();
+            query
+                .query_map([], |r| {
+                    (0..columns)
+                        .map(|i| r.get::<_, rusqlite::types::Value>(i))
+                        .collect::<Result<Vec<_>, _>>()
+                })
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        })
+    };
+    let before = execution();
+    let laptop = PlanningGit::new(left_repo.path(), &binding).unwrap();
+    let worker = PlanningGit::new(right_repo.path(), &binding).unwrap();
+    let publish = |store: &SqliteStore, repo: &Path, transport: &PlanningGit| {
+        let snapshot = store
+            .export_peer_planning(repo.to_str().unwrap(), &destination)
+            .unwrap();
+        let local = transport.local().unwrap();
+        let remote = transport.fetch().unwrap();
+        let document = transport
+            .save(
+                &snapshot.to_bytes().unwrap(),
+                local.as_ref().map(|d| &d.revision),
+                remote.as_ref().map(|d| &d.revision),
+            )
+            .unwrap();
+        assert_eq!(
+            transport.publish(&document.revision).unwrap(),
+            PlanningPublication::Confirmed
+        );
+    };
+    let receive = |store: &SqliteStore, repo: &Path, transport: &PlanningGit| {
+        let document = transport.fetch().unwrap().unwrap();
+        let snapshot = PlanningSnapshot::from_bytes(&document.bytes).unwrap();
+        store
+            .import_peer_planning(
+                repo.to_str().unwrap(),
+                &destination,
+                document.revision.as_str(),
+                &snapshot,
+            )
+            .unwrap();
+        snapshot
+    };
+    publish(&left, left_repo.path(), &laptop);
+    let first = receive(&right, right_repo.path(), &worker);
+    assert!(right.task(&a.id).unwrap().is_none());
+    assert!(!right
+        .peer_planning_status(right_repo.path().to_str().unwrap())
+        .unwrap()[0]
+        .conflicts
+        .is_empty());
+    // Receiving matching provider mappings must not infer correspondence.
+    let associate = |store: &SqliteStore,
+                     repo: &Path,
+                     incoming: &loopflow::work::task::Task,
+                     local: &loopflow::work::task::Task| {
+        for (kind, origin, owner, provider) in [
+            (
+                PlanningKind::Task,
+                incoming.id.as_str(),
+                local.id.as_str(),
+                row.snapshot.items[0].id.as_str(),
+            ),
+            (
+                PlanningKind::Project,
+                incoming.project_id.as_str(),
+                local.project_id.as_str(),
+                row.snapshot.projects[0].id.as_str(),
+            ),
+        ] {
+            store
+                .associate_peer_planning(
+                    repo.to_str().unwrap(),
+                    &PlanningObject {
+                        kind,
+                        id: origin.into(),
+                    },
+                    owner,
+                    provider,
+                )
+                .unwrap();
+        }
+    };
+    associate(&right, right_repo.path(), &a, &b);
+    receive(&right, right_repo.path(), &worker);
+    publish(&right, right_repo.path(), &worker);
+    receive(&left, left_repo.path(), &laptop);
+    associate(&left, left_repo.path(), &b, &a);
+    receive(&left, left_repo.path(), &laptop);
+    let edit = |store: &SqliteStore, task: &loopflow::durable::TaskId, title: &str| {
+        let record = store.task(task).unwrap().unwrap();
+        store
+            .edit_task(
+                task,
+                record.plan.revision,
+                &loopflow::pm::PmItemUpdate {
+                    name: Some(title.into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+    };
+    edit(&left, &a.id, "Peer next focus");
+    publish(&left, left_repo.path(), &laptop);
+    receive(&right, right_repo.path(), &worker);
+    assert_eq!(
+        right.task(&b.id).unwrap().unwrap().plan.title,
+        "Peer next focus"
+    );
+    edit(&right, &b.id, "Local continuation");
+    publish(&right, right_repo.path(), &worker);
+    let continued = receive(&left, left_repo.path(), &laptop);
+    assert_eq!(
+        left.task(&a.id).unwrap().unwrap().plan.title,
+        "Local continuation"
+    );
+    let (peer_id, _) = continued
+        .changes
+        .iter()
+        .find(|(_, c)| c.value == "Peer next focus")
+        .unwrap();
+    let local = continued
+        .changes
+        .values()
+        .find(|c| c.value == "Local continuation")
+        .unwrap();
+    assert!(local.parents.contains(peer_id));
+    for (id, change) in first.changes {
+        assert_eq!(continued.changes[&id], change);
+    }
+    assert!(!continued
+        .changes
+        .values()
+        .any(|c| c.object.id == private.as_str()));
+    let saved = left
+        .export_peer_planning(left_repo.path().to_str().unwrap(), &destination)
+        .unwrap();
+    receive(&left, left_repo.path(), &laptop);
+    assert_eq!(
+        left.export_peer_planning(left_repo.path().to_str().unwrap(), &destination)
+            .unwrap(),
+        saved
+    );
+    for (store, repo) in [(&left, left_repo.path()), (&right, right_repo.path())] {
+        assert!(
+            store.peer_planning_status(repo.to_str().unwrap()).unwrap()[0]
+                .conflicts
+                .is_empty()
+        );
+    }
+    assert_eq!(execution(), before);
 }

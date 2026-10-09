@@ -2208,21 +2208,14 @@ fn project_delivery_fields(
 }
 
 fn linear_predecessor(snapshot: &PlanningSnapshot, change: &PlanningMutation) -> Option<Value> {
-    let mut pending: Vec<_> = change.parents.iter().map(String::as_str).collect();
-    let mut visited = BTreeSet::new();
     let mut latest = None;
-    while let Some(id) = pending.pop() {
-        if !visited.insert(id) {
-            continue;
-        }
-        let prior = &snapshot.changes[id];
+    for (id, prior) in snapshot.ancestors(change.parents.iter().map(String::as_str)) {
         if let Some(observation) = &prior.linear {
             let candidate = (observation.revision_time(), prior.clock, id);
             if latest.is_none_or(|previous| candidate > previous) {
                 latest = Some(candidate);
             }
         }
-        pending.extend(prior.parents.iter().map(String::as_str));
     }
     latest.map(|(_, _, id)| {
         let prior = &snapshot.changes[id];
@@ -8110,6 +8103,80 @@ mod tests {
             0,
             "provider acquisition and peer import never create local requests"
         );
+    }
+
+    #[test]
+    fn local_save_retires_its_provider_ancestor_through_an_unassociated_origin() {
+        let (_source_home, source) = store();
+        let (_target_home, target) = store();
+        let (wave, row, peer) = linear_seed(&source);
+        target
+            .create_wave(&Wave::new(
+                wave.clone(),
+                "planning".into(),
+                "/target".into(),
+            ))
+            .unwrap();
+        target.put_pm_snapshot(&row).unwrap();
+        target
+            .select_peer_waves("/target", &destination(), std::slice::from_ref(&wave))
+            .unwrap();
+        let local = target
+            .task_by_issue(&row.snapshot.items[0].id)
+            .unwrap()
+            .unwrap();
+        preserve_execution(&target, &wave, &local.id);
+        let execution = execution_rows(&target);
+        let mut incoming = export(&target, "/target")
+            .merge(&export(&source, "/source"))
+            .unwrap();
+        let (ancestor_id, ancestor) = incoming
+            .heads()
+            .find(|(_, c)| c.object.id == local.id.as_str() && c.field == "issue_title")
+            .unwrap();
+        assert!(ancestor.linear.is_some());
+        let ancestor_id = ancestor_id.to_owned();
+        let mut bridge = ancestor.clone();
+        bridge.object.id = peer.to_string();
+        bridge.linear = None;
+        bridge.value = json!("Foreign continuation");
+        bridge.clock = incoming.changes.values().map(|c| c.clock).max().unwrap() + 1;
+        bridge.parents = [ancestor_id.clone()].into();
+        let mut saved = bridge.clone();
+        saved.object.id = local.id.to_string();
+        saved.value = json!("Local continuation");
+        saved.clock += 1;
+        saved.parents = ["foreign-bridge".into()].into();
+        incoming.changes.insert("foreign-bridge".into(), bridge);
+        incoming.changes.insert("local-continuation".into(), saved);
+        incoming.validate().unwrap();
+
+        import(&target, "/target", "foreign-ancestry", &incoming);
+        assert_eq!(
+            target.task(&local.id).unwrap().unwrap().plan.title,
+            "Local continuation"
+        );
+        // An ancestry edge orders intentions, but cannot associate the foreign
+        // duplicate or clear its rejected projection.
+        assert!(target.task(&peer).unwrap().is_none());
+        assert!(target
+            .peer_projection_conflicts("/target")
+            .unwrap()
+            .iter()
+            .any(|c| c.object.id == peer.as_str()));
+        let retained = export(&target, "/target");
+        for id in [&ancestor_id, "foreign-bridge", "local-continuation"] {
+            assert_eq!(retained.changes[id], incoming.changes[id]);
+        }
+        edit_title(&target, &local.id, "Next accepted save");
+        let next = export(&target, "/target");
+        let save = next
+            .changes
+            .values()
+            .find(|c| c.value == "Next accepted save")
+            .unwrap();
+        assert_eq!(save.parents, ["local-continuation".into()].into());
+        assert_eq!(execution_rows(&target), execution);
     }
 
     #[test]

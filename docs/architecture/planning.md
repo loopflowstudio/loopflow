@@ -169,9 +169,12 @@ facts. Successful scalar/content and receipt projection records the evaluated he
 later saves can name accepted peer-authored predecessors. Failed projection cannot
 supply save parents. Portable validation permits same-field links between origins
 with one matching provider mapping; only explicit local correspondence lets those
-links retire foreign heads during projection. Per-origin journal heads remain intact
-so each origin still carries a complete record. Acquisition can also link an exact
-provider fact without claiming a rejected peer edit was displayed.
+links retire foreign heads during projection. Projection walks through foreign
+origins to retire the same owner's causal predecessors before applying provider
+priority or save clocks; that walk grants no correspondence. Per-origin journal
+heads remain intact so each origin still carries a complete record. Creation
+receipts retain their separate origin frontiers. Acquisition can also link an
+exact provider fact without claiming a rejected peer edit was displayed.
 
 Task membership, comment ownership and Wave chapter selection resolve correspondence
 at the common writers, without rewriting portable values. Order receipts preserve

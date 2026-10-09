@@ -260,24 +260,14 @@ impl PlanningSnapshot {
     pub fn heads(&self) -> impl Iterator<Item = (&str, &PlanningMutation)> {
         // Portable links retain each origin's own frontier; only the receiver
         // can associate identities for joint projection.
-        self.heads_by(|object| object)
-    }
-
-    /// Evaluate causality within the caller's projection owners. Creation
-    /// receipts always retain their original identity, even after association.
-    pub(crate) fn heads_by<'a, K: Eq>(
-        &'a self,
-        owner: impl Fn(&'a PlanningObject) -> K,
-    ) -> impl Iterator<Item = (&'a str, &'a PlanningMutation)> {
         let retired: BTreeSet<_> = self
             .changes
             .values()
             .flat_map(|change| {
                 change.parents.iter().filter(|id| {
-                    self.changes.get(*id).is_some_and(|parent| {
-                        owner(&parent.object) == owner(&change.object)
-                            && (change.field != "creation" || parent.object == change.object)
-                    })
+                    self.changes
+                        .get(*id)
+                        .is_some_and(|parent| parent.object == change.object)
                 })
             })
             .collect();
@@ -285,6 +275,57 @@ impl PlanningSnapshot {
             .iter()
             .filter(move |(id, _)| !retired.contains(id))
             .map(|(id, change)| (id.as_str(), change))
+    }
+
+    /// Evaluate causality before ranking within the caller's projection owners.
+    /// Foreign predecessors may lead back to this owner's past without granting
+    /// correspondence. Creation receipts keep their origin even after association.
+    pub(crate) fn heads_by<'a, K: Ord>(
+        &'a self,
+        owner: impl Fn(&'a PlanningObject) -> K,
+    ) -> impl Iterator<Item = (&'a str, &'a PlanningMutation)> {
+        let heads: Vec<_> = self.heads().collect();
+        let mut parents = BTreeMap::<_, Vec<_>>::new();
+        for (_, change) in &heads {
+            let creation_origin = (change.field == "creation").then_some(&change.object);
+            parents
+                .entry((owner(&change.object), creation_origin))
+                .or_default()
+                .extend(change.parents.iter().map(String::as_str));
+        }
+        let mut retired = BTreeSet::new();
+        for ((projection, creation_origin), parents) in parents {
+            for (id, parent) in self.ancestors(parents) {
+                if owner(&parent.object) == projection
+                    && creation_origin.is_none_or(|origin| origin == &parent.object)
+                {
+                    retired.insert(id);
+                }
+            }
+        }
+        heads
+            .into_iter()
+            .filter(move |(id, _)| !retired.contains(id))
+    }
+
+    /// Walk each retained predecessor once, including paths through foreign
+    /// origins. Callers decide which ancestors may retire heads or supply bases.
+    pub(crate) fn ancestors<'a>(
+        &'a self,
+        parents: impl IntoIterator<Item = &'a str>,
+    ) -> impl Iterator<Item = (&'a str, &'a PlanningMutation)> {
+        let mut pending: Vec<_> = parents.into_iter().collect();
+        let mut visited = BTreeSet::new();
+        std::iter::from_fn(move || {
+            while let Some(id) = pending.pop() {
+                if visited.insert(id) {
+                    let change = &self.changes[id];
+                    pending.extend(change.parents.iter().map(String::as_str));
+                    return Some((id, change));
+                }
+            }
+            None
+        })
     }
 
     pub(crate) fn objects(&self) -> BTreeSet<&PlanningObject> {

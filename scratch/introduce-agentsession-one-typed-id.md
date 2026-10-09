@@ -16,7 +16,8 @@ on #1516; merging is explicitly excluded.
   retain opaque provider bytes, resume behavior and account attribution.
 - OpenCode's separate resume/create helpers and optional success result are
   replaced by `open_agent_session`: create only without saved identity, and
-  share startup failure cleanup. Swift uses RawRepresentable's string Codable
+  share startup failure cleanup. A failed saved-id lookup never creates a
+  replacement conversation. Swift uses RawRepresentable's string Codable
   implementation instead of duplicating its encoder and decoder.
 - Keep the SQL/JSON encodings and historical fixtures below, not parallel
   compatibility paths. Engine/driver columns remain outside this Task.
@@ -53,9 +54,9 @@ uses two stand-in Claude processes, not a live provider. Its earlier final-only
 fixture omitted streamed answer text; the repaired text-delta version now passes.
 Rust and Swift DTO fixtures pass with unchanged wire keys.
 
-The prior publication preflight stopped at 30.1 GiB free against the 32 GiB
-reserve, reclaiming nothing. The October 9 retry passes at 35.8 GiB; recovery
-retains active builds and reports the busy uv cache rather than forcing cleanup.
+The October 9 publication preflight retry passed after the earlier reserve
+refusal; dated evidence remains at
+`1770350a3:scratch/introduce-agentsession-one-typed-id.md`.
 
 Review retains the Swift native-history `rawValue` projection so row ids do not
 change when their type changes. No engine/driver columns or migrations changed.
@@ -64,6 +65,13 @@ acceptance; no release, installation or schedule change is authorized here.
 
 Full materialized Rust and broader Swift suites remain with gate/CI. Publication
 is authorized after these focused checks, stacked on #1516; no merge or Task
-completion. No installed or live-provider acceptance is claimed.
+completion. Publication itself is not established by these source checks.
+No installed or live-provider acceptance is claimed.
+
+October 9 realignment inspected the compressed OpenCode path, Swift encoding,
+fresh-process fixture and retained wire/column names; no implementation mismatch
+was found. Release is the only immediate child Wave in this checkout; its goal
+and complete memory retain the distinction between source, publication and
+installed evidence already applied here. No new product decision is needed.
 
 Checks: `cargo fmt --check`, `cargo clippy --all-targets -j 4 -- -D warnings`, `cargo test -p loopflow --lib --no-run -j 4`, network-isolated `open_agent_session_creates_only_without_saved_identity` (1), `scripts/test_desktop.sh --jobs 2 -Xswiftc -gnone --filter DTOFixtureTests` (build + 23 tests), and `git diff --check` pass after compression; prior nine Rust identity/account checks and Rust DTO fixtures (22) remain applicable; full matrix remains gate/CI-owned.

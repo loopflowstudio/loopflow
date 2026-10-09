@@ -232,9 +232,10 @@ mapping, placement and proofs:
 
 ## Provider conversations (LOO-442, 2026-10-09)
 
-Jack selected AgentSessionId atop LOO-441; LOO-443 owns engine/driver.
+Jack selected AgentSessionId atop LOO-441/#1516; LOO-443 owns engine/driver.
 No table; retain history/attribution, SQL/JSON bytes and Swift rawValue ids.
-October 9: verify, publish on #1516; no merge. Installation unproved.
+Focused checks pass; stacked publication authorized, not merge.
+Installation unproved.
 
 ## Terminal conversation recovery (LOO-409, 2026-10-07)
 

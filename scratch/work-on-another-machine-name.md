@@ -226,13 +226,13 @@ issue-name fallback records no association; item 3 remains unimplemented.
 
 ## Remaining integration — October 9
 
-At `19dab80ddf`, cross-ID effect deferral and its shared provider-claim query exist;
-explicit association does not. The recorded 68-test storage pass supersedes the
-previous feedback's unproved mapping checks, not successful recovery. Item 3's
-common receipt-origin cut now replaces the single-slot effects layout. Origin
-identity and local projection are separate; all ordinary delivery/status callers
-use the common owner. Correspondence, lookup and deterministic projection remain;
-an alias-only patch still cannot supply those behaviors.
+At `5e5786bff`, the receipt-origin prerequisite in the previous feedback is
+implemented, including removal of synthetic local creation requests on import.
+Correspondence, lookup and deterministic cross-origin projection in item 3 remain
+unimplemented. Production `insert_and_project` still passes the incoming Work ID
+as the receipt's local owner; only the focused common-owner fixture supplies a
+different projection. The earlier 68-test pass proves preservation, not recovery;
+`f1a3b315d` records the receipt-origin passes before the latest reduction.
 
 Destination-level Desktop status has focused headless proof; per-Work membership,
 authorship/assignees and losing-edit recovery remain unfinished. Public Git/Linear
@@ -326,8 +326,8 @@ Keep their counterexamples and acceptance limits; no second implementation is ne
   and refreshes only an accepted matching-or-newer frontier. Cold import reapplies
   notices; null detail and unknown-age migration use the same capture path.
   Marker-only import exposed an older cache: common invalidation now fences it
-  with the real detail revision. The current check below covers storage, not
-  public mixed-provider acceptance.
+  with the real detail revision. The 68-test pass at `e08dc9312` covers storage,
+  not public mixed-provider acceptance or the later receipt-origin reduction.
 - **Unplaced Wave/status (`60d113a70`, `c20e4ad13`).** Nullable placement and
   destination-level Desktop status have focused headless proof. Public reads
   preserve retained Sessions, Processes, Workflow and placements; no live control,
@@ -460,12 +460,13 @@ invalidation) remain. The diagnostic is temporary, not product policy.
    pre-capture diagnostic loss: nullable captured input now preserves discovery
    failures through migration and status without inventing an attempt.
 
-   The focused common-owner fixture imports distinct attempted receipts onto one
-   private local Task/Project, repeats import, and reads back one exact origin.
+   The focused common-owner fixture directly calls `import_peer_receipts` with
+   distinct attempted receipts onto one private local Task/Project, repeats that
+   helper call, then calls `attach_in` for one exact origin.
    It checks retained inputs/errors, later saves, populated execution, no enrollment,
    and no re-creation of incoming Work. This is receipt composition, not successful
-   association or public acquisition. Mapping-preserving readback of a *different*
-   created provider object is still outside correspondence: the current common
+   association, full journal import or public acquisition. Mapping-preserving
+   readback of a *different* created provider object is still outside correspondence: the current common
    acquisition refuses to replace an existing different mapping. Retain that
    uncertainty; no mapping transfer or fabricated acknowledgement is authorized.
 
@@ -481,6 +482,13 @@ invalidation) remain. The diagnostic is temporary, not product policy.
    - Independent private selection: associating private B with selected A cannot
      enroll B, its comments, losing edits or private parent references. Public
      recovery must explain the resulting hold.
+
+   Acceptance must enter through that correspondence operation and ordinary peer
+   import/lookup, not substitute helper calls for association. For both Tasks and
+   Projects, reversed import order and repeat association must retain the same
+   planning winners, both IDs, losing edits, uncertain origins, populated execution
+   and private-selection holds. Public provider readback must settle only its exact
+   origin; lookup by either associated ID must preserve local execution ownership.
 
    The new two-store preservation fixture has distinct local Task/Project IDs,
    a private legacy Wave, populated Session/Process/Workflow/PR history, uncertain
@@ -639,7 +647,7 @@ and limitations: `9b59e9b71:scratch/work-on-another-machine-name.md`,
 **Acceptance for review**. They do not establish this ordering cut, public
 combined behavior or Desktop acceptance.
 
-Check: `cargo fmt --all --check` and `git diff --check` pass; `scripts/resource_envelope.py --recover` leaves 29.6 GiB below the 32 GiB reserve, so build, all-target Clippy and network-isolated `creation_origins_preserve` / `peer_creation_` / `peer_project_creation_` lib checks are deferred to capable gate. Previous receipt-origin passes: `f1a3b315d`, this heading; they do not verify this reduction. Combined foreground/native-resume, partial-list and Git/Linear acceptance remain gate-owned; association remains unfinished.
+Check: `git diff --check` passes for prose-only reconciliation; `5e5786bff` records fmt passing and resource-deferred build/Clippy/receipt-origin tests, still owned by capable gate alongside combined foreground/native-resume, partial-list and Git/Linear acceptance. Earlier receipt-origin passes at `f1a3b315d` do not verify the latest reduction.
 
 Earlier SQL proofs, macOS startup limitations and the retained historical Flow
 without a recorded exit remain at

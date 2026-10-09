@@ -631,16 +631,14 @@ Ordering, causal freshness, private-history holds and unknown-journal proofs:
 convergence. Desktop keeps last-good scoped status. Mixed exchange stays disabled;
 sharing/recovery and public composition remain unfinished.
 
-Legacy association remains unfinished. Clearing mappings creates new provider-creation
+Legacy association remains unfinished. Clearing mappings creates provider-creation
 candidates; issue-name fallback persists no association. Projection and cross-ID
-effect deferral share one derived query of retained mappings/creation inputs,
-including losers; nulling a rejected mapping cannot hide ownership. This grants
-no association.
-Effect origin is not projection ownership: creation receipts retain original
-UUIDs/models separately from local Work foreign keys; imports create no local
-creation request. Correspondence, lookup and deterministic projection remain
-unfinished. The earlier 68-test pass proves refusal/preservation, not recovery.
-Preserve execution and private selection.
+deferral share retained claims, including losers; nulling a mapping hides no claim.
+`5e5786bff` separates creation origins from projection and removes synthetic requests.
+Production import still uses incoming IDs. Direct receipt fixtures prove no
+correspondence, cross-origin winners or public recovery; prior passes predate this
+reduction. Preserve IDs, execution, private selection and uncertain effects;
+repeat association and order-independent projection remain unproved.
 Plan: `scratch/work-on-another-machine-name.md`.
 
 ## Driver recovery

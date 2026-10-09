@@ -58,13 +58,12 @@ internal delivery retains it. His `34c1739a-8831-4578-96c9-797aeaa87743` propose
 complete Task/Project planning with machine-local execution linked by Task ID.
 No rewrite is authorized; Linear Done beside a running Flow remains unanswered.
 
-The enabled `task_completion_preserves_linear_reopening_during_delivery` regression
-still fails: an unseen reopening is overwritten and matching readback falsely
-settles delivery. Unseen-write prevention and a pending loser exceed accepted
-observed Linear-wins. Test disposition remains for review, not precedence.
-The regression stays enabled, not waived.
-Linear's schema at `7d2bc4279f` exposes no expected-revision issue update. More reads
-cannot prove atomic preservation. Observations settle state; failures retain uncertainty.
+Jack Heart authorized this regression repair. Tests distinguish observed reopening
+(adopt Linear, retain both values, retire delivery, preserve execution) from unseen
+reopening (unconditional writes can overwrite it). This supersedes frozen test
+disposition. Readback settles state, not atomicity; `7d2bc4279f`'s Linear schema
+has no expected-revision update. [Rationale](../../docs/architecture/planning.md).
+Materialized Linux: 54 planning tests, fmt/Clippy pass; full CI remains open.
 
 Comments retain provider authorship and losing edits without echo. Cancellation
 resolves the Team's lowest-position state before attempting; failed discovery stays

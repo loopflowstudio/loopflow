@@ -1176,7 +1176,8 @@ fn projection_conflict(error: &StoreError) -> bool {
                 | "Linear removal prevents peer Task projection"
                 | "Linear archive prevents peer Project projection"
         ),
-        StoreError::ProjectMembershipConflict { .. } => true,
+        StoreError::ProjectMembershipConflict { .. }
+        | StoreError::ProviderObservationConflict { .. } => true,
         _ => false,
     }
 }
@@ -1692,6 +1693,264 @@ mod tests {
                 .unwrap(),
             before_reads
         );
+    }
+
+    #[test]
+    fn peer_task_same_revision_conflict_retains_evidence_and_independent_imports() {
+        assert_peer_provider_conflict_isolated(false);
+    }
+
+    #[test]
+    fn peer_project_same_revision_conflict_retains_evidence_and_independent_imports() {
+        assert_peer_provider_conflict_isolated(true);
+    }
+
+    fn assert_peer_provider_conflict_isolated(project_conflict: bool) {
+        let (_source_home, source) = store();
+        let (_target_home, target) = store();
+        let (wave, row, task) = linear_seed(&source);
+        let base = source
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        target
+            .import_peer_planning("/target", &destination(), "base", &base)
+            .unwrap();
+        let project = target.task(&task).unwrap().unwrap().project_id;
+        preserve_execution(&target, &wave, &task);
+
+        // Each machine legitimately accepted a different body at the same new
+        // provider revision. Neither journal is a malformed document.
+        for (store, repo, title) in [
+            (&source, "/source", "Peer observation"),
+            (&target, "/target", "Retained observation"),
+        ] {
+            if project_conflict {
+                let mut observed = row.snapshot.projects[0].clone();
+                observed.name = title.into();
+                observed.revision = Some("2026-10-08T11:00:00Z".into());
+                store
+                    .put_pm_project(&wave, "linear", "initiative", &observed, 60)
+                    .unwrap();
+            } else {
+                let mut item = row.snapshot.items[0].clone();
+                item.name = title.into();
+                item.revision = Some("2026-10-08T11:00:00Z".into());
+                store
+                    .put_pm_task(
+                        repo,
+                        "linear",
+                        &crate::store::PmTaskRecord {
+                            item,
+                            project: None,
+                            observed_at: 60,
+                        },
+                        Some((&wave, "initiative")),
+                    )
+                    .unwrap();
+            }
+        }
+        edit_title(&target, &task, "Uncertain local title");
+        target
+            .edit_project(&project, Some("Uncertain local Project"), None)
+            .unwrap();
+        {
+            let conn = target.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE task_changes SET attempted=1,error='lost response' WHERE task_id=?1",
+                [&task],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE project_changes SET attempted=1,error='lost response' WHERE project_id=?1",
+                [&project],
+            )
+            .unwrap();
+        }
+        let task_receipts = target.pending_task_changes(&task).unwrap();
+        let project_receipts = target.pending_project_changes(&project).unwrap();
+        assert!(!task_receipts.is_empty());
+        assert!(!project_receipts.is_empty());
+        let retained_task = target.task(&task).unwrap().unwrap();
+        let retained_project = target.project(&project).unwrap().unwrap();
+        let workflow = target.workflow(&task).unwrap();
+        let execution = target.revisions().unwrap();
+        let journal = target
+            .export_peer_planning("/target", &destination())
+            .unwrap();
+        let (table, provider_id, rejected_id) = if project_conflict {
+            (
+                "pm_projects",
+                &row.snapshot.projects[0].id,
+                project.as_str(),
+            )
+        } else {
+            ("pm_items", &row.snapshot.items[0].id, task.as_str())
+        };
+        let frontier = || -> (String, i64) {
+            target.conn.lock().unwrap().query_row(
+                &format!("SELECT body,observed_at FROM {table} WHERE repo='/target' AND provider='linear' AND id=?1"),
+                [provider_id], |r| Ok((r.get(0)?, r.get(1)?)),
+            ).unwrap()
+        };
+        let accepted = frontier();
+        let independent = Wave::new(WaveId::new(), "independent".into(), "/source".into());
+        source.create_wave(&independent).unwrap();
+        source
+            .select_peer_waves(
+                "/source",
+                &destination(),
+                std::slice::from_ref(independent.id()),
+            )
+            .unwrap();
+        let incoming = source
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        incoming.validate().unwrap();
+        let retained = journal.merge(&incoming).unwrap();
+
+        target
+            .import_peer_planning("/target", &destination(), "conflicting", &incoming)
+            .unwrap();
+        assert!(target.get_wave(independent.id()).unwrap().is_some());
+        assert_eq!(frontier(), accepted);
+        assert_eq!(target.task(&task).unwrap().unwrap(), retained_task);
+        assert_eq!(target.project(&project).unwrap().unwrap(), retained_project);
+        assert_eq!(target.workflow(&task).unwrap(), workflow);
+        assert_eq!(target.pending_task_changes(&task).unwrap(), task_receipts);
+        for (owner, receipts) in [("task", &task_receipts), ("project", &project_receipts)] {
+            for receipt in receipts {
+                let state: (bool, bool, Option<String>, Option<String>) = target.conn.lock().unwrap().query_row(
+                    &format!("SELECT attempted,acknowledged,conflict_json,error FROM {owner}_changes WHERE id=?1"),
+                    [&receipt.id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                ).unwrap();
+                assert_eq!(state, (true, false, None, Some("lost response".into())));
+            }
+        }
+        assert_eq!(
+            target.pending_project_changes(&project).unwrap(),
+            project_receipts
+        );
+        let after = target.revisions().unwrap();
+        assert_eq!(
+            (after.sessions, after.processes, after.flows),
+            (execution.sessions, execution.processes, execution.flows)
+        );
+        assert_eq!(
+            target
+                .export_peer_planning("/target", &destination())
+                .unwrap(),
+            retained
+        );
+        assert_eq!(
+            import_revision(&target, "/target", &destination()).as_deref(),
+            Some("conflicting")
+        );
+        let conflicts = target.peer_projection_conflicts("/target").unwrap();
+        assert_eq!(conflicts.len(), 1);
+        assert_eq!(conflicts[0].object.id, rejected_id);
+        assert!(conflicts[0].reason.contains("unordered or conflicting"));
+        // Reading back a retained conflict must not append mutations, change
+        // its reason or manufacture a fresh acquisition.
+        target
+            .import_peer_planning("/target", &destination(), "conflicting", &incoming)
+            .unwrap();
+        assert_eq!(target.revisions().unwrap(), after);
+        assert_eq!(
+            target.peer_projection_conflicts("/target").unwrap(),
+            conflicts
+        );
+    }
+
+    #[test]
+    fn malformed_peer_observations_roll_back_independent_records_and_checkpoint() {
+        let (_source_home, source) = store();
+        let (_target_home, target) = store();
+        let (wave, row, task) = linear_seed(&source);
+        let base = source
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        target
+            .import_peer_planning("/target", &destination(), "base", &base)
+            .unwrap();
+        preserve_execution(&target, &wave, &task);
+        edit_title(&target, &task, "Retained local title");
+        let receipts = target.pending_task_changes(&task).unwrap();
+        let journal = target
+            .export_peer_planning("/target", &destination())
+            .unwrap();
+        let before = target.revisions().unwrap();
+        let retained_task = target.task(&task).unwrap().unwrap();
+        let workflow = target.workflow(&task).unwrap();
+        let mut item = row.snapshot.items[0].clone();
+        item.name = "New observation".into();
+        item.revision = Some("2026-10-08T11:00:00Z".into());
+        source
+            .put_pm_task(
+                "/source",
+                "linear",
+                &crate::store::PmTaskRecord {
+                    item,
+                    project: None,
+                    observed_at: 60,
+                },
+                Some((&wave, "initiative")),
+            )
+            .unwrap();
+        let independent = Wave::new(WaveId::new(), "independent".into(), "/source".into());
+        source.create_wave(&independent).unwrap();
+        source
+            .select_peer_waves(
+                "/source",
+                &destination(),
+                std::slice::from_ref(independent.id()),
+            )
+            .unwrap();
+        let incoming = source
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        for defect in ["revision", "execution", "value"] {
+            let mut malformed = incoming.clone();
+            let change = malformed
+                .changes
+                .values_mut()
+                .find(|change| {
+                    change.object.id == task.as_str()
+                        && change.field == "issue_title"
+                        && change.value == "New observation"
+                })
+                .unwrap();
+            match defect {
+                "revision" => {
+                    change.linear.as_mut().unwrap().body["revision"] = json!("not a revision")
+                }
+                "execution" => change.linear.as_mut().unwrap().body["worktree"] = json!("/private"),
+                "value" => change.value = json!("Not the observed value"),
+                _ => unreachable!(),
+            }
+            let error = target
+                .import_peer_planning("/target", &destination(), "malformed", &malformed)
+                .unwrap_err();
+            assert!(matches!(error, crate::store::StoreError::InvalidData(_)));
+            assert!(target.get_wave(independent.id()).unwrap().is_none());
+            assert_eq!(target.task(&task).unwrap().unwrap(), retained_task);
+            assert_eq!(target.workflow(&task).unwrap(), workflow);
+            assert_eq!(target.pending_task_changes(&task).unwrap(), receipts);
+            assert_eq!(
+                target
+                    .export_peer_planning("/target", &destination())
+                    .unwrap(),
+                journal
+            );
+            assert_eq!(
+                import_revision(&target, "/target", &destination()).as_deref(),
+                Some("base")
+            );
+            assert!(target
+                .peer_projection_conflicts("/target")
+                .unwrap()
+                .is_empty());
+            assert_eq!(target.revisions().unwrap(), before);
+        }
     }
 
     #[test]

@@ -630,10 +630,9 @@ intentions. `c6f55719d` fences projection with removal/archive evidence and
 retains typed membership disputes after object rollback. Entity revisions cannot
 order relationships. `9355170fd` keeps scoped savepoints and borrowed heads.
 SQL passes; Rust/CLI/Desktop/installed acceptance is unproved.
-Same-revision entity contradictions still escape object isolation as `InvalidData`;
-source inspection finds whole-import rollback, not an executed reproduction.
-Grouped receipts, alternate acquisition paths, legacy association and Desktop
-remain. Integrated parent `b6f34a6f8` supplies ordering, common status and repository
+Typed provider conflicts isolate same-revision contradictions; malformed input
+aborts import. Task/Project regressions remain unexecuted. Grouped receipts,
+alternate acquisition, legacy association and Desktop remain. Integrated parent `b6f34a6f8` supplies ordering, common status and repository
 sync; reuse those owners. Design: `scratch/work-on-another-machine-name.md`.
 
 Joining publishes nothing. Mixed Linear exchange stays disabled pending composition,

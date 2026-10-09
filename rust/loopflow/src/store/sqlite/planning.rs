@@ -843,10 +843,10 @@ pub(super) fn put_project(
             comparable.slug.clone_from(&previous.slug);
         }
         if comparable != previous && (revision.is_none() || revision == previous_revision) {
-            return Err(StoreError::InvalidData(format!(
-                "unordered or conflicting Project facts for {}; refresh planning",
-                project.id
-            )));
+            return Err(StoreError::ProviderObservationConflict {
+                entity: "Project",
+                id: project.id.clone(),
+            });
         }
         if revision.is_none() && previous_revision.is_some()
             || revision == previous_revision && observed_at < acquired
@@ -936,9 +936,10 @@ pub(super) fn put_item(
                 comparable.completed_at = None;
             }
             if comparable != previous {
-                return Err(StoreError::InvalidData(format!(
-                    "conflicting planning facts at the same provider revision for {}; refresh planning", item.identifier
-                )));
+                return Err(StoreError::ProviderObservationConflict {
+                    entity: "Task",
+                    id: item.id.clone(),
+                });
             }
         }
         // For equal revisions, keep the later acquisition's list rank and freshness.

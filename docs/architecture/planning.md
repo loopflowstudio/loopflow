@@ -155,6 +155,10 @@ Contradictory receipts stay held with their original journal values. Common
 acquisition can settle the exact origin without releasing new effects; it never
 replaces an existing different provider mapping. Cross-origin field projection
 and relationship recovery remain unfinished.
+Correspondence is not causal acknowledgement: local capture and delivery baselines
+still follow same-object journal parents. Non-creation receipt projection also
+still uses incoming IDs. Resolving a lookup or retaining creation origins does
+not make either boundary safe to release.
 
 `ops/planning_delivery.rs` consumes mapped Task titles, descriptions, nullable
 assignees and membership, and Project names, summaries, statuses and structured

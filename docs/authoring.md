@@ -63,10 +63,13 @@ flow — with commits between them:
 - gate
 ```
 
-Bare names and `flow: NAME` prefer an authored flow, then a skill. Adding a
-same-named flow changes those references. Use `step: NAME` to select the skill
-explicitly; this also lets a flow call its own same-named skill without a cycle.
-An invalid flow reports its error instead of falling back to the skill.
+Bare names and `flow: NAME` select an exact literal name before considering
+slash/dash fallbacks. When a skill and Flow share that literal name, the Flow
+wins; an exact skill still wins over a fallback Flow. Use `step: NAME` to select
+the skill explicitly; this also lets a Flow call its own same-named skill
+without a cycle. An invalid selected Flow reports its error instead of falling
+back to the skill. Unlike YAML `flow: NAME`, CLI `lf flow show NAME` selects only
+Flows.
 
 Skills that need another Work's perspective launch it directly with
 `lf --task <task> : "<prompt>"`. Headless skills missing required input

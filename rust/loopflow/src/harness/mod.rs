@@ -20,6 +20,7 @@ pub mod opencode;
 pub(crate) mod opencode_history;
 mod opencode_mapping;
 
+use crate::id::AgentSessionId;
 pub(crate) use claude_mapping::rate_limit_signal as claude_rate_limit_signal;
 pub(crate) use codex_mapping::rate_limit_signal as codex_rate_limit_signal;
 /// Name a codex rate-limit window by duration — shared with the subscription
@@ -269,7 +270,7 @@ pub trait Harness: Send + Sync {
     /// Vendor session/thread id, once the vendor has announced it. Codex and
     /// opencode announce it by the time `start` returns; claude announces it
     /// on the first turn's stream. Callers persist this before driving turns.
-    fn provider_session_id(&self) -> Option<String>;
+    fn agent_session(&self) -> Option<AgentSessionId>;
     /// The owned provider child, for read-only activity sampling. This does not
     /// grant process-group signal authority.
     fn process_id(&self) -> Option<u32> {
@@ -291,7 +292,7 @@ pub trait Harness: Send + Sync {
     }
     /// Seed a previously persisted vendor session id so the next turn resumes
     /// it. Drivers that take resume state at `start` instead ignore this.
-    fn set_provider_session_id(&mut self, _provider_session_id: Option<String>) {}
+    fn set_agent_session(&mut self, _agent_session: Option<AgentSessionId>) {}
     /// Pin this Invocation to the exact managed account already recorded in its
     /// durable route. Accountless providers keep the default no-op.
     fn set_provider_account_id(&mut self, _account_id: Option<crate::store::ProviderAccountId>) {}

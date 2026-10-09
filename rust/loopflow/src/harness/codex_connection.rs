@@ -3,6 +3,7 @@
 //! replies. The same transport relays to the existing AgentProcess and inspects
 //! it during attachment settlement, under the ownership fence.
 
+use crate::id::AgentSessionId;
 use std::path::Path;
 use std::time::Duration;
 
@@ -21,7 +22,7 @@ use crate::store::{StoreError, StoreResult};
 /// must come from the record; an AgentProcess that also serves an unrelated
 /// conversation is left running, and that is an error.
 pub(crate) fn close_agent_process(
-    (endpoint, thread): (&str, &str),
+    (endpoint, thread): (&str, &AgentSessionId),
     pid: u32,
     started: i64,
 ) -> Result<()> {
@@ -101,7 +102,7 @@ pub(crate) fn close_agent_process(
     Err(anyhow!("process {pid} did not exit"))
 }
 
-async fn inspect_agent_threads(endpoint: &str, thread: &str) -> Result<()> {
+async fn inspect_agent_threads(endpoint: &str, thread: &AgentSessionId) -> Result<()> {
     let socket = match UnixStream::connect(endpoint).await {
         Ok(socket) => socket,
         Err(error)
@@ -138,7 +139,7 @@ async fn inspect_agent_threads(endpoint: &str, thread: &str) -> Result<()> {
                 .ok_or_else(|| anyhow!("loaded thread has no ID"))?
                 .to_owned();
             let mut ancestors = std::collections::HashSet::new();
-            while current != thread {
+            while current != thread.as_str() {
                 if !ancestors.insert(current.clone()) {
                     return Err(anyhow!("provider thread parent cycle"));
                 }
@@ -176,7 +177,7 @@ async fn inspect_agent_threads(endpoint: &str, thread: &str) -> Result<()> {
 pub struct CodexConnection {
     pub store: SqliteStore,
     pub session_id: String,
-    pub thread_id: String,
+    pub thread_id: AgentSessionId,
     pub attachment: Option<SessionAttachment>,
 }
 
@@ -247,7 +248,7 @@ impl CodexConnection {
                     let mut rpc: Value = serde_json::from_str(&text)?;
                     let method = rpc.get("method").and_then(Value::as_str).unwrap_or_default();
                     let target = rpc.pointer("/params/threadId").and_then(Value::as_str);
-                    let wrong_thread = target.is_some_and(|id| id != self.thread_id);
+                    let wrong_thread = target.is_some_and(|id| id != self.thread_id.as_str());
                     // Creating another thread is another conversation admission.
                     let admission = matches!(method, "thread/start" | "thread/fork");
                     if wrong_thread || admission {

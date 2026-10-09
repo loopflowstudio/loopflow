@@ -8,6 +8,7 @@ use std::process::{Command, Stdio};
 use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
 
 use crate::engine::{codex_permission_args, missing_agent_message, workspace_add_dirs};
+use crate::id::AgentSessionId;
 use crate::journal::elapsed_seconds;
 use crate::provider_auth::Provider;
 use crate::session_record::{ProviderClientRef, ProviderClientStopReason};
@@ -68,7 +69,7 @@ pub(crate) fn launch_session(
     worktree: &Path,
     prompt: &str,
     environment: &BTreeMap<String, String>,
-    provider_session_id: Option<&str>,
+    agent_session: Option<&AgentSessionId>,
     flags: &[String],
     context_file: Option<&Path>,
     attachment: Option<(String, crate::process::SessionAttachment)>,
@@ -79,12 +80,12 @@ pub(crate) fn launch_session(
         model,
         &worktree,
         prompt,
-        provider_session_id,
+        agent_session,
         context_file,
     )?;
     command.args.splice(0..0, flags.iter().cloned());
     command.attachment = attachment;
-    spawn_session_command_with_env(&command, environment, provider_session_id, None, None)
+    spawn_session_command_with_env(&command, environment, agent_session, None, None)
 }
 
 pub(crate) fn build_session_command(
@@ -92,7 +93,7 @@ pub(crate) fn build_session_command(
     model: Option<&str>,
     worktree: &Path,
     prompt: &str,
-    provider_session_id: Option<&str>,
+    agent_session: Option<&AgentSessionId>,
     context_file: Option<&Path>,
 ) -> Result<SessionCommand> {
     let worktree_arg = worktree.to_string_lossy().to_string();
@@ -131,9 +132,9 @@ pub(crate) fn build_session_command(
                 args.push("--add-dir".to_string());
                 args.push(dir.to_string_lossy().to_string());
             }
-            if let Some(provider_session_id) = provider_session_id {
+            if let Some(agent_session) = agent_session {
                 args.push("--session-id".to_string());
-                args.push(provider_session_id.to_string());
+                args.push(agent_session.to_string());
             }
             if let Some(path) = context_file {
                 args.push("--append-system-prompt-file".to_string());
@@ -203,7 +204,7 @@ pub(crate) fn resume_session_with_env(
         harness,
         model,
         worktree,
-        &provider_session.provider_session_id,
+        &provider_session.agent_session,
     )?;
     command.attachment = attachment;
     command.remote = remote;
@@ -233,7 +234,7 @@ pub(crate) fn resume_session_with_env(
     spawn_session_command_with_env(
         &command,
         &environment,
-        Some(&provider_session.provider_session_id),
+        Some(&provider_session.agent_session),
         provider_session.account_id.as_ref(),
         launch_lock,
     )
@@ -439,7 +440,7 @@ fn build_resume_session_command(
     harness: &str,
     model: Option<&str>,
     worktree: &Path,
-    provider_session_id: &str,
+    agent_session: &AgentSessionId,
 ) -> Result<SessionCommand> {
     let cwd = absolute_path(worktree);
     let worktree_arg = cwd.to_string_lossy().to_string();
@@ -452,7 +453,7 @@ fn build_resume_session_command(
             for dir in workspace_add_dirs(&cwd) {
                 args.extend(["--add-dir".to_string(), dir.to_string_lossy().to_string()]);
             }
-            args.extend(["--resume".to_string(), provider_session_id.to_string()]);
+            args.extend(["--resume".to_string(), agent_session.to_string()]);
             args
         }
         "codex" => {
@@ -464,14 +465,14 @@ fn build_resume_session_command(
                 args.extend(["--add-dir".to_string(), dir.to_string_lossy().to_string()]);
             }
             args.extend(codex_permission_args(Some(&cwd), false, false));
-            args.extend(["--".to_string(), provider_session_id.to_string()]);
+            args.extend(["--".to_string(), agent_session.to_string()]);
             args
         }
         "opencode" => {
             let mut args = vec![
                 worktree_arg,
                 "--session".to_string(),
-                provider_session_id.to_string(),
+                agent_session.to_string(),
             ];
             if let Some(model) = model {
                 args.extend(["--model".to_string(), model.to_string()]);
@@ -497,14 +498,14 @@ fn build_resume_session_command(
 fn spawn_session_command_with_env(
     command: &SessionCommand,
     environment: &BTreeMap<String, String>,
-    provider_session_id: Option<&str>,
+    agent_session: Option<&AgentSessionId>,
     exact_account_id: Option<&crate::store::ProviderAccountId>,
     launch_lock: Option<File>,
 ) -> Result<()> {
     let outcome = session_command_status_with_env(
         command,
         environment,
-        provider_session_id,
+        agent_session,
         exact_account_id,
         launch_lock,
     )?;
@@ -513,7 +514,7 @@ fn spawn_session_command_with_env(
         Ok(())
     } else if outcome.status.success() {
         Ok(())
-    } else if provider_session_id.is_some() {
+    } else if agent_session.is_some() {
         Err(anyhow!(
             "{} could not open this session (status {}). If another client still owns it, close that client or use `lf session connect --replace` for a Loopflow-owned client.",
             command.program,
@@ -612,7 +613,7 @@ fn native_provider_attachment(
 fn session_command_status_with_env(
     command: &SessionCommand,
     environment: &BTreeMap<String, String>,
-    provider_session_id: Option<&str>,
+    agent_session: Option<&AgentSessionId>,
     exact_account_id: Option<&crate::store::ProviderAccountId>,
     launch_lock: Option<File>,
 ) -> Result<SessionCommandOutcome> {
@@ -677,7 +678,7 @@ fn session_command_status_with_env(
         let result = run_native_session(
             &command,
             &environment,
-            provider_session_id,
+            agent_session,
             exact_account_id,
             launch_lock,
         );
@@ -710,7 +711,7 @@ fn session_command_status_with_env(
 fn run_native_session(
     command: &SessionCommand,
     environment: &BTreeMap<String, String>,
-    provider_session_id: Option<&str>,
+    agent_session: Option<&AgentSessionId>,
     exact_account_id: Option<&crate::store::ProviderAccountId>,
     launch_lock: Option<File>,
 ) -> Result<SessionCommandOutcome> {
@@ -739,7 +740,7 @@ fn run_native_session(
         .map(|provider| {
             crate::provider_account::resolve_provider_account_exact_blocking(
                 provider,
-                provider_session_id.map(str::to_string),
+                agent_session.cloned(),
                 exact_account_id.cloned(),
             )
         })
@@ -765,7 +766,7 @@ fn run_native_session(
     }
     let observed_capture = capture_dir
         .clone()
-        .filter(|_| command.program == "opencode" && provider_session_id.is_none());
+        .filter(|_| command.program == "opencode" && agent_session.is_none());
     if observed_capture.is_some() {
         process.args(["--print-logs", "--log-level", "INFO"]);
         process.stderr(Stdio::piped());
@@ -782,21 +783,19 @@ fn run_native_session(
             crate::session_record::PROVIDER_ACCOUNT_ID_ENV,
             route.account_id().as_str(),
         );
-        route.record_process_blocking(provider_session_id.map(str::to_string), None)?;
+        route.record_process_blocking(agent_session.cloned(), None)?;
     }
     let codex_profile =
-        if command.program == "codex" && provider_session_id.is_none() && capture_dir.is_some() {
+        if command.program == "codex" && agent_session.is_none() && capture_dir.is_some() {
             Some(prepare_codex_capture(&mut process)?)
         } else {
             None
         };
     process.args(&command.args);
-    if let (Some(capture_dir), Some(provider_session_id)) =
-        (capture_dir.as_deref(), provider_session_id)
-    {
+    if let (Some(capture_dir), Some(agent_session)) = (capture_dir.as_deref(), agent_session) {
         crate::session_record::write_provider_session(
             capture_dir,
-            provider_session_id,
+            agent_session,
             account_route
                 .as_ref()
                 .map(|route| route.account_id().clone()),
@@ -867,9 +866,7 @@ fn run_native_session(
     // Record which home this conversation lives in, so reopening returns there.
     if let (Some(route), Some(capture_dir)) = (&account_route, capture_dir.as_deref()) {
         if let Ok(Some(session)) = crate::session_record::read_provider_session(capture_dir) {
-            if let Err(error) =
-                route.record_process_blocking(Some(session.provider_session_id), None)
-            {
+            if let Err(error) = route.record_process_blocking(Some(session.agent_session), None) {
                 tracing::warn!(%error, "failed to record the provider session's account home");
             }
         }
@@ -1037,11 +1034,11 @@ fn observe_opencode_session(capture_dir: &Path, stderr: impl Read) -> std::io::R
     for line in BufReader::new(stderr).lines() {
         let line = line?;
         if !observed {
-            if let Some(provider_session_id) = parse_opencode_session_id(&line) {
+            if let Some(agent_session) = parse_opencode_session_id(&line) {
                 observed = true;
                 if let Err(error) = crate::session_record::write_provider_session(
                     capture_dir,
-                    provider_session_id,
+                    &agent_session.into(),
                     None,
                 ) {
                     write_error = Some(error);
@@ -1391,7 +1388,8 @@ mod tests {
         let mut fixture = NativeClient::new();
         std::env::set_var("LF_HOME", fixture.temp.path());
         let dir = fixture.capture.artifact_dir();
-        crate::session_record::write_provider_session(&dir, "native-history", None).unwrap();
+        crate::session_record::write_provider_session(&dir, &"native-history".into(), None)
+            .unwrap();
         let clients = active_provider_clients(&dir, "fake-provider").unwrap();
         fixture.mock_ps("echo unreadable fake-provider");
         assert!(replace_provider_clients(
@@ -1453,8 +1451,8 @@ mod tests {
             crate::session_record::read_provider_session(&dir)
                 .unwrap()
                 .unwrap()
-                .provider_session_id,
-            "native-history"
+                .agent_session,
+            "native-history".into()
         );
     }
 
@@ -1510,8 +1508,8 @@ mod tests {
             crate::session_record::read_provider_session(&dir)
                 .unwrap()
                 .unwrap()
-                .provider_session_id,
-            "ses_delayed"
+                .agent_session,
+            "ses_delayed".into()
         );
         assert!(crate::session_record::read_provider_clients(&dir)
             .unwrap()
@@ -1735,7 +1733,7 @@ mod tests {
             None,
             &path(),
             "test",
-            Some("01234567-89ab-cdef-0123-456789abcdef"),
+            Some(&"01234567-89ab-cdef-0123-456789abcdef".into()),
             None,
         )
         .expect("build launch");
@@ -1757,9 +1755,13 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let provider = fake_provider(&temp, "for arg do printf '%s\\0' \"$arg\"; done > received");
         for harness in ["claude", "codex", "opencode"] {
-            let command =
-                build_resume_session_command(harness, None, temp.path(), "recorded-session")
-                    .unwrap();
+            let command = build_resume_session_command(
+                harness,
+                None,
+                temp.path(),
+                &"recorded-session".into(),
+            )
+            .unwrap();
             let status = Command::new(&provider)
                 .args(&command.args)
                 .current_dir(temp.path())
@@ -1810,7 +1812,8 @@ mod tests {
         )
         .unwrap();
         let capture_dir = capture.artifact_dir();
-        crate::session_record::write_provider_session(&capture_dir, "ses_original", None).unwrap();
+        crate::session_record::write_provider_session(&capture_dir, &"ses_original".into(), None)
+            .unwrap();
         let session = crate::session_record::read_provider_session(&capture_dir)
             .unwrap()
             .unwrap();
@@ -1971,8 +1974,8 @@ mod tests {
         assert_eq!(
             crate::session_record::read_provider_session(&capture.artifact_dir())
                 .unwrap()
-                .map(|session| session.provider_session_id),
-            Some("ses_native".to_string())
+                .map(|session| session.agent_session),
+            Some("ses_native".into())
         );
     }
 

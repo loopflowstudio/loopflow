@@ -2,6 +2,7 @@ use rusqlite::{params, OptionalExtension, TransactionBehavior};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+use crate::id::AgentSessionId;
 use crate::session::{SessionEvent, SessionEventKind};
 use crate::session_record::{FinalAnswer, ProviderSessionRef};
 use crate::store::{StoreError, StoreResult};
@@ -138,7 +139,7 @@ impl SqliteStore {
     pub(crate) fn record_session_event(
         &self,
         session: &str,
-        thread: &str,
+        thread: &AgentSessionId,
         turn: &str,
         kind: SessionEventKind,
         payload: &Value,
@@ -188,7 +189,7 @@ impl SqliteStore {
     /// Retain correlated origin after takeover without reading current assignment.
     pub(crate) fn record_session_turn_origin(
         &self,
-        thread: &str,
+        thread: &AgentSessionId,
         turn: &str,
         origin: &crate::session::SessionTurnOrigin,
     ) -> StoreResult<i64> {
@@ -271,7 +272,7 @@ impl SqliteStore {
         &self,
         session: &str,
         scope: (Option<&str>, Option<&str>, Option<&str>),
-        thread: Option<&str>,
+        thread: Option<&AgentSessionId>,
         turn: Option<&str>,
     ) -> StoreResult<Vec<SessionEvent>> {
         self.read_history(session, 0, 0, None, scope, Some((thread, turn)))
@@ -284,7 +285,7 @@ impl SqliteStore {
         limit: usize,
         input: Option<&str>,
         scope: (Option<&str>, Option<&str>, Option<&str>),
-        orphaned: Option<(Option<&str>, Option<&str>)>,
+        orphaned: Option<(Option<&AgentSessionId>, Option<&str>)>,
     ) -> StoreResult<Vec<SessionEvent>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(
@@ -332,7 +333,7 @@ impl SqliteStore {
                 Ok((
                     row.get::<_, i64>(0)?,
                     row.get::<_, String>(1)?,
-                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<AgentSessionId>>(2)?,
                     row.get::<_, Option<String>>(3)?,
                     row.get::<_, String>(4)?,
                     row.get::<_, Option<i64>>(5)?,
@@ -348,7 +349,7 @@ impl SqliteStore {
             let (
                 seq,
                 session_id,
-                provider_thread,
+                agent_session,
                 provider_turn,
                 kind,
                 provider_generation,
@@ -361,7 +362,7 @@ impl SqliteStore {
             Ok(SessionEvent {
                 seq,
                 session_id,
-                provider_thread,
+                agent_session,
                 provider_turn,
                 kind: match kind.as_str() {
                     "started" => SessionEventKind::Started,
@@ -392,7 +393,7 @@ impl SqliteStore {
 fn record_event_in(
     tx: &rusqlite::Transaction<'_>,
     session: &str,
-    thread: &str,
+    thread: &AgentSessionId,
     turn: &str,
     kind: SessionEventKind,
     payload: &Value,
@@ -454,7 +455,7 @@ mod tests {
             });
         let origin = store.session_turn_origin(session, &attachment).unwrap();
         store
-            .record_session_turn_origin("thread", turn, &origin)
+            .record_session_turn_origin(&"thread".into(), turn, &origin)
             .unwrap()
     }
 
@@ -492,21 +493,21 @@ mod tests {
             .unwrap();
         let after = store.session_turn_origin(&session.id, &attachment).unwrap();
         let seq = store
-            .record_session_turn_origin("thread", "late", &before)
+            .record_session_turn_origin(&"thread".into(), "late", &before)
             .unwrap();
         let revisions = store.revisions().unwrap();
         assert_eq!(
             store
-                .record_session_turn_origin("thread", "late", &before)
+                .record_session_turn_origin(&"thread".into(), "late", &before)
                 .unwrap(),
             seq
         );
         assert_eq!(store.revisions().unwrap(), revisions);
         assert!(store
-            .record_session_turn_origin("thread", "late", &after)
+            .record_session_turn_origin(&"thread".into(), "late", &after)
             .is_err());
         store
-            .record_session_turn_origin("thread", "new", &after)
+            .record_session_turn_origin(&"thread".into(), "new", &after)
             .unwrap();
         let events = store.session_history(&session.id, 0, 0).unwrap();
         let late = events
@@ -572,7 +573,7 @@ mod tests {
             ),
         );
         let reference = store.input_provider_session(&input).unwrap().unwrap();
-        assert_eq!(reference.provider_session_id, "second-thread");
+        assert_eq!(reference.agent_session, "second-thread".into());
         assert_eq!(reference.account_id.unwrap().as_str(), "recorded");
         // Importing an older thread later cannot replace that pair.
         retain(
@@ -583,7 +584,7 @@ mod tests {
             ),
         );
         let reference = store.input_provider_session(&input).unwrap().unwrap();
-        assert_eq!(reference.provider_session_id, "second-thread");
+        assert_eq!(reference.agent_session, "second-thread".into());
         assert_eq!(reference.account_id.unwrap().as_str(), "recorded");
         retain(
             "events.jsonl:3",
@@ -611,7 +612,7 @@ mod tests {
             json!({"schema_version":1,"provider_session_id":"legacy-thread","account_id":"legacy"}),
         );
         let reference = store.input_provider_session(&input).unwrap().unwrap();
-        assert_eq!(reference.provider_session_id, "fresh-thread");
+        assert_eq!(reference.agent_session, "fresh-thread".into());
         assert_eq!(reference.account_id, None);
     }
 
@@ -777,7 +778,7 @@ mod tests {
                 store
                     .record_session_event(
                         &session.id,
-                        "thread",
+                        &"thread".into(),
                         &at.to_string(),
                         SessionEventKind::Completed,
                         &json!({"status":"completed"}),
@@ -943,7 +944,7 @@ mod tests {
             store
                 .record_session_event(
                     "conversation",
-                    "thread",
+                    &"thread".into(),
                     turn,
                     SessionEventKind::Usage,
                     &json!({"total":counts,"last":counts}),
@@ -952,7 +953,7 @@ mod tests {
             store
                 .record_session_event(
                     "conversation",
-                    "thread",
+                    &"thread".into(),
                     turn,
                     SessionEventKind::Completed,
                     &json!({"status":"completed"}),
@@ -1087,7 +1088,7 @@ mod tests {
                     &session.id,
                     &original,
                     home.path().join("engine.sock").to_str().unwrap(),
-                    "saved-thread",
+                    &"saved-thread".into(),
                 )
                 .unwrap();
             let current = if transfer {
@@ -1123,8 +1124,8 @@ mod tests {
             let _ = child.wait();
             assert!(store.session_connection(&session.id).unwrap().is_none());
             assert_eq!(
-                store.session_thread(&session.id).unwrap().as_deref(),
-                Some("saved-thread")
+                store.session_thread(&session.id).unwrap(),
+                Some("saved-thread".into())
             );
             assert!(store
                 .session_attachment(&session.id)
@@ -1221,7 +1222,7 @@ mod tests {
             store
                 .record_session_event(
                     &session.id,
-                    "thread",
+                    &"thread".into(),
                     "turn",
                     kind,
                     &json!({"status": "completed"}),
@@ -1264,7 +1265,7 @@ mod tests {
         store
             .record_session_event(
                 &session.id,
-                "thread",
+                &"thread".into(),
                 "turn",
                 SessionEventKind::Completed,
                 &json!({"status":"interrupted"}),
@@ -1330,7 +1331,7 @@ mod tests {
             .unwrap();
         store
             .record_session_turn_origin(
-                "thread",
+                &"thread".into(),
                 "turn",
                 &store.session_turn_origin(&session.id, &driver).unwrap(),
             )
@@ -1342,7 +1343,7 @@ mod tests {
         store
             .record_session_event(
                 &session.id,
-                "thread",
+                &"thread".into(),
                 "turn",
                 SessionEventKind::Usage,
                 &json!({"total":counts(12,3),"last":counts(12,3)}),
@@ -1360,7 +1361,7 @@ mod tests {
         store
             .record_session_event(
                 &session.id,
-                "thread",
+                &"thread".into(),
                 "turn",
                 SessionEventKind::Usage,
                 &json!({"total":counts(20,5),"last":counts(8,2)}),
@@ -1369,7 +1370,7 @@ mod tests {
         store
             .record_session_event(
                 &session.id,
-                "thread",
+                &"thread".into(),
                 "turn",
                 SessionEventKind::Completed,
                 &json!({"status":"completed"}),
@@ -1419,7 +1420,7 @@ mod tests {
         store
             .record_session_event(
                 &session.id,
-                "thread",
+                &"thread".into(),
                 "unknown",
                 SessionEventKind::Usage,
                 &json!({"total":counts(100,50),"last":counts(10,5)}),
@@ -1443,7 +1444,7 @@ mod tests {
         store
             .record_session_event(
                 &session.id,
-                "thread",
+                &"thread".into(),
                 "partial",
                 SessionEventKind::Usage,
                 &json!({"total":counts(100,50),"last":counts(10,5)}),
@@ -1457,7 +1458,7 @@ mod tests {
         assert!(partial.usage.gaps > 0);
         record_captured_start(&store, &session.id, "decrease");
         for (total, last) in [(20, 20), (40, 20), (30, 10)] {
-            store.record_session_event(&session.id,"thread","decrease",SessionEventKind::Usage,
+            store.record_session_event(&session.id,&"thread".into(),"decrease",SessionEventKind::Usage,
                 &json!({"total":{"inputTokens":total,"outputTokens":0,"cachedInputTokens":0,"reasoningOutputTokens":0},
                     "last":{"inputTokens":last,"outputTokens":0,"cachedInputTokens":0,"reasoningOutputTokens":0}})).unwrap();
         }
@@ -1473,7 +1474,7 @@ mod tests {
         store
             .record_session_event(
                 &session.id,
-                "thread",
+                &"thread".into(),
                 "decrease",
                 SessionEventKind::Completed,
                 &json!({"status":"completed"}),
@@ -1482,7 +1483,7 @@ mod tests {
         record_captured_start(&store, &session.id, "next");
         // Reconnect missed one request: 60 lifetime minus the retained 40 peak,
         // not merely this final request's 10 tokens or the regressed 30 baseline.
-        store.record_session_event(&session.id,"thread","next",SessionEventKind::Usage,
+        store.record_session_event(&session.id,&"thread".into(),"next",SessionEventKind::Usage,
             &json!({"total":{"inputTokens":60,"outputTokens":0,"cachedInputTokens":0,"reasoningOutputTokens":0},
                 "last":{"inputTokens":10,"outputTokens":0,"cachedInputTokens":0,"reasoningOutputTokens":0}})).unwrap();
         assert_eq!(
@@ -1511,7 +1512,7 @@ mod tests {
                 store
                     .record_session_event(
                         "conversation",
-                        "thread",
+                        &"thread".into(),
                         turn,
                         SessionEventKind::Usage,
                         &json!({"total":counts(total),"last":counts(last)}),
@@ -1521,7 +1522,7 @@ mod tests {
             store
                 .record_session_event(
                     "conversation",
-                    "thread",
+                    &"thread".into(),
                     turn,
                     SessionEventKind::Completed,
                     &json!({"status":"completed"}),
@@ -1562,7 +1563,7 @@ mod tests {
         let seq = store
             .record_session_event(
                 "conversation",
-                "thread",
+                &"thread".into(),
                 "turn",
                 SessionEventKind::Completed,
                 &completed,
@@ -1572,7 +1573,7 @@ mod tests {
             store
                 .record_session_event(
                     "conversation",
-                    "thread",
+                    &"thread".into(),
                     "turn",
                     SessionEventKind::Completed,
                     &completed
@@ -1583,7 +1584,7 @@ mod tests {
         assert!(store
             .record_session_event(
                 "conversation",
-                "thread",
+                &"thread".into(),
                 "turn",
                 SessionEventKind::Completed,
                 &json!({"status":"failed"})
@@ -1625,14 +1626,19 @@ mod tests {
             .claim_session_attachment("conversation", None, &first, false)
             .unwrap();
         store
-            .record_session_connection("conversation", &original, "/original.sock", "thread")
+            .record_session_connection(
+                "conversation",
+                &original,
+                "/original.sock",
+                &"thread".into(),
+            )
             .unwrap();
         store
             .record_session_provider_process("conversation", &original, 12345, 12)
             .unwrap();
         store
             .record_session_turn_origin(
-                "thread",
+                &"thread".into(),
                 "later",
                 &store
                     .session_turn_origin("conversation", &original)
@@ -1649,11 +1655,16 @@ mod tests {
             .unwrap()
             .is_none());
         assert_eq!(
-            store.session_thread("conversation").unwrap().as_deref(),
-            Some("thread")
+            store.session_thread("conversation").unwrap(),
+            Some("thread".into())
         );
         assert!(store
-            .record_session_connection("conversation", &original, "/stale.sock", "wrong-thread")
+            .record_session_connection(
+                "conversation",
+                &original,
+                "/stale.sock",
+                &"wrong-thread".into()
+            )
             .is_err());
         assert!(store
             .record_session_provider_process("conversation", &original, 12346, 13)
@@ -1661,7 +1672,7 @@ mod tests {
         store
             .record_session_event(
                 "conversation",
-                "thread",
+                &"thread".into(),
                 "later",
                 SessionEventKind::Usage,
                 &json!({"total":{"inputTokens":40}}),
@@ -1670,7 +1681,7 @@ mod tests {
         store
             .record_session_event(
                 "conversation",
-                "thread",
+                &"thread".into(),
                 "unobserved",
                 SessionEventKind::Usage,
                 &json!({"total":{"inputTokens":60}}),

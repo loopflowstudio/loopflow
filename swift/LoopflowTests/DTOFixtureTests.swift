@@ -149,10 +149,11 @@ struct DTOFixtureTests {
     func sessionHistoryFixture() throws {
         let data = try loadFixtureData("session_history.json")
         let events = try JSONDecoder().decode([SessionEvent].self, from: data)
+        #expect(events[0].agentSession == AgentSessionId(rawValue: "thread_fixture"))
         #expect(events[1].kind == .completed)
         #expect(events[1].processLFID == nil)
         #expect(events[2].kind == .observed)
-        #expect(events[2].providerThread == nil)
+        #expect(events[2].agentSession == nil)
         #expect(events[2].providerTurn == nil)
         #expect(events[0].payload == .object([
             "total": .object(["inputTokens": .integer(40), "outputTokens": .integer(10)]),

@@ -98,9 +98,63 @@ uuid_id!(ProcessLfid);
 // One claim, not a Process identity. Never reused after attachment transfer.
 uuid_id!(AttachmentToken);
 
+/// A provider-owned conversation id. Opaque vendor bytes, never an lf identity.
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(transparent)]
+pub struct AgentSessionId(String);
+
+impl AgentSessionId {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<String> for AgentSessionId {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl From<&str> for AgentSessionId {
+    fn from(value: &str) -> Self {
+        Self(value.to_owned())
+    }
+}
+
+impl fmt::Display for AgentSessionId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+impl rusqlite::ToSql for AgentSessionId {
+    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
+        Ok(self.as_str().into())
+    }
+}
+
+impl rusqlite::types::FromSql for AgentSessionId {
+    fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
+        Ok(Self::from(value.as_str()?))
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{ProcessLfid, TraceId, WaveId};
+    use super::{AgentSessionId, ProcessLfid, TraceId, WaveId};
+
+    #[test]
+    fn agent_session_preserves_opaque_provider_bytes_in_json_and_sql() {
+        let id = AgentSessionId::from("session_vendor:Case-Sensitive/01");
+        let json = serde_json::to_string(&id).unwrap();
+        assert_eq!(json, r#""session_vendor:Case-Sensitive/01""#);
+        assert_eq!(serde_json::from_str::<AgentSessionId>(&json).unwrap(), id);
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        let saved: AgentSessionId = db.query_row("SELECT ?1", [&id], |row| row.get(0)).unwrap();
+        assert_eq!(saved, id);
+    }
 
     #[test]
     fn ids_round_trip_as_uuid_strings() {

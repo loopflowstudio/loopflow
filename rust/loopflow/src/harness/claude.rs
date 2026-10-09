@@ -15,6 +15,7 @@ use crate::engine::agent::{build_claude_stream_session_args, AgentConfig};
 use crate::harness::claude_mapping::ReaderState;
 use crate::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
 use crate::harness::{claude_mapping, Harness, HarnessError, RawProviderEvent, SendCurrentOutcome};
+use crate::id::AgentSessionId;
 use crate::provider_account::{resolve_provider_account_exact, ProviderAccountRoute};
 use crate::provider_auth::Provider;
 use crate::store::ProviderAccountId;
@@ -34,7 +35,7 @@ pub struct ClaudeHarness {
     should_seed_task_prompt: bool,
     /// Vendor session id captured from the first turn's `system` event; a
     /// respawn (after interrupt/crash) resumes it via `--resume`.
-    provider_session_id: Arc<Mutex<Option<String>>>,
+    agent_session: Arc<Mutex<Option<AgentSessionId>>>,
     account_route: Option<ProviderAccountRoute>,
     requested_account_id: Option<ProviderAccountId>,
     turn_in_progress: Arc<AtomicBool>,
@@ -77,7 +78,7 @@ impl ClaudeHarness {
             config: None,
             capture: None,
             should_seed_task_prompt: true,
-            provider_session_id: Arc::new(Mutex::new(None)),
+            agent_session: Arc::new(Mutex::new(None)),
             account_route: None,
             requested_account_id: None,
             turn_in_progress: Arc::new(AtomicBool::new(false)),
@@ -121,13 +122,13 @@ impl ClaudeHarness {
             );
         }
         let resume_id = self
-            .provider_session_id
+            .agent_session
             .lock()
             .expect("claude provider session id lock poisoned")
             .clone();
         let context_file = crate::engine::agent::write_system_prompt_file(config, "session")?;
         let args =
-            build_claude_stream_session_args(config, resume_id.as_deref(), context_file.as_deref());
+            build_claude_stream_session_args(config, resume_id.as_ref(), context_file.as_deref());
         let mut cmd = Command::new("claude");
         cmd.args(&args);
         super::configure_agent_env(&mut cmd, config);
@@ -189,7 +190,7 @@ impl ClaudeHarness {
         let current_turn_id = self.current_turn_id.clone();
         let shutdown = self.shutdown_requested.clone();
         let interrupted = self.interrupt_requested.clone();
-        let session_slot = self.provider_session_id.clone();
+        let session_slot = self.agent_session.clone();
         let account_route = self.account_route.clone();
         self.reader_task = Some(tokio::spawn(async move {
             let reader = BufReader::new(stdout);
@@ -250,7 +251,7 @@ impl ClaudeHarness {
                     break;
                 }
                 let result = claude_mapping::process_line(&line, &turn_id(), &events, &mut state);
-                if let Some(session_id) = state.take_provider_session_id() {
+                if let Some(session_id) = state.take_agent_session() {
                     *session_slot
                         .lock()
                         .expect("claude provider session id lock poisoned") =
@@ -402,13 +403,13 @@ impl Harness for ClaudeHarness {
 
     async fn start(&mut self, config: &AgentConfig) -> Result<()> {
         let requested_session = self
-            .provider_session_id
+            .agent_session
             .lock()
             .expect("claude provider session id lock poisoned")
             .clone();
         let account_route = resolve_provider_account_exact(
             Provider::Claude,
-            requested_session.as_deref(),
+            requested_session.as_ref(),
             self.requested_account_id.as_ref(),
         )
         .await?;
@@ -417,7 +418,7 @@ impl Harness for ClaudeHarness {
             .is_some_and(|route| !route.resume_requested_session())
         {
             *self
-                .provider_session_id
+                .agent_session
                 .lock()
                 .expect("claude provider session id lock poisoned") = None;
         }
@@ -575,18 +576,18 @@ impl Harness for ClaudeHarness {
         self.kill_process().await
     }
 
-    fn provider_session_id(&self) -> Option<String> {
-        self.provider_session_id
+    fn agent_session(&self) -> Option<AgentSessionId> {
+        self.agent_session
             .lock()
             .expect("claude provider session id lock poisoned")
             .clone()
     }
 
-    fn set_provider_session_id(&mut self, provider_session_id: Option<String>) {
+    fn set_agent_session(&mut self, agent_session: Option<AgentSessionId>) {
         *self
-            .provider_session_id
+            .agent_session
             .lock()
-            .expect("claude provider session id lock poisoned") = provider_session_id;
+            .expect("claude provider session id lock poisoned") = agent_session;
     }
 
     fn set_provider_account_id(&mut self, account_id: Option<ProviderAccountId>) {
@@ -903,6 +904,76 @@ mod tests {
         assert!(!harness.interrupt_requested.load(Ordering::SeqCst));
     }
 
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // Isolate the stand-in provider and its homes.
+    async fn agent_session_resumes_on_a_fresh_process() {
+        let _lock = crate::journal::test_env_lock();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let _environment = crate::test_ambient::EnvGuard::clear(&[
+            "LF_HOME",
+            "LF_BIN",
+            "PATH",
+            "HOME",
+            "CLAUDE_CONFIG_DIR",
+        ]);
+        let home = tempfile::tempdir().unwrap();
+        for key in ["LF_HOME", "HOME", "CLAUDE_CONFIG_DIR"] {
+            std::env::set_var(key, home.path());
+        }
+        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
+        std::env::set_var("PATH", home.path());
+        let script = home.path().join("claude");
+        std::fs::write(&script, r#"#!/bin/sh
+resume=""
+while [ "$#" -gt 0 ]; do
+    if [ "$1" = "--resume" ]; then shift; resume="$1"; fi
+    shift
+done
+while read -r line; do
+    if [ -z "$resume" ]; then
+        printf '%s' remembered > memory
+        answer=created
+    elif [ "$resume" = "vendor-conversation" ] && [ -f memory ]; then
+        answer=remembered
+    else
+        exit 1
+    fi
+    printf '%s\n' '{"type":"system","subtype":"init","session_id":"vendor-conversation"}'
+    printf '{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"%s"}}\n' "$answer"
+    printf '{"type":"result","subtype":"success","session_id":"vendor-conversation","result":"%s"}\n' "$answer"
+done
+"#).unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut config = live_config();
+        config.cwd = Some(home.path().to_path_buf());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut first = ClaudeHarness::new(tx);
+        first.config = Some(config.clone());
+        first.send_input("remember").await.unwrap();
+        let (status, answer, _) = tokio::time::timeout(Duration::from_secs(5), drive_turn(&mut rx))
+            .await
+            .unwrap();
+        assert_eq!(status, Lifecycle::Completed);
+        assert!(answer.contains("created"));
+        let agent_session: AgentSessionId = first.agent_session().unwrap();
+
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut resumed = ClaudeHarness::new(tx);
+        resumed.set_agent_session(Some(agent_session.clone()));
+        resumed.config = Some(config);
+        resumed.send_input("recall").await.unwrap();
+        let (status, answer, _) = tokio::time::timeout(Duration::from_secs(5), drive_turn(&mut rx))
+            .await
+            .unwrap();
+        let different_process = first.process_id() != resumed.process_id();
+        first.stop().await.unwrap();
+        resumed.stop().await.unwrap();
+        assert!(different_process);
+        assert_eq!(status, Lifecycle::Completed);
+        assert!(answer.contains("remembered"));
+        assert_eq!(resumed.agent_session(), Some(agent_session));
+    }
+
     // Live persistent-process checks against the real `claude` CLI (subscription
     // auth). Ignored by default — run explicitly with a live login:
     //   cargo test -p loopflow --lib claude::tests::live_ -- --ignored --nocapture
@@ -967,7 +1038,7 @@ mod tests {
         assert!(text.contains("ALPHA"), "first turn text: {text:?}");
 
         // Same persistent process, second turn — the session id must be stable.
-        let session_after_first = harness.provider_session_id();
+        let session_after_first = harness.agent_session();
         harness
             .send_input("Reply with exactly: BETA")
             .await
@@ -977,7 +1048,7 @@ mod tests {
         assert!(text.contains("BETA"), "second turn text: {text:?}");
         assert_eq!(
             session_after_first,
-            harness.provider_session_id(),
+            harness.agent_session(),
             "the persistent process keeps one vendor session across turns"
         );
 

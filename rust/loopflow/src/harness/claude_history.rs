@@ -1,4 +1,5 @@
 //! Stream input UUIDs, echoed by Claude, correlate each native result.
+use crate::id::AgentSessionId;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
@@ -13,7 +14,7 @@ use crate::store::sqlite::SqliteStore;
 pub(super) struct History {
     pub owner: Option<(SqliteStore, String, SessionAttachment)>,
     pub requests: Arc<Mutex<HashMap<String, Option<crate::session::SessionTurnOrigin>>>>,
-    pub pending: VecDeque<(String, String)>,
+    pub pending: VecDeque<(AgentSessionId, String)>,
     pub attention: super::attention::Attention,
 }
 
@@ -32,6 +33,7 @@ impl History {
             else {
                 return Ok(());
             };
+            let thread = AgentSessionId::from(thread);
             let Some(origin) = self
                 .requests
                 .lock()
@@ -41,7 +43,7 @@ impl History {
                 return Ok(());
             };
             if let Some(origin) = origin {
-                store.record_session_turn_origin(thread, turn, &origin)?;
+                store.record_session_turn_origin(&thread, turn, &origin)?;
             }
             self.pending.push_back((thread.to_owned(), turn.to_owned()));
         } else if value["type"] == "result" {
@@ -49,7 +51,7 @@ impl History {
                 return Ok(());
             };
             anyhow::ensure!(
-                value["session_id"] == *thread,
+                value["session_id"] == thread.as_str(),
                 "Claude result changed conversation"
             );
             let status = if value["subtype"] == "success" && value["is_error"] != true {

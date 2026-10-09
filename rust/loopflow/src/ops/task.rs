@@ -5095,7 +5095,7 @@ mod tests {
             .sqlite
             .record_session_event(
                 &session.id,
-                "thread",
+                &"thread".into(),
                 "turn",
                 crate::session::SessionEventKind::Started,
                 &serde_json::json!({}),

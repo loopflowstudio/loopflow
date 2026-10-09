@@ -320,6 +320,10 @@ fn session_history_retains_receipts_and_unknown_driver() {
         events[1].kind,
         loopflow::session::SessionEventKind::Completed
     );
+    assert_eq!(
+        events[0].agent_session.as_ref().unwrap().as_str(),
+        "thread_fixture"
+    );
     assert!(events[1].process_lfid.is_none());
     assert_eq!(events[0].payload["total"]["inputTokens"], 40);
     assert_eq!(
@@ -327,7 +331,7 @@ fn session_history_retains_receipts_and_unknown_driver() {
         loopflow::session::SessionEventKind::Observed
     );
     assert!(events[2].provider_turn.is_none());
-    assert!(events[2].provider_thread.is_none());
+    assert!(events[2].agent_session.is_none());
     assert_eq!(
         serde_json::to_value(events).unwrap(),
         serde_json::from_str::<serde_json::Value>(input).unwrap()

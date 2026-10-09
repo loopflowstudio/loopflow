@@ -19,6 +19,7 @@ use crate::harness::{
     opencode_history, opencode_mapping, ApprovalPolicy, Harness, HarnessError, RawProviderEvent,
     SendCurrentOutcome,
 };
+use crate::id::AgentSessionId;
 
 pub(crate) const OPENCODE_DISCONNECTED_CODE: &str = "opencode_disconnected";
 
@@ -35,7 +36,7 @@ pub struct OpenCodeHarness {
     stderr_task: Option<JoinHandle<()>>,
     sse_task: Option<JoinHandle<()>>,
     server_base_url: Option<String>,
-    provider_session_id: Option<String>,
+    agent_session: Option<AgentSessionId>,
 }
 
 impl std::fmt::Debug for OpenCodeHarness {
@@ -62,7 +63,7 @@ impl OpenCodeHarness {
             stderr_task: None,
             sse_task: None,
             server_base_url: None,
-            provider_session_id: None,
+            agent_session: None,
         }
     }
 
@@ -103,26 +104,14 @@ impl OpenCodeHarness {
             return Err(err);
         }
 
-        let provider_session_id = match resume_provider_session(
-            &self.client,
-            &base_url,
-            self.provider_session_id.as_deref(),
-        )
-        .await
-        {
-            Ok(Some(id)) => id,
-            Ok(None) => match create_provider_session(&self.client, &base_url).await {
+        let agent_session =
+            match open_agent_session(&self.client, &base_url, self.agent_session.as_ref()).await {
                 Ok(id) => id,
                 Err(error) => {
                     shutdown_child(&mut child).await;
                     return Err(error);
                 }
-            },
-            Err(error) => {
-                shutdown_child(&mut child).await;
-                return Err(error);
-            }
-        };
+            };
         // The dedicated server answers each native permission once, after the
         // originating user message has been selected under the Session owner.
         let mut permissions = vec![json!({"permission":"*","pattern":"*","action":"ask"})];
@@ -132,7 +121,7 @@ impl OpenCodeHarness {
         }
         if let Err(error) = self
             .client
-            .patch(format!("{base_url}/session/{provider_session_id}"))
+            .patch(format!("{base_url}/session/{agent_session}"))
             .json(&json!({"permission":permissions}))
             .send()
             .await?
@@ -148,7 +137,7 @@ impl OpenCodeHarness {
                     session,
                     driver,
                     &base_url,
-                    &provider_session_id,
+                    &agent_session,
                 )?;
             }
         }
@@ -161,7 +150,7 @@ impl OpenCodeHarness {
         let history = self.history.clone();
         let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
         let reader_base_url = base_url.clone();
-        let reader_session_id = provider_session_id.clone();
+        let reader_session_id = agent_session.clone();
         let reader_model = opencode_model(config)
             .map(|(provider_id, model_id)| format!("{provider_id}/{model_id}"))
             .or_else(|| config.agent.clone());
@@ -356,7 +345,7 @@ impl OpenCodeHarness {
         self.stderr_task = Some(stderr_task);
         self.sse_task = Some(sse_task);
         self.server_base_url = Some(base_url);
-        self.provider_session_id = Some(provider_session_id);
+        self.agent_session = Some(agent_session);
         ready_rx
             .await
             .map_err(|_| anyhow!("OpenCode event stream did not connect"))?;
@@ -419,8 +408,8 @@ impl Harness for OpenCodeHarness {
             .server_base_url
             .clone()
             .ok_or_else(|| anyhow!("opencode server not started"))?;
-        let provider_session_id = self
-            .provider_session_id
+        let agent_session = self
+            .agent_session
             .clone()
             .ok_or_else(|| anyhow!("opencode provider session id is not available"))?;
 
@@ -437,7 +426,7 @@ impl Harness for OpenCodeHarness {
         // whole turn finishes, which would keep `send_input` (and its `&mut
         // self` borrow) from returning — leaving no window to call
         // `send_current` mid-turn.
-        let message_url = format!("{base_url}/session/{provider_session_id}/prompt_async");
+        let message_url = format!("{base_url}/session/{agent_session}/prompt_async");
         opencode_history::post(owner, message_url, payload).await?;
 
         self.should_seed_prompt = false;
@@ -457,9 +446,9 @@ impl Harness for OpenCodeHarness {
         if !self.turn_in_progress.load(Ordering::SeqCst) {
             return SendCurrentOutcome::NotSteerable;
         }
-        let (Some(base_url), Some(provider_session_id), Some(config)) = (
+        let (Some(base_url), Some(agent_session), Some(config)) = (
             self.server_base_url.clone(),
-            self.provider_session_id.clone(),
+            self.agent_session.clone(),
             self.config.clone(),
         ) else {
             return SendCurrentOutcome::NotSteerable;
@@ -479,7 +468,7 @@ impl Harness for OpenCodeHarness {
             (request, history.owner.clone())
         };
         payload["messageID"] = json!(provider_turn_id);
-        let steer_url = format!("{base_url}/session/{provider_session_id}/prompt_async");
+        let steer_url = format!("{base_url}/session/{agent_session}/prompt_async");
         match opencode_history::post(owner, steer_url, payload).await {
             Ok(()) => SendCurrentOutcome::Sent { provider_turn_id },
             Err(error) => SendCurrentOutcome::Failed {
@@ -497,12 +486,12 @@ impl Harness for OpenCodeHarness {
             .server_base_url
             .clone()
             .ok_or_else(|| anyhow!("opencode server not started"))?;
-        let provider_session_id = self
-            .provider_session_id
+        let agent_session = self
+            .agent_session
             .clone()
             .ok_or_else(|| anyhow!("opencode provider session id is not available"))?;
 
-        let abort_url = format!("{base_url}/session/{provider_session_id}/abort");
+        let abort_url = format!("{base_url}/session/{agent_session}/abort");
         send_request_with_retry(&self.client, Method::POST, &abort_url, Some(json!({}))).await?;
         Ok(())
     }
@@ -510,14 +499,13 @@ impl Harness for OpenCodeHarness {
     async fn stop(&mut self) -> Result<()> {
         self.shutdown_requested.store(true, Ordering::SeqCst);
 
-        if let (Some(base_url), Some(provider_session_id)) =
-            (&self.server_base_url, &self.provider_session_id)
+        if let (Some(base_url), Some(agent_session)) = (&self.server_base_url, &self.agent_session)
         {
             // Abort any in-flight turn but leave the session in opencode's
             // storage — the persisted id lets the next launch resume the
             // conversation (and its provider-side prompt cache) instead of
             // starting cold, matching the claude/codex harnesses.
-            let abort_url = format!("{base_url}/session/{provider_session_id}/abort");
+            let abort_url = format!("{base_url}/session/{agent_session}/abort");
             let _ =
                 send_request_with_retry(&self.client, Method::POST, &abort_url, Some(json!({})))
                     .await;
@@ -545,15 +533,15 @@ impl Harness for OpenCodeHarness {
         }
 
         self.turn_in_progress.store(false, Ordering::SeqCst);
-        // Keep `provider_session_id`: the runner persists it after stop so the
-        // next launch can resume the session (see `resume_provider_session`).
+        // Keep `agent_session`: the runner persists it after stop so the
+        // next launch can resume the session (see `open_agent_session`).
         self.server_base_url = None;
 
         Ok(())
     }
 
-    fn provider_session_id(&self) -> Option<String> {
-        self.provider_session_id.clone()
+    fn agent_session(&self) -> Option<AgentSessionId> {
+        self.agent_session.clone()
     }
 
     fn process_group_id(&self) -> Option<u32> {
@@ -561,8 +549,8 @@ impl Harness for OpenCodeHarness {
         self.process_id().filter(|pid| *pid > 1)
     }
 
-    fn set_provider_session_id(&mut self, provider_session_id: Option<String>) {
-        self.provider_session_id = provider_session_id;
+    fn set_agent_session(&mut self, agent_session: Option<AgentSessionId>) {
+        self.agent_session = agent_session;
     }
 }
 
@@ -572,23 +560,20 @@ async fn shutdown_child(child: &mut Child) {
 }
 
 /// A saved conversation must remain the same conversation after a retry.
-async fn resume_provider_session(
+async fn open_agent_session(
     client: &reqwest::Client,
     base_url: &str,
-    stored: Option<&str>,
-) -> Result<Option<String>> {
-    let Some(session_id) = stored else {
-        return Ok(None);
-    };
-    client
-        .get(format!("{base_url}/session/{session_id}"))
-        .send()
-        .await?
-        .error_for_status()?;
-    Ok(Some(session_id.into()))
-}
+    stored: Option<&AgentSessionId>,
+) -> Result<AgentSessionId> {
+    if let Some(session_id) = stored {
+        client
+            .get(format!("{base_url}/session/{session_id}"))
+            .send()
+            .await?
+            .error_for_status()?;
+        return Ok(session_id.clone());
+    }
 
-async fn create_provider_session(client: &reqwest::Client, base_url: &str) -> Result<String> {
     let session_url = format!("{base_url}/session");
     let response =
         send_request_with_retry(client, Method::POST, &session_url, Some(json!({}))).await?;
@@ -597,12 +582,8 @@ async fn create_provider_session(client: &reqwest::Client, base_url: &str) -> Re
         .await
         .map_err(|err| anyhow!("failed to parse opencode session response: {err}"))?;
 
-    parse_session_id(&body).ok_or_else(|| {
-        anyhow!(
-            "opencode session response did not include session id: {}",
-            body
-        )
-    })
+    parse_session_id(&body)
+        .ok_or_else(|| anyhow!("opencode session response did not include session id: {body}"))
 }
 
 fn send_disconnect_error(
@@ -763,11 +744,11 @@ async fn send_request_with_retry(
     }
 }
 
-fn parse_session_id(value: &Value) -> Option<String> {
+fn parse_session_id(value: &Value) -> Option<AgentSessionId> {
     value
         .get("id")
         .and_then(Value::as_str)
-        .map(ToString::to_string)
+        .map(AgentSessionId::from)
 }
 
 fn build_turn_content(content: &str, config: &AgentConfig, first_turn: bool) -> Option<String> {
@@ -957,7 +938,7 @@ mod tests {
     fn parse_session_id_requires_canonical_top_level_id() {
         assert_eq!(
             parse_session_id(&json!({"id": "session_1"})),
-            Some("session_1".to_string())
+            Some("session_1".into())
         );
         assert_eq!(
             parse_session_id(&json!({"session": {"id": "session_2"}})),
@@ -1017,10 +998,8 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
-    /// A stored session id is reused when the serve instance still has it and
-    /// dropped when it's gone — resume is an optimization, never a failure.
     #[tokio::test]
-    async fn resume_probe_preserves_saved_identity_on_failure() {
+    async fn open_agent_session_creates_only_without_saved_identity() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         let base_url = format!("http://127.0.0.1:{port}");
@@ -1035,6 +1014,8 @@ mod tests {
                 let request = String::from_utf8_lossy(&buf[..n]).to_string();
                 let response = if request.starts_with("GET /session/live") {
                     "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}"
+                } else if request.starts_with("POST /session ") {
+                    "HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\n{\"id\":\"new\"}"
                 } else {
                     "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n"
                 };
@@ -1044,19 +1025,17 @@ mod tests {
 
         let client = reqwest::Client::new();
         assert_eq!(
-            resume_provider_session(&client, &base_url, Some("live"))
+            open_agent_session(&client, &base_url, Some(&"live".into()))
                 .await
                 .unwrap(),
-            Some("live".to_string())
+            "live".into()
         );
-        assert!(resume_provider_session(&client, &base_url, Some("gone"))
+        assert!(open_agent_session(&client, &base_url, Some(&"gone".into()))
             .await
             .is_err());
         assert_eq!(
-            resume_provider_session(&client, &base_url, None)
-                .await
-                .unwrap(),
-            None
+            open_agent_session(&client, &base_url, None).await.unwrap(),
+            "new".into()
         );
     }
 

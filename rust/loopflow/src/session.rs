@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::durable::TaskId;
-use crate::id::WaveId;
+use crate::id::{AgentSessionId, WaveId};
 
 /// Attribution captured before a native request, never from its delayed reply.
 /// This is observation context, not a capability to write to the provider.
@@ -22,7 +22,9 @@ pub(crate) struct SessionTurnOrigin {
 pub struct SessionEvent {
     pub seq: i64,
     pub session_id: String,
-    pub provider_thread: Option<String>,
+    // Retain the published DTO key and historical event encoding.
+    #[serde(rename = "provider_thread")]
+    pub agent_session: Option<AgentSessionId>,
     pub provider_turn: Option<String>,
     pub kind: SessionEventKind,
     pub provider_generation: Option<i64>,

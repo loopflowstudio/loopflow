@@ -8,7 +8,7 @@ use rusqlite::types::Value;
 use rusqlite::{params, params_from_iter, OptionalExtension, TransactionBehavior};
 use sha2::{Digest, Sha256};
 
-use crate::id::{AttachmentToken, ProcessLfid};
+use crate::id::{AgentSessionId, AttachmentToken, ProcessLfid};
 use crate::process::{
     AgentCaller, LfProcess, LfProcessCursor, LfProcessFilter, LfProcessOutcomeFilter,
     LfProcessPage, LfProcessWorkFilter, SessionAttachment,
@@ -407,7 +407,10 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn session_connection(&self, session: &str) -> StoreResult<Option<(String, String)>> {
+    pub fn session_connection(
+        &self,
+        session: &str,
+    ) -> StoreResult<Option<(String, AgentSessionId)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn.query_row(
             "SELECT p.endpoint,s.provider_thread FROM agent_sessions s JOIN processes p ON p.lfid=s.agent_process_lfid WHERE s.id=?1 AND p.endpoint IS NOT NULL AND s.provider_thread IS NOT NULL",
@@ -415,7 +418,7 @@ impl SqliteStore {
         ).optional()?)
     }
 
-    pub(crate) fn session_thread(&self, session: &str) -> StoreResult<Option<String>> {
+    pub(crate) fn session_thread(&self, session: &str) -> StoreResult<Option<AgentSessionId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
@@ -524,7 +527,7 @@ impl SqliteStore {
         session: &str,
         expected: &SessionAttachment,
         endpoint: &str,
-        thread: &str,
+        thread: &AgentSessionId,
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -804,7 +807,7 @@ impl SqliteStore {
         &self,
         session: &str,
         expected: &SessionAttachment,
-        resume_thread: Option<&str>,
+        resume_thread: Option<&AgentSessionId>,
         close: impl FnOnce() -> StoreResult<bool>,
     ) -> StoreResult<SessionAttachment> {
         let _dispatch = self.lock_session_attachment(session)?;

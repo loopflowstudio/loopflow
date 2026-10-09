@@ -631,13 +631,14 @@ saves. Lookup and launch freshness stay separate. October 9 Task creation readba
 settles captured saves after mapping-only import, retaining later saves and uncertain
 attempts. Creation/link attempt transport remains unfinished.
 
-Peer acquisition retains original provider age. Missing list inventory is not negative
-membership evidence; explicit archive, unresolved membership and configured-Initiative
-contradictions still block. Import allocates no Machine placement; later local placement
-uses this machine for an unplaced parent, preserving existing placements.
-Linux public work-watch passes cold creation, offline comments/edits/completion and
-reconnect with execution retained, not connected-Linear or SSH acceptance. Checkpoint
-CI skips product suites with scratch.
+Peer acquisition retains provider age. Missing inventory is not negative membership;
+archive, unresolved membership and configured-Initiative contradictions still block.
+Imports stay unplaced; local placement uses this machine for an unplaced parent,
+preserving existing placements.
+Linux peer-storage proofs cover conflicts, receipts and execution preservation;
+public work-watch covers cold creation, offline edits/comments/completion and reconnect.
+Neither proves connected-Linear, SSH or installed acceptance. Checkpoint CI skips
+product suites with scratch.
 
 Fetch/import/publication stay separate; worker-held effect locks block neither saves
 nor acquisition. Damaged journals retain unknown pending state and receipts/conflicts

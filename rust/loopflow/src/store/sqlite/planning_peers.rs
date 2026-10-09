@@ -22,29 +22,46 @@ use super::SqliteStore;
 // mutation identity and provenance. Retries never rebuild a value-only index.
 type WinningFields<'a> = BTreeMap<&'a str, (&'a str, &'a PlanningMutation)>;
 
-// One borrowed view per object keeps projection retries from scanning the whole
-// repository journal. The snapshot still owns every mutation and causal link.
+// Prepare winners and provider frontiers once, before projection retries.
+// The snapshot still owns every mutation, losing value and causal link.
 #[derive(Default)]
 struct ObjectChanges<'a> {
     winners: WinningFields<'a>,
-    history: Vec<&'a PlanningMutation>,
+    observations: Vec<&'a LinearObservation>,
 }
 
 fn changes_by_object(snapshot: &PlanningSnapshot) -> BTreeMap<&PlanningObject, ObjectChanges<'_>> {
     let mut objects: BTreeMap<_, ObjectChanges<'_>> = BTreeMap::new();
-    for change in snapshot.changes.values() {
+    for (id, change) in snapshot.winners() {
         objects
             .entry(&change.object)
             .or_default()
-            .history
-            .push(change);
-    }
-    for (id, change) in snapshot.winners() {
-        objects
-            .get_mut(&change.object)
-            .expect("every winner is a retained mutation")
             .winners
             .insert(change.field.as_str(), (id, change));
+    }
+    for change in snapshot.changes.values() {
+        let Some(observation) = &change.linear else {
+            continue;
+        };
+        let object = objects
+            .get_mut(&change.object)
+            .expect("every retained object has a winning field");
+        let mapping = match change.object.kind {
+            PlanningKind::Task => "external_issue_id",
+            PlanningKind::Project => "external_project_id",
+            // Comment membership carries provenance too, but content owns acquisition.
+            PlanningKind::Comment if change.field == "content" => {
+                object.observations.push(observation);
+                continue;
+            }
+            _ => continue,
+        };
+        if object.winners.get(mapping).is_some_and(|(_, winner)| {
+            winner.value.as_str().is_some()
+                && winner.value.as_str() == observation.body["id"].as_str()
+        }) {
+            object.observations.push(observation);
+        }
     }
     objects
 }
@@ -519,7 +536,7 @@ impl SqliteStore {
         let saved = export_in(&tx, repo, destination)?;
         let merged = saved.merge(incoming).map_err(invalid)?;
         reserve_incoming(&tx, repo, destination, incoming)?;
-        let objects = changes_by_object(&merged);
+        let mut objects = changes_by_object(&merged);
         let held = selection_conflicts(&tx, repo, destination, &merged)?;
         retain_mutations(&tx, &saved, incoming)?;
         tx.execute("UPDATE planning_peer_context SET importing=1", [])?;
@@ -541,11 +558,14 @@ impl SqliteStore {
                 PlanningKind::Comment => {}
             }
         }
-        let mut pending: Vec<_> = objects
-            .iter()
-            .map(|(&object, changes)| (object, changes))
+        let mut pending = objects
+            .iter_mut()
             .filter(|(object, _)| !held.contains_key(*object))
-            .collect();
+            .map(|(&object, changes)| {
+                changes.observations = latest_observations(changes.observations.iter().copied())?;
+                Ok((object, &*changes))
+            })
+            .collect::<StoreResult<Vec<_>>>()?;
         let mut conflicts = loop {
             let count = pending.len();
             let mut retry = Vec::new();
@@ -1042,14 +1062,7 @@ fn project_comment(
             .ok_or_else(|| invalid("comment requires a Task"))?,
     );
     let winner = winners["content"].1;
-    let observations = latest_observations(
-        changes
-            .history
-            .iter()
-            .filter(|change| change.field == "content")
-            .filter_map(|change| change.linear.as_ref()),
-    )?;
-    for observation in observations {
+    for observation in &changes.observations {
         let comment = serde_json::from_value(observation.body.clone())?;
         if !super::task_comments::ingest_task_comment(
             conn,
@@ -1120,16 +1133,8 @@ fn acquire_linear_frontier(
     let Some(provider_id) = winners[mapping].1.value.as_str() else {
         return Ok(());
     };
-    let observations = latest_observations(
-        changes
-            .history
-            .iter()
-            .filter_map(|change| change.linear.as_ref())
-            .filter(|observation| observation.body["id"].as_str() == Some(provider_id)),
-    )?;
-    let readback = observations.last().copied();
     let mut accepted = true;
-    for observation in observations {
+    for observation in &changes.observations {
         let retained: Option<(String, i64)> = conn.query_row(
             &format!("SELECT body,observed_at FROM {provider_table} WHERE repo=?1 AND provider='linear' AND id=?2"),
             params![repo, provider_id], |row| Ok((row.get(0)?, row.get(1)?)),
@@ -1219,7 +1224,11 @@ fn acquire_linear_frontier(
     // A mapping is not a creation acknowledgement. Only an accepted provider
     // body can reconcile the original attempt, including after a peer supplied
     // the mapping first. Keep this inside the object's projection savepoint.
-    if let Some(observation) = readback.filter(|_| object.kind == PlanningKind::Task) {
+    if let Some(observation) = changes
+        .observations
+        .last()
+        .filter(|_| object.kind == PlanningKind::Task)
+    {
         super::planning_export::attach_in(conn, repo, false, &observation.body)?;
     }
     conn.execute(
@@ -1555,6 +1564,7 @@ mod tests {
 
     use super::SqliteStore;
     use crate::durable::{ProjectId, TaskId};
+    use crate::engine::planning_exchange::PlanningSnapshot;
     use crate::engine::planning_git::PlanningDestination;
     use crate::id::{ProcessLfid, TraceId, WaveId};
     use crate::ops::pm::{TaskComment, TaskCommentAuthor};
@@ -1578,6 +1588,16 @@ mod tests {
         (home, store)
     }
 
+    fn export(store: &SqliteStore, repo: &str) -> PlanningSnapshot {
+        store.export_peer_planning(repo, &destination()).unwrap()
+    }
+
+    fn import(store: &SqliteStore, repo: &str, revision: &str, incoming: &PlanningSnapshot) {
+        store
+            .import_peer_planning(repo, &destination(), revision, incoming)
+            .unwrap();
+    }
+
     fn import_revision(store: &SqliteStore, repo: &str, destination: &str) -> Option<String> {
         store
             .peer_planning_status(repo)
@@ -1594,8 +1614,8 @@ mod tests {
         let project = ProjectId::new();
         let task = TaskId::new();
         let conn = store.conn.lock().unwrap();
-        conn.execute("INSERT INTO projects(id,wave_id,created_at,project_slug,project_name,project_prompt_context)
-            VALUES(?1,?2,1,'chapter','Chapter','')", params![project.as_str(),wave.id()]).unwrap();
+        conn.execute("INSERT INTO projects(id,wave_id,created_at,updated_at,project_slug,project_name,project_prompt_context)
+            VALUES(?1,?2,1,1,'chapter','Chapter','')", params![project.as_str(),wave.id()]).unwrap();
         conn.execute("INSERT INTO tasks(id,project_id,issue_identifier,issue_title,issue_description,created_at,updated_at,workspace_slug)
             VALUES(?1,?2,'FIX-1','Original','Brief',1,1,'')",params![task.as_str(),project.as_str()]).unwrap();
         super::super::project_content::capture_content(&conn, &project).unwrap();
@@ -1700,11 +1720,11 @@ mod tests {
             .unwrap();
         edit_title(&source, &task, "Captured title");
         let owner = PlanningChanges::Task(&task);
-        let export = source
+        let creation = source
             .prepare_planning_export(owner, "team", "initiative")
             .unwrap();
         assert!(source
-            .attempt_planning_export(owner, &export.input, false)
+            .attempt_planning_export(owner, &creation.input, false)
             .unwrap());
         source.planning_export_error(owner, "lost reply").unwrap();
         let captured = source.pending_task_changes(&task).unwrap();
@@ -1714,9 +1734,7 @@ mod tests {
                 "/target",
                 &destination(),
                 "created",
-                &source
-                    .export_peer_planning("/source", &destination())
-                    .unwrap(),
+                &export(&source, "/source"),
             )
             .unwrap();
         // Entity provenance is usable without fabricating complete-list evidence
@@ -1771,7 +1789,7 @@ mod tests {
             .unwrap()
             .execute(
                 "UPDATE tasks SET external_issue_id=?2 WHERE id=?1",
-                params![task.as_str(), export.id],
+                params![task.as_str(), creation.id],
             )
             .unwrap();
         source
@@ -1779,9 +1797,7 @@ mod tests {
                 "/source",
                 &destination(),
                 "mapping",
-                &target
-                    .export_peer_planning("/target", &destination())
-                    .unwrap(),
+                &export(&target, "/target"),
             )
             .unwrap();
         let receipt = || {
@@ -1799,7 +1815,7 @@ mod tests {
         );
 
         let mut item = row.snapshot.items[0].clone();
-        item.id.clone_from(&export.id);
+        item.id.clone_from(&creation.id);
         item.identifier = "NEW-1".into();
         item.name = "Captured title".into();
         item.description = "Brief".into();
@@ -1807,12 +1823,8 @@ mod tests {
         row.snapshot.items = vec![item];
         row.synced_at += 1;
         target.put_pm_snapshot(&row).unwrap();
-        let observed = target
-            .export_peer_planning("/target", &destination())
-            .unwrap();
-        source
-            .import_peer_planning("/source", &destination(), "observed", &observed)
-            .unwrap();
+        let observed = export(&target, "/target");
+        import(&source, "/source", "observed", &observed);
         assert_eq!(receipt(), (uncertain.0, true, None));
         let conn = source.conn.lock().unwrap();
         let acknowledged: bool = conn
@@ -1845,9 +1857,7 @@ mod tests {
         assert_eq!(source.task_state(&task).unwrap(), state);
         assert_eq!(source.recent_task_events(&task, 100).unwrap(), events);
         let revisions = source.revisions().unwrap();
-        source
-            .import_peer_planning("/source", &destination(), "observed", &observed)
-            .unwrap();
+        import(&source, "/source", "observed", &observed);
         assert_eq!(source.revisions().unwrap(), revisions);
     }
 
@@ -1863,12 +1873,8 @@ mod tests {
             };
             let original = source.task(&task).unwrap().unwrap();
             let project = &original.project_id;
-            let base = source
-                .export_peer_planning("/source", &destination())
-                .unwrap();
-            target
-                .import_peer_planning("/target", &destination(), "base", &base)
-                .unwrap();
+            let base = export(&source, "/source");
+            import(&target, "/target", "base", &base);
             preserve_execution(&target, &original.wave_id, &task);
             let execution = target.revisions().unwrap();
             let task_before = target.task(&task).unwrap();
@@ -1889,9 +1895,7 @@ mod tests {
                 target: crate::work::wave::metrics::MetricTarget::AtLeast { value: 1.0 },
             }];
             target.update_project_content(project, &right).unwrap();
-            let incoming = source
-                .export_peer_planning("/source", &destination())
-                .unwrap();
+            let incoming = export(&source, "/source");
             assert!(incoming
                 .changes
                 .values()
@@ -1902,9 +1906,7 @@ mod tests {
                 .unwrap()
                 .0
                 .to_owned();
-            target
-                .import_peer_planning("/target", &destination(), "independent", &incoming)
-                .unwrap();
+            import(&target, "/target", "independent", &incoming);
             right.krs = left.krs.clone();
             let merged = target.planning_project(project).unwrap();
             assert_eq!(merged.krs, right.krs);
@@ -1936,16 +1938,10 @@ mod tests {
                     [&receipt.id],
                 )
                 .unwrap();
-            let union = target
-                .export_peer_planning("/target", &destination())
-                .unwrap();
-            source
-                .import_peer_planning("/source", &destination(), "union", &union)
-                .unwrap();
+            let union = export(&target, "/target");
+            import(&source, "/source", "union", &union);
             assert_eq!(source.planning_project(project).unwrap(), merged);
-            target
-                .import_peer_planning("/target", &destination(), "independent", &incoming)
-                .unwrap();
+            import(&target, "/target", "independent", &incoming);
             let receipt_state: (bool,bool,Option<String>,Option<String>) = target.conn.lock().unwrap().query_row(
                 "SELECT attempted,acknowledged,error,conflict_json FROM project_changes WHERE id=?1", [&receipt.id],
                 |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).unwrap();
@@ -1953,12 +1949,7 @@ mod tests {
                 receipt_state,
                 (true, false, Some("lost reply".into()), None)
             );
-            assert_eq!(
-                target
-                    .export_peer_planning("/target", &destination())
-                    .unwrap(),
-                union
-            );
+            assert_eq!(export(&target, "/target"), union);
 
             // Concurrent edits of the same semantic field retain both values.
             left = right.clone();
@@ -1966,12 +1957,8 @@ mod tests {
             right.krs[0].text = "Target's later KR".into();
             source.update_project_content(project, &left).unwrap();
             target.update_project_content(project, &right).unwrap();
-            let a = source
-                .export_peer_planning("/source", &destination())
-                .unwrap();
-            let b = target
-                .export_peer_planning("/target", &destination())
-                .unwrap();
+            let a = export(&source, "/source");
+            let b = export(&target, "/target");
             let combined = a.merge(&b).unwrap();
             let winner = combined
                 .winners()
@@ -1980,12 +1967,8 @@ mod tests {
                 .1
                 .value
                 .clone();
-            target
-                .import_peer_planning("/target", &destination(), "concurrent", &a)
-                .unwrap();
-            source
-                .import_peer_planning("/source", &destination(), "concurrent", &b)
-                .unwrap();
+            import(&target, "/target", "concurrent", &a);
+            import(&source, "/source", "concurrent", &b);
             for (store, repo) in [(&source, "/source"), (&target, "/target")] {
                 assert_eq!(json!(store.planning_project(project).unwrap().krs), winner);
                 let journal = store.export_peer_planning(repo, &destination()).unwrap();
@@ -2015,12 +1998,8 @@ mod tests {
         let (_target_home, target) = store();
         let (wave, row, task) = linear_seed(&source);
         let project = source.task(&task).unwrap().unwrap().project_id;
-        let base = source
-            .export_peer_planning("/source", &destination())
-            .unwrap();
-        target
-            .import_peer_planning("/target", &destination(), "base", &base)
-            .unwrap();
+        let base = export(&source, "/source");
+        import(&target, "/target", "base", &base);
         let mut content =
             super::super::project_content::read_content(&target.conn.lock().unwrap(), &project)
                 .unwrap();
@@ -2053,18 +2032,14 @@ mod tests {
         source
             .put_pm_project(&wave, "linear", "initiative", &observed, 70)
             .unwrap();
-        let incoming = source
-            .export_peer_planning("/source", &destination())
-            .unwrap();
+        let incoming = export(&source, "/source");
         let winner = incoming
             .winners()
             .find(|(_, c)| c.object.id == project.as_str() && c.field == "krs")
             .unwrap()
             .1;
         assert_eq!(winner.linear.as_ref().unwrap().body, json!(observed));
-        target
-            .import_peer_planning("/target", &destination(), "observed", &incoming)
-            .unwrap();
+        import(&target, "/target", "observed", &incoming);
         let actual = target.planning_project(&project).unwrap();
         assert_eq!(actual.krs, observed.krs);
         assert_eq!(actual.workflow, observed.workflow);
@@ -2083,18 +2058,9 @@ mod tests {
             .unwrap()
             .iter()
             .all(|c| c.field != "krs"));
-        let before = target
-            .export_peer_planning("/target", &destination())
-            .unwrap();
-        target
-            .import_peer_planning("/target", &destination(), "observed", &incoming)
-            .unwrap();
-        assert_eq!(
-            target
-                .export_peer_planning("/target", &destination())
-                .unwrap(),
-            before
-        );
+        let before = export(&target, "/target");
+        import(&target, "/target", "observed", &incoming);
+        assert_eq!(export(&target, "/target"), before);
     }
 
     #[test]
@@ -2103,9 +2069,7 @@ mod tests {
         let (_target_home, target) = store();
         let task = seed(&source);
         let project = source.task(&task).unwrap().unwrap().project_id;
-        let base = source
-            .export_peer_planning("/source", &destination())
-            .unwrap();
+        let base = export(&source, "/source");
         for (field, value) in [
             (
                 "krs",
@@ -2132,11 +2096,7 @@ mod tests {
                 .is_err());
             assert!(target.task(&task).unwrap().is_none());
             assert!(target.project(&project).unwrap().is_none());
-            assert!(target
-                .export_peer_planning("/target", &destination())
-                .unwrap()
-                .changes
-                .is_empty());
+            assert!(export(&target, "/target").changes.is_empty());
             assert_eq!(import_revision(&target, "/target", &destination()), None);
         }
     }
@@ -2147,9 +2107,7 @@ mod tests {
         let task = seed(&store);
         let project = store.task(&task).unwrap().unwrap().project_id;
         let before = store.project(&project).unwrap();
-        let journal = store
-            .export_peer_planning("/source", &destination())
-            .unwrap();
+        let journal = export(&store, "/source");
         store
             .conn
             .lock()
@@ -2170,12 +2128,7 @@ mod tests {
         };
         assert!(store.update_project_content(&project, &content).is_err());
         assert_eq!(store.project(&project).unwrap(), before);
-        assert_eq!(
-            store
-                .export_peer_planning("/source", &destination())
-                .unwrap(),
-            journal
-        );
+        assert_eq!(export(&store, "/source"), journal);
         assert!(store.pending_project_changes(&project).unwrap().is_empty());
     }
 
@@ -2200,12 +2153,8 @@ mod tests {
         let (_source_home, source) = store();
         let (_target_home, target) = store();
         let (wave, _, task) = linear_seed(&source);
-        let base = source
-            .export_peer_planning("/source", &destination())
-            .unwrap();
-        target
-            .import_peer_planning("/target", &destination(), "base", &base)
-            .unwrap();
+        let base = export(&source, "/source");
+        import(&target, "/target", "base", &base);
         preserve_execution(&target, &wave, &task);
         let execution = target.revisions().unwrap();
         let workflow = target.workflow(&task).unwrap();
@@ -2220,12 +2169,8 @@ mod tests {
             created_at: Some("2026-10-08T10:00:00Z".into()),
         };
         source.append_task_comment(&task, &comment).unwrap();
-        let authored = source
-            .export_peer_planning("/source", &destination())
-            .unwrap();
-        target
-            .import_peer_planning("/target", &destination(), "authored", &authored)
-            .unwrap();
+        let authored = export(&source, "/source");
+        import(&target, "/target", "authored", &authored);
         assert_eq!(
             target.pending_task_comments(&task).unwrap(),
             vec![comment.clone()]
@@ -2236,9 +2181,7 @@ mod tests {
         let uncertain = comment_receipt(&target, &comment.id);
         assert!(!uncertain.1);
         assert_eq!(uncertain.2.as_deref(), Some("lost response"));
-        target
-            .import_peer_planning("/target", &destination(), "authored", &authored)
-            .unwrap();
+        import(&target, "/target", "authored", &authored);
         assert_eq!(comment_receipt(&target, &comment.id), uncertain);
         let mut observed = crate::pm::IssueComment {
             id: comment.id.clone(),
@@ -2249,9 +2192,7 @@ mod tests {
             revision: Some("2026-10-08T10:01:00Z".into()),
         };
         acquire_comment(&source, &task, &observed);
-        let confirmed = source
-            .export_peer_planning("/source", &destination())
-            .unwrap();
+        let confirmed = export(&source, "/source");
         assert!(confirmed
             .changes
             .values()
@@ -2261,9 +2202,7 @@ mod tests {
                     .as_ref()
                     .is_some_and(|fact| fact.body == serde_json::to_value(&observed).unwrap()
                         && fact.observed_at == 42)));
-        target
-            .import_peer_planning("/target", &destination(), "confirmed", &confirmed)
-            .unwrap();
+        import(&target, "/target", "confirmed", &confirmed);
         assert!(target.pending_task_comments(&task).unwrap().is_empty());
         let receipt = comment_receipt(&target, &comment.id);
         assert!(receipt.1);
@@ -2273,26 +2212,15 @@ mod tests {
             comment
         );
         let revisions = target.revisions().unwrap();
-        target
-            .import_peer_planning("/target", &destination(), "confirmed", &confirmed)
-            .unwrap();
+        import(&target, "/target", "confirmed", &confirmed);
         assert_eq!(target.revisions().unwrap(), revisions);
-        assert_eq!(
-            target
-                .export_peer_planning("/target", &destination())
-                .unwrap(),
-            confirmed
-        );
+        assert_eq!(export(&target, "/target"), confirmed);
         observed.body = "Provider correction".into();
         observed.author_name = Some("Quinn".into());
         observed.revision = Some("2026-10-08T10:02:00Z".into());
         acquire_comment(&source, &task, &observed);
-        let amended = source
-            .export_peer_planning("/source", &destination())
-            .unwrap();
-        target
-            .import_peer_planning("/target", &destination(), "amended", &amended)
-            .unwrap();
+        let amended = export(&source, "/source");
+        import(&target, "/target", "amended", &amended);
         assert_eq!(
             target.task_comments(&task).unwrap().comments,
             vec![TaskComment::from(&observed)]
@@ -2302,12 +2230,7 @@ mod tests {
             .unwrap();
         assert_eq!(comment_receipt(&target, &comment.id), receipt);
         assert!(target.pending_task_comments(&task).unwrap().is_empty());
-        assert_eq!(
-            target
-                .export_peer_planning("/target", &destination())
-                .unwrap(),
-            amended
-        );
+        assert_eq!(export(&target, "/target"), amended);
         assert_eq!(target.workflow(&task).unwrap(), workflow);
         assert_eq!(target.task(&task).unwrap(), task_before);
         assert_eq!(target.task_steers(&task).unwrap(), steers);
@@ -2332,12 +2255,8 @@ mod tests {
             created_at: Some("2026-10-08T10:00:00Z".into()),
         };
         source.append_task_comment(&task, &comment).unwrap();
-        let authored = source
-            .export_peer_planning("/source", &destination())
-            .unwrap();
-        target
-            .import_peer_planning("/target", &destination(), "authored", &authored)
-            .unwrap();
+        let authored = export(&source, "/source");
+        import(&target, "/target", "authored", &authored);
         target
             .record_comment_delivery(&comment.id, Some("lost response"))
             .unwrap();
@@ -2350,12 +2269,8 @@ mod tests {
             revision: Some("2026-10-08T10:01:00Z".into()),
         };
         acquire_comment(&source, &task, &observed);
-        let provider = source
-            .export_peer_planning("/source", &destination())
-            .unwrap();
-        target
-            .import_peer_planning("/target", &destination(), "provider", &provider)
-            .unwrap();
+        let provider = export(&source, "/source");
+        import(&target, "/target", "provider", &provider);
         let receipt = comment_receipt(&target, &comment.id);
         assert!(!receipt.1);
         assert_eq!(
@@ -2374,9 +2289,7 @@ mod tests {
         // A separately accepted contradictory body at the same provider revision
         // stays journal evidence; it cannot overwrite the thread or its receipt.
         let (_other_home, other) = store();
-        other
-            .import_peer_planning("/source", &destination(), "authored", &authored)
-            .unwrap();
+        import(&other, "/source", "authored", &authored);
         let contradictory = crate::pm::IssueComment {
             body: "Different same revision".into(),
             ..observed.clone()
@@ -2391,12 +2304,8 @@ mod tests {
                 std::slice::from_ref(independent.id()),
             )
             .unwrap();
-        let incoming = other
-            .export_peer_planning("/source", &destination())
-            .unwrap();
-        target
-            .import_peer_planning("/target", &destination(), "contradiction", &incoming)
-            .unwrap();
+        let incoming = export(&other, "/source");
+        import(&target, "/target", "contradiction", &incoming);
         assert!(target.get_wave(independent.id()).unwrap().is_some());
         assert_eq!(
             target.task_comments(&task).unwrap().comments,
@@ -2409,18 +2318,14 @@ mod tests {
             .iter()
             .any(|conflict| conflict.object.id == comment.id));
         assert_eq!(
-            target
-                .export_peer_planning("/target", &destination())
-                .unwrap(),
+            export(&target, "/target"),
             provider.merge(&incoming).unwrap()
         );
         assert_eq!(
             import_revision(&target, "/target", &destination()).as_deref(),
             Some("contradiction")
         );
-        target
-            .import_peer_planning("/target", &destination(), "contradiction", &incoming)
-            .unwrap();
+        import(&target, "/target", "contradiction", &incoming);
         assert_eq!(comment_receipt(&target, &comment.id), receipt);
     }
 
@@ -2449,12 +2354,8 @@ mod tests {
             ..comment.clone()
         };
         acquire_comment(&source, &task, &independent);
-        let incoming = source
-            .export_peer_planning("/source", &destination())
-            .unwrap();
-        target
-            .import_peer_planning("/target", &destination(), "provider", &incoming)
-            .unwrap();
+        let incoming = export(&source, "/source");
+        import(&target, "/target", "provider", &incoming);
         let imported = target.task(&task).unwrap().unwrap();
         assert!(imported.worktree.is_none());
         assert!(imported.workspace_slug.is_empty());
@@ -2473,12 +2374,7 @@ mod tests {
             })
             .unwrap();
         assert_eq!(count, 0);
-        assert_eq!(
-            target
-                .export_peer_planning("/target", &destination())
-                .unwrap(),
-            incoming
-        );
+        assert_eq!(export(&target, "/target"), incoming);
         // A versioned edit supersedes the unversioned body without replaying it
         // as a contradictory acquisition on the next import.
         let edited = crate::pm::IssueComment {
@@ -2487,21 +2383,15 @@ mod tests {
             ..comment.clone()
         };
         acquire_comment(&source, &task, &edited);
-        let incoming = source
-            .export_peer_planning("/source", &destination())
-            .unwrap();
-        target
-            .import_peer_planning("/target", &destination(), "edited", &incoming)
-            .unwrap();
+        let incoming = export(&source, "/source");
+        import(&target, "/target", "edited", &incoming);
         assert_eq!(
             target.task_comments(&task).unwrap().comments,
             vec![TaskComment::from(&edited), TaskComment::from(&independent)]
         );
         assert!(target.pending_task_comments(&task).unwrap().is_empty());
         let revisions = target.revisions().unwrap();
-        target
-            .import_peer_planning("/target", &destination(), "edited", &incoming)
-            .unwrap();
+        import(&target, "/target", "edited", &incoming);
         assert_eq!(target.revisions().unwrap(), revisions);
         let mut malformed = incoming.clone();
         let fact = malformed
@@ -2528,22 +2418,14 @@ mod tests {
         let (_source_home, source) = store();
         let (_target_home, target) = store();
         let (_, row, task) = linear_seed(&source);
-        let base = source
-            .export_peer_planning("/source", &destination())
-            .unwrap();
-        target
-            .import_peer_planning("/target", &destination(), "base", &base)
-            .unwrap();
+        let base = export(&source, "/source");
+        import(&target, "/target", "base", &base);
         let workflow = target.workflow(&task).unwrap();
         let state = target.task_state(&task).unwrap();
         let events = target.recent_task_events(&task, 100).unwrap();
         complete(&source, &task);
-        let completed = source
-            .export_peer_planning("/source", &destination())
-            .unwrap();
-        target
-            .import_peer_planning("/target", &destination(), "completed", &completed)
-            .unwrap();
+        let completed = export(&source, "/source");
+        import(&target, "/target", "completed", &completed);
         assert_eq!(
             target
                 .planning_task(&task)
@@ -2585,9 +2467,7 @@ mod tests {
         assert!(target.attempt_task_state(&delivery).unwrap());
         target.task_state_error(&delivery, "lost reply").unwrap();
         let revision = target.revisions().unwrap();
-        target
-            .import_peer_planning("/target", &destination(), "completed", &completed)
-            .unwrap();
+        import(&target, "/target", "completed", &completed);
         assert_eq!(target.revisions().unwrap(), revision);
         assert_eq!(
             target.pending_task_state(&task).unwrap().unwrap().id,
@@ -2601,12 +2481,8 @@ mod tests {
             "unstarted",
         )
         .unwrap();
-        let reopened = source
-            .export_peer_planning("/source", &destination())
-            .unwrap();
-        target
-            .import_peer_planning("/target", &destination(), "reopened", &reopened)
-            .unwrap();
+        let reopened = export(&source, "/source");
+        import(&target, "/target", "reopened", &reopened);
         let later = target.pending_task_state(&task).unwrap().unwrap();
         assert_ne!(later.id, delivery.id);
         assert_eq!(later.target, "unstarted");
@@ -2638,12 +2514,8 @@ mod tests {
             "canceled",
         )
         .unwrap();
-        let canceled = source
-            .export_peer_planning("/source", &destination())
-            .unwrap();
-        target
-            .import_peer_planning("/target", &destination(), "canceled", &canceled)
-            .unwrap();
+        let canceled = export(&source, "/source");
+        import(&target, "/target", "canceled", &canceled);
         assert_eq!(
             target.pending_task_state(&task).unwrap().unwrap().target,
             "canceled"
@@ -2658,12 +2530,8 @@ mod tests {
         let (_source_home, source) = store();
         let (_target_home, target) = store();
         let (_, mut row, task) = linear_seed(&source);
-        let base = source
-            .export_peer_planning("/source", &destination())
-            .unwrap();
-        target
-            .import_peer_planning("/target", &destination(), "base", &base)
-            .unwrap();
+        let base = export(&source, "/source");
+        import(&target, "/target", "base", &base);
         complete(&target, &task);
         let delivery = target.pending_task_state(&task).unwrap().unwrap();
         let workflow = target.workflow(&task).unwrap();
@@ -2672,12 +2540,8 @@ mod tests {
         row.snapshot.items[0].revision = Some("2026-10-08T11:00:00Z".into());
         row.synced_at += 1;
         source.put_pm_snapshot(&row).unwrap();
-        let observed = source
-            .export_peer_planning("/source", &destination())
-            .unwrap();
-        target
-            .import_peer_planning("/target", &destination(), "observed", &observed)
-            .unwrap();
+        let observed = export(&source, "/source");
+        import(&target, "/target", "observed", &observed);
         assert!(target.pending_task_state(&task).unwrap().is_none());
         let receipt: (String, bool, bool, String) = target.conn.lock().unwrap().query_row(
             "SELECT target,attempted,settled,conflict_json FROM task_state_deliveries WHERE id=?1",
@@ -2704,9 +2568,7 @@ mod tests {
         assert_eq!(target.workflow(&task).unwrap(), workflow);
         assert_eq!(target.task_state(&task).unwrap(), state);
         let revision = target.revisions().unwrap();
-        target
-            .import_peer_planning("/target", &destination(), "observed", &observed)
-            .unwrap();
+        import(&target, "/target", "observed", &observed);
         assert_eq!(target.revisions().unwrap(), revision);
     }
 
@@ -2724,12 +2586,8 @@ mod tests {
                 [task.as_str()],
             )
             .unwrap();
-        let snapshot = source
-            .export_peer_planning("/source", &destination())
-            .unwrap();
-        target
-            .import_peer_planning("/target", &destination(), "started", &snapshot)
-            .unwrap();
+        let snapshot = export(&source, "/source");
+        import(&target, "/target", "started", &snapshot);
         assert_eq!(
             target
                 .planning_task(&task)
@@ -2763,16 +2621,10 @@ mod tests {
         let (_source_home, source) = store();
         let (_target_home, target) = store();
         let (_, _, task) = linear_seed(&source);
-        let base = source
-            .export_peer_planning("/source", &destination())
-            .unwrap();
-        target
-            .import_peer_planning("/target", &destination(), "base", &base)
-            .unwrap();
+        let base = export(&source, "/source");
+        import(&target, "/target", "base", &base);
         complete(&source, &task);
-        let completed = source
-            .export_peer_planning("/source", &destination())
-            .unwrap();
+        let completed = export(&source, "/source");
         let before = target.planning_task(&task).unwrap();
         target
             .conn
@@ -2791,12 +2643,7 @@ mod tests {
             import_revision(&target, "/target", &destination()).as_deref(),
             Some("base")
         );
-        assert_eq!(
-            target
-                .export_peer_planning("/target", &destination())
-                .unwrap(),
-            base
-        );
+        assert_eq!(export(&target, "/target"), base);
         assert!(target.pending_task_state(&task).unwrap().is_none());
         target
             .conn
@@ -2804,9 +2651,7 @@ mod tests {
             .unwrap()
             .execute_batch("DROP TRIGGER fail_state_receipt")
             .unwrap();
-        target
-            .import_peer_planning("/target", &destination(), "completed", &completed)
-            .unwrap();
+        import(&target, "/target", "completed", &completed);
         assert_eq!(
             target.pending_task_state(&task).unwrap().unwrap().target,
             "completed"
@@ -2818,24 +2663,16 @@ mod tests {
         let (_source_home, source) = store();
         let (_target_home, target) = store();
         let (_, row, task) = linear_seed(&source);
-        let base = source
-            .export_peer_planning("/source", &destination())
-            .unwrap();
-        target
-            .import_peer_planning("/target", &destination(), "base", &base)
-            .unwrap();
+        let base = export(&source, "/source");
+        import(&target, "/target", "base", &base);
         assert!(target.pending_task_changes(&task).unwrap().is_empty());
         edit_title(&source, &task, "Peer title");
         let project = source.task(&task).unwrap().unwrap().project_id;
         source
             .edit_project(&project, Some("Peer project"), Some("Peer summary"))
             .unwrap();
-        let incoming = source
-            .export_peer_planning("/source", &destination())
-            .unwrap();
-        target
-            .import_peer_planning("/target", &destination(), "edited", &incoming)
-            .unwrap();
+        let incoming = export(&source, "/source");
+        import(&target, "/target", "edited", &incoming);
         let receipts = target.pending_task_changes(&task).unwrap();
         let title = receipts.iter().find(|c| c.field == "name").unwrap();
         assert_eq!(title.value, "Peer title");
@@ -2851,9 +2688,7 @@ mod tests {
             .iter()
             .any(|c| c.field == "summary" && c.value == "Peer summary"));
         let revisions = target.revisions().unwrap();
-        target
-            .import_peer_planning("/target", &destination(), "edited", &incoming)
-            .unwrap();
+        import(&target, "/target", "edited", &incoming);
         assert_eq!(target.pending_task_changes(&task).unwrap(), receipts);
         assert_eq!(
             target.pending_project_changes(&project).unwrap(),
@@ -2863,9 +2698,7 @@ mod tests {
         // Repeating an older acquisition cannot erase a save made after import.
         edit_title(&target, &task, "Later local save");
         let later = target.pending_task_changes(&task).unwrap();
-        target
-            .import_peer_planning("/target", &destination(), "edited", &incoming)
-            .unwrap();
+        import(&target, "/target", "edited", &incoming);
         assert_eq!(
             target.task(&task).unwrap().unwrap().plan.title,
             "Later local save"
@@ -2883,9 +2716,7 @@ mod tests {
                 "/target",
                 &destination(),
                 "base",
-                &source
-                    .export_peer_planning("/source", &destination())
-                    .unwrap(),
+                &export(&source, "/source"),
             )
             .unwrap();
         edit_title(&target, &task, "Uncertain local title");
@@ -2919,12 +2750,8 @@ mod tests {
                 Some((&wave, "initiative")),
             )
             .unwrap();
-        let incoming = source
-            .export_peer_planning("/source", &destination())
-            .unwrap();
-        target
-            .import_peer_planning("/target", &destination(), "linear", &incoming)
-            .unwrap();
+        let incoming = export(&source, "/source");
+        import(&target, "/target", "linear", &incoming);
         assert_eq!(
             target.task(&task).unwrap().unwrap().plan.title,
             "Linear title"
@@ -2954,9 +2781,7 @@ mod tests {
             .any(|c| c.id == receipt.id
                 && c.state == crate::planning::PlanningSyncState::AdoptedLinear));
         let revision = target.revisions().unwrap();
-        target
-            .import_peer_planning("/target", &destination(), "linear", &incoming)
-            .unwrap();
+        import(&target, "/target", "linear", &incoming);
         assert_eq!(target.revisions().unwrap(), revision);
     }
 
@@ -2970,25 +2795,11 @@ mod tests {
                 "/target",
                 &destination(),
                 "base",
-                &source
-                    .export_peer_planning("/source", &destination())
-                    .unwrap(),
+                &export(&source, "/source"),
             )
             .unwrap();
         // Execution remains a local fact throughout provider/peer reconciliation.
-        target
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "UPDATE tasks SET worktree='/retained/work',started_at=7 WHERE id=?1",
-                [task.as_str()],
-            )
-            .unwrap();
-        target.conn.lock().unwrap().execute(
-            "INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id)
-             VALUES('retained','Retained','human',1,0,'/retained/work',?1,?2)", params![task.as_str(),wave],
-        ).unwrap();
+        preserve_execution(&target, &wave, &task);
         edit_title(&target, &task, "Uncertain local title");
         let receipt = target
             .pending_task_changes(&task)
@@ -3022,16 +2833,10 @@ mod tests {
         source
             .put_pm_task("/source", "linear", &record, Some((&wave, "initiative")))
             .unwrap();
-        let incoming = source
-            .export_peer_planning("/source", &destination())
-            .unwrap();
+        let incoming = export(&source, "/source");
         let execution_before = target.revisions().unwrap();
-        target
-            .import_peer_planning("/target", &destination(), "newer", &incoming)
-            .unwrap();
-        let before_reads = target
-            .export_peer_planning("/target", &destination())
-            .unwrap();
+        import(&target, "/target", "newer", &incoming);
+        let before_reads = export(&target, "/target");
         let retained = target.task(&task).unwrap().unwrap();
         assert_eq!(retained.plan.title, "Linear winner");
         assert_eq!(
@@ -3081,12 +2886,7 @@ mod tests {
                 )
             );
         }
-        assert_eq!(
-            target
-                .export_peer_planning("/target", &destination())
-                .unwrap(),
-            before_reads
-        );
+        assert_eq!(export(&target, "/target"), before_reads);
         assert!(target.pending_task_changes(&task).unwrap().is_empty());
         // A same-revision contradiction rejects atomically, retaining frontier,
         // receipt history and the existing imported journal.
@@ -3094,12 +2894,7 @@ mod tests {
         assert!(target
             .put_pm_task("/target", "linear", &record, Some((&wave, "initiative")))
             .is_err());
-        assert_eq!(
-            target
-                .export_peer_planning("/target", &destination())
-                .unwrap(),
-            before_reads
-        );
+        assert_eq!(export(&target, "/target"), before_reads);
     }
 
     #[test]
@@ -3116,12 +2911,8 @@ mod tests {
         let (_source_home, source) = store();
         let (_target_home, target) = store();
         let (wave, row, task) = linear_seed(&source);
-        let base = source
-            .export_peer_planning("/source", &destination())
-            .unwrap();
-        target
-            .import_peer_planning("/target", &destination(), "base", &base)
-            .unwrap();
+        let base = export(&source, "/source");
+        import(&target, "/target", "base", &base);
         let project = target.task(&task).unwrap().unwrap().project_id;
         preserve_execution(&target, &wave, &task);
 
@@ -3181,9 +2972,7 @@ mod tests {
         let retained_project = target.project(&project).unwrap().unwrap();
         let workflow = target.workflow(&task).unwrap();
         let execution = target.revisions().unwrap();
-        let journal = target
-            .export_peer_planning("/target", &destination())
-            .unwrap();
+        let journal = export(&target, "/target");
         let (table, provider_id, rejected_id) = if project_conflict {
             (
                 "pm_projects",
@@ -3209,15 +2998,11 @@ mod tests {
                 std::slice::from_ref(independent.id()),
             )
             .unwrap();
-        let incoming = source
-            .export_peer_planning("/source", &destination())
-            .unwrap();
+        let incoming = export(&source, "/source");
         incoming.validate().unwrap();
         let retained = journal.merge(&incoming).unwrap();
 
-        target
-            .import_peer_planning("/target", &destination(), "conflicting", &incoming)
-            .unwrap();
+        import(&target, "/target", "conflicting", &incoming);
         assert!(target.get_wave(independent.id()).unwrap().is_some());
         assert_eq!(frontier(), accepted);
         assert_eq!(target.task(&task).unwrap().unwrap(), retained_task);
@@ -3242,12 +3027,7 @@ mod tests {
             (after.sessions, after.processes, after.flows),
             (execution.sessions, execution.processes, execution.flows)
         );
-        assert_eq!(
-            target
-                .export_peer_planning("/target", &destination())
-                .unwrap(),
-            retained
-        );
+        assert_eq!(export(&target, "/target"), retained);
         assert_eq!(
             import_revision(&target, "/target", &destination()).as_deref(),
             Some("conflicting")
@@ -3258,9 +3038,7 @@ mod tests {
         assert!(conflicts[0].reason.contains("unordered or conflicting"));
         // Reading back a retained conflict must not append mutations, change
         // its reason or manufacture a fresh acquisition.
-        target
-            .import_peer_planning("/target", &destination(), "conflicting", &incoming)
-            .unwrap();
+        import(&target, "/target", "conflicting", &incoming);
         assert_eq!(target.revisions().unwrap(), after);
         assert_eq!(
             target.peer_projection_conflicts("/target").unwrap(),
@@ -3273,18 +3051,12 @@ mod tests {
         let (_source_home, source) = store();
         let (_target_home, target) = store();
         let (wave, row, task) = linear_seed(&source);
-        let base = source
-            .export_peer_planning("/source", &destination())
-            .unwrap();
-        target
-            .import_peer_planning("/target", &destination(), "base", &base)
-            .unwrap();
+        let base = export(&source, "/source");
+        import(&target, "/target", "base", &base);
         preserve_execution(&target, &wave, &task);
         edit_title(&target, &task, "Retained local title");
         let receipts = target.pending_task_changes(&task).unwrap();
-        let journal = target
-            .export_peer_planning("/target", &destination())
-            .unwrap();
+        let journal = export(&target, "/target");
         let before = target.revisions().unwrap();
         let retained_task = target.task(&task).unwrap().unwrap();
         let workflow = target.workflow(&task).unwrap();
@@ -3312,9 +3084,7 @@ mod tests {
                 std::slice::from_ref(independent.id()),
             )
             .unwrap();
-        let incoming = source
-            .export_peer_planning("/source", &destination())
-            .unwrap();
+        let incoming = export(&source, "/source");
         for defect in ["revision", "execution", "value"] {
             let mut malformed = incoming.clone();
             let change = malformed
@@ -3342,12 +3112,7 @@ mod tests {
             assert_eq!(target.task(&task).unwrap().unwrap(), retained_task);
             assert_eq!(target.workflow(&task).unwrap(), workflow);
             assert_eq!(target.pending_task_changes(&task).unwrap(), receipts);
-            assert_eq!(
-                target
-                    .export_peer_planning("/target", &destination())
-                    .unwrap(),
-                journal
-            );
+            assert_eq!(export(&target, "/target"), journal);
             assert_eq!(
                 import_revision(&target, "/target", &destination()).as_deref(),
                 Some("base")
@@ -3367,12 +3132,8 @@ mod tests {
             let (_source_home, source) = store();
             let (_target_home, target) = store();
             let (wave, row, task) = linear_seed(&source);
-            let base = source
-                .export_peer_planning("/source", &destination())
-                .unwrap();
-            target
-                .import_peer_planning("/target", &destination(), "base", &base)
-                .unwrap();
+            let base = export(&source, "/source");
+            import(&target, "/target", "base", &base);
             let project = target.task(&task).unwrap().unwrap().project_id;
             preserve_execution(&target, &wave, &task);
             if archived {
@@ -3392,9 +3153,7 @@ mod tests {
             let retained_project = target.project(&project).unwrap().unwrap();
             let workflow = target.workflow(&task).unwrap();
             let execution = target.revisions().unwrap();
-            let journal = target
-                .export_peer_planning("/target", &destination())
-                .unwrap();
+            let journal = export(&target, "/target");
             // An unrelated selected Wave must still enter the same import.
             let independent = Wave::new(WaveId::new(), "independent".into(), "/source".into());
             source.create_wave(&independent).unwrap();
@@ -3438,12 +3197,8 @@ mod tests {
                     )
                     .unwrap();
             }
-            let incoming = source
-                .export_peer_planning("/source", &destination())
-                .unwrap();
-            target
-                .import_peer_planning("/target", &destination(), "rejected", &incoming)
-                .unwrap();
+            let incoming = export(&source, "/source");
+            import(&target, "/target", "rejected", &incoming);
             assert!(target.get_wave(independent.id()).unwrap().is_some());
             assert_eq!(target.task(&task).unwrap().unwrap(), retained_task);
             assert_eq!(target.project(&project).unwrap().unwrap(), retained_project);
@@ -3454,9 +3209,7 @@ mod tests {
                 (execution.sessions, execution.processes, execution.flows)
             );
             assert_eq!(
-                target
-                    .export_peer_planning("/target", &destination())
-                    .unwrap(),
+                export(&target, "/target"),
                 journal.merge(&incoming).unwrap()
             );
             assert_eq!(
@@ -3472,9 +3225,7 @@ mod tests {
             assert!(conflicts
                 .iter()
                 .any(|conflict| conflict.object.id == rejected_id));
-            target
-                .import_peer_planning("/target", &destination(), "rejected", &incoming)
-                .unwrap();
+            import(&target, "/target", "rejected", &incoming);
             assert_eq!(target.revisions().unwrap(), after);
             assert_eq!(
                 target.peer_projection_conflicts("/target").unwrap(),
@@ -3491,12 +3242,8 @@ mod tests {
             let (_source_home, source) = store();
             let (_target_home, target) = store();
             let (wave, row, task) = linear_seed(&source);
-            let base = source
-                .export_peer_planning("/source", &destination())
-                .unwrap();
-            target
-                .import_peer_planning("/target", &destination(), "base", &base)
-                .unwrap();
+            let base = export(&source, "/source");
+            import(&target, "/target", "base", &base);
             let project = target.task(&task).unwrap().unwrap().project_id;
             preserve_execution(&target, &wave, &task);
             let retained = target.project(&project).unwrap().unwrap();
@@ -3531,12 +3278,8 @@ mod tests {
                     std::slice::from_ref(independent.id()),
                 )
                 .unwrap();
-            let incoming = source
-                .export_peer_planning("/source", &destination())
-                .unwrap();
-            target
-                .import_peer_planning("/target", &destination(), "disputed", &incoming)
-                .unwrap();
+            let incoming = export(&source, "/source");
+            import(&target, "/target", "disputed", &incoming);
             assert!(target.get_wave(independent.id()).unwrap().is_some());
             assert_eq!(target.project(&project).unwrap().unwrap(), retained);
             assert_eq!(target.task(&task).unwrap().unwrap(), retained_task);
@@ -3557,20 +3300,13 @@ mod tests {
                 row.snapshot.projects[0]
             );
             drop(conn);
-            assert_eq!(
-                target
-                    .export_peer_planning("/target", &destination())
-                    .unwrap(),
-                incoming
-            );
+            assert_eq!(export(&target, "/target"), incoming);
             let conflicts = target.peer_projection_conflicts("/target").unwrap();
             assert!(conflicts
                 .iter()
                 .any(|conflict| conflict.object.id == project.as_str()
                     && conflict.reason.contains("relationship ordering evidence")));
-            target
-                .import_peer_planning("/target", &destination(), "disputed", &incoming)
-                .unwrap();
+            import(&target, "/target", "disputed", &incoming);
             assert_eq!(target.revisions().unwrap(), after);
             assert_eq!(
                 target.peer_projection_conflicts("/target").unwrap(),
@@ -3583,13 +3319,13 @@ mod tests {
         let driver = ProcessLfid::new();
         {
             let conn = store.conn.lock().unwrap();
+            conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id)
+                VALUES('retained','Retained','human',1,0,'/retained/work',?1,?2)", params![task.as_str(),wave]).unwrap();
             conn.execute(
-                "UPDATE tasks SET worktree='/retained/work',started_at=7 WHERE id=?1",
+                "UPDATE tasks SET worktree='/retained/work' WHERE id=?1",
                 [task.as_str()],
             )
             .unwrap();
-            conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id)
-                VALUES('retained','Retained','human',1,0,'/retained/work',?1,?2)", params![task.as_str(),wave]).unwrap();
             conn.execute(
                 "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,?2,1)",
                 params![driver, TraceId::new()],
@@ -3638,9 +3374,7 @@ mod tests {
             "Saved locally"
         );
         assert_eq!(source.pending_task_changes(&task).unwrap(), receipt);
-        let snapshot = source
-            .export_peer_planning("/source", &destination())
-            .unwrap();
+        let snapshot = export(&source, "/source");
         let (_, title) = snapshot
             .winners()
             .find(|(_, change)| change.object.id == task.as_str() && change.field == "issue_title")
@@ -3672,18 +3406,12 @@ mod tests {
                 "/target",
                 &destination(),
                 "project",
-                &source
-                    .export_peer_planning("/source", &destination())
-                    .unwrap(),
+                &export(&source, "/source"),
             )
             .unwrap();
-        let before = target
-            .export_peer_planning("/target", &destination())
-            .unwrap();
+        let before = export(&target, "/target");
         let revisions = target.revisions().unwrap();
-        target
-            .import_peer_planning("/target", &destination(), "project", &before)
-            .unwrap();
+        import(&target, "/target", "project", &before);
         assert_eq!(target.revisions().unwrap(), revisions);
         project.name = "Delayed Project".into();
         project.revision = Some("2026-10-08T11:30:00Z".into());
@@ -3692,12 +3420,7 @@ mod tests {
             .unwrap();
         assert_eq!(accepted.name, "Current Project");
         assert_eq!(accepted.revision.as_deref(), Some("2026-10-08T12:00:00Z"));
-        assert_eq!(
-            target
-                .export_peer_planning("/target", &destination())
-                .unwrap(),
-            before
-        );
+        assert_eq!(export(&target, "/target"), before);
     }
 
     #[test]
@@ -3705,12 +3428,8 @@ mod tests {
         let (_source_home, source) = store();
         let (_target_home, target) = store();
         let task = seed(&source);
-        let base = source
-            .export_peer_planning("/source", &destination())
-            .unwrap();
-        target
-            .import_peer_planning("/target", &destination(), "base", &base)
-            .unwrap();
+        let base = export(&source, "/source");
+        import(&target, "/target", "base", &base);
         edit_title(&target, &task, "Attempted");
         let receipt = target
             .pending_task_changes(&task)
@@ -3732,19 +3451,13 @@ mod tests {
                 "/source",
                 &destination(),
                 "attempted",
-                &target
-                    .export_peer_planning("/target", &destination())
-                    .unwrap(),
+                &export(&target, "/target"),
             )
             .unwrap();
         edit_title(&source, &task, "Successor");
-        let incoming = source
-            .export_peer_planning("/source", &destination())
-            .unwrap();
+        let incoming = export(&source, "/source");
         let before = target.pending_task_changes(&task).unwrap();
-        let journal_before = target
-            .export_peer_planning("/target", &destination())
-            .unwrap();
+        let journal_before = export(&target, "/target");
         target
             .conn
             .lock()
@@ -3759,12 +3472,7 @@ mod tests {
             .is_err());
         assert_eq!(target.task(&task).unwrap().unwrap().plan.title, "Attempted");
         assert_eq!(target.pending_task_changes(&task).unwrap(), before);
-        assert_eq!(
-            target
-                .export_peer_planning("/target", &destination())
-                .unwrap(),
-            journal_before
-        );
+        assert_eq!(export(&target, "/target"), journal_before);
         assert_eq!(
             import_revision(&target, "/target", &destination()).as_deref(),
             Some("base")
@@ -3775,9 +3483,7 @@ mod tests {
             .unwrap()
             .execute_batch("DROP TRIGGER fail_peer_receipt")
             .unwrap();
-        target
-            .import_peer_planning("/target", &destination(), "successor", &incoming)
-            .unwrap();
+        import(&target, "/target", "successor", &incoming);
         let successor = target
             .pending_task_changes(&task)
             .unwrap()
@@ -3832,20 +3538,13 @@ mod tests {
     fn a_shared_endpoint_does_not_transfer_repository_ownership() {
         let (_home, store) = store();
         let task = seed(&store);
-        let before = store
-            .export_peer_planning("/source", &destination())
-            .unwrap();
+        let before = export(&store, "/source");
         let error = store
             .import_peer_planning("/target", &destination(), "foreign", &before)
             .unwrap_err();
         assert!(error.to_string().contains("another repository"), "{error}");
         assert_eq!(import_revision(&store, "/target", &destination()), None);
-        assert_eq!(
-            store
-                .export_peer_planning("/source", &destination())
-                .unwrap(),
-            before
-        );
+        assert_eq!(export(&store, "/source"), before);
         assert!(store.task(&task).unwrap().is_some());
     }
 
@@ -3860,12 +3559,8 @@ mod tests {
             "INSERT INTO tasks(id,project_id,issue_identifier,issue_title,created_at,updated_at,workspace_slug,issue_description) VALUES(?1,?2,'FIX-2','Sibling',1,1,'','')",
             params![sibling.as_str(), original.project_id.as_str()],
         ).unwrap();
-        let base = left
-            .export_peer_planning("/source", &destination())
-            .unwrap();
-        right
-            .import_peer_planning("/target", &destination(), "base", &base)
-            .unwrap();
+        let base = export(&left, "/source");
+        import(&right, "/target", "base", &base);
         let private = Wave::new(WaveId::new(), "private".into(), "/source".into());
         left.create_wave(&private).unwrap();
         let private_project = ProjectId::new();
@@ -3910,16 +3605,12 @@ mod tests {
         let held = left.peer_projection_conflicts("/source").unwrap();
         assert_eq!(held.len(), 2);
         assert!(held.iter().any(|c| c.object.id == task.as_str()));
-        let outgoing = left
-            .export_peer_planning("/source", &destination())
-            .unwrap();
+        let outgoing = export(&left, "/source");
         let bytes = String::from_utf8(outgoing.to_bytes().unwrap()).unwrap();
         assert!(!bytes.contains(private_project.as_str()));
         assert!(!bytes.contains("Private after move"));
         assert!(!outgoing.objects().iter().any(|o| o.id == task.as_str()));
-        right
-            .import_peer_planning("/target", &destination(), "held", &outgoing)
-            .unwrap();
+        import(&right, "/target", "held", &outgoing);
         // Omission retains the peer's last shared Task, not a deletion or a move.
         assert_eq!(
             right.task(&task).unwrap().unwrap().project_id,
@@ -3936,14 +3627,9 @@ mod tests {
                 },
             )
             .unwrap();
-        let received = right
-            .export_peer_planning("/target", &destination())
-            .unwrap();
-        left.import_peer_planning("/source", &destination(), "remote", &received)
-            .unwrap();
-        let portable = left
-            .export_peer_planning("/source", &destination())
-            .unwrap();
+        let received = export(&right, "/target");
+        import(&left, "/source", "remote", &received);
+        let portable = export(&left, "/source");
         assert!(!portable.objects().iter().any(|o| o.id == task.as_str()));
         assert_eq!(
             left.task(&task).unwrap().unwrap().project_id,
@@ -3966,9 +3652,7 @@ mod tests {
         // Returning to the shared parent does not leak the losing private reference.
         left.refile_unplaced_task(&task, &private_project, &original.project_id)
             .unwrap();
-        assert!(!left
-            .export_peer_planning("/source", &destination())
-            .unwrap()
+        assert!(!export(&left, "/source")
             .objects()
             .iter()
             .any(|o| o.id == task.as_str()));
@@ -3979,9 +3663,7 @@ mod tests {
             std::slice::from_ref(private.id()),
         )
         .unwrap();
-        let released = left
-            .export_peer_planning("/source", &destination())
-            .unwrap();
+        let released = export(&left, "/source");
         assert!(released.objects().iter().any(|o| o.id == task.as_str()));
         assert!(left
             .peer_projection_conflicts("/source")
@@ -4030,9 +3712,7 @@ mod tests {
                 std::slice::from_ref(independent.id()),
             )
             .unwrap();
-        let outgoing = store
-            .export_peer_planning("/source", &destination())
-            .unwrap();
+        let outgoing = export(&store, "/source");
         assert!(outgoing
             .objects()
             .iter()
@@ -4051,9 +3731,7 @@ mod tests {
             .peer_projection_conflicts("/source")
             .unwrap()
             .is_empty());
-        let released = store
-            .export_peer_planning("/source", &destination())
-            .unwrap();
+        let released = export(&store, "/source");
         assert!(held
             .iter()
             .all(|conflict| released.objects().contains(&conflict.object)));
@@ -4108,34 +3786,8 @@ mod tests {
                 params![private_id.as_str(), wave.id()],
             )
             .unwrap();
-            conn.execute(
-                "UPDATE tasks SET worktree='/retained/work',started_at=1 WHERE id=?1",
-                [task.id.as_str()],
-            )
-            .unwrap();
-            conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id) VALUES('session-retained','Retained','human',1,0,'/retained/work',?1,?2)", params![task.id.as_str(),wave.id()]).unwrap();
         }
-        let driver = ProcessLfid::new();
-        store.conn.lock().unwrap().execute(
-            "INSERT INTO processes(lfid,trace_id,started_at,completed_at,outcome) VALUES(?1,?2,1,2,'succeeded')",
-            params![driver,TraceId::new()],
-        ).unwrap();
-        store
-            .take_up_workflow(
-                &task.id,
-                &crate::engine::workflow::WorkflowDefinition {
-                    name: "review".into(),
-                    nodes: vec![crate::engine::workflow::WorkflowNode {
-                        name: "review".into(),
-                        skill: "review".into(),
-                        description: None,
-                    }],
-                    edges: Vec::new(),
-                },
-                &driver,
-                None,
-            )
-            .unwrap();
+        preserve_execution(&store, wave.id(), &task.id);
         let workflow = store.workflow(&task.id).unwrap();
         let mut item = row.snapshot.items[0].clone();
         item.project_id = Some(project.id.clone());
@@ -4157,9 +3809,7 @@ mod tests {
             store.task(&task.id).unwrap().unwrap().project_id,
             private_id
         );
-        let outgoing = store
-            .export_peer_planning("/source", &destination())
-            .unwrap();
+        let outgoing = export(&store, "/source");
         assert!(!outgoing.objects().iter().any(|o| o.id == task.id.as_str()));
         assert!(outgoing
             .objects()
@@ -4174,8 +3824,7 @@ mod tests {
             .iter()
             .any(|c| c.object.id == task.id.as_str()));
         let (_peer_home, peer) = self::store();
-        peer.import_peer_planning("/target", &destination(), "provider-move", &outgoing)
-            .unwrap();
+        import(&peer, "/target", "provider-move", &outgoing);
         assert_eq!(
             peer.task(&sibling.id).unwrap().unwrap().plan.title,
             sibling.plan.title
@@ -4193,7 +3842,7 @@ mod tests {
         );
         assert_eq!(
             conn.query_row(
-                "SELECT task_id FROM agent_sessions WHERE id='session-retained'",
+                "SELECT task_id FROM agent_sessions WHERE id='retained'",
                 [],
                 |r| r.get::<_, String>(0)
             )
@@ -4207,9 +3856,7 @@ mod tests {
     fn export_validates_only_the_selected_plans_causal_heads() {
         let (_home, store) = store();
         seed(&store);
-        let before = store
-            .export_peer_planning("/source", &destination())
-            .unwrap();
+        let before = export(&store, "/source");
         let unrelated = Wave::new(WaveId::new(), "private".into(), "/source".into());
         store.create_wave(&unrelated).unwrap();
         store
@@ -4221,12 +3868,7 @@ mod tests {
                 [unrelated.id()],
             )
             .unwrap();
-        assert_eq!(
-            store
-                .export_peer_planning("/source", &destination())
-                .unwrap(),
-            before
-        );
+        assert_eq!(export(&store, "/source"), before);
 
         store
             .conn
@@ -4248,7 +3890,6 @@ mod tests {
 
     #[test]
     fn joining_a_plan_keeps_unrelated_local_work_out_of_its_publication() {
-        use crate::engine::planning_exchange::PlanningSnapshot;
         use crate::engine::planning_git::{PlanningGit, PlanningPublication};
         use loopflow_test_support::TestRepo;
 
@@ -4382,9 +4023,7 @@ mod tests {
     fn joining_cannot_claim_existing_ids_or_references_from_another_plan() {
         let (_home, store) = store();
         let task = seed(&store);
-        let original = store
-            .export_peer_planning("/source", &destination())
-            .unwrap();
+        let original = export(&store, "/source");
         let shared =
             PlanningDestination::new("/synthetic/remote", "refs/loopflow/planning/shared/other")
                 .unwrap();
@@ -4415,22 +4054,15 @@ mod tests {
         assert!(store
             .import_peer_planning("/source", &id, "private-parent", &referencing)
             .is_err());
-        assert!(store.planning_task(&other_task).unwrap().record.is_none());
-        assert_eq!(
-            store
-                .export_peer_planning("/source", &destination())
-                .unwrap(),
-            original
-        );
+        assert!(store.task(&other_task).unwrap().is_none());
+        assert_eq!(export(&store, "/source"), original);
     }
 
     #[test]
     fn unselected_rows_and_retained_journals_cannot_be_claimed_on_join() {
         let (_source_home, source) = store();
         let task = seed(&source);
-        let incoming = source
-            .export_peer_planning("/source", &destination())
-            .unwrap();
+        let incoming = export(&source, "/source");
         let (_target_home, target) = store();
         // Reproduce an already-known local identity, without selecting it.
         let wave_id = incoming
@@ -4450,12 +4082,8 @@ mod tests {
         assert!(target
             .import_peer_planning("/target", &destination(), "collision", &incoming)
             .is_err());
-        assert!(target
-            .export_peer_planning("/target", &destination())
-            .unwrap()
-            .changes
-            .is_empty());
-        assert!(target.planning_task(&task).unwrap().record.is_none());
+        assert!(export(&target, "/target").changes.is_empty());
+        assert!(target.task(&task).unwrap().is_none());
         target
             .conn
             .lock()
@@ -4492,31 +4120,20 @@ mod tests {
                 "/target",
                 &destination(),
                 "first",
-                &first
-                    .export_peer_planning("/source", &destination())
-                    .unwrap(),
+                &export(&first, "/source"),
             )
             .unwrap();
         let first_conflicts = target.peer_projection_conflicts("/target").unwrap();
         assert!(!first_conflicts.is_empty());
         target
-            .import_peer_planning(
-                "/target",
-                &other_id,
-                "second",
-                &second
-                    .export_peer_planning("/source", &destination())
-                    .unwrap(),
-            )
+            .import_peer_planning("/target", &other_id, "second", &export(&second, "/source"))
             .unwrap();
         let both = target.peer_projection_conflicts("/target").unwrap();
         assert!(both.len() > first_conflicts.len());
         for conflict in first_conflicts {
             assert!(both.contains(&conflict));
         }
-        target
-            .import_peer_planning("/target", &destination(), "retry", &Default::default())
-            .unwrap();
+        import(&target, "/target", "retry", &Default::default());
         assert_eq!(target.peer_projection_conflicts("/target").unwrap(), both);
 
         let conflicts_for = |id: &str| {
@@ -4541,9 +4158,7 @@ mod tests {
                 "/target",
                 &destination(),
                 "resolved",
-                &first
-                    .export_peer_planning("/source", &destination())
-                    .unwrap(),
+                &export(&first, "/source"),
             )
             .unwrap();
         assert!(conflicts_for(&destination()).is_empty());
@@ -4589,9 +4204,7 @@ mod tests {
         let status = store.peer_planning_status("/source").unwrap();
         assert!(!status[0].active);
         assert_eq!(status[0].selected_records, 2);
-        let exported = store
-            .export_peer_planning("/source", &destination())
-            .unwrap();
+        let exported = export(&store, "/source");
         assert_eq!(exported.objects().len(), 2);
         assert!(exported
             .objects()
@@ -4603,9 +4216,7 @@ mod tests {
     fn importing_a_root_keeps_its_destination_even_when_another_plan_is_active() {
         let (_source_home, source) = store();
         seed(&source);
-        let incoming = source
-            .export_peer_planning("/source", &destination())
-            .unwrap();
+        let incoming = export(&source, "/source");
         let (_target_home, target) = store();
         let other =
             PlanningDestination::new("/synthetic/other", "refs/loopflow/planning/shared/other")
@@ -4614,24 +4225,15 @@ mod tests {
         target
             .use_peer_planning("/target", Some(&other_id))
             .unwrap();
-        target
-            .import_peer_planning("/target", &destination(), "incoming", &incoming)
-            .unwrap();
+        import(&target, "/target", "incoming", &incoming);
         assert!(target
             .export_peer_planning("/target", &other_id)
             .unwrap()
             .changes
             .is_empty());
-        assert_eq!(
-            target
-                .export_peer_planning("/target", &destination())
-                .unwrap(),
-            incoming
-        );
+        assert_eq!(export(&target, "/target"), incoming);
         let revisions = target.revisions().unwrap();
-        target
-            .import_peer_planning("/target", &destination(), "incoming", &incoming)
-            .unwrap();
+        import(&target, "/target", "incoming", &incoming);
         assert_eq!(target.revisions().unwrap(), revisions);
         let statuses = target.peer_planning_status("/target").unwrap();
         let imported = statuses.iter().find(|s| s.id == destination()).unwrap();
@@ -4799,23 +4401,10 @@ mod tests {
         let (_left_home, left) = store();
         let (_right_home, right) = store();
         let task = seed(&left);
-        let base = left
-            .export_peer_planning("/source", &destination())
-            .unwrap();
-        assert_eq!(
-            base,
-            left.export_peer_planning("/source", &destination())
-                .unwrap()
-        );
-        right
-            .import_peer_planning("/target", &destination(), "first", &base)
-            .unwrap();
-        assert_eq!(
-            right
-                .export_peer_planning("/target", &destination())
-                .unwrap(),
-            base
-        );
+        let base = export(&left, "/source");
+        assert_eq!(base, export(&left, "/source"));
+        import(&right, "/target", "first", &base);
+        assert_eq!(export(&right, "/target"), base);
         let driver = ProcessLfid::new();
         {
             let conn = right.conn.lock().unwrap();
@@ -4863,25 +4452,12 @@ mod tests {
             created_at: Some("2026-10-08T12:00:00Z".into()),
         };
         left.append_task_comment(&task, &comment).unwrap();
-        let incoming = left
-            .export_peer_planning("/source", &destination())
-            .unwrap();
-        right
-            .import_peer_planning("/target", &destination(), "second", &incoming)
-            .unwrap();
-        let merged = right
-            .export_peer_planning("/target", &destination())
-            .unwrap();
+        let incoming = export(&left, "/source");
+        import(&right, "/target", "second", &incoming);
+        let merged = export(&right, "/target");
         let revisions = right.revisions().unwrap();
-        right
-            .import_peer_planning("/target", &destination(), "second", &incoming)
-            .unwrap();
-        assert_eq!(
-            right
-                .export_peer_planning("/target", &destination())
-                .unwrap(),
-            merged
-        );
+        import(&right, "/target", "second", &incoming);
+        assert_eq!(export(&right, "/target"), merged);
         assert_eq!(right.revisions().unwrap(), revisions);
         assert_eq!(
             import_revision(&right, "/target", &destination()).as_deref(),
@@ -4903,15 +4479,8 @@ mod tests {
             .unwrap();
         assert_eq!(placement, ("/retained/checkout".into(), "codex".into()));
         drop(conn);
-        left.import_peer_planning("/source", &destination(), "third", &merged)
-            .unwrap();
-        assert_eq!(
-            left.export_peer_planning("/source", &destination())
-                .unwrap(),
-            right
-                .export_peer_planning("/target", &destination())
-                .unwrap()
-        );
+        import(&left, "/source", "third", &merged);
+        assert_eq!(export(&left, "/source"), export(&right, "/target"));
     }
 
     #[test]
@@ -4952,9 +4521,7 @@ mod tests {
             },
         )
         .unwrap();
-        let incoming = left
-            .export_peer_planning("/source", &destination())
-            .unwrap();
+        let incoming = export(&left, "/source");
         let mut parents = incoming.clone();
         parents.changes.retain(|_, change| {
             matches!(
@@ -4963,22 +4530,14 @@ mod tests {
                     | crate::engine::planning_exchange::PlanningKind::Project
             )
         });
-        right
-            .import_peer_planning("/target", &destination(), "parents", &parents)
-            .unwrap();
+        import(&right, "/target", "parents", &parents);
         right.conn.lock().unwrap().execute(
             "INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,issue_title,created_at,worktree,updated_at,workspace_slug,issue_description) VALUES(?1,?2,'provider-1','FIX-1','Legacy identity',1,'/legacy/checkout',1,'','')",
             params![legacy.as_str(), project.as_str()],
         ).unwrap();
-        let expected = right
-            .export_peer_planning("/target", &destination())
-            .unwrap()
-            .merge(&incoming)
-            .unwrap();
-        right
-            .import_peer_planning("/target", &destination(), "conflict", &incoming)
-            .unwrap();
-        assert!(right.planning_task(&task).unwrap().record.is_none());
+        let expected = export(&right, "/target").merge(&incoming).unwrap();
+        import(&right, "/target", "conflict", &incoming);
+        assert!(right.task(&task).unwrap().is_none());
         assert_eq!(
             right
                 .planning_task(&independent)
@@ -5005,14 +4564,10 @@ mod tests {
             .iter()
             .any(|c| c.object.id == task.as_str() && c.reason.contains("external_issue_id")));
         assert!(conflicts.iter().any(|c| c.object.id == "pending-comment"));
-        let exported = right
-            .export_peer_planning("/target", &destination())
-            .unwrap();
+        let exported = export(&right, "/target");
         assert_eq!(exported, expected);
         let revisions = right.revisions().unwrap();
-        right
-            .import_peer_planning("/target", &destination(), "conflict", &incoming)
-            .unwrap();
+        import(&right, "/target", "conflict", &incoming);
         assert_eq!(right.revisions().unwrap(), revisions);
         assert_eq!(
             right.peer_projection_conflicts("/target").unwrap(),
@@ -5034,9 +4589,7 @@ mod tests {
                 [legacy.as_str()],
             )
             .unwrap();
-        right
-            .import_peer_planning("/target", &destination(), "repaired", &Default::default())
-            .unwrap();
+        import(&right, "/target", "repaired", &Default::default());
         assert!(right
             .peer_projection_conflicts("/target")
             .unwrap()
@@ -5068,12 +4621,8 @@ mod tests {
         let (_left_home, left) = store();
         let (_right_home, right) = store();
         let task = seed(&left);
-        let base = left
-            .export_peer_planning("/source", &destination())
-            .unwrap();
-        right
-            .import_peer_planning("/target", &destination(), "base", &base)
-            .unwrap();
+        let base = export(&left, "/source");
+        import(&right, "/target", "base", &base);
         let (project, wave): (String, String) = right.conn.lock().unwrap().query_row(
             "SELECT t.project_id,p.wave_id FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?1",
             [task.as_str()], |r| Ok((r.get(0)?, r.get(1)?)),
@@ -5108,17 +4657,9 @@ mod tests {
             .unwrap();
             conn.execute("INSERT INTO tasks(id,project_id,issue_identifier,issue_title,created_at,updated_at,workspace_slug,issue_description) VALUES(?1,?2,'FIX-2','Still progresses',1,1,'','')", params![independent.as_str(),project.as_str()]).unwrap();
         }
-        let incoming = left
-            .export_peer_planning("/source", &destination())
-            .unwrap();
-        let expected = right
-            .export_peer_planning("/target", &destination())
-            .unwrap()
-            .merge(&incoming)
-            .unwrap();
-        right
-            .import_peer_planning("/target", &destination(), "move", &incoming)
-            .unwrap();
+        let incoming = export(&left, "/source");
+        let expected = export(&right, "/target").merge(&incoming).unwrap();
+        import(&right, "/target", "move", &incoming);
         assert_eq!(
             right
                 .planning_task(&independent)
@@ -5132,9 +4673,7 @@ mod tests {
         let conflicts = right.peer_projection_conflicts("/target").unwrap();
         assert_eq!(conflicts.len(), 1);
         assert!(conflicts[0].reason.contains("AgentSession ancestry"));
-        let exported = right
-            .export_peer_planning("/target", &destination())
-            .unwrap();
+        let exported = export(&right, "/target");
         assert_eq!(exported, expected);
         let conn = right.conn.lock().unwrap();
         assert_eq!(
@@ -5174,12 +4713,8 @@ mod tests {
                 params![wave, project.as_str()],
             )
             .unwrap();
-        let incoming = left
-            .export_peer_planning("/source", &destination())
-            .unwrap();
-        right
-            .import_peer_planning("/target", &destination(), "selected", &incoming)
-            .unwrap();
+        let incoming = export(&left, "/source");
+        import(&right, "/target", "selected", &incoming);
         assert!(right
             .peer_projection_conflicts("/target")
             .unwrap()
@@ -5215,14 +4750,10 @@ mod tests {
         missing
             .changes
             .insert("missing-selection".into(), selection);
-        right
-            .import_peer_planning("/target", &destination(), "pending-selection", &missing)
-            .unwrap();
+        import(&right, "/target", "pending-selection", &missing);
         assert_eq!(right.peer_projection_conflicts("/target").unwrap().len(), 1);
         let revisions = right.revisions().unwrap();
-        right
-            .import_peer_planning("/target", &destination(), "pending-selection", &missing)
-            .unwrap();
+        import(&right, "/target", "pending-selection", &missing);
         assert_eq!(right.revisions().unwrap(), revisions);
         assert_eq!(
             right
@@ -5244,12 +4775,8 @@ mod tests {
         let (_left_home, left) = store();
         let (_right_home, right) = store();
         let task = seed(&left);
-        let base = left
-            .export_peer_planning("/source", &destination())
-            .unwrap();
-        right
-            .import_peer_planning("/target", &destination(), "base", &base)
-            .unwrap();
+        let base = export(&left, "/source");
+        import(&right, "/target", "base", &base);
         left.conn
             .lock()
             .unwrap()
@@ -5258,9 +4785,7 @@ mod tests {
                 [task.as_str()],
             )
             .unwrap();
-        let mut incoming = left
-            .export_peer_planning("/source", &destination())
-            .unwrap();
+        let mut incoming = export(&left, "/source");
         let (id, previous) = incoming
             .changes
             .iter()
@@ -5272,14 +4797,8 @@ mod tests {
         parent.clock += 1;
         parent.value = json!(WaveId::new().as_str());
         incoming.changes.insert("missing-parent".into(), parent);
-        let expected = right
-            .export_peer_planning("/target", &destination())
-            .unwrap()
-            .merge(&incoming)
-            .unwrap();
-        right
-            .import_peer_planning("/target", &destination(), "missing-parent", &incoming)
-            .unwrap();
+        let expected = export(&right, "/target").merge(&incoming).unwrap();
+        import(&right, "/target", "missing-parent", &incoming);
         assert_eq!(
             right
                 .planning_task(&task)
@@ -5293,9 +4812,7 @@ mod tests {
         let conflicts = right.peer_projection_conflicts("/target").unwrap();
         assert_eq!(conflicts.len(), 1);
         assert!(conflicts[0].reason.contains("parent is unavailable"));
-        let exported = right
-            .export_peer_planning("/target", &destination())
-            .unwrap();
+        let exported = export(&right, "/target");
         assert_eq!(exported, expected);
         assert_eq!(
             right
@@ -5326,12 +4843,8 @@ mod tests {
         left.create_wave(&root).unwrap();
         left.select_peer_waves("/source", &destination(), std::slice::from_ref(root.id()))
             .unwrap();
-        let base = left
-            .export_peer_planning("/source", &destination())
-            .unwrap();
-        right
-            .import_peer_planning("/target", &destination(), "base", &base)
-            .unwrap();
+        let base = export(&left, "/source");
+        import(&right, "/target", "base", &base);
         let child = Wave::new(
             WaveId::parse("00000000-0000-4000-8000-000000000002").unwrap(),
             "child".into(),
@@ -5339,9 +4852,7 @@ mod tests {
         )
         .with_parent(root.id().clone());
         left.create_wave(&child).unwrap();
-        let mut incoming = left
-            .export_peer_planning("/source", &destination())
-            .unwrap();
+        let mut incoming = export(&left, "/source");
         let (id, previous) = incoming
             .changes
             .iter()
@@ -5355,25 +4866,16 @@ mod tests {
         parent.value = json!(child.id());
         incoming.changes.insert("cyclic-parent".into(), parent);
 
-        right
-            .import_peer_planning("/target", &destination(), "cycle", &incoming)
-            .unwrap();
+        import(&right, "/target", "cycle", &incoming);
         let conflicts = right.peer_projection_conflicts("/target").unwrap();
         assert_eq!(conflicts.len(), 1);
         assert_eq!(conflicts[0].object.id, root.id().as_str());
         assert!(conflicts[0].reason.contains("cycle"));
-        assert_eq!(
-            right
-                .export_peer_planning("/target", &destination())
-                .unwrap(),
-            incoming
-        );
+        assert_eq!(export(&right, "/target"), incoming);
         // Repeating the same acquisition cannot churn status by retiring an
         // obsolete first-pass error that should never have been published.
         let revisions = right.revisions().unwrap();
-        right
-            .import_peer_planning("/target", &destination(), "cycle", &incoming)
-            .unwrap();
+        import(&right, "/target", "cycle", &incoming);
         assert_eq!(right.revisions().unwrap(), revisions);
         assert_eq!(
             right.peer_projection_conflicts("/target").unwrap(),
@@ -5386,9 +4888,7 @@ mod tests {
         let (_left_home, left) = store();
         let (_right_home, right) = store();
         let task = seed(&left);
-        let base = left
-            .export_peer_planning("/source", &destination())
-            .unwrap();
+        let base = export(&left, "/source");
         // Completeness is checked against the same winners used for projection.
         let mut incomplete = base.clone();
         incomplete
@@ -5398,21 +4898,13 @@ mod tests {
             .import_peer_planning("/target", &destination(), "incomplete", &incomplete)
             .unwrap_err();
         assert!(error.to_string().contains("incomplete planning record"));
-        assert!(right
-            .export_peer_planning("/target", &destination())
-            .unwrap()
-            .changes
-            .is_empty());
+        assert!(export(&right, "/target").changes.is_empty());
         assert!(import_revision(&right, "/target", &destination()).is_none());
         right.conn.lock().unwrap().execute_batch("CREATE TEMP TRIGGER interrupt_peer BEFORE INSERT ON tasks BEGIN SELECT RAISE(ABORT,'simulated interruption'); END;").unwrap();
         assert!(right
             .import_peer_planning("/target", &destination(), "candidate", &base)
             .is_err());
-        assert!(right
-            .export_peer_planning("/target", &destination())
-            .unwrap()
-            .changes
-            .is_empty());
+        assert!(export(&right, "/target").changes.is_empty());
         assert!(import_revision(&right, "/target", &destination()).is_none());
         right
             .conn
@@ -5420,9 +4912,7 @@ mod tests {
             .unwrap()
             .execute_batch("DROP TRIGGER interrupt_peer;")
             .unwrap();
-        right
-            .import_peer_planning("/target", &destination(), "candidate", &base)
-            .unwrap();
+        import(&right, "/target", "candidate", &base);
         assert!(right.planning_task(&task).unwrap().record.is_some());
         let mut conflicting = base.clone();
         conflicting
@@ -5438,21 +4928,14 @@ mod tests {
             import_revision(&right, "/target", &destination()).as_deref(),
             Some("candidate")
         );
-        assert_eq!(
-            right
-                .export_peer_planning("/target", &destination())
-                .unwrap(),
-            base
-        );
+        assert_eq!(export(&right, "/target"), base);
     }
 
     #[test]
     fn reused_changes_in_another_repository_preserve_the_original_and_import_checkpoint() {
         let (_home, store) = store();
         seed(&store);
-        let original = store
-            .export_peer_planning("/source", &destination())
-            .unwrap();
+        let original = export(&store, "/source");
         let mut reused = original.clone();
         // Use a new object so repository ownership cannot mask the global
         // mutation-ID collision this fixture is meant to exercise.
@@ -5469,17 +4952,8 @@ mod tests {
             error.to_string().contains("conflicting contents"),
             "{error}"
         );
-        assert_eq!(
-            store
-                .export_peer_planning("/source", &destination())
-                .unwrap(),
-            original
-        );
-        assert!(store
-            .export_peer_planning("/other", &destination())
-            .unwrap()
-            .changes
-            .is_empty());
+        assert_eq!(export(&store, "/source"), original);
+        assert!(export(&store, "/other").changes.is_empty());
         assert!(import_revision(&store, "/other", &destination()).is_none());
     }
 
@@ -5496,12 +4970,8 @@ mod tests {
                 [task.as_str()],
             )
             .unwrap();
-        let completed = left
-            .export_peer_planning("/source", &destination())
-            .unwrap();
-        right
-            .import_peer_planning("/target", &destination(), "done", &completed)
-            .unwrap();
+        let completed = export(&left, "/source");
+        import(&right, "/target", "done", &completed);
         right
             .conn
             .lock()
@@ -5511,9 +4981,7 @@ mod tests {
                 [task.as_str()],
             )
             .unwrap();
-        right
-            .import_peer_planning("/target", &destination(), "delayed", &completed)
-            .unwrap();
+        import(&right, "/target", "delayed", &completed);
         assert!(
             !right
                 .planning_task(&task)
@@ -5536,27 +5004,16 @@ mod tests {
                 "/target",
                 &destination(),
                 "deleted",
-                &left
-                    .export_peer_planning("/source", &destination())
-                    .unwrap(),
+                &export(&left, "/source"),
             )
             .unwrap();
         assert_eq!(
             right.planning_task(&task).unwrap().state,
             crate::store::PlanningState::Removed
         );
-        let retained = right
-            .export_peer_planning("/target", &destination())
-            .unwrap();
-        right
-            .import_peer_planning("/target", &destination(), "omission", &Default::default())
-            .unwrap();
-        assert_eq!(
-            right
-                .export_peer_planning("/target", &destination())
-                .unwrap(),
-            retained
-        );
+        let retained = export(&right, "/target");
+        import(&right, "/target", "omission", &Default::default());
+        assert_eq!(export(&right, "/target"), retained);
         assert!(right.planning_task(&task).unwrap().record.is_some());
     }
 }

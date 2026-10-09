@@ -1082,11 +1082,15 @@ cargo nextest run -p loopflow --test task_github_cache_tests --no-fail-fast
 ```
 
 When changing Linear response shapes, run the client tests and PM-operation
-consumers together. Team migration also reads issue comments; its fixtures must
-include the requested pagination metadata.
+consumers together, including `planning_reconnect_tests` on Linux (a disposable
+container works on macOS). That suite is compiled out on macOS, so a local Rust
+pass there does not cover its HTTPS fixtures. Keep nullable requested fields,
+including `dueDate`, present in fixture responses. Team migration also reads issue
+comments; its fixtures must include the requested pagination metadata.
 
 ```bash
 cargo nextest run -p loopflow --lib -E 'test(pm::linear::) | test(ops::pm::) | test(ops::linear_observe::)' --no-fail-fast
+cargo nextest run -p loopflow --test planning_reconnect_tests --no-fail-fast
 ```
 
 ### Test without an installed Loopflow

@@ -1,4 +1,5 @@
 //! Public commands with isolated stores and a simulated SSH endpoint.
+mod support;
 use std::fs;
 use std::io::Write;
 use std::os::fd::FromRawFd;
@@ -27,8 +28,10 @@ impl Machines {
             &format!(
                 r#"#!/bin/sh
 for arg in "$@"; do remote_command="$arg"; done
+cd '{}' || exit 1
 exec env -i HOME='{}' PATH=/usr/bin:/bin bash -c "$remote_command"
 "#,
+                remote.display(),
                 remote.display()
             ),
         );
@@ -683,4 +686,268 @@ fn machine_add_on_the_remote_updates_only_its_registry() {
     let local = fixture.json(&["machine", "list", "--json"]);
     assert_eq!(local.as_array().unwrap().len(), 1);
     assert_eq!(local[0]["label"], "mini");
+}
+
+/// Two actual CLIs joined by the fixture's local-only SSH substitute.
+fn preview_machines() -> Machines {
+    let fixture = Machines::new();
+    let remote = fixture.root.path().join("remote");
+    executable(
+        &remote.join(".local/bin/lf"),
+        &format!(
+            "#!/bin/sh\nexport LF_HOME='{}' LF_BIN='{}'\nexec '{}' \"$@\"\n",
+            remote.join("store").display(),
+            env!("CARGO_BIN_EXE_lf"),
+            env!("CARGO_BIN_EXE_lf"),
+        ),
+    );
+    // Seed identity using the normal operation before taking the read baseline.
+    assert_success(&fixture.run(&["machine", "add", "mini", "--repo", "."]));
+    for bin in [fixture.root.path().join("bin"), remote.join(".local/bin")] {
+        for program in ["gh", "security", "doppler", "claude", "codex", "opencode"] {
+            executable(
+                &bin.join(program),
+                &format!(
+                    "#!/bin/sh\necho '{program}' >> '{}'\nexit 91\n",
+                    fixture.root.path().join("forbidden-effect").display()
+                ),
+            );
+        }
+    }
+    fixture
+}
+
+fn checkpoint_bytes(path: &Path) -> Vec<u8> {
+    let db = rusqlite::Connection::open(path).unwrap();
+    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+    fs::read(path).unwrap()
+}
+
+#[test]
+fn remote_preview_resolves_repository_on_selected_machine_without_launch_effects() {
+    let fixture = preview_machines();
+    let remote = fixture.root.path().join("remote");
+    let repo = remote.join("projects/project's checkout");
+    fs::create_dir_all(repo.join(".lf/skills")).unwrap();
+    assert!(Command::new("git")
+        .args(["init", "-q"])
+        .arg(&repo)
+        .status()
+        .unwrap()
+        .success());
+    fs::write(
+        repo.join(".lf/skills/probe.md"),
+        "Read the remote-only marker.",
+    )
+    .unwrap();
+    fs::write(
+        repo.join(".lf/config.yaml"),
+        "diff: false\ndiff_files: false\npaste: false\n",
+    )
+    .unwrap();
+    fs::write(remote.join("store/config.yaml"), "repo_root: ~/projects\n").unwrap();
+    // A conflicting caller preference must not resolve the destination path.
+    fs::write(
+        fixture.root.path().join("local/config.yaml"),
+        "repo_root: /not-the-remote-root\n",
+    )
+    .unwrap();
+    let local_db = fixture.root.path().join("local/loopflow.db");
+    let remote_db = remote.join("store/loopflow.db");
+    let local_before = checkpoint_bytes(&local_db);
+    let remote_before = checkpoint_bytes(&remote_db);
+    let expected_id: String = rusqlite::Connection::open(&remote_db)
+        .unwrap()
+        .query_row("SELECT id FROM machines WHERE route='local'", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    let selected_path = repo.canonicalize().unwrap();
+    for selector in [
+        "project's checkout",
+        "~/projects/project's checkout",
+        "./projects/project's checkout",
+        repo.to_str().unwrap(),
+    ] {
+        let output = fixture
+            .command(&[
+                "--machine",
+                "mini",
+                "--repo",
+                selector,
+                "--account",
+                "unconnected@example.invalid",
+                "--shared",
+                "skill",
+                "probe",
+                "literal 'draft'; $(false)",
+                "--context",
+                "--explain",
+                "--json",
+            ])
+            // Preview must not decode or prepare the caller's account environment.
+            .env("LF_ACCOUNT_SELECTION", "not a launch selection")
+            .output()
+            .unwrap();
+        assert_success(&output);
+        let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(report["resolution"]["machine"]["value"], expected_id);
+        assert_eq!(
+            report["resolution"]["repository_path"]["value"],
+            selected_path.to_str().unwrap()
+        );
+        assert_eq!(report["resolution"]["task"]["state"], "unbound");
+        assert_eq!(report["input"]["checkout"], selected_path.to_str().unwrap());
+        assert!(report["input"]["system_prompt"]
+            .as_str()
+            .unwrap()
+            .contains("remote-only marker"));
+        assert!(report["input"]["system_prompt"]
+            .as_str()
+            .unwrap()
+            .contains("literal 'draft'; $(false)"));
+    }
+    let missing = fixture.json(&[
+        "--machine",
+        "mini",
+        "--repo",
+        "project's checkout",
+        "--task",
+        "UNKNOWN-427",
+        "--explain",
+        "--json",
+    ]);
+    assert_eq!(missing["machine"]["value"], expected_id);
+    assert_eq!(missing["task"]["state"], "unavailable");
+    assert!(missing["task"]["reason"]
+        .as_str()
+        .unwrap()
+        .contains("UNKNOWN-427"));
+    let text = fixture.run(&[
+        "--machine",
+        "mini",
+        "--repo",
+        "project's checkout",
+        "--task",
+        "UNKNOWN-427",
+        "--explain",
+    ]);
+    assert_success(&text);
+    assert!(String::from_utf8_lossy(&text.stdout).contains("Task: unavailable:"));
+    assert_eq!(
+        checkpoint_bytes(&local_db),
+        local_before,
+        "preview mutated caller registry"
+    );
+    assert_eq!(
+        checkpoint_bytes(&remote_db),
+        remote_before,
+        "preview mutated destination registry"
+    );
+    assert!(!fixture.root.path().join("forbidden-effect").exists());
+    assert!(!repo.join(".lf/tmp").exists());
+    assert!(!remote.join(".codex").exists());
+    assert!(!remote.join(".claude").exists());
+}
+
+#[test]
+fn remote_preview_preserves_absent_corrupt_and_changed_machine_evidence() {
+    let fixture = preview_machines();
+    let local_db = fixture.root.path().join("local/loopflow.db");
+    let remote_db = fixture.root.path().join("remote/store/loopflow.db");
+    let local_before = checkpoint_bytes(&local_db);
+    let remote_before = checkpoint_bytes(&remote_db);
+    fs::remove_file(&remote_db).unwrap();
+    let absent = fixture.run(&["--machine", "mini", "--explain", "--json"]);
+    assert!(!absent.status.success());
+    assert!(String::from_utf8_lossy(&absent.stderr).contains("Machine identity unavailable"));
+    assert!(
+        !remote_db.exists(),
+        "preview initialized the missing Machine"
+    );
+    fs::write(&remote_db, b"not a database").unwrap();
+    let corrupt = fixture.run(&["--machine", "mini", "--explain"]);
+    assert!(!corrupt.status.success());
+    assert_eq!(fs::read(&remote_db).unwrap(), b"not a database");
+    fs::write(&remote_db, &remote_before).unwrap();
+    {
+        let db = rusqlite::Connection::open(&remote_db).unwrap();
+        db.execute(
+            "UPDATE machines SET id='home_99999999999999999999999999999999' WHERE route='local'",
+            [],
+        )
+        .unwrap();
+    }
+    let changed_before = checkpoint_bytes(&remote_db);
+    let changed = fixture.run(&["--machine", "mini", "--explain"]);
+    assert!(!changed.status.success());
+    assert!(String::from_utf8_lossy(&changed.stderr).contains("expected Machine"));
+    assert_eq!(checkpoint_bytes(&remote_db), changed_before);
+    assert_eq!(checkpoint_bytes(&local_db), local_before);
+    assert!(!fixture.root.path().join("forbidden-effect").exists());
+}
+
+#[test]
+fn remote_preview_connection_failure_never_falls_back_to_local_execution() {
+    let fixture = preview_machines();
+    let local_db = fixture.root.path().join("local/loopflow.db");
+    let before = checkpoint_bytes(&local_db);
+    executable(
+        &fixture.root.path().join("bin/ssh"),
+        "#!/bin/sh\nexit 255\n",
+    );
+    let output = fixture.run(&["--machine", "mini", "--context", "skill", "debug"]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("unreachable"));
+    assert!(output.stdout.is_empty());
+    assert_eq!(checkpoint_bytes(&local_db), before);
+    assert!(!fixture.root.path().join("forbidden-effect").exists());
+}
+
+#[test]
+fn remote_preview_uses_the_same_work_for_explicit_and_inferred_task_selection() {
+    let fixture = preview_machines();
+    let repo = loopflow_test_support::TestRepo::new();
+    support::bind_task_planning(&repo);
+    repo.create_branch("remote-preview");
+    let remote_store = fixture.root.path().join("remote/store");
+    let registered = support::register_task(
+        &remote_store,
+        &repo.path().canonicalize().unwrap(),
+        "remote-preview",
+        &repo.head_sha(),
+    );
+    support::record_flow(
+        &remote_store,
+        repo.path(),
+        "prior",
+        "prior-step",
+        "succeeded",
+    );
+    let local_db = fixture.root.path().join("local/loopflow.db");
+    let remote_db = remote_store.join("loopflow.db");
+    let local_before = checkpoint_bytes(&local_db);
+    let remote_before = checkpoint_bytes(&remote_db);
+    let read = |args: &[&str]| {
+        let mut command = vec!["--machine", "mini", "--repo", repo.path().to_str().unwrap()];
+        command.extend(args);
+        fixture.json(&command)
+    };
+    let explicit = read(&["task", "run", "INF-123", "--explain", "--json"]);
+    let inferred = read(&["task", "run", "--explain", "--json"]);
+    for report in [&explicit, &inferred] {
+        assert_eq!(
+            report["resolution"]["task"]["value"],
+            registered.task.id.as_str()
+        );
+        assert_eq!(
+            report["resolution"]["checkout"]["value"],
+            repo.path().canonicalize().unwrap().to_str().unwrap()
+        );
+    }
+    assert_eq!(explicit["action"], inferred["action"]);
+    assert_eq!(explicit["impediments"], inferred["impediments"]);
+    assert_eq!(checkpoint_bytes(&local_db), local_before);
+    assert_eq!(checkpoint_bytes(&remote_db), remote_before);
+    assert!(!fixture.root.path().join("forbidden-effect").exists());
 }

@@ -501,9 +501,14 @@ opening the app. Display stays on the command's Machine, separate from Task
 execution. The URL is not a window reservation, readiness receipt or input target;
 installed-app and retained-window state remain uninspected.
 
-Flow-wide input and remote previews are unavailable; preview a skill directly on its
-execution Machine. Bare-agent and new operator-checkout input is not predicted by
-creating Work. `lf context` remains the standalone budget report.
+Use `lf --machine mini --repo project debug --context --explain --json` to preview
+on an added Machine. The receiving CLI checks its identity read-only and resolves
+its own repository, Work and input. Preview skips provider/account preparation,
+planning refresh and Process recording on both Machines. Missing identity or
+transport fails explicitly, with no local execution fallback; missing Work remains
+unavailable evidence. This observes the selected Machine, not peer-exclusive start
+permission. Flow-wide input is still undefined. Bare-agent and new operator-checkout
+input is not predicted by creating Work. `lf context` remains the budget report.
 
 ## Desktop navigation
 

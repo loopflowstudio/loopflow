@@ -1456,11 +1456,7 @@ fn run() -> anyhow::Result<()> {
             loopflow::process::CommandExit(code)
         })?
     {
-        let preview_args = reorder_args(
-            std::iter::once("lf".to_string())
-                .chain(command.clone())
-                .collect(),
-        );
+        let preview_args = reorder_args(std::iter::once("lf".to_string()).chain(command).collect());
         let preview = match Cli::try_parse_from(&preview_args) {
             Ok(cli) => cli.context || cli.explain,
             Err(error)
@@ -1475,23 +1471,23 @@ fn run() -> anyhow::Result<()> {
         };
         if preview {
             journal::mark_effect_free_read();
-            anyhow::bail!("remote invocation preview is unavailable without an effect-free identity transport; no remote command was sent. Run the preview directly on the selected Machine");
         }
         // The target owns command flags, including --verbose; RUST_LOG controls transport logs.
         init_tracing(false);
-        loopflow::installation::dispatch_default_cli()?;
+        if !preview {
+            loopflow::installation::dispatch_default_cli()?;
+            journal::admit_process(&std::env::current_dir()?, &raw_args);
+        }
         ctrlc::set_handler(|| loopflow::engine::agent::exit_on_interrupt())
             .expect("failed to set Ctrl+C handler");
-        journal::admit_process(&std::env::current_dir()?, &raw_args);
         loopflow::lf::commands::machine::validate_expected_machine_process()?;
-        let command = reorder_args(std::iter::once("lf".to_string()).chain(command).collect());
         return loopflow::lf::commands::ssh::run(
             remote
                 .machine
                 .as_deref()
                 .expect("remote invocation has a machine"),
             remote.forward_agent,
-            &command[1..],
+            &preview_args[1..],
             None,
         );
     }
@@ -1538,6 +1534,9 @@ fn run() -> anyhow::Result<()> {
         );
     if matches!(cli.command, Some(Commands::Desktop { .. })) && !opening_preview {
         loopflow::lf::commands::desktop::require_supported()?;
+    }
+    if cli.context || cli.explain {
+        loopflow::lf::commands::machine::validate_expected_machine_process()?;
     }
     let _selected_repo_cwd = cli
         .repo

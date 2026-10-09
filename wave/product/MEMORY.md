@@ -61,7 +61,7 @@ Sessions use `connect`. October 9 local Task/Session-plus-Changes opening bypass
 execution routing and CLI preparation. Session/companion intent travels together; a partial Session inventory must not
 retire other panes. Opening generations follow Session/Files/pane readiness and failures. Wave-owned `show`, `workflow` and `edit-plan` replace root roadmap/Project locally;
 retained Project IDs and the snapshot/writer owners survive. Desktop sends Wave identity.
-Remote/Flow input and full action explanation remain. Discord is unchanged;
+Flow input and full action explanation remain. Discord is unchanged;
 `--steers-after` filters nodes, not restarts.
 `repo_root` (default `~/src`) and paths resolve on the selected Machine, never as
 portable identity; remembered names remain open. Scoped IDs survive dispatch.
@@ -106,8 +106,11 @@ missing-registry and checkpointed-WAL tests exposed fallback Process writes.
 Resolve chapter targets once on the operation's store, without a CLI ID round trip.
 Workflow reads and writes have separate APIs.
 Previews share Task admission/Workflow, Desktop URL validation and skill/Flow syntax
-with launch. Only launch prepares Work. Linux previews report platform impediments;
-Linux/native/remote acceptance and peer start remain unproved.
+with launch. Only launch prepares Work. Linux previews report platform impediments.
+Explicit-Machine previews skip credential preparation and writable identity probes;
+receivers validate identity read-only. Checkpoint both stores: an effect-free receiver
+cannot undo a sender's Process write. Two-CLI fixtures establish repository/Work
+resolution, not configured SSH, native acceptance or peer-exclusive first start.
 
 ## Terminal-host adoption (2026-10-07)
 
@@ -245,13 +248,10 @@ heading. Task Workflow and Flow execution remain separate owners.
   at `end`; the abandoned mark stays.
 - "run is one conceptual attempt, exec is one lf invocation." `lf task run`
   moves the Workflow and `lf run` does not: "worth it to keep lf run simple."
-- LOO-386 steers, October 6: "run for workflow api and exec for flow datamodel."
-  One Task run may start several Flow execs; a headless conversation also spans
-  Execs. Edges stay named by their Flow/skill, unique from one node; decision
-  labels are not being introduced. Jack: "Flow is too deeply engrained to
-  explore really changing it right now." Pipeline, Step flow and Compute flow
-  remain historical suggestions. Jack accepted Workflow and Flow on October 7;
-  the owner-scoped implementation below supersedes the naming draft.
+- Jack retained Flow, with edges named by their Flow/skill and unique per
+  departure node. One Task run can start several Flow processes. October 7's
+  Workflow/Flow decision supersedes the naming draft; original steers and
+  retired alternatives: `af79d4762:wave/product/MEMORY.md`, this heading.
 - Dropping per-node steer acknowledgement was "potentially bad": it had
   stopped runaway token counts. Restored as `--steers-after`.
 - The first Task sheet was "kinda yucky." Wanted and built: the Workflow graph

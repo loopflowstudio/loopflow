@@ -18,12 +18,18 @@ pub fn run(
     task_route: Option<TaskExecutionRoute>,
 ) -> anyhow::Result<()> {
     let cli = parse_remote_command(lf_args)?;
-    if matches!(cli.command, Some(crate::lf::Commands::Desktop { .. })) {
+    let preview = cli.context || cli.explain;
+    if !preview && matches!(cli.command, Some(crate::lf::Commands::Desktop { .. })) {
         super::desktop::require_supported()?;
     }
-    let inherited_selection = AccountSelection::from_env()?;
     let runtime = tokio::runtime::Runtime::new()?;
-    let target = runtime.block_on(resolve_target(target, forward_agent))?;
+    let target = if preview {
+        let store = crate::store::read_existing_registry()?
+            .ok_or_else(|| anyhow!("Machine unavailable: local registry is absent"))?;
+        runtime.block_on(super::machine::find_machine(&store, target))?
+    } else {
+        runtime.block_on(resolve_target(target, forward_agent))?
+    };
     // Automatic routing already chose both Machine and plan. Keep that reading
     // together rather than combining its Machine with a second plan reading.
     let routed = task_route.is_some();
@@ -46,22 +52,33 @@ pub fn run(
         .repository
         .as_ref()
         .or(work_route.as_ref().map(|route| &route.repository_id));
-    let selection = runtime.block_on(super::machine_credentials::prepare_launch(
-        &target,
-        &inherited_selection,
-        &cli,
-    ))?;
+    // Preview forwards only authored selectors. Account lookup/connection and
+    // isolation preparation belong to launch, on neither side of this read.
+    let selection = if preview {
+        None
+    } else {
+        Some(
+            runtime
+                .block_on(super::machine_credentials::prepare_launch(
+                    &target,
+                    &AccountSelection::from_env()?,
+                    &cli,
+                ))?
+                .env_value()?,
+        )
+    };
     let user_name = crate::engine::config::participant_name()?.unwrap_or_default();
-    let selection = selection.env_value()?;
     let mut extra_env = vec![
         (EXPECTED_MACHINE_ID_ENV, target.id.as_str()),
         (crate::engine::config::USER_NAME_ENV, user_name.as_str()),
-        (
-            crate::provider_account::selection::ACCOUNT_SELECTION_ENV,
-            selection.as_str(),
-        ),
-        crate::provider_account::activation::isolation_env(true),
     ];
+    if let Some(selection) = selection.as_deref() {
+        extra_env.push((
+            crate::provider_account::selection::ACCOUNT_SELECTION_ENV,
+            selection,
+        ));
+        extra_env.push(crate::provider_account::activation::isolation_env(true));
+    }
     let declaration = std::env::var(crate::lf::WORK_DECLARATION_ENV).ok();
     if let Some(value) = declaration.as_deref() {
         extra_env.push((crate::lf::WORK_DECLARATION_ENV, value));
@@ -72,7 +89,11 @@ pub fn run(
             cmd.extend(["--repository".into(), repository.to_string()]);
         }
     }
-    cmd.extend(resident_args(lf_args, &cli, routed));
+    cmd.extend(if preview {
+        lf_args.to_vec()
+    } else {
+        resident_args(lf_args, &cli, routed)
+    });
     let preamble = build_preamble(
         &target.route,
         if repository.is_some() || cli.repo.is_some() {
@@ -82,6 +103,7 @@ pub fn run(
         },
         &cmd,
         &extra_env,
+        !preview,
     );
     run_ssh(&target.route, forward_agent, &preamble)
 }
@@ -170,13 +192,18 @@ fn build_preamble(
     repo: Option<&str>,
     cmd: &[String],
     extra_env: &[(&str, &str)],
+    probe_identity: bool,
 ) -> String {
     let mut lines = vec![super::machine::REMOTE_PATH.to_string()];
     for (name, value) in extra_env {
         lines.push(format!("export {name}={}", sh_quote(value)));
     }
-    lines.push("LF_REACHED_MACHINE_ID=$(lf machine id) || exit 1".to_string());
-    lines.push(r#"[ "$LF_REACHED_MACHINE_ID" = "$LF_EXPECTED_MACHINE_ID" ] || { echo 'remote machine identity changed' >&2; exit 1; }"#.to_string());
+    // Preview validates the expected identity inside the receiving read-only
+    // invocation; `machine id` initializes an absent registry and journals a Process.
+    if probe_identity {
+        lines.push("LF_REACHED_MACHINE_ID=$(lf machine id) || exit 1".to_string());
+        lines.push(r#"[ "$LF_REACHED_MACHINE_ID" = "$LF_EXPECTED_MACHINE_ID" ] || { echo 'remote machine identity changed' >&2; exit 1; }"#.to_string());
+    }
     if let Some(repo) = repo {
         let path = if repo.starts_with('/') {
             sh_quote(repo)
@@ -275,6 +302,7 @@ mod tests {
             Some("~/project's checkout"),
             &["lf".into(), "session".into(), "list".into()],
             &[("LF_EXPECTED_MACHINE_ID", "home_test")],
+            true,
         );
         assert!(script.contains("machine identity changed"));
         assert!(!script.contains("TOKEN"));
@@ -303,6 +331,7 @@ mod tests {
                 "literal 'draft'; $(false)".into(),
             ],
             &[("LF_EXPECTED_MACHINE_ID", "home_fixture")],
+            true,
         );
         let output = std::process::Command::new("/bin/bash")
             .args(["-c", &script])

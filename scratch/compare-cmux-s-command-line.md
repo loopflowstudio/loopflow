@@ -8,11 +8,11 @@ lf2 cannot extract bounded text; the verified native artifact remains required.
 Focused local Rust and model evidence establish neither native acceptance nor delivery.
 
 LOO-406 is integrated through main’s `d20c56daf` (#1503). LOO-412 through
-`fcd64901f` was inspected, not integrated: retained-effect deferral and ordering
-receipt transport now join creation/deletion recovery in the common owners.
+`5624151a3` was inspected, not integrated: common receipt transport includes
+`357090d4b`’s primary-only ordering repair. Mixed-provider acquisition remains open.
 Mixed Linear/Git stays disabled pending the remaining composition.
 Local Task/Session-plus-Changes opening follows request-scoped readiness; native proof remains.
-Remaining implementation: remote/Flow input and broader explanation, shared identity/exchange and first-start
+Remaining implementation: Flow input and broader explanation, shared identity/exchange and first-start
 admission, and verified native bounded extraction. Full-path proof remains.
 [Findings](findings.md), [questions](questions.md) and the
 [comparison](../docs/reviews/terminal-command-comparison.md) retain evidence and open choices.
@@ -75,17 +75,12 @@ ambiguous shortcuts name their choices and perform nothing. `list`/`show` genera
 `skill`/`flow` resolve naming collisions; the shorthand collision policy remains
 open. Not every verb exists yet.
 
-Jack favors Wave-owned planning, including Workflow selection, and questions
-public `project` and `roadmap`. Proposed: `wave show WAVE` owns the chapter plan;
-`wave list` discovers Waves, `monitor` covers current attention across them, and
-`task list/show` retains exact historical lookup. Project IDs, chapter history,
-KRs and Workflow storage survive. A combined cross-Wave backlog view is optional,
-not a requirement merely because roadmap exists today.
-
-Jack questions `run NAME`: remove that duplicate dispatch spelling after its
-Flow drivers, skills, examples and tests use explicit invocation. `task run`
-continues to advance the captured Workflow; direct invocation does not. Removing
-a CLI spelling does not remove the shared execution function or driver.
+Jack selected Wave-owned planning. Locally, `wave show [WAVE]` reads current and
+historical chapter plans; `wave workflow` selects future take-up, and `wave edit-plan`
+edits chapter name/summary. Project IDs, KRs, history and stored Workflow definitions
+survive. Root `project`/`roadmap` and duplicate `run` dispatch are removed. Task run
+still advances the captured Workflow; explicit skill/Flow invocation does not.
+A separate cross-Wave backlog surface is optional, not implied by the old command.
 
 Jack accepted combining activity and history (October 8): `lf history` is the
 chronological feed, with execution details and replay underneath. Remove the
@@ -95,13 +90,10 @@ Replay starts a new execution. Session-native history stays under Session.
 Jack accepted `history usage` for aggregate views of tokens, cost and time.
 Reuse existing records; no second store.
 
-Jack questioned both `open` and `desktop`, and dislikes `inspect` alongside
-`--explain`. Proposed: `desktop open` owns opening, `desktop list` reads actual
-windows/panes. They keep short forms through normal resolution, not duplicate
-implementations. `desktop list --json` preserves reading freshness, exact targets,
-capability support and legal actions. Composed Session+diff opening must return
-opening/usable/failed outcomes; neither command success nor layout mutation proves
-a rendered endpoint. Remote viewing stays separate from execution placement.
+`desktop open/list` own opening and actual-window inspection, with short forms
+through normal resolution. JSON retains freshness, exact targets, capabilities and
+legal actions. Opening/usable/failed are distinct: layout mutation is not a rendered
+endpoint. Remote viewing stays separate from execution placement.
 
 Jack deferred Discord changes; leave it unchanged.
 
@@ -183,10 +175,10 @@ checkout and launch.
 Local `--context` reuses launch prompt assembly and bound Work enrichment for skills and inline requests;
 `--explain` uses WorkSelection/ContextFact before admission or preparation. JSON
 combines both on request. Primary scoped identity survives dispatch. Broader action
-explanation, remote preview and complete-path composition remain unfinished.
+explanation and complete-path composition remain unfinished. Explicit-Machine preview is implemented.
 
-Headless gate separates command discovery (`documented_commands`), wire shape
-(`dto_fixtures`) and behavioral routing/preview tests. The latter must establish
+Headless gate separates discovery (`documented_commands`), wire shape
+(`dto_fixtures`) and routing/preview behavior, including
 no provider or Work effects, selected-Machine repository lookup, explicit unknowns
 and preview/launch input parity for the same snapshot. Existing exact-target
 fixtures prove separate resolver/model boundaries, not the composed usable endpoint.
@@ -212,6 +204,10 @@ These boundaries are integration constraints, not separate replacement projects.
 
 ## Delete — do not maintain
 
+Removed: `lf.rs`'s blanket remote-preview refusal and writable receiver identity
+lookup. Preview bypasses probe/credential preparation in the existing transport;
+launch retains its checks. No parallel preview protocol or planning reader.
+
 Removed: launch-only opening, automatic execution routing/preparation, split Session/Changes
 intent and URL-based completion. One generation-scoped `LinkedSession` observes existing
 Session/Files/pane owners. Palette links reuse `TaskLink.url`; direct/chooser failures
@@ -220,10 +216,6 @@ view revision counters and `openingSessionObservation`. Session and multiplexer 
 now use Observation, like Files; no replacement readiness or layout store is added.
 MultiplexerStore now owns exact-pane visibility for reads and readiness; ordered
 request-ID snapshots are sets, with no copied receipt dictionary for validation.
-
-Repository resolution and restored-scene validation now share the router;
-pre-registration failures are inspectable. Mounted Task content, not selection,
-settles the request generation.
 
 Removed in the invocation cut: embedded Workflow choice, caller-supplied Project
 selection, duplicate option/provenance checks and fallback Process writes after previews.
@@ -235,7 +227,10 @@ Opening explanation reports platform impediments; actual Desktop control still
 refuses before repository lookup. Linux execution remains with gate/CI.
 
 Removed `Commands::Project`, `Commands::Roadmap` and their dispatch. Wave owns
-planning commands; the existing plan and Workflow readers/writers remain. `Context { explain }`, validation-only scope checks,
+planning commands. Removed `plan_selector`'s ID round trip and the optional-write
+`workflow` API: each operation resolves `PlanTarget` on its own store;
+`workflow` reads and `set_workflow` writes through the existing owners.
+`Context { explain }`, validation-only scope checks,
 `execute_command`'s raw-argv reparse and unused `resolve_checkout_binding` are removed.
 Checkout/retirement fixtures now exercise the surviving execution-binding reader. The standalone budget reader remains;
 its final home is open. Prompt excerpts now defer persistence until launch. Their underlying
@@ -264,34 +259,31 @@ native/artifact evidence and the plan below retains incomplete composition.
 
 ## Implementation sequence — one PR
 
-CLI cutover and checkout-location evidence: `0625dfb60:scratch/compare-cmux-s-command-line.md`,
-Implementation sequence. Root run/open and public max-turns/no-loopflow are removed;
-Task edges retain skill/Flow dispatch and steer filtering. One draft separates
-recorded checkout Machine from delegation; installed migration proof stays with gate.
+Checkout migration evidence: `0625dfb60:scratch/compare-cmux-s-command-line.md`;
+installed proof stays with gate.
 
 ### Wave planning and invocation explanation — October 9
 
-`wave show [WAVE]` replaces root roadmap on the existing snapshot owner, including
-`--all` and exact `--task` lookup. Text now retains historical chapters, KRs and
-metric targets beside current selection. Wire types and internal Project identity
-remain unchanged. `wave workflow` replaces Project workflow; ordinary selection
-addresses a Wave, with `--project` for exact retained chapters. `wave edit-plan`
-reuses the common name/summary writer. Desktop sends Wave identity rather than
-choosing a Project from an older reading. No migration, new writer or live rotation.
-
-Planning reads skip Process admission and use the read-only store.
-A missing-registry regression first exposed fallback Process initialization, as
-preview's checkpointed-WAL fixture had before. Mutations retain ordinary admission.
-Desktop, fixtures and examples move together.
-These reversible spellings remain distinct from Jack Heart's accepted Wave ownership.
+`575bde5bc`/`367ce31a9` implement Wave-owned current/historical planning through
+existing readers and separate Workflow writes. Desktop sends Wave identity;
+Project IDs, KRs, metric targets and captured Workflows survive. Reads skip Process
+admission, use read-only storage and resolve targets once. Earlier detail:
+`af79d4762:scratch/compare-cmux-s-command-line.md`, this heading.
 
 Task-run and opening explanation share launch selection/validation; only launch
-prepares Work. Parsed previews suppress fallback Process writes. Original failures,
-route provenance and option details: `f881ae647:scratch/compare-cmux-s-command-line.md`,
-**Invocation explanation** and [findings](findings.md). A proposed URL proves no native
-readiness. Local absence and delegation never grant peer-exclusive first start.
+prepares Work. Checkpointed-WAL and missing/unreadable-store fixtures preserve
+the hidden-write regressions. A proposed URL proves no native readiness.
 
-Remaining: broader action explanation, remote/Flow input, exchange/admission and
+Explicit `--machine` previews now use the same SSH transport, Work routing and
+receiving preview owners. The caller reads its saved Machine without probing;
+the receiver validates expected identity read-only before repository resolution.
+Neither admits a Process or prepares credentials. Names/paths resolve on the
+selected Machine; unavailable identity/transport fails without fallback, while
+missing Work remains unavailable in text/JSON. Existing SSH authentication is
+still required. Fixtures use two actual CLIs and local-only simulated SSH;
+configured SSH and peer-exclusive first start are unproved.
+
+Remaining: broader action explanation, Flow input, exchange/admission and
 verified bounded native extraction; one PR through demo, not separate delivery.
 
 ### Local composed opening — October 9
@@ -401,7 +393,7 @@ Pending data is not remotely durable until published. Existing execution keeps
 its own lifecycle; no automatic turn/Flow retry is introduced. Online comments
 and completion propagate semi-live through the active sync owner. Main's LOO-406
 `d20c56daf` is integrated, retaining repository-scoped foreground Linear sync.
-Readback cannot exclude unseen Linear reopening. LOO-412 through `fcd64901f` is
+Readback cannot exclude unseen Linear reopening. LOO-412 through `5624151a3` is
 inspected, not integrated. `08a285872` repairs the previously observed source gap:
 common attempt transactions defer effects while rejected or sharing-held projections
 retain receipts only in journals. Saves and independent acquisition continue;
@@ -410,11 +402,14 @@ selection alone cannot release the hold before successful import.
 owner. Original save clocks select intentions; later effect/readback clocks cannot
 revive losing orders. Unresolved losing effects still prevent another write, and
 only complete-list acquisition recognizes progress. Import and detail reads settle
-nothing. These mechanisms replace the earlier outstanding implementation items,
+nothing. `357090d4b` also accepts common moves that change only
+`prioritySortOrder`; requiring a secondary key had rejected valid receipts.
+These mechanisms replace the earlier outstanding implementation items,
 not the mixed-operation acceptance below.
 
-Alternate/relationship acquisition, legacy association and unplaced-Wave/Desktop
-presentation remain before mixed activation. The dependency records focused storage,
+Alternate acquisition must preserve provider-only removal/archive and independently
+aged Team/Initiative/list evidence; entity revisions cannot order relationships.
+Legacy association and unplaced-Wave/Desktop presentation also remain before mixed activation. The dependency records focused storage,
 migration and common-delivery passes; revised Linux public reconnect and combined
 acceptance remain with gate. Deletion/retained-effect fixtures compare seven
 populated execution tables, while creation's retained-ID list is empty. Neither
@@ -578,7 +573,4 @@ identity/delegation, open them, add shell/Files panes, retain an unfinished draf
 change focus, target a harmless command, read output, hide/restore, and verify the
 original input target and draft survive. Demo owns native usability; preserve comparison evidence and use no real accounts or live user terminals.
 
-Earlier failed attempts and check archives: [findings](findings.md) and
-`f48d84511:scratch/compare-cmux-s-command-line.md`.
-
-Check (October 9): Rust build/Clippy, `local_planning wave_planning` (2), catalog (1), Desktop RegistryQuery/Headless (25), Python timings/alignment (6), documented commands (3) PASS. Gate owns combined verification; demo owns native usability.
+Check (October 9): build/fmt/Clippy and four network-isolated `machine_commands remote_preview` fixtures PASS; combined verification stays with gate, native usability with demo.

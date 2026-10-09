@@ -440,15 +440,11 @@ pub fn validate_expected_machine_process() -> anyhow::Result<()> {
     if std::env::var_os(crate::lf::commands::ssh::EXPECTED_MACHINE_ID_ENV).is_none() {
         return Ok(());
     }
-    let runtime = tokio::runtime::Runtime::new()?;
-    let local = runtime.block_on(async {
-        crate::store::open_existing_store()
-            .await
-            .ok_or_else(|| anyhow!("Machine-addressed command needs an initialized local store"))?
-            .local_machine()
-            .await
-            .map_err(anyhow::Error::from)
-    })?;
+    let local = crate::store::read_existing_registry()
+        .context("Machine identity unavailable")?
+        .ok_or_else(|| anyhow!("Machine identity unavailable: local registry is absent"))?
+        .sqlite
+        .local_machine()?;
     validate_expected_machine(&local.id)
 }
 

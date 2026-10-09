@@ -31,7 +31,10 @@ Project identity and historical planning remain. `575bde5bc`/`367ce31a9` impleme
 this through the existing readers/writers; current/history text/JSON and
 checkpointed-store fixtures cover effect-free reads. Earlier delta entries saying
 Wave planning is incomplete describe their revisions, not the current checkout.
-Remote/Flow previews, peer composition and native bounded extraction remain.
+Explicit-Machine previews now reuse the transport without identity-probe writes,
+credential preparation or Process recording. Two real CLI fixtures cover remote
+repository/Work reads; configured SSH is unproved. Flow previews, peer composition
+and native bounded extraction remain.
 Earlier command names below are dated evidence, not compatibility aliases.
 
 ## Evidence and version boundary

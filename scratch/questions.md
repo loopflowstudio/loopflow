@@ -107,22 +107,23 @@ These are reversible lookup choices, not shared Work identity or publication.
 Primary and stack-parent Task selectors now carry repository-scoped full IDs through
 dispatch; an unscoped ambiguous prefix still fails.
 
-Generated goal remains about 10k tokens over 16000, mostly the file inventory.
+October 9 `lf context --skill implement`: generated goal 27,022/16,000 tokens
+(11,022 over), mostly file inventory; supplied complete source was read.
 Authored-note curation cannot shrink it; context-producer work remains separate.
 
 ## Reversible preview limits — October 9
 
 Local skill/inline `--context` uses the stored snapshot; real launch may refresh Task
 comments first. Flow-wide context remains undefined. Bare-agent/new operator-checkout
-previews cannot create their future checkout to manufacture input. Remote transport
-currently probes identity and prepares credentials, so remote preview fails before
-transport rather than pretending those effects are reads. These gaps remain in the
-one-PR scope, not deferred deliverables. Task-run action/impediment explanation now uses the launch owners. Desktop opening also explains its proposed URL and impediments; other command
+previews cannot create their future checkout to manufacture input. Explicit-Machine
+preview now skips probes and credentials; missing/changed identity fails before
+input assembly. Existing SSH authentication remains required. These remaining gaps
+stay in the one-PR scope. Task-run action/impediment explanation now uses the launch owners. Desktop opening also explains its proposed URL and impediments; other command
 action explanation remains. Its reversible JSON shape uses nullable `url`, not an
 opening receipt; on unsupported platforms the proposal may coexist with a blocker. Omitting a Task from `task run` uses checkout/declaration
 inference in preview and execution; naming a Flow still uses the explicit Task
-positional form. Remote action evidence is unavailable without effect-free transport;
-local absence does not resolve Q2 or first-start admission.
+positional form. A remote preview observes only its selected Machine;
+local absence never grants first-start admission.
 
 ## Reversible exact-input choices — October 8
 

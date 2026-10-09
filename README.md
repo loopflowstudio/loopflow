@@ -163,6 +163,7 @@ lf history             # durable work, delivery and steering history
 lf session list --json # conversations on this Machine
 lf context             # context budgets, configuration sources and current usage
 lf task run LOO-427 --explain --json # intended action and impediments; no launch
+lf --machine mini --repo project debug --context # read remote input without launching
 lf usage --days 30      # recorded provider usage
 lf usage --task LOO-265 # usage attributed to one Task
 lf usage --task LOO-265 --context # each step's input by source, flagged over budget

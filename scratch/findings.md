@@ -49,7 +49,7 @@ proof remains.
 
 ### Committed exchange update — October 9
 
-LOO-412 through `fcd64901f` was inspected through Git, not integrated.
+LOO-412 through `5624151a3` was inspected through Git, not integrated.
 Creation discovery and common deletion receipts remain implemented; earlier evidence
 and the rejected-projection gap survive at `af34dd20c:scratch/findings.md`, this
 heading. That was a source gap, not an observed production duplicate.
@@ -71,25 +71,25 @@ not settled superseded partial moves. Import preserves baseline, desired list,
 effects, acknowledgement and conflicts; complete-list acquisition alone recognizes
 progress. Malformed effects abort import; competing effect chains isolate the
 object. Historical order lists participate in private-history sharing holds.
-The dependency records six focused storage/migration/common-delivery tests, build
-and Clippy passes, not public mixed-provider activation.
+`357090d4b` repairs a narrower receipt mismatch: common delivery can change only
+`prioritySortOrder`, but import required `sortOrder` too. The added lost-reply
+fixture imports that effect and settles via acquisition without another write.
+This is inspected fixture source, not mixed-provider activation.
 
 `ops/planning_peer.rs` still refuses connected Linear exchange; the plan retains
 remaining composition and preservation limits. Dependency plan and Infrastructure
-memory inspected at `fcd64901f`, **Remaining integration** and **Tasks across machines**.
+memory inspected at `5624151a3`, **Remaining integration** and **Tasks across machines**.
 
-Coverage: Product has no child directories/memories. Related Infrastructure planning,
+October 9 coverage: filesystem inspection found no Product child directories/memories. Related Infrastructure planning,
 peer and Intelligence context/check-ownership sections were read; unrelated sibling
 history was not re-audited.
 
 ## Arrangement evidence — October 8
 
-`d9fa2b829`–`caa48b5c1` implement exact-target arrangement, shared pruning and
-companion insertion, publishing command/focus/Undo together. Direct Swift/model
-checks passed; packaged attempts stalled. Commands and failures remain at
-`0dba18b79:scratch/findings.md`, this heading, and Git blob
-`939890436fc712a5e14875749d586ae3ae450523`. Native drafts/responders and the
-cross-machine path remain unproved; the plan retains their acceptance.
+`d9fa2b829`–`caa48b5c1`: exact-target arrangement and shared companion insertion;
+direct Swift/model checks passed, packaged execution stalled. Failed attempts:
+`0dba18b79:scratch/findings.md`, this heading. Native drafts/responders and
+cross-machine composition remain unproved.
 
 ## Terminal identity and extraction boundary — October 8
 
@@ -187,3 +187,16 @@ impediments. Preview now uses the launch's URL owner without invoking Desktop.
 A proposed URL establishes no window, surface or usable endpoint. Fixture launch
 and preview compare URLs; checkpointed populated storage checks catch hidden writes.
 Pre-edit conflicted notes and checks: `/tmp/loo427-desktop-explain/`.
+
+## Remote preview — October 9
+
+`machine id` probes initialize/journal; preview now validates identity inside the
+receiving read-only invocation and skips account preparation at the sender.
+Checkpointed populated registries on both ends catch Process writes, including
+failed reads. The first repository-name fixture failed because config was written
+outside its explicit `LF_HOME`; correcting the fixture preserves selected-Machine
+lookup, not a production workaround. A second assertion expected arguments in
+`task_prompt`; system input owns them. Relative-path coverage also exposed the SSH
+substitute retaining the caller's cwd; it now enters the simulated login directory.
+Pre-edit notes and checks:
+`/tmp/loo427-remote-preview/`. No live SSH/provider or peer-admission proof.

@@ -224,7 +224,7 @@ unpublished code retained, without deletion or delivery authorization.
 Jack Heart requested one inventory. #1512 is `3e1e6245c`; authorized parallel
 LOO-441 must integrate before publication. Prior proofs: `6f96a964c`, this heading.
 
-Fresh tokens fence A → B → A; retain provider identity/parent and exact exits.
+Tokens fence A → B → A; retain provider identity/parent and exits.
 Freeze Work/capture before native requests, never from delayed starts or launch
 capture. `a563794b7` preserves matching origins and rejects conflicting repeats.
 Late history grants no control; broadcasts cannot borrow newer input.

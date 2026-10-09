@@ -32,3 +32,9 @@ account failover selects a fresh native thread, while same-account retry retains
 This extends the existing exact-owner rule, not generic harness-stop authority.
 The native PTY fixture covers inherited descriptors/group, not configured terminal
 interaction. Focused runtime results are recorded in the plan.
+
+2026-10-09 implementation choice: native commands carry the owner's exact
+attachment in memory, never serialized into stable tool provenance. The client
+relay and provider endpoint are separate paths. Connection exit/interruption
+records its attachment outcome without asserting provider death or invoking
+provider close; independent orphan settlement still owns detached providers.

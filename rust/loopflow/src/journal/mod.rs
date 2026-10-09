@@ -78,6 +78,20 @@ impl TestLedgerGuard {
     }
 }
 
+/// Pin a blocking fixture worker to its owning test's store; the caller holds
+/// the environment lock. Production processes already share one admitted ledger.
+#[cfg(test)]
+pub(crate) fn with_test_ledger<T>(path: PathBuf, run: impl FnOnce() -> T) -> T {
+    struct Restore(Option<PathBuf>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            TEST_LEDGER_DB_PATH.with(|path| *path.borrow_mut() = self.0.take());
+        }
+    }
+    let _restore = Restore(TEST_LEDGER_DB_PATH.with(|current| current.replace(Some(path))));
+    run()
+}
+
 #[cfg(test)]
 impl Drop for TestLedgerGuard {
     fn drop(&mut self) {

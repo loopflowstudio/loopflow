@@ -87,7 +87,7 @@ attribution survive.
   direct receipt sampler or mutable-Session provider selector remains there.
 - Native resume's separate claim/interrupt/finish path in `resume_session_with_env`
   is removed. `session_command_status_with_env` owns fresh and resumed admission;
-  saved captures survive. Connection admission remains incomplete below.
+  saved captures survive. Exact connection admission is described below.
   Intentional client moves remain successful command exits, including their
   attachment outcome.
 - Metadata-only `CaptureHandle::fail_and_begin_attempt` is removed; invocation
@@ -95,6 +95,8 @@ attribution survive.
   metadata reducer remains for history/usage projection.
 - Native `spawn_native(None)`, capture launch without an attachment, and
   `native_provider_driver`'s missing-provenance-as-client inference are removed.
+  Native admission no longer reconstructs authority from `AgentCaller`; the
+  command carries the capture or connection owner’s frozen attachment separately.
   Raw headless optional admission remains a deletion target.
 - Top’s receipt-selected inventory, `ProcessSnapshot`, and the exclusive
   `read_process_snapshot` transaction wrapper are removed. One unfinished-row
@@ -198,36 +200,28 @@ one attachment fence now spans LfProcess observation, recorded-provider close
 and atomic settlement/claim, including input admission. Detached-live,
 unknown-spawn, duplicate identity, zombie and changed-settings fixtures cover
 this source boundary. The earlier feedback's request to consolidate resume is
-implemented; connection admission below is a separate remaining defect.
+implemented; the subsequent exact connection-admission slice is recorded below.
+
+**Native connection (2026-10-09):** Native launch now carries the
+frozen attachment from the capture or connection owner; the old provenance-to-
+current-token lookup is deleted. Connection launch separates the client relay
+from the recorded upstream endpoint, and validates the latter under the exact
+attachment. A second exact-token check still fences actual spawn. Client exit
+and interruption retain attachment outcomes without closing or ending the
+surviving AgentProcess; orphan settlement remains independent. The previous
+generic connection finish could close a headless Codex provider and is removed.
+The composed fixture covers launch, takeover during history acquisition and
+A → B → A before launch. It uses a stand-in native client and local history
+server, not a configured Codex conversation or complete relay roundtrip.
 
 ## Remaining implementation
 
-1. Finish admission at the invocation boundary, in two distinct paths:
-   - **Codex live connection first.** `connect_live_codex` already claims an exact
-     attachment and gives it to the relay, but sends an empty environment and the
-     relay socket to `resume_session_with_env`. Native admission rejects missing
-     provenance; supplying `AgentCaller` alone would then fail the comparison of
-     the relay socket with the recorded upstream endpoint. Preserve both endpoint
-     roles and pass the connection owner's exact attachment through native launch.
-     The helper fixture supplies the upstream path directly; it misses this path.
-   - **Do not reconstruct attachment authority from caller provenance.** At
-     `9255e9b03`, `native_provider_attachment` reads the current attachment and
-     compares only current LfProcess plus `attachment.caller(...)`. That caller
-     contains Session, provider generation and original parent, not the claim
-     token. For A → B → A on the same AgentProcess, A's old environment is
-     indistinguishable from its new one. The later spawn lock checks the newly
-     read token, not the caller's original claim. This is a source-derived
-     admission counterexample, not an observed native write. Carry the frozen
-     `SessionAttachment` as authority; keep stable tool provenance separate.
-     Prove composed relay launch, takeover before launch, A → B → A rejection,
-     and client exit without provider settlement. Do not weaken endpoint or
-     provenance checks merely to let the existing fixture pass.
-   - **Raw headless starts.** `run_agent` and native helpers enter the invocation
-     runtime, but raw `Harness::start`, optional config, `open_owner` and headless
-     `spawn` still permit unrecorded children. Make admission unconditional at the
-     invocation entry, not by inventing a parent inside a spawn callback. Retain
-     the lock through recording, failed-spawn evidence and uncertain-spawn refusal.
-     Native foreground treatment must preserve TTY/process-group behavior.
+1. **Raw headless starts.** `run_agent` and native helpers enter the invocation
+   runtime, but raw `Harness::start`, optional config, `open_owner` and headless
+   `spawn` still permit unrecorded children. Make admission unconditional at the
+   invocation entry, not by inventing a parent inside a spawn callback. Retain
+   the lock through recording, failed-spawn evidence and uncertain-spawn refusal.
+   Native foreground treatment must preserve TTY/process-group behavior.
 2. Remove numeric provider generation from runtime caller/status fences in favor
    of AgentProcess identity. Request correlation already freezes Process, Work and
    capture before send in Claude, Codex and OpenCode history; `SessionTurnOrigin`
@@ -277,19 +271,23 @@ checks). These remain source proofs, not configured or installed acceptance.
 
 Compression removes native resume's duplicate admission/settlement path. The
 common entry admits one lf invocation and AgentProcess around the saved capture;
-remote connection admission remains incomplete. Review retained intentional move
+remote connection admission now carries its exact claim separately. Review retained intentional move
 semantics: the public command accepts a recorded stop reason even with nonzero
 provider status, so attachment settlement must do the same. Fixtures exercise
 both outer-runtime and direct resume, saved native identity and one reservation
 per launch. Top's activity fold uses array indices instead of cloned ID graphs;
 unknown parent evidence, provider-only state and cycle refusal remain unchanged.
 
-Realignment at `9255e9b03` confirms the composed relay mismatch and exposes the
-native boundary's token loss under A → B → A (item 1). Repair needs the
-connection-owner interface, not another provenance lookup. Release's child memory
-was read in full: its operation-entry lesson applies to this lower-helper blind
-spot as well as top/Task-status/scheduled acceptance. No configured orphan was
-signaled and no installed store was opened. These are implementation gaps within
-Jack Heart's accepted scope, not new product choices.
+Realignment at `726806476` identified the composed relay mismatch and token loss;
+this slice removes that lookup and supplies the frozen capability end to end.
+Review also found generic connection completion could close the provider after
+client exit. Connection cleanup now records only its attachment outcome, including
+failure rather than reporting all exits completed. Release's child memory was
+read in full; its operation-entry lesson informs the composed fixture. Configured
+acceptance, all remaining lifecycle cuts above and the full gate remain open.
+Native fixtures now pin invocation and capture to the same ledger, including
+blocking workers, and supply required startup evidence. The planning
+reconnect fixture retains its original behavior and reports early launch errors.
+No installed store was opened and no configured orphan was signaled.
 
-Check: `git diff --check` and `lf context --skill realign` pass; source audit confirms the relay/provenance gaps, prior focused checks remain at `9255e9b03` in this plan; no Rust changed or suites rerun, full verification remains gate/CI-owned.
+Check: LF_*-cleared `cargo test -p loopflow --lib` with native-util, composed-connection and planning-reconnect filters passes after fixture repairs; `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` pass; full Rust/Swift/DTO/materialized and Linux verification remains gate/CI-owned.

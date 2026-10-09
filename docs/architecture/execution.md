@@ -154,13 +154,15 @@ and attachment transfer hold the same per-Session OS lock, without holding a
 SQLite transaction over transport I/O. A send timeout
 has an unknown outcome and is not retried automatically.
 
-The composed native connection is not yet working: its owner passes neither
-caller provenance nor the exact attachment to native resume, and the native
-helper compares the relay socket to the upstream provider endpoint. Supplying
-provenance alone is insufficient: the helper reconstructs the current attachment
-from it, losing the original claim token across A → B → A. The connection must
-carry its frozen attachment and distinguish relay from upstream endpoint. Direct
-native-helper fixtures do not prove this composed entry path.
+Native launch carries the capture or connection owner's frozen attachment in
+memory, separately from stable tool provenance. Admission validates that token;
+it never reconstructs authority from the current record. The client connects to
+the local relay, while the recorded upstream endpoint identifies the AgentProcess.
+Both initial validation and actual spawn reject a replaced attachment, including
+A → B → A. Connection exit or interruption records an attachment outcome without
+closing or ending the surviving provider; orphan settlement remains independent.
+Composed stand-ins cover launch and pre-launch takeover, not configured Codex or
+a complete native-client relay exchange.
 
 A passive viewer subscribes without claiming the Session. A former driver can
 keep receiving and retaining provider history after transfer but cannot start or

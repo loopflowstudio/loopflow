@@ -225,11 +225,12 @@ Jack Heart requested one inventory; #1512/#1516 integrated. Unknown stays visibl
 retry preserves history; remote clients cannot settle providers.
 
 `c1c09fb6c` fences resume close/claim; `9255e9b03` shares native admission.
-Configured connection remains unproved: Codex omits provenance and compares relay
-with upstream endpoint. Native admission also reconstructs the current claim
-from tokenless provenance: A → B → A defeats that boundary despite token-fenced
-storage/dispatch. Carry exact attachment separately from stable provenance;
-Helper proofs miss composed entry (Release's lesson).
+Native launch carries frozen attachment separately from provenance;
+relay and provider endpoints stay distinct. Composed stand-ins prove launch,
+pre-launch takeover and A → B → A rejection. Connection exit records its
+attachment outcome without closing or ending the provider. Configured connection
+and full relay acceptance remain unproved. Release's operation-entry lesson
+exposed both the admission gap and generic cleanup's excess authority.
 
 Headless optional admission, generations, foreground cleanup, takeover death
 orders, public/scheduled agreement, two-second removal and installed settlement

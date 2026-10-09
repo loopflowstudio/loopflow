@@ -747,11 +747,21 @@ async fn connect_live_codex(
             }
             Err(error) => return Err(error.into()),
         };
-    crate::session_record::register_session_attachment_interrupt(
-        &store.sqlite,
-        session.id.clone(),
-        driver.clone(),
-    );
+    let interrupted_store = store.sqlite.clone();
+    let interrupted_session = session.id.clone();
+    let interrupted_attachment = driver.clone();
+    crate::engine::agent::register_interrupt_cleanup(move || {
+        // A native client owns its attachment, never the surviving provider's exit.
+        match interrupted_store.finish_session_attachment(
+            &interrupted_session,
+            &interrupted_attachment,
+            "interrupted",
+            || Ok(false),
+        ) {
+            Ok(()) | Err(crate::store::StoreError::InvalidAuthority(_)) => {}
+            Err(error) => tracing::warn!(%error, "record interrupted Session connection"),
+        }
+    });
     let connected = async {
         // Retain the AgentProcess while this lf invocation is attached.
         crate::engine::process::hold_agent_process_lifeline(
@@ -769,6 +779,7 @@ async fn connect_live_codex(
             store: store.sqlite.clone(), session_id: session.id.clone(), thread_id: thread, attachment: Some(driver.clone()),
         };
         connection.recover_history(Path::new(&endpoint)).await?;
+        let upstream = PathBuf::from(&endpoint);
         let relay = tokio::spawn(async move {
             let mut clients = tokio::task::JoinSet::new();
             loop {
@@ -787,10 +798,16 @@ async fn connect_live_codex(
         });
         let session = session.clone();
         let provider = provider.clone();
+        let attachment = driver.clone();
+        let environment = BTreeMap::from([(
+            crate::process::AGENT_CALLER_ENV.into(),
+            serde_json::to_string(&attachment.caller(session.id.clone()))?,
+        )]);
         let result = tokio::task::spawn_blocking(move || {
             crate::lf::commands::util::resume_session_with_env(
                 "codex", session.model.as_deref(), &session.cwd, &session.artifact_key, &provider,
-                &BTreeMap::new(), None, Some(&remote),
+                &environment, None, Some(crate::lf::commands::util::NativeConnection { relay: remote, upstream }),
+                Some((session.id.clone(), attachment)),
             )
         }).await;
         relay.abort();
@@ -798,11 +815,15 @@ async fn connect_live_codex(
         result??;
         Ok::<_, anyhow::Error>(true)
     }.await;
-    match crate::session_record::finish_session_attachment(
-        &store.sqlite,
+    match store.sqlite.finish_session_attachment(
         &session.id,
         &driver,
-        "completed",
+        if connected.is_ok() {
+            "completed"
+        } else {
+            "failed"
+        },
+        || Ok(false),
     ) {
         Ok(_) | Err(crate::store::StoreError::InvalidAuthority(_)) => {}
         Err(error) => return Err(error.into()),
@@ -1170,6 +1191,7 @@ pub(crate) fn resume_native_session(
         &environment,
         launch_lock.take(),
         None,
+        None,
     )?;
     Ok(true)
 }
@@ -1430,6 +1452,199 @@ fn read_observation_chunk(_: &mut [u8]) -> std::io::Result<Option<usize>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn codex_connection_launch_preserves_provider_and_rejects_replaced_attachment() {
+        use futures_util::{SinkExt, StreamExt};
+        use std::os::unix::fs::PermissionsExt;
+        use tokio_tungstenite::{accept_async, tungstenite::Message};
+
+        // Exercise the actual process-wide invocation across the blocking native launcher.
+        // Keep its one-shot runtime initialization out of the other library tests.
+        const CHILD: &str = "LOOPFLOW_CONNECTION_TEST_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+            child.args(["--exact", "ops::human_session::tests::codex_connection_launch_preserves_provider_and_rejects_replaced_attachment", "--nocapture"]);
+            for (key, _) in std::env::vars_os() {
+                if key.to_string_lossy().starts_with("LF_") {
+                    child.env_remove(key);
+                }
+            }
+            let output = child.env(CHILD, "1").output().unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let home = ledger.home();
+        let bin = home.join("bin");
+        std::fs::create_dir(&bin).unwrap();
+        let codex = bin.join("codex");
+        std::fs::write(&codex, "#!/bin/sh\nprintf '%s\\n' \"$@\" > client-args\n").unwrap();
+        std::fs::set_permissions(&codex, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // No installed provider or account can win PATH discovery.
+        let _path = crate::test_ambient::EnvGuard::clear(&["PATH"]);
+        std::env::set_var("PATH", format!("{}:/usr/bin:/bin", bin.display()));
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        crate::journal::with_process(|| {
+            crate::journal::admit_process(home, &["lf".into(), "session".into()]);
+            runtime.block_on(async {
+                let store = std::sync::Arc::new(
+                    crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
+                        home.join("loopflow.db"),
+                    ))
+                    .await?,
+                );
+                for transfer in ["none", "takeover", "reattach"] {
+                    let capture = crate::session_record::CaptureHandle::begin_at(
+                        home,
+                        crate::session_record::SessionCaptureSpec {
+                            harness: "codex".into(),
+                            model: None,
+                            surface: "headless".into(),
+                            cwd: home.into(),
+                            repo: None,
+                            worktree: None,
+                            skill: None,
+                            subjects: Vec::new(),
+                            flow: crate::session_record::SessionFlowMembership::Independent,
+                            work: None,
+                        },
+                    )?;
+                    let session = store
+                        .sqlite
+                        .session_for_artifact(&capture.artifact_key())?
+                        .unwrap();
+                    let original = store.sqlite.claim_session_attachment(
+                        &session.id,
+                        None,
+                        &crate::id::ProcessLfid::new(),
+                        true,
+                    )?;
+                    let mut command = std::process::Command::new("/bin/sleep");
+                    command
+                        .env_clear()
+                        .arg("60")
+                        .stdin(std::process::Stdio::null())
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null());
+                    let mut provider = crate::harness::agent_process::spawn_native(
+                        command,
+                        &(store.sqlite.clone(), session.id.clone(), original.clone()),
+                    )?;
+                    let endpoint = home.join(format!("{transfer}.sock"));
+                    store.sqlite.record_session_connection(
+                        &session.id,
+                        &original,
+                        endpoint.to_str().unwrap(),
+                        "saved-thread",
+                    )?;
+                    let listener = tokio::net::UnixListener::bind(&endpoint)?;
+                    let sqlite = store.sqlite.clone();
+                    let session_id = session.id.clone();
+                    let server = tokio::spawn(tokio::time::timeout(
+                        std::time::Duration::from_secs(5),
+                        async move {
+                            // The first connection probes reachability; the second reads native history.
+                            drop(listener.accept().await?.0);
+                            let mut socket = accept_async(listener.accept().await?.0).await?;
+                            while let Some(message) = socket.next().await {
+                                let message = message?;
+                                if matches!(message, Message::Close(_)) {
+                                    break;
+                                }
+                                let Message::Text(text) = message else {
+                                    continue;
+                                };
+                                let rpc: serde_json::Value = serde_json::from_str(&text)?;
+                                let Some(id) = rpc.get("id") else { continue };
+                                let history = rpc["method"] == "thread/turns/list";
+                                if history && transfer != "none" {
+                                    let first = sqlite.session_attachment(&session_id)?.unwrap();
+                                    let second = sqlite.claim_session_attachment(
+                                        &session_id,
+                                        Some(&first),
+                                        &crate::id::ProcessLfid::new(),
+                                        false,
+                                    )?;
+                                    if transfer == "reattach" {
+                                        let third = sqlite.claim_session_attachment(
+                                            &session_id,
+                                            Some(&second),
+                                            first.process_lfid.as_ref().unwrap(),
+                                            false,
+                                        )?;
+                                        assert_eq!(
+                                            first.caller(session_id.clone()),
+                                            third.caller(session_id.clone())
+                                        );
+                                        assert_ne!(first.token, third.token);
+                                    }
+                                }
+                                let result = if history {
+                                    serde_json::json!({"data":[], "nextCursor":null})
+                                } else {
+                                    serde_json::json!({})
+                                };
+                                socket
+                                    .send(Message::Text(
+                                        serde_json::json!({"id":id, "result":result})
+                                            .to_string()
+                                            .into(),
+                                    ))
+                                    .await?;
+                            }
+                            Ok::<_, anyhow::Error>(())
+                        },
+                    ));
+                    crate::session_record::write_provider_session(
+                        &capture.artifact_dir(),
+                        "saved-thread",
+                        None,
+                    )?;
+                    let native =
+                        crate::session_record::read_provider_session(&capture.artifact_dir())?
+                            .unwrap();
+                    let result = super::connect_live_codex(&store, &session, &native, false).await;
+                    let history = server.await;
+                    let alive = provider.try_wait()?.is_none();
+                    let row = store.sqlite.process(&original.agent_process_lfid)?.unwrap();
+                    let attachment = store.sqlite.session_attachment(&session.id)?.unwrap();
+                    let retained = store.sqlite.session_connection(&session.id)?;
+                    // Only the test's throwaway child is stopped, after observing client effects.
+                    provider.kill()?;
+                    provider.wait()?;
+                    history???;
+                    assert!(alive && row.completed_at.is_none());
+                    assert_eq!(
+                        retained,
+                        Some((endpoint.to_str().unwrap().into(), "saved-thread".into()))
+                    );
+                    let args_path = home.join("client-args");
+                    if transfer == "none" {
+                        assert!(result?, "composed connection did not launch");
+                        let args = std::fs::read_to_string(&args_path)?;
+                        assert!(args.contains("--remote\nunix:///tmp/lf-connect-"), "{args}");
+                        assert!(args.contains("client.sock") && args.contains("saved-thread"));
+                        assert!(!args.contains(endpoint.to_str().unwrap()));
+                        assert!(attachment.process_lfid.is_none());
+                        std::fs::remove_file(args_path)?;
+                    } else {
+                        assert!(result.is_err(), "stale {transfer} connection launched");
+                        assert!(!args_path.exists());
+                        assert!(attachment.process_lfid.is_some());
+                    }
+                }
+                Ok(())
+            })
+        })
+        .unwrap();
+    }
+
     #[test]
     fn session_metadata_wire_preserves_unknown_observation_and_occurrence() {
         let session: super::SessionRecord = serde_json::from_str(include_str!(

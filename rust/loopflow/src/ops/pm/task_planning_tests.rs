@@ -1821,14 +1821,17 @@ exit 0
                 ..Default::default()
             };
             let context = PM_TEST_CONTEXT.with(Clone::clone);
+            let database = fixture.database.clone();
             runtime.block_on(async {
-                let running = tokio::task::spawn_blocking(move || {
-                    PM_TEST_CONTEXT.sync_scope(context, || {
-                        crate::engine::agent::run_agent(
-                            &launch,
-                            &process,
-                            &crate::engine::agent::AgentCapabilities::default(),
-                        )
+                let mut running = tokio::task::spawn_blocking(move || {
+                    crate::journal::with_test_ledger(database, || {
+                        PM_TEST_CONTEXT.sync_scope(context, || {
+                            crate::engine::agent::run_agent(
+                                &launch,
+                                &process,
+                                &crate::engine::agent::AgentCapabilities::default(),
+                            )
+                        })
                     })
                 });
                 let observed = tokio::time::timeout(std::time::Duration::from_secs(45), async {
@@ -1842,7 +1845,12 @@ exit 0
                         {
                             break;
                         }
-                        assert!(!running.is_finished(), "provider exited during outage");
+                        if running.is_finished() {
+                            panic!(
+                                "provider exited during outage: {:?}",
+                                (&mut running).await.unwrap()
+                            );
+                        }
                         tokio::time::sleep(std::time::Duration::from_millis(25)).await;
                     }
                     assert_eq!(

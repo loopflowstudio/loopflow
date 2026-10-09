@@ -50,7 +50,15 @@ pub(crate) struct SessionCommand {
     pub(crate) program: String,
     pub(crate) args: Vec<String>,
     pub(crate) cwd: PathBuf,
-    pub(crate) remote: Option<PathBuf>,
+    pub(crate) remote: Option<NativeConnection>,
+    pub(crate) attachment: Option<(String, crate::process::SessionAttachment)>,
+}
+
+/// The local relay is the client transport; only upstream identifies the AgentProcess.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct NativeConnection {
+    pub(crate) relay: PathBuf,
+    pub(crate) upstream: PathBuf,
 }
 
 #[allow(clippy::too_many_arguments)] // Provider inputs plus native skill flags and context file.
@@ -63,6 +71,7 @@ pub(crate) fn launch_session(
     provider_session_id: Option<&str>,
     flags: &[String],
     context_file: Option<&Path>,
+    attachment: Option<(String, crate::process::SessionAttachment)>,
 ) -> Result<()> {
     let worktree = absolute_path(worktree);
     let mut command = build_session_command(
@@ -74,6 +83,7 @@ pub(crate) fn launch_session(
         context_file,
     )?;
     command.args.splice(0..0, flags.iter().cloned());
+    command.attachment = attachment;
     spawn_session_command_with_env(&command, environment, provider_session_id, None, None)
 }
 
@@ -148,6 +158,7 @@ pub(crate) fn build_session_command(
         ),
     };
     Ok(SessionCommand {
+        attachment: None,
         remote: None,
         program: harness.to_string(),
         args,
@@ -171,6 +182,7 @@ pub(crate) fn resume_session(
         &BTreeMap::new(),
         None,
         None,
+        None,
     )
 }
 
@@ -183,7 +195,8 @@ pub(crate) fn resume_session_with_env(
     provider_session: &crate::session_record::ProviderSessionRef,
     extra_environment: &BTreeMap<String, String>,
     launch_lock: Option<File>,
-    remote: Option<&Path>,
+    remote: Option<NativeConnection>,
+    attachment: Option<(String, crate::process::SessionAttachment)>,
 ) -> Result<()> {
     let user_name = crate::engine::config::participant_name()?;
     let mut command = build_resume_session_command(
@@ -192,14 +205,18 @@ pub(crate) fn resume_session_with_env(
         worktree,
         &provider_session.provider_session_id,
     )?;
-    command.remote = remote.map(Path::to_path_buf);
-    if let Some(remote) = remote {
+    command.attachment = attachment;
+    command.remote = remote;
+    if let Some(remote) = &command.remote {
         if harness != "codex" {
             bail!("This provider has no native remote connection");
         }
         command.args.splice(
             1..1,
-            ["--remote".into(), format!("unix://{}", remote.display())],
+            [
+                "--remote".into(),
+                format!("unix://{}", remote.relay.display()),
+            ],
         );
     }
     let mut environment = BTreeMap::from([(
@@ -469,6 +486,7 @@ fn build_resume_session_command(
         }
     };
     Ok(SessionCommand {
+        attachment: None,
         remote: None,
         program: harness.to_string(),
         args,
@@ -550,35 +568,45 @@ fn record_interactive_opened(environment: &BTreeMap<String, String>) -> Result<(
 }
 
 fn native_provider_attachment(
+    command: &SessionCommand,
     environment: &BTreeMap<String, String>,
-    remote: Option<&Path>,
 ) -> Result<(SqliteStore, String, crate::process::SessionAttachment)> {
+    let (session, attachment) = command
+        .attachment
+        .as_ref()
+        .ok_or_else(|| anyhow!("Native launch has no admitted attachment"))?;
     let caller = environment
         .get(crate::process::AGENT_CALLER_ENV)
         .ok_or_else(|| anyhow!("Native launch has no admitted conversation"))?;
     let caller: crate::process::AgentCaller = serde_json::from_str(caller)?;
     let process = crate::journal::current_process_lfid()
         .ok_or_else(|| anyhow!("Native launch has no admitted invocation"))?;
-    let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
-    let driver = store
-        .session_attachment(&caller.session_id)?
-        .ok_or_else(|| anyhow!("Session has no admitted driver"))?;
-    if driver.process_lfid.as_ref() != Some(&process)
-        || driver.caller(caller.session_id.clone()) != caller
+    if attachment.process_lfid.as_ref() != Some(&process)
+        || attachment.caller(session.clone()) != caller
     {
-        bail!("Session driver changed before provider launch");
+        bail!("Session attachment differs from native launch provenance");
     }
-    if let Some(remote) = remote {
-        let connection = store
-            .session_connection(&caller.session_id)?
-            .ok_or_else(|| anyhow!("Remote client has no recorded AgentProcess endpoint"))?;
-        if Path::new(&connection.0) != remote {
-            bail!("Remote client endpoint differs from its AgentProcess");
+    let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    store.with_session_attachment(session, attachment, || {
+        if let Some(remote) = &command.remote {
+            let connection = store.session_connection(session)?.ok_or_else(|| {
+                crate::store::StoreError::InvalidAuthority(
+                    "Remote client has no recorded AgentProcess endpoint".into(),
+                )
+            })?;
+            if Path::new(&connection.0) != remote.upstream {
+                return Err(crate::store::StoreError::InvalidAuthority(
+                    "Remote client endpoint differs from its AgentProcess".into(),
+                ));
+            }
+        } else if attachment.provider_process_lfid != process {
+            return Err(crate::store::StoreError::InvalidAuthority(
+                "Native provider launch does not own the admitted AgentProcess".into(),
+            ));
         }
-    } else if driver.provider_process_lfid != process {
-        bail!("Native provider launch does not own the admitted AgentProcess");
-    }
-    Ok((store, caller.session_id, driver))
+        Ok(())
+    })?;
+    Ok((store, session.clone(), attachment.clone()))
 }
 
 fn session_command_status_with_env(
@@ -590,9 +618,13 @@ fn session_command_status_with_env(
 ) -> Result<SessionCommandOutcome> {
     let argv = std::env::args().collect::<Vec<_>>();
     crate::journal::with_runtime(&command.cwd, &argv, || {
+        let mut command = command.clone();
         let mut environment = environment.clone();
         let mut capture = None;
-        let admitted = if !environment.contains_key(crate::process::AGENT_CALLER_ENV) {
+        let admitted = if command.attachment.is_none() {
+            if environment.contains_key(crate::process::AGENT_CALLER_ENV) {
+                bail!("Native launch provenance has no admitted attachment");
+            }
             if command.remote.is_some() {
                 bail!("Remote client has no admitted attachment");
             }
@@ -637,12 +669,13 @@ fn session_command_status_with_env(
                 session.id.clone(),
                 attachment.clone(),
             );
+            command.attachment = Some((session.id.clone(), attachment.clone()));
             Some((store, session.id, attachment))
         } else {
             None
         };
         let result = run_native_session(
-            command,
+            &command,
             &environment,
             provider_session_id,
             exact_account_id,
@@ -682,6 +715,7 @@ fn run_native_session(
     launch_lock: Option<File>,
 ) -> Result<SessionCommandOutcome> {
     let started = std::time::Instant::now();
+    let attachment = native_provider_attachment(command, environment)?;
     // Keep admission and client publication on the same side of Session stop.
     // Release before waiting for the child, so stop can settle that client.
     let capture_dir = environment
@@ -769,7 +803,6 @@ fn run_native_session(
         )?;
     }
     // Only an explicit remote connection is a client of a surviving AgentProcess.
-    let attachment = native_provider_attachment(environment, command.remote.as_deref())?;
     let owned = command.remote.is_none().then_some(&attachment);
     tracing::debug!(
         elapsed_ms = started.elapsed().as_millis(),
@@ -1537,6 +1570,7 @@ mod tests {
             pid
         });
         let command = SessionCommand {
+            attachment: None,
             remote: None,
             program: provider.display().to_string(),
             args: Vec::new(),
@@ -1604,6 +1638,7 @@ mod tests {
         )
         .unwrap();
         let command = SessionCommand {
+            attachment: None,
             remote: None,
             program: provider.display().to_string(),
             args: Vec::new(),
@@ -1684,6 +1719,7 @@ mod tests {
         assert_eq!(
             launch,
             SessionCommand {
+                attachment: None,
                 remote: None,
                 program: "claude".to_string(),
                 args: args(&["--model", "sonnet", "--", "fix it"]),
@@ -1806,6 +1842,7 @@ mod tests {
                     &BTreeMap::new(),
                     None,
                     None,
+                    None,
                 )
             };
             if index % 2 == 0 {
@@ -1919,6 +1956,7 @@ mod tests {
         )
         .unwrap();
         let command = SessionCommand {
+            attachment: None,
             remote: None,
             program: "opencode".to_string(),
             args: vec![temp.path().display().to_string()],
@@ -1947,6 +1985,7 @@ mod tests {
             program: "/bin/sh".into(),
             args: vec!["-c".into(), "printf '%s' \"$$\" > pid".into()],
             cwd: home.into(),
+            attachment: None,
             remote: None,
         };
         assert!(
@@ -2039,16 +2078,24 @@ mod tests {
                 program: "/usr/bin/true".into(),
                 args: vec![],
                 cwd: home.into(),
-                remote: Some(endpoint),
+                attachment: Some((session.id.clone(), attached.clone())),
+                remote: Some(NativeConnection {
+                    relay: home.join("relay.sock"),
+                    upstream: endpoint.clone(),
+                }),
             };
             let result = session_command_status_with_env(&command, &environment, None, None, None);
             let alive = provider.try_wait()?.is_none();
             let unchanged = store.process(&attached.agent_process_lfid)? == Some(before);
             command.remote = None;
             let local = session_command_status_with_env(&command, &environment, None, None, None);
-            command.remote = Some(home.join("other.sock"));
+            command.remote = Some(NativeConnection {
+                relay: home.join("relay.sock"),
+                upstream: home.join("other.sock"),
+            });
             let wrong_endpoint =
                 session_command_status_with_env(&command, &environment, None, None, None);
+            command.attachment = None;
             let unadmitted =
                 session_command_status_with_env(&command, &BTreeMap::new(), None, None, None);
             crate::harness::agent_process::stop_native(
@@ -2115,6 +2162,7 @@ mod tests {
                     std::fs::write(capture.artifact_dir().join("provider-clients"), "occupied")?;
                 }
                 let command = SessionCommand {
+                    attachment: capture.session_attachment(),
                     remote: None,
                     program: "/bin/sleep".into(),
                     args: vec!["60".into()],
@@ -2179,8 +2227,10 @@ mod tests {
     #[allow(clippy::await_holding_lock)]
     #[tokio::test]
     async fn session_launch_tui_claude_signs_its_native_home_in_as_a_healthy_managed_login() {
-        let _lock = crate::journal::test_env_lock();
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let _ambient = crate::test_ambient::EnvGuard::new();
         let temp = tempfile::tempdir().unwrap();
+        ledger.set_db_path(temp.path().join("loopflow.db"));
         let _restore = EnvRestore::capture(&[
             "LF_HOME",
             "LF_TEST_SESSION_ENV",
@@ -2239,6 +2289,7 @@ mod tests {
             None,
             &[],
             None,
+            None,
         )
         .unwrap();
 
@@ -2255,16 +2306,20 @@ mod tests {
     #[allow(clippy::await_holding_lock)]
     #[tokio::test]
     async fn session_launch_tui_preserves_native_oauth_and_routes_stored_api_keys() {
-        let _lock = crate::journal::test_env_lock();
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let _ambient = crate::test_ambient::EnvGuard::new();
         let temp = tempfile::tempdir().unwrap();
+        ledger.set_db_path(temp.path().join("loopflow.db"));
         let _restore = EnvRestore::capture(&[
             "LF_HOME",
             "LF_TEST_SESSION_ENV",
             "OPENCODE_API_KEY",
             "CODEX_ACCESS_TOKEN",
+            "CODEX_HOME",
             "PATH",
         ]);
         std::env::set_var("LF_HOME", temp.path());
+        std::env::set_var("CODEX_HOME", temp.path().join("codex-home"));
         std::env::set_var("OPENCODE_API_KEY", "ambient-key");
         std::env::remove_var("CODEX_ACCESS_TOKEN");
 
@@ -2273,7 +2328,7 @@ mod tests {
         let opencode = bin.join("opencode");
         std::fs::write(
             &opencode,
-            "#!/bin/sh\nprintf '%s' \"$OPENCODE_API_KEY\" > \"$LF_TEST_SESSION_ENV\"\n",
+            "#!/bin/sh\nprintf '%s' \"$OPENCODE_API_KEY\" > \"$LF_TEST_SESSION_ENV\"\nprintf '%s\\n' 'timestamp=2026-10-09T00:00:00Z level=INFO run=tui message=created id=ses_native directory=/tmp/repo' >&2\n",
         )
         .unwrap();
         #[cfg(unix)]
@@ -2320,6 +2375,7 @@ mod tests {
             None,
             &[],
             None,
+            None,
         )
         .unwrap();
 
@@ -2354,8 +2410,9 @@ mod tests {
             temp.path(),
             "review it",
             &BTreeMap::new(),
-            None,
+            Some("existing-codex-thread"),
             &[],
+            None,
             None,
         )
         .unwrap();
@@ -2376,6 +2433,7 @@ mod tests {
         assert_eq!(
             launch,
             SessionCommand {
+                attachment: None,
                 remote: None,
                 program: "opencode".to_string(),
                 args: args(&[

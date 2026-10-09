@@ -591,6 +591,7 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
                 provider_session_id.as_deref(),
                 &flags,
                 context_file.as_deref(),
+                capture.session_attachment(),
             )
         })();
         if let Some(provider_session) =

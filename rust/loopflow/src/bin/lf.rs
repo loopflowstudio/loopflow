@@ -1724,29 +1724,17 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
     // Display location is not execution placement. Opening reads Work here;
     // the retained Desktop owners prepare/connect only the requested view.
     if let Some(Commands::Desktop { cmd }) = &cli.command {
-        return match cmd {
-            loopflow::lf::DesktopCommand::Open {
-                session,
-                diff,
-                json,
-            } => {
-                let _cwd = cli
-                    .wt
-                    .as_deref()
-                    .map(loopflow::lf::commands::ops::resolve_worktree)
-                    .transpose()?
-                    .map(|path| CwdGuard::enter(&path))
-                    .transpose()?;
-                loopflow::lf::commands::desktop::open_work(
-                    &cli,
-                    session.as_deref(),
-                    *diff,
-                    *json || cli.json,
-                )
-            }
-            _ => loopflow::lf::commands::desktop::run(cmd),
+        let _cwd = if matches!(cmd, loopflow::lf::DesktopCommand::Open { .. }) {
+            cli.wt
+                .as_deref()
+                .map(|name| CwdGuard::enter(&loopflow::lf::commands::ops::resolve_worktree(name)?))
+                .transpose()?
+        } else {
+            None
         };
+        return loopflow::lf::commands::desktop::run(&cli, cmd);
     }
+
     if loopflow::lf::commands::work_route::dispatch(&cli, args)? {
         return Ok(());
     }
@@ -1902,7 +1890,9 @@ fn execute_command(
                 None => loopflow::lf::commands::run::run(repo, None, Some(&text), cli),
             })
         }
-        Some(Commands::Desktop { cmd }) => loopflow::lf::commands::desktop::run(cmd),
+        Some(Commands::Desktop { .. }) => {
+            unreachable!("Desktop dispatch precedes Work preparation")
+        }
         Some(Commands::Config {
             cmd: loopflow::lf::ConfigCommand::User { json },
         }) => loopflow::lf::commands::config::print_user(*json),

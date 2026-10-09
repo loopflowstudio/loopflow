@@ -258,13 +258,7 @@ pub enum DesktopOpeningStatus {
     Failed,
 }
 
-pub fn open_work(
-    cli: &crate::lf::Cli,
-    session: Option<&str>,
-    diff: bool,
-    json: bool,
-) -> Result<()> {
-    require_supported()?;
+fn open_work(cli: &crate::lf::Cli, session: Option<&str>, diff: bool, json: bool) -> Result<()> {
     let resolution = opening_context(cli, session)?;
     let url = opening_url(&resolution, diff)?;
     let status = std::process::Command::new("open")
@@ -396,12 +390,18 @@ fn opening_url(
     Ok(url)
 }
 
-pub fn run(command: &crate::lf::DesktopCommand) -> Result<()> {
+pub fn run(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<()> {
     use crate::lf::DesktopCommand;
     // Check before decoding targets or looking up any Work/Machine.
     require_supported()?;
     let (target, action, json) = match command {
-        DesktopCommand::Open { .. } => bail!("Desktop opening requires resolved Work"),
+        DesktopCommand::Open {
+            session,
+            diff,
+            json,
+        } => {
+            return open_work(cli, session.as_deref(), *diff, *json || cli.json);
+        }
         DesktopCommand::List { json } => return invoke(None, *json),
         DesktopCommand::Text {
             target,

@@ -784,7 +784,7 @@ struct DesktopPerformanceTests {
             try await sample("native_session_reopen", "snapshot", round, journal, window, soaking: round >= samples, captureWhenReady: true, action: {
                 await model.openTaskLink(url)
                 try journal.write(["event": "reopen_request", "round": round,
-                                   "linked": model.linkedSession?.id as Any? ?? NSNull(),
+                                   "linked": model.linkedSession?.record.id as Any? ?? NSNull(),
                                    "state": String(describing: store.sessions.first { $0.id == fixture.sessionId }?.state),
                                    "actions": String(describing: store.sessions.first { $0.id == fixture.sessionId }?.record.actions)])
             }, ready: {
@@ -798,7 +798,7 @@ struct DesktopPerformanceTests {
                 let readiness = "\(terminal.surface != nil)/\(hasHistory)/\(focused)/\(selected)/\(state)"
                 if readiness != lastReadiness {
                     try? journal.write(["event": "reopen_state", "round": round,
-                                        "linked": model.linkedSession?.id as Any? ?? NSNull(),
+                                        "linked": model.linkedSession?.record.id as Any? ?? NSNull(),
                                         "has_surface": terminal.surface != nil, "has_history": hasHistory,
                                         "focused": focused, "selected": selected, "state": state])
                     lastReadiness = readiness

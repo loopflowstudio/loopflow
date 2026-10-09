@@ -89,6 +89,12 @@ struct TaskReadings<Value> {
     }
 }
 
+/// One pending view request: its companion must never outlive or drift from the Session.
+struct LinkedSession: Equatable {
+    let record: SessionRecord
+    let changesTask: RoadmapTask?
+}
+
 @MainActor
 @Observable
 final class WorkModel {
@@ -97,8 +103,7 @@ final class WorkModel {
     private(set) var taskLinkURL: URL?
     private(set) var taskLinkReading: WorkReading<RoadmapSnapshot> = .loading
     var showsTaskLink = false
-    var linkedSession: SessionRecord?
-    var linkedChangesTask: RoadmapTask?
+    var linkedSession: LinkedSession?
     private(set) var taskOpening: DesktopOpening?
     @ObservationIgnored private var destinationGeneration = 0
 
@@ -108,8 +113,7 @@ final class WorkModel {
         guard !Task.isCancelled else { return }
         destinationGeneration &+= 1
         let generation = destinationGeneration
-        linkedSession = nil
-        linkedChangesTask = nil
+        if linkedSession != nil { linkedSession = nil }
         taskOpening = DesktopOpening(url: url.absoluteString, status: .opening, reason: nil)
         // Observation invalidates on every write, changed or not. Reopening
         // what is already open must not redraw the window.
@@ -145,10 +149,7 @@ final class WorkModel {
                 showsTaskLink = true
             }
         } catch {
-            guard !Task.isCancelled, destinationGeneration == generation else { return }
-            taskOpening = DesktopOpening(url: url.absoluteString, status: .failed, reason: error.localizedDescription)
-            taskLinkReading = .unavailable(lastGood: nil, reason: error.localizedDescription)
-            showsTaskLink = true
+            failTaskLink(error, url: url, generation: generation)
         }
     }
 
@@ -156,19 +157,24 @@ final class WorkModel {
         destinationGeneration &+= 1
         if showsTaskLink { showsTaskLink = false }
         if linkedSession != nil { linkedSession = nil }
-        linkedChangesTask = nil
     }
 
     func chooseLinkedTask(wave: WaveRoadmap, task: RoadmapTask) async {
         guard let taskLinkURL else { return }
         let generation = destinationGeneration
+        taskOpening = DesktopOpening(url: taskLinkURL.absoluteString, status: .opening, reason: nil)
         do {
             try await openLinkedTask(wave: wave, task: task, link: TaskLink(url: taskLinkURL), generation: generation)
         } catch {
-            guard !Task.isCancelled, destinationGeneration == generation else { return }
-            taskLinkReading = .unavailable(lastGood: nil, reason: error.localizedDescription)
-            showsTaskLink = true
+            failTaskLink(error, url: taskLinkURL, generation: generation)
         }
+    }
+
+    private func failTaskLink(_ error: Error, url: URL, generation: Int) {
+        guard !Task.isCancelled, destinationGeneration == generation else { return }
+        taskOpening = DesktopOpening(url: url.absoluteString, status: .failed, reason: error.localizedDescription)
+        taskLinkReading = .unavailable(lastGood: nil, reason: error.localizedDescription)
+        showsTaskLink = true
     }
 
     /// The one Task a repository-qualified link names in planning this window holds.
@@ -243,8 +249,7 @@ final class WorkModel {
         sessions = .available(records)
         navigation.selectedSessionId = record.id
         navigation.content = .terminals
-        linkedChangesTask = link.diff ? task : nil
-        linkedSession = record
+        linkedSession = LinkedSession(record: record, changesTask: link.diff ? task : nil)
     }
 
     func openTaskDestination(wave: WaveRoadmap, task: RoadmapTask) {
@@ -276,12 +281,7 @@ final class WorkModel {
         }
         guard let recent = navigation.recentDestinations.first(where: { $0.id == .task(id) }),
               let repoPath else { return }
-        var components = URLComponents()
-        components.scheme = "loopflow"
-        components.host = "task"
-        components.path = "/" + recent.key
-        components.queryItems = [URLQueryItem(name: "repo", value: repoPath)]
-        guard let url = components.url else { return }
+        guard let url = TaskLink(issue: recent.key, repo: repoPath).url else { return }
         await openTaskLink(url, expectedTaskID: id)
     }
 

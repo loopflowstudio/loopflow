@@ -50,26 +50,26 @@ without rewriting Machine defaults. Inheritance is unapproved; placement suites 
 Neither negative peer observation nor local SQLite reserves first start; runtime
 must not synchronize. Seeded IDs prove routing, not exchange/admission.
 
-LOO-427's local window, exact-pane arrangement and Machine-qualified I/O have
-partial proof in `scratch/findings.md`; native artifact, peer composition and
-packaged acceptance remain. `desktop text/key` reuse the pane/surface owners.
-Jack selected insertion into the existing draft; Enter is separate. Control-text
-rejection and finishing IME first are reversible restrictions. Native draft/cursor
-and replacement fixtures remain unexecuted. Read grants no input authority.
+LOO-427's window/arrangement/I/O proof is partial (`scratch/findings.md`);
+native artifact, peer composition and packaged acceptance remain. `desktop text/key` reuse pane/surface owners. Jack selected
+insertion into existing drafts, with Enter separate. Control-text rejection and
+finishing IME first are reversible; native draft/cursor/replacement fixtures are
+unexecuted. Passive reading grants no input authority.
 
-Jack's October 8 API: `--context` previews input without launch; `--explain`
-is broader; `--chrome` controls execution. Root `run`, `--max-turns` and
-`--no-loopflow` are removed; Task skill/Flow selection survives. History owns
-activity, Process pages, show/replay and usage. Desktop owns open/list; root
-`open` is ambiguous with PR opening; Sessions use `connect`. Composed opening and
-Wave planning remain. Local preview/launch share Work assembly; explanation bypasses admission.
-Remote/Flow input and full action explanation remain. Discord is unchanged;
+Jack's October 8 API: `--context` previews input, `--explain` is broader,
+`--chrome` controls execution. Root `run`, `--max-turns` and `--no-loopflow` are
+removed; Task skill/Flow selection survives. History owns activity, Process pages,
+show/replay and usage; Desktop owns open/list. Bare `open` conflicts with PR opening;
+Sessions use `connect`. October 9 local Task/Session-plus-Changes opening bypasses
+execution routing and CLI preparation. Session/companion intent travels together;
+`opening` never proves usable. Native readiness/downstream failures, Wave planning,
+remote/Flow input and full action explanation remain. Discord is unchanged;
 `--steers-after` filters nodes, not restarts.
-Lookup uses Machine-local `repo_root` (default `~/src`) or explicit paths,
-expanded on the selected Machine, never portable identity. Remembered names are
-open. Scoped IDs survive dispatch without argv reparsing. Preview/routing use read-only
-SQLite; unreadable is not absent. Assembly returns excerpts; only launch writes
-them. Fake-provider parity proves no remote/native acceptance.
+`repo_root` (default `~/src`) and paths resolve on the selected Machine, never as
+portable identity; remembered names remain open. Scoped IDs survive dispatch.
+Preview/routing use read-only SQLite; unreadable is not absent. Preview/launch share
+Work assembly; only launch writes excerpts. Fake-provider/model checks prove no
+remote/native acceptance.
 
 Jack selected local planning/Git sync: 406 owns writes/Linear, 412 exchange.
 Imported completion cannot move Workflow or clean execution. Preserve pending

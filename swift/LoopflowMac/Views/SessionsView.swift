@@ -710,15 +710,14 @@ struct SessionsContentView: View {
                 }
             }
         }
-        .onChange(of: model.linkedSession, initial: true) { _, record in
-            guard let record,
+        .onChange(of: model.linkedSession, initial: true) { _, destination in
+            guard let destination,
                   model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath else { return }
-            let changesTask = model.linkedChangesTask
+            let record = destination.record
             model.linkedSession = nil
-            model.linkedChangesTask = nil
             store.reconcile(model.sessions.value ?? [])
             openSession(record)
-            if let changesTask, let identity = record.workspace?.identity {
+            if let changesTask = destination.changesTask, let identity = record.workspace?.identity {
                 workspaces.showChanges(task: changesTask, in: identity, query: query)
             }
         }

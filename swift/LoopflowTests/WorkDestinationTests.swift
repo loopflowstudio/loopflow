@@ -124,7 +124,7 @@ struct WorkDestinationTests {
         var url = try #require(URLComponents(string: "loopflow://task/\(task.task.identifier)"))
         url.queryItems = [URLQueryItem(name: "repo", value: wave.wave.repo), URLQueryItem(name: "session", value: record.id)]
         await model.openTaskLink(try #require(url.url))
-        #expect(model.linkedSession?.id == record.id)
+        #expect(model.linkedSession?.record.id == record.id)
         #expect(model.navigation.selectedSessionId == record.id)
         #expect(model.taskLinkReading.errorMessage == nil)
         // Reopening from retained evidence must preserve the conversation too.
@@ -150,10 +150,16 @@ struct WorkDestinationTests {
         }
         let model = WorkModel(query: query, repoPath: wave.wave.repo)
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        let sessionOnly = TaskLink(issue: task.task.identifier, repo: wave.wave.repo, session: record.id)
+        await model.openTaskLink(try #require(sessionOnly.url))
+        #expect(model.linkedSession?.record.id == record.id)
+        #expect(model.linkedSession?.changesTask == nil)
+        // The same Session with a companion is a different pending destination,
+        // even if SwiftUI has not consumed the first request yet.
         let link = TaskLink(issue: try #require(task.runtime?.workId), repo: wave.wave.repo, session: record.id, diff: true)
         await model.openTaskLink(try #require(link.url))
-        #expect(model.linkedSession?.id == record.id)
-        #expect(model.linkedChangesTask?.id == task.id)
+        #expect(model.linkedSession?.record.id == record.id)
+        #expect(model.linkedSession?.changesTask?.id == task.id)
         #expect(model.taskOpening?.status == .opening) // selection is not native readiness
         let registry = SessionsWorkspaceRegistry()
         let workspace = registry.workspace(for: identity)
@@ -173,6 +179,12 @@ struct WorkDestinationTests {
         #expect(model.taskOpening?.status == .failed)
         #expect(model.taskOpening?.url == failure.url?.absoluteString)
         #expect(model.navigation.selectedSessionId == record.id)
+        #expect(model.linkedSession == nil)
+        // Retrying through the chooser uses the same failure receipt as a direct link.
+        await model.chooseLinkedTask(wave: wave, task: task)
+        #expect(model.taskOpening?.status == .failed)
+        #expect(model.taskOpening?.reason == model.taskLinkReading.errorMessage)
+        #expect(model.linkedSession == nil)
     }
 
     @Test func delayedPrimarySessionPreparationDoesNotOpenChangesInAnotherTask() async throws {
@@ -196,7 +208,6 @@ struct WorkDestinationTests {
         await barrier.release("ensure")
         await opening.value
         #expect(model.selection == .wave(id: wave.wave.id))
-        #expect(model.linkedChangesTask == nil)
         #expect(model.linkedSession == nil)
     }
 
@@ -257,7 +268,7 @@ struct WorkDestinationTests {
         await model.openTaskLink(try #require(url.url))
         #expect(model.navigation.selectedSessionId == record.id)
         #expect(model.navigation.content == .terminals)
-        #expect(model.linkedSession?.id == record.id)
+        #expect(model.linkedSession?.record.id == record.id)
         #expect(!model.showsTaskLink)
 
         for session in ["missing", unrelated.id] {

@@ -199,11 +199,11 @@ mod tests {
     }
 
     #[test]
-    fn desktop_open_keeps_work_routing_but_pane_reads_do_not_prepare_work() {
-        for (operation, expected) in [("open", Some("LOO-427")), ("list", None)] {
+    fn desktop_commands_do_not_route_to_the_execution_machine() {
+        for operation in ["open", "list"] {
             let cli =
                 Cli::try_parse_from(["lf", "--task", "LOO-427", "desktop", operation]).unwrap();
-            assert_eq!(launch_task(&cli), expected);
+            assert_eq!(launch_task(&cli), None);
         }
     }
 }

@@ -226,6 +226,24 @@ struct WorkDestinationTests {
         #expect(files.selection == "retained-draft.rs")
     }
 
+    @Test func missingSessionReadingDoesNotHidePaneClosure() async throws {
+        let (model, record, url, query) = try openingFixture(outcome: "usable")
+        await model.openTaskLink(url)
+        let request = try #require(model.linkedSession)
+        let workspace = SessionsWorkspace(identity: try #require(record.workspace?.identity))
+        workspace.multiplexer.load(sessionId: record.id)
+        workspace.multiplexer.show(.files(taskId: try #require(request.changesTask?.id)), focus: false)
+        let store = SessionsStore(repoPath: try #require(model.repoPath), query: query)
+        // An incomplete Session reading is not failure, but cannot hide a
+        // definitive layout change while the request waits for that reading.
+        await model.connectLinkedOpening(request, store: store, workspace: workspace, files: nil)
+        #expect(model.taskOpening?.status == .opening)
+        workspace.multiplexer.close(workspace.multiplexer.focusedPaneId)
+        try await waitForOpening(model)
+        #expect(model.taskOpening?.status == .failed)
+        #expect(model.taskOpening?.reason == "Opening panes were hidden, closed or replaced.")
+    }
+
     @Test(arguments: [false, true])
     func supersededOpeningCannotSettleRepeatedURL(cancel: Bool) async throws {
         let (model, record, url, query) = try openingFixture(outcome: "usable")
@@ -848,8 +866,8 @@ struct WorkDestinationTests {
         #expect(router.inspect().openings.first?.status == .usable)
     }
 
-    @Test(arguments: [false, true])
-    func sceneValidationFailureDoesNotSettleNewRepositoryRequest(cancel: Bool) async throws {
+    @Test(arguments: ["success", "failure", "cancellation"])
+    func obsoleteSceneValidationCannotSettleNewRepositoryRequest(outcome: String) async throws {
         let router = WorkLinkRouter(), barrier = LinkedDestinationBarrier()
         let path = repositoryFixturePath()
         let query = RegistryQuery { _, _ in "\"plan\"" }
@@ -858,13 +876,14 @@ struct WorkDestinationTests {
         let validation = Task {
             try await router.resolveWorkspace(workspace, query: RegistryQuery { _, _ in
                 await barrier.wait("validate")
-                throw RegistryQueryError("Old validation failure")
+                if outcome == "failure" { throw RegistryQueryError("Old validation failure") }
+                return "\"plan\""
             })
         }
         while !(await barrier.contains("validate")) { await Task.yield() }
         _ = try await router.openRepository(path: path, link: nil, query: query) { _ in }
         #expect(router.workspaceRequests(workspace.id) != oldRequests)
-        if cancel { validation.cancel() }
+        if outcome == "cancellation" { validation.cancel() }
         await barrier.release("validate")
         switch await validation.result {
         case .success: Issue.record("Obsolete validation unexpectedly succeeded")

@@ -153,7 +153,7 @@ final class SessionsWorkspaceRegistry {
             result = .unavailable(reason: .notTerminal)
         }
         return DesktopTextReading(request: request, observedAt: Int64(Date().timeIntervalSince1970),
-            hidden: store.collapsedPaneIds.contains(pane.id) || (store.zoomedPaneId != nil && store.zoomedPaneId != pane.id),
+            hidden: !store.isVisible(pane),
             result: result)
     }
 

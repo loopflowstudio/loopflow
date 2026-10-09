@@ -320,16 +320,15 @@ final class WorkModel {
     private func updateLinkedOpening(_ destination: LinkedSession, store: SessionsStore, workspace: SessionsWorkspace, panes: [PaneState], files: TaskFilesStore?) {
         guard destination.generation == destinationGeneration,
               let opening = taskOpening, opening.status == .opening else { return }
-        guard let item = store.sessions.first(where: { $0.id == destination.record.id }) else { return }
-        let layout = workspace.multiplexer
-        let panesVisible = panes.allSatisfy { pane in
-            layout.layout.pane(for: pane.id) == pane && !layout.collapsedPaneIds.contains(pane.id)
-                && (layout.zoomedPaneId == nil || layout.zoomedPaneId == pane.id)
+        // Observe the panes even before the Session reading arrives. Its absence
+        // cannot hide a definitive close, replacement or visibility change.
+        guard panes.allSatisfy(workspace.multiplexer.isVisible) else {
+            taskOpening = DesktopOpening(url: opening.url, status: .failed, reason: "Opening panes were hidden, closed or replaced.")
+            return
         }
+        guard let item = store.sessions.first(where: { $0.id == destination.record.id }) else { return }
         let reason: String?
-        if !panesVisible {
-            reason = "Opening panes were hidden, closed or replaced."
-        } else if item.record.workspace?.machineId == nil {
+        if item.record.workspace?.machineId == nil {
             reason = "Session Machine unavailable."
         } else if item.record.workspace?.identity != destination.record.workspace?.identity {
             reason = "The Session checkout changed while opening; retry its current location."

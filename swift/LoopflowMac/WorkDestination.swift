@@ -69,7 +69,7 @@ struct TaskLink: Equatable, Sendable {
 struct WorkLinkReceiver: NSViewRepresentable {
     let router: WorkLinkRouter
     let repository: String
-    let openingRequests: [UUID]
+    let openingRequests: Set<UUID>
     let inspect: (UUID) -> DesktopWindowInspection
     let controlPane: (DesktopPaneCommand) throws -> Void
     let readText: (DesktopTextRequest) throws -> DesktopTextReading
@@ -92,13 +92,13 @@ struct WorkLinkReceiver: NSViewRepresentable {
         let id = UUID()
         let router: WorkLinkRouter
         let repository: String
-        let openingRequests: [UUID]
+        let openingRequests: Set<UUID>
         var inspect: (UUID) -> DesktopWindowInspection
         var controlPane: (DesktopPaneCommand) throws -> Void
         var readText: (DesktopTextRequest) throws -> DesktopTextReading
         var receive: (URL) async -> Void
 
-        init(router: WorkLinkRouter, repository: String, openingRequests: [UUID], inspect: @escaping (UUID) -> DesktopWindowInspection,
+        init(router: WorkLinkRouter, repository: String, openingRequests: Set<UUID>, inspect: @escaping (UUID) -> DesktopWindowInspection,
              controlPane: @escaping (DesktopPaneCommand) throws -> Void,
              readText: @escaping (DesktopTextRequest) throws -> DesktopTextReading,
              receive: @escaping (URL) async -> Void) {

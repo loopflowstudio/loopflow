@@ -43,7 +43,7 @@ final class WorkLinkRouter {
     }
     private var delivering: [String: Delivery] = [:]
 
-    func register(_ incarnation: UUID, repository: String, openingRequests: [UUID] = [],
+    func register(_ incarnation: UUID, repository: String, openingRequests: Set<UUID> = [],
                   focus: @escaping () -> Void,
                   inspect: @escaping (UUID) -> DesktopWindowInspection,
                   controlPane: @escaping (DesktopPaneCommand) throws -> Void,
@@ -96,37 +96,36 @@ final class WorkLinkRouter {
 
     func hasWindow(_ repository: String) -> Bool { targets[repository] != nil }
 
-    func confirmRegisteredWorkspace(_ repository: String, requests: [UUID]) {
+    func confirmRegisteredWorkspace(_ repository: String, requests: Set<UUID>) {
         guard !Task.isCancelled, hasWindow(repository) else { return }
         for (path, request) in repositoryOpenings where request.repository == repository && requests.contains(request.id) {
             finishRepositoryOpening(path, id: request.id, status: .usable)
         }
     }
 
-    func workspaceRequests(_ repository: String) -> [UUID] {
-        repositoryOpenings.sorted { $0.key < $1.key }.compactMap {
-            $0.value.repository == repository ? $0.value.id : nil
-        }
+    func workspaceRequests(_ repository: String) -> Set<UUID> {
+        Set(repositoryOpenings.values.compactMap {
+            $0.repository == repository ? $0.id : nil
+        })
     }
 
     /// Restored scenes use the same resolver. Failure belongs to requests that
     /// were waiting when this validation began, never arrivals during the read.
     func resolveWorkspace(_ workspace: RepositoryWorkspace, query: RegistryQuery) async throws -> RepositoryWorkspace {
-        let requests = repositoryOpenings.filter { $0.value.repository == workspace.id }
-        let requestIDs = requests.sorted { $0.key < $1.key }.map { $0.value.id }
+        let requests = workspaceRequests(workspace.id)
         do {
             let current = try await RepositoryWorkspace.resolve(path: workspace.path, query: query)
             try Task.checkCancellation()
             guard current.id == workspace.id else {
                 throw RegistryQueryError("This location now selects another repository plan. Open it explicitly from Open Repo; the restored workspace was not changed.")
             }
-            guard workspaceRequests(workspace.id) == requestIDs else {
+            guard workspaceRequests(workspace.id) == requests else {
                 throw CancellationError()
             }
             return current
         } catch {
-            guard workspaceRequests(workspace.id) == requestIDs else { throw CancellationError() }
-            for (path, request) in requests {
+            guard workspaceRequests(workspace.id) == requests else { throw CancellationError() }
+            for (path, request) in repositoryOpenings where requests.contains(request.id) {
                 finishRepositoryOpening(path, id: request.id, status: .failed,
                     reason: error is CancellationError ? "Repository opening canceled." : error.localizedDescription)
             }

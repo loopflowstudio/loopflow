@@ -55,7 +55,7 @@ struct RepositoryWorkspaceView: View {
     let router: WorkLinkRouter
     let openRepository: (String, URL?) -> Void
     @State private var reading: WorkReading<RepositoryWorkspace> = .loading
-    @State private var openingRequests: [UUID] = []
+    @State private var openingRequests: Set<UUID> = []
 
     var body: some View {
         let requests = router.workspaceRequests(workspace.id)

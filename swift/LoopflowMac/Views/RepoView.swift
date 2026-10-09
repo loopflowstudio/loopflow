@@ -15,7 +15,7 @@ struct RepoView: View {
     @State private var sessionWorkspaces: SessionsWorkspaceRegistry
     private let taskLinks: WorkLinkRouter?
     private let repository: String?
-    private let openingRequests: [UUID]
+    private let openingRequests: Set<UUID>
     private let query: RegistryQuery
 
     init(
@@ -24,7 +24,7 @@ struct RepoView: View {
         query: RegistryQuery = RegistryQueryLocal.shared,
         taskLinks: WorkLinkRouter? = nil,
         repository: String? = nil,
-        openingRequests: [UUID] = [],
+        openingRequests: Set<UUID> = [],
         openRepository: ((String, URL?) -> Void)? = nil
     ) {
         self.portfolioService = portfolioService

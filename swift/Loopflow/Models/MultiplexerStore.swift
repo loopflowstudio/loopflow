@@ -22,6 +22,13 @@ public final class MultiplexerStore {
     public private(set) var collapsedPaneIds: Set<String> = []
     public var visibleLayout: LayoutNode? { layout.visible(excluding: collapsedPaneIds) }
 
+    /// Visibility of this exact retained occurrence within its workspace,
+    /// independent of window focus or compositor visibility.
+    public func isVisible(_ pane: PaneState) -> Bool {
+        layout.pane(for: pane.id) == pane && !collapsedPaneIds.contains(pane.id)
+            && (zoomedPaneId == nil || zoomedPaneId == pane.id)
+    }
+
     private var closedState: ClosedState?
     private var focusBeforeZoom: String?
 

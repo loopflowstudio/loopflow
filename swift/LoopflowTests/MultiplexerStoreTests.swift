@@ -6,6 +6,30 @@ import Testing
 @Suite("Multiplexer store")
 @MainActor
 struct MultiplexerStoreTests {
+    @Test("Visibility follows retained occurrences, collapse and zoom, not focus")
+    func exactPaneVisibility() throws {
+        let store = MultiplexerStore()
+        store.load(sessionId: "retained")
+        let retained = store.focusedPane
+        let other = try #require(store.split(retained.id, axis: .vertical))
+        #expect(store.isVisible(retained))
+        #expect(store.isVisible(other))
+        store.setZoom(other.id, enabled: true)
+        #expect(!store.isVisible(retained))
+        #expect(store.isVisible(other))
+        store.setZoom(other.id, enabled: false)
+        store.setCollapsed(paneId: retained.id, collapsed: true)
+        #expect(!store.isVisible(retained))
+        store.setCollapsed(paneId: retained.id, collapsed: false)
+        #expect(store.isVisible(retained))
+        store.close(retained.id)
+        #expect(!store.isVisible(retained))
+        store.undoClose()
+        #expect(!store.isVisible(retained))
+        #expect(store.isVisible(try #require(store.layout.pane(for: retained.id))))
+        #expect(store.isVisible(other))
+    }
+
     @Test("Observed shell panes carry their launch command")
     func shellLaunchIsPublishedTogether() async throws {
         let store = MultiplexerStore()

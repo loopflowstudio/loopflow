@@ -92,11 +92,13 @@ no longer assigns placement. Linux recovery uses unrun records and six tables, n
 populated Process/control proof; revised status assertions await gate. Ordering/deletion,
 alternate/relationship acquisition, legacy association and unplaced-Wave/Desktop remain.
 
-`e49e4ccf3`: a Session callback masked a pane-close gap; Observation replaces
-notification bridges. Generations, not URLs, fence outcomes. October 9: repository
-failures before window registration now have router receipts; plain Task links await
-mounted page content. Registration retains its validated requests, not later arrivals.
-Shell/page readiness proves neither compositor usability nor Session readiness.
+`e49e4ccf3`: a Session callback masked missed pane closure; Observation replaces
+notifications. Observe pane visibility even without a Session reading;
+MultiplexerStore owns it for readiness and passive reads. Generations, not URLs, fence outcomes. October 9:
+pre-registration repository failures have router receipts; plain Task links await
+mounted page content. Registration retains validated request IDs, not later
+arrivals. Headless callbacks prove neither compositor usability nor native Session
+readiness.
 
 ## Terminal-host adoption (2026-10-07)
 

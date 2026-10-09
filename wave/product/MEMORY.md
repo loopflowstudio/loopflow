@@ -100,11 +100,11 @@ Router receipts expose pre-registration failures; plain Task links await mounted
 content. Validated request IDs fence registration, never URLs or later arrivals.
 Headless callbacks prove neither compositor usability nor native Session readiness.
 
-October 9 Task-run explanation shares launch routing, admission and Workflow choice;
-only launch mutates position. Delegation is a proposed destination, never peer start
-permission. Preview still wrote through the Process journal's
-fallback. Checkpointing WAL exposed it where main-file byte checks had missed it;
-parsed previews now opt out of observation. Native/remote acceptance remains unproved.
+October 9 Task-run explanation shares launch admission, options and Workflow choice;
+only launch mutates position. Routing must return provenance with its destination,
+not rederive it later. Delegation grants no peer start permission. Checkpointing WAL
+exposed preview's fallback Process writes that main-file comparisons missed;
+parsed previews now opt out. Native/remote acceptance remains unproved.
 
 ## Terminal-host adoption (2026-10-07)
 

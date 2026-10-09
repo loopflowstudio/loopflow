@@ -66,6 +66,36 @@ pub struct TaskProcessOptions {
     pub end: EndOptions,
 }
 
+impl TaskProcessOptions {
+    fn validate_directive(&self, existing: Option<&Task>) -> OpsResult<()> {
+        if let Some(text) = &self.directive {
+            if text.trim().is_empty() {
+                return Err(task_error("directive cannot be empty"));
+            }
+            if let Some(task) = existing {
+                return Err(task_error(format!(
+                    "Task {} already exists; use `lf task comment {} <new-direction>`",
+                    task.plan.identifier, task.plan.identifier
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_workspace_name(&self, task: &Task) -> OpsResult<()> {
+        if let Some(name) = &self.name {
+            let requested = parse_workspace_slug(name)?;
+            if task.worktree.is_some() && requested.as_str() != task.workspace_slug {
+                return Err(task_error(format!(
+                    "Task {} already uses workspace name {:?}",
+                    task.plan.identifier, task.workspace_slug
+                )));
+            }
+        }
+        Ok(())
+    }
+}
+
 /// What reaching `end` may set aside.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EndOptions {
@@ -422,7 +452,7 @@ pub(crate) async fn task_work_status(store: &Store, task: &Task) -> OpsResult<Wo
 /// agent, `reason` as a steer, and the Flow. A Task on a workflow sets out on
 /// the outgoing edge that runs the named Flow, or on its only one; otherwise
 /// the Task takes up the workflow named, else its Project's. The caller then
-/// runs the returned Flow like any `lf --task ISSUE run FLOW`; `None` is an
+/// runs the returned Flow like any `lf --task ISSUE flow FLOW`; `None` is an
 /// edge that runs nothing.
 pub fn task_place(
     repo: &Path,
@@ -439,11 +469,6 @@ pub fn task_place(
     let mut task = prepare_task(repo, issue, options)?;
     block_on_task(async {
         let store = task_store().await?;
-        let project = store
-            .get_project(&task.project_id)
-            .await
-            .map_err(task_error)?
-            .ok_or_else(|| task_error("Task Project is missing"))?;
         let reason = reason
             .as_deref()
             .map(str::trim)
@@ -452,15 +477,7 @@ pub fn task_place(
             .sqlite
             .require_task_launch(&task.id)
             .map_err(task_error)?;
-        let flow = traverse_workflow(
-            &store,
-            &task,
-            flow.as_deref(),
-            &project.plan.workflow,
-            reason,
-            &end,
-        )
-        .await?;
+        let flow = traverse_workflow(&store, &task, flow.as_deref(), reason, &end).await?;
         select_task_agent(&store, &mut task, agent.as_deref()).await?;
         if let Some(reason) = reason {
             append_task_comment(&store, &task, reason, true)?;
@@ -485,7 +502,6 @@ pub(crate) fn select_task_run(
     task: &Task,
     checkout: &Path,
     requested: Option<&str>,
-    project_workflow: &str,
 ) -> OpsResult<TaskRunSelection> {
     let current = store.sqlite.workflow(&task.id).map_err(task_error)?;
     // A name that leaves the current node is that edge, whatever else
@@ -516,23 +532,29 @@ pub(crate) fn select_task_run(
         }
         (_, Some(named)) => Some(named),
         (_, None) => {
-            match super::project::load_workflow(store, &task.wave_id, project_workflow, checkout)? {
-                Some(definition) => Some(definition),
-                None => {
-                    let Some(flow) = requested else {
-                        return Err(task_error(format!(
-                        "Task {}'s Project names {project_workflow:?}, which is not a workflow. `lf project workflow set <project> <name>` sets one; `lf task run {} <workflow>` takes one up for this Task",
+            let project = store
+                .sqlite
+                .project(&task.project_id)
+                .map_err(task_error)?
+                .ok_or_else(|| task_error("Task Project is missing"))?;
+            let name = &project.plan.workflow;
+            let definition = super::project::load_workflow(store, &task.wave_id, name, checkout)?;
+            if definition.is_none() {
+                let Some(flow) = requested else {
+                    return Err(task_error(format!(
+                        "Task {}'s Project names {name:?}, which is not a workflow. `lf project workflow set <project> <name>` sets one; `lf task run {} <workflow>` takes one up for this Task",
                         task.plan.identifier, task.plan.identifier
                     )));
-                    };
-                    return Ok(TaskRunSelection::Flow(load_task_flow(checkout, flow)?.0));
-                }
+                };
+                return Ok(TaskRunSelection::Flow(load_task_flow(checkout, flow)?.0));
             }
+            definition
         }
     };
     // Validate the choice against the Workflow the Task will be on before
     // anything is written.
-    let workflow = match take_up.clone() {
+    let taking_up = take_up.is_some();
+    let workflow = match take_up {
         Some(definition) => crate::ops::workflow::Workflow::new(
             definition,
             WorkflowPosition::Node {
@@ -581,7 +603,7 @@ pub(crate) fn select_task_run(
     drop(edges);
     Ok(TaskRunSelection::Edge {
         index,
-        take_up: take_up.is_some(),
+        take_up: taking_up,
         workflow,
     })
 }
@@ -594,12 +616,11 @@ async fn traverse_workflow(
     store: &SharedStore,
     task: &Task,
     requested: Option<&str>,
-    project_workflow: &str,
     note: Option<&str>,
     end: &EndOptions,
 ) -> OpsResult<Option<String>> {
     let (workflow, index, take_up) =
-        match select_task_run(store, task, task.worktree()?, requested, project_workflow)? {
+        match select_task_run(store, task, task.worktree()?, requested)? {
             TaskRunSelection::Edge {
                 workflow,
                 index,
@@ -770,13 +791,7 @@ pub fn task_checkout(repo: &Path, issue: &str, options: TaskCheckoutOptions) -> 
 }
 
 fn prepare_task(repo: &Path, issue: &str, options: TaskProcessOptions) -> OpsResult<Task> {
-    if options
-        .directive
-        .as_deref()
-        .is_some_and(|text| text.trim().is_empty())
-    {
-        return Err(task_error("directive cannot be empty"));
-    }
+    options.validate_directive(None)?;
     block_on_task(async {
         let store = task_store().await?;
         let main = crate::engine::worktrees::main_repo_root(repo).map_err(task_error)?;
@@ -846,21 +861,8 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskProcessOptions) -> OpsRes
             .sqlite
             .validate_task_planning(&task)
             .map_err(task_error)?;
-        if !acquired && options.directive.is_some() {
-            return Err(task_error(format!(
-                "Task {} already exists; use `lf task comment {} <new-direction>`",
-                task.plan.identifier, task.plan.identifier
-            )));
-        }
-        if let Some(name) = options.name.as_deref() {
-            let requested = parse_workspace_slug(name)?;
-            if task.worktree.is_some() && requested.as_str() != task.workspace_slug {
-                return Err(task_error(format!(
-                    "Task {} already uses workspace name {:?}",
-                    task.plan.identifier, task.workspace_slug
-                )));
-            }
-        }
+        options.validate_directive((!acquired).then_some(&task))?;
+        options.validate_workspace_name(&task)?;
         let task = if task.worktree.is_none() {
             if let Some(flow) = options.flow.as_deref().filter(|flow| *flow != END) {
                 if super::project::load_workflow(&store, wave.id(), flow, repo)?.is_none() {

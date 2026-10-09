@@ -909,6 +909,7 @@ mod durable_store_tests {
 
     #[test]
     fn task_routing_pins_checkouts_while_delegating_unstarted_work() {
+        use crate::durable::TaskExecutionSource::{EffectiveDelegation, RecordedCheckout};
         let (dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();
         let wave = store.get_wave(&task.wave_id).unwrap().unwrap();
@@ -923,12 +924,17 @@ mod durable_store_tests {
         let route = store.task_execution_route(&task_id).unwrap();
         assert_eq!(route.machine_id, local);
         assert_eq!(route.repository_id, repository);
+        assert_eq!(route.source, RecordedCheckout);
 
         let (future, _) = unregistered_task(&store, &task_id, dir.path().join("future"));
         store.seed_unplaced_task(&future);
         assert_eq!(
             store.task_execution_route(&future.id).unwrap().machine_id,
             remote
+        );
+        assert_eq!(
+            store.task_execution_route(&future.id).unwrap().source,
+            EffectiveDelegation
         );
         // A retained checkout on a different Machine is execution evidence even
         // when there is no running provider. Subsequent delegation cannot move it.
@@ -953,6 +959,26 @@ mod durable_store_tests {
         assert_eq!(store.machine_by_id(&remote).unwrap(), Some(saved_machine));
         assert!(!store.task_started(&future.id).unwrap());
         assert!(store.task(&future.id).unwrap().unwrap().worktree.is_none());
+        // Started evidence still pins a retired checkout, including provenance.
+        store
+            .create_session(
+                unpublished_conversation(Some(task_id.clone()), None, 1),
+                None,
+            )
+            .unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET worktree=NULL WHERE id=?1",
+                [task_id.as_str()],
+            )
+            .unwrap();
+        let route = store.task_execution_route(&task_id).unwrap();
+        assert_eq!(route.machine_id, remote);
+        assert_eq!(route.source, RecordedCheckout);
+
         store
             .conn
             .lock()

@@ -1,7 +1,9 @@
 //! Selected planning identity, separate from a machine's local repository path.
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
-use crate::durable::{MachineId, RepositoryId, TaskExecutionRoute, TaskId, WorkRef};
+use crate::durable::{
+    MachineId, RepositoryId, TaskExecutionRoute, TaskExecutionSource, TaskId, WorkRef,
+};
 use crate::store::{StoreError, StoreResult};
 
 use super::SqliteStore;
@@ -47,20 +49,27 @@ impl SqliteStore {
         let repository_id = repository_id_in(&tx, &repo)?.ok_or_else(|| {
             StoreError::InvalidData(format!("repository {repo} has no selected plan identity"))
         })?;
-        let machine_id = if checkout.as_deref().is_some_and(|path| !path.is_empty())
+        let (machine_id, source) = if checkout.as_deref().is_some_and(|path| !path.is_empty())
             || started.is_some()
         {
             let machine = machine.ok_or_else(|| StoreError::InvalidData(format!(
                 "Task {task} has unknown execution Machine; delegation cannot relocate existing work"
             )))?;
-            MachineId::parse(&machine)
-                .map_err(|error| StoreError::InvalidData(error.to_string()))?
+            (
+                MachineId::parse(&machine)
+                    .map_err(|error| StoreError::InvalidData(error.to_string()))?,
+                TaskExecutionSource::RecordedCheckout,
+            )
         } else {
-            super::durable::placement_in(&tx, &WorkRef::Task(task.clone()))?.machine_id
+            (
+                super::durable::placement_in(&tx, &WorkRef::Task(task.clone()))?.machine_id,
+                TaskExecutionSource::EffectiveDelegation,
+            )
         };
         Ok(TaskExecutionRoute {
             repository_id,
             machine_id,
+            source,
         })
     }
 

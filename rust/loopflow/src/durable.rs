@@ -110,6 +110,13 @@ impl WorkRef {
 pub struct TaskExecutionRoute {
     pub repository_id: RepositoryId,
     pub machine_id: MachineId,
+    pub source: TaskExecutionSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskExecutionSource {
+    RecordedCheckout,
+    EffectiveDelegation,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

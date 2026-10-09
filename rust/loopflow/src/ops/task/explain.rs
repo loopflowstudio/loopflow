@@ -3,6 +3,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::durable::TaskExecutionSource;
 use crate::ops::context::{ContextExplanation, ContextFact};
 use crate::ops::run::WorkSelection;
 use crate::store::SharedStore;
@@ -120,10 +121,9 @@ async fn read_task_run(
     };
     report.resolution.execution_machine = ContextFact::Bound {
         value: route.machine_id.to_string(),
-        source: if task.worktree.is_some() || store.sqlite.task_started(&id)? {
-            "recorded_checkout"
-        } else {
-            "effective_delegation"
+        source: match route.source {
+            TaskExecutionSource::RecordedCheckout => "recorded_checkout",
+            TaskExecutionSource::EffectiveDelegation => "effective_delegation",
         }
         .into(),
     };
@@ -146,22 +146,12 @@ async fn read_task_run(
     if let Some(blocker) = super::task_worktree_blocker(store, &task).await? {
         report.impediments.push(blocker.reason);
     }
-    if options.directive.is_some() {
-        report.impediments.push(format!(
-            "Task {} already exists; use `lf task comment {} <new-direction>`",
-            task.plan.identifier, task.plan.identifier
-        ));
-    }
-    if let Some(name) = &options.name {
-        match super::parse_workspace_slug(name) {
-            Err(error) => report.impediments.push(error.to_string()),
-            Ok(name) if task.worktree.is_some() && name.as_str() != task.workspace_slug => {
-                report.impediments.push(format!(
-                    "Task {} already uses workspace name {:?}",
-                    task.plan.identifier, task.workspace_slug
-                ))
-            }
-            Ok(_) => {}
+    for result in [
+        options.validate_directive(Some(&task)),
+        options.validate_workspace_name(&task),
+    ] {
+        if let Err(error) = result {
+            report.impediments.push(error.to_string());
         }
     }
     if options.stack_on.is_some() {
@@ -180,17 +170,7 @@ async fn read_task_run(
             checkout.display()
         );
     }
-    let project = store
-        .get_project(&task.project_id)
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("Task Project is missing"))?;
-    let choice = match select_task_run(
-        store,
-        &task,
-        checkout,
-        options.flow.as_deref(),
-        &project.plan.workflow,
-    ) {
+    let choice = match select_task_run(store, &task, checkout, options.flow.as_deref()) {
         Ok(choice) => choice,
         Err(error) => {
             report.impediments.push(error.to_string());

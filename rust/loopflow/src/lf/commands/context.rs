@@ -129,10 +129,10 @@ pub fn explain(
     let runtime = tokio::runtime::Runtime::new()?;
     Ok(runtime.block_on(async {
         use crate::ops::context::ContextExplanation;
-        match crate::store::read_existing_registry() {
-            Ok(Some(store)) => {
+        match read_registry() {
+            Ok(store) => {
                 crate::ops::context::explain_context(
-                    &std::sync::Arc::new(store),
+                    &store,
                     &cwd,
                     crate::ops::WorkSelection { task, wave },
                     session,
@@ -140,10 +140,7 @@ pub fn explain(
                 )
                 .await
             }
-            Ok(None) => ContextExplanation::unavailable("Local registry is absent"),
-            Err(error) => {
-                ContextExplanation::unavailable(format!("Local registry unavailable: {error}"))
-            }
+            Err(error) => ContextExplanation::unavailable(error),
         }
     }))
 }
@@ -156,10 +153,10 @@ pub fn explain_task_run(
     let cwd = std::env::current_dir()?;
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
-        let unavailable = match crate::store::read_existing_registry() {
-            Ok(Some(store)) => {
+        let unavailable = match read_registry() {
+            Ok(store) => {
                 return Ok(crate::ops::task::explain_task_run(
-                    &std::sync::Arc::new(store),
+                    &store,
                     &cwd,
                     crate::ops::WorkSelection {
                         task,
@@ -169,8 +166,7 @@ pub fn explain_task_run(
                 )
                 .await)
             }
-            Ok(None) => "Local registry is absent".into(),
-            Err(error) => format!("Local registry unavailable: {error}"),
+            Err(error) => error.to_string(),
         };
         Ok(crate::ops::task::TaskRunExplanation {
             resolution: crate::ops::context::ContextExplanation::unavailable(&unavailable),
@@ -179,4 +175,11 @@ pub fn explain_task_run(
             unavailable: vec![unavailable],
         })
     })
+}
+
+fn read_registry() -> Result<crate::store::SharedStore> {
+    crate::store::read_existing_registry()
+        .map_err(|error| anyhow!("Local registry unavailable: {error}"))?
+        .map(std::sync::Arc::new)
+        .ok_or_else(|| anyhow!("Local registry is absent"))
 }

@@ -1071,11 +1071,46 @@ fn task_run_explain_explicit_and_checkout_inferred_actions_preserve_all_state() 
         "{text}"
     );
     assert!(text.contains("Nothing was executed"));
+    let options = [
+        ("--directive", " ", "directive cannot be empty"),
+        ("--directive", "new direction", "already exists"),
+        ("--name", "other-workspace", "already uses workspace name"),
+        ("--name", "invalid/name", "workspace name"),
+    ];
+    let mut impediments = Vec::new();
+    for (flag, value, expected) in options {
+        let report = read(&["task", "run", "INF-123", flag, value, "--explain", "--json"]);
+        let reason = report["impediments"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|reason| reason.as_str())
+            .find(|reason| reason.contains(expected))
+            .unwrap_or_else(|| panic!("missing {expected}: {report}"));
+        impediments.push(reason.to_owned());
+    }
     db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
     assert!(
         fs::read(path).unwrap() == before,
         "preview changed database bytes"
     );
+    // Launch rejects the same options before checkout/Workflow preparation.
+    // Its ordinary Process observation is allowed, unlike the previews above.
+    for ((flag, value, _), reason) in options.into_iter().zip(impediments) {
+        let output = command(
+            home.path(),
+            repo.path(),
+            &["task", "run", "INF-123", flag, value],
+        )
+        .output()
+        .unwrap();
+        assert!(!output.status.success());
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            error.contains(&reason),
+            "preview: {reason}; launch: {error}"
+        );
+    }
 }
 
 #[test]

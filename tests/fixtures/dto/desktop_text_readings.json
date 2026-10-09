@@ -1,0 +1,109 @@
+[
+  {
+    "request": {
+      "target": {
+        "repository": "repo_22222222222222222222222222222222",
+        "window": "55555555-5555-5555-5555-555555555555",
+        "machine_id": "home_11111111111111111111111111111111",
+        "worktree": "/repo.task",
+        "pane": "session-pane",
+        "incarnation": "occurrence-session-pane"
+      },
+      "surface": "native-surface-incarnation",
+      "region": "selection",
+      "max_bytes": 16
+    },
+    "observed_at": 1791500000,
+    "hidden": false,
+    "result": {
+      "status": "available",
+      "text": "",
+      "truncated": false
+    }
+  },
+  {
+    "request": {
+      "target": {
+        "repository": "repo_22222222222222222222222222222222",
+        "window": "55555555-5555-5555-5555-555555555555",
+        "machine_id": "home_11111111111111111111111111111111",
+        "worktree": "/repo.task",
+        "pane": "session-pane",
+        "incarnation": "occurrence-session-pane"
+      },
+      "surface": "native-surface-incarnation",
+      "region": "scrollback",
+      "max_bytes": 16
+    },
+    "observed_at": 1791500000,
+    "hidden": true,
+    "result": {
+      "status": "available",
+      "text": "héλ🙂",
+      "truncated": true
+    }
+  },
+  {
+    "request": {
+      "target": {
+        "repository": "repo_22222222222222222222222222222222",
+        "window": "55555555-5555-5555-5555-555555555555",
+        "machine_id": "home_11111111111111111111111111111111",
+        "worktree": "/repo.task",
+        "pane": "session-pane",
+        "incarnation": "occurrence-session-pane"
+      },
+      "surface": "native-surface-incarnation",
+      "region": "screen",
+      "max_bytes": 16
+    },
+    "observed_at": 1791500000,
+    "hidden": false,
+    "result": {
+      "status": "unavailable",
+      "reason": "missing_surface"
+    }
+  },
+  {
+    "request": {
+      "target": {
+        "repository": "repo_22222222222222222222222222222222",
+        "window": "55555555-5555-5555-5555-555555555555",
+        "machine_id": "home_11111111111111111111111111111111",
+        "worktree": "/repo.task",
+        "pane": "session-pane",
+        "incarnation": "occurrence-session-pane"
+      },
+      "surface": "native-surface-incarnation",
+      "region": "screen",
+      "max_bytes": 16
+    },
+    "observed_at": 1791500000,
+    "hidden": false,
+    "result": {
+      "status": "unavailable",
+      "reason": "not_terminal"
+    }
+  },
+  {
+    "request": {
+      "target": {
+        "repository": "repo_22222222222222222222222222222222",
+        "window": "55555555-5555-5555-5555-555555555555",
+        "machine_id": "home_11111111111111111111111111111111",
+        "worktree": "/repo.task",
+        "pane": "session-pane",
+        "incarnation": "occurrence-session-pane"
+      },
+      "surface": "native-surface-incarnation",
+      "region": "screen",
+      "max_bytes": 16
+    },
+    "observed_at": 1791500000,
+    "hidden": false,
+    "result": {
+      "status": "unavailable",
+      "reason": "bounded_reader_unavailable"
+    }
+  }
+]

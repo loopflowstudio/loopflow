@@ -67,15 +67,17 @@ struct WorkLinkReceiver: NSViewRepresentable {
     let repository: String
     let inspect: (UUID) -> DesktopWindowInspection
     let controlPane: (DesktopPaneCommand) throws -> Void
+    let readText: (DesktopTextRequest) throws -> DesktopTextReading
     let receive: (URL) async -> Void
 
     func makeNSView(context: Context) -> Receiver {
-        Receiver(router: router, repository: repository, inspect: inspect, controlPane: controlPane, receive: receive)
+        Receiver(router: router, repository: repository, inspect: inspect, controlPane: controlPane, readText: readText, receive: receive)
     }
     func updateNSView(_ view: Receiver, context: Context) {
         view.receive = receive
         view.inspect = inspect
         view.controlPane = controlPane
+        view.readText = readText
     }
     static func dismantleNSView(_ view: Receiver, coordinator: ()) {
         view.router.remove(view.id, repository: view.repository)
@@ -87,16 +89,19 @@ struct WorkLinkReceiver: NSViewRepresentable {
         let repository: String
         var inspect: (UUID) -> DesktopWindowInspection
         var controlPane: (DesktopPaneCommand) throws -> Void
+        var readText: (DesktopTextRequest) throws -> DesktopTextReading
         var receive: (URL) async -> Void
 
         init(router: WorkLinkRouter, repository: String, inspect: @escaping (UUID) -> DesktopWindowInspection,
              controlPane: @escaping (DesktopPaneCommand) throws -> Void,
+             readText: @escaping (DesktopTextRequest) throws -> DesktopTextReading,
              receive: @escaping (URL) async -> Void) {
             self.router = router
             self.repository = repository
             self.receive = receive
             self.inspect = inspect
             self.controlPane = controlPane
+            self.readText = readText
             super.init(frame: .zero)
         }
         required init?(coder: NSCoder) { fatalError("init(coder:) is unsupported") }
@@ -108,6 +113,9 @@ struct WorkLinkReceiver: NSViewRepresentable {
                 }, inspect: inspect, controlPane: { [weak self] request in
                     guard let self else { throw RegistryQueryError("The repository window is unavailable.") }
                     try self.controlPane(request)
+                }, readText: { [weak self] request in
+                    guard let self else { throw RegistryQueryError("The repository window is unavailable.") }
+                    return try self.readText(request)
                 }) { [weak self] link in
                     await self?.receive(link)
                 }

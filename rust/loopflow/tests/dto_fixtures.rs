@@ -751,3 +751,39 @@ fn desktop_pane_command_requires_an_exact_content_occurrence() {
     missing.as_object_mut().unwrap().remove("action");
     assert!(serde_json::from_value::<DesktopPaneCommand>(missing).is_err());
 }
+
+#[test]
+fn desktop_text_distinguishes_empty_and_unavailable() {
+    use loopflow::lf::commands::desktop::{
+        DesktopTextReading, DesktopTextResult, DesktopTextUnavailable,
+    };
+    let json = include_str!("../../../tests/fixtures/dto/desktop_text_readings.json");
+    let readings: Vec<DesktopTextReading> = serde_json::from_str(json).unwrap();
+    assert_eq!(
+        serde_json::to_value(&readings).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+    assert_eq!(
+        readings[0].result,
+        DesktopTextResult::Available {
+            text: String::new(),
+            truncated: false
+        }
+    );
+    assert_eq!(
+        readings[2].result,
+        DesktopTextResult::Unavailable {
+            reason: DesktopTextUnavailable::MissingSurface
+        }
+    );
+    for reading in &readings {
+        let wire = serde_json::to_value(reading).unwrap();
+        for owner in ["request", "result"] {
+            for field in wire[owner].as_object().unwrap().keys() {
+                let mut missing = wire.clone();
+                missing[owner].as_object_mut().unwrap().remove(field);
+                assert!(serde_json::from_value::<DesktopTextReading>(missing).is_err());
+            }
+        }
+    }
+}

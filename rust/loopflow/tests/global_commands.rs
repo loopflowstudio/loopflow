@@ -461,7 +461,7 @@ fn desktop_inspection_rejects_linux_before_machine_routing_or_work_preparation()
     let home = tempfile::tempdir().unwrap();
     for operation in [
         "inspect", "hide", "restore", "focus", "split", "move", "resize", "zoom", "shell", "files",
-        "flow-log",
+        "flow-log", "read",
     ] {
         let output = command(
             home.path(),
@@ -478,6 +478,14 @@ fn desktop_inspection_rejects_linux_before_machine_routing_or_work_preparation()
         )
         .args(match operation {
             "inspect" => vec![],
+            "read" => vec![
+                "--target",
+                "invalid-json",
+                "--surface",
+                "stale",
+                "--region",
+                "screen",
+            ],
             "files" | "flow-log" => vec!["--target", "invalid-json", "--task", "absent"],
             "split" => vec!["--target", "invalid-json", "--axis", "vertical"],
             "move" => vec![

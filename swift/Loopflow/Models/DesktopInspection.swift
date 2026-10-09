@@ -170,7 +170,7 @@ public struct DesktopWorktreeNode: Codable, Sendable, Equatable {
 }
 
 /// An exact retained view, never a selector that follows current focus.
-/// This addresses arrangement only, not input into a native terminal surface.
+/// A read additionally requires the native surface incarnation. Neither grants input authority.
 public struct DesktopPaneTarget: Codable, Sendable, Equatable {
     public let repository: String
     public let window: String
@@ -258,5 +258,70 @@ public enum DesktopPaneAction: Codable, Sendable, Equatable {
             try values.encode(enabled, forKey: .enabled)
         }
         try values.encode(kind, forKey: .kind)
+    }
+}
+
+/// A bounded observation of one native surface, independent of current focus.
+public struct DesktopTextRequest: Codable, Sendable, Equatable {
+    public let target: DesktopPaneTarget
+    public let surface: String
+    public let region: DesktopTextRegion
+    public let maxBytes: Int
+
+    public init(target: DesktopPaneTarget, surface: String, region: DesktopTextRegion, maxBytes: Int) {
+        self.target = target; self.surface = surface; self.region = region; self.maxBytes = maxBytes
+    }
+    enum CodingKeys: String, CodingKey { case target, surface, region; case maxBytes = "max_bytes" }
+}
+
+public enum DesktopTextRegion: String, Codable, Sendable { case screen, scrollback, selection }
+
+public struct DesktopTextReading: Codable, Sendable, Equatable {
+    public let request: DesktopTextRequest
+    public let observedAt: Int64
+    public let hidden: Bool
+    public let result: DesktopTextResult
+
+    public init(request: DesktopTextRequest, observedAt: Int64, hidden: Bool, result: DesktopTextResult) {
+        self.request = request; self.observedAt = observedAt; self.hidden = hidden; self.result = result
+    }
+    enum CodingKeys: String, CodingKey { case request, hidden, result; case observedAt = "observed_at" }
+}
+
+public enum DesktopTextUnavailable: String, Codable, Sendable {
+    case missingSurface = "missing_surface"
+    case notTerminal = "not_terminal"
+    case boundedReaderUnavailable = "bounded_reader_unavailable"
+}
+
+/// Empty text is a successful observation, never a missing surface.
+public enum DesktopTextResult: Codable, Sendable, Equatable {
+    case available(text: String, truncated: Bool)
+    case unavailable(reason: DesktopTextUnavailable)
+
+    private enum CodingKeys: String, CodingKey { case status, text, truncated, reason }
+    private enum Status: String, Codable { case available, unavailable }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        switch try values.decode(Status.self, forKey: .status) {
+        case .available:
+            self = .available(text: try values.decode(String.self, forKey: .text),
+                              truncated: try values.decode(Bool.self, forKey: .truncated))
+        case .unavailable:
+            self = .unavailable(reason: try values.decode(DesktopTextUnavailable.self, forKey: .reason))
+        }
+    }
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .available(let text, let truncated):
+            try values.encode(Status.available, forKey: .status)
+            try values.encode(text, forKey: .text)
+            try values.encode(truncated, forKey: .truncated)
+        case .unavailable(let reason):
+            try values.encode(Status.unavailable, forKey: .status)
+            try values.encode(reason, forKey: .reason)
+        }
     }
 }

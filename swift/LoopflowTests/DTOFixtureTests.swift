@@ -21,6 +21,31 @@ struct DTOFixtureTests {
         }
     }
 
+    @Test func desktopTextDistinguishesEmptyAndUnavailable() throws {
+        let data = try loadFixtureData("desktop_text_readings.json")
+        let readings = try JSONDecoder().decode([DesktopTextReading].self, from: data)
+        #expect(readings[0].result == .available(text: "", truncated: false))
+        #expect(readings[1].result == .available(text: "héλ🙂", truncated: true))
+        #expect(readings[2].result == .unavailable(reason: .missingSurface))
+        let original = try #require(JSONSerialization.jsonObject(with: data) as? NSArray)
+        let encoded = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(readings)) as? NSArray)
+        #expect(original == encoded)
+        for reading in readings {
+            let wire = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(reading)) as? [String: Any])
+            for owner in ["request", "result"] {
+                let payload = try #require(wire[owner] as? [String: Any])
+                for field in payload.keys {
+                    var missing = wire, value = payload
+                    value.removeValue(forKey: field)
+                    missing[owner] = value
+                    #expect(throws: DecodingError.self) {
+                        try JSONDecoder().decode(DesktopTextReading.self, from: JSONSerialization.data(withJSONObject: missing))
+                    }
+                }
+            }
+        }
+    }
+
     @Test func paneCommandRequiresEveryTargetComponent() throws {
         let data = try loadFixtureData("desktop_pane_commands.json")
         let requests = try JSONDecoder().decode([DesktopPaneCommand].self, from: data)

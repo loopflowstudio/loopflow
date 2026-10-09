@@ -23,6 +23,7 @@ final class WorkLinkRouter {
         let receive: (URL) async -> Void
         let inspect: (UUID) -> DesktopWindowInspection
         let controlPane: (DesktopPaneCommand) throws -> Void
+        let readText: (DesktopTextRequest) throws -> DesktopTextReading
     }
     private var targets: [String: Target] = [:]
     private var pending: [String: [URL]] = [:]
@@ -36,11 +37,12 @@ final class WorkLinkRouter {
                   focus: @escaping () -> Void,
                   inspect: @escaping (UUID) -> DesktopWindowInspection,
                   controlPane: @escaping (DesktopPaneCommand) throws -> Void,
+                  readText: @escaping (DesktopTextRequest) throws -> DesktopTextReading,
                   receive: @escaping (URL) async -> Void) {
         if targets[repository]?.incarnation != incarnation {
             delivering.removeValue(forKey: repository)?.task.cancel()
         }
-        targets[repository] = Target(incarnation: incarnation, focus: focus, receive: receive, inspect: inspect, controlPane: controlPane)
+        targets[repository] = Target(incarnation: incarnation, focus: focus, receive: receive, inspect: inspect, controlPane: controlPane, readText: readText)
         deliverPending(repository)
     }
 
@@ -53,12 +55,25 @@ final class WorkLinkRouter {
 
     /// Validation and mutation stay in this MainActor turn; no focus fallback.
     func controlPane(_ request: DesktopPaneCommand) throws -> DesktopInspection {
-        guard let receiver = targets[request.target.repository],
-              receiver.incarnation.uuidString == request.target.window else {
-            throw RegistryQueryError("The repository window was closed or replaced. Inspect Desktop again; no pane was changed.")
-        }
+        let receiver = try receiver(for: request.target)
         try receiver.controlPane(request)
         return inspect()
+    }
+
+    /// Resolve and read synchronously; no client acquisition or focus fallback.
+    func readText(_ request: DesktopTextRequest) throws -> DesktopTextReading {
+        guard (1...1_048_576).contains(request.maxBytes) else {
+            throw RegistryQueryError("Text byte limit must be between 1 and 1048576.")
+        }
+        return try receiver(for: request.target).readText(request)
+    }
+
+    private func receiver(for target: DesktopPaneTarget) throws -> Target {
+        guard let receiver = targets[target.repository],
+              receiver.incarnation.uuidString == target.window else {
+            throw RegistryQueryError("The repository window was closed or replaced. Inspect Desktop again; no pane was changed.")
+        }
+        return receiver
     }
 
     func remove(_ incarnation: UUID, repository: String) {

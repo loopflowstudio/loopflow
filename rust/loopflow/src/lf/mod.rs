@@ -509,6 +509,20 @@ pub enum Commands {
 
 #[derive(Subcommand, Debug)]
 pub enum DesktopCommand {
+    /// Read bounded text from an exact retained surface, without following focus
+    Read {
+        #[arg(long)]
+        target: String,
+        /// Native surface incarnation from desktop inspect
+        #[arg(long)]
+        surface: String,
+        #[arg(long, value_enum)]
+        region: commands::desktop::DesktopTextRegion,
+        #[arg(long, default_value_t = 65536)]
+        max_bytes: usize,
+        #[arg(long)]
+        json: bool,
+    },
     /// Hide an exact retained pane without closing its Session or process
     Hide {
         /// JSON object with repository, window, machine_id, worktree, pane and incarnation

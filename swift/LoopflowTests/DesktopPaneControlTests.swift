@@ -1,6 +1,10 @@
 #if os(macOS)
 import Foundation
 import Testing
+#if canImport(GhosttyKit)
+import AppKit
+import GhosttyKit
+#endif
 @testable import Loopflow
 @testable import LoopflowMac
 
@@ -19,12 +23,76 @@ struct DesktopPaneControlTests {
                     selectionKind: nil, selectionId: nil, reading: "unavailable", reason: "Offline",
                     task: nil, session: nil, supportedOperations: ["inspect", "hide", "restore", "focus", "split", "move", "resize", "zoom"],
                     workspaces: registry.inspect(), layouts: registry.inspectLayouts())
-            }, controlPane: { try registry.controlPane($0, model: model) }) { _ in }
+            }, controlPane: { try registry.controlPane($0, model: model) }, readText: { try registry.readText($0) }) { _ in }
     }
 
     private func target(_ pane: PaneState, window: UUID, machine: String = "machine-a") -> DesktopPaneTarget {
         DesktopPaneTarget(repository: repository, window: window.uuidString, machineId: machine,
             worktree: identity.worktree, pane: pane.id, incarnation: pane.incarnation)
+    }
+
+    @Test func textReplyKeepsItsExactRequestAndEmptyResultWithoutWindowFocus() throws {
+        let router = WorkLinkRouter(), window = UUID()
+        var focused = false
+        router.register(window, repository: repository, focus: { focused = true },
+            inspect: { _ in fatalError("Reading text must not inspect unrelated windows") },
+            controlPane: { _ in throw RegistryQueryError("Reading text must not arrange panes") },
+            readText: { request in
+                DesktopTextReading(request: request, observedAt: 1, hidden: true,
+                                   result: .available(text: "", truncated: false))
+            }) { _ in fatalError("Reading text must not open Work") }
+        let request = DesktopTextRequest(target: target(PaneState(id: "pane", content: .shell), window: window),
+                                         surface: "surface", region: .selection, maxBytes: 16)
+        let reading = try router.readText(request)
+        #expect(reading.request == request)
+        #expect(reading.result == .available(text: "", truncated: false))
+        #expect(reading.hidden)
+        #expect(!focused)
+    }
+
+    @Test func passiveReadKeepsMissingSurfaceDistinctAndDoesNotFollowFocus() throws {
+        let registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId)
+        let router = WorkLinkRouter(), window = UUID()
+        let workspace = registry.workspace(for: identity), store = workspace.multiplexer
+        store.newShell(command: ["retained-command"])
+        let shell = store.focusedPane
+        let request = DesktopTextRequest(target: target(shell, window: window), surface: "old-surface",
+                                         region: .selection, maxBytes: 16)
+        store.load(sessionId: "other-session")
+        store.setCollapsed(paneId: shell.id, collapsed: true)
+        let before = store.layout, focus = store.focusedPane
+        register(router, window: window, registry: registry)
+        let reading = try router.readText(request)
+        #expect(reading.request == request)
+        #expect(reading.result == .unavailable(reason: .missingSurface))
+        #expect(reading.hidden)
+        #expect(store.layout == before)
+        #expect(store.focusedPane == focus)
+        #expect(store.shellCommands[shell.id] == ["retained-command"])
+        #expect(registry.surfaces.programStatus(for: .shell(shell.id, machineId: identity.machineId)) == nil)
+        #expect(registry.paths == [identity])
+    }
+
+    @Test func readRejectsStaleWindowContentAndByteLimitsWithoutChangingWorkspace() throws {
+        let registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId)
+        let router = WorkLinkRouter(), window = UUID()
+        let store = registry.workspace(for: identity).multiplexer
+        let empty = store.focusedPane
+        let request = DesktopTextRequest(target: target(empty, window: window), surface: "surface", region: .screen, maxBytes: 16)
+        register(router, window: window, registry: registry)
+        #expect(try router.readText(request).result == .unavailable(reason: .notTerminal))
+        for bound in [0, -1, 1_048_577] {
+            #expect(throws: RegistryQueryError.self) {
+                try router.readText(.init(target: request.target, surface: request.surface, region: .screen, maxBytes: bound))
+            }
+        }
+        store.load(sessionId: "replacement")
+        let before = store.layout
+        #expect(throws: RegistryQueryError.self) { try router.readText(request) }
+        let current = DesktopTextRequest(target: target(store.focusedPane, window: window), surface: "surface", region: .screen, maxBytes: 16)
+        register(router, window: UUID(), registry: registry)
+        #expect(throws: RegistryQueryError.self) { try router.readText(current) }
+        #expect(store.layout == before)
     }
 
     @Test func terminalInspectionDoesNotAllocateOrFollowFocus() throws {
@@ -45,6 +113,46 @@ struct DesktopPaneControlTests {
     }
 
     #if canImport(GhosttyKit)
+    @Test(.requiresDisplay) func passiveReadRetainsExitedSurfaceAndRejectsItsReplacement() throws {
+        _ = NSApplication.shared
+        let manager = GhosttyManager.shared
+        manager.initialize()
+        let registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId)
+        let router = WorkLinkRouter(), window = UUID()
+        let store = registry.workspace(for: identity).multiplexer
+        store.newShell()
+        let pane = store.focusedPane
+        let terminal = TerminalIdentity.shell(pane.id, machineId: identity.machineId)
+        let view = registry.surfaces.view(for: terminal)
+        view.setFrameSize(CGSize(width: 400, height: 300))
+        view.workingDirectory = NSTemporaryDirectory()
+        view.command = "/bin/sh -c 'printf retained; exit 0'"
+        view.createSurface(manager: manager)
+        defer { registry.surfaces.release(terminal) }
+        let surface = try #require(view.surface)
+        let token = try #require(registry.surfaces.surfaceIncarnation(for: terminal))
+        let request = DesktopTextRequest(target: target(pane, window: window), surface: token, region: .screen, maxBytes: 16)
+        register(router, window: window, registry: registry)
+        // Keep queued MainActor lifecycle callbacks pending to observe the real
+        // exited-but-retained interval. Reading must not perform their cleanup.
+        let deadline = Date().addingTimeInterval(3)
+        while !ghostty_surface_process_exited(surface), Date() < deadline { Thread.sleep(forTimeInterval: 0.01) }
+        try #require(ghostty_surface_process_exited(surface))
+        #expect(try router.readText(request).result == .unavailable(reason: .boundedReaderUnavailable))
+        #expect(view.surface == surface)
+        #expect(registry.surfaces.surfaceIncarnation(for: terminal) == token)
+        registry.surfaces.release(terminal)
+        #expect(try router.readText(request).result == .unavailable(reason: .missingSurface))
+        let replacement = registry.surfaces.view(for: terminal)
+        replacement.setFrameSize(CGSize(width: 400, height: 300))
+        replacement.workingDirectory = NSTemporaryDirectory()
+        replacement.command = "/bin/cat"
+        replacement.createSurface(manager: manager)
+        _ = try #require(replacement.surface)
+        #expect(throws: RegistryQueryError.self) { try router.readText(request) }
+        #expect(replacement.surface != nil)
+    }
+
     @Test func sameTerminalIdOnAnotherMachineKeepsItsOwnViewAndLifetime() {
         let pool = GhosttySurfacePool()
         let local = TerminalIdentity.session("same-session", machineId: "local")

@@ -547,7 +547,26 @@ Existing documents and terminal drafts stay retained. An empty target is filled;
 occupied contents are never replaced. Repeating Files/Flow-log reveals the same
 pane; repeating Shell adds another shell, so inspect after a lost reply.
 
-Terminal I/O and composed Session-plus-diff opening remain implementation work.
+Request text from that exact pane and native surface:
+
+```sh
+# Set surface to this pane's surface incarnation from the same inspection.
+lf desktop read --target "$target" --surface "$surface" --region screen --max-bytes 65536 --json
+```
+
+Regions are `screen`, `scrollback` and `selection`; the byte limit is 1–1048576
+(default 65536). The reply echoes the request, observation time and whether the
+pane is collapsed or hidden by zoom. Available results carry `text` and
+`truncated`; an empty string is successful empty output. Unavailable results carry
+a reason instead of text. Replaced windows, content or native surfaces reject old
+targets. Reads never follow focus, acquire a client or clean up an exited surface.
+
+**Native extraction is not yet available:** the pinned Ghostty artifact lacks the
+bounded reader. Existing surfaces return `bounded_reader_unavailable`, absent
+surfaces `missing_surface`, and nonterminal panes `not_terminal`. There is no
+unbounded fallback. JSON preserves these outcomes; text mode reports unavailability
+as an error. Read tokens authorize no input. Native extraction, terminal input and
+composed Session-plus-diff opening remain implementation work.
 
 ```sh
 open 'loopflow://task/LOO-303'

@@ -172,6 +172,19 @@ final class GhosttySurfacePool {
         return view.programStatus.incarnation.uuidString.lowercased()
     }
 
+    func readText(_ request: DesktopTextRequest, terminal: TerminalIdentity) throws -> DesktopTextResult {
+        // Do not use view(for:) or hasSurface: those allocate or schedule cleanup.
+        guard let view = views[terminal], view.surface != nil else {
+            return .unavailable(reason: .missingSurface)
+        }
+        guard view.programStatus.incarnation.uuidString.lowercased() == request.surface else {
+            throw RegistryQueryError("The terminal surface was replaced. Inspect Desktop again; no text was read.")
+        }
+        // lf2 has no bounded reader. Replace this result with the fixed-buffer
+        // extraction only after the verified lf3 artifact is selected.
+        return .unavailable(reason: .boundedReaderUnavailable)
+    }
+
     func programStatus(for id: TerminalIdentity) -> ProgramStatusSurface? {
         views[id]?.programStatus
     }
@@ -1318,6 +1331,9 @@ func terminalPasteText(from pasteboard: NSPasteboard) -> String? {
 @MainActor @Observable
 final class GhosttySurfacePool {
     func surfaceIncarnation(for id: TerminalIdentity) -> String? { nil }
+    func readText(_ request: DesktopTextRequest, terminal: TerminalIdentity) throws -> DesktopTextResult {
+        .unavailable(reason: .missingSurface)
+    }
     func hasSurface(_ id: TerminalIdentity) -> Bool { false }
     func programStatus(for id: TerminalIdentity) -> ProgramStatusSurface? { nil }
     func associateProgramStatus(_ records: [SessionRecord]) {}

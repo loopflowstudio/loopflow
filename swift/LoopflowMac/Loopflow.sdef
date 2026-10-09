@@ -11,6 +11,11 @@
             <direct-parameter type="text" description="JSON exact target and arrangement action"/>
             <result type="text" description="JSON reading after the arrangement"/>
         </command>
+        <command name="read terminal text" code="CNRTtext" description="Read an exact retained terminal surface without acquiring a client">
+            <cocoa class="LoopflowMac.ReadTerminalTextCommand"/>
+            <direct-parameter type="text" description="JSON exact pane, surface incarnation, region and byte limit"/>
+            <result type="text" description="JSON bounded text or explicit unavailability"/>
+        </command>
         <command name="capture screenshot" code="CNRTcapt" description="Capture Loopflow window screenshot and save to repository">
             <cocoa class="LoopflowMac.CaptureScreenshotCommand"/>
             <direct-parameter type="text" description="Repository path for saving screenshot"/>

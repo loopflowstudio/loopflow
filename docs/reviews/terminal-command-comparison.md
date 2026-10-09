@@ -78,7 +78,12 @@ installed help or reviewed Desktop code, not proof that no external tool exists.
   formatter tests and embedded C compilation/export, not native surface reads.
   The framework remains unbuilt/unpublished;
   packaged lf2 still allocates the full result. Swift truncation is no fallback.
-  Terminal reads/input, peer composition and native acceptance remain unfinished. The command tables still describe October 7's baseline.
+  The exact-target `desktop read` request now reaches passive surface validation,
+  without allocating or cleaning up on exit. Missing surfaces differ from empty
+  text in the wire contract; stale windows/content/surfaces reject the request.
+  Existing surfaces report `bounded_reader_unavailable` until artifact composition;
+  native extraction/input, peer composition and native acceptance remain unfinished.
+  The command tables still describe October 7's baseline.
   No cmux/herdr behavior was re-exercised for these deltas.
 - Public [cmux API](https://cmux.com/docs/api) and
   [concepts](https://cmux.com/docs/concepts) provide context, but the tables below

@@ -63,3 +63,22 @@ class ControlPaneCommand: NSScriptCommand {
         }
     }
 }
+
+class ReadTerminalTextCommand: NSScriptCommand {
+    override func performDefaultImplementation() -> Any? {
+        do {
+            guard let json = directParameter as? String else {
+                throw RegistryQueryError("Expected a JSON terminal text request.")
+            }
+            let request = try JSONDecoder().decode(DesktopTextRequest.self, from: Data(json.utf8))
+            return try MainActor.assumeIsolated { () throws -> String in
+                let reading = try WorkLinkRouter.shared.readText(request)
+                return String(decoding: try JSONEncoder().encode(reading), as: UTF8.self)
+            }
+        } catch {
+            scriptErrorNumber = NSInternalScriptError
+            scriptErrorString = error.localizedDescription
+            return nil
+        }
+    }
+}

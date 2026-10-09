@@ -143,6 +143,48 @@ pub enum DesktopSplitAxis {
     Vertical,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DesktopTextRequest {
+    pub target: DesktopPaneTarget,
+    pub surface: String,
+    pub region: DesktopTextRegion,
+    pub max_bytes: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, clap::ValueEnum)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum DesktopTextRegion {
+    Screen,
+    Scrollback,
+    Selection,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DesktopTextReading {
+    pub request: DesktopTextRequest,
+    pub observed_at: i64,
+    pub hidden: bool,
+    pub result: DesktopTextResult,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum DesktopTextResult {
+    Available { text: String, truncated: bool },
+    Unavailable { reason: DesktopTextUnavailable },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum DesktopTextUnavailable {
+    MissingSurface,
+    NotTerminal,
+    BoundedReaderUnavailable,
+}
+
 // Raw event spelling avoids loading an installed scripting dictionary during
 // compilation. Checking running state precedes the tell: inspection never opens
 // an app or an unrelated workspace. No caller-controlled text enters the script.
@@ -156,7 +198,11 @@ on run argv
             tell application id "com.loopflow.mac" to return «event CNRTinsp»
         else
             set request to item 1 of argv
-            tell application id "com.loopflow.mac" to return «event CNRTpane» request
+            if (count of argv) is 2 then
+                tell application id "com.loopflow.mac" to return «event CNRTtext» request
+            else
+                tell application id "com.loopflow.mac" to return «event CNRTpane» request
+            end if
         end if
     end timeout
 end run
@@ -168,6 +214,48 @@ pub fn run(command: &crate::lf::DesktopCommand) -> Result<()> {
     super::open::require_supported()?;
     let (target, action, json) = match command {
         DesktopCommand::Inspect { json } => return invoke(None, *json),
+        DesktopCommand::Read {
+            target,
+            surface,
+            region,
+            max_bytes,
+            json,
+        } => {
+            if !(1..=1_048_576).contains(max_bytes) {
+                bail!("Text byte limit must be between 1 and 1048576");
+            }
+            let request = DesktopTextRequest {
+                target: parse_target(target)?,
+                surface: surface.clone(),
+                region: *region,
+                max_bytes: *max_bytes,
+            };
+            let encoded = serde_json::to_string(&request)?;
+            let output = contact(Some(&encoded), true)?;
+            let reading: DesktopTextReading = serde_json::from_slice(&output)
+                .context("Desktop returned an invalid terminal text reading")?;
+            if reading.request != request {
+                bail!("Desktop returned text for a different request");
+            }
+            if matches!(&reading.result, DesktopTextResult::Available { text, .. } if text.len() > request.max_bytes)
+            {
+                bail!("Desktop returned text exceeding the requested byte limit");
+            }
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&reading)?);
+            } else {
+                match &reading.result {
+                    DesktopTextResult::Available { text, truncated } => {
+                        print!("{text}");
+                        if *truncated {
+                            eprintln!("\n[Desktop text truncated]");
+                        }
+                    }
+                    DesktopTextResult::Unavailable { reason } => bail!("{}", reason.message()),
+                }
+            }
+            return Ok(());
+        }
         DesktopCommand::Hide { target, json } => (target, DesktopPaneAction::Hide, json),
         DesktopCommand::Restore { target, json } => (target, DesktopPaneAction::Restore, json),
         DesktopCommand::Focus { target, json } => (target, DesktopPaneAction::Focus, json),
@@ -232,11 +320,12 @@ fn parse_target(target: &str) -> Result<DesktopPaneTarget> {
         .context("expected the exact pane target from `lf desktop inspect --json`")
 }
 
-fn invoke(request: Option<&str>, json: bool) -> Result<()> {
+fn contact(request: Option<&str>, text_read: bool) -> Result<Vec<u8>> {
     super::open::require_supported()?;
     let output = std::process::Command::new("/usr/bin/osascript")
         .args(["-e", DESKTOP_EVENT, "--"])
         .args(request)
+        .args(text_read.then_some("text"))
         .output()
         .context("contact Loopflow Desktop via macOS automation")?;
     if !output.status.success() {
@@ -244,7 +333,12 @@ fn invoke(request: Option<&str>, json: bool) -> Result<()> {
         // repeating a split allocates another pane; inspect before retrying.
         bail!("Desktop request failed: {}. Inspect again before retrying; `lf task status <task>` remains available in this terminal.", String::from_utf8_lossy(&output.stderr).trim());
     }
-    let reading: DesktopInspection = serde_json::from_slice(&output.stdout)
+    Ok(output.stdout)
+}
+
+fn invoke(request: Option<&str>, json: bool) -> Result<()> {
+    let output = contact(request, false)?;
+    let reading: DesktopInspection = serde_json::from_slice(&output)
         .context("Desktop returned an invalid reading; inspect again before retrying")?;
     if json {
         println!("{}", serde_json::to_string_pretty(&reading)?);
@@ -404,6 +498,16 @@ impl DesktopWorktreeNode {
             for child in &self.children {
                 child.render(indent + 2, lines);
             }
+        }
+    }
+}
+
+impl DesktopTextUnavailable {
+    fn message(self) -> &'static str {
+        match self {
+            Self::MissingSurface => "The retained pane has no native surface; no client was acquired.",
+            Self::NotTerminal => "The addressed pane is not a terminal.",
+            Self::BoundedReaderUnavailable => "This Desktop build has no verified bounded text reader; no unbounded fallback was used.",
         }
     }
 }

@@ -128,9 +128,26 @@ final class SessionsWorkspaceRegistry {
         }
     }
 
+    func readText(_ request: DesktopTextRequest) throws -> DesktopTextReading {
+        let (workspace, pane) = try retainedPane(for: request.target)
+        let store = workspace.multiplexer
+        let result: DesktopTextResult
+        switch pane.content {
+        case .shell:
+            result = try surfaces.readText(request, terminal: .shell(pane.id, machineId: request.target.machineId))
+        case .session(let id):
+            result = try surfaces.readText(request, terminal: .session(id, machineId: request.target.machineId))
+        case .empty, .files, .flowLog:
+            result = .unavailable(reason: .notTerminal)
+        }
+        return DesktopTextReading(request: request, observedAt: Int64(Date().timeIntervalSince1970),
+            hidden: store.collapsedPaneIds.contains(pane.id) || (store.zoomedPaneId != nil && store.zoomedPaneId != pane.id),
+            result: result)
+    }
+
     func controlPane(_ request: DesktopPaneCommand, model: WorkModel) throws {
         let target = request.target
-        let workspace = try retainedWorkspace(for: target)
+        let (workspace, _) = try retainedPane(for: target)
         let store = workspace.multiplexer
         // Validate both ends before changing anything. Moving a view is not
         // reassociating its Work or transferring a client to another checkout.
@@ -140,7 +157,7 @@ final class SessionsWorkspaceRegistry {
                   other.pane != target.pane else {
                 throw RegistryQueryError("Choose two distinct panes in the same retained workspace; no pane was changed.")
             }
-            _ = try retainedWorkspace(for: other)
+            _ = try retainedPane(for: other)
         }
         switch request.action {
         case .shell:
@@ -178,14 +195,14 @@ final class SessionsWorkspaceRegistry {
         }
     }
 
-    private func retainedWorkspace(for target: DesktopPaneTarget) throws -> SessionsWorkspace {
+    private func retainedPane(for target: DesktopPaneTarget) throws -> (SessionsWorkspace, PaneState) {
         let identity = WorkspaceIdentity(machineId: target.machineId, worktree: target.worktree)
         guard let workspace = workspaces[identity],
               let pane = workspace.multiplexer.layout.pane(for: target.pane),
               pane.incarnation == target.incarnation else {
             throw RegistryQueryError("The pane content was removed or replaced. Inspect Desktop again; no pane was changed.")
         }
-        return workspace
+        return (workspace, pane)
     }
 
     func path(containingShell id: String, machineId: String) -> WorkspaceIdentity? {

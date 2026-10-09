@@ -572,5 +572,12 @@ rejects stale targets, including the second target of a move or resize. Replies
 are model readings, not native-rendering proof. Shell, Files and Flow-log add
 companions beside the exact target without changing focus or zoom. Files and
 Flow-log reuse existing panes for the named Task; its recorded checkout must
-match. Shell opening is local-only. Terminal I/O and cross-machine composition
-remain unfinished.
+match. Shell opening is local-only.
+
+`lf desktop read --target "$target" --surface "$surface" --region selection --json`
+validates the retained pane and native surface without following focus or retiring
+an exited surface. Missing surfaces and nonterminal panes are explicit unavailable
+results, not empty text. The pinned lf2 artifact has no bounded reader: existing
+surfaces report `bounded_reader_unavailable` until verified artifact composition.
+No unbounded extraction is used. Native text extraction, input and cross-machine
+composition remain unfinished.

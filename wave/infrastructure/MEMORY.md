@@ -221,20 +221,20 @@ unpublished code retained, without deletion or delivery authorization.
 
 ## AgentProcess (LOO-443, 2026-10-09)
 
-Jack Heart requested one inventory; #1512/#1516 integrated. Tokens fence
-A → B → A; duplicate PID/birth grants no control (`48aaf72a1`, this heading).
+Jack Heart requested one inventory; #1512/#1516 integrated. Tokens fence A → B → A.
+Top/gate retain Unknown LFIDs; active Sessions retain Unavailable; zombies are dead.
+Invocation retry preserves account/native history and exact settlement; failover
+selects a fresh thread. Native admission requires attachment, headless remains optional.
+Remote clients never settle providers; generic stop preserves takeover.
 
-Native admission requires attachment; remote clients never settle providers.
-Invocation retry settles the exact old AgentProcess before reserving another,
-retaining account/native history. Failover selects a fresh thread; same-account
-retry retains it. Failed close/stale authority refuses replacement; generic stop
-preserves takeover. Raw headless admission remains optional.
+Resume bypasses detached settlement, uses mutable Session settings and lacks
+duplicate-identity refusal; close/claim lock separately. Retry proves no resume safety.
+Codex alone has FIFO handoff; live reaping covers noninteractive Codex/OpenCode.
+Generations, foreground cleanup, death orders, public status/scheduled agreement,
+two-second removal and installed settlement remain open.
 
-Top/gate share unfinished inventory and identity judgment. Missing receipts,
-birth or sampling retain Unknown LFID rows; active Sessions retain Unavailable
-records. Display grants no control; zombies are dead. Public Task-status/scheduled
-agreement remains unproved. Only Codex has FIFO handoff; live reaping covers noninteractive Codex/OpenCode. Generations, foreground
-cleanup, death orders, two-second removal and installed settlement remain open.
+#1511 adds native Codex `--no-daemon`.
+Prior constraints/proofs: `5fa855c6c:wave/infrastructure/MEMORY.md`, this heading.
 
 ## Execution ownership names (LOO-441, 2026-10-09)
 

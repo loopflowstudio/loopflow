@@ -131,6 +131,13 @@ Recovery preserves recorded inputs and exact native evidence. File publication
 and SQLite settlement have an explicit recoverable boundary; neither alone is a
 claim of successful execution.
 
+Resume admission has not yet converged on that same settlement path.
+`replaceable_driver` still treats detached attachment as replaceable and samples
+attached lf receipts separately; abandoned-process cleanup reads the Session's
+mutable provider without the retry path's duplicate-identity check. Close and
+claim use separate lock acquisitions. Consolidating these boundaries remains
+part of the cutover; invocation-owned retry tests do not establish resume safety.
+
 ## Connect and transfer attachment
 
 Codex's private Unix WebSocket supports multiple clients on one active native

@@ -142,14 +142,18 @@ cleanup. Codex relay and close terminology now uses attachment/AgentProcess;
 retained socket/FIFO names remain unchanged. This does not complete the broader
 vocabulary or optional-launch cut.
 
-LOO-441 is integrated from pinned main `461577746` (#1516) through the owned
-sync. No publication, installed-store migration or installed acceptance is claimed.
+LOO-441/#1516 and #1512 are integrated. The latest owned sync, `e99aee7f7`,
+adds main `e69d5103f` (#1511): native Codex commands pass `--no-daemon`, while
+explicit account selection reconciles Codex's separate shared background daemon.
+That daemon's five-minute turn grace period is not AgentProcess takeover or
+orphan policy. Private headless app-server endpoints are unchanged. The upstream
+native-argv fixture checks the new flag; configured terminal behavior with the
+combined candidate remains unproved. No publication or installed-store migration
+is claimed.
 Earlier implementation/review detail and contrary evidence:
 `e0d360e6a:scratch/introduce-agentprocess-record-the-provider.md`.
 
-## Remaining implementation
-
-**Invocation-owned replacement (2026-10-09):** the library admission
+**Invocation-owned replacement (`cd3e8bafa`, 2026-10-09):** the library admission
 counterexample is repaired without weakening the saved-thread check or changing
 Codex's takeover-preserving `stop`. Retry now holds the capture's exact attachment,
 closes or observes the old AgentProcess dead, and atomically retains its end,
@@ -160,9 +164,9 @@ clears the resume selection, including one inherited from the original launch;
 same-account retry retains its thread. Prior account/native observations remain
 history. Metadata-only retry is no longer a production capture API.
 
-Settlement reads the recorded provider/interactivity, not next-launch settings.
-Unknown or duplicated OS identity grants no signal authority; native foreground
-providers keep their launcher-owned teardown. The owned Codex close uses the
+Invocation-owned settlement reads the recorded provider/interactivity, not next-launch
+settings. Unknown or duplicated OS identity grants no signal authority in this path;
+native foreground providers keep their launcher-owned teardown. The owned Codex close uses the
 shared zombie/identity judgment. Generic harness teardown errors now propagate.
 The regression uses different native threads for revoked and fallback accounts
 and checks distinct ended AgentProcesses, one Session/parent and retained
@@ -171,6 +175,16 @@ throwaway-group check exercises live close with an absent endpoint, not a live
 Codex thread-inventory exchange. Configured-provider acceptance remains open.
 Earlier failing proof and analysis: `3f530ffce:scratch/introduce-agentprocess-record-the-provider.md`.
 
+
+**Inventory (`5fa855c6c`, 2026-10-09):** top and Task gates share unfinished-row
+selection and identity judgment. Missing lf receipts, missing agent birth and
+failed sampling remain visible Unknown rows with LFIDs. Active Sessions retain
+records and report Unavailable on sampling failure. Rust/Swift activity DTOs and
+fixtures move together. Source fixtures compare actual blockers to top rows;
+the public ps fixture covers failed sampling. These results supersede the earlier
+invisible-blocker implementation finding, not public Task-status/scheduled proof.
+
+## Remaining implementation
 
 1. Eliminate optional attachment paths in raw headless harness starts. `run_agent`
    now enters the existing invocation runtime before creating its implicit capture;
@@ -197,26 +211,20 @@ Earlier failing proof and analysis: `3f530ffce:scratch/introduce-agentprocess-re
    Codex/OpenCode-only, noninteractive selection without applying headless group
    control to a foreground TTY. `HELD_LIFELINES` still retains superseded writers
    until lf exit. No current live attachment means orphan settlement, not invented exit;
-   unknown attachment liveness stays unknown. Resume must consult the AgentProcess
-   before treating a detached attachment as replaceable. Unfinished rows with
-   unknown PID remain diagnosable. Top, active Sessions, receipt checks, gate and
-   reaper now share `journal::OsProcess` parsing and identity judgment; zombies
-   are dead, invalid observations remain errors/Unknown. Inventory and unknown
-   display selection are covered below. No configured orphan was signaled and
-   OS death supplies no successful outcome.
-4. Replace remaining predecessor fixture assumptions and restore required
-   native-history and Task-membership coverage on records. Top and the Task gate
-   now share unfinished-row selection and identity judgment. Missing lf receipts,
-   missing agent birth and failed sampling produce visible Unknown rows; LFIDs
-   are shown in text and JSON. Self-exclusion uses LFID, not a reusable PID.
-   Active Sessions retain unknown agents and report Unavailable when sampling
-   fails. Exact absence, birth mismatch and zombies remain death evidence.
-   The receipt-selected inventory and exclusive snapshot transaction wrapper
-   are deleted. Rust/Swift activity states and DTO fixtures move together.
-   Source fixtures compare actual Task blockers to top rows and retain native
-   history; the public ps fixture covers failed sampling. Public Task-status and
-   scheduled-entry agreement, caller-lineage exclusion and two-second removal
-   remain unproved. Prune still stops before reaping on a failed OS sample.
+   unknown attachment liveness stays unknown. Resume still has a separate path:
+   `replaceable_driver` returns immediately when no LfProcess is attached and
+   otherwise checks a receipt's PID/start directly, not the shared record judgment.
+   `end_abandoned_agent_process` reads the mutable Session provider and lacks the
+   invocation-retry path's duplicate PID/birth check. Its close and subsequent claim
+   also acquire separate attachment locks. Consolidate this path around the exact
+   AgentProcess and one fenced settlement/replacement, preserving unknown spawn,
+   detached-live, zombie, duplicate-identity and changed-launch-setting cases.
+   Invocation-retry repair does not establish resume safety. No configured orphan
+   was signaled and OS death supplies no successful outcome.
+4. Complete public Task-status and scheduled-entry agreement, caller-lineage
+   exclusion, native-history coverage and two-second removal. The inventory repair
+   above supplies source evidence, not those entry-point proofs. Prune still stops
+   before reaping on failed OS sampling; failure must remain visible, not success.
    Earlier visibility counterexamples: `48aaf72a1`, this plan.
 5. LOO-441's LfProcess/LfSession rename is integrated from #1516. Update the final
    model/API docs and all wire fixtures after the generation cut. The common
@@ -252,11 +260,11 @@ drop the published client guard before cleanup; it remains in the outer scope.
 No new signal authority, attachment refresh or lifecycle owner is introduced.
 
 October 9 realignment read Release's GOAL and full MEMORY, the only immediate
-child scope found here. Its operation-entry lesson applies to both visibility
-and scheduled settlement: shared internals do not prove public outcomes. Local
-main remains `461577746`; #1512 and #1516 are integrated. No additional upstream
-integration is claimed. The lifecycle and visibility gaps need implementation,
-not a new product decision or relaxed acceptance.
+child scope found here, including directories without a registered Wave. Its
+operation-entry lesson also applies to resume: invocation-retry fixtures do not
+prove the separate admission/abandonment path. Source review found the bypasses
+in item 3; these need implementation, not a new product decision or relaxed
+acceptance. The account-daemon merge is integrated, not installed acceptance.
 
 Review caught two boundary errors and repaired them: native clients must hold the
 attachment fence at spawn, and a helper-created capture must finish with the
@@ -278,4 +286,9 @@ boundary, corrected closing against mutable Session provider settings and kept
 telemetry loss nonfatal after the durable replacement transaction. The live-close
 fixture's invalid trace identity was repaired before its passing run.
 
-Check: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test --no-run` (lib/process_ownership_tests/dto_fixtures), network-isolated top/active/journal lib filters (21), public ps (1), Rust DTO filters (2), and `swiftc` ActivitySnapshot fixture round-trip pass; full Rust/Swift/DTO/materialized and Linux remain gate/CI-owned. Prior invocation replacement checks: `397b2ee59`, this plan.
+Prior checks: `5fa855c6c:scratch/introduce-agentprocess-record-the-provider.md`
+records fmt/Clippy, focused compilation, 21 top/active/journal cases, public ps,
+Rust DTO filters and a Swift ActivitySnapshot round-trip; invocation replacement
+checks remain at `397b2ee59`, this plan. They predate the account-daemon sync.
+
+Check: `git diff --check` and migration-excluded deletion audit pass; `lf context --skill realign --json` fits; prose-only reconciliation, runtime suites deferred to gate/CI.

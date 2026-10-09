@@ -107,7 +107,7 @@ These are reversible lookup choices, not shared Work identity or publication.
 Primary and stack-parent Task selectors now carry repository-scoped full IDs through
 dispatch; an unscoped ambiguous prefix still fails.
 
-October 9 context query: generated Work seed 31,627/16,000 tokens (15,627 over),
+October 9 context query: generated Work seed 31,633/16,000 tokens (15,633 over),
 including the Task-workspace inventory. Complete launch source inspected. Authored
 notes cannot shrink this separate producer gap; no limit was raised.
 

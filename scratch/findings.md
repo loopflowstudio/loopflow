@@ -50,17 +50,11 @@ ages and causal invalidation findings remain at
 scalar/list replay cannot clear freshness. Earlier 63 peer-storage passes and four
 focused invalidation checks are bounded evidence, not combined acceptance.
 
-`60d113a70`/`c20e4ad13` supply unplaced Waves and repository-scoped Git
-receipts/holds through the existing Work stream. Scoped last-good readings survive
-unavailability; no second poller. Earlier detail: `a73198197:scratch/findings.md`,
-this heading. Per-Work sharing/recovery and native acceptance remain unproved.
-
-`7260e4602` moves provider-mapping validation ahead of both scalar projection and
-independent evidence. A new fixture retains mapping, uncertain effects and execution
-when peers remove/replace a mapping, while independent objects import. The earlier
-raw-SQL unmapping recovery was removed: it could turn legacy Work into a duplicate
-provider-creation candidate without reconciling issue lookup or effects. Divergent Task/Project provider association remains unfinished; repository-root
-binding below is a different operation. This fixture was inspected, not run.
+Unplaced-Wave/Work-stream composition and the inspected-only provider-mapping
+fixture: `75fff9cb0:scratch/findings.md`, this heading. Scoped last-good readings
+survive unavailability. Raw-SQL unmapping could create duplicate provider Work;
+explicit correspondence below supersedes that recovery proposal. Per-Work
+sharing/recovery and native acceptance remain unproved.
 
 `ops/planning_peer.rs` still refuses connected Linear exchange. Partial-list/public
 composition, foreground provider lifetime/native reconnect and peer-exclusive start
@@ -202,7 +196,14 @@ refusal. The imported CLI fixture is explicitly Store-seeded, not Git acquisitio
 Joint causal/relationship projection and origin settlement remain held; mixed
 exchange and first-start refusals are unchanged.
 
-Review confirmed local-only request idempotence and retained effects/execution.
-`cli_catalog` regenerated the command reference after invalid help/list attempts;
-`list` refused production storage. No installed runtime or production plan changed.
-Generated Work-seed overflow remains; no limit was raised.
+CLI-reference attempts and integration review: `75fff9cb0`, this heading.
+No installed runtime or production plan changed. Generated Work-seed overflow
+remains; no limit was raised.
+
+Correspondence lookup mixed physical absence, mapping and record content across
+observations. The real-WAL fixture fails on `75fff9cb0` (lookup returns null), then
+passes with one read snapshot for Tasks/Projects. The next lookup sees the changed
+mapping. Imports are Store-seeded, not Git acquisition. The initial unqualified
+`--exact` filter ran zero tests; the qualified filter ran the regression.
+Resource recovery left 30.3 GiB below its 32 GiB reserve; uv-cache pruning was
+locked. No other checkout was cleaned.

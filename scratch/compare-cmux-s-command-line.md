@@ -249,7 +249,10 @@ not depend on globally unique aliases. Unknown Tasks retain ordinary acquisition
 
 Receipt import no longer synthesizes `task_creation_intents`; only local creation
 requests own idempotence. Full-ID correspondence extends the existing resolver,
-not a second Work registry or execution alias.
+not a second Work registry or execution alias. Task/Project lookup no longer
+releases its connection between physical lookup, correspondence and record reads:
+the common resolver and row readers share one read snapshot. Later lookups recheck
+mapping changes; the snapshot grants no execution or synchronization authority.
 
 Peer import no longer mutates its prepared object index in the retry loop or
 maintains a second receipt-exclusion list for scalar writes. Index construction
@@ -372,13 +375,10 @@ Wave-owned planning and repository-keyed windows; do not add another poller or i
 repository identity from a destination. Per-Work sharing/authorship/assignee and
 losing-edit recovery presentation remain, distinct from implemented destination status.
 
-`d378f31ae` composes LOO-412 through `19e31f64d`: cross-ID provider claims
-hold effects; origin-keyed creation receipts preserve UUIDs, inputs and attempts.
-Transfer/preparing selection stays deleted. Mapping preservation is not association:
-raw unmapping would make legacy Work eligible for duplicate creation. Earlier
-counterexamples: `28fc5274a:scratch/findings.md`, **Shared planning composition**.
-Main's `3e1e6245c` is integrated: live connect hands off; dead-driver resume starts
-an engine on native history. Import must never trigger that legitimate local action.
+Earlier provider-claim/creation composition: `75fff9cb0`, this heading;
+unmapping counterexamples: `28fc5274a:scratch/findings.md`, **Shared planning
+composition**. Never turn legacy Work into duplicate creation candidates or trigger
+main's legitimate native-history resume through import.
 
 **Composed October 9 through `de3c84b08` (`66dd3c44f`):** common receipts no
 longer manufacture local Task-creation requests. `planning associate` records exact
@@ -543,4 +543,4 @@ identity/delegation, open them, add shell/Files panes, retain an unfinished draf
 change focus, target a harmless command, read output, hide/restore, and verify the
 original input target and draft survive. Demo owns native usability; preserve comparison evidence and use no real accounts or live user terminals.
 
-Check: network-isolated `loopflow` tests `explicit_correspondence_*`, `peer_creation_*`, `peer_migration_preserves_*` PASS (7), `planning_setup_tests public_association_*` PASS (1); fmt/Clippy PASS; prior Desktop proof: `15663bd45`; full suites: gate; native usability: demo.
+Check: `cargo test -p loopflow --lib --no-run`, network-isolated lib filters `correspondence_lookup_*`, `explicit_correspondence_*`, `routing_resolves_task_prefixes_*` PASS (3); `cargo fmt --all --check`, `cargo clippy --all-targets -- -D warnings` PASS; prior receipt/CLI/migration checks: `b0cda0896`; full suites: gate; native usability: demo.

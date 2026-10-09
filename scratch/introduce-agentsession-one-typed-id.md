@@ -4,9 +4,10 @@ Jack Heart requested AgentSession on 2026-10-09, stacked on LOO-441 / PR #1516.
 The Task brief is accepted scope; the implementation selects its permitted
 opaque typed-id path, without a table or migration. Jack's parallel-work steer
 leaves engine/driver columns and Process ownership exclusively with LOO-443.
-Jack's October 9 comment `70bad83a-1001-4247-ade5-430e0fddf4bc` requests
-the deferred resume, account, Clippy and DTO checks, then publication stacked
-on #1516; merging is explicitly excluded.
+Jack's October 9 comment `901bf763-b15d-4940-a6b3-1b2967f5ed90` approves
+landing PR #1517 after syncing onto main, superseding publication-only direction.
+`lf sync` integrated merged parent #1516 (`461577746`) without conflicts as
+`adf3f9e4b`. Gate does not perform the later delivery operation.
 
 ## Delete — do not maintain
 
@@ -46,32 +47,39 @@ replacement event. No engine/driver column changed.
 
 ## Verification and remaining delivery
 
-Jack's requested publication checks now pass. The nine focused Rust checks cover
-fresh-process resume, opaque bytes, Codex identity discovery, durable identity
-before spawn, account pinning/switch attribution, original identity ordering and
-usage preservation across replacement. `agent_session_resumes_on_a_fresh_process`
-uses two stand-in Claude processes, not a live provider. Its earlier final-only
-fixture omitted streamed answer text; the repaired text-delta version now passes.
-Rust and Swift DTO fixtures pass with unchanged wire keys.
+The merged-parent tree retains opaque ids, original SQL/JSON keys, account
+attribution and Swift native-history row ids. Review found no additional code
+repair within the typed-id scope. No engine/driver columns or migrations changed.
+Fresh-process resume uses two stand-in Claude processes, not a live provider;
+source checks establish neither installed acceptance nor live-provider continuity.
+Earlier publication/compression evidence remains at
+`5cdfae63c:scratch/introduce-agentsession-one-typed-id.md`.
 
-The October 9 publication preflight retry passed after the earlier reserve
-refusal; dated evidence remains at
-`1770350a3:scratch/introduce-agentsession-one-typed-id.md`.
+### Remaining gate findings
 
-Review retains the Swift native-history `rawValue` projection so row ids do not
-change when their type changes. No engine/driver columns or migrations changed.
-Release's child guidance still separates source checks, publication and installed
-acceptance; no release, installation or schedule change is authorized here.
+The affected-suite run completed, including every Rust target despite failures.
+The materialized Rust run had five failures; AgentSession resume, opaque-id,
+account, replacement-history and DTO cases passed. Three failures in Wave cron
+lookup, authored-goal context and exact-Task roadmap pass with canonical
+`TMPDIR=/private/tmp`. Their fixtures stored `/var/folders` aliases while readers
+resolved canonical repository paths. TESTING.md now carries this gate setup.
 
-Full materialized Rust and broader Swift suites remain with gate/CI. Publication
-is authorized after these focused checks, stacked on #1516; no merge or Task
-completion. Publication itself is not established by these source checks.
-No installed or live-provider acceptance is claimed.
+Two failures remain, outside the AgentSession implementation:
 
-October 9 realignment inspected the compressed OpenCode path, Swift encoding,
-fresh-process fixture and retained wire/column names; no implementation mismatch
-was found. Release is the only immediate child Wave in this checkout; its goal
-and complete memory retain the distinction between source, publication and
-installed evidence already applied here. No new product decision is needed.
+- `lf::commands::install::artifact_tests::a_settled_install_keeps_only_what_it_can_select_or_is_running`:
+  the copied `/bin/sh` produces no readiness line. An isolated probe confirms
+  the copy exits on SIGKILL (-9), while `/bin/sh` itself prints `ready` and exits
+  zero. The killer/cause is unproved; retention behavior needs a capable host/CI.
+- `work_watch::a_checkout_changed_on_disk_is_shown`: no initial planning frame
+  showing `(false, false)` within 30 seconds. It fails both in the materialized
+  suite and the focused source-tree run with canonical TMPDIR. This is an
+  unresolved failure, not a passing check or a reason to remove the assertion.
 
-Checks: `cargo fmt --check`, `cargo clippy --all-targets -j 4 -- -D warnings`, `cargo test -p loopflow --lib --no-run -j 4`, network-isolated `open_agent_session_creates_only_without_saved_identity` (1), `scripts/test_desktop.sh --jobs 2 -Xswiftc -gnone --filter DTOFixtureTests` (build + 23 tests), and `git diff --check` pass after compression; prior nine Rust identity/account checks and Rust DTO fixtures (22) remain applicable; full matrix remains gate/CI-owned.
+Original logs: `.lf/tmp/gate/run-55756/`; focused nextest run:
+`d39dbe0e-f831-4ee7-9fe7-b1961c5febcf`. No production implementation was changed
+for these findings. The gate remains non-green; delivery must retain that fact.
+CI owns its full platform matrix. No release, installation, schedule change or
+Task completion occurred. Release's child guidance still separates source checks,
+publication and installed evidence; its goal and memory were read during realignment.
+
+Checks: `uv run python scripts/test.py --reuse-passing` on `adf3f9e4b` with inherited LF/LOOPFLOW authority cleared: architecture, fmt, stable Clippy, website (76), Swift app/DTO/model/view tests (404) and boundaries PASS; materialized Rust 2333 PASS / 5 FAIL / 17 skipped; canonical-TMPDIR focused reruns resolve three failures, checkout-watch still FAIL; isolated copied-shell probe exits -9; disposable `lf monitor list --json`, `lf usage --json`, `lf doctor --json` PASS; full platform/installation matrix remains CI-owned.

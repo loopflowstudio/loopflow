@@ -231,9 +231,11 @@ LFID durable; PID reusable. LOO-400 history, mapping, placement and proofs:
 
 ## Provider conversations (LOO-442, 2026-10-09)
 
-Jack selected AgentSessionId atop LOO-441/#1516; LOO-443 owns engine/driver.
-No table; retain history/attribution, SQL/JSON bytes and Swift rawValue ids.
-Focused checks pass; stacked publication authorized, not merge.
+Jack approved #1517 landing October 9; `adf3f9e4b` integrates merged #1516.
+AgentSessionId has no table; retain history/account attribution, SQL/JSON bytes
+and Swift ids. LOO-443 owns engine/driver. Identity, Clippy, DTO and headless Swift
+checks pass. Gate fails: copied-shell retention exits -9; checkout-watch times out.
+Canonical TMPDIR resolves three fixture failures.
 Installation unproved.
 
 ## Terminal conversation recovery (LOO-409, 2026-10-07)
@@ -1001,11 +1003,9 @@ invented completion date. No fourth user-facing planning noun was selected.
 
 ## Earlier follow-ups (reselect through the accepted chapter)
 
-Historical suggestions remain at
-`d281370191844294ce0ad877752f2aa6a6402282:wave/infrastructure/MEMORY.md#earlier-follow-ups-reselect-through-the-accepted-chapter`;
-they authorize no current work or retired owners. PR #818 resolved rebase-efficiency
-follow-ups. Measure command drift, avoidable rebases and post-land repairs before
-tuning policy; the synthetic harness remains unbuilt. Jack Heart's July 6
+Unselected suggestions, #818's resolved rebase work and the unbuilt policy
+harness: `adf3f9e4b:wave/infrastructure/MEMORY.md`, this heading. Measure drift
+before tuning; archived notes authorize no work. Jack Heart's July 6
 “up/down 5ths” referent remains unresolved and deferred.
 
 ## Direct invocation and large inputs (curated 2026-10-08)

@@ -1,6 +1,7 @@
 //! Provider observations survive the client that happened to receive them.
 //! These receipts confer no conversational or Flow mutation authority.
 
+use crate::id::AgentSessionId;
 use std::collections::{HashMap, HashSet};
 
 use serde_json::{json, Value};
@@ -44,7 +45,7 @@ impl History {
         store: &SqliteStore,
         session: &str,
         driver: Option<&SessionDriver>,
-        expected_thread: Option<&str>,
+        expected_thread: Option<&AgentSessionId>,
         rpc: &Value,
     ) -> StoreResult<()> {
         self.sequence += 1;
@@ -79,12 +80,16 @@ impl History {
         };
         let observed_thread = params["threadId"]
             .as_str()
-            .or(result["thread"]["id"].as_str());
+            .or(result["thread"]["id"].as_str())
+            .map(AgentSessionId::from);
         let thread = expected_thread
-            .or(stored_thread.as_deref())
-            .or(observed_thread);
+            .or(stored_thread.as_ref())
+            .or(observed_thread.as_ref());
         let Some(thread) = thread else { return Ok(()) };
-        if observed_thread.is_some_and(|observed| observed != thread) {
+        if observed_thread
+            .as_ref()
+            .is_some_and(|observed| observed != thread)
+        {
             return Ok(());
         }
         let turn = super::codex_mapping::extract_turn_id(params);
@@ -187,7 +192,12 @@ fn final_text(item: &Value) -> Option<&str> {
         .flatten()
 }
 
-fn completion(store: &SqliteStore, session: &str, thread: &str, turn: &Value) -> StoreResult<()> {
+fn completion(
+    store: &SqliteStore,
+    session: &str,
+    thread: &AgentSessionId,
+    turn: &Value,
+) -> StoreResult<()> {
     let Some(id) = turn["id"].as_str() else {
         return Ok(());
     };
@@ -264,7 +274,7 @@ mod tests {
                         &store,
                         "conversation",
                         Some(&original),
-                        Some("thread"),
+                        Some(&"thread".into()),
                         message,
                     )
                     .unwrap();
@@ -277,7 +287,7 @@ mod tests {
             // A reconnect discovers the existing turn; another input receives
             // that same turn rather than a fresh native start notification.
             let mut current = History::default();
-            current.record(&store,"conversation",Some(&replacement),Some("thread"),
+            current.record(&store,"conversation",Some(&replacement),Some(&"thread".into()),
                 &json!({"result":{"thread":{"id":"thread","turns":[{"id":turn,"status":"inProgress"}]}}})).unwrap();
             current.request(&json!({"id":2,"method":"turn/start"}));
             current
@@ -285,7 +295,7 @@ mod tests {
                     &store,
                     "conversation",
                     Some(&replacement),
-                    Some("thread"),
+                    Some(&"thread".into()),
                     &json!({"id":2,"result":{"turn":{"id":turn}}}),
                 )
                 .unwrap();
@@ -294,7 +304,7 @@ mod tests {
         let mut current = History::default();
         // Even a broadcast before this client's request does not establish
         // that this client started the turn.
-        current.record(&store,"conversation",Some(&replacement),Some("thread"),
+        current.record(&store,"conversation",Some(&replacement),Some(&"thread".into()),
             &json!({"method":"turn/started","params":{"threadId":"thread","turn":{"id":"unknown"}}})).unwrap();
         current.request(&json!({"id":3,"method":"turn/start"}));
         current
@@ -302,7 +312,7 @@ mod tests {
                 &store,
                 "conversation",
                 Some(&replacement),
-                Some("thread"),
+                Some(&"thread".into()),
                 &json!({"id":3,"result":{"turn":{"id":"unknown"}}}),
             )
             .unwrap();
@@ -316,7 +326,13 @@ mod tests {
         assert_eq!(unknown.provider_generation, None);
         assert!(
             store
-                .record_session_turn_origin("conversation", "thread", "reply-first", 1, &second)
+                .record_session_turn_origin(
+                    "conversation",
+                    &"thread".into(),
+                    "reply-first",
+                    1,
+                    &second
+                )
                 .is_err(),
             "contradictory actual origin evidence still fails"
         );

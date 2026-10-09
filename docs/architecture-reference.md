@@ -167,7 +167,8 @@ driver Process --< step Process     FlowProcess: the driver's graph and each ste
 | Task | Worktree, serial PRs and every associated Session, Flow and Process; no Flow is privileged |
 | Flow | Reusable authored graph of agent/mechanical/router nodes; a running one is a driver Process and its step processes |
 | LfProcess | One lf process's immutable causal ancestry and command completion |
-| LfSession | Conversation identity, title, feedback, native thread and provider history |
+| LfSession | Loopflow conversation identity, title, feedback, current AgentSession and provider history |
+| AgentSession | Provider-owned conversation, identified by opaque AgentSessionId for resume, turn matching and account attribution; no separate table |
 | Machine | Store, payloads, credentials and exact local process authority |
 | Placement | Where Work executes; no authority over merely observed processes |
 | Steer | Ordered authored correction to Work |
@@ -243,6 +244,18 @@ A Task's primary is one of its own conversations, named by
 member. `lf session ensure --task` keeps an explicit choice, else selects the
 sole unfinished interactive conversation, else the most recently used by
 `lf resume`'s ranking, and creates one only when the Task has none.
+
+AgentSessionId preserves the provider's exact id, including non-UUID ids. The
+current connection belongs to the LfSession row; captured provider observations
+also retain native resume references. A replacement preserves LfSession identity. Immutable turn/capture history keeps
+earlier AgentSessions and their account attribution: replacement does not
+reassign old usage. A new agent process resumes the selected AgentSession.
+No reader needs an independent provider-conversation table.
+
+SQL columns and captured JSON retain `provider_thread` / `provider_session_id`;
+Rust uses `agent_session` and Swift uses `agentSession` with the same string
+encoding. This preserves existing native evidence and DTO fixtures without
+a naming-only migration. Provider protocol names remain vendor-owned.
 
 An LfSession can have many historical driving Processes and at most one current
 driver. Driver compare-and-set increments its driver generation. A continuing

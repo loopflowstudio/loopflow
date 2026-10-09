@@ -319,7 +319,12 @@ mod tests {
                 .record_session_provider_process("orphan", &claim, engine.id(), started_at)
                 .unwrap();
             store
-                .record_session_connection("orphan", &claim, "/tmp/lf-test/engine.sock", "thread")
+                .record_session_connection(
+                    "orphan",
+                    &claim,
+                    "/tmp/lf-test/engine.sock",
+                    &"thread".into(),
+                )
                 .unwrap();
             Self {
                 ledger,

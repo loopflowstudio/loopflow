@@ -1,5 +1,6 @@
 //! Conversation identity and execution history. An invocation never owns feedback.
 
+use crate::id::AgentSessionId;
 use serde::{Deserialize, Serialize};
 
 use crate::durable::TaskId;
@@ -10,7 +11,9 @@ use crate::id::WaveId;
 pub struct SessionEvent {
     pub seq: i64,
     pub session_id: String,
-    pub provider_thread: Option<String>,
+    // Retain the published DTO key and historical event encoding.
+    #[serde(rename = "provider_thread")]
+    pub agent_session: Option<AgentSessionId>,
     pub provider_turn: Option<String>,
     pub kind: SessionEventKind,
     pub provider_generation: Option<i64>,

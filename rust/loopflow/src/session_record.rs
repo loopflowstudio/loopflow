@@ -4,6 +4,7 @@ pub mod active;
 pub(crate) mod activity;
 mod runtime;
 
+use crate::id::AgentSessionId;
 pub(crate) use runtime::finish_session_driver;
 
 use std::collections::{BTreeMap, HashMap};
@@ -201,13 +202,15 @@ struct EventEnvelope {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct ProviderSessionRef {
     schema_version: u32,
-    pub(crate) provider_session_id: String,
+    // Capture files retain their original encoding.
+    #[serde(rename = "provider_session_id")]
+    pub(crate) agent_session: AgentSessionId,
     pub(crate) account_id: Option<crate::store::ProviderAccountId>,
 }
 
 impl ProviderSessionRef {
     pub(crate) fn validate(&self) -> std::io::Result<()> {
-        if self.schema_version != SCHEMA_VERSION || self.provider_session_id.is_empty() {
+        if self.schema_version != SCHEMA_VERSION || self.agent_session.as_str().is_empty() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "invalid provider session reference",
@@ -269,7 +272,8 @@ enum CaptureEvent {
     },
     ProviderSessionObserved {
         attempt_key: String,
-        provider_session_id: String,
+        #[serde(rename = "provider_session_id")]
+        agent_session: AgentSessionId,
     },
     Handoff {
         surface: String,
@@ -380,7 +384,7 @@ pub struct ProviderHistory {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ProviderHistoryReference {
     NativeTurn {
-        thread: String,
+        thread: AgentSessionId,
         turn: String,
         start_seq: Option<i64>,
         completion_seq: Option<i64>,
@@ -724,13 +728,12 @@ fn recover_native_usage(
 ) -> usize {
     use crate::session::SessionEventKind;
 
-    let mut turns = BTreeMap::<(&str, &str), Vec<&crate::session::SessionEvent>>::new();
+    let mut turns = BTreeMap::<(&AgentSessionId, &str), Vec<&crate::session::SessionEvent>>::new();
     for event in history {
         if event.kind != SessionEventKind::Observed {
-            if let (Some(thread), Some(turn)) = (
-                event.provider_thread.as_deref(),
-                event.provider_turn.as_deref(),
-            ) {
+            if let (Some(thread), Some(turn)) =
+                (event.agent_session.as_ref(), event.provider_turn.as_deref())
+            {
                 turns.entry((thread, turn)).or_default().push(event);
             }
         }
@@ -740,8 +743,8 @@ fn recover_native_usage(
         .filter_map(|event| match &event.event {
             CaptureEvent::ProviderSessionObserved {
                 attempt_key,
-                provider_session_id,
-            } => Some((attempt_key.clone(), provider_session_id.clone())),
+                agent_session,
+            } => Some((attempt_key.clone(), agent_session.clone())),
             _ => None,
         })
         .collect();
@@ -779,7 +782,7 @@ fn recover_native_usage(
                         usage_stream_id.clone(),
                         *observation_seq,
                         *final_receipt,
-                        threads.get(attempt_key).map(String::as_str) == Some(thread),
+                        threads.get(attempt_key) == Some(thread),
                     ))
                 }
                 _ => None,
@@ -874,7 +877,7 @@ fn recover_native_usage(
                     .iter()
                     .filter(|event| {
                         event.kind != SessionEventKind::Observed
-                            && event.provider_thread.as_deref() == Some(thread)
+                            && event.agent_session.as_ref() == Some(thread)
                             && event.provider_turn.as_deref() != Some(turn)
                             && event.seq < start.seq
                     })
@@ -883,7 +886,7 @@ fn recover_native_usage(
             .filter(|previous| {
                 history.iter().any(|event| {
                     event.kind == SessionEventKind::Completed
-                        && event.provider_thread == previous.provider_thread
+                        && event.agent_session == previous.agent_session
                         && event.provider_turn == previous.provider_turn
                         && event.seq < start.expect("previous turn requires a start").seq
                 })
@@ -898,7 +901,7 @@ fn recover_native_usage(
                     .iter()
                     .filter(|event| {
                         event.kind == SessionEventKind::Usage
-                            && event.provider_thread == previous.provider_thread
+                            && event.agent_session == previous.agent_session
                             && event.provider_turn == previous.provider_turn
                             && event.seq <= previous.seq
                     })
@@ -993,15 +996,14 @@ fn project_provider_history(
     history: &[crate::session::SessionEvent],
 ) -> std::io::Result<Vec<ProviderHistory>> {
     use crate::session::SessionEventKind;
-    let mut native = BTreeMap::<(&str, &str), Vec<&crate::session::SessionEvent>>::new();
+    let mut native = BTreeMap::<(&AgentSessionId, &str), Vec<&crate::session::SessionEvent>>::new();
     for event in history
         .iter()
         .filter(|event| event.kind != SessionEventKind::Observed)
     {
-        if let (Some(thread), Some(turn)) = (
-            event.provider_thread.as_deref(),
-            event.provider_turn.as_deref(),
-        ) {
+        if let (Some(thread), Some(turn)) =
+            (event.agent_session.as_ref(), event.provider_turn.as_deref())
+        {
             native.entry((thread, turn)).or_default().push(event);
         }
     }
@@ -1010,8 +1012,8 @@ fn project_provider_history(
         .filter_map(|event| match &event.event {
             CaptureEvent::ProviderSessionObserved {
                 attempt_key,
-                provider_session_id,
-            } => Some((attempt_key.as_str(), provider_session_id.as_str())),
+                agent_session,
+            } => Some((attempt_key.as_str(), agent_session)),
             _ => None,
         })
         .collect();
@@ -1044,7 +1046,7 @@ fn project_provider_history(
         .usage;
         records.push(ProviderHistory {
             reference: ProviderHistoryReference::NativeTurn {
-                thread: (*thread).into(),
+                thread: (*thread).clone(),
                 turn: (*turn).into(),
                 start_seq: start.map(|event| event.seq),
                 completion_seq: completed.map(|event| event.seq),
@@ -1364,11 +1366,11 @@ fn provider_session_from_events(
             }
             CaptureEvent::ProviderSessionObserved {
                 attempt_key,
-                provider_session_id,
+                agent_session,
             } => {
                 provider_session = Some(ProviderSessionRef {
                     schema_version: SCHEMA_VERSION,
-                    provider_session_id,
+                    agent_session,
                     account_id: accounts.get(&attempt_key).cloned().flatten(),
                 });
             }
@@ -1451,10 +1453,10 @@ pub(crate) fn final_answer(events: Vec<serde_json::Value>) -> std::io::Result<Op
 
 pub(crate) fn write_provider_session(
     dir: &Path,
-    provider_session_id: &str,
+    agent_session: &AgentSessionId,
     account_id: Option<crate::store::ProviderAccountId>,
 ) -> std::io::Result<()> {
-    if provider_session_id.is_empty() {
+    if agent_session.as_str().is_empty() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             "provider session id cannot be empty",
@@ -1473,7 +1475,7 @@ pub(crate) fn write_provider_session(
         task_id: session.task_id.clone(), wave_id: session.wave_id.clone(),
         payload: serde_json::json!({"input_id":input,"source":source,"evidence":ProviderSessionRef {
             schema_version: SCHEMA_VERSION,
-            provider_session_id: provider_session_id.to_string(), account_id,
+            agent_session: agent_session.clone(), account_id,
         }}),
     }).map_err(std::io::Error::other)
 }
@@ -2344,7 +2346,7 @@ impl CaptureHandle {
         });
     }
 
-    pub(crate) fn conversation_resume_token(&self) -> StoreResult<Option<String>> {
+    pub(crate) fn conversation_resume_token(&self) -> StoreResult<Option<AgentSessionId>> {
         let capture = self.0.lock().expect("Session capture mutex poisoned");
         let store = row_store(&capture.dir)?;
         let Some(session) = store.session_for_artifact(&capture.manifest.artifact_key)? else {
@@ -2435,7 +2437,7 @@ impl CaptureHandle {
 
     pub(crate) fn observe_provider(
         &self,
-        session_id: Option<String>,
+        session_id: Option<AgentSessionId>,
         account_id: Option<crate::store::ProviderAccountId>,
     ) {
         self.with_capture(|capture| {
@@ -2451,15 +2453,15 @@ impl CaptureHandle {
             let Some(session_id) = session_id else {
                 return Ok(());
             };
-            if !account_changed && capture.provider_session_id.as_ref() == Some(&session_id) {
+            if !account_changed && capture.agent_session.as_ref() == Some(&session_id) {
                 return Ok(());
             }
             write_provider_session(&capture.dir, &session_id, capture.account_id.clone())?;
             capture.append_event(CaptureEvent::ProviderSessionObserved {
                 attempt_key: capture.attempt_key(),
-                provider_session_id: session_id.clone(),
+                agent_session: session_id.clone(),
             })?;
-            capture.provider_session_id = Some(session_id);
+            capture.agent_session = Some(session_id);
             Ok(())
         });
     }
@@ -2516,7 +2518,7 @@ struct SessionCapture {
     model: Option<String>,
     account_id: Option<crate::store::ProviderAccountId>,
     account_observed: bool,
-    provider_session_id: Option<String>,
+    agent_session: Option<AgentSessionId>,
     attempt: u32,
     attempt_started: bool,
     turn_key: String,
@@ -2603,7 +2605,7 @@ impl SessionCapture {
                 .as_ref()
                 .and_then(|process| process.account_id.clone()),
             account_observed: false,
-            provider_session_id: None,
+            agent_session: None,
             manifest,
             dir,
             attempt: 1,
@@ -2655,7 +2657,7 @@ impl SessionCapture {
         self.model = model;
         self.account_id = account_id;
         self.account_observed = false;
-        self.provider_session_id = None;
+        self.agent_session = None;
         self.attempt += 1;
         self.attempt_started = false;
         self.turn_key = Uuid::new_v4().to_string();
@@ -3782,7 +3784,7 @@ mod tests {
                 crate::store::ProviderAccountId::parse("engineering").unwrap(),
             ),
             max_turns: Some(7),
-            resume_token: Some("resume-secret".to_string()),
+            resume_token: Some("resume-secret".into()),
             skip_permissions: true,
             directive_relay: Some("/tmp/directive-secret".into()),
             env: BTreeMap::from([("TOKEN".to_string(), "ambient-secret".to_string())]),
@@ -4066,7 +4068,7 @@ mod tests {
                 &session.id,
                 &driver,
                 "/retained.sock",
-                "native-thread",
+                &"native-thread".into(),
             )?;
             store.record_session_provider_process(
                 &session.id,
@@ -4098,7 +4100,9 @@ mod tests {
             let (id, next_driver) = next.session_driver().unwrap();
             assert_eq!(id, session.id);
             assert_eq!(
-                next.conversation_resume_token()?.as_deref(),
+                next.conversation_resume_token()?
+                    .as_ref()
+                    .map(crate::id::AgentSessionId::as_str),
                 Some("native-thread")
             );
             // The finished driver's engine is never adopted.
@@ -4276,7 +4280,7 @@ mod tests {
                 "conversation",
                 &driver,
                 socket.to_str().unwrap(),
-                "saved-thread",
+                &"saved-thread".into(),
             )
             .unwrap();
 
@@ -4309,7 +4313,11 @@ mod tests {
             .unwrap()
             .is_none());
         assert_eq!(
-            store.session_thread("conversation").unwrap().as_deref(),
+            store
+                .session_thread("conversation")
+                .unwrap()
+                .as_ref()
+                .map(crate::id::AgentSessionId::as_str),
             Some("saved-thread")
         );
     }
@@ -4351,16 +4359,16 @@ mod tests {
     }
 
     #[test]
-    fn provider_session_identity_is_durable_before_the_provider_starts() {
+    fn agent_session_identity_is_durable_before_the_provider_starts() {
         let home = tempfile::tempdir().unwrap();
         let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
-        capture.observe_provider(Some("provider-session".to_string()), None);
+        capture.observe_provider(Some("provider-session".into()), None);
 
         assert_eq!(
             read_provider_session(&capture.artifact_dir())
                 .unwrap()
-                .map(|session| session.provider_session_id),
-            Some("provider-session".to_string())
+                .map(|session| session.agent_session),
+            Some("provider-session".into())
         );
     }
 
@@ -4371,7 +4379,7 @@ mod tests {
         let account_id = crate::store::ProviderAccountId::parse("primary").unwrap();
         super::write_provider_session(
             &capture.artifact_dir(),
-            "provider-session",
+            &"provider-session".into(),
             Some(account_id.clone()),
         )
         .unwrap();
@@ -4380,7 +4388,7 @@ mod tests {
         let session = read_provider_session(&capture.artifact_dir())
             .unwrap()
             .expect("provider session reference");
-        assert_eq!(session.provider_session_id, "provider-session");
+        assert_eq!(session.agent_session, "provider-session".into());
         assert_eq!(session.account_id, Some(account_id));
     }
 
@@ -4418,7 +4426,7 @@ mod tests {
             [capture.artifact_key().as_str()],
         ).unwrap();
         let recovered = read_provider_session(&dir).unwrap().unwrap();
-        assert_eq!(recovered.provider_session_id, "second-session");
+        assert_eq!(recovered.agent_session, "second-session".into());
         assert_eq!(recovered.account_id, Some(second));
         capture.fail_and_begin_attempt("proof".into(), None, None);
         capture.observe_provider(Some("ambient-session".into()), None);
@@ -4453,7 +4461,7 @@ mod tests {
             3
         );
         let ambient = read_provider_session(&dir).unwrap().unwrap();
-        assert_eq!(ambient.provider_session_id, "ambient-session");
+        assert_eq!(ambient.agent_session, "ambient-session".into());
         assert_eq!(ambient.account_id, None);
         assert!(!dir.join("provider-session.json").exists());
         rusqlite::Connection::open(super::row_database(&dir).unwrap()).unwrap().execute(

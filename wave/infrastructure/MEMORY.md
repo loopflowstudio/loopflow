@@ -230,6 +230,13 @@ LFID stays durable; optional PID is reusable. LOO-400's accepted history,
 mapping, placement and proofs:
 `6130a4eed:wave/infrastructure/MEMORY.md`, “Process vocabulary.”
 
+## Provider conversations (LOO-442, 2026-10-09)
+
+Jack Heart requested AgentSession atop LOO-441; LOO-443 owns engine/driver changes.
+AgentSessionId needs no table: provider identity types resume, turn keys
+and account routing. Replacement retains earlier ids/attribution in history.
+Wire/storage unchanged; installation unproved.
+
 ## Terminal conversation recovery (LOO-409, 2026-10-07)
 
 Jack Heart authorized autonomous repair through landing. Installed v0.13.9
@@ -908,20 +915,18 @@ unselected; a phase alone is not durable advancement evidence.
 
 ## Installation and checkout closure (LOO-292, 2026-10-04)
 
-Jack Heart closed LOO-292 on machine evidence; exact proofs and cadence:
-`86d0e5e6a2:wave/infrastructure/MEMORY.md`, this heading. Install owns artifacts,
-sync owns checkouts. Monday firing, coalesced wake and app acceptance remain
-unproved. Redundant download under load remains unexplained; reload stopped it
-without damage. Reinstall does not heal a truncated entry gate.
+Jack Heart closed LOO-292 on machine evidence; proofs and unresolved cadence/app
+checks: `86d0e5e6a2:wave/infrastructure/MEMORY.md`, this heading. Install owns
+artifacts, sync owns checkouts. Reload stopped unexplained redundant downloads;
+reinstall does not heal a truncated entry gate.
 
 ## Shipped history
 
-Historical installation, rebase/placement, PM, OAuth and cron delivery records
-remain in [main's preserved memory](https://github.com/loopflowstudio/loopflow/blob/52ab4a4a5cf1ec3c24b019d5cee3a1c782a30d9b/wave/infrastructure/MEMORY.md#shipped).
-Current command, Task ownership and installation contracts above supersede their
-old names and execution models. Cron continuity judges each latest due interval
-against an exact scheduled receipt; manual receipts do not prove firing, while
-failed scheduled targets do. Historical gap days do not keep later telemetry red.
+Historical delivery records:
+`4b4ad05186e85ba8a48924a6294ba9ec2e6df65f:wave/infrastructure/MEMORY.md`,
+this heading and its archive link. Current contracts supersede history.
+Cron continuity judges the latest due against exact scheduled receipts; manual
+runs prove no firing, and old gaps do not keep later telemetry red.
 
 ## Gotchas
 

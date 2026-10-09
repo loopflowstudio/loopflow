@@ -1,10 +1,26 @@
 import Foundation
 
+/// Provider-issued opaque conversation identity; encoded as the provider's string.
+public struct AgentSessionId: RawRepresentable, Codable, Sendable, Hashable {
+    public let rawValue: String
+
+    public init(rawValue: String) { self.rawValue = rawValue }
+
+    public init(from decoder: Decoder) throws {
+        rawValue = try decoder.singleValueContainer().decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var value = encoder.singleValueContainer()
+        try value.encode(rawValue)
+    }
+}
+
 /// Native receipts retain missing attribution and provider-specific evidence.
 public struct SessionEvent: Codable, Sendable, Equatable, Identifiable {
     public let seq: Int64
     public let sessionID: String
-    public let providerThread: String?
+    public let agentSession: AgentSessionId?
     public let providerTurn: String?
     public let kind: Kind
     public let providerGeneration: Int64?
@@ -23,7 +39,7 @@ public struct SessionEvent: Codable, Sendable, Equatable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case seq, kind, payload
         case sessionID = "session_id"
-        case providerThread = "provider_thread"
+        case agentSession = "provider_thread"
         case providerTurn = "provider_turn"
         case providerGeneration = "provider_generation"
         case processLFID = "process_lfid"

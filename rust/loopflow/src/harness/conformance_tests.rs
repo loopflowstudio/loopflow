@@ -10,6 +10,7 @@ use super::claude_mapping::{self, ReaderState};
 use super::codex::{process_notification, process_rpc_error, NotificationState};
 use super::{opencode_history::History, opencode_mapping};
 use crate::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
+use crate::id::AgentSessionId;
 
 fn read_trace_lines(file_name: &str) -> Vec<String> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -31,7 +32,7 @@ fn drain_events(
     }
 }
 
-fn replay_claude_trace(file_name: &str) -> (Vec<ConversationEvent>, Option<String>) {
+fn replay_claude_trace(file_name: &str) -> (Vec<ConversationEvent>, Option<AgentSessionId>) {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mut events = Vec::new();
     let mut state = ReaderState::default();
@@ -55,7 +56,7 @@ fn replay_claude_trace(file_name: &str) -> (Vec<ConversationEvent>, Option<Strin
         }
     }
 
-    let session_id = state.take_provider_session_id();
+    let session_id = state.take_agent_session();
 
     if !saw_turn_completed {
         for item in state.drain_open_items(Lifecycle::Failed) {
@@ -120,7 +121,7 @@ fn replay_codex_lines(lines: Vec<String>) -> Vec<ConversationEvent> {
 fn claude_trace_normal_turn() {
     let (events, session_id) = replay_claude_trace("claude_normal_turn.ndjson");
     assert_eq!(
-        session_id.as_deref(),
+        session_id.as_ref().map(crate::id::AgentSessionId::as_str),
         Some("sess_claude_normal"),
         "system event's session id should be captured for --resume"
     );
@@ -392,14 +393,15 @@ fn opencode_native_history_preserves_output_tools_and_usage_missingness() {
             .unwrap();
         let mut history = History::new(Some((store.clone(), session.clone(), driver)));
         let request = history.request();
-        let mut display = opencode_mapping::ReaderState::new(session.clone(), None, "opencode");
+        let mut display =
+            opencode_mapping::ReaderState::new(session.clone().into(), None, "opencode");
         let mut message = json!({
             "info":{"id":"assistant","sessionID":session,"role":"assistant","parentID":request,"time":{"created":1}},
             "parts":[{"id":"tool","sessionID":session,"messageID":"assistant","type":"tool","tool":"bash",
                 "state":{"status":"running","input":{"command":"echo ok"}}}]
         });
         let started = history
-            .observe(&session, std::slice::from_ref(&message))
+            .observe(&session.clone().into(), std::slice::from_ref(&message))
             .unwrap();
         assert!(
             matches!(&started[..], [ConversationEvent::TurnStarted { turn_id }] if turn_id == &request)
@@ -438,12 +440,15 @@ fn opencode_native_history_preserves_output_tools_and_usage_missingness() {
         assert!(output.iter().any(|event| matches!(event, ConversationEvent::ItemCompleted {turn_id,item:ConversationItem::Command {output:Some(text),exit_code:Some(0),..}} if turn_id == &request && text == "ok")));
         assert!(output.iter().any(|event| matches!(event, ConversationEvent::TextDelta {turn_id,content} if turn_id == &request && content == "Final answer")));
         let completion = history
-            .observe(&session, std::slice::from_ref(&message))
+            .observe(&session.clone().into(), std::slice::from_ref(&message))
             .unwrap();
         assert!(
             matches!(&completion[..], [ConversationEvent::TurnCompleted {turn_id,status:Lifecycle::Completed}] if turn_id == &request)
         );
-        assert!(history.observe(&session, &[message]).unwrap().is_empty());
+        assert!(history
+            .observe(&session.clone().into(), &[message])
+            .unwrap()
+            .is_empty());
         let usage = store.input_history(input.as_str()).unwrap().usage;
         assert_eq!(usage.input_tokens, measured);
         assert_eq!(usage.output_tokens, measured.map(|_| 5));
@@ -458,10 +463,13 @@ fn opencode_native_error_completes_only_its_request() {
     let message = json!({"info":{"id":"assistant","parentID":request,"role":"assistant","sessionID":"session",
         "time":{"created":1,"completed":2},"error":{"name":"APIError","data":{"message":"provider rejected request"}}},"parts":[]});
     let events = history
-        .observe("session", std::slice::from_ref(&message))
+        .observe(&"session".into(), std::slice::from_ref(&message))
         .unwrap();
     assert!(
         matches!(&events[..], [ConversationEvent::TurnStarted {turn_id}, ConversationEvent::Error {message,..}, ConversationEvent::TurnCompleted {turn_id:completed,status:Lifecycle::Failed}] if turn_id == &request && completed == &request && message == "provider rejected request")
     );
-    assert!(history.observe("session", &[message]).unwrap().is_empty());
+    assert!(history
+        .observe(&"session".into(), &[message])
+        .unwrap()
+        .is_empty());
 }

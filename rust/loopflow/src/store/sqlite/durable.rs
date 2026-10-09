@@ -1793,7 +1793,7 @@ mod durable_store_tests {
         store
             .record_session_event(
                 "orphan",
-                "thread",
+                &"thread".into(),
                 "active",
                 crate::session::SessionEventKind::Started,
                 &serde_json::json!({}),
@@ -1802,7 +1802,7 @@ mod durable_store_tests {
         store
             .record_session_event(
                 "orphan",
-                "thread",
+                &"thread".into(),
                 "active",
                 crate::session::SessionEventKind::Usage,
                 &serde_json::json!({"input": 20}),
@@ -1835,7 +1835,7 @@ mod durable_store_tests {
         store
             .record_session_event(
                 "orphan",
-                "thread",
+                &"thread".into(),
                 "active",
                 crate::session::SessionEventKind::Usage,
                 &serde_json::json!({"input": 30}),
@@ -1844,7 +1844,7 @@ mod durable_store_tests {
         store
             .record_session_event(
                 "orphan",
-                "thread",
+                &"thread".into(),
                 "future",
                 crate::session::SessionEventKind::Started,
                 &serde_json::json!({}),

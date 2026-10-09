@@ -222,11 +222,11 @@ unpublished code retained, without deletion or delivery authorization.
 ## Execution ownership names (LOO-441, 2026-10-09)
 
 Jack Heart selected LfSession/LfProcess; provider names remain LOO-442. He approved
-#1516 landing October 9. The rename preserves wire/storage/fixtures, ProcessLfid,
+#1516 landing. The rename preserves wire/storage/fixtures, ProcessLfid,
 variants and product Session/Process; SQL/profiling retain historical names.
 `2b183c547` implements Rust/Swift/docs. Gate: fmt/Clippy pass; disk-blocked suites
 defer to CI. Installation unproved.
-LFID stays durable; PID reusable. LOO-400 history, mapping, placement and proofs:
+LFID durable; PID reusable. LOO-400 history, mapping, placement and proofs:
 `6130a4eed:wave/infrastructure/MEMORY.md`, “Process vocabulary.”
 
 ## Terminal conversation recovery (LOO-409, 2026-10-07)

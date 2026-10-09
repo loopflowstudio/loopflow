@@ -221,21 +221,20 @@ unpublished code retained, without deletion or delivery authorization.
 
 ## AgentProcess (LOO-443, 2026-10-09)
 
-Jack Heart requested one inventory; #1512/#1516 integrated. A → B → A is fenced.
-Top/gates retain Unknown LFIDs; Sessions retain Unavailable; zombies are dead.
-Exact retry retains account/native history; failover starts a fresh thread.
-Native admission requires attachment; headless remains optional.
-Remote clients never settle providers; generic stop preserves takeover.
+Jack Heart requested one inventory; #1512/#1516 integrated. Unknown stays visible;
+retry preserves history; remote clients cannot settle providers.
 
-Resume fences close/claim; native launch/resume share admission.
-Detached-live and duplicate ownership require recorded-identity close.
-Configured resume is unproved; Codex's relay omits caller provenance and fails
-the provider-endpoint comparison. Direct fixtures miss both.
-Codex alone has FIFO handoff; reaping covers noninteractive Codex/OpenCode.
-Generations, foreground cleanup, death orders, public/scheduled agreement,
-two-second removal and installed settlement remain open.
+`c1c09fb6c` fences resume close/claim; `9255e9b03` shares native admission.
+Configured connection remains unproved: Codex omits provenance and compares relay
+with upstream endpoint. Native admission also reconstructs the current claim
+from tokenless provenance: A → B → A defeats that boundary despite token-fenced
+storage/dispatch. Carry exact attachment separately from stable provenance;
+Helper proofs miss composed entry (Release's lesson).
 
-#1511: native Codex `--no-daemon`. Prior: `5fa855c6c`, this heading.
+Headless optional admission, generations, foreground cleanup, takeover death
+orders, public/scheduled agreement, two-second removal and installed settlement
+remain open. FIFO is Codex-only; reaping is noninteractive Codex/OpenCode.
+Earlier slice proofs: `9255e9b03`, this heading.
 
 ## Execution ownership names (LOO-441, 2026-10-09)
 

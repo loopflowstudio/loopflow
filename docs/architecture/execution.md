@@ -154,6 +154,14 @@ and attachment transfer hold the same per-Session OS lock, without holding a
 SQLite transaction over transport I/O. A send timeout
 has an unknown outcome and is not retried automatically.
 
+The composed native connection is not yet working: its owner passes neither
+caller provenance nor the exact attachment to native resume, and the native
+helper compares the relay socket to the upstream provider endpoint. Supplying
+provenance alone is insufficient: the helper reconstructs the current attachment
+from it, losing the original claim token across A → B → A. The connection must
+carry its frozen attachment and distinguish relay from upstream endpoint. Direct
+native-helper fixtures do not prove this composed entry path.
+
 A passive viewer subscribes without claiming the Session. A former driver can
 keep receiving and retaining provider history after transfer but cannot start or
 steer a turn or change current attachment, connection, process evidence or stream

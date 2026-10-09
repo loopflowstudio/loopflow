@@ -21,7 +21,9 @@ Invocation-owned account failover now settles the old process and preserves its
 history before replacement. Top and Task gates share unfinished-row selection
 and identity judgment; unknown agents and receipt-less lf rows remain visible.
 Sampling failure retains Unknown rows, not an empty inventory. Public Task-status
-and scheduled-entry agreement remain unproved.
+and scheduled-entry agreement remain unproved. Native live connection still loses
+its explicit attachment at resume and confuses relay/upstream endpoints; the
+native helper's provenance lookup also fails to retain the original claim token.
 The LfProcess/LfSession rename is integrated from #1516. The
 [execution guide](architecture/execution.md#record-actual-processes) records this
 boundary; record fixtures do not establish installed acceptance.

@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use crate::durable::{render_steers, Steer, TaskId, WorkRef};
+use crate::durable::{render_steers, Steer, WorkRef};
 use crate::id::WaveId;
 use crate::planning::ProjectPlan;
 use crate::store::SharedStore;
@@ -76,6 +76,95 @@ pub struct WorkSelection<'a> {
     pub wave: Option<&'a str>,
 }
 
+/// Planning identity is readable before a Task has a checkout, PR, or Workflow.
+/// Launch binding adds those requirements only after selecting the same records.
+#[derive(Debug)]
+pub(crate) struct SelectedWork {
+    pub source: crate::session::WorkSource,
+    pub wave: Wave,
+    pub task: Option<Task>,
+}
+
+pub(crate) async fn select_work(
+    store: &SharedStore,
+    cwd: &Path,
+    selection: WorkSelection<'_>,
+) -> OpsResult<Option<SelectedWork>> {
+    for (kind, value) in [("task", selection.task), ("wave", selection.wave)] {
+        if value.is_some_and(|value| value.trim().is_empty()) {
+            return Err(run_error(format!("{kind} selector cannot be empty")));
+        }
+    }
+    let selected_wave = match selection.wave {
+        Some(value) => Some(resolve_wave(store, cwd, value.trim()).await?),
+        None => None,
+    };
+    let (task, source) = if let Some(value) = selection.task {
+        let id = store
+            .sqlite
+            .resolve_task_id(value.trim(), None)
+            .map_err(run_error)?
+            .ok_or_else(|| run_error(format!("Task {value:?} is not registered")))?;
+        let task = store
+            .get_task(&id)
+            .await
+            .map_err(run_error)?
+            .ok_or_else(|| run_error(format!("Task {id} is not registered")))?;
+        (Some(task), crate::session::WorkSource::Declared)
+    } else if selected_wave.is_some() {
+        (None, crate::session::WorkSource::Declared)
+    } else {
+        // Branch names are not checkout identity: another clone can use the same
+        // branch. Never probe a remote Machine's recorded path on this Machine.
+        let Ok(root) = crate::engine::git::worktree_root(cwd) else {
+            return Ok(None);
+        };
+        let local = store.local_machine().await.map_err(run_error)?.id;
+        let mut id = None;
+        for checkout in store.task_checkouts().await.map_err(run_error)? {
+            if checkout.machine_id.as_ref() != Some(&local) {
+                if checkout.machine_id.is_none() && checkout.worktree == root {
+                    return Err(run_error("Task checkout Machine is unknown"));
+                }
+                continue;
+            }
+            if crate::engine::git::worktree_root(&checkout.worktree)
+                .ok()
+                .as_ref()
+                == Some(&root)
+            {
+                if id.is_some() {
+                    return Err(run_error("Multiple Tasks claim this checkout"));
+                }
+                id = Some(checkout.task_id);
+            }
+        }
+        let task = match id {
+            Some(id) => store.get_task(&id).await.map_err(run_error)?,
+            None => None,
+        };
+        (task, crate::session::WorkSource::Checkout)
+    };
+    let wave = match &task {
+        Some(task) => {
+            let wave = store
+                .get_wave(&task.wave_id)
+                .await
+                .map_err(run_error)?
+                .ok_or_else(|| run_error(format!("Task {} has no owning Wave", task.id)))?;
+            if let Some(selected) = &selected_wave {
+                require_wave_match(&wave, selected, &format!("Task {}", task.plan.identifier))?;
+            }
+            wave
+        }
+        None => match selected_wave {
+            Some(wave) => wave,
+            None => return Ok(None),
+        },
+    };
+    Ok(Some(SelectedWork { source, wave, task }))
+}
+
 pub async fn resolve_work_binding(
     store: &SharedStore,
     repo: &Path,
@@ -109,42 +198,16 @@ pub async fn resolve_work_selection(
     repo: &Path,
     selection: WorkSelection<'_>,
 ) -> OpsResult<WorkBinding> {
-    for (kind, value) in [("task", selection.task), ("wave", selection.wave)] {
-        if value.is_some_and(|value| value.trim().is_empty()) {
-            return Err(run_error(format!("{kind} selector cannot be empty")));
-        }
-    }
-
-    let selected_wave = match selection.wave {
-        Some(value) => Some(resolve_wave(store, repo, value.trim()).await?),
-        None => None,
-    };
-
-    if let Some(value) = selection.task {
-        let value = value.trim();
-        let task = if let Ok(id) = TaskId::parse(value) {
-            store.get_task(&id).await.map_err(run_error)?
-        } else {
-            store.get_task_by_issue(value).await.map_err(run_error)?
-        }
-        .ok_or_else(|| run_error(format!("Task {value:?} is not registered")))?;
-        let wave = store
-            .get_wave(&task.wave_id)
-            .await
-            .map_err(run_error)?
-            .ok_or_else(|| run_error(format!("Task {} has no owning Wave", task.id)))?;
+    let selected = select_work(store, repo, selection)
+        .await?
+        .ok_or_else(|| run_error("select a Task or Wave"))?;
+    let wave = selected.wave;
+    if let Some(task) = selected.task {
         let project = store
             .get_project(&task.project_id)
             .await
             .map_err(run_error)?
             .ok_or_else(|| run_error(format!("Task {} has no owning Project", task.id)))?;
-        if let Some(selected_wave) = &selected_wave {
-            require_wave_match(
-                &wave,
-                selected_wave,
-                &format!("Task {}", task.plan.identifier),
-            )?;
-        }
         let work = WorkRef::Task(task.id.clone());
         let steers = Vec::new();
         let pr = store
@@ -157,18 +220,9 @@ pub async fn resolve_work_selection(
         if let Ok(Some(workflow)) = store.sqlite.workflow(&task.id) {
             context.push_str(&format!("\n\n{}", workflow.guidance(&task.plan.identifier)));
         }
-        let cwd = if crate::engine::git::current_branch(repo)
-            .ok()
-            .flatten()
-            .as_deref()
-            == Some(pr.branch.as_str())
-        {
-            crate::engine::git::worktree_root(repo).unwrap_or_else(|_| repo.to_path_buf())
-        } else {
-            task.worktree()?.clone()
-        };
+        let cwd = task.worktree()?.clone();
         return Ok(WorkBinding {
-            source: crate::session::WorkSource::Declared,
+            source: selected.source,
             subjects: vec![
                 format!("wave:{}", wave.slug()),
                 format!("project:{}", project.plan.slug),
@@ -183,7 +237,7 @@ pub async fn resolve_work_selection(
         });
     }
 
-    if let Some(wave) = selected_wave {
+    {
         let metric_context = crate::ops::metrics::metric_prompt_section(
             "metric-portfolio",
             crate::ops::metrics::stored_wave_metric_portfolio(
@@ -201,8 +255,8 @@ pub async fn resolve_work_selection(
             PathBuf::from(wave.repo())
         };
         let context = render_wave_context(&cwd, wave.slug(), &metric_context);
-        return Ok(WorkBinding {
-            source: crate::session::WorkSource::Declared,
+        Ok(WorkBinding {
+            source: selected.source,
             subjects: vec![format!("wave:{}", wave.slug())],
             work: WorkRef::Wave(wave.id().clone()),
             wave_id: wave.id().clone(),
@@ -210,10 +264,8 @@ pub async fn resolve_work_selection(
             cwd,
             context,
             agent: None,
-        });
+        })
     }
-
-    Err(run_error("select a Task or Wave"))
 }
 
 /// Resolve checkout ownership before an ancestor's explicit declaration.
@@ -243,7 +295,10 @@ pub async fn resolve_checkout_binding(
     store: &SharedStore,
     repo: &Path,
 ) -> OpsResult<Option<WorkBinding>> {
-    let Some(task) = crate::ops::task::task_for_checkout(store, repo).await? else {
+    let Some(selected) = select_work(store, repo, WorkSelection::default()).await? else {
+        return Ok(None);
+    };
+    let Some(task) = selected.task else {
         return Ok(None);
     };
     let id = task.id.to_string();
@@ -388,6 +443,207 @@ mod tests {
         .unwrap();
         store.seed_task(&task, &pr).await.unwrap();
         task
+    }
+
+    #[tokio::test]
+    async fn explanation_reads_unstarted_planning_without_allocating_work() {
+        use crate::ops::context::{explain_context, ContextFact};
+        let (directory, store) = test_store().await;
+        let wave = Wave::new(
+            WaveId::new(),
+            "runtime".into(),
+            directory.path().display().to_string(),
+        );
+        store.create_wave(&wave).await.unwrap();
+        let project = project(&wave, "runtime", "project-runtime");
+        store.create_project(&project).await.unwrap();
+        crate::store::sqlite::project_selection::write_project_binding(
+            &store.sqlite,
+            wave.id(),
+            None,
+            project.plan.linear_id.as_ref().unwrap().as_str(),
+            &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
+        )
+        .unwrap();
+        let task = store
+            .create_task(&crate::planning::NewTask {
+                id: TaskId::new(),
+                project_id: project.id,
+                title: "Inspect before starting".into(),
+                description: String::new(),
+            })
+            .await
+            .unwrap();
+        let report = explain_context(
+            &store,
+            directory.path(),
+            WorkSelection {
+                task: Some(task.id.as_str()),
+                wave: None,
+            },
+            None,
+            None,
+        )
+        .await;
+        assert_eq!(
+            report.task,
+            ContextFact::Bound {
+                value: task.id.to_string(),
+                source: "explicit".into()
+            }
+        );
+        assert_eq!(report.checkout, ContextFact::Unbound);
+        assert!(matches!(
+            report.execution_machine,
+            ContextFact::Unavailable { .. }
+        ));
+        assert!(store.task_prs(&task.id).await.unwrap().is_empty());
+        assert!(store.task_checkout(&task.id).await.unwrap().is_none());
+        assert!(store.sqlite.workflow(&task.id).unwrap().is_none());
+        assert!(report.render().contains("Checkout: unbound"));
+        assert!(report
+            .render()
+            .contains("peer execution has not been observed"));
+    }
+
+    #[tokio::test]
+    async fn explanation_and_launch_share_checkout_identity_not_branch_names() {
+        use crate::ops::context::{explain_context, ContextFact};
+        let (_directory, store) = test_store().await;
+        let repo = loopflow_test_support::TestRepo::new();
+        let other = loopflow_test_support::TestRepo::new();
+        repo.create_branch("jack/runtime-research");
+        other.create_branch("jack/runtime-research");
+        let wave = Wave::new(
+            WaveId::new(),
+            "runtime".into(),
+            repo.path().display().to_string(),
+        );
+        store.create_wave(&wave).await.unwrap();
+        let project = project(&wave, "runtime", "project-runtime");
+        store.create_project(&project).await.unwrap();
+        let task = task(&store, &wave, &project, repo.path().to_path_buf()).await;
+        let inferred =
+            explain_context(&store, repo.path(), WorkSelection::default(), None, None).await;
+        assert_eq!(
+            inferred.task,
+            ContextFact::Bound {
+                value: task.id.to_string(),
+                source: "checkout".into()
+            }
+        );
+        let declared = explain_context(
+            &store,
+            other.path(),
+            WorkSelection {
+                task: Some(task.plan.identifier.as_str()),
+                wave: None,
+            },
+            None,
+            None,
+        )
+        .await;
+        assert_eq!(declared.checkout, inferred.checkout);
+        assert_eq!(declared.repository, inferred.repository);
+        let launch = resolve_work_binding(&store, other.path(), "task:LOO-267")
+            .await
+            .unwrap();
+        assert_eq!(launch.cwd, *task.worktree.as_ref().unwrap());
+        assert!(super::resolve_checkout_binding(&store, other.path())
+            .await
+            .unwrap()
+            .is_none());
+        let unbound =
+            explain_context(&store, other.path(), WorkSelection::default(), None, None).await;
+        assert_eq!(unbound.task, ContextFact::Unbound);
+        // Explaining a plain clone does not mint a plan or associate by remote.
+        assert_eq!(unbound.repository, ContextFact::Unbound);
+    }
+
+    #[tokio::test]
+    async fn explanation_preserves_remote_and_unknown_location_without_local_access() {
+        use crate::ops::context::{explain_context, ContextFact};
+        let (directory, store) = test_store().await;
+        let wave = Wave::new(
+            WaveId::new(),
+            "runtime".into(),
+            directory.path().display().to_string(),
+        );
+        store.create_wave(&wave).await.unwrap();
+        let project = project(&wave, "runtime", "project-runtime");
+        store.create_project(&project).await.unwrap();
+        let task = task(&store, &wave, &project, "/not/a/local/checkout".into()).await;
+        let peer = crate::durable::MachineId::new();
+        store
+            .add_machine(&peer, "peer", "peer", "/default")
+            .await
+            .unwrap();
+        let conn = rusqlite::Connection::open(directory.path().join("loopflow.db")).unwrap();
+        for machine in [Some(peer.as_str()), None] {
+            conn.execute(
+                "UPDATE tasks SET checkout_machine_id=?2 WHERE id=?1",
+                rusqlite::params![task.id.as_str(), machine],
+            )
+            .unwrap();
+            let report = explain_context(
+                &store,
+                directory.path(),
+                WorkSelection {
+                    task: Some(task.id.as_str()),
+                    wave: None,
+                },
+                None,
+                None,
+            )
+            .await;
+            assert_eq!(
+                report.checkout,
+                ContextFact::Bound {
+                    value: "/not/a/local/checkout".into(),
+                    source: "recorded_checkout".into()
+                }
+            );
+            match machine {
+                Some(id) => assert_eq!(
+                    report.execution_machine,
+                    ContextFact::Bound {
+                        value: id.into(),
+                        source: "recorded_checkout".into()
+                    }
+                ),
+                None => assert!(matches!(
+                    report.execution_machine,
+                    ContextFact::Unavailable { .. }
+                )),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn explanation_missing_subjects_are_unavailable_not_unbound() {
+        use crate::ops::context::{explain_context, ContextFact};
+        let (directory, store) = test_store().await;
+        for (task, session, process) in [
+            (Some("absent"), None, None),
+            (None, Some("absent"), None),
+            (None, None, Some("absent")),
+        ] {
+            let report = explain_context(
+                &store,
+                directory.path(),
+                WorkSelection { task, wave: None },
+                session,
+                process,
+            )
+            .await;
+            assert!(matches!(report.task, ContextFact::Unavailable { .. }));
+            if session.is_some() {
+                assert!(matches!(report.session, ContextFact::Unavailable { .. }));
+            }
+            if process.is_some() {
+                assert!(matches!(report.process, ContextFact::Unavailable { .. }));
+            }
+        }
     }
 
     #[test]

@@ -2,6 +2,10 @@
 <!DOCTYPE dictionary SYSTEM "file://localhost/System/Library/DTDs/sdef.dtd">
 <dictionary title="Loopflow Terminology">
     <suite name="Loopflow Suite" code="CNRT" description="Loopflow scripting commands">
+        <command name="inspect desktop" code="CNRTinsp" description="Read registered repository windows without focusing or acquiring clients">
+            <cocoa class="LoopflowMac.InspectDesktopCommand"/>
+            <result type="text" description="JSON reading of retained windows and panes"/>
+        </command>
         <command name="capture screenshot" code="CNRTcapt" description="Capture Loopflow window screenshot and save to repository">
             <cocoa class="LoopflowMac.CaptureScreenshotCommand"/>
             <direct-parameter type="text" description="Repository path for saving screenshot"/>

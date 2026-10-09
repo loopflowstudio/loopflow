@@ -592,3 +592,50 @@ fn placement_retains_assignment_source_and_unknown_history() {
     assert_eq!(placements[2].provenance, PlacementProvenance::LocalDefault);
     assert_eq!(serde_json::to_value(placements).unwrap(), wire);
 }
+
+#[test]
+fn context_explanation_preserves_unbound_unavailable_and_provenance() {
+    use loopflow::ops::context::{ContextExplanation, ContextFact};
+    let json = include_str!("../../../tests/fixtures/dto/context_explanation.json");
+    let report: ContextExplanation = serde_json::from_str(json).unwrap();
+    assert_eq!(report.checkout, ContextFact::Unbound);
+    assert!(matches!(
+        report.execution_machine,
+        ContextFact::Unavailable { .. }
+    ));
+    assert_eq!(
+        serde_json::to_value(&report).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+    let mut missing: serde_json::Value = serde_json::from_str(json).unwrap();
+    missing.as_object_mut().unwrap().remove("task");
+    assert!(serde_json::from_value::<ContextExplanation>(missing).is_err());
+}
+
+#[test]
+fn desktop_inspection_preserves_exact_windows_hidden_panes_and_stale_reading() {
+    use loopflow::lf::commands::desktop::DesktopInspection;
+    let json = include_str!("../../../tests/fixtures/dto/desktop_inspection.json");
+    let report: DesktopInspection = serde_json::from_str(json).unwrap();
+    let window = &report.windows[0];
+    assert_eq!(window.reading, "unavailable");
+    assert!(window.recommended_action.is_none());
+    assert_eq!(window.workspaces[0].hidden_panes, ["files-pane"]);
+    assert_eq!(
+        window.workspaces[0].layout.children[0].subject.as_deref(),
+        Some("session-one")
+    );
+    assert_eq!(
+        serde_json::to_value(&report).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+    assert!(report
+        .render()
+        .contains("session-pane: session session-one"));
+    let mut missing: serde_json::Value = serde_json::from_str(json).unwrap();
+    missing["windows"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("reading");
+    assert!(serde_json::from_value::<DesktopInspection>(missing).is_err());
+}

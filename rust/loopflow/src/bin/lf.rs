@@ -1419,7 +1419,7 @@ fn run() -> anyhow::Result<()> {
         }
     };
     init_tracing(cli.verbose);
-    if matches!(cli.command, Some(Commands::Open)) {
+    if matches!(cli.command, Some(Commands::Open | Commands::Desktop { .. })) {
         loopflow::lf::commands::open::require_supported()?;
     }
     if cli.task.is_none() && cli.wt.is_none() {
@@ -1551,6 +1551,32 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
     // Remote commands prove they reached the saved machine before dispatch.
     loopflow::lf::commands::machine::validate_expected_machine_process()?;
 
+    if let Some(Commands::Desktop {
+        cmd: loopflow::lf::DesktopCommand::Inspect { json },
+    }) = &cli.command
+    {
+        return loopflow::lf::commands::desktop::inspect(*json);
+    }
+    // Explanation reads the selected local records, including remote checkout
+    // evidence. It must not route, bind a launch, or require a PR/checkout.
+    if let Some(Commands::Context {
+        explain: true,
+        json,
+        wave,
+        task,
+        session,
+        process,
+        ..
+    }) = &cli.command
+    {
+        return loopflow::lf::commands::context::explain(
+            *json,
+            wave.as_deref().or(cli.wave.as_deref()),
+            task.as_deref().or(cli.task.as_deref()),
+            session.as_deref(),
+            process.as_deref(),
+        );
+    }
     if loopflow::lf::commands::work_route::dispatch(&cli, args)? {
         return Ok(());
     }
@@ -1940,6 +1966,7 @@ fn execute_command(
             wave,
             task,
             skill,
+            ..
         }) => loopflow::lf::commands::context::run(*json, wave.as_deref(), task.as_deref(), skill),
         Some(Commands::TelemetryScorecard { json }) => in_repo_runtime(args, |repo| {
             loopflow::ops::run_telemetry_scorecard(repo, *json).map_err(Into::into)
@@ -1954,7 +1981,7 @@ fn execute_command(
                 loopflow::lf::commands::doctor::run(*json)
             }
         }
-        Some(Commands::List { .. } | Commands::Help { .. }) => {
+        Some(Commands::List { .. } | Commands::Help { .. } | Commands::Desktop { .. }) => {
             unreachable!("inspection returned before execution")
         }
         Some(Commands::Roadmap {

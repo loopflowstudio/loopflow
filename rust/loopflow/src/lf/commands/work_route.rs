@@ -31,6 +31,7 @@ pub fn repository_path(id: &RepositoryId) -> Result<std::path::PathBuf> {
 
 fn launch_task(cli: &Cli) -> Option<&str> {
     match &cli.command {
+        Some(Commands::Context { explain: true, .. } | Commands::Desktop { .. }) => None,
         Some(Commands::Task {
             cmd: TaskCommand::Run { issue, .. } | TaskCommand::Checkout { issue, .. },
         }) => Some(issue),

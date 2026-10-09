@@ -7,6 +7,38 @@ import Testing
 /// the Mac app.
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
+    @Test func contextExplanationPreservesAvailabilityAndProvenance() throws {
+        let data = try loadFixtureData("context_explanation.json")
+        let report = try JSONDecoder().decode(ContextExplanation.self, from: data)
+        #expect(report.checkout == .unbound)
+        #expect(report.executionMachine == .unavailable(reason: "No local execution location; peer execution has not been observed"))
+        #expect(report.planningObservedAt == nil)
+        #expect(try JSONDecoder().decode(ContextExplanation.self, from: JSONEncoder().encode(report)) == report)
+        var wire = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        wire.removeValue(forKey: "task")
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(ContextExplanation.self, from: JSONSerialization.data(withJSONObject: wire))
+        }
+    }
+
+    @Test func desktopInspectionRetainsUnavailableWorkAndExactPanes() throws {
+        let data = try loadFixtureData("desktop_inspection.json")
+        let report = try JSONDecoder().decode(DesktopInspection.self, from: data)
+        let window = try #require(report.windows.first)
+        #expect(window.reading == "unavailable")
+        #expect(window.recommendedAction == nil)
+        #expect(window.workspaces.first?.hiddenPanes == ["files-pane"])
+        #expect(window.workspaces.first?.layout.children.first?.subject == "session-one")
+        #expect(try JSONDecoder().decode(DesktopInspection.self, from: JSONEncoder().encode(report)) == report)
+        var wire = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var windows = try #require(wire["windows"] as? [[String: Any]])
+        windows[0].removeValue(forKey: "reading")
+        wire["windows"] = windows
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(DesktopInspection.self, from: JSONSerialization.data(withJSONObject: wire))
+        }
+    }
+
     @Test("Task work retains conversations, Flows and command history")
     func taskWorkFixture() throws {
         let data = try loadFixtureData("task_work.json")

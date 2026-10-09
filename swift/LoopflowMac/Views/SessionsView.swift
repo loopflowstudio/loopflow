@@ -102,6 +102,25 @@ final class SessionsWorkspaceRegistry {
 
     var paths: [WorkspaceIdentity] { Array(workspaces.keys).sorted { ($0.machineId, $0.worktree) < ($1.machineId, $1.worktree) } }
 
+    func inspectLayouts() -> [DesktopWorktreeInspection] {
+        layouts.keys.sorted { ($0.machineId, $0.worktree) < ($1.machineId, $1.worktree) }.compactMap { identity in
+            layouts[identity].map {
+                DesktopWorktreeInspection(machineId: identity.machineId, repositoryPath: identity.worktree,
+                    focusedSlot: $0.focusedSlotId, layout: $0.layout)
+            }
+        }
+    }
+
+    func inspect() -> [DesktopWorkspaceInspection] {
+        paths.compactMap { identity in
+            guard let workspace = workspaces[identity] else { return nil }
+            let panes = workspace.multiplexer
+            return DesktopWorkspaceInspection(machineId: identity.machineId, worktree: identity.worktree,
+                layout: DesktopLayoutInspection(panes.layout), focusedPane: panes.focusedPaneId,
+                zoomedPane: panes.zoomedPaneId, hiddenPanes: panes.collapsedPaneIds.sorted())
+        }
+    }
+
     func path(containingShell id: String) -> WorkspaceIdentity? {
         workspaces.first { $0.value.multiplexer.layout.pane(for: id)?.content == .shell }?.key
     }

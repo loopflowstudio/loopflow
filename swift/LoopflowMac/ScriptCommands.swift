@@ -1,6 +1,7 @@
 // AppleScript command handlers for Loopflow automation.
 
 import Cocoa
+import Loopflow
 
 class CaptureScreenshotCommand: NSScriptCommand {
     override func performDefaultImplementation() -> Any? {
@@ -27,3 +28,20 @@ class CaptureScreenshotCommand: NSScriptCommand {
     }
 }
 
+
+/// Passive Apple event: operates on registered windows, never the key window.
+class InspectDesktopCommand: NSScriptCommand {
+    override func performDefaultImplementation() -> Any? {
+        do {
+            let result: String = try MainActor.assumeIsolated {
+                let data = try JSONEncoder().encode(WorkLinkRouter.shared.inspect())
+                return String(decoding: data, as: UTF8.self)
+            }
+            return result
+        } catch {
+            scriptErrorNumber = NSInternalScriptError
+            scriptErrorString = error.localizedDescription
+            return nil
+        }
+    }
+}

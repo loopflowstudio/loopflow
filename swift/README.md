@@ -541,3 +541,17 @@ same name. Project selectors list only Workflows. Task reads expose
 `workflow_name`, `latest_flow_process`, `execution`, and `run_control` separately;
 completed Flow processes retain their graph and identity. The Task watch part
 supplies `flow_processes`, using the same execution details as CLI inspection.
+
+### Inspect retained workspaces
+
+```sh
+lf desktop inspect --json
+lf context --explain --task LOO-427 --json
+```
+
+Inspection reads the open repository windows through macOS automation without
+launching the app, changing focus or acquiring a Session. Window incarnations,
+Machine/checkout layouts and hidden panes come from the retained workspace owners;
+stale planning cannot supply legal actions. This reports model state, not rendered
+usability or provider readiness. Pane controls and composed opening remain separate
+implementation work.

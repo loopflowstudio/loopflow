@@ -48,12 +48,16 @@ struct TaskLink: Equatable, Sendable {
 struct WorkLinkReceiver: NSViewRepresentable {
     let router: WorkLinkRouter
     let repository: String
+    let inspect: (UUID) -> DesktopWindowInspection
     let receive: (URL) async -> Void
 
     func makeNSView(context: Context) -> Receiver {
-        Receiver(router: router, repository: repository, receive: receive)
+        Receiver(router: router, repository: repository, inspect: inspect, receive: receive)
     }
-    func updateNSView(_ view: Receiver, context: Context) { view.receive = receive }
+    func updateNSView(_ view: Receiver, context: Context) {
+        view.receive = receive
+        view.inspect = inspect
+    }
     static func dismantleNSView(_ view: Receiver, coordinator: ()) {
         view.router.remove(view.id, repository: view.repository)
     }
@@ -62,12 +66,15 @@ struct WorkLinkReceiver: NSViewRepresentable {
         let id = UUID()
         let router: WorkLinkRouter
         let repository: String
+        var inspect: (UUID) -> DesktopWindowInspection
         var receive: (URL) async -> Void
 
-        init(router: WorkLinkRouter, repository: String, receive: @escaping (URL) async -> Void) {
+        init(router: WorkLinkRouter, repository: String, inspect: @escaping (UUID) -> DesktopWindowInspection,
+             receive: @escaping (URL) async -> Void) {
             self.router = router
             self.repository = repository
             self.receive = receive
+            self.inspect = inspect
             super.init(frame: .zero)
         }
         required init?(coder: NSCoder) { fatalError("init(coder:) is unsupported") }
@@ -76,7 +83,7 @@ struct WorkLinkReceiver: NSViewRepresentable {
             if let window {
                 router.register(id, repository: repository, focus: { [weak window] in
                     window?.makeKeyAndOrderFront(nil)
-                }) { [weak self] link in
+                }, inspect: inspect) { [weak self] link in
                     await self?.receive(link)
                 }
             }

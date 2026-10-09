@@ -12,6 +12,42 @@ func fixtureWorkspace(_ path: String) -> WorkspaceIdentity {
 @Suite("Worktree workspaces")
 @MainActor
 struct WorktreeWorkspaceTests {
+    @Test("Inspection reads retained panes and drafts without allocating, focusing or opening a client")
+    func inspectionIsPassive() throws {
+        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
+        #expect(registry.inspect().isEmpty)
+        let workspace = registry.workspace(for: fixtureWorkspace("/repo"))
+        let panes = workspace.multiplexer
+        panes.load(sessionId: "retained")
+        let sessionPane = panes.focusedPaneId
+        panes.show(.files(taskId: "task"))
+        let filesPane = panes.focusedPaneId
+        panes.setCollapsed(paneId: filesPane, collapsed: true)
+        panes.toggleZoom(sessionPane)
+        let files = workspace.files(taskId: "task", issue: "TASK", cwd: "/repo")
+        let document = files.document("note.txt")
+        document.editor.string = "unfinished draft"
+        let outer = registry.layout(for: fixtureWorkspace("/repo"))
+        outer.split(outer.focusedSlotId, axis: .vertical)
+        outer.select(WorkspaceIdentity(machineId: "peer", worktree: "/remote/task"))
+        let outerReading = try #require(registry.inspectLayouts().first)
+        #expect(outerReading.focusedSlot == outer.focusedSlotId)
+        #expect(outerReading.layout.children.last?.machineId == "peer")
+        #expect(outerReading.layout.axis == "vertical")
+        let layout = panes.layout
+        let before = registry.paths
+        let reading = try #require(registry.inspect().first)
+        #expect(reading.focusedPane == sessionPane)
+        #expect(reading.zoomedPane == sessionPane)
+        #expect(reading.hiddenPanes == [filesPane])
+        #expect(reading.layout.children.map(\.content) == ["session", "files"])
+        #expect(reading.layout.children.map(\.subject) == ["retained", "task"])
+        #expect(registry.paths == before)
+        #expect(panes.layout == layout)
+        #expect(panes.focusedPaneId == sessionPane)
+        #expect(document.editor.string == "unfinished draft")
+    }
+
     @Test("Files and the Flow process log open as panes beside a Session and are revealed, not duplicated")
     func taskPanes() {
         let panes = SessionsWorkspace().multiplexer

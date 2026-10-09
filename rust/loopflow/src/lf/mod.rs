@@ -389,6 +389,11 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: ConfigCommand,
     },
+    /// Inspect Loopflow Desktop's retained repository windows (macOS only)
+    Desktop {
+        #[command(subcommand)]
+        cmd: DesktopCommand,
+    },
     /// Open or focus Loopflow.app
     Open,
     /// Name and connect to machines
@@ -416,8 +421,17 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: TaskCommand,
     },
-    /// Show effective context budgets, their sources, and current source usage
+    /// Show context budgets, or explain selected Work without launching it
     Context {
+        /// Explain identity and selection provenance instead of prompt budgets
+        #[arg(long)]
+        explain: bool,
+        /// Inspect a recorded Session without acquiring its client
+        #[arg(long, requires = "explain", conflicts_with_all = ["process", "task", "wave"])]
+        session: Option<String>,
+        /// Inspect a recorded Process without granting control
+        #[arg(long, requires = "explain", conflicts_with_all = ["task", "wave"])]
+        process: Option<String>,
         #[arg(long)]
         json: bool,
         /// Inspect a Wave's local authored context
@@ -491,6 +505,15 @@ pub enum Commands {
     /// External: skill/flow name (when no subcommand matches)
     #[command(external_subcommand)]
     External(Vec<String>),
+}
+
+#[derive(Subcommand, Debug)]
+pub enum DesktopCommand {
+    /// Read actual windows and panes without launching, focusing, or acquiring clients
+    Inspect {
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]

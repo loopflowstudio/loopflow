@@ -5,6 +5,7 @@ pub mod ci;
 pub mod config;
 pub mod context;
 pub mod context_cost;
+pub mod desktop;
 pub mod discord;
 pub mod doctor;
 pub mod flow;

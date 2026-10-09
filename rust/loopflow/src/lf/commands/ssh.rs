@@ -18,7 +18,10 @@ pub fn run(
     task_route: Option<TaskExecutionRoute>,
 ) -> anyhow::Result<()> {
     let cli = parse_remote_command(lf_args)?;
-    if matches!(cli.command, Some(crate::lf::Commands::Open)) {
+    if matches!(
+        cli.command,
+        Some(crate::lf::Commands::Open | crate::lf::Commands::Desktop { .. })
+    ) {
         super::open::require_supported()?;
     }
     let inherited_selection = AccountSelection::from_env()?;

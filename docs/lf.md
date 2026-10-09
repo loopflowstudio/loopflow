@@ -452,6 +452,31 @@ names canonical owners and arguments. [Authoring](authoring.md) explains workflo
 ## Desktop navigation
 
 ```sh
+lf context --explain --task LOO-427 --json
+lf context --explain                         # resolve the current checkout
+lf context --explain --session SESSION_ID
+lf context --explain --process PROCESS_LFID
+lf desktop inspect --json                    # read an already-running Mac app
+```
+
+Explanation reads local records without allocating a checkout, creating a plan,
+starting a provider or contacting peers. Each identity is bound (with its source),
+unbound or unavailable. Machine identifies the reader; Execution Machine comes
+from recorded checkout evidence, never delegation substituted for a missing
+execution observation. The timestamp dates this read, not planning freshness or
+permission to start. Process checkout resolution describes current Work at that
+location, not historical usage attribution. Ordinary `lf context` still reads
+prompt budgets.
+
+Desktop inspection reports registered repository/window identities, selection,
+reading availability and retained Machine/checkout pane trees with focus, zoom
+and hidden panes. Current Rust Task recommendations are forwarded, not recomputed;
+stale readings supply none. Inspection neither focuses windows nor opens clients.
+It requires macOS and a running app with automation access; failure leaves
+`lf task status <task>` available in the terminal. Arrangement, terminal I/O and
+composed Session-plus-diff opening are not yet exposed by this command.
+
+```sh
 open 'loopflow://task/LOO-303'
 lf roadmap --task LOO-303 --all --json
 ```

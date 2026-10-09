@@ -396,6 +396,26 @@ struct WorkDestinationTests {
         #expect(model.showsTaskLink == !scoped)
     }
 
+    private func windowInspection(_ id: UUID) -> DesktopWindowInspection {
+        DesktopWindowInspection(repository: "fixture", window: id.uuidString, path: nil,
+            selectionKind: nil, selectionId: nil, selectedSession: nil, reading: "loading", reason: nil,
+            recommendedAction: nil, actionReason: nil, supportedOperations: ["inspect"], workspaces: [], layouts: [])
+    }
+
+    @Test func inspectionIncludesOnlyRegisteredWindowIncarnationsWithoutFocusing() {
+        let router = WorkLinkRouter()
+        let first = UUID(), replacement = UUID()
+        var focused = false
+        router.register(first, repository: "plan", focus: { focused = true }, inspect: windowInspection) { _ in }
+        #expect(router.inspect().windows.map(\.window) == [first.uuidString])
+        router.register(replacement, repository: "plan", focus: { focused = true }, inspect: windowInspection) { _ in }
+        router.remove(first, repository: "plan")
+        #expect(router.inspect().windows.map(\.window) == [replacement.uuidString])
+        router.remove(replacement, repository: "plan")
+        #expect(router.inspect().windows.isEmpty)
+        #expect(!focused)
+    }
+
     @Test func coldRepositoriesRegisterInReverseOrderWithoutLosingDestinations() async throws {
         let router = WorkLinkRouter()
         let a = try #require(URL(string: "loopflow://task/A"))
@@ -406,11 +426,11 @@ struct WorkDestinationTests {
         #expect(!router.deliver(a2, repository: "plan-a"))
         var first: [URL] = []
         var second: [URL] = []
-        router.register(UUID(), repository: "plan-b", focus: {}) { second.append($0) }
+        router.register(UUID(), repository: "plan-b", focus: {}, inspect: windowInspection) { second.append($0) }
         while second.isEmpty { await Task.yield() }
         #expect(second == [b])
         #expect(first.isEmpty)
-        router.register(UUID(), repository: "plan-a", focus: {}) { first.append($0) }
+        router.register(UUID(), repository: "plan-a", focus: {}, inspect: windowInspection) { first.append($0) }
         while first.count < 2 { await Task.yield() }
         #expect(first == [a, a2])
         #expect(second == [b])
@@ -425,8 +445,8 @@ struct WorkDestinationTests {
         var focused: [String] = []
         var received: [URL] = []
         let url = try #require(URL(string: "loopflow://task/A"))
-        router.register(UUID(), repository: a.id, focus: { focused.append("retained") }) { received.append($0) }
-        router.register(UUID(), repository: "other", focus: { focused.append("other") }) { _ in
+        router.register(UUID(), repository: a.id, focus: { focused.append("retained") }, inspect: windowInspection) { received.append($0) }
+        router.register(UUID(), repository: "other", focus: { focused.append("other") }, inspect: windowInspection) { _ in
             Issue.record("A repository must never receive another repository's link")
         }
         #expect(router.deliver(url, repository: b.id))
@@ -439,9 +459,9 @@ struct WorkDestinationTests {
     @Test func lateWindowRemovalDoesNotRemoveItsReplacement() async throws {
         let router = WorkLinkRouter()
         let old = UUID(), replacement = UUID()
-        router.register(old, repository: "plan", focus: {}) { _ in }
+        router.register(old, repository: "plan", focus: {}, inspect: windowInspection) { _ in }
         var received: [URL] = []
-        router.register(replacement, repository: "plan", focus: {}) { received.append($0) }
+        router.register(replacement, repository: "plan", focus: {}, inspect: windowInspection) { received.append($0) }
         router.remove(old, repository: "plan")
         let url = try #require(URL(string: "loopflow://task/A"))
         #expect(router.deliver(url, repository: "plan"))
@@ -460,27 +480,81 @@ struct WorkDestinationTests {
         let old = UUID(), replacement = UUID()
         let barrier = LinkedDestinationBarrier()
         var delivered: [URL] = []
-        router.register(old, repository: "plan", focus: {}) { link in
-            delivered.append(link)
+        router.register(old, repository: "plan", focus: {}, inspect: windowInspection) { link in
             await barrier.wait("first")
+            guard !Task.isCancelled else { return }
+            delivered.append(link)
         }
         router.deliver(first, repository: "plan")
         router.deliver(second, repository: "plan")
         while !(await barrier.contains("first")) { await Task.yield() }
-        #expect(delivered == [first])
+        #expect(delivered.isEmpty)
         router.remove(old, repository: "plan")
         #expect(!router.deliver(third, repository: "plan"))
-        router.register(replacement, repository: "plan", focus: {}) { delivered.append($0) }
+        router.register(replacement, repository: "plan", focus: {}, inspect: windowInspection) { delivered.append($0) }
         router.remove(old, repository: "plan")
 
         // A slow repository never blocks another repository's opening.
-        router.register(UUID(), repository: "other", focus: {}) { delivered.append($0) }
+        router.register(UUID(), repository: "other", focus: {}, inspect: windowInspection) { delivered.append($0) }
         router.deliver(other, repository: "other")
-        while delivered.count < 2 { await Task.yield() }
-        #expect(delivered == [first, other])
-        await barrier.release("first")
         while delivered.count < 4 { await Task.yield() }
-        #expect(delivered == [first, other, second, third])
+        #expect(delivered.filter { $0 != other } == [first, second, third])
+        #expect(delivered.contains(other))
+        // The replacement finishes even while the obsolete read is suspended.
+        await barrier.release("first")
+        for _ in 0..<10 { await Task.yield() }
+        #expect(delivered.count == 4)
+    }
+
+    @Test func reattachingTheSameReceiverDoesNotLetItsCanceledReadClearTheNewQueue() async throws {
+        let router = WorkLinkRouter(), id = UUID()
+        let first = try #require(URL(string: "loopflow://task/first"))
+        let second = try #require(URL(string: "loopflow://task/second"))
+        let barrier = LinkedDestinationBarrier()
+        var delivered: [URL] = []
+        router.register(id, repository: "plan", focus: {}, inspect: windowInspection) { _ in await barrier.wait("old") }
+        router.deliver(first, repository: "plan")
+        while !(await barrier.contains("old")) { await Task.yield() }
+        router.remove(id, repository: "plan")
+        router.register(id, repository: "plan", focus: {}, inspect: windowInspection) { link in
+            if link == first { await barrier.wait("new") }
+            delivered.append(link)
+        }
+        while !(await barrier.contains("new")) { await Task.yield() }
+        await barrier.release("old")
+        for _ in 0..<10 { await Task.yield() }
+        router.deliver(second, repository: "plan")
+        for _ in 0..<10 { await Task.yield() }
+        #expect(delivered.isEmpty)
+        await barrier.release("new")
+        while delivered.count < 2 { await Task.yield() }
+        #expect(delivered == [first, second])
+    }
+
+    @Test(arguments: [false, true])
+    func closedWindowDoesNotPublishDelayedOpening(fails: Bool) async throws {
+        let data = try fixture()
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
+        let task = try #require(snapshot.waves.first?.tasks.items.first)
+        let exact = try oneTask(data, taskId: task.id)
+        let barrier = LinkedDestinationBarrier()
+        let model = WorkModel(query: RegistryQuery { _, _ in
+            await barrier.wait("read")
+            if fails { throw RegistryQueryError("Delayed failure") }
+            return exact
+        }, repoPath: "/origin")
+        model.navigation.selectedSessionId = "retained-session"
+        let link = try #require(URL(string: "loopflow://task/\(task.task.identifier)"))
+        let opening = Task { await model.openTaskLink(link) }
+        while !(await barrier.contains("read")) { await Task.yield() }
+        opening.cancel()
+        await barrier.release("read")
+        await opening.value
+        #expect(model.repoPath == "/origin")
+        #expect(model.selection == nil)
+        #expect(model.navigation.selectedSessionId == "retained-session")
+        #expect(model.linkedSession == nil)
+        #expect(!model.showsTaskLink)
     }
 
     @Test func repositoryNavigationLeavesTheOriginSelectionAndDraftWorkspaceAlone() async throws {

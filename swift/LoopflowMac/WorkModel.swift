@@ -103,6 +103,7 @@ final class WorkModel {
     @ObservationIgnored private var taskLinkExpectedID: String?
 
     func openTaskLink(_ url: URL, expectedTaskID: String? = nil) async {
+        guard !Task.isCancelled else { return }
         destinationGeneration &+= 1
         let generation = destinationGeneration
         // Observation invalidates on every write, changed or not. Reopening
@@ -120,7 +121,7 @@ final class WorkModel {
             }
             taskLinkReading = .loading
             let result = try await query.taskDestination(issue: link.issue, repo: link.repo)
-            guard destinationGeneration == generation else { return }
+            guard !Task.isCancelled, destinationGeneration == generation else { return }
             let matches = result.waves.flatMap { wave in wave.tasks.items.map { (wave, $0) } }
             let unavailable = result.waves.contains { $0.tasks.unavailableReason != nil }
             if let expectedTaskID {
@@ -138,7 +139,7 @@ final class WorkModel {
                 showsTaskLink = true
             }
         } catch {
-            guard destinationGeneration == generation else { return }
+            guard !Task.isCancelled, destinationGeneration == generation else { return }
             taskLinkReading = .unavailable(lastGood: nil, reason: error.localizedDescription)
             showsTaskLink = true
         }
@@ -156,7 +157,7 @@ final class WorkModel {
         do {
             try await openLinkedTask(wave: wave, task: task, link: TaskLink(url: taskLinkURL), generation: generation)
         } catch {
-            guard destinationGeneration == generation else { return }
+            guard !Task.isCancelled, destinationGeneration == generation else { return }
             taskLinkReading = .unavailable(lastGood: nil, reason: error.localizedDescription)
             showsTaskLink = true
         }
@@ -173,6 +174,8 @@ final class WorkModel {
     }
 
     private func openLinkedTask(wave: WaveRoadmap, task: RoadmapTask, link: TaskLink, generation: Int) async throws {
+        try Task.checkCancellation()
+        guard destinationGeneration == generation else { return }
         if let openRepository, repoPath?.normalizedFilePath != wave.wave.repo.normalizedFilePath {
             openRepository(wave.wave.repo, taskLinkURL)
             return
@@ -190,7 +193,7 @@ final class WorkModel {
             var after: String?
             repeat {
                 let page = try await query.sessionPage(includingHeadless: true, after: after, cwd: wave.wave.repo)
-                guard destinationGeneration == generation else { return }
+                guard !Task.isCancelled, destinationGeneration == generation else { return }
                 records += page.entries
                 after = page.next
             } while after != nil
@@ -254,6 +257,26 @@ final class WorkModel {
     func retryTaskLink() async {
         guard let taskLinkURL else { return }
         await openTaskLink(taskLinkURL, expectedTaskID: taskLinkExpectedID)
+    }
+
+    func inspectDesktop(repository: String, window: UUID, workspaces: SessionsWorkspaceRegistry) -> DesktopWindowInspection {
+        let reading: String
+        switch workStatus {
+        case .loading: reading = "loading"
+        case .updating: reading = "updating"
+        case .current: reading = "current"
+        case .failed: reading = "unavailable"
+        }
+        // Cached Workspace/Task text is evidence, never an actionable reading.
+        let action = reading == "current" && selection?.kind == .task
+            ? roadmap.value?.waves.flatMap { $0.tasks.items }.first {
+                $0.id == selection?.id || $0.runtime?.workId == selection?.id
+            }?.actions : nil
+        return DesktopWindowInspection(repository: repository, window: window.uuidString,
+            path: repoPath, selectionKind: selection?.kind.rawValue, selectionId: selection?.id,
+            selectedSession: navigation.selectedSessionId, reading: reading, reason: workStatus.message,
+            recommendedAction: action?.recommended?.rawValue, actionReason: action?.reason,
+            supportedOperations: ["inspect"], workspaces: workspaces.inspect(), layouts: workspaces.inspectLayouts())
     }
 
     var taskHistoryFilters: [String: TaskHistoryFilter] = [:]

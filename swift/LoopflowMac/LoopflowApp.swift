@@ -11,7 +11,7 @@ private func enrichProcessPathForGUILaunch() {
 
 @main
 struct LoopflowApp: App {
-    @State private var taskLinks = WorkLinkRouter()
+    @State private var taskLinks = WorkLinkRouter.shared
     @State private var portfolioService = PortfolioService()
     @Environment(\.openWindow) private var openWindow
     @State private var snapshotError: String?

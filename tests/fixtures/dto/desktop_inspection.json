@@ -1,0 +1,70 @@
+{
+  "observed_at": 1791500000,
+  "windows": [
+    {
+      "repository": "repo_22222222222222222222222222222222",
+      "window": "55555555-5555-5555-5555-555555555555",
+      "path": "/repo",
+      "selection_kind": "task",
+      "selection_id": "task_44444444444444444444444444444444",
+      "selected_session": "session-one",
+      "reading": "unavailable",
+      "reason": "Registry read failed; retained views remain available",
+      "recommended_action": null,
+      "action_reason": null,
+      "supported_operations": [
+        "inspect"
+      ],
+      "workspaces": [
+        {
+          "machine_id": "home_11111111111111111111111111111111",
+          "worktree": "/repo.task",
+          "focused_pane": "session-pane",
+          "zoomed_pane": null,
+          "hidden_panes": [
+            "files-pane"
+          ],
+          "layout": {
+            "pane": null,
+            "content": null,
+            "subject": null,
+            "axis": "vertical",
+            "ratio": 0.6,
+            "children": [
+              {
+                "pane": "session-pane",
+                "content": "session",
+                "subject": "session-one",
+                "axis": null,
+                "ratio": null,
+                "children": []
+              },
+              {
+                "pane": "files-pane",
+                "content": "files",
+                "subject": "task_44444444444444444444444444444444",
+                "axis": null,
+                "ratio": null,
+                "children": []
+              }
+            ]
+          }
+        }
+      ],
+      "layouts": [
+        {
+          "machine_id": "home_11111111111111111111111111111111",
+          "repository_path": "/repo",
+          "focused_slot": "task-slot",
+          "layout": {
+            "slot": "task-slot",
+            "machine_id": "home_11111111111111111111111111111111",
+            "worktree": "/repo.task",
+            "axis": null,
+            "children": []
+          }
+        }
+      ]
+    }
+  ]
+}

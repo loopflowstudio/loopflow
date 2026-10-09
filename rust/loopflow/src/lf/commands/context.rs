@@ -110,3 +110,46 @@ pub fn run(json: bool, wave: Option<&str>, task: Option<&str>, skill: &str) -> R
     }
     Ok(())
 }
+
+/// Explain stored identity without creating a repository plan or preparing Work.
+pub fn explain(
+    json: bool,
+    wave: Option<&str>,
+    task: Option<&str>,
+    session: Option<&str>,
+    process: Option<&str>,
+) -> Result<()> {
+    anyhow::ensure!(
+        (wave.is_some() || task.is_some()) as usize
+            + session.is_some() as usize
+            + process.is_some() as usize
+            <= 1,
+        "select Work, a Session, or a Process, not several independent targets"
+    );
+    let cwd = std::env::current_dir()?;
+    let runtime = tokio::runtime::Runtime::new()?;
+    let report = runtime.block_on(async {
+        use crate::ops::context::ContextExplanation;
+        match crate::store::open_registry_for_authority().await {
+            Ok(store) => {
+                crate::ops::context::explain_context(
+                    &std::sync::Arc::new(store),
+                    &cwd,
+                    crate::ops::WorkSelection { task, wave },
+                    session,
+                    process,
+                )
+                .await
+            }
+            Err(error) => {
+                ContextExplanation::unavailable(format!("Local registry unavailable: {error:?}"))
+            }
+        }
+    });
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!("{}", report.render());
+    }
+    Ok(())
+}

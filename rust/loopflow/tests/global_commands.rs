@@ -437,3 +437,46 @@ fn scheduled_install_is_independent_of_the_invoking_checkout_and_reusable() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("invalid value"));
     assert_eq!(fs::read(&path).unwrap(), before);
 }
+
+#[test]
+fn context_explanation_works_outside_git_and_preserves_unavailable_registry() {
+    let home = tempfile::tempdir().unwrap();
+    let output = success(
+        command(
+            home.path(),
+            home.path(),
+            &["context", "--explain", "--json"],
+        )
+        .output()
+        .unwrap(),
+    );
+    let report: serde_json::Value = serde_json::from_str(&output).unwrap();
+    assert_eq!(report["machine"]["state"], "unavailable");
+    assert_eq!(report["task"]["state"], "unavailable");
+}
+
+#[cfg(not(target_os = "macos"))]
+#[test]
+fn desktop_inspection_rejects_linux_before_machine_routing_or_work_preparation() {
+    let home = tempfile::tempdir().unwrap();
+    let output = command(
+        home.path(),
+        home.path(),
+        &[
+            "--machine",
+            "unregistered",
+            "--task",
+            "absent",
+            "desktop",
+            "inspect",
+            "--json",
+        ],
+    )
+    .output()
+    .unwrap();
+    assert!(!output.status.success());
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(error.contains("require macOS"), "{error}");
+    assert!(error.contains("lf task status"), "{error}");
+    assert!(!home.path().join(".lf/loopflow.db").exists());
+}

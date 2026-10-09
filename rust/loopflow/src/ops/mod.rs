@@ -3,6 +3,7 @@ pub mod chapter;
 pub mod checkout;
 pub(crate) mod child;
 mod commit;
+pub mod context;
 pub mod cron;
 mod error;
 mod flow;

@@ -1,5 +1,5 @@
 //! Work chooses execution; SSH transports the ordinary command unchanged.
-use crate::durable::{RepositoryId, TaskExecutionRoute};
+use crate::durable::{RepositoryId, TaskExecutionRoute, TaskId};
 use crate::lf::{Cli, Commands, TaskCommand};
 use crate::store::sqlite::SqliteStore;
 use anyhow::{anyhow, Result};
@@ -28,7 +28,7 @@ pub fn repository_path(id: &RepositoryId) -> Result<std::path::PathBuf> {
         .map(|store| store.repository_path(id))
         .transpose()?
         .flatten()
-        .ok_or_else(|| anyhow!("repository plan {id} is not selected on this Machine; select it through planning sync before running its Work"))?;
+        .ok_or_else(|| anyhow!("repository plan {id} has no local checkout; run `lf repo identity --bind {id}` in its repository on this Machine"))?;
     Ok(path.into())
 }
 
@@ -63,7 +63,8 @@ pub fn resolve_repository_selection(cli: &mut Cli) -> Result<()> {
         return Ok(());
     }
     let repo = crate::repository::CanonicalRepo::current()?
-        .ok_or_else(|| anyhow!("selected repository is unavailable"))?;
+        .ok_or_else(|| anyhow!("selected repository is unavailable"))?
+        .to_string();
     let Some(store) = read_registry()? else {
         return Ok(());
     };
@@ -74,12 +75,8 @@ pub fn resolve_repository_selection(cli: &mut Cli) -> Result<()> {
         .chain(command_task)
         .chain(parent_task)
     {
-        if let Some(id) = store.resolve_task_id(selector, Some(&repo.to_string()))? {
+        if let Some(id) = resolve_task_id(&store, selector, Some(&repo))? {
             *selector = id.to_string();
-        } else if store.resolve_task_id(selector, None)?.is_some() {
-            return Err(anyhow!(
-                "Task {selector} does not belong to selected repository {repo}"
-            ));
         }
     }
     Ok(())
@@ -151,34 +148,95 @@ fn resolve_task(
     cli: &Cli,
     selector: &str,
 ) -> Result<Option<TaskExecutionRoute>> {
-    let repo = cli
-        .repo
-        .as_ref()
-        .map(|_| crate::repository::CanonicalRepo::current())
-        .transpose()?
-        .flatten();
-    let repo = repo.map(|repo| repo.to_string());
-    let Some(task) = store.resolve_task_id(selector, repo.as_deref())? else {
-        return Ok(None);
-    };
-    let route = store.task_execution_route(&task)?;
-    if let Some(id) = &cli.repository {
-        if store.repository_path(id)? != store.repository_path(&route.repository_id)? {
-            return Err(anyhow!(
-                "Task {selector} does not belong to the selected repository plan"
-            ));
-        }
+    let repo =
+        if let Some(id) = &cli.repository {
+            Some(store.repository_path(id)?.ok_or_else(|| {
+                anyhow!("repository plan {id} has no local checkout on this Machine")
+            })?)
+        } else if cli.repo.is_some() {
+            Some(
+                crate::repository::CanonicalRepo::current()?
+                    .ok_or_else(|| anyhow!("selected repository is unavailable"))?
+                    .to_string(),
+            )
+        } else {
+            None
+        };
+    resolve_task_id(store, selector, repo.as_deref())?
+        .map(|task| store.task_execution_route(&task).map_err(Into::into))
+        .transpose()
+}
+
+/// Scope aliases and prefixes before routing, just as entry dispatch does.
+/// An unknown selector may still be acquired; known Work in another repo may not.
+fn resolve_task_id(
+    store: &SqliteStore,
+    selector: &str,
+    repo: Option<&str>,
+) -> Result<Option<TaskId>> {
+    let task = store.resolve_task_id(selector, repo)?;
+    if let Some(repo) = repo.filter(|_| task.is_none()) {
+        anyhow::ensure!(
+            store.resolve_task_id(selector, None)?.is_none(),
+            "Task {selector} does not belong to selected repository {repo}"
+        );
     }
-    Ok(Some(route))
+    Ok(task)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{launch_task, repository_path, resolve};
-    use crate::durable::RepositoryId;
+    use super::{launch_task, repository_path, resolve, resolve_task};
+    use crate::durable::{RepositoryId, TaskId};
     use crate::lf::Cli;
+    use crate::planning::NewTask;
     use crate::store::sqlite::SqliteStore;
     use clap::Parser;
+
+    #[test]
+    fn routing_resolves_task_prefixes_within_historical_repository_locators() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let first = TaskId::parse("task_abcd1234400080000000000000000001").unwrap();
+        let second = TaskId::parse("task_abcd1235400080000000000000000002").unwrap();
+        for (repo, id) in [("/selected", &first), ("/other", &second)] {
+            let project = store.ensure_wave_project(repo, "inbox").unwrap();
+            store
+                .create_task(&NewTask {
+                    id: id.clone(),
+                    project_id: project.id,
+                    title: repo.into(),
+                    description: String::new(),
+                })
+                .unwrap();
+        }
+        let prior = store.repository_id("/selected").unwrap().unwrap();
+        let selected = RepositoryId::new();
+        store.bind_repository("/selected", &selected).unwrap();
+        let cli = Cli::try_parse_from(["lf", "--repository", prior.as_str()]).unwrap();
+        assert_eq!(
+            resolve_task(&store, &cli, "abcd").unwrap(),
+            Some(store.task_execution_route(&first).unwrap())
+        );
+        assert_eq!(
+            resolve_task(&store, &cli, first.as_str())
+                .unwrap()
+                .unwrap()
+                .repository_id,
+            selected
+        );
+        assert!(resolve_task(&store, &cli, second.as_str())
+            .unwrap_err()
+            .to_string()
+            .contains("does not belong"));
+        assert!(resolve_task(&store, &cli, "UNKNOWN-1").unwrap().is_none());
+        let unbound = RepositoryId::new();
+        let cli = Cli::try_parse_from(["lf", "--repository", unbound.as_str()]).unwrap();
+        assert!(resolve_task(&store, &cli, first.as_str())
+            .unwrap_err()
+            .to_string()
+            .contains("no local checkout"));
+    }
 
     #[test]
     fn destination_lookup_preserves_missing_and_unreadable_registry() {

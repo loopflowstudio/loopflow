@@ -157,10 +157,10 @@ pub fn explain_task_run(
 ) -> Result<crate::ops::task::TaskRunExplanation> {
     let cwd = std::env::current_dir()?;
     let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(async {
-        let unavailable = match read_registry() {
+    Ok(runtime.block_on(async {
+        match read_registry() {
             Ok(store) => {
-                return Ok(crate::ops::task::explain_task_run(
+                crate::ops::task::explain_task_run(
                     &store,
                     &cwd,
                     crate::ops::WorkSelection {
@@ -169,17 +169,16 @@ pub fn explain_task_run(
                     },
                     options,
                 )
-                .await)
+                .await
             }
-            Err(error) => error.to_string(),
-        };
-        Ok(crate::ops::task::TaskRunExplanation {
-            resolution: crate::ops::context::ContextExplanation::unavailable(&unavailable),
-            action: None,
-            impediments: Vec::new(),
-            unavailable: vec![unavailable],
-        })
-    })
+            Err(error) => crate::ops::task::TaskRunExplanation {
+                resolution: crate::ops::context::ContextExplanation::unavailable(&error),
+                action: None,
+                impediments: Vec::new(),
+                unavailable: vec![error.to_string()],
+            },
+        }
+    }))
 }
 
 fn read_registry() -> Result<crate::store::SharedStore> {

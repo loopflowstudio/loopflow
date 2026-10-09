@@ -93,16 +93,16 @@ ages/baselines and causal frontiers. Import reuses portable fields.
 Entity revisions cannot order relationships; scalar/list replay cannot clear
 freshness or unseen notices. Prior evidence: `7d12ab10a`, this heading.
 
-October 9: `repo identity --bind` associates established roots. Prior IDs remain
-local locators; Work, mappings, effects and execution survive. Both fixture roots
-precede binding. No publication. Unbound import allocates local identity; journals
-exclude RepositoryId/delegation. Live-window reassociation remains. Git-selected
-Tasks without retained checkouts refuse first start; binding grants no admission.
+October 9: `repo identity --bind` associates established roots; old IDs remain
+local locators. Work, mappings, effects and execution survive. Fixture roots precede
+binding. Resolve locators to paths before scoped Task lookup. Imports allocate identity; journals exclude RepositoryId/delegation.
+Live-window reassociation remains. Binding publishes nothing and grants no admission;
+shared Tasks without checkouts refuse start.
 
 Composition excludes LOO-412's transfer/preparing resolver, preserving Jack Heart's
 recorded-Machine retention and effect-free selection. **Unmapping is not association:**
 preserve IDs, lookup, effects and execution. Peer reads use Machine/repository keys.
-Legacy association, sharing/recovery and remote/native acceptance remain unproved.
+Live legacy association, sharing/recovery and remote/native acceptance remain unproved.
 
 Integrated #1512 (`3e1e6245c`): live connect hands off; dead-driver resume starts a
 fresh engine on native history. Peer proof must separate local resume from

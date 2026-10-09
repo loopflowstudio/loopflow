@@ -104,7 +104,7 @@ These are reversible lookup choices, not shared Work identity or publication.
 Primary and stack-parent Task selectors now carry repository-scoped full IDs through
 dispatch; an unscoped ambiguous prefix still fails.
 
-October 9 compress measured generated goal input at 23351/16000 tokens (7351 over):
+October 9 implementation measured generated goal input at 23457/16000 tokens (7457 over):
 stored direction plus generated inventory. The supplied omitted text is inventory,
 not additional instructions. This generated source cannot be curated through
 memory/scratch edits; context-producer work remains outside this cut. No limit changed.
@@ -116,8 +116,9 @@ comments first. Flow-wide context remains undefined. Bare-agent/new operator-che
 previews cannot create their future checkout to manufacture input. Remote transport
 currently probes identity and prepares credentials, so remote preview fails before
 transport rather than pretending those effects are reads. These gaps remain in the
-one-PR scope, not deferred deliverables. Task-run action/impediment explanation now uses the launch owners. Other command
-action explanation remains. Omitting a Task from `task run` uses checkout/declaration
+one-PR scope, not deferred deliverables. Task-run action/impediment explanation now uses the launch owners. Desktop opening also explains its proposed URL and impediments; other command
+action explanation remains. Its reversible JSON shape uses nullable `url`, not an
+opening receipt; on unsupported platforms the proposal may coexist with a blocker. Omitting a Task from `task run` uses checkout/declaration
 inference in preview and execution; naming a Flow still uses the explicit Task
 positional form. Remote action evidence is unavailable without effect-free transport;
 local absence does not resolve Q2 or first-start admission.

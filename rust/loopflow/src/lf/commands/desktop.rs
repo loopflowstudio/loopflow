@@ -259,6 +259,72 @@ pub enum DesktopOpeningStatus {
     Failed,
 }
 
+/// A proposed opening, not a LaunchServices or native-readiness receipt.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DesktopOpenExplanation {
+    pub resolution: crate::ops::context::ContextExplanation,
+    pub url: Option<String>,
+    pub impediments: Vec<String>,
+    pub unavailable: Vec<String>,
+}
+
+impl DesktopOpenExplanation {
+    pub fn render(&self) -> String {
+        let mut text = self.resolution.render();
+        if let Some(url) = &self.url {
+            text.push_str(&format!(
+                "\nOpen on this Machine, reusing the repository window: {url}"
+            ));
+        }
+        for reason in &self.impediments {
+            text.push_str(&format!("\nImpediment: {reason}"));
+        }
+        for reason in &self.unavailable {
+            text.push_str(&format!("\nUnavailable: {reason}"));
+        }
+        text.push_str("\nNothing was executed; no app, checkout or Session was prepared.");
+        text
+    }
+}
+
+pub fn explain_open(
+    cli: &crate::lf::Cli,
+    session: Option<&str>,
+    diff: bool,
+) -> DesktopOpenExplanation {
+    let mut impediments = Vec::new();
+    if let Err(error) = require_supported() {
+        impediments.push(error.to_string());
+    }
+    let (resolution, url) = match opening_context(cli, session) {
+        Ok(resolution) => {
+            let url = match opening_url(&resolution, diff) {
+                Ok(url) => Some(url.into()),
+                Err(error) => {
+                    impediments.push(error.to_string());
+                    None
+                }
+            };
+            (resolution, url)
+        }
+        Err(error) => {
+            impediments.push(error.to_string());
+            (
+                crate::ops::context::ContextExplanation::unavailable(error),
+                None,
+            )
+        }
+    };
+    DesktopOpenExplanation {
+        resolution,
+        url,
+        impediments,
+        unavailable: vec![
+            "Desktop installation, retained windows and native readiness were not inspected. Opening re-resolves Work; a URL does not reserve a window or an input target.".into(),
+        ],
+    }
+}
+
 fn open_work(cli: &crate::lf::Cli, session: Option<&str>, diff: bool, json: bool) -> Result<()> {
     let resolution = opening_context(cli, session)?;
     let url = opening_url(&resolution, diff)?;
@@ -282,7 +348,7 @@ fn open_work(cli: &crate::lf::Cli, session: Option<&str>, diff: bool, json: bool
     Ok(())
 }
 
-pub fn opening_context(
+fn opening_context(
     cli: &crate::lf::Cli,
     session: Option<&str>,
 ) -> Result<crate::ops::context::ContextExplanation> {

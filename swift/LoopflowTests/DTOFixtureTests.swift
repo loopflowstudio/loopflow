@@ -7,6 +7,15 @@ import Testing
 /// the Mac app.
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
+    @Test func desktopOpenExplanationsPreserveProposalsAndImpediments() throws {
+        let data = try loadFixtureData("desktop_open_explanations.json")
+        let reports = try JSONDecoder().decode([DesktopOpenExplanation].self, from: data)
+        #expect(reports[0].url?.contains("diff=true") == true)
+        #expect(reports[1].url == nil)
+        #expect(!reports[1].impediments.isEmpty)
+        #expect(try JSONDecoder().decode([DesktopOpenExplanation].self, from: JSONEncoder().encode(reports)) == reports)
+    }
+
     @Test func taskRunExplanationsPreserveActionsAndMissingEvidence() throws {
         let data = try loadFixtureData("task_run_explanations.json")
         let reports = try JSONDecoder().decode([TaskRunExplanation].self, from: data)

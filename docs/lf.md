@@ -468,6 +468,7 @@ names canonical owners and arguments. [Authoring](authoring.md) explains workflo
 lf implement --context --json
 lf implement --context --explain
 lf task run LOO-427 --explain --json
+lf --task LOO-427 desktop open --diff --explain --json
 ```
 
 `--context` assembles a skill or inline request's input from local sources using
@@ -487,6 +488,13 @@ execution; unstarted Tasks show effective delegation as a **proposed destination
 not proof of peer-exclusive first start. Remote execution state is unavailable
 without reading that Machine. Completion, future checkout and provider checks are
 not fabricated; a real run checks them again.
+
+`desktop open --explain` reports `resolution`, the proposed `url`, `impediments`
+and `unavailable` evidence using the same Work and opening checks as launch.
+It includes `--session` and `--diff`, and reports unsupported platforms without
+opening the app. Display stays on the command's Machine, separate from Task
+execution. The URL is not a window reservation, readiness receipt or input target;
+installed-app and retained-window state remain uninspected.
 
 Flow-wide input and remote previews are unavailable; preview a skill directly on its
 execution Machine. Bare-agent and new operator-checkout input is not predicted by

@@ -100,3 +100,10 @@ public struct TaskRunExplanation: Codable, Equatable, Sendable {
     public let impediments: [String]
     public let unavailable: [String]
 }
+
+public struct DesktopOpenExplanation: Codable, Equatable, Sendable {
+    public let resolution: ContextExplanation
+    public let url: String?
+    public let impediments: [String]
+    public let unavailable: [String]
+}

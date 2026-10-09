@@ -843,3 +843,20 @@ fn task_run_explanations_preserve_actions_and_missing_evidence() {
     missing[0].as_object_mut().unwrap().remove("unavailable");
     assert!(serde_json::from_value::<Vec<TaskRunExplanation>>(missing).is_err());
 }
+
+#[test]
+fn desktop_open_explanations_preserve_proposals_and_impediments() {
+    use loopflow::lf::commands::desktop::DesktopOpenExplanation;
+    let json = include_str!("../../../tests/fixtures/dto/desktop_open_explanations.json");
+    let reports: Vec<DesktopOpenExplanation> = serde_json::from_str(json).unwrap();
+    assert!(reports[0].url.as_ref().unwrap().contains("diff=true"));
+    assert!(reports[1].url.is_none());
+    assert!(!reports[1].impediments.is_empty());
+    assert_eq!(
+        serde_json::to_value(reports).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+    let mut missing: serde_json::Value = serde_json::from_str(json).unwrap();
+    missing[0].as_object_mut().unwrap().remove("impediments");
+    assert!(serde_json::from_value::<Vec<DesktopOpenExplanation>>(missing).is_err());
+}

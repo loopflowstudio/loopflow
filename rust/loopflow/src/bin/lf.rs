@@ -1596,18 +1596,18 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
         }
     }
     if let Some(Commands::Desktop {
-        cmd: loopflow::lf::DesktopCommand::Open { session, .. },
+        cmd: loopflow::lf::DesktopCommand::Open { session, diff, .. },
     }) = &cli.command
     {
         anyhow::ensure!(
             !cli.context,
             "--context requires an agent invocation; nothing was executed"
         );
-        let resolution = loopflow::lf::commands::desktop::opening_context(cli, session.as_deref())?;
+        let report = loopflow::lf::commands::desktop::explain_open(cli, session.as_deref(), *diff);
         if json {
-            println!("{}", serde_json::to_string_pretty(&resolution)?);
+            println!("{}", serde_json::to_string_pretty(&report)?);
         } else {
-            println!("{}", resolution.render());
+            println!("{}", report.render());
         }
         return Ok(());
     }

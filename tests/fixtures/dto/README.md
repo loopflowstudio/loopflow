@@ -72,6 +72,9 @@ is LOO-298-shaped (384 steers over the goal budget); the other has no retained
 capture, so every source is `null` rather than zero. Rust round-trips it and
 Swift decodes it for the Task's Session history.
 
+`desktop_open_explanations.json` pins proposed opening URLs, impediments and unknown
+native state. Rust and Swift round-trip it; a proposal is not an opening receipt.
+
 `desktop_openings.json` distinguishes request acceptance, usable endpoints and failures;
 `desktop_inspection.json` requires top-level `openings` for failures before window
 registration. Window receipts own Task/Session outcomes. Fixture shape is not native

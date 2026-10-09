@@ -232,6 +232,8 @@ provenance inference, and fallback Process observation after parsed previews.
 Selection reads the Project only when taking up its default; routing returns its
 source in the same transaction. Launch and preview share Task option checks.
 Ordinary command observation survives; no second dry-run planner exists.
+Desktop opening's identity-only explanation is removed; its ordinary URL owner
+validates both preview and launch, including `--diff`.
 
 Remaining removals are `Commands::Project` and `Commands::Roadmap`, with consumer
 cutover to Wave planning. `Context { explain }`, validation-only scope checks,
@@ -263,22 +265,12 @@ native/artifact evidence and the plan below retains incomplete composition.
 
 ## Implementation sequence — one PR
 
-**CLI cutover, partially implemented (October 8–9).** Root `run`, public
-`--max-turns`/`--no-loopflow`, root `open`, recorded Monitor routes and raw-argv
-reparsing are removed. Task edges use explicit skill/Flow dispatch; history and
-Desktop retain the owners in the accepted map. Captured requests and command
-normalization survive. The repeated-node steer filter still requires operating
-guidance in its regression fixture. Detailed fixtures and the original missing-Workflow-node repair:
-`1f42a98e4:scratch/compare-cmux-s-command-line.md`, Implementation sequence.
+CLI cutover and checkout-location evidence: `0625dfb60:scratch/compare-cmux-s-command-line.md`,
+Implementation sequence. Root run/open and public max-turns/no-loopflow are removed;
+Task edges retain skill/Flow dispatch and steer filtering. One draft separates
+recorded checkout Machine from delegation; installed migration proof stays with gate.
 
-### Local invocation previews and recorded location
-
-Local skill/inline previews share launch assembly without storage/excerpt writes.
-`tasks.checkout_machine_id` separates execution from delegation; missing Machine
-stays unknown. The draft changes no installed store. Prior proof:
-`0cb4ff2c5:scratch/compare-cmux-s-command-line.md`; gate owns lifecycle/migrations.
-
-### Task run invocation explanation — October 9
+### Invocation explanation — October 9
 
 Implemented locally: text/JSON carries identity, selected edge/ad-hoc Flow,
 impediments and unavailable evidence. Launch and preview share `select_task_run`,
@@ -295,7 +287,11 @@ Process observation that otherwise writes after their read-only code returns.
 The strengthened state fixture checkpoints WAL before comparing the whole database;
 its initial failure and repaired owner are in [findings](findings.md).
 
-Remaining: general action explanation, remote/Flow input, Wave planning, composed
+`desktop open --explain` now shares opening URL validation with launch, retaining
+Session/diff intent and reporting platform/selection impediments in text and JSON.
+The proposed URL is not a readiness receipt; native state remains uninspected.
+
+Remaining: other action explanation, remote/Flow input, Wave planning, composed
 exchange/admission and verified bounded native extraction. No separate delivery or native acceptance follows.
 
 ### Local composed opening — October 9
@@ -580,4 +576,4 @@ original input target and draft survive. Demo owns native usability; preserve co
 Earlier failed attempts and check archives: [findings](findings.md) and
 `f48d84511:scratch/compare-cmux-s-command-line.md`.
 
-Check (October 9 sync): two focused network-isolated `cli_discovery` tests PASS; earlier eight focused tests/build/Clippy PASS are preserved in `/tmp/loo427-desktop-explain/scratch/`. Affected suites gate/CI; native usability demo.
+Check (October 9): Rust build, network-isolated `global_commands desktop_open` (3) and `dto_fixtures desktop_open_explanations` (1), direct Swift DTO round-trip/missing-field check, Clippy, fmt/diff PASS; packaged suites/Linux gate/CI, native usability demo. Prior checks: `0625dfb60:scratch/compare-cmux-s-command-line.md`.

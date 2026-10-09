@@ -186,3 +186,11 @@ Flow/Process history and checks the complete checkpointed database, not empty ta
 Failed build/test logs and pre-edit notes: `/tmp/loo427-task-run-explain/`.
 Neither these fixtures nor action explanation establish remote admission, native
 Desktop usability, provider acceptance or delivery.
+
+## Desktop opening explanation — October 9
+
+Review found identity-only explanation skipped `--diff` validation and platform
+impediments. Preview now uses the launch's URL owner without invoking Desktop.
+A proposed URL establishes no window, surface or usable endpoint. Fixture launch
+and preview compare URLs; checkpointed populated storage checks catch hidden writes.
+Pre-edit conflicted notes and checks: `/tmp/loo427-desktop-explain/`.

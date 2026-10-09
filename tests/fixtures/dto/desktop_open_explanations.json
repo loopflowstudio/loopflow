@@ -1,0 +1,102 @@
+[
+  {
+    "resolution": {
+      "observed_at": 1791500000,
+      "machine": {
+        "state": "bound",
+        "value": "home_11111111111111111111111111111111",
+        "source": "observing_machine"
+      },
+      "repository": {
+        "state": "bound",
+        "value": "repo_22222222222222222222222222222222",
+        "source": "selected_plan"
+      },
+      "repository_path": {
+        "state": "bound",
+        "value": "/repo",
+        "source": "local_locator"
+      },
+      "checkout": {
+        "state": "unbound"
+      },
+      "execution_machine": {
+        "state": "unavailable",
+        "reason": "No local execution location; peer execution has not been observed"
+      },
+      "wave": {
+        "state": "bound",
+        "value": "33333333-3333-3333-3333-333333333333",
+        "source": "explicit"
+      },
+      "task": {
+        "state": "bound",
+        "value": "task_44444444444444444444444444444444",
+        "source": "explicit"
+      },
+      "session": {
+        "state": "unbound"
+      },
+      "process": {
+        "state": "unbound"
+      },
+      "planning_observed_at": null
+    },
+    "url": "loopflow://task/task_44444444444444444444444444444444?repo=%2Frepo&diff=true",
+    "impediments": [],
+    "unavailable": [
+      "Native readiness was not inspected."
+    ]
+  },
+  {
+    "resolution": {
+      "observed_at": 1791500000,
+      "machine": {
+        "state": "bound",
+        "value": "home_11111111111111111111111111111111",
+        "source": "observing_machine"
+      },
+      "repository": {
+        "state": "bound",
+        "value": "repo_22222222222222222222222222222222",
+        "source": "selected_plan"
+      },
+      "repository_path": {
+        "state": "bound",
+        "value": "/repo",
+        "source": "local_locator"
+      },
+      "checkout": {
+        "state": "unbound"
+      },
+      "execution_machine": {
+        "state": "unavailable",
+        "reason": "No local execution location; peer execution has not been observed"
+      },
+      "wave": {
+        "state": "bound",
+        "value": "33333333-3333-3333-3333-333333333333",
+        "source": "explicit"
+      },
+      "task": {
+        "state": "bound",
+        "value": "task_44444444444444444444444444444444",
+        "source": "explicit"
+      },
+      "session": {
+        "state": "unbound"
+      },
+      "process": {
+        "state": "unbound"
+      },
+      "planning_observed_at": null
+    },
+    "url": null,
+    "impediments": [
+      "Session does not belong to the selected Work. No app was opened."
+    ],
+    "unavailable": [
+      "Native readiness was not inspected."
+    ]
+  }
+]

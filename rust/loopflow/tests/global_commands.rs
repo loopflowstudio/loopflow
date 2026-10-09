@@ -927,6 +927,129 @@ fn task_run_explain_reads_unstarted_work_without_preparing_it() {
     assert!(store.task_by_issue(id).unwrap().unwrap().worktree.is_none());
 }
 
+#[test]
+fn desktop_open_explain_checks_the_opening_without_initializing_or_launching() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    let read = |args: &[&str]| -> serde_json::Value {
+        serde_json::from_str(&success(
+            command(home.path(), repo.path(), args).output().unwrap(),
+        ))
+        .unwrap()
+    };
+    let plain = read(&["desktop", "open", "--explain", "--json"]);
+    let url = reqwest::Url::parse(plain["url"].as_str().unwrap()).unwrap();
+    assert_eq!(url.host_str(), Some("open"));
+    assert_eq!(plain["resolution"]["repository"]["state"], "unbound");
+    assert!(!plain["unavailable"].as_array().unwrap().is_empty());
+    if cfg!(target_os = "macos") {
+        assert!(plain["impediments"].as_array().unwrap().is_empty());
+    } else {
+        assert!(plain["impediments"][0]
+            .as_str()
+            .unwrap()
+            .contains("require macOS"));
+        assert!(plain["impediments"][0]
+            .as_str()
+            .unwrap()
+            .contains("terminal instead"));
+    }
+    let invalid = read(&["desktop", "open", "--diff", "--explain", "--json"]);
+    assert!(invalid["url"].is_null());
+    assert!(invalid["impediments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|reason| reason.as_str().unwrap().contains("--diff needs a Task")));
+    let text = success(
+        command(home.path(), repo.path(), &["desktop", "open", "--explain"])
+            .output()
+            .unwrap(),
+    );
+    assert!(text.contains("Open on this Machine"));
+    assert!(text.contains("Nothing was executed"));
+    assert!(!home.path().join(".lf").exists());
+    assert!(!repo.path().join(".lf/tmp").exists());
+
+    // An unreadable registry is not an unregistered repository to initialize.
+    fs::create_dir(home.path().join(".lf")).unwrap();
+    let database = home.path().join(".lf/loopflow.db");
+    fs::write(&database, "not SQLite").unwrap();
+    let unavailable = read(&["desktop", "open", "--explain", "--json"]);
+    assert!(unavailable["url"].is_null());
+    assert_eq!(
+        unavailable["resolution"]["repository"]["state"],
+        "unavailable"
+    );
+    assert_eq!(fs::read_to_string(database).unwrap(), "not SQLite");
+}
+
+#[test]
+fn desktop_open_explain_preserves_state_and_matches_explicit_and_inferred_work() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    support::bind_task_planning(&repo);
+    repo.create_branch("open-explain");
+    let registered = support::register_task(
+        &home.path().join(".lf"),
+        &repo.path().canonicalize().unwrap(),
+        "open-explain",
+        &repo.head_sha(),
+    );
+    support::record_flow(
+        &home.path().join(".lf"),
+        repo.path(),
+        "prior",
+        "prior-step",
+        "succeeded",
+    );
+    let path = home.path().join(".lf/loopflow.db");
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+    let before = fs::read(&path).unwrap();
+    let read = |args: &[&str]| -> serde_json::Value {
+        serde_json::from_str(&success(
+            command(home.path(), repo.path(), args).output().unwrap(),
+        ))
+        .unwrap()
+    };
+    let explicit = read(&[
+        "--task",
+        "INF-123",
+        "desktop",
+        "open",
+        "--diff",
+        "--explain",
+        "--json",
+    ]);
+    let inferred = read(&["desktop", "open", "--diff", "--explain", "--json"]);
+    assert_eq!(explicit["url"], inferred["url"]);
+    assert_eq!(explicit["resolution"]["task"]["source"], "explicit");
+    assert_eq!(inferred["resolution"]["task"]["source"], "checkout");
+    let url = reqwest::Url::parse(explicit["url"].as_str().unwrap()).unwrap();
+    assert_eq!(url.path(), format!("/{}", registered.task.id));
+    assert!(url
+        .query_pairs()
+        .any(|(key, value)| key == "diff" && value == "true"));
+    let missing = read(&[
+        "desktop",
+        "open",
+        "--session",
+        "missing",
+        "--explain",
+        "--json",
+    ]);
+    assert!(missing["url"].is_null());
+    assert!(!missing["impediments"].as_array().unwrap().is_empty());
+    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+    assert_eq!(
+        fs::read(path).unwrap(),
+        before,
+        "explanation changed the registry"
+    );
+    assert!(!repo.path().join(".lf/tmp").exists());
+}
+
 #[cfg(target_os = "macos")]
 #[test]
 fn desktop_open_delivers_exact_task_without_preparing_its_execution() {
@@ -954,6 +1077,26 @@ fn desktop_open_delivers_exact_task_without_preparing_its_execution() {
     .unwrap();
     fs::set_permissions(bin.join("open"), fs::Permissions::from_mode(0o755)).unwrap();
     let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
+    let preview: serde_json::Value = serde_json::from_str(&success(
+        command(
+            home.path(),
+            repo.path(),
+            &[
+                "--task",
+                id,
+                "desktop",
+                "open",
+                "--diff",
+                "--explain",
+                "--json",
+            ],
+        )
+        .env("PATH", &path)
+        .output()
+        .unwrap(),
+    ))
+    .unwrap();
+    assert!(!received.exists(), "preview launched the app");
     let output = success(
         command(
             home.path(),
@@ -970,6 +1113,7 @@ fn desktop_open_delivers_exact_task_without_preparing_its_execution() {
         opening.status,
         loopflow::lf::commands::desktop::DesktopOpeningStatus::Opening
     );
+    assert_eq!(preview["url"], opening.url);
     let url = reqwest::Url::parse(&opening.url).unwrap();
     assert_eq!(url.path(), format!("/{id}"));
     assert!(url

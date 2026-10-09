@@ -147,11 +147,9 @@ uv run python scripts/test_network.py uv run --no-sync python \
 uv run pytest scripts/benchmarks/skill-invocation/test_first_turn_transport.py -q
 ```
 
-Compares one complete 225,023-byte first turn through file-backed stdin on
-Codex exec and the native TUI, with a controlling terminal on stdout, fresh Homes
-and a local fake API. All argv entries remain small. Saves exact requests,
-terminal output and exit/timeout evidence. A nonzero result means at least one
-surface did not deliver the full turn; it is not a passing transport check.
+Compares 225,023-byte stdin turns on Codex exec/TUI with terminal stdout, fresh
+Homes and a fake API. Saves requests, terminal output, argv sizes and exit/timeout
+evidence. Nonzero means failed delivery.
 
 Codex 0.161.0 (October 9): exec delivered exact user text; TUI exited 1 with
 `stdin is not a terminal`, without a request. This rejects file-backed stdin

@@ -8,8 +8,8 @@ lf2 cannot extract bounded text; the verified native artifact remains required.
 Focused local Rust and model evidence establish neither native acceptance nor delivery.
 
 LOO-406 is integrated through main’s `d20c56daf` (#1503). LOO-412 through
-`7f206cd0e` was inspected, not integrated: removal/archive/Team acquisition now
-exists alongside common receipts. Replay-safe invalidation remains unfinished.
+`03742af66` was inspected, not integrated: common receipts, alternate acquisition
+and replay-safe invalidation exist with focused proof.
 Mixed Linear/Git stays disabled pending the remaining composition.
 Local Task/Session-plus-Changes opening follows request-scoped readiness; native proof remains.
 Remaining implementation: broader explanation, shared identity/exchange and first-start
@@ -223,25 +223,16 @@ replaces `multiplexerStoreDidChange`, `_notify`, view revision counters and
 `openingSessionObservation`. MultiplexerStore owns visibility; request validation
 uses ID sets, not copied receipts. Earlier detail: `bdb008907` under this heading.
 
-Removed in the invocation cut: embedded Workflow choice, caller-supplied Project
-selection, duplicate option/provenance checks and fallback Process writes after previews.
-Launch/preview share selection, admission and opening-URL validation. CLI builtins
-now dispatch the parsed command directly: the discarded `Target::Command` copy and
-its exclusive reconstruction assertion are gone. Definition syntax has one reader
-for launch/preview; preview no longer tracks separate mutable name/kind/agent flags.
-Opening explanation reports platform impediments; actual Desktop control still
-refuses before repository lookup. Linux execution remains with gate/CI.
+Launch/preview share Task admission, Workflow selection, URL validation and definition
+syntax. Only launch prepares Work; previews suppress fallback Process writes and
+report Linux opening impediments. Builtins dispatch the parsed command directly,
+without `Target::Command` reconstruction.
 
-Removed `Commands::Project`, `Commands::Roadmap` and their dispatch. Wave owns
-planning commands. Removed `plan_selector`'s ID round trip and the optional-write
-`workflow` API: each operation resolves `PlanTarget` on its own store;
-`workflow` reads and `set_workflow` writes through the existing owners.
-`Context { explain }`, validation-only scope checks,
-`execute_command`'s raw-argv reparse and unused `resolve_checkout_binding` are removed.
-Checkout/retirement fixtures now exercise the surviving execution-binding reader. The standalone budget reader remains;
-its final home is open. Prompt excerpts now defer persistence until launch. Their underlying
-planning/history/prompt owners survive. LOO-412 owns exchange replacement;
-no second planning writer or callback planner is introduced.
+Wave replaces public Project/roadmap dispatch; each operation resolves `PlanTarget`
+on its own store, with separate Workflow reads/writes. Prompt excerpts persist
+only on launch; standalone budget reporting's final home remains open. Existing
+planning/history/prompt owners survive. Removal history:
+`82f9ed087:scratch/compare-cmux-s-command-line.md`, this heading.
 
 Removed: copied inheritance; duplicate window/opening paths; unqualified terminal
 keys; duplicate visibility/pruning/insertion paths; root `run` and `open`;
@@ -281,12 +272,22 @@ prepares Work. Checkpointed-WAL and missing/unreadable-store fixtures preserve
 the hidden-write regressions. A proposed URL proves no native readiness.
 
 `31dbb3a68`/`942dab5d8` implement explicit `--machine` previews through SSH, Work
-routing and the receiving preview; the earlier iteration request is satisfied.
+routing and the receiving preview.
 No probes, credential preparation or Process writes; names/paths resolve on the
 selected Machine. Identity/transport failure has no fallback, missing Work stays
 unavailable in text/JSON. Authentication is outside preview preparation.
 Two real CLIs with simulated SSH cover this, not configured SSH or exclusive start.
 Entry-level identity validation also protects ordinary commands and early reads.
+
+### Flow context preview — October 9
+
+`49effe9bf`/`82f9ed087` complete Flow preview through shared definition, graph and
+prompt owners in `context/preview.rs`. Only initial skill/router input is assembled;
+future/loop input stays unavailable and commands never run. Resolved `operator_scope`
+covers aliases/captures without checkout preparation. Native arguments stay separate
+from router instructions. Presentation remains reversible.
+Fixtures cover branches/loops, command-first Flows and unchanged stores,
+not configured transport/native invocation.
 
 ### Local composed opening — October 9
 
@@ -395,7 +396,7 @@ Pending data is not remotely durable until published. Existing execution keeps
 its own lifecycle; no automatic turn/Flow retry is introduced. Online comments
 and completion propagate semi-live through the active sync owner. Main's LOO-406
 `d20c56daf` is integrated, retaining repository-scoped foreground Linear sync.
-Readback cannot exclude unseen Linear reopening. LOO-412 through `7f206cd0e` is
+Readback cannot exclude unseen Linear reopening. LOO-412 through `03742af66` is
 inspected, not integrated. `08a285872` repairs the previously observed source gap:
 common attempt transactions defer effects while rejected or sharing-held projections
 retain receipts only in journals. Saves and independent acquisition continue;
@@ -410,11 +411,13 @@ common writers, with independent savepoints, original ages and Team baselines.
 Rejected scalar or Team projection cannot erase independent negative facts. This
 supersedes implementing those paths, not their composed acceptance. Entity revisions
 still cannot order relationships; imported Team evidence cannot clear retained
-membership uncertainty. Non-removal invalidations remain local: delayed replay after
-successful detail and genuinely new invalidation still need distinction without
-invented provider clocks. Legacy association and unplaced-Wave/Desktop remain.
+membership uncertainty. `4acd37ec8`/`6ccbbabe3` add causal invalidation acknowledgement: detail retires
+observed notices, never unseen ones; replay retains the greatest revision floor.
+Freshness clears only beside an accepted entity frontier, not scalar/list replay
+or a cache-only acknowledgement against an older body. Legacy association,
+unplaced-Wave/Desktop and public invalidation verification remain.
 
-The dependency records 63 peer-storage passes, not mixed-provider activation.
+The dependency records 63 earlier peer-storage passes and four focused invalidation/negative-evidence checks, not mixed-provider activation.
 Its Team fixture preserves uncertain order without list acquisition; the separate
 cold empty-list rejection proves no composed partial-list behavior. Revised Linux
 public reconnect, mixed transport and live-control preservation remain with gate.
@@ -579,4 +582,4 @@ identity/delegation, open them, add shell/Files panes, retain an unfinished draf
 change focus, target a harmless command, read output, hide/restore, and verify the
 original input target and draft survive. Demo owns native usability; preserve comparison evidence and use no real accounts or live user terminals.
 
-Check (October 9): `cargo build -p loopflow --bin lf`; `cargo test -p loopflow --test context_launch_tests context_preview` (4) and `--test machine_commands flow_context_preview` (1); `cargo clippy --all-targets -- -D warnings`, fmt and diff-check PASS. Combined verification: gate; native usability: demo.
+Check (October 9 realign): `git diff --check` PASS; source/fixture review reuses `82f9ed087` build, Clippy and focused context-preview passes (4 local, 1 simulated SSH), without rerunning unchanged code; combined verification: gate, native usability: demo.

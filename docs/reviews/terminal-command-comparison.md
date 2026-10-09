@@ -35,9 +35,14 @@ Explicit-Machine previews now reuse the transport without identity-probe writes,
 credential preparation or Process recording (`31dbb3a68`/`942dab5d8`). Fixtures
 running two real CLIs cover remote repository/Work reads through simulated SSH.
 Addressed identity is validated once before early reads or dispatch; rejected
-commands suppress fallback Process writes. Configured SSH is unproved. Flow
-previews, broader action explanation, peer composition and native bounded
-extraction remain.
+commands suppress fallback Process writes. `49effe9bf`/`82f9ed087` add effect-free
+Flow context through shared definition, graph and prompt owners: only the initial
+skill/router has current-snapshot input; future and repeat input is unavailable.
+Commands never run to manufacture input. Resolved skill identity handles aliases
+and captured operator steps without preparing checkouts. Local and two-CLI fixtures
+cover branches/loops, command-first Flows, native argument preservation and unchanged
+checkpointed stores. Configured SSH/native invocation remain unproved. Broader action
+explanation, peer composition/admission and native bounded extraction remain.
 Earlier command names below are dated evidence, not compatibility aliases.
 
 ## Evidence and version boundary

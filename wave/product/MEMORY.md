@@ -66,7 +66,7 @@ Flow previews expose initial input; future/loop input stays unavailable. Broader
 `repo_root` (default `~/src`) and paths resolve on the selected Machine, never as
 portable identity; remembered names remain open. Scoped IDs survive dispatch.
 Preview/routing use read-only SQLite; unreadable is not absent. Preview/launch share
-assembly; only launch writes excerpts.
+assembly and resolved operator scope; only launch writes excerpts.
 
 Jack selected local planning/Git sync: 406 owns writes/Linear, 412 exchange.
 Imported completion cannot move Workflow or clean execution. Preserve pending
@@ -84,19 +84,21 @@ Multiple destinations must not split the repository window.
 Private-ancestry holds retain journals/dependents and local moves;
 peers keep old values, so omission is not convergence.
 
-LOO-412 through `7f206cd0e` is inspected, not integrated; mixed Linear/Git stays
-disabled. **Retained uncertainty constrains effects.** Journal-only conflicts defer
-attempts, not saves/acquisition; selection cannot release them (`08a285872`). Save
-clocks order intentions; unresolved losing effects hold delivery. Only complete
-lists settle order progress. `357090d4b` preserves primary-only moves.
+LOO-412 through `03742af66` is inspected, not integrated; mixed Linear/Git stays
+disabled. **Retained uncertainty constrains effects.** Journal conflicts defer
+attempts, never saves/acquisition; selection cannot release them (`08a285872`).
+Save clocks order intentions; unresolved losers hold delivery. Complete lists alone
+settle order progress; `357090d4b` preserves primary-only moves.
 
-**Independent facts need separate rollback.** `358f7fa08`/`25cbc0a09` acquire
-removal/archive/Teams through common writers with savepoints, original
-ages and Team baselines. Contradictory Teams cannot erase an archive. Entity
-revisions cannot order relationships; old evidence cannot clear membership
-uncertainty. Partial-list composition is unproved. Replay-safe invalidation, legacy
-association and unplaced-Wave/Desktop remain. Imports stay unplaced; mixed
-transport, live controls and peer admission remain unproved.
+**Independent rollback:** removal/archive/Teams retain separate savepoints and
+original ages/baselines (`25cbc0a09`). Team contradictions cannot erase archives;
+entity revisions cannot order relationships.
+
+**Causal invalidation:** `6ccbbabe3` retires observed notices, never unseen ones,
+retaining revision floors. Freshness requires an accepted entity frontier, not
+scalar/list replay. Partial-list/public composition, legacy association,
+unplaced-Wave/Desktop, live controls and peer admission remain unproved.
+Imports stay unplaced; old evidence cannot clear membership uncertainty.
 
 October 9 (`e3ca861b1`): observe pane visibility before Session readings; a callback
 had masked missed closure. MultiplexerStore owns visibility for readiness and reads.

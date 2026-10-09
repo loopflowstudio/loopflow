@@ -49,7 +49,7 @@ proof remains.
 
 ### Committed exchange update — October 9
 
-LOO-412 through `7f206cd0e` was inspected through Git, not integrated.
+LOO-412 through `03742af66` was inspected through Git, not integrated.
 Creation/deletion, retained-effect eligibility and ordering receipt evidence remains
 at `942dab5d8:scratch/findings.md`, this heading. `08a285872` defers effects while
 projection conflicts retain journals; `fcd64901f` orders intentions by save clocks,
@@ -61,18 +61,23 @@ acquisition helpers. `25cbc0a09` prepares typed histories before projection retr
 Source inspection confirms one savepoint per independent fact before scalar
 projection: contradictory Teams cannot roll back an archive. Original acquisition
 ages and Team baselines survive; migration leaves legacy ages unknown.
-`ProviderEvidence::validate` rejects non-removal notifications. Replay-safe
-invalidation after later detail is still implementation work, not a retired contract.
+`4acd37ec8`/`6ccbbabe3` subsequently transport non-removal notices and detail
+acknowledgements through causal journal heads. Replay cannot revive observed notices;
+unseen concurrent notices still invalidate. Known revision floors survive lower or
+unversioned heads. `reconcile_task_freshness` requires an accepted entity frontier:
+a cache-only acknowledgement cannot refresh an older body. Scalar/list replay no
+longer clears freshness. Source and fixtures were inspected, not integrated.
 
-The dependency records 63 peer-storage passes. Inspected Team coverage preserves
+The dependency records 63 earlier peer-storage passes plus four focused invalidation/negative-evidence checks. Inspected Team coverage preserves
 newer entity facts, original ages, populated execution and an uncertain order,
 but never acquires a list. Cold empty-list rejection is separate; combined partial
 list acquisition and public paths remain unproved. `ops/planning_peer.rs` still
 refuses connected Linear exchange. Legacy association and unplaced-Wave/Desktop
 remain; no peer admission or live-control proof follows. Dependency plan/memory:
-`7f206cd0e`, **Remaining integration** and **Tasks across machines**.
+`03742af66`, **Remaining integration** and **Tasks across machines**. Public
+invalidation verification remains with its combined gate.
 
-October 9 coverage: no Product child directories/memories. Infrastructure
+October 9: no Product child directories/memories found. Infrastructure
 planning/Machine sections, LOO-412’s committed peer memory
 and Intelligence context/check-ownership sections were read; unrelated sibling
 history was not re-audited. Main remains `3a0aa5ca4`, already integrated.
@@ -172,13 +177,9 @@ Executable quoting/effect tests replace the removed shell-check fixture.
 
 ## Flow context preview — October 9
 
-`49effe9bf` compiles through launch's owner and assembles only the first skill/router;
-future/repeat input stays unavailable and commands never run. Capture provenance
-preserves native operating guidance without writing transport files. The original
-fixture's same-named Flow/skill correctly failed cycle detection; distinct fixture
-names repaired it, without changing collision policy (`bdb008907`, this heading).
-
-Review found raw-name guards missed resolved
-`repo-operate` aliases and captured Flow steps while refusing a literal hierarchical
-override. Shared `operator_scope` now owns preview/launch checkout decisions.
-Two-CLI simulated SSH proves no configured transport, admission or native endpoint.
+`49effe9bf`/`82f9ed087` satisfy the supplied preview direction through shared graph
+and prompt owners. Same-named Flow/skill fixture cycle failure and repair:
+`bdb008907`, this heading. Resolved `operator_scope` fixes aliases/captured steps
+without refusing literal hierarchical overrides. Two-CLI simulated SSH proves
+neither configured transport, admission nor native endpoints. The plan owns the
+current mechanism and evidence limits.

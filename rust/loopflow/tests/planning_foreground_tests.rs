@@ -767,7 +767,7 @@ fn public_wave_reads_imported_planning_without_placing_or_changing_execution() {
         let roadmap: serde_json::Value = serde_json::from_str(&run(
             &target,
             right.path(),
-            &["roadmap", "--wave", wave_id, "--json"],
+            &["wave", "show", wave_id, "--json"],
         ))
         .unwrap();
         assert_eq!(roadmap["waves"][0]["wave"]["id"], wave_id);

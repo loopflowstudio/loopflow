@@ -4,12 +4,15 @@ use crate::lf::{Cli, Commands, TaskCommand};
 use crate::store::sqlite::SqliteStore;
 use anyhow::{anyhow, Result};
 
-pub fn identity(json: bool) -> Result<()> {
+pub fn identity(bind: Option<&RepositoryId>, json: bool) -> Result<()> {
     let repo = crate::repository::CanonicalRepo::current()?
         .ok_or_else(|| anyhow!("run `lf repo identity` in a repository"))?;
     let runtime = tokio::runtime::Runtime::new()?;
     let id = runtime.block_on(async {
         let store = crate::store::open_store(&crate::store::storage_config_from_env()?).await?;
+        if let Some(id) = bind {
+            store.sqlite.bind_repository(&repo.to_string(), id)?;
+        }
         Ok::<_, anyhow::Error>(store.ensure_repository(&repo.to_string()).await?)
     })?;
     if json {

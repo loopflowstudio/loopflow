@@ -45,7 +45,7 @@ proof remains.
 
 ### Committed exchange update — October 9
 
-LOO-412 through `7260e4602` was inspected through Git, not integrated.
+LOO-412 through `7260e4602` is now composed locally; earlier source observations follow.
 Receipt ordering, independent removal/archive/Team rollback, original acquisition
 ages and causal invalidation findings remain at
 `2c23acbb8:scratch/findings.md`, this heading. Complete lists alone settle order;
@@ -181,3 +181,22 @@ and prompt owners. Same-named Flow/skill fixture cycle failure and repair:
 without refusing literal hierarchical overrides. Two-CLI simulated SSH proves
 neither configured transport, admission nor native endpoints. The plan owns the
 current mechanism and evidence limits.
+
+## Shared planning composition — October 9
+
+The committed dependency's common journal, receipt writer, Git transport,
+foreground lifetime and Desktop Work stream are reused. Merge review found
+`TaskSource` transfer and preparation inside Work selection incompatible with
+started-Machine retention and effect-free previews. They are excluded rather than
+silently changing those contracts. Copied child placement remains deleted.
+
+`repo identity --bind` exposes explicit existing-store association without a new
+registry or publication. It intentionally preserves/refuses an existing different
+repository identity; this slice does not solve divergent-root association. The
+independent-Task fixture exchanges real common-writer journals, not matched Task
+IDs. Its first run exposed an invalid retained-checkout fixture (empty workspace
+slug); the fixture now records a valid slug, Machine and distinct checkout paths. Populated legacy local
+execution is retained separately from first-start authority. Review also found import could expose local-default allocation without peer
+admission. The shared admission owner now refuses first start for shared Tasks
+without retained checkouts; it leaves saves and acquisition alone. Mixed Linear/Git,
+delegation exchange, exclusive admission and remote/native composition remain.

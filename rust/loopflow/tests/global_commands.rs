@@ -1702,3 +1702,56 @@ fn session_connect_explain_never_probes_or_claims_a_live_endpoint() {
     assert!(!home.path().join(".lf/runs").exists());
     assert!(!home.path().join(".lf/human-sessions").exists());
 }
+
+#[test]
+fn repository_identity_binding_is_explicit_and_does_not_select_planning() {
+    let source = TestRepo::new();
+    let target = TestRepo::new();
+    let source_home = tempfile::tempdir().unwrap();
+    let target_home = tempfile::tempdir().unwrap();
+    for home in [source_home.path(), target_home.path()] {
+        fs::create_dir_all(home.join(".lf")).unwrap();
+        SqliteStore::new(&home.join(".lf/loopflow.db")).unwrap();
+    }
+    let id: String = serde_json::from_str(&success(
+        command(
+            source_home.path(),
+            source.path(),
+            &["repo", "identity", "--json"],
+        )
+        .output()
+        .unwrap(),
+    ))
+    .unwrap();
+    let bound: String = serde_json::from_str(&success(
+        command(
+            target_home.path(),
+            target.path(),
+            &["repo", "identity", "--bind", &id, "--json"],
+        )
+        .output()
+        .unwrap(),
+    ))
+    .unwrap();
+    assert_eq!(bound, id);
+    let store = SqliteStore::new(&target_home.path().join(".lf/loopflow.db")).unwrap();
+    let repo = target
+        .path()
+        .canonicalize()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    assert!(store.peer_planning_status(&repo).unwrap().is_empty());
+    assert!(store.list_waves(None).unwrap().is_empty());
+    let other = loopflow::durable::RepositoryId::new();
+    let rejected = command(
+        target_home.path(),
+        target.path(),
+        &["repo", "identity", "--bind", other.as_str()],
+    )
+    .output()
+    .unwrap();
+    assert!(!rejected.status.success());
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("already selects plan"));
+    assert_eq!(store.repository_id(&repo).unwrap().unwrap().as_str(), id);
+}

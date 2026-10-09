@@ -79,28 +79,27 @@ can overwrite unseen reopening: readback proves observed state, not atomicity.
 
 Jack selected user-keyed Git plans by default, explicit shared opt-in, Linear wins;
 otherwise host preference then last-write-wins with recoverable edits. Code remotes
-grant neither identity nor publication permission. LOO-412 is unintegrated:
-joins select/publish nothing; Wave selection inherits to descendants.
+grant neither identity nor publication permission. Joins select/publish nothing; Wave selection inherits to descendants.
 Multiple destinations must not split the repository window.
 Private-ancestry holds retain journals/dependents and local moves;
 peers keep old values, so omission is not convergence.
 
-LOO-412 through `7260e4602` is inspected, not integrated; mixed Linear/Git stays
-disabled. **Retained uncertainty constrains effects, not saves/acquisition.** Save
-clocks order intentions; unresolved losers hold delivery. Complete lists alone
-settle order progress; primary-only moves retain exact input. Selection cannot
-release projection conflicts. Independent provider facts retain separate savepoints,
-original ages/baselines and causal frontiers. Entity revisions cannot order
-relationships; scalar/list replay cannot clear freshness. Retain revision floors and
-unseen concurrent notices. Prior proof: `2c23acbb8`.
+LOO-427 now composes LOO-412's `7260e4602` journals, common receipts, unplaced-Wave
+reads and destination-level Desktop Work stream. Mixed Linear/Git stays disabled.
+**Retained uncertainty constrains effects, not saves/acquisition.** Save clocks
+order intentions; unresolved losers hold delivery. Complete lists alone settle
+order; primary-only moves retain input. Independent provider facts keep separate
+savepoints, ages/baselines and causal frontiers. Entity revisions cannot order
+relationships; scalar/list replay cannot clear freshness or unseen notices.
+Prior evidence: `7d12ab10a`, this heading.
 
-Unplaced-Wave reads and destination-level Desktop receipts/holds now exist in the
-dependency (`60d113a70`, `c20e4ad13`); reuse its repository Work stream, not another
-poller. Per-Work sharing/recovery and combined public/native acceptance remain.
-**Unmapping is not association:** clearing provider identity can create a duplicate
-while leaving selectors/effects behind. `7260e4602` protects mappings before scalar
-and evidence projection; legacy association must preserve IDs, lookup and execution.
-Partial-list/public composition and peer admission remain unproved.
+`repo identity --bind` associates an unbound checkout without selecting/publishing; divergent roots retain their identities. Shared first starts refuse pending exclusive admission. Delegation exchange,
+legacy association and remote/native composition remain. Desktop peer readings use Machine/repository keys.
+
+Composition excludes LOO-412's started-Task transfer/preparing resolver, preserving
+Jack Heart's recorded-Machine retention and effect-free selection. **Unmapping is not association:** duplicate provider creation can
+leave selectors/effects behind. Preserve IDs, lookup and execution. Per-Work
+sharing/recovery and combined public/native acceptance remain unproved.
 
 Integrated #1512 (`3e1e6245c`): live connect hands off; dead-driver resume starts a
 fresh engine on native history. Peer proof must separate local resume from

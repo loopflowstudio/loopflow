@@ -8,12 +8,12 @@ fixed-buffer reader with exact pane/surface validation; native proof remains.
 Focused local Rust and model evidence establish neither native acceptance nor delivery.
 
 LOO-406 is integrated through main’s `d20c56daf` (#1503). LOO-412 through
-`7260e4602` was inspected, not integrated: common receipts, unplaced-Wave reads
-and destination-level Desktop status exist; legacy association remains.
+`7260e4602` is composed locally: common receipts, unplaced-Wave reads and
+destination-level Desktop status survive. Legacy association remains.
 Mixed Linear/Git stays disabled pending the remaining composition.
 Local Task/Session-plus-Changes opening follows request-scoped readiness; native proof remains.
-Remaining implementation: broader explanation, shared identity/exchange and first-start
-admission, and remote opening. Native I/O and full-path proof remain.
+Remaining implementation: broader explanation, divergent-root/delegation exchange,
+first-start admission and remote opening. Native I/O and full-path proof remain.
 [Findings](findings.md), [questions](questions.md) and the
 [comparison](../docs/reviews/terminal-command-comparison.md) retain evidence and open choices.
 
@@ -205,6 +205,15 @@ These boundaries are integration constraints, not separate replacement projects.
 
 ## Delete — do not maintain
 
+Dependency composition excludes `ops/task/remote.rs`, `TaskSource`,
+`LF_TASK_SOURCE`, its launch-time Work-binding preparation and transfer-only
+`task_remote_tests`. Started Tasks keep their recorded Machine; shared planning
+acquisition, pushed-branch preparation in the existing Task owner, preview parity
+and account handling survive. Copied child placements stay deleted. Dependency
+scratch stays at `7260e4602`, not beside this Task's plan. Desktop replaces the
+path-only peer reading key with the existing Machine/repository reading key.
+
+
 Replaced lf2's `boundedReaderUnavailable` placeholder and DTO variant with the
 verified fixed-buffer reader. Removed the native input fixture's unbounded observer;
 it now observes through the exact-target router. Clipboard/Quick Look stay unchanged.
@@ -242,11 +251,9 @@ only on launch; standalone budget reporting's final home remains open. Existing
 planning/history/prompt owners survive. Removal history:
 `82f9ed087:scratch/compare-cmux-s-command-line.md`, this heading.
 
-Session explanation replaces identity-only connection preview. It uses the shared
-state/action rules and one client observation, not a full UI record, launch argv
-or workspace association. Resume reuses its selection store when opening. Removed
-unreachable remote-Session workspace branches and `human_open_argv`'s unused
-Machine parameter; `workspace::associate` remains the location owner.
+Session explanation reuses selection, action and client-observation owners without
+preparation or takeover. Removed remote workspace branches and unused Machine
+parameters remain at `7d12ab10a`, this heading; `workspace::associate` owns location.
 
 Removed: copied inheritance; duplicate window/opening paths; unqualified terminal
 keys; duplicate visibility/pruning/insertion paths; root `run` and `open`;
@@ -270,88 +277,52 @@ native/artifact evidence and the plan below retains incomplete composition.
 
 ## Implementation sequence — one PR
 
-### Wave planning and invocation explanation — October 9
+### Completed local command/opening slices — October 9
 
-`575bde5bc`/`367ce31a9` implement Wave-owned current/historical planning through
-existing readers and separate Workflow writes. Desktop sends Wave identity;
-Project IDs, KRs, metric targets and captured Workflows survive. Reads skip Process
-admission, use read-only storage and resolve targets once. Earlier detail:
-`af79d4762:scratch/compare-cmux-s-command-line.md`, this heading.
+Wave planning, Task-run/Session/Desktop explanation, remote preview and composed
+local opening mechanisms and failed observations: `7d12ab10a`, this file, the
+completed command/opening headings. Read-only stores, parsed transport and shared prompt,
+selection and validation owners survive. Preview skips probes, credentials,
+Process writes and preparation; initial Flow inputs only. Two-CLI simulated SSH
+and checkpointed-store fixtures are not configured transport or first-start proof.
 
-Task-run and opening explanation share launch selection/validation; only launch
-prepares Work. Checkpointed-WAL and missing/unreadable-store fixtures preserve
-the hidden-write regressions. A proposed URL proves no native readiness.
-
-`31dbb3a68`/`942dab5d8` implement explicit `--machine` previews through SSH, Work
-routing and the receiving preview.
-Preview omits probes, credential preparation and Process writes; repository
-lookup belongs to the selected Machine. Identity/transport failure has no fallback, missing Work stays
-unavailable in text/JSON. Authentication is outside preview preparation.
-Two real CLIs with simulated SSH cover this, not configured SSH or exclusive start.
-Entry-level identity validation also protects ordinary commands and early reads.
-
-### Session connection explanation — October 9
-
-Implemented through the Session opening owner: explicit/native IDs and inferred
-interactive resume share selection and active-client refusal. Explanation reports
-start/resume/possible live connection, replacement/try intent, shared legal actions
-and unavailable evidence. It admits nothing, prepares no workspace, probes no
-socket and acquires/signals no client. JSON preparation stays distinct from takeover.
-Checkpointed-store, owned-client and listening-socket fixtures prove these boundaries;
-Rust/Swift fixtures preserve wire shape. Native use remains with demo.
-
-### Local composed opening — October 9
-
-`1dd8230d0` and `e3ca861b1` satisfy the preceding repository-failure/Task-page
-readiness direction. Delayed lookup, registration, failure and cancellation are
-fenced by request. Remaining work is remote/native composition, not another
-readiness owner.
-
-`desktop open` now reads the shared Work resolver and sends a repository-qualified
-Task link to the existing identity-keyed window router. `--session` selects the
-exact Task-associated conversation; `--diff` reveals retained Changes beside it.
-Without a Session selector, the existing primary-Session owner prepares/chooses it;
-subsequent reads retain the originating Task and complete Session inventory.
-No CLI checkout preparation or automatic routing to the execution Machine remains.
-Explicit `--machine` still selects the command's machine, not a viewing relay.
-
-Request generations fence lookup, registration, preparation and pane readiness;
-repeated URLs are new requests. Links preserve literal paths, full IDs and `diff`.
-Chooser/direct failures share receipts, including pre-registration failures.
-LaunchServices returns `opening`; selection, insertion and `.prepared` are not usable.
-Plain Task links await mounted content; composed links await Session surface and
-Files comparison with the original visible pane occurrences. Closure, replacement,
-hiding or zoom fails pending requests; navigation cancels them without stopping
-shared preparation. Late callbacks cannot settle another generation.
-
-Session/Files/multiplexer Observation owns readiness, including visibility before
-Session evidence. Composed Changes clears zoom while keeping drafts; ordinary
-companions retain zoom. Pending exact links suppress primary entry. Native creation
-failure propagates, including Ghostty-disabled builds. Latest-only receipts prove
-model/view readiness, not compositor or provider usability. Detailed implementation
-and failed observations: `2b924f3fd:scratch/compare-cmux-s-command-line.md`, this heading.
-
-**Remaining opening implementation/proof:** remote composition and native endpoints.
-Headless fixtures cover supersession, cancellation, delayed registration, failures,
-closed panes and retained file selection, but not LaunchServices → real Session
-surface + usable Changes. Native endpoints remain in this one PR's demo; Linux
-refusal remains with gate/CI.
+Local Session-plus-Changes opening uses one repository-qualified link and existing
+Session/Files/multiplexer owners. Generations fence registration, preparation,
+readiness, failure and cancellation; partial inventories never retire other panes.
+Plain Task links await mounted content; composed links await exact visible Session
+and Files panes. LaunchServices returns opening, not usability. Remote composition
+and native endpoints remain; model receipts prove neither compositor nor provider use.
 
 ### 2. Shared Work identity, delegation and routing
 
-**Partially implemented, not composed.** The branch includes LOO-406's
-common writer and planning-sync receipts. `repository_plans` supplies local plan
+**Locally composed, incomplete.** The branch includes LOO-406's common writer
+and LOO-412's `7260e4602` exchange, journal, foreground sync and repository Work-stream
+receipts. Wave commands retain their shared readers and separate writes. The
+Desktop peer cache reuses Machine/repository keys, not path-only readings. `repository_plans` supplies local plan
 identity even without Tasks; explicit binding can associate a peer path with that
 ID. Known started Tasks route via recorded checkout Machine; locally unstarted
-Tasks use effective delegation. Neither rewrites Machine defaults. LOO-412's
-portable exchange still needs composition with this identity/delegation schema.
-The two-store routing fixture seeds identical Work IDs directly: it proves routing
-is independent of path/default, not exchange convergence or peer start admission.
+Tasks use effective delegation. Neither rewrites Machine defaults. Explicit `repo identity --bind ID` exposes the existing binding owner before
+creating/importing Work on a new peer checkout. Binding neither selects nor
+publishes a destination. Imported Waves establish a local repository identity when
+none exists, without allocating placement. The new peer fixture starts with
+independently created Tasks/Waves on both stores, exchanges their journals and
+checks stable identity, offline saves, completion and replay against retained local
+Workflow, checkout, Session and Process rows. Matching Work IDs are not seeded.
+This is storage composition, not configured transport or exclusive admission.
 
-First-start observation/admission remains unresolved: local absence cannot prove
-a peer never started. Even a fresh negative peer observation is not a reservation.
-A local SQLite transaction cannot exclude a competing peer allocation. Dependent
-cross-machine launch work must not treat the prototype as complete admission.
+The merge exposed an incompatible source-side transfer path: LOO-412's
+`TaskSource` could carry a started Task's branch to another Machine and its binding
+resolver could prepare Work. This cut excludes that path and its transfer-only
+fixtures, preserving LOO-427's read-only selection and recorded-Machine routing.
+Cold planning acquisition and common Git exchange remain; code preparation uses
+the existing Task owner. Remote first start needs its own accepted admission,
+not the removed source envelope or an implicit provider-alias association.
+
+First-start admission remains unresolved. Shared Tasks without a retained local
+checkout now refuse start through the common planning/admission check, before Git
+preparation and again at placement. Local-only Tasks, saves, acquisition and
+retained execution remain usable. Neither local absence, a negative peer reading
+nor a local SQLite transaction supplies a cross-Machine reservation.
 Delegation inheritance remains proposed, not accepted from source code alone.
 
 Remaining identity work composes the existing repository root with LOO-412's
@@ -408,7 +379,7 @@ its own lifecycle; no automatic turn/Flow retry is introduced. Online comments
 and completion propagate semi-live through the active sync owner. Main's LOO-406
 `d20c56daf` is integrated, retaining repository-scoped foreground Linear sync.
 Readback cannot exclude unseen Linear reopening. LOO-412 through `7260e4602` is
-inspected, not integrated. Its receipt ordering, independent evidence rollback and
+integrated locally, excluding the incompatible started-Task transfer path. Its receipt ordering, independent evidence rollback and
 causal invalidation replace no local owner; prior mechanisms and contrary evidence:
 `2c23acbb8:scratch/compare-cmux-s-command-line.md`, **Mixed command**.
 
@@ -574,4 +545,4 @@ identity/delegation, open them, add shell/Files panes, retain an unfinished draf
 change focus, target a harmless command, read output, hide/restore, and verify the
 original input target and draft survive. Demo owns native usability; preserve comparison evidence and use no real accounts or live user terminals.
 
-Check (October 9 realign): `git diff --check` PASS (prose only); retained compress result: `scripts/test_desktop.sh -Xswiftc -gnone --no-parallel --filter DesktopPaneControlTests` PASS (build; 15 headless tests, two native skips); native extraction/input remains with demo. Prior Rust/Swift bounded-reader checks: `feb512076` and `/tmp/loo427-compress-reader/scratch/compare-cmux-s-command-line.md`; affected suites: gate.
+Check (October 9 composition): Rust build/fmt and `cargo clippy --all-targets -- -D warnings` PASS; network-isolated identity CLI, independent-peer/admission and unplaced-import tests PASS (3). `scripts/test_desktop.sh -Xswiftc -gnone --no-parallel --filter WorkModelStreamTests` PASS (6). Affected suites: gate; native I/O: demo. Prior reader proof: `7d12ab10a`.

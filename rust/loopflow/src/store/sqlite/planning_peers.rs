@@ -1172,6 +1172,7 @@ fn insert_and_project(
         };
         match object.kind {
             PlanningKind::Wave => {
+                super::repositories::ensure_repository_in(conn, repo)?;
                 conn.execute(
                     "INSERT INTO waves(id,name,repo,created_at,parent_wave_id) VALUES(?1,?2,?3,unixepoch(),?4)",
                     params![object.id, required("name")?, repo, winners["parent_wave_id"].1.value.as_str()],
@@ -2097,7 +2098,11 @@ mod tests {
     }
 
     fn seed(store: &SqliteStore) -> TaskId {
-        let wave = Wave::new(WaveId::new(), "planning".into(), "/source".into());
+        seed_at(store, "/source", "planning", "FIX-1")
+    }
+
+    fn seed_at(store: &SqliteStore, repo: &str, name: &str, identifier: &str) -> TaskId {
+        let wave = Wave::new(WaveId::new(), name.into(), repo.into());
         store.create_wave(&wave).unwrap();
         let project = ProjectId::new();
         let task = TaskId::new();
@@ -2105,11 +2110,11 @@ mod tests {
         conn.execute("INSERT INTO projects(id,wave_id,created_at,updated_at,project_slug,project_name,project_prompt_context)
             VALUES(?1,?2,1,1,'chapter','Chapter','')", params![project.as_str(),wave.id()]).unwrap();
         conn.execute("INSERT INTO tasks(id,project_id,issue_identifier,issue_title,issue_description,created_at,updated_at,workspace_slug)
-            VALUES(?1,?2,'FIX-1','Original','Brief',1,1,'')",params![task.as_str(),project.as_str()]).unwrap();
+            VALUES(?1,?2,?3,'Original','Brief',1,1,'')",params![task.as_str(),project.as_str(),identifier]).unwrap();
         super::capture_project_content(&conn, &project).unwrap();
         drop(conn);
         store
-            .select_peer_waves("/source", &destination(), std::slice::from_ref(wave.id()))
+            .select_peer_waves(repo, &destination(), std::slice::from_ref(wave.id()))
             .unwrap();
         task
     }
@@ -2679,11 +2684,17 @@ mod tests {
         let (_source_home, source) = store();
         let (_target_home, target) = store();
         let task = seed(&source);
+        assert!(target.repository_id("/target").unwrap().is_none());
         import(
             &target,
             "/target",
             "unprepared",
             &export(&source, "/source"),
+        );
+        let repository = target.repository_id("/target").unwrap().unwrap();
+        assert_eq!(
+            target.repository_path(&repository).unwrap().as_deref(),
+            Some("/target")
         );
         let project = target.task(&task).unwrap().unwrap().project_id;
         assert_eq!(
@@ -3946,6 +3957,114 @@ mod tests {
     }
 
     #[test]
+    fn independent_peer_tasks_converge_without_transferring_execution() {
+        let (_left_home, left) = store();
+        let (_right_home, right) = store();
+        // Explicit repository association precedes sharing. No Task/Wave IDs are
+        // seeded on the other Machine, and the transport destination is not identity.
+        let repository = left.ensure_repository("/source").unwrap();
+        right.bind_repository("/target", &repository).unwrap();
+        let left_task = seed(&left);
+        let right_task = seed_at(&right, "/target", "right", "RIGHT-1");
+        assert_ne!(left_task, right_task);
+        let left_wave = left.task(&left_task).unwrap().unwrap().wave_id;
+        let right_wave = right.task(&right_task).unwrap().unwrap().wave_id;
+        let admission = left
+            .validate_task_planning(&left.task(&left_task).unwrap().unwrap())
+            .unwrap_err();
+        assert!(admission.to_string().contains("first-start admission"));
+        for (store, wave, task) in [
+            (&left, &left_wave, &left_task),
+            (&right, &right_wave, &right_task),
+        ] {
+            preserve_execution(store, wave, task);
+        }
+        let left_execution = execution_rows(&left);
+        let right_execution = execution_rows(&right);
+        let left_route = left.task_execution_route(&left_task).unwrap();
+        let right_route = right.task_execution_route(&right_task).unwrap();
+        assert_ne!(left_route.machine_id, right_route.machine_id);
+        assert_eq!(left_route.repository_id, right_route.repository_id);
+        let left_initial = export(&left, "/source");
+        let right_initial = export(&right, "/target");
+        import(&left, "/source", "right", &right_initial);
+        import(&right, "/target", "left", &left_initial);
+        assert_eq!(export(&left, "/source"), export(&right, "/target"));
+        for (store, repo) in [(&left, "/source"), (&right, "/target")] {
+            assert!(store.peer_projection_conflicts(repo).unwrap().is_empty());
+            assert!(store.task(&left_task).unwrap().is_some());
+            assert!(store.task(&right_task).unwrap().is_some());
+            assert_eq!(store.repository_id(repo).unwrap(), Some(repository.clone()));
+        }
+        assert!(left.task(&right_task).unwrap().unwrap().worktree.is_none());
+        assert!(right.task(&left_task).unwrap().unwrap().worktree.is_none());
+        assert!(right
+            .validate_task_planning(&right.task(&left_task).unwrap().unwrap())
+            .unwrap_err()
+            .to_string()
+            .contains("first-start admission"));
+        right
+            .validate_task_planning(&right.task(&right_task).unwrap().unwrap())
+            .unwrap();
+        assert_eq!(execution_rows(&left), left_execution);
+        assert_eq!(execution_rows(&right), right_execution);
+        assert_eq!(left.task_execution_route(&left_task).unwrap(), left_route);
+        assert_eq!(
+            right.task_execution_route(&right_task).unwrap(),
+            right_route
+        );
+
+        // Preserve legacy local execution for an imported identity too. This
+        // fixture is history, not a competing first-start admission protocol.
+        preserve_named_execution(
+            &right,
+            &left_wave,
+            &left_task,
+            "legacy-left",
+            "/retained/legacy-left",
+        );
+        let right_execution = execution_rows(&right);
+        let legacy_route = right.task_execution_route(&left_task).unwrap();
+        let legacy_workflow = right.workflow(&left_task).unwrap();
+
+        // Local saves while disconnected need no peer. Reconnection imports the
+        // planning disposition, never the sender's Workflow movement or cleanup.
+        edit_title(&left, &left_task, "Saved offline");
+        complete(&left, &left_task);
+        let completed = export(&left, "/source");
+        import(&right, "/target", "completed", &completed);
+        assert_eq!(
+            right.task(&left_task).unwrap().unwrap().plan.title,
+            "Saved offline"
+        );
+        assert_eq!(
+            right
+                .planning_task(&left_task)
+                .unwrap()
+                .record
+                .unwrap()
+                .item
+                .state
+                .as_deref(),
+            Some("completed")
+        );
+        assert_eq!(right.workflow(&left_task).unwrap(), legacy_workflow);
+        assert_eq!(
+            right.task_execution_route(&left_task).unwrap(),
+            legacy_route
+        );
+        assert_eq!(execution_rows(&right), right_execution);
+        let revision = right.revisions().unwrap();
+        import(&right, "/target", "completed", &completed);
+        assert_eq!(right.revisions().unwrap(), revision);
+        assert_eq!(export(&right, "/target"), completed);
+        assert_eq!(
+            right.task_execution_route(&right_task).unwrap(),
+            right_route
+        );
+    }
+
+    #[test]
     fn peer_cached_non_lifecycle_state_does_not_invent_a_delivery() {
         let (_source_home, source) = store();
         let (_target_home, target) = store();
@@ -5171,14 +5290,25 @@ mod tests {
     }
 
     fn preserve_execution(store: &SqliteStore, wave: &WaveId, task: &TaskId) {
+        preserve_named_execution(store, wave, task, "retained", "/retained/work");
+    }
+
+    fn preserve_named_execution(
+        store: &SqliteStore,
+        wave: &WaveId,
+        task: &TaskId,
+        session: &str,
+        checkout: &str,
+    ) {
+        let machine = store.local_machine().unwrap().id;
         let driver = ProcessLfid::new();
         {
             let conn = store.conn.lock().unwrap();
             conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id)
-                VALUES('retained','Retained','human',1,0,'/retained/work',?1,?2)", params![task.as_str(),wave]).unwrap();
+                VALUES(?3,'Retained','human',1,0,?4,?1,?2)", params![task.as_str(),wave,session,checkout]).unwrap();
             conn.execute(
-                "UPDATE tasks SET worktree='/retained/work' WHERE id=?1",
-                [task.as_str()],
+                "UPDATE tasks SET worktree=?3,workspace_slug='retained',checkout_machine_id=?2 WHERE id=?1",
+                params![task.as_str(), machine.as_str(), checkout],
             )
             .unwrap();
             conn.execute(

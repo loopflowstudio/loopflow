@@ -619,22 +619,23 @@ acceptance remain at
 
 ## Tasks across machines (LOO-412, 2026-10-09)
 
-Jack Heart selected review-only custom-ref sync, not landing/real export.
-Joining publishes nothing; imports remain unplaced. Malformed input aborts import;
+Jack Heart selected review-only custom-ref sync; no landing/export.
+Joining publishes nothing; imports stay unplaced. Malformed input aborts import;
 contradictions defer effects, not saves/acquisition. Preserve execution, baselines,
 uncertainty and losers. Mappings/errors and creation never settle removal.
-Association/mixed exchange stays held pending per-Work recovery presentation and
-public Git/HTTPS proof. Destination-level Desktop retains scoped last-good status.
+Association/mixed exchange stays held pending public Git/HTTPS proof.
 
-Causality precedes ranking. Correspondence reuses accepted observations, never
-identity or authority; private references hold groups. Journal origins and alias
-comparisons preserve inputs and rebase later saves. Equal revisions can carry
-different ranks; retain bodies. Earlier proofs: `6f1869e9b`, this heading.
-`8a6f8f807`: delivery readback must enter common planning projection, not only
-settle a receipt, to reach peers. State/comment/Wave association fixtures retain
-authorship, uncertainty and execution; association alone selects nothing. These
-are storage proofs, not public or installed acceptance. Plan:
-`scratch/work-on-another-machine-name.md`.
+CLI/Desktop read per-origin selection, values, comment authors and private
+references without enrollment. Candidates prove no projection/delivery; unknown
+authors stay unknown. Ordinary edits own restores; status retains scoped last-good
+readings. Transport/installation remain unproved.
+
+Causality precedes ranking. Correspondence reuses observations, not identity or
+authority; private references hold groups. Journal origins/aliases retain inputs
+and later-save baselines. Equal revisions can carry different ranks; retain bodies.
+`8a6f8f807`: state/comment/Wave readback must enter common projection to reach
+peers, not merely settle receipts. Storage proof retains authorship and execution.
+`6f1869e9b` retains earlier proofs. Plan: `scratch/work-on-another-machine-name.md`.
 
 ## Driver recovery
 

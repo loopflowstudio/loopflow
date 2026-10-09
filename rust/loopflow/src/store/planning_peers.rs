@@ -29,6 +29,30 @@ pub struct PeerPlanningStatus {
     pub pending_local: Option<bool>,
     pub local_error: Option<String>,
     pub conflicts: Vec<PeerProjectionConflict>,
+    pub records: Vec<PeerPlanningRecord>,
+    pub recovery_error: Option<String>,
+}
+
+/// Local recovery view, never an export document or an instruction to restore.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PeerPlanningRecord {
+    pub object: PlanningObject,
+    pub local_id: String,
+    pub destination: Option<String>,
+    pub references: Vec<PlanningObject>,
+    pub values: Vec<PeerPlanningValue>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PeerPlanningValue {
+    pub id: String,
+    pub field: String,
+    /// Lossless JSON, including null and grouped disposition/comment values.
+    pub value_json: String,
+    /// Ranked journal candidate, not evidence of successful projection or delivery.
+    pub candidate: bool,
+    pub author: Option<crate::ops::pm::TaskCommentAuthor>,
+    pub observed_at: Option<i64>,
 }
 
 impl Store {

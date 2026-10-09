@@ -258,7 +258,13 @@ not future edits or held records. Each destination includes its sharing holds an
 retained projection conflicts. An invalid local journal reports unknown pending
 changes (`pending_local: null` in JSON), without hiding other destinations or
 changing sync receipts. Status does not repair the journal. In Desktop, open **Git planning** in the
-repository roadmap for the same destination, pending state and held records. Its
+repository roadmap and expand a Work record to inspect its selection, associated
+local ID, retained parent references, assignees and authored comment values.
+CLI status exposes the same records, including losing values and mutation IDs.
+Candidates are ranked journal values, not proof of projection or delivery. Unknown
+authors stay unknown. Copy a retained value into an ordinary edit to save it again;
+inspection never enrolls Work or publishes it. Selecting a Wave can share its
+retained private history, including comments and old parent references. Its
 foreground reader updates these receipts without a manual refresh; a failed
 reading keeps the last status visibly stale. Import retention is not convergence.
 Git exchange

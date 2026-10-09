@@ -46,7 +46,11 @@ struct DesktopHeadlessTests {
         for text in ["Showing the last sync status", "Local changes unknown", "Local changes pending",
                      "Selected for future root Waves", "Held task retained-task: retained projection conflict",
                      "Publication: unconfirmed (attempted-publication)", "Fetched: newer-fetch",
-                     "Retained import: retained-import", "Sync status unavailable: reader exited"] {
+                     "Retained import: retained-import", "Sync status unavailable: reader exited",
+                     "Local only; not selected", "Retained reference: project private-parent",
+                     "issue_title: retained alternative", "\"Retained private title\"",
+                     "planning_assignee: candidate, not confirmed", "\"Maya\"",
+                     "Mutation: comment-loser; author: Maya"] {
             #expect(try view.inspect().find(text: text).string() == text)
         }
         let local = PeerPlanningView(reading: .available([]))

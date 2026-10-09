@@ -110,7 +110,7 @@ async fn run_async(repo: &Path, cmd: &PlanningCommand) -> Result<()> {
                 )
                 .await?;
             println!("{incoming} resolves to local {local}. Neither identity, execution nor sharing selection changed.");
-            eprintln!("Relationship and receipt composition remains unfinished; exchange and effects stay held. No provider effect or Git publication was issued.");
+            eprintln!("Public Git/Linear composition is unverified; exchange and effects stay held. No provider effect or Git publication was issued.");
         }
         PlanningCommand::Status { json } => print_status(&store, &repo_key, *json).await?,
     }
@@ -171,6 +171,7 @@ async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
             destination.local_error,
             destination.acquisition_error,
             destination.publication_error,
+            destination.recovery_error,
         ]
         .into_iter()
         .flatten()
@@ -185,7 +186,54 @@ async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
                 conflict.reason
             );
         }
+        for record in destination.records {
+            println!(
+                "  {} {} — {}",
+                record.object.kind.as_str(),
+                record.object.id,
+                match record.destination.as_deref() {
+                    Some(id) if id == destination.id => "selected here".to_string(),
+                    Some(id) => format!("not selected here; selected in {id}"),
+                    None => "local only; not selected".to_string(),
+                }
+            );
+            if record.local_id != record.object.id {
+                println!(
+                    "    Resolves to {} (execution stays local)",
+                    record.local_id
+                );
+            }
+            for reference in record.references {
+                println!(
+                    "    Retained reference: {} {}",
+                    reference.kind.as_str(),
+                    reference.id
+                );
+            }
+            for value in record.values {
+                let author = match value.author {
+                    Some(crate::ops::pm::TaskCommentAuthor::Person { name }) => {
+                        name.unwrap_or_else(|| "Unknown person".into())
+                    }
+                    Some(crate::ops::pm::TaskCommentAuthor::Integration) => "Integration".into(),
+                    None => "Unknown".into(),
+                };
+                println!(
+                    "    {} [{}; {}; author: {}]: {}",
+                    value.field,
+                    value.id,
+                    if value.candidate {
+                        "candidate, not confirmed"
+                    } else {
+                        "retained alternative"
+                    },
+                    author,
+                    value.value_json
+                );
+            }
+        }
     }
+    println!("Recovery inspection changes nothing. Copy a retained value into an ordinary edit to save it again; selecting a Wave can share its retained history.");
     println!("Import retention is not publication or convergence. Linear delivery is separate.");
     Ok(())
 }

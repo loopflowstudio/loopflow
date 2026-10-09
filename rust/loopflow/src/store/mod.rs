@@ -27,7 +27,9 @@ mod sessions;
 pub mod sqlite;
 mod token_crypto;
 
-pub use planning_peers::{PeerPlanningStatus, PeerProjectionConflict};
+pub use planning_peers::{
+    PeerPlanningRecord, PeerPlanningStatus, PeerPlanningValue, PeerProjectionConflict,
+};
 
 /// One Wave's planning view, assembled from shared entities and membership.
 #[derive(Debug, Clone, PartialEq)]

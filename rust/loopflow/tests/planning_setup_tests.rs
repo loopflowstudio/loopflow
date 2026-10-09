@@ -298,7 +298,7 @@ fn public_status_keeps_healthy_plans_and_receipts_visible_beside_a_damaged_journ
 }
 
 #[test]
-fn public_association_preserves_ids_and_reports_unfinished_projection() {
+fn public_association_recovery_preserves_private_history_without_publication() {
     use loopflow::engine::planning_git::PlanningDestination;
     use loopflow::store::sqlite::SqliteStore;
 
@@ -317,9 +317,12 @@ fn public_association_preserves_ids_and_reports_unfinished_projection() {
     let source = SqliteStore::new(&source_home.path().join("loopflow.db")).unwrap();
     let repo_path = repo.path().canonicalize().unwrap();
     let scope = repo_path.to_str().unwrap();
-    let destination =
-        PlanningDestination::new("/synthetic/absent", "refs/loopflow/planning/shared/fixture")
-            .unwrap();
+    let destination = PlanningDestination::resolve(
+        repo.path(),
+        "origin",
+        "refs/loopflow/planning/shared/fixture",
+    )
+    .unwrap();
     for store in [&source, &target] {
         store.bind_peer_planning(scope, &destination).unwrap();
     }
@@ -354,6 +357,31 @@ fn public_association_preserves_ids_and_reports_unfinished_projection() {
         .task_by_issue(&snapshot.items[0].id)
         .unwrap()
         .unwrap();
+    for title in ["Private losing title", "Private current title"] {
+        let current = target.task(&local.id).unwrap().unwrap();
+        target
+            .edit_task(
+                &local.id,
+                current.plan.revision,
+                &loopflow::pm::PmItemUpdate {
+                    name: Some(title.into()),
+                    assignee: Some(Some("Maya".into())),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+    }
+    let comment = loopflow::ops::pm::TaskComment {
+        id: "private-comment".into(),
+        body: "Private direction".into(),
+        author: loopflow::ops::pm::TaskCommentAuthor::Person {
+            name: Some("Maya".into()),
+        },
+        created_at: Some("2026-10-09T10:00:00Z".into()),
+    };
+    target.append_task_comment(&local.id, &comment).unwrap();
+    let unrelated = Wave::new(WaveId::new(), "Unrelated private Wave".into(), scope.into());
+    target.create_wave(&unrelated).unwrap();
     let journal = source
         .export_peer_planning(scope, &destination.id())
         .unwrap();
@@ -391,7 +419,7 @@ fn public_association_preserves_ids_and_reports_unfinished_projection() {
                 String::from_utf8_lossy(&reply.stderr)
             );
             assert!(String::from_utf8_lossy(&reply.stdout).contains(local_id));
-            assert!(String::from_utf8_lossy(&reply.stderr).contains("unfinished"));
+            assert!(String::from_utf8_lossy(&reply.stderr).contains("unverified"));
         }
     }
     let reply = invoke_lf(
@@ -422,7 +450,95 @@ fn public_association_preserves_ids_and_reports_unfinished_projection() {
         local.project_id.as_str(),
     ]
     .contains(&change.object.id.as_str())));
+    let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let revision = || -> i64 {
+        conn.query_row(
+            "SELECT revision FROM store_revisions WHERE domain='planning'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap()
+    };
+    let before = revision();
+    let comments_before = target.task_comments(&local.id).unwrap();
+    let pending_before = target.pending_task_changes(&local.id).unwrap();
+    for _ in 0..2 {
+        let status: Value =
+            serde_json::from_str(&run(repo.path(), home.path(), &["status", "--json"])).unwrap();
+        let plan = &status["destinations"][0];
+        assert!(plan["recovery_error"].is_null(), "{plan}");
+        let records = plan["records"].as_array().unwrap();
+        assert!(!records
+            .iter()
+            .any(|r| r["object"]["id"] == unrelated.id().as_str()));
+        for id in [
+            local.id.as_str(),
+            local.project_id.as_str(),
+            private_wave.id().as_str(),
+            &comment.id,
+        ] {
+            let record = records.iter().find(|r| r["object"]["id"] == id).unwrap();
+            assert!(record["destination"].is_null());
+        }
+        let record = records
+            .iter()
+            .find(|r| r["object"]["id"] == local.id.as_str())
+            .unwrap();
+        let values = record["values"].as_array().unwrap();
+        let losing = values
+            .iter()
+            .find(|v| v["value_json"] == "\"Private losing title\"")
+            .unwrap();
+        assert_eq!(losing["candidate"], false);
+        assert!(values
+            .iter()
+            .any(|v| v["field"] == "planning_assignee" && v["value_json"] == "\"Maya\""));
+        let record = records
+            .iter()
+            .find(|r| r["object"]["id"] == comment.id)
+            .unwrap();
+        let content = record["values"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|v| v["field"] == "content")
+            .unwrap();
+        assert_eq!(content["author"]["name"], "Maya");
+        assert!(content["value_json"]
+            .as_str()
+            .unwrap()
+            .contains("Private direction"));
+        assert_eq!(revision(), before);
+        assert_eq!(
+            target
+                .export_peer_planning(scope, &destination.id())
+                .unwrap(),
+            exported
+        );
+        assert_eq!(target.task_comments(&local.id).unwrap(), comments_before);
+        assert_eq!(
+            target.pending_task_changes(&local.id).unwrap(),
+            pending_before
+        );
+    }
     let status = run(repo.path(), home.path(), &["status"]);
-    assert!(status.contains("relationship and receipt composition is unfinished"));
+    assert!(status.contains("public Git/Linear composition is unverified"));
     assert!(status.contains("exchange and effects remain held"));
+    assert!(status.contains("local only; not selected"));
+    assert!(status.contains("retained alternative"));
+    assert!(status.contains("Private losing title"));
+    assert!(status.contains("author: Maya"));
+    assert!(status.contains("Private direction"));
+    assert!(status.contains(&format!("Retained reference: project {}", local.project_id)));
+    assert_eq!(revision(), before);
+    let refs = Command::new("git")
+        .current_dir(repo.path())
+        .args(["ls-remote", "origin", "refs/loopflow/planning/*"])
+        .output()
+        .unwrap();
+    assert!(refs.status.success());
+    assert!(
+        refs.stdout.is_empty(),
+        "recovery inspection must not publish"
+    );
 }

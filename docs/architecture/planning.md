@@ -241,6 +241,16 @@ on planning revisions, not execution or usage updates. Desktop retains last-good
 status on reader failure, fences replies by scope and Machine, and distinguishes
 unknown local changes from no additional eligible changes. Git publication is not
 Linear delivery; retained imports and sharing holds never imply convergence.
+The same read transaction derives per-Work recovery records from the retained journal:
+selected origins, explicit associations, referenced parents and their comments.
+Unrelated private Work is not included. Membership is shown per origin, never
+inferred from correspondence. Scalar candidates reuse causal frontier/ranking;
+all alternatives retain mutation IDs and lossless JSON. Comment authorship comes
+from its captured content; scalar authors remain unknown. This is a local read
+view, never a transport document. Recovery inspection changes no membership,
+observations, receipt, placement or publication state; ordinary edits own restores.
+Malformed recovery history reports a separate sanitized error without hiding
+healthy publication receipts. Exchange and effect holds remain independently owned.
 
 A foreground connection synchronizes its repository, independent of Desktop Task
 selection. Inventory, comments and delivery use separate bounded loops; closing

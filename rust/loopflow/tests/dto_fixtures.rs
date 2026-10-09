@@ -631,10 +631,22 @@ fn peer_planning_status_keeps_unknown_local_state_and_retained_receipts() {
     );
     assert_eq!(statuses[0].conflicts.len(), 1);
     assert_eq!(statuses[1].pending_local, Some(true));
+    let private = &statuses[1].records[0];
+    assert_eq!(private.destination, None);
+    assert!(!private.values[0].candidate);
+    assert_eq!(private.values[0].value_json, "\"Retained private title\"");
+    assert_eq!(
+        statuses[1].records[1].values[0].author,
+        Some(loopflow::ops::pm::TaskCommentAuthor::Person {
+            name: Some("Maya".into())
+        })
+    );
     assert_eq!(serde_json::to_value(&statuses).unwrap(), value);
-    let mut missing = value[1].clone();
-    missing.as_object_mut().unwrap().remove("conflicts");
-    assert!(serde_json::from_value::<loopflow::store::PeerPlanningStatus>(missing).is_err());
+    for field in ["conflicts", "records"] {
+        let mut missing = value[1].clone();
+        missing.as_object_mut().unwrap().remove(field);
+        assert!(serde_json::from_value::<loopflow::store::PeerPlanningStatus>(missing).is_err());
+    }
 }
 
 #[test]

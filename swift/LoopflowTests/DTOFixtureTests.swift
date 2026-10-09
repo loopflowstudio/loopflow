@@ -512,10 +512,16 @@ struct DTOFixtureTests {
         #expect(statuses[0].conflicts[0].object.id == "retained-task")
         #expect(statuses[1].pendingLocal == true)
         #expect(statuses[1].active)
-        var object = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])[1]
-        object.removeValue(forKey: "conflicts")
-        #expect(throws: (any Error).self) {
-            try JSONDecoder().decode(PeerPlanningStatus.self, from: JSONSerialization.data(withJSONObject: object))
+        #expect(statuses[1].records[0].destination == nil)
+        #expect(!statuses[1].records[0].values[0].candidate)
+        #expect(statuses[1].records[1].values[0].author == .person(name: "Maya"))
+        #expect(statuses[1].records[1].values[0].observedAt == 42)
+        for field in ["conflicts", "records"] {
+            var object = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])[1]
+            object.removeValue(forKey: field)
+            #expect(throws: (any Error).self) {
+                try JSONDecoder().decode(PeerPlanningStatus.self, from: JSONSerialization.data(withJSONObject: object))
+            }
         }
     }
 

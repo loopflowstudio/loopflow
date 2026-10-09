@@ -1,6 +1,8 @@
 //! Peer receipts and projection commit together on the existing planning tables.
 //! Export reads retained mutation identities; it never creates a new edit.
 
+mod recovery;
+
 use std::collections::{btree_map::Entry, BTreeMap, BTreeSet};
 
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
@@ -20,7 +22,7 @@ use super::planning::ProviderEvidence;
 use super::planning_changes::PlanningChanges;
 use super::SqliteStore;
 
-const ASSOCIATION_PROJECTION_PENDING: &str = "correspondence retained; relationship and receipt composition is unfinished; exchange and effects remain held";
+const ASSOCIATION_PROJECTION_PENDING: &str = "correspondence retained; public Git/Linear composition is unverified; exchange and effects remain held";
 
 const SHARING_PROJECTION_PENDING: &str = "peer projection skipped by sharing hold; import required";
 
@@ -546,6 +548,16 @@ impl SqliteStore {
                 ),
                 Err(error) => return Err(error),
             };
+            let (records, recovery_error) = match export_in(&tx, repo, &id)
+                .and_then(|snapshot| recovery::records(&tx, repo, snapshot))
+            {
+                Ok(records) => (records, None),
+                Err(StoreError::InvalidData(_) | StoreError::Serde(_)) => (
+                    Vec::new(),
+                    Some("Recovery values unavailable: retained planning is invalid; nothing changed.".into()),
+                ),
+                Err(error) => return Err(error),
+            };
             statuses.push(PeerPlanningStatus {
                 id,
                 reference: row.get(1)?,
@@ -560,6 +572,8 @@ impl SqliteStore {
                 pending_local,
                 local_error,
                 conflicts,
+                records,
+                recovery_error,
             });
         }
         drop(rows);
@@ -8996,6 +9010,43 @@ mod tests {
             uncertain.id
         );
         assert_eq!(comment_receipt(&target, &comment.id), comment_before);
+        let revision_before = target.revisions().unwrap();
+        let export_before = export(&target, "/target");
+        for _ in 0..2 {
+            let status = target.peer_planning_status("/target").unwrap().remove(0);
+            assert_eq!(status.recovery_error, None);
+            for id in [
+                local.id.as_str(),
+                local.project_id.as_str(),
+                private.id().as_str(),
+                &comment.id,
+            ] {
+                let record = status.records.iter().find(|r| r.object.id == id).unwrap();
+                assert_eq!(record.destination, None);
+            }
+            let saved = status
+                .records
+                .iter()
+                .find(|r| r.object.id == comment.id)
+                .unwrap();
+            assert_eq!(
+                saved
+                    .values
+                    .iter()
+                    .find(|v| v.field == "content")
+                    .unwrap()
+                    .author,
+                Some(comment.author.clone())
+            );
+            assert_eq!(target.revisions().unwrap(), revision_before);
+            assert_eq!(export(&target, "/target"), export_before);
+            assert_eq!(execution_rows(&target), execution);
+            assert_eq!(comment_receipt(&target, &comment.id), comment_before);
+            assert_eq!(
+                target.pending_task_state(&local.id).unwrap().unwrap().id,
+                uncertain.id
+            );
+        }
         // Retention alone is not observation. The common acquisition writer now
         // reads the same fact, even though its value/revision was already local.
         target.put_pm_snapshot(&local_row).unwrap();

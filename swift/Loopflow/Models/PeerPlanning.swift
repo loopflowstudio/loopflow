@@ -15,9 +15,12 @@ public struct PeerPlanningStatus: Decodable, Sendable, Equatable, Identifiable {
     public let pendingLocal: Bool?
     public let localError: String?
     public let conflicts: [PeerProjectionConflict]
+    public let records: [PeerPlanningRecord]
+    public let recoveryError: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, reference, active, conflicts
+        case id, reference, active, conflicts, records
+        case recoveryError = "recovery_error"
         case selectedRecords = "selected_records"
         case importedRevision = "imported_revision"
         case fetchedRevision = "fetched_revision"
@@ -38,4 +41,42 @@ public struct PeerProjectionConflict: Decodable, Sendable, Equatable {
 
     public let object: Object
     public let reason: String
+}
+
+/// Read-only local recovery; these records are never a publication payload.
+public struct PeerPlanningRecord: Decodable, Sendable, Equatable, Identifiable {
+    public let object: PeerProjectionConflict.Object
+    public let localID: String
+    public let destination: String?
+    public let references: [PeerProjectionConflict.Object]
+    public let values: [PeerPlanningValue]
+    public var id: String { "\(object.kind):\(object.id)" }
+
+    enum CodingKeys: String, CodingKey {
+        case object, destination, references, values
+        case localID = "local_id"
+    }
+}
+
+public struct PeerPlanningValue: Decodable, Sendable, Equatable, Identifiable {
+    public let id: String
+    public let field: String
+    public let valueJSON: String
+    public let candidate: Bool
+    public let author: TaskCommentAuthor?
+    public let observedAt: Int64?
+
+    enum CodingKeys: String, CodingKey {
+        case id, field, candidate, author
+        case valueJSON = "value_json"
+        case observedAt = "observed_at"
+    }
+
+    public var authorLabel: String {
+        switch author {
+        case let .person(name): name ?? "Unknown person"
+        case .integration: "Integration"
+        case nil: "Unknown"
+        }
+    }
 }

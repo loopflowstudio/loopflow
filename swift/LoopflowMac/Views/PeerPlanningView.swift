@@ -49,11 +49,43 @@ struct PeerPlanningView: View {
             if let error = destination.localError { Text(error) }
             if let error = destination.acquisitionError { Text(error) }
             if let error = destination.publicationError { Text(error) }
+            if let error = destination.recoveryError { Text(error) }
             ForEach(destination.conflicts.indices, id: \.self) { index in
                 let conflict = destination.conflicts[index]
                 Text("Held \(conflict.object.kind) \(conflict.object.id): \(conflict.reason)")
             }
+            ForEach(destination.records) { record in
+                recovery(record, destination: destination.id)
+            }
         }
         .accessibilityIdentifier("peer-planning-\(destination.id)")
+    }
+
+    private func recovery(_ record: PeerPlanningRecord, destination: String) -> some View {
+        DisclosureGroup("\(record.object.kind) \(record.object.id)") {
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                if let selected = record.destination {
+                    Text(selected == destination ? "Selected here" : "Not selected here; selected in \(selected)")
+                } else {
+                    Text("Local only; not selected")
+                }
+                if record.localID != record.object.id {
+                    Text("Resolves to \(record.localID) (execution stays local)")
+                }
+                ForEach(record.references.indices, id: \.self) { index in
+                    let reference = record.references[index]
+                    Text("Retained reference: \(reference.kind) \(reference.id)")
+                }
+                ForEach(record.values) { value in
+                    VStack(alignment: .leading, spacing: Spacing.xs) {
+                        Text("\(value.field): \(value.candidate ? "candidate, not confirmed" : "retained alternative")")
+                        Text(value.valueJSON)
+                        Text("Mutation: \(value.id); author: \(value.authorLabel)")
+                    }
+                }
+                Text("Inspection changes nothing. Copy a retained value into an ordinary edit to save it again. Selecting a Wave can share its retained history.")
+            }
+        }
+        .accessibilityIdentifier("peer-recovery-\(record.object.id)")
     }
 }

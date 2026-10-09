@@ -48,9 +48,11 @@ CREATE TABLE planning_peer_conflicts (
     PRIMARY KEY(kind,object_id,reason)
 );
 
-CREATE TRIGGER store_revision_peer_conflicts_insert AFTER INSERT ON planning_peer_conflicts
+CREATE TRIGGER store_revision_planning_peer_conflicts_insert AFTER INSERT ON planning_peer_conflicts
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
-CREATE TRIGGER store_revision_peer_conflicts_update AFTER UPDATE ON planning_peer_conflicts
+CREATE TRIGGER store_revision_planning_peer_conflicts_update AFTER UPDATE ON planning_peer_conflicts
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+CREATE TRIGGER store_revision_planning_peer_conflicts_delete AFTER DELETE ON planning_peer_conflicts
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
 
 CREATE TRIGGER peer_wave_insert AFTER INSERT ON waves

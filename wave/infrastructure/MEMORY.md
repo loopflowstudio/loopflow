@@ -640,10 +640,12 @@ and destination-specific refs. Causality precedes Linear preference, then clock/
 losers survive. Rust and installed behavior remain unverified. Ref-rejection fixtures
 must target the selected ref, not its retired root. Destination binding, safe joining,
 foreground exchange/presentation and legacy-ID association remain unfinished.
-Projection conflicts now retain rejected records while independent objects commit;
-checkpoints acknowledge retention, not full projection. Rust proof, legacy association
-and composed Linear/execution preservation remain required. Design: `scratch/work-on-another-machine-name.md`;
-earlier evidence: `5d336868f`, this heading.
+Projection conflicts retain rejected records while independent objects commit;
+checkpoints acknowledge retention, not full projection. Compression separates receipt
+retention from projection and repairs conflict revision-trigger coverage. SQL replay
+is not Rust or public-entry proof; composed Linear/execution preservation remains
+required. Design: `scratch/work-on-another-machine-name.md`; prior evidence:
+`81fcf66e3`, this heading.
 
 ## Synced planning integration (LOO-334)
 

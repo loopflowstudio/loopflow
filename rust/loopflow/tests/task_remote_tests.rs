@@ -31,22 +31,6 @@ fn source(branch: &str, commit: &str) -> String {
         .to_string()
 }
 
-fn repository() -> TestRepo {
-    let repo = TestRepo::new();
-    repo.create_file(
-        ".lf/config.yaml",
-        "pm:\n  provider: linear\n  linear_team: team-1\n",
-    );
-    repo.create_file(
-        "wave/product/GOAL.md",
-        "---\npm:\n  linear_initiative: initiative-1\n---\nKeep working.\n",
-    );
-    repo.stage_all();
-    repo.commit("Repository planning");
-    repo.push();
-    repo
-}
-
 #[test]
 fn machine_selector_runs_a_skill_in_the_peer_imported_checkout_and_reuses_it() {
     let repo = TestRepo::new();
@@ -283,7 +267,8 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"inspected"
 
 #[test]
 fn missing_remote_branch_or_commit_is_named_without_creating_a_task() {
-    let repo = repository();
+    let repo = TestRepo::new();
+    repo.push();
     let home = tempfile::tempdir().unwrap();
     let _env = support::EnvGuard::with_lf_home(&[], home.path());
     let runtime = tokio::runtime::Runtime::new().unwrap();

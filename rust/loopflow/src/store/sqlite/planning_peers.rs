@@ -39,36 +39,7 @@ impl SqliteStore {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let saved = export_in(&tx, repo)?;
         let merged = saved.merge(incoming).map_err(invalid)?;
-        // Check identities against the whole store, not only this repository.
-        {
-            let mut query = tx.prepare_cached(
-                "SELECT kind,object_id,field,value,clock,linear,parents FROM planning_peer_changes WHERE id=?1",
-            )?;
-            for (id, change) in &incoming.changes {
-                let mut rows = query.query([id])?;
-                if let Some(row) = rows.next()? {
-                    if read_mutation(row)? != *change {
-                        return Err(invalid(format!(
-                            "planning change {id} has conflicting contents"
-                        )));
-                    }
-                }
-            }
-        }
-        let mut added: Vec<_> = incoming
-            .changes
-            .iter()
-            .filter(|(id, _)| !saved.changes.contains_key(*id))
-            .collect();
-        added.sort_by_key(|(id, change)| (change.clock, *id));
-        for (id, change) in added {
-            tx.execute(
-                "INSERT OR IGNORE INTO planning_peer_changes(id,kind,object_id,field,value,clock,linear,parents)
-                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
-                params![id,change.object.kind.as_str(),change.object.id,change.field,
-                    change.value.to_string(),change.clock,change.linear,serde_json::to_string(&change.parents)?],
-            )?;
-        }
+        retain_mutations(&tx, &saved, incoming)?;
         tx.execute("UPDATE planning_peer_context SET importing=1", [])?;
         let objects = merged.resolved();
         for (object, fields) in &objects {
@@ -85,11 +56,7 @@ impl SqliteStore {
                 }
                 PlanningKind::Comment => {}
             }
-        }
-
-        // Validate repository ownership before retaining any object. Pending
-        // projections have an owner even when their row could not be created.
-        for object in objects.keys() {
+            // Pending projections retain ownership even without a live row.
             require_repository(&tx, object, repo)?;
         }
         let mut conflicts = BTreeSet::new();
@@ -125,11 +92,11 @@ impl SqliteStore {
             if object.kind != PlanningKind::Wave || !exists(&tx, object)? {
                 continue;
             }
-            let selection = BTreeMap::from([(
-                "current_project_id".to_string(),
-                fields["current_project_id"].clone(),
-            )]);
-            match project_in(&tx, object, &selection) {
+            match project_fields(
+                &tx,
+                object,
+                std::iter::once(("current_project_id", &fields["current_project_id"])),
+            ) {
                 Ok(()) => {}
                 Err(error) if projection_conflict(&error) => {
                     conflicts.insert((object.clone(), error.to_string()));
@@ -170,6 +137,50 @@ impl SqliteStore {
         .optional()
         .map_err(Into::into)
     }
+}
+
+fn retain_mutations(
+    conn: &Connection,
+    saved: &PlanningSnapshot,
+    incoming: &PlanningSnapshot,
+) -> StoreResult<()> {
+    let mut added: Vec<_> = incoming
+        .changes
+        .iter()
+        .filter(|(id, _)| !saved.changes.contains_key(*id))
+        .collect();
+    added.sort_by_key(|(id, change)| (change.clock, *id));
+    // Merge checked this repository's identities. New receipts must also
+    // agree with any identity retained elsewhere in the same store.
+    let mut query = conn.prepare_cached(
+        "SELECT kind,object_id,field,value,clock,linear,parents FROM planning_peer_changes WHERE id=?1",
+    )?;
+    for (id, change) in added {
+        let mut rows = query.query([id])?;
+        if let Some(row) = rows.next()? {
+            if read_mutation(row)? != *change {
+                return Err(invalid(format!(
+                    "planning change {id} has conflicting contents"
+                )));
+            }
+            continue;
+        }
+        conn.execute(
+            "INSERT INTO planning_peer_changes(id,kind,object_id,field,value,clock,linear,parents)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
+            params![
+                id,
+                change.object.kind.as_str(),
+                change.object.id,
+                change.field,
+                change.value.to_string(),
+                change.clock,
+                change.linear,
+                serde_json::to_string(&change.parents)?
+            ],
+        )?;
+    }
+    Ok(())
 }
 
 fn export_in(conn: &Connection, repo: &str) -> StoreResult<PlanningSnapshot> {
@@ -314,11 +325,19 @@ fn insert_and_project(
             }
         }
     }
-    let mut fields = fields.clone();
     if object.kind == PlanningKind::Wave {
-        fields.remove("current_project_id");
+        validate_wave(conn, object, fields, repo)?;
     }
-    project_in(conn, object, &fields)?;
+    project_fields(
+        conn,
+        object,
+        fields
+            .iter()
+            .filter(|(field, _)| {
+                object.kind != PlanningKind::Wave || *field != "current_project_id"
+            })
+            .map(|(field, value)| (field.as_str(), value)),
+    )?;
     require_repository(conn, object, repo)
 }
 
@@ -393,41 +412,43 @@ fn reconcile_conflicts(
     Ok(())
 }
 
-fn project_in(
+fn validate_wave(
     conn: &Connection,
     object: &PlanningObject,
     fields: &BTreeMap<String, Value>,
+    repo: &str,
 ) -> StoreResult<()> {
-    if object.kind == PlanningKind::Wave && fields.contains_key("name") {
-        let id = crate::id::WaveId::parse(&object.id).map_err(invalid)?;
-        let name = fields["name"]
-            .as_str()
-            .ok_or_else(|| invalid("Wave name must be text"))?;
-        let parent = fields["parent_wave_id"]
-            .as_str()
-            .map(crate::id::WaveId::parse)
-            .transpose()
-            .map_err(invalid)?;
-        let repo: String =
-            conn.query_row("SELECT repo FROM waves WHERE id=?1", [&object.id], |r| {
-                r.get(0)
-            })?;
-        super::validate_wave_parent(conn, &id, name, &repo, parent.as_ref()).map_err(|error| {
-            // Validation reads only live parents. A missing or retired parent is
-            // an unresolved relationship, not an operational failure of the import.
-            if matches!(
-                error,
-                StoreError::Sqlite(rusqlite::Error::QueryReturnedNoRows)
-            ) {
-                invalid("Wave parent is unavailable")
-            } else {
-                error
-            }
-        })?;
-    }
+    let id = crate::id::WaveId::parse(&object.id).map_err(invalid)?;
+    let name = fields["name"]
+        .as_str()
+        .ok_or_else(|| invalid("Wave name must be text"))?;
+    let parent = fields["parent_wave_id"]
+        .as_str()
+        .map(crate::id::WaveId::parse)
+        .transpose()
+        .map_err(invalid)?;
+    super::validate_wave_parent(conn, &id, name, repo, parent.as_ref()).map_err(|error| {
+        // Validation reads only live parents. A missing or retired parent is
+        // an unresolved relationship, not an operational failure of the import.
+        if matches!(
+            error,
+            StoreError::Sqlite(rusqlite::Error::QueryReturnedNoRows)
+        ) {
+            invalid("Wave parent is unavailable")
+        } else {
+            error
+        }
+    })
+}
+
+fn project_fields<'a>(
+    conn: &Connection,
+    object: &PlanningObject,
+    fields: impl IntoIterator<Item = (&'a str, &'a Value)>,
+) -> StoreResult<()> {
     let mut columns = BTreeMap::new();
     for (field, value) in fields {
-        if matches!(field.as_str(), "disposition" | "content") {
+        if matches!(field, "disposition" | "content") {
             // The merged snapshot has already validated names and grouped values.
             columns.extend(
                 value
@@ -437,7 +458,7 @@ fn project_in(
                     .map(|(key, value)| (key.as_str(), value)),
             );
         } else {
-            columns.insert(field.as_str(), value);
+            columns.insert(field, value);
         }
     }
     let assignments = columns

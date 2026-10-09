@@ -621,33 +621,35 @@ acceptance remain at
 
 ## Tasks across machines (LOO-412, 2026-10-09)
 
-Jack Heart selected custom-ref sync under Plan ownership. Review-only; no landing or real public-remote planning export. Joining publishes nothing.
-Malformed input aborts import; contradictions isolate objects. Entity revisions
-never order relationships. Execution stays local.
+Jack Heart selected custom-ref sync under Plan ownership. Review-only; no landing
+or real public-remote planning export. Joining publishes nothing. Malformed input
+aborts import; contradictions isolate objects. Execution stays local.
 
 Common owners retain disposition, comments/authorship without steer/echo and semantic
 Project content. Selected Linear winners retire losers; unchanged acquisition preserves
-saves. Lookup and launch freshness stay separate. October 9 Task creation readback
-settles captured saves after mapping-only import, retaining later saves and uncertain
-attempts. Creation/link attempt transport remains unfinished.
+saves. Mapping is not acknowledgement: accepted Task creation readback reconciles
+only captured saves on an existing receipt, retaining later saves and uncertainty.
+Creation/link attempt transport and Project readback remain unfinished.
 
-Peer acquisition retains provider age. Missing inventory is not negative membership;
-archive, unresolved membership and configured-Initiative contradictions still block.
-Imports stay unplaced; local placement uses this machine for an unplaced parent,
-preserving existing placements.
-Linux peer-storage proofs cover conflicts, receipts and execution preservation;
-public work-watch covers cold creation, offline edits/comments/completion and reconnect.
-Neither proves connected-Linear, SSH or installed acceptance. Checkpoint CI skips
-product suites with scratch.
+Peer acquisition retains provider age. Entity revisions never order relationships;
+missing inventory is not negative membership. Archive, unresolved membership and
+configured-Initiative contradictions still block. Lookup and launch freshness stay
+separate. Imports stay unplaced; first local placement uses this machine for an
+unplaced parent and preserves existing placements.
 
-Fetch/import/publication stay separate; worker-held effect locks block neither saves
-nor acquisition. Damaged journals retain unknown pending state and receipts/conflicts
-without hiding independent plans.
-Private moves hold whole histories/dependents, including retained Git documents, until
-explicit selection; omission is not convergence. Recovery/losing-edit UX needs review.
-Order/deletion receipts, alternate paths, relationship ordering, legacy association and
-Desktop remain before enabling mixed-provider exchange. Installed acceptance is unproved. Earlier evidence: `a6cb48664:wave/infrastructure/MEMORY.md`, this heading.
-Design: `scratch/work-on-another-machine-name.md`.
+Linux storage and public work-watch proofs cover offline planning, reconnect and
+execution preservation, not connected-Linear, SSH or installed acceptance. Storage
+passes do not certify later Task-admission changes. Checkpoint CI skips product
+suites with scratch.
+
+Fetch/import/publication stay separate; worker-held effect locks block neither
+saves nor acquisition. Damaged journals retain unknown pending state without hiding
+independent plans. Private moves hold whole histories/dependents, including retained
+Git documents, until explicit selection; omission is not convergence. Recovery and
+losing-edit UX need review. Order/deletion receipts, alternate paths, relationship
+ordering, legacy association and Desktop remain before mixed-provider activation.
+Design: `scratch/work-on-another-machine-name.md`; earlier evidence:
+`a6cb48664:wave/infrastructure/MEMORY.md`, this heading.
 
 ## Synced planning integration (LOO-334)
 

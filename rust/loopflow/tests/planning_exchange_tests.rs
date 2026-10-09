@@ -247,3 +247,63 @@ fn provider_observations_cannot_smuggle_execution_or_invalid_revisions() {
         .body["revision"] = json!("not-a-revision");
     assert!(snapshot.to_bytes().is_err());
 }
+
+#[test]
+fn cross_origin_observation_retains_portable_causality_without_redirecting_identity() {
+    let mut snapshot = PlanningSnapshot::default();
+    write(&mut snapshot, "peer", "issue_title", "Observed", 1, true);
+    snapshot.changes.get_mut("peer").unwrap().object.id = "task-peer".into();
+    let mut observation = snapshot.changes["peer"].clone();
+    observation.object.id = "task-existing".into();
+    observation.clock = 2;
+    observation.linear.as_mut().unwrap().observed_at = 10;
+    observation.parents.insert("peer".into());
+    snapshot.changes.insert("observed-here".into(), observation);
+    write(
+        &mut snapshot,
+        "save",
+        "issue_title",
+        "Next local save",
+        3,
+        false,
+    );
+    let exchanged = PlanningSnapshot::from_bytes(&snapshot.to_bytes().unwrap()).unwrap();
+    assert_eq!(
+        exchanged.changes["save"].parents,
+        BTreeSet::from(["observed-here".into()])
+    );
+    assert_eq!(
+        exchanged.changes["observed-here"].parents,
+        BTreeSet::from(["peer".into()])
+    );
+    assert_eq!(
+        exchanged.heads().map(|(id, _)| id).collect::<Vec<_>>(),
+        ["peer", "save"]
+    );
+    assert_eq!(snapshot.merge(&exchanged).unwrap(), snapshot);
+
+    // Neither equal values nor another provider/revision can grant cross-origin
+    // causality. The exact accepted fact is the proof, not the local association.
+    for field in ["id", "revision"] {
+        let mut unrelated = snapshot.clone();
+        unrelated
+            .changes
+            .get_mut("observed-here")
+            .unwrap()
+            .linear
+            .as_mut()
+            .unwrap()
+            .body[field] = json!(if field == "revision" {
+            "2026-10-08T11:00:00Z"
+        } else {
+            "another-provider"
+        });
+        assert!(unrelated.to_bytes().is_err());
+    }
+    let mut unobserved = snapshot.clone();
+    unobserved.changes.get_mut("observed-here").unwrap().linear = None;
+    assert!(unobserved.to_bytes().is_err());
+    let mut missing = snapshot;
+    missing.changes.remove("peer");
+    assert!(missing.to_bytes().is_err());
+}

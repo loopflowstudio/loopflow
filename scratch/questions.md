@@ -140,27 +140,12 @@ remain separate. No new product decision is selected.
   unfinished.
   No new product policy is selected.
 
-- October 9 effect-eligibility choice: a rejected or sharing-held peer object
-  cannot authorize a new common field/deletion, creation/link, state or ordering
-  effect from its incomplete local receipts. Check existing conflict receipts,
-  including skipped imports, inside the attempt transaction without blocking saves
-  or acquisition. No new effect queue or automatic retry is introduced. A newer
-  acquisition cannot erase the conflict; successful import must incorporate the
-  retained attempts first. This conservative object-level deferral is an internal
-  composition choice, not a new product policy. Mixed-provider exchange remains
-  disabled. Creation-column ownership rationale remains at
-  `cdec83fe8:scratch/questions.md`, October 9 receipt transport, and in the design.
-
-- October 9 foreground/deletion choices are implemented, not new product policy:
-  one common export view exposes unprepared plans and explicit acknowledgement;
-  acquisition never places work. Optional `deletion:<receipt-id>` journal fields
-  transport common receipts with original save times, baselines and monotonic
-  attempts/acknowledgements. Common visibility reconciliation replaces sequence
-  selection. Unordered active/trash evidence isolates projection; no inferred
-  deletion settlement. Full rationale and prior checks:
-  `225b8c95f:scratch/questions.md`, final two entries. The current design owns
-  remaining public invalidation verification and presentation work;
-  mixed-provider exchange remains disabled.
+- Effect-eligibility and deletion representation choices are consolidated in the
+  design's implemented boundaries; full rationale remains at
+  `de3c84b08:scratch/questions.md`, the October 9 effect-eligibility and
+  foreground/deletion entries. Holds defer effects, never saves/acquisition;
+  common receipts retain original times, baselines, uncertainty and explicit
+  acknowledgements. No new product policy is selected.
 
 - Ordering choices and counterexamples live in the design's
   **Implemented boundaries, not remaining implementation**, Ordering; detailed
@@ -182,7 +167,10 @@ remain separate. No new product decision is selected.
   --with <local-id> --linear <provider-id>` uses retained scalar mapping evidence,
   not names or creation inputs. Exact local rows retain execution ownership; an
   absent incoming full ID can resolve to that owner. Correspondence never enrolls
-  either side or clears projection/effect conflicts. Joint projection remains
-  held pending cross-origin causal and receipt composition, not a new product
-  policy. Review found that lookup must recheck the local mapping and repository;
-  changed routing cannot silently reuse a stale association.
+  either side or clears projection/effect conflicts. Ordinary import now retains
+  each associated creation receipt under its original ID on the local owner;
+  no physical identity or captured input is reassigned. Common acquisition owns
+  exact readback. Joint scalar/relationship projection stays held. Lookup rechecks
+  local mapping/repository and contradictory incoming scalar claims. This is a
+  reversible composition choice, not new policy. Tests now enter through ordinary
+  association/import/acquisition; execution remains gate-deferred.

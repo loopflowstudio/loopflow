@@ -241,13 +241,23 @@ pub(super) fn capture_project_content(conn: &Connection, project: &ProjectId) ->
                     })
             })
         });
-        if unchanged && frontier_retained {
+        let missing_origin = linear.is_some() && conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM planning_peer_capture_heads h
+             JOIN planning_peer_changes c ON c.id=h.id
+             WHERE h.kind='project' AND h.object_id=?1 AND h.field=?2 AND c.object_id!=?1
+             AND NOT EXISTS(SELECT 1 FROM planning_peer_heads own JOIN planning_peer_changes saved ON saved.id=own.id
+                 JOIN json_each(saved.parents) parent ON parent.value=h.id
+                 WHERE own.kind=h.kind AND own.object_id=h.object_id AND own.field=h.field))",
+            params![project.as_str(), field], |row| row.get(0),
+        )?;
+        if unchanged && frontier_retained && !missing_origin {
             continue;
         }
         conn.execute("INSERT INTO planning_peer_changes(id,kind,object_id,field,value,clock,linear,parents)
             SELECT lower(hex(randomblob(16))),'project',?1,?2,?3,
                 max(CAST(unixepoch('subsec')*1000 AS INTEGER),COALESCE((SELECT max(clock)+1 FROM planning_peer_changes),0)),?4,
-                (SELECT json_group_array(id) FROM planning_peer_heads WHERE kind='project' AND object_id=?1 AND field=?2)",
+                (SELECT json_group_array(h.id) FROM planning_peer_capture_heads h JOIN planning_peer_changes c ON c.id=h.id
+                    WHERE h.kind='project' AND h.object_id=?1 AND h.field=?2 AND (c.object_id=?1 OR ?4 IS NOT NULL))",
             params![project.as_str(),field,value.to_string(),linear.map(serde_json::to_string).transpose()?])?;
     }
     Ok(())
@@ -1127,7 +1137,13 @@ fn selection_conflicts(
 ) -> StoreResult<BTreeMap<PlanningObject, String>> {
     let mut dependents: BTreeMap<PlanningObject, BTreeSet<&PlanningObject>> = BTreeMap::new();
     for change in snapshot.changes.values() {
-        for parent in references(change) {
+        for parent in references(change).into_iter().chain(
+            change
+                .parents
+                .iter()
+                .map(|id| snapshot.changes[id].object.clone())
+                .filter(|parent| parent != &change.object),
+        ) {
             dependents.entry(parent).or_default().insert(&change.object);
         }
     }
@@ -1139,6 +1155,10 @@ fn selection_conflicts(
     }
     let mut held = BTreeMap::new();
     for object in snapshot.objects() {
+        if member_destination(conn, repo, object)?.as_deref() != Some(destination) {
+            held.insert(object.clone(), "planning exchange held: causal predecessor is outside this selection; private history is retained".into());
+            pending.insert(object.clone());
+        }
         if belongs_elsewhere(conn, object, repo)? {
             held.insert(object.clone(), "planning exchange held: record moved outside this repository; local work and peer history are retained".into());
             pending.insert(object.clone());
@@ -1235,9 +1255,17 @@ fn export_selected(
 
 fn export_in(conn: &Connection, repo: &str, destination: &str) -> StoreResult<PlanningSnapshot> {
     require_destination(conn, repo, destination)?;
-    let mut query = conn.prepare("SELECT c.kind,c.object_id,c.field,c.value,c.clock,c.linear,c.parents,c.id
-        FROM planning_peer_changes c JOIN planning_members m ON m.kind=c.kind AND m.object_id=c.object_id
-        WHERE m.repo=?1 AND m.destination=?2")?;
+    let mut query = conn.prepare(
+        "WITH RECURSIVE origins(kind,object_id) AS (
+        SELECT kind,object_id FROM planning_members WHERE repo=?1 AND destination=?2
+        UNION
+        SELECT parent.kind,parent.object_id FROM origins o
+        JOIN planning_peer_changes c ON c.kind=o.kind AND c.object_id=o.object_id
+        JOIN json_each(c.parents) link
+        JOIN planning_peer_changes parent ON parent.id=link.value
+    ) SELECT c.kind,c.object_id,c.field,c.value,c.clock,c.linear,c.parents,c.id
+        FROM planning_peer_changes c JOIN origins o ON o.kind=c.kind AND o.object_id=c.object_id",
+    )?;
     let mut snapshot = PlanningSnapshot::default();
     let mut rows = query.query(params![repo, destination])?;
     while let Some(row) = rows.next()? {
@@ -1245,13 +1273,13 @@ fn export_in(conn: &Connection, repo: &str, destination: &str) -> StoreResult<Pl
     }
     snapshot.validate().map_err(invalid)?;
     let mut query = conn.prepare(
-        "SELECT h.id FROM planning_peer_heads h
-         JOIN planning_peer_changes c ON c.id=h.id
-         JOIN planning_members m ON m.kind=c.kind AND m.object_id=c.object_id
-         WHERE m.repo=?1 AND m.destination=?2",
+        "SELECT h.id FROM json_each(?1) o JOIN planning_peer_heads h
+         ON h.kind=json_extract(o.value,'$.kind') AND h.object_id=json_extract(o.value,'$.id')",
     )?;
     let actual = query
-        .query_map(params![repo, destination], |row| row.get::<_, String>(0))?
+        .query_map([serde_json::to_string(&snapshot.objects())?], |row| {
+            row.get::<_, String>(0)
+        })?
         .collect::<Result<BTreeSet<_>, _>>()?;
     if !snapshot
         .heads()
@@ -7283,6 +7311,135 @@ mod tests {
             )
             .unwrap());
         }
+    }
+
+    #[test]
+    fn associated_readback_captures_foreign_predecessor_without_sharing_private_history() {
+        use crate::engine::planning_exchange::{PlanningKind, PlanningObject};
+
+        let (_source_home, source) = store();
+        let (_, row, incoming_task) = linear_seed(&source);
+        let incoming_project = source.task(&incoming_task).unwrap().unwrap().project_id;
+        let incoming = export(&source, "/source");
+        let (_target_home, target) = store();
+        let private = Wave::new(WaveId::new(), "private".into(), "/target".into());
+        target.create_wave(&private).unwrap();
+        let mut local_row = row.clone();
+        local_row.wave_id = private.id().clone();
+        target.put_pm_snapshot(&local_row).unwrap();
+        let local = target
+            .task_by_issue(&row.snapshot.items[0].id)
+            .unwrap()
+            .unwrap();
+        preserve_execution(&target, private.id(), &local.id);
+        let execution = execution_rows(&target);
+        import(&target, "/target", "incoming", &incoming);
+        for (kind, origin, owner, provider) in [
+            (
+                PlanningKind::Task,
+                incoming_task.as_str(),
+                local.id.as_str(),
+                row.snapshot.items[0].id.as_str(),
+            ),
+            (
+                PlanningKind::Project,
+                incoming_project.as_str(),
+                local.project_id.as_str(),
+                row.snapshot.projects[0].id.as_str(),
+            ),
+        ] {
+            target
+                .associate_peer_planning(
+                    "/target",
+                    &PlanningObject {
+                        kind,
+                        id: origin.into(),
+                    },
+                    owner,
+                    provider,
+                )
+                .unwrap();
+        }
+        // Retention alone is not observation. The common acquisition writer now
+        // reads the same fact, even though its value/revision was already local.
+        target.put_pm_snapshot(&local_row).unwrap();
+        edit_title(&target, &local.id, "After observed peer fact");
+        target
+            .edit_project(&local.project_id, Some("After observed Project fact"), None)
+            .unwrap();
+        assert_eq!(execution_rows(&target), execution);
+        assert!(!export(&target, "/target")
+            .objects()
+            .iter()
+            .any(|o| o.id == local.id.as_str()
+                || o.id == local.project_id.as_str()
+                || o.id == private.id().as_str()));
+
+        // An explicit selection makes the retained journal inspectable here; it
+        // still cannot release the association hold or publish private parents.
+        target
+            .select_peer_waves(
+                "/target",
+                &destination(),
+                std::slice::from_ref(private.id()),
+            )
+            .unwrap();
+        let retained =
+            super::export_in(&target.conn.lock().unwrap(), "/target", &destination()).unwrap();
+        let exchanged = PlanningSnapshot::from_bytes(&retained.to_bytes().unwrap()).unwrap();
+        // An unchanged readback must preserve the subsequent local intention,
+        // without relabeling it as Linear or repeatedly capturing the bridge.
+        target.put_pm_snapshot(&local_row).unwrap();
+        assert_eq!(
+            super::export_in(&target.conn.lock().unwrap(), "/target", &destination()).unwrap(),
+            retained
+        );
+        for (kind, origin, owner, field, value) in [
+            (
+                PlanningKind::Task,
+                incoming_task.as_str(),
+                local.id.as_str(),
+                "issue_title",
+                "After observed peer fact",
+            ),
+            (
+                PlanningKind::Project,
+                incoming_project.as_str(),
+                local.project_id.as_str(),
+                "project_name",
+                "After observed Project fact",
+            ),
+        ] {
+            let (_, saved) = exchanged
+                .winners()
+                .find(|(_, c)| c.object.id == owner && c.field == field)
+                .unwrap();
+            assert_eq!(saved.value, value);
+            let baseline = super::linear_predecessor(&exchanged, saved).unwrap();
+            let (peer_id, peer) = incoming
+                .winners()
+                .find(|(_, c)| c.object.kind == kind && c.object.id == origin && c.field == field)
+                .unwrap();
+            assert_eq!(
+                baseline,
+                serde_json::json!({"value":peer.value,"revision":peer.linear.as_ref().unwrap().revision()})
+            );
+            assert!(saved
+                .parents
+                .iter()
+                .any(|id| exchanged.changes[id].parents.contains(peer_id)));
+            assert_eq!(exchanged.changes[peer_id], *peer);
+        }
+        import(&target, "/target", "repeat", &incoming);
+        assert_eq!(execution_rows(&target), execution);
+        assert_eq!(
+            super::export_in(&target.conn.lock().unwrap(), "/target", &destination()).unwrap(),
+            retained
+        );
+        assert!(!export(&target, "/target")
+            .objects()
+            .iter()
+            .any(|o| o.id == local.id.as_str() || o.id == local.project_id.as_str()));
     }
 
     #[test]

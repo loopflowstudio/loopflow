@@ -204,25 +204,22 @@ this heading. Keep these replacements deleted:
   one outstanding-head handler runs before and after scalar acquisition. Freshness
   reconciliation reads only the cached revision, not another complete entity body.
 
-Compression through `6442085a3` removes repeated provider-evidence decoding,
-parallel order-history maps, duplicate pre-settlement reads and Desktop reply
-reducers. Typed histories retain independent savepoints and original ages; order
-settlement rereads delivery eligibility after updates. Primary-only moves retain
-their exact input. Optional Wave placement stays distinct from execution's required
-placement. Desktop keeps one scope/generation fence and last-good reading reducer.
-Exact deletion inventory and focused results:
-`5b8eda933:scratch/work-on-another-machine-name.md`, this heading and **Acceptance
-for review**. These reductions add neither a planner nor execution authority.
+Earlier decoding, ordering, Desktop and test-helper reductions:
+`39dba32c1:scratch/work-on-another-machine-name.md`, **Delete — do not maintain**.
+Keep independent savepoints, original ages, exact order inputs, post-update effect
+eligibility and Desktop scope/generation fences. The derived
+`planning_peer_provider_claims` view owns retained mapping/creation predicates;
+issue-name fallback records no association. Item 3 remains unfinished.
 
-Test-only `export`/`import` helpers remove repeated successful-call plumbing, not
-assertions or failure-path checks. No predecessor path or second planner is added.
-Legacy association and acceptance remain below; omission and retained conflicts
-are not convergence. Delete duplicated retained-provider-claim predicates:
-`planning_peer_provider_claims` derives mapping and creation identities once from
-all journal history for both projection and effect acquisition. No materialized
-cache or second owner is added. Independent evidence retains its separate
-savepoints and identity validation. Review also corrected the resolver comment:
-issue-name fallback records no association; item 3 remains unfinished.
+Delete cloned head-value collections in `FieldHistory`: each decoded value now
+carries its head marker, with borrowed iteration for acquisition and order import.
+Scalar SQL projection uses `PlanningKind::fields`, not a second exclusion list
+of creation/deletion/order/evidence protocols. Receipt writers, all retained
+mutations and association holds remain unchanged; no joint projection is added.
+
+Delete the creation-origin fixture's direct `import_peer_receipts`/`attach_in`
+shortcut: ordinary association/import and common acquisition now exercise that
+boundary. Keep both origin IDs, captured inputs, uncertainty and private membership.
 
 Association and import share one conflict writer and one skipped-projection
 receipt. Delete diagnostic-text branching between association and sharing holds:
@@ -234,8 +231,9 @@ each Task/Project after reversed and repeated imports.
 
 ## Remaining integration — October 9
 
-Receipt origins (`19e31f64d`/`5e5786bff`) and explicit correspondence/full-ID lookup
-(`b414e8cce`) exist. `381c88fec` unifies skipped-projection holds, not projection.
+Receipt origins and full-ID correspondence exist. Ordinary import now projects
+associated creation receipts onto their local owner without releasing holds
+(`39dba32c1`).
 **Joint projection and association recovery remain unfinished**; item 3 owns
 the causal, relationship and receipt composition before lifting those holds.
 
@@ -438,19 +436,12 @@ invalidation) remain. The diagnostic is temporary, not product policy.
    implementation. The common receipt-origin cut below resolves storage multiplicity.
    Explicit correspondence/lookup now exists; joint projection and completed
    recovery do not.
-   Scalar peer imports also bypassed the mapping check used by independent
-   provider evidence. That check now precedes either acquisition or projection,
-   retaining contradictory mutations and independent progress. This is a
-   preservation repair, not association implementation.
-   October 9's cross-ID deferral cut repairs one of those boundaries:
-   common field/deletion, creation/link, state and ordering attempts consult active
-   conflicts against the same exact provider object, even when the rejected ID is
-   not the local mapped ID. Retained mapping history and creation inputs supply the
-   provider identity; a later null/replacement cannot mask its earlier claim.
-   Mapping validation uses the retained claims too, preventing a rejected incoming
-   ID from becoming a new creation candidate by clearing its winning mapping.
-   No new association, selection, lookup or execution authority is introduced.
-   Diagnostics name the rejected Work ID. Acquisition and saves remain independent.
+   Mapping validation precedes scalar and independent-evidence acquisition.
+   Common effect attempts consult cross-ID conflicts against retained provider
+   claims, including losing mappings and creation inputs; nulling a mapping
+   cannot release them. Saves/acquisition remain independent. These implemented
+   refusals are not association recovery; exact history:
+   `f2a5c94e8:scratch/work-on-another-machine-name.md`, item 3.
 
    **Receipt-origin cut — October 9, not a new product decision.**
    Common `planning_creations` now holds each original Task/Project creation and
@@ -465,11 +456,22 @@ invalidation) remain. The diagnostic is temporary, not product policy.
    pre-capture diagnostic loss: nullable captured input now preserves discovery
    failures through migration and status without inventing an attempt.
 
-   Prior direct receipt-helper fixtures and mapping-preserving readback limits:
-   `bf4c39b2e:scratch/work-on-another-machine-name.md`, item 3. They do not enter
-   correspondence or full journal import and prove no public origin settlement.
-   Readback of a different created provider object remains uncertain; no mapping
-   transfer or fabricated acknowledgement is authorized.
+   **October 9 receipt composition:** ordinary import consumes explicit
+   correspondence and projects each creation origin through the existing common
+   receipt writer, independently of the held scalar projection. Savepoints retain
+   contradictory operations without replacing receipts or stopping other objects.
+   Import suppression avoids echo; neither private selection nor execution moves.
+   No reassignment API is needed: correspondence already refuses physical incoming
+   rows. Lookup also rejects contradictory incoming scalar mappings.
+
+   The former direct-helper fixture is replaced by
+   `correspondence_import_retains_creation_origins_and_exact_readback`: both kinds,
+   reversed/repeated imports, retained uncertainty and captured inputs, private
+   membership, populated execution, and ordinary Store acquisition settling only
+   the exact origin. It also covers later contradictory mappings. Execution is
+   deferred below; this is not public Git/HTTPS or joint scalar acceptance.
+   Helper evidence: `de3c84b08`, this item. Readback of a
+   different created provider object cannot transfer mappings or settle receipts.
 
    `planning associate <incoming-id> --with <local-id> --linear <provider-id>`
    now records a machine-local correspondence using the incoming journal's
@@ -489,7 +491,7 @@ invalidation) remain. The diagnostic is temporary, not product policy.
    Its corrected `execution.task_id` assertion awaits rerun; `381c88fec`'s revised
    Store hold assertions remain gate-deferred.
 
-   Remaining association composes this owner with:
+   October 9 source reconciliation at `f2a5c94e8` leaves this implementation order:
    - Replace `insert_and_project`'s incoming-ID-only projection with deterministic
      planning projection across origins, preserving mutation IDs,
      causal heads, baselines and losers rather than last-projected-ID wins.
@@ -498,6 +500,11 @@ invalidation) remain. The diagnostic is temporary, not product policy.
      ID's heads. Grouping current winners alone would keep an observed peer Linear
      head concurrent with a later local save. Resolve cross-origin observation in
      the journal before enabling projection; a higher local clock alone is wrong.
+     `linear_predecessor` follows those same parents for delivery baselines.
+     Local correspondence alone is not portable causal evidence: exported saves
+     must retain valid predecessors without publishing an unselected origin.
+     Keep the journal, head index and import validator consistent; merely relaxing
+     the same-object check would accept unrelated predecessors.
    - Resolve planning references as well as the object being projected. Current
      `insert_and_project`/`project_comment` and post-pass Wave selection/order
      projection use incoming IDs directly. Associated parents may have no physical
@@ -505,9 +512,12 @@ invalidation) remain. The diagnostic is temporary, not product policy.
      to the local planning owner without rewriting journal values, captured effect
      inputs or execution foreign keys. Association alone changes no Wave selection.
      Import coverage must include relationships, not only full-ID lookup.
-   - Explicit receipt projection reassignment, if needed by correspondence, without
-     rewriting captured inputs or treating a different provider object as the
-     associated identity. Every origin still requires exact readback.
+   - Compose non-creation receipts against the resolved local owner.
+     `project_delivery_fields`, deletion import and order import still construct
+     owners from the incoming ID. Creation-origin retention does not repair these
+     paths. Preserve field/state mutation identities, deletion/order receipt IDs,
+     original inputs, baselines and uncertain losing attempts; relationship
+     resolution changes the local projection, not captured delivery inputs.
    - Independent private selection: associating private B with selected A cannot
      enroll B, its comments, losing edits or private parent references. Public
      recovery must explain the resulting hold.
@@ -518,6 +528,9 @@ invalidation) remain. The diagnostic is temporary, not product policy.
    planning winners, both IDs, losing edits, uncertain origins, populated execution
    and private-selection holds. Public provider readback must settle only its exact
    origin; lookup by either associated ID must preserve local execution ownership.
+   After observing a peer Linear winner, save locally and exchange again: the
+   receiver must retain the observed predecessor and delivery baseline, rather
+   than treating the save as concurrent or exporting private history.
 
    Earlier refusal/68-test coverage and limits:
    `381c88fec:scratch/work-on-another-machine-name.md`, item 3. Private ancestry,
@@ -665,7 +678,7 @@ and limitations: `9b59e9b71:scratch/work-on-another-machine-name.md`,
 **Acceptance for review**. They do not establish this ordering cut, public
 combined behavior or Desktop acceptance.
 
-Check: `git diff --check` passes (prose only); prior fmt/Clippy and resource-deferred build/correspondence checks: `381c88fec:scratch/work-on-another-machine-name.md`, **Acceptance for review**. Capable gate owns those checks and combined public acceptance.
+Check: `git diff --check` passes (prose only); preceding `cargo fmt`/`cargo clippy --all-targets -- -D warnings` passed, but resource recovery did not meet the build reserve; build, focused ordering/provider-evidence/correspondence execution and combined acceptance remain with capable gate.
 
 Earlier SQL proofs, macOS startup limitations and the retained historical Flow
 without a recorded exit remain at

@@ -194,6 +194,12 @@ this heading. Keep these replacements deleted:
   Provider/work-watch lifetimes drive exchange; each worker holds its effect lock
   through readback/status. Short saves commit and release planning locks first.
 
+- Parallel order-history/head maps and the second next-delivery selection query.
+  Each receipt owns its history and heads together; the common delivery view already
+  excludes superseded settled intentions. Projection reuses one membership read.
+- The peer validator's requirement to rewrite both sort keys. Common moves between
+  priority groups intentionally retain the secondary key; transport keeps that exact
+  input rather than inventing an additional write.
 - Status's intermediate `(DTO, digest)` vector and duplicated reconnect execution
   readers. Destination rows stream within the same read transaction. One fixture
   reader compares full rows and explicitly selected retained Process IDs; new CLI
@@ -206,12 +212,9 @@ and retained conflicts are not convergence.
 
 ## Remaining integration — October 9
 
-Creation implementation: `098de8033`, with parent `efc90abb1` integrated at
-`7b5a12e2b`. `a002e4060` implements the previous feedback's foreground creation
-request: discover unprepared peer-born plans, retain mapped uncertainty in acquisition
-and status, and acknowledge through common readback. Prepared receipt transport
-(`88cd47572`) is no longer the frontier. Remaining work is below, not another
-creation owner or a repeat implementation of discovery.
+Creation discovery/readback exists at `a002e4060`, with status assertions corrected
+at `098de8033`. Prepared receipt transport is no longer the frontier; the evidence
+below distinguishes public acquisition from storage-only proof.
 
 `84f8fb9d8` deletion receipt composition extends `planning_changes.rs`, not a peer-only
 delete writer. Each saved deletion has its own optional journal field keyed by the
@@ -246,14 +249,11 @@ Gate still owns the combined admission, cold-worker and provider-recovery candid
 parent integration does not establish peer composition.
 Destination-scoped status/conflicts (`de9470d5a`), common comment acquisition and
 receipts (`7e56c01fd`), and semantic Project content (`a518b985b`) are integrated.
-Their owners and preservation boundaries are described under **Delete — do not
-maintain** and item 4 below.
+Their boundaries are under **Delete — do not maintain** and item 4.
 
-Creation/link transport and discovery use `planning_export.rs` and the shared
-`planning_exports` view. Captured UUIDs, original parent/input, change IDs, attempts
-and acknowledgement remain together; no imported transition or mapping supplies
-acknowledgement. Later accepted moves remain legal; late errors cannot reopen
-matching acknowledgement. Detailed proof: `95e81c688:scratch/work-on-another-machine-name.md`,
+Creation/link discovery and receipts share `planning_export.rs` and
+`planning_exports`; mappings and imported transitions never acknowledge effects.
+Exact capture/readback proof: `95e81c688:scratch/work-on-another-machine-name.md`,
 **Remaining integration**.
 
 At `a002e4060`, the isolated Linux connected-provider fixture passed after importing
@@ -284,11 +284,14 @@ Executable feedback exposed two distinct presentation/execution boundaries:
   and absence. The public fixture retains the six-table comparison above that
   exposed this failure rather than relaxing it.
 
-Remaining composition, reconciled October 9 against `30b476328`:
+Remaining composition, reconciled October 9 against `5bed3a211`:
 
-`08a285872` implements the earlier iteration's effect repair. `30b476328`
-simplifies status and shares the fixture reader. Main's `d20c56daf` is integrated;
-remaining composition is not blocked on its writer.
+Ordering is implemented at `fcd64901f` and `357090d4b`; item 3 remains unimplemented. Retained-effect
+eligibility already exists at `08a285872`; `30b476328` shares its fixture reader.
+`5bed3a211` integrates main `3a0aa5ca4` (#1510), after the common writer's
+`d20c56daf`. Main adds chat Flow recipes and hierarchical names, not provider
+frontier transport. Earlier focused passes predate that merge; gate owns the
+combined launch/Flow candidate. The writer is integrated.
 
 1. **Retained-effect eligibility is implemented, with bounded proof.**
    Common field/deletion, creation/link, state and ordering attempt transactions
@@ -316,13 +319,24 @@ remaining composition is not blocked on its writer.
    Lists include private-history references in the existing sharing holds.
    Divergent effect chains or unordered baseline heads isolate projection.
    The two-store common-delivery fixture covers lost replies, cold empty-list
-   rejection, reopening and a later save. Migration, selection and competing-effect
-   proofs remain distinct from public mixed-provider acceptance.
-3. **Alternate acquisition remains separate from deletion receipts.** Provider-only
-   removal/archive, reteam and independent Initiative/Team/list observations must
-   retain their own frontiers and original ages through common owners. The deletion
-   cut transports saved effects; it does not transport every provider observation.
-   Entity revisions cannot order relationships; missing inventory proves no removal.
+   rejection, reopening and a later save. Compression exposed rejection of valid
+   primary-key-only moves: the common writer omits `sortOrder` when moving between
+   priority groups. Transport now retains that exact input. A regression failed
+   on export before repair and exercises peer readback without another write.
+   Migration, selection and competing-effect proofs remain distinct from public
+   mixed-provider acceptance.
+3. **Alternate acquisition is the remaining provider composition cut.**
+   `planning.rs::observe_pm_issue_change`, `confirm_pm_project_archival` and
+   `reconcile_pm_project_teams` own removal, archive and confirmed Team changes.
+   Their accepted evidence is not covered by entity-field provenance or saved
+   deletion receipts. `LinearObservation::fields` deliberately excludes Project
+   relationships and list order; importing an entity cannot settle those frontiers.
+   Transport these observations through their common owners with original ages,
+   retaining independent Initiative/Team/list evidence. Counterexamples must include
+   provider-only removal before a stale peer detail, archive without a local delete,
+   reteam beside a newer entity, and incomplete lists beside uncertain order effects.
+   Independent objects must still import; execution and losing evidence must survive.
+   Missing inventory proves no removal; entity revisions never order relationships.
 4. **Legacy association and presentation remain implementation work.** Divergent
    existing IDs retain history; unplaced Waves need nullable Rust/Swift Machine
    presentation, not placement on read. Desktop still needs selected-plan,
@@ -339,13 +353,9 @@ required local Task defaults) remain at `08a285872:scratch/work-on-another-machi
 **Remaining integration**. Imported planning stays unplaced; those focused results
 supersede Rust-unavailability claims, not composed acceptance.
 
-Earlier October 9 readback, acquisition-age and readiness findings are now
-part of the creation composition above. Exact intermediate evidence remains at
-`a002e4060:scratch/work-on-another-machine-name.md`, **Remaining integration**.
-The public two-store work-watch proof covers cold creation, offline edits/comments/
-completion, reconnect and retained execution with synthetic provider facts, not a
-connected Linear service, mixed-provider delivery or real SSH. The connected-provider
-creation fixture has the narrower preservation boundary described above.
+Earlier acquisition-age/readiness findings and the public work-watch evidence:
+`fcd64901f:scratch/work-on-another-machine-name.md`, **Remaining integration**.
+They establish neither connected Linear/Git composition nor real SSH.
 
 Earlier parent-integration results and the synthetic-state-settlement removal:
 `9b59e9b71:scratch/work-on-another-machine-name.md`, **Remaining integration**.
@@ -372,9 +382,8 @@ without another commit. Uncertainty is saved before push; later local edits are
 compared with the attempted snapshot digest. Fetched, imported and publication
 revisions remain separate. The public work-watch case passes in isolated Linux;
 other composed cases remain gate acceptance.
-Linear-connected repositories still do not exchange: grouped receipt and provider-path
-composition remain unfinished. The safety boundary's diagnostic still names the
-provenance gap; revise it with the completed composition, not as a product limitation.
+Linear-connected repositories still do not exchange: alternate provider frontiers
+remain uncomposed. The provenance diagnostic is temporary, not product policy.
 
 1. Public `lf planning key/connect/use/select/status` now provisions/recover keys,
    pins an empty binding, selects exact Wave IDs and displays retained imports/holds.
@@ -498,12 +507,10 @@ provenance gap; revise it with the completed composition, not as a product limit
    observation/value fixtures require whole-import rollback. These storage tests
    pass; they do not establish composed behavior.
 
-   Complete grouped receipts through their existing common owners, not the scalar
-   field loop. Source inspection identifies the remaining seams:
-   - `planning_export.rs` owns creation/link attempts. Prepared receipts now travel
-     through the storage boundary described at the start of **Remaining integration**.
-     The foreground cut above discovers unprepared creations and mapped uncertainty;
-     import and existing mappings still cannot acknowledge an effect.
+   Grouped receipt transport exists through these common owners, not the scalar
+   field loop. These are implemented boundaries with remaining composed acceptance:
+   - `planning_export.rs` owns creation/link attempts and discovery as described above;
+     mappings alone cannot acknowledge an effect.
    - Peer comments now reuse `task_comments.rs::ingest_task_comment` and
      `insert_authored_comment`. Comment ID remains delivery identity; reimport
      retains errors/acknowledgement/conflicts, and acquired comments create no
@@ -596,10 +603,9 @@ records a recovery path missed by lower-level fixtures and a successful failure
 report mistaken for operation success. The same lessons require public command
 coverage here, and status that distinguishes retained conflicts from convergence.
 October 9 reconciliation reread Release's GOAL.md and full MEMORY.md; filesystem
-inspection found no other immediate Infrastructure child memory, including
-unregistered scopes. Its operation-entry lesson applies to creation recovery:
-storage readback cannot prove that mapped receipts reach foreground acquisition.
-Those operation-entry and result-accounting lessons remain in parent memory.
+inspection found no other immediate child memory. Its operation-entry and
+result-accounting lessons remain in parent memory: storage readback cannot prove
+foreground acquisition, and a successful report cannot replace operation success.
 
 1. Create/edit/comment/read from either machine through public commands. Replicate
    the same ID without placement from creation. Repeated deliveries create no
@@ -646,7 +652,7 @@ and limitations: `9b59e9b71:scratch/work-on-another-machine-name.md`,
 **Acceptance for review**. They do not establish this ordering cut, public
 combined behavior or Desktop acceptance.
 
-Check (October 9 ordering): `cargo test -p loopflow --lib --no-run`, six focused network-isolated storage/migration/common-delivery tests, all-target Clippy, fmt and `git diff --check` pass. Public reconnect/combined/Desktop acceptance: gate.
+Check (October 9 realign): `git diff --check` and `lf context --skill realign --json` pass. Recorded pre-merge build, 15 isolated ordering/peer/migration tests, Clippy/fmt pass; combined/public/Desktop: gate. No tests rerun.
 
 Earlier SQL proofs, macOS startup limitations and the retained historical Flow
 without a recorded exit remain at

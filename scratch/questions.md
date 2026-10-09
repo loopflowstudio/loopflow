@@ -189,13 +189,8 @@ remain separate. No new product decision is selected.
   remaining alternate-acquisition and presentation work;
   mixed-provider exchange remains disabled.
 
-- October 9 ordering choice: each common `task_order` receipt has an `order:<id>`
-  journal field. First-mutation logical time and receipt ID order intentions;
-  effect updates do not change that priority. This reuses the selected LWW policy
-  without importing local sequences or creating another order store. Causal heads
-  choose the baseline; all history retains monotonic effect/settlement evidence.
-  Concurrent incompatible chains/baselines isolate projection. Review exposed
-  settled partial moves being misclassified as external conflicts after a later
-  move; the common delivery view now retains but excludes those intentions.
-  Cold imports also lack list inventory: captured baseline/effect members prevent
-  empty reads from falsely settling them. No mixed-provider activation.
+- October 9 ordering choices and counterexamples now live in the design's
+  **Remaining integration**, item 2. Common receipt identities and first-mutation
+  clocks select intentions; effect updates cannot promote losers. No new product
+  policy or mixed-provider activation. Detailed rationale and the settled-partial
+  and cold-inventory counterexamples: `fcd64901f:scratch/questions.md`, final entry.

@@ -102,23 +102,25 @@ A→B→A and concurrent locators defeat scene/per-path fences. No native proof.
 composes LOO-412 through `de3c84b08`: correspondence/full-ID lookup preserves
 physical IDs, private selection, effects and execution; import creates no requests.
 Store/CLI/migration checks pass.
-`2afcfba1a`: lookup/mapping/records share one snapshot, never a reservation.
+`2afcfba1a`: lookup shares one snapshot, never a reservation.
 
 **Retention is not observation:** `44d73dbcd`/`d62003e0f` separate accepted
-frontiers from rejected heads (counterexample: `29fa9a90e`). October 9's
-`7165f9a62`/`dffdbaaa5` jointly project associated origins, preserving original
-journals/receipts and private holds. `1ece5cc52`: a foreign bridge left old Linear
-winning over local continuation. Transitive retirement precedes ranking, preserving
-mapping validation and per-origin portable/creation heads. Causality grants no identity/selection. Git tests call
-transport/Store, not foreground exchange/Desktop. Mixed exchange, delegation,
-admission and remote/native proof remain.
+frontiers from rejected heads (counterexample: `29fa9a90e`). `7165f9a62`/`dffdbaaa5`
+jointly project associated origins, retaining original journals/receipts/private
+holds. `1ece5cc52` retires foreign-bridge ancestry before ranking. Mapping validation,
+per-origin heads and creation inputs survive; causality grants no identity/selection.
+October 9's foreground fixture replaces direct transport proof: public Work watch
+and Task saves cover offline/reconnect, associated continuation, observed reopening,
+publication recovery and unchanged seeded execution. Git confirmation never
+acknowledges provider delivery; comment errors stay local. No live Linear, running
+provider or mounted Desktop proof. Mixed exchange, delegation, admission and remote
+opening remain; mixed-provider and first-start refusals stay.
 
-#1512 (`3e1e6245c`): live connect hands off; dead-driver resume starts an engine
-on native history. Local resume is not import-triggered launch; native proof remains.
+#1512: live connect hands off; dead-driver resume uses native history, never
+import-triggered launch. Native proof remains.
 
-October 9 (`e3ca861b1`): observe visibility before Session readings; callbacks
-masked closure. Expose pre-registration failures; Task links await mounted pages.
-Request IDs fence registration, not later arrivals. No native proof.
+`e3ca861b1`: mounted-page/visibility observation replaces callbacks, including
+pre-registration failure. Request IDs fence registration only; native proof remains.
 
 October 9 planning reads use read-only storage and skip Process admission;
 missing-registry/checkpointed-WAL tests exposed fallback writes. Resolve chapters
@@ -130,11 +132,10 @@ readers and suppresses fallback Process writes. Parsed transport retains scoped 
 Checkpoint both stores: an effect-free receiver cannot undo a sender's write.
 Two-CLI fixtures cover routing/Flow previews, not configured SSH or exclusive start.
 
-Session connection explanation shares selection and native-client refusal with
-opening. JSON preparation is not takeover. Socket probes enter a live driver's
-protocol: read recorded endpoints without probing, retain reachability
-as unavailable, and re-resolve on opening. Fixtures preserve client receipts
-and checkpointed stores, not native/provider acceptance.
+Session explanation shares opening selection/refusal. Read recorded endpoints
+without probing live-driver protocols; reachability stays unavailable. Re-resolve
+on opening. JSON preparation grants no takeover. Receipt/store fixtures prove no
+native acceptance. Earlier evidence: `859c414d1`, this heading.
 
 ## Terminal-host adoption (2026-10-07)
 

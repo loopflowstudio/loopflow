@@ -96,6 +96,7 @@ impl Drop for Watch {
     }
 }
 
+#[track_caller]
 fn wait_for(mut condition: impl FnMut() -> bool) {
     let deadline = Instant::now() + Duration::from_secs(30);
     while !condition() {
@@ -783,4 +784,439 @@ fn public_wave_reads_imported_planning_without_placing_or_changing_execution() {
     assert_eq!(placements(), placements_before);
     assert_eq!(execution(&conn, fixture.task.id.as_str()), imported_before);
     assert_eq!(execution(&conn, &retained), before);
+}
+
+// Provider observations seed independently retained origins, but both repositories
+// are disconnected from Linear. All exchange goes through the public foreground
+// owner, not direct PlanningGit publication or Store import calls.
+#[test]
+fn associated_origins_reconnect_through_foreground_exchange_and_work_stream() {
+    use loopflow::id::WaveId;
+    use loopflow::store::{sqlite::SqliteStore, PmSnapshotRow};
+    use loopflow::work::wave::Wave;
+
+    let left_repo = TestRepo::new();
+    let right_repo = TestRepo::new();
+    let left_home = tempfile::tempdir().unwrap();
+    let right_home = tempfile::tempdir().unwrap();
+    fs::write(
+        left_home.path().join("config.yaml"),
+        "user:\n  name: Maya\n",
+    )
+    .unwrap();
+    fs::write(
+        right_home.path().join("config.yaml"),
+        "user:\n  name: Lee\n",
+    )
+    .unwrap();
+    let left_path = left_repo.path().canonicalize().unwrap();
+    let right_path = right_repo.path().canonicalize().unwrap();
+    let binding = PlanningDestination::resolve(
+        &left_path,
+        "origin",
+        "refs/loopflow/planning/shared/associated-fixture",
+    )
+    .unwrap();
+    let destination = binding.id();
+    let wave = WaveId::new();
+    let private = WaveId::new();
+    let mut snapshot: loopflow::pm::PmSnapshot = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/task_history_planning.json"
+    ))
+    .unwrap();
+    snapshot.items.truncate(1);
+    snapshot.items[0].state = Some("unstarted".into());
+    snapshot.items[0].revision = Some("2026-10-08T10:00:00Z".into());
+    let mut observation = PmSnapshotRow {
+        wave_id: wave.clone(),
+        provider: "linear".into(),
+        initiative: "initiative".into(),
+        synced_at: 42,
+        snapshot,
+    };
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let stores: Vec<_> = [
+        (&left_path, left_home.path()),
+        (&right_path, right_home.path()),
+    ]
+    .into_iter()
+    .map(|(repo, home)| {
+        fs::create_dir_all(repo.join(".lf")).unwrap();
+        fs::write(repo.join(".lf/config.yaml"), "pm: null\n").unwrap();
+        runtime
+            .block_on(open_ephemeral_store(&StorageConfig::sqlite(
+                home.join("loopflow.db"),
+            )))
+            .unwrap();
+        let store = SqliteStore::new(&home.join("loopflow.db")).unwrap();
+        let scope = repo.to_str().unwrap();
+        store.bind_peer_planning(scope, &binding).unwrap();
+        store
+            .create_wave(&Wave::new(wave.clone(), "Shared".into(), scope.into()))
+            .unwrap();
+        store.put_pm_snapshot(&observation).unwrap();
+        store
+            .select_peer_waves(scope, &destination, std::slice::from_ref(&wave))
+            .unwrap();
+        store
+            .create_wave(&Wave::new(private.clone(), "Private".into(), scope.into()))
+            .unwrap();
+        store
+    })
+    .collect();
+    let left = &stores[0];
+    let right = &stores[1];
+    let a = left
+        .task_by_issue(&observation.snapshot.items[0].id)
+        .unwrap()
+        .unwrap();
+    let b = right
+        .task_by_issue(&observation.snapshot.items[0].id)
+        .unwrap()
+        .unwrap();
+    assert_ne!(a.id, b.id);
+    assert_ne!(a.project_id, b.project_id);
+    let connections: Vec<_> = [left_home.path(), right_home.path()]
+        .into_iter()
+        .map(|home| {
+            let conn = Connection::open(home.join("loopflow.db")).unwrap();
+            conn.busy_timeout(Duration::from_secs(5)).unwrap();
+            conn
+        })
+        .collect();
+    // Each origin keeps a different captured Workflow and its own Session.
+    for (conn, task, repo, node) in [
+        (&connections[0], &a, &left_path, "review"),
+        (&connections[1], &b, &right_path, "design"),
+    ] {
+        conn.execute("INSERT INTO processes(lfid,trace_id,started_at) VALUES('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000002',1)", []).unwrap();
+        conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id)
+            VALUES('retained','Retained','human',1,0,?1,?2,?3)",
+            params![repo.to_str().unwrap(),task.id.as_str(),wave.as_str()]).unwrap();
+        let graph =
+            json!({"name":node,"nodes":[{"name":node,"skill":node,"description":null}],"edges":[]});
+        conn.execute(
+            "INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,?2,?3,1)",
+            params![task.id.as_str(), graph.to_string(), node],
+        )
+        .unwrap();
+    }
+    let before = [
+        execution(&connections[0], a.id.as_str()),
+        execution(&connections[1], b.id.as_str()),
+    ];
+    let state = |store: &SqliteStore, repo: &Path| {
+        store
+            .peer_planning_status(repo.to_str().unwrap())
+            .unwrap()
+            .remove(0)
+    };
+    let left_watch = Watch::start(&left_path, left_home.path());
+    let right_watch = Watch::start(&right_path, right_home.path());
+    wait_for(|| {
+        !state(left, &left_path).conflicts.is_empty()
+            && !state(right, &right_path).conflicts.is_empty()
+    });
+    // Matching provider IDs do not silently associate either origin.
+    assert!(left.task(&b.id).unwrap().is_none());
+    assert!(right.task(&a.id).unwrap().is_none());
+    for (repo, home, incoming, local) in [
+        (&left_path, left_home.path(), &b, &a),
+        (&right_path, right_home.path(), &a, &b),
+    ] {
+        for (origin, owner, provider) in [
+            (
+                incoming.id.as_str(),
+                local.id.as_str(),
+                observation.snapshot.items[0].id.as_str(),
+            ),
+            (
+                incoming.project_id.as_str(),
+                local.project_id.as_str(),
+                observation.snapshot.projects[0].id.as_str(),
+            ),
+        ] {
+            run(
+                repo,
+                home,
+                &[
+                    "planning",
+                    "associate",
+                    origin,
+                    "--with",
+                    owner,
+                    "--linear",
+                    provider,
+                ],
+            );
+        }
+    }
+    let settled = || {
+        [&left_path, &right_path]
+            .into_iter()
+            .zip(&stores)
+            .all(|(repo, store)| {
+                let status = state(store, repo);
+                status.conflicts.is_empty()
+                    && status.pending_local == Some(false)
+                    && status.publication_state.as_deref() == Some("confirmed")
+                    && status.acquisition_error.is_none()
+                    && status.publication_error.is_none()
+            })
+    };
+    wait_for(settled);
+    let initial = left
+        .export_peer_planning(left_path.to_str().unwrap(), &destination)
+        .unwrap();
+
+    let remote = Path::new(binding.endpoint());
+    let disconnected = remote.with_extension("disconnected");
+    fs::rename(remote, &disconnected).unwrap();
+    run(
+        &left_path,
+        left_home.path(),
+        &["task", "edit", a.id.as_str(), "--title", "Peer next focus"],
+    );
+    run(
+        &right_path,
+        right_home.path(),
+        &[
+            "task",
+            "edit",
+            b.id.as_str(),
+            "--notes",
+            "Saved while disconnected",
+        ],
+    );
+    run(
+        &right_path,
+        right_home.path(),
+        &[
+            "task",
+            "comment",
+            b.id.as_str(),
+            "Retain this direction",
+            "--json",
+        ],
+    );
+    let comment = right.task_comments(&b.id).unwrap().comments.remove(0);
+    // A previous provider attempt lost its reply. Git confirmation must never
+    // acknowledge that distinct provider effect or change its captured input.
+    right
+        .record_comment_delivery(&comment.id, Some("lost provider reply"))
+        .unwrap();
+    let receipt = |conn: &Connection| {
+        rows(conn,
+        "SELECT comment_json,acknowledged,conflicting_comment_json FROM task_comment_deliveries WHERE comment_id=?1",
+        [&comment.id])
+    };
+    let uncertain = receipt(&connections[1]);
+    assert_eq!(uncertain[0][1], rusqlite::types::Value::Integer(0));
+    assert_eq!(
+        left.task(&a.id).unwrap().unwrap().plan.title,
+        "Peer next focus"
+    );
+    assert_eq!(
+        right.task(&b.id).unwrap().unwrap().plan.description,
+        "Saved while disconnected"
+    );
+    for (repo, home) in [
+        (&left_path, left_home.path()),
+        (&right_path, right_home.path()),
+    ] {
+        wait_for(|| {
+            peer_frame(home, repo).is_some_and(|s| {
+                s.pending_local == Some(true)
+                    && s.acquisition_error.is_some()
+                    && s.imported_revision.is_some()
+            })
+        });
+    }
+    fs::rename(&disconnected, remote).unwrap();
+    wait_for(|| {
+        right.task(&b.id).unwrap().unwrap().plan.title == "Peer next focus"
+            && left.task(&a.id).unwrap().unwrap().plan.description == "Saved while disconnected"
+            && settled()
+    });
+    run(
+        &right_path,
+        right_home.path(),
+        &[
+            "task",
+            "edit",
+            b.id.as_str(),
+            "--title",
+            "Local continuation",
+        ],
+    );
+    wait_for(|| left.task(&a.id).unwrap().unwrap().plan.title == "Local continuation" && settled());
+    let continued = left
+        .export_peer_planning(left_path.to_str().unwrap(), &destination)
+        .unwrap();
+    let (peer_id, _) = continued
+        .changes
+        .iter()
+        .find(|(_, c)| c.value == "Peer next focus")
+        .unwrap();
+    let local = continued
+        .changes
+        .values()
+        .find(|c| c.value == "Local continuation")
+        .unwrap();
+    assert!(local.parents.contains(peer_id));
+    for (id, change) in initial.changes {
+        assert_eq!(continued.changes[&id], change);
+    }
+    assert!(!continued
+        .changes
+        .values()
+        .any(|c| c.object.id == private.as_str()));
+
+    // An observed completion and its later reopening cross associated origins.
+    // They change planning only; neither captured Workflow may move.
+    observation.snapshot.items[0].completed = true;
+    observation.snapshot.items[0].state = Some("completed".into());
+    observation.snapshot.items[0].revision = Some("2026-10-08T11:00:00Z".into());
+    left.put_pm_snapshot(&observation).unwrap();
+    wait_for(|| {
+        right
+            .planning_task(&b.id)
+            .unwrap()
+            .record
+            .unwrap()
+            .item
+            .completed
+            && settled()
+    });
+    let completed = left
+        .export_peer_planning(left_path.to_str().unwrap(), &destination)
+        .unwrap();
+    fs::rename(remote, &disconnected).unwrap();
+    observation.snapshot.items[0].completed = false;
+    observation.snapshot.items[0].state = Some("unstarted".into());
+    observation.snapshot.items[0].revision = Some("2026-10-08T12:00:00Z".into());
+    right.put_pm_snapshot(&observation).unwrap();
+    fs::rename(&disconnected, remote).unwrap();
+    // Publication acquires the still-completed remote first. It must not roll
+    // back the reopening saved against the accepted completion frontier.
+    wait_for(|| {
+        !left
+            .planning_task(&a.id)
+            .unwrap()
+            .record
+            .unwrap()
+            .item
+            .completed
+            && settled()
+    });
+    let reopened = left
+        .export_peer_planning(left_path.to_str().unwrap(), &destination)
+        .unwrap();
+    for (id, change) in completed.changes {
+        assert_eq!(reopened.changes[&id], change);
+    }
+    for (repo, home) in [
+        (&left_path, left_home.path()),
+        (&right_path, right_home.path()),
+    ] {
+        wait_for(|| {
+            peer_frame(home, repo).is_some_and(|s| {
+                s.pending_local == Some(false)
+                    && s.publication_state.as_deref() == Some("confirmed")
+                    && s.fetched_revision == s.imported_revision
+                    && s.imported_revision == s.publication_revision
+                    && s.acquisition_error.is_none()
+                    && s.publication_error.is_none()
+                    && s.conflicts.is_empty()
+            })
+        });
+    }
+    drop(left_watch);
+    drop(right_watch);
+    let journals: Vec<_> = connections
+        .iter()
+        .map(|conn| rows(conn, "SELECT * FROM planning_peer_changes ORDER BY id", []))
+        .collect();
+    let revision = state(left, &left_path).publication_revision;
+    // A fresh public connection repeats both acquisition and publication.
+    for (conn, repo, home) in [
+        (&connections[0], &left_path, left_home.path()),
+        (&connections[1], &right_path, right_home.path()),
+    ] {
+        // Simulate a lost durable receipt for an effect already on the remote.
+        conn.execute("UPDATE planning_destinations SET publication_state='unconfirmed' WHERE repo=?1 AND id=?2",
+            params![repo.to_str().unwrap(), destination]).unwrap();
+        fs::remove_file(home.join("watch.jsonl")).unwrap();
+        let watch = Watch::start(repo, home);
+        wait_for(|| {
+            peer_frame(home, repo).is_some_and(|s| {
+                s.pending_local == Some(false)
+                    && s.publication_revision == revision
+                    && s.publication_state.as_deref() == Some("confirmed")
+            })
+        });
+        drop(watch);
+    }
+    assert_eq!(
+        connections[1]
+            .query_row(
+                "SELECT error FROM task_comment_deliveries WHERE comment_id=?1",
+                [&comment.id],
+                |row| row.get::<_, Option<String>>(0)
+            )
+            .unwrap()
+            .as_deref(),
+        Some("lost provider reply")
+    );
+    for (index, task) in [&a, &b].into_iter().enumerate() {
+        assert_eq!(
+            rows(
+                &connections[index],
+                "SELECT * FROM planning_peer_changes ORDER BY id",
+                []
+            ),
+            journals[index]
+        );
+        assert_eq!(
+            execution(&connections[index], task.id.as_str()),
+            before[index]
+        );
+        assert_eq!(receipt(&connections[index]), uncertain);
+        assert_eq!(
+            rows(
+                &connections[index],
+                "SELECT body FROM task_comments WHERE task_id=?1",
+                [task.id.as_str()]
+            )
+            .len(),
+            1
+        );
+        assert!(
+            !stores[index]
+                .planning_task(&task.id)
+                .unwrap()
+                .record
+                .unwrap()
+                .item
+                .completed
+        );
+    }
+}
+
+fn peer_frame(home: &Path, repo: &Path) -> Option<PeerPlanningStatus> {
+    fs::read_to_string(home.join("watch.jsonl"))
+        .unwrap()
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|frame| {
+            frame["part"] == "peer_planning"
+                && frame["unavailable"].is_null()
+                && frame["body"]["repo"] == repo.to_str().unwrap()
+        })
+        .filter_map(|frame| {
+            serde_json::from_value::<Vec<PeerPlanningStatus>>(frame["body"]["destinations"].clone())
+                .ok()
+        })
+        .filter_map(|statuses| statuses.into_iter().next())
+        .next_back()
 }

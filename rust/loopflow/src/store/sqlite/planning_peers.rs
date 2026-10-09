@@ -465,8 +465,8 @@ impl SqliteStore {
                 params![origin.kind.as_str(),origin.id,repo,provider_id,local_id],
             )?;
         }
-        // Correspondence enables lookup, not joint projection. Keep incomplete
-        // receipt composition visibly held instead of clearing mapping conflicts.
+        // Correspondence enables lookup immediately. The next import projects the
+        // associated histories and clears only the conflicts it resolves.
         retain_projection_conflict(&tx, repo, origin, SHARING_PROJECTION_PENDING)?;
         tx.commit()?;
         Ok(())

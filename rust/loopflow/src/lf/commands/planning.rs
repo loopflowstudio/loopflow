@@ -110,7 +110,7 @@ async fn run_async(repo: &Path, cmd: &PlanningCommand) -> Result<()> {
                 )
                 .await?;
             println!("{incoming} resolves to local {local}. Neither identity, execution nor sharing selection changed.");
-            eprintln!("Joint planning projection remains unfinished and held. No provider effect or Git publication was issued.");
+            eprintln!("Projection awaits the next import. No provider effect or Git publication was issued.");
         }
         PlanningCommand::Status { json } => print_status(&store, &repo_key, *json).await?,
     }

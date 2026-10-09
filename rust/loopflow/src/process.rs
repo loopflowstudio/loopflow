@@ -137,7 +137,7 @@ impl SessionAttachment {
 /// release and replacement; attachment and parent are independent identities.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AgentProcess {
-    pub process: Process,
+    pub process: LfProcess,
     pub attached_process_lfid: Option<ProcessLfid>,
     pub attachment_token: Option<crate::id::AttachmentToken>,
     pub provider: Option<String>,

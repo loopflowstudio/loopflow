@@ -221,15 +221,14 @@ unpublished code retained, without deletion or delivery authorization.
 
 ## AgentProcess (LOO-443, 2026-10-09)
 
-Jack Heart requested one inventory; integrate LOO-441 before publication.
+Jack Heart requested one inventory; #1516 is integrated.
 Detached rows survive; duplicate PID/birth and late history grant no control.
 Tokens fence A → B → A. Preserve TTY groups, immutable waits and Session-only
-teardown locks; reservations are consumed once. Exact cleanup proofs remain at
-`e0d360e6a`/`263b6adfb`.
+teardown locks; consume reservations once. Cleanup proofs: `e0d360e6a`/`263b6adfb`.
 
 Native admission requires an attachment; remote clients never settle their provider.
-Library admission exposes a Codex account-failover conflict with retained native
-threads; resolve replacement before claiming completion. Raw headless admission remains.
+Library admission conflicts with retained Codex threads on account failover;
+resolve replacement. Raw headless admission remains.
 
 One OS reader now serves top, active Sessions, gates and reaping: zombies are
 dead; invalid observations stay unknown. Top still omits missing identities.

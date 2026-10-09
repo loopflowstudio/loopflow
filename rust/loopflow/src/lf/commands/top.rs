@@ -256,7 +256,7 @@ fn observe_processes(now: i64, lf_home: &Path) -> Result<ProcessSnapshot> {
 }
 
 fn collect_activity(
-    records: Vec<crate::process::Process>,
+    records: Vec<crate::process::LfProcess>,
     snapshot: ProcessSnapshot,
     now: i64,
 ) -> Result<ActivitySnapshot> {
@@ -611,13 +611,13 @@ fn format_duration(seconds: i64) -> String {
 mod tests {
     use super::{collect_activity, ActivityNodeKind, OsProcess, ProcessSnapshot};
     use crate::id::{ProcessLfid, TraceId};
-    use crate::process::{Process, ProcessKind};
+    use crate::process::{LfProcess, ProcessKind};
 
     #[test]
     fn detached_agent_is_a_recorded_node_without_its_parent_or_a_client_receipt() {
         let id = ProcessLfid::new();
         let parent = ProcessLfid::new();
-        let record = Process {
+        let record = LfProcess {
             lfid: id.clone(),
             kind: ProcessKind::Agent,
             agent_session_id: Some("conversation".into()),

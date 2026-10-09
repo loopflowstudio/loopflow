@@ -1002,32 +1002,33 @@ follow-ups. Measure command drift, avoidable rebases and post-land repairs befor
 tuning policy; the synthetic harness remains unbuilt. Jack Heart's July 6
 “up/down 5ths” referent remains unresolved and deferred.
 
-## Direct invocation and large inputs (curated 2026-10-08)
+## Direct invocation and large inputs (curated 2026-10-09)
 
-Jack Heart's LOO-429 decision supersedes 428's argv/fixed-system constraints:
-all assembled context in one system/instructions file, short user trigger, no
-split, fallback or lf-side refusal wording. PR #1498 owns transport/oversized
-acceptance. Claude readback proves neither plan mode, cmux nor the combined
-candidate; shared transport proves no native resume. Jack authorized 429 landing
-despite gaps, then 428 queue/landing October 8.
+Jack Heart's LOO-444 direction supersedes 429's all-system transport: preserve
+native prompts/guides, add fixed instructions, put skill/request in the first
+turn and refresh whole-file context at start/compaction. No cutover is implemented.
+Literal byte identity conflicts with accepted surface/name/reply metadata in that
+slot; the design retains this unresolved channel choice, not a silent relocation.
 
-Jack approved setup-free Codex coexistence: temporary native capture profile,
-bounded wrapper-trust parser probe, unchanged saved config/trust. Normal exit
-removes the profile; interruption may leave it unselected. Codex 0.160.1 composes
-profile/CLI hooks; two CLI tables replace each other; config bypass is ignored.
-Native PTYs prove capture, launch hooks and reconnect. Fresh reconnect hooks
-are absent even without lf; earlier assertions reread launch receipts. Actual
-cmux/installation remain unproved; preserve live Sessions. Launch receipts prove
-neither fresh reconnect hooks nor host tracking.
+Fake-API probes: Claude 2.1.295 injects user context at startup/compact, unlike
+2.1.294. Codex 0.161.0 preserves native
+base, AGENTS.md and additive instructions through manual compaction. SessionStart
+with source compact injects; PostCompact does not. App-server needs scoped hook
+trust; TUI bypass did not suffice. `context_delivery.py` under
+`scripts/benchmarks/skill-invocation/` owns reproduction. These prove no LF cutover,
+automatic compaction, OpenCode wire behavior, cmux or installed acceptance.
 
-Flow output prints position/name and messages; verbose adds accounting/INFO,
-never prompts. Started commits with Flow registration. Jack removed `--tui`
-October 8: terminal defaults interactive, `-i` forces it, `-b` stays headless;
-`default`'s override and #1500's stale forwarding are removed. Dated gate/PTY,
-website and static proofs: `9ab5b6a52:wave/infrastructure/MEMORY.md`, this heading;
-CI owns the full materialized matrix. LOO-422 owns OSC 7501 simplification after
-adoption. Preserve caller checkpoints/common invocation loading. Codex rejected-turn
-recovery remains unresolved; homepage capture follows installation.
+Retain setup-free capture, saved config/trust, native identity and caller checkpoints.
+Interrupted profiles may remain unselected. Prior PTYs prove no fresh reconnect
+hooks or host tracking. Exact 429/428 decisions, proofs and landing authority:
+`3a0aa5ca4:wave/infrastructure/MEMORY.md`, this heading.
+
+Flow output shows position/name/messages; verbose adds accounting/INFO, never
+prompts. Started commits with registration. Jack removed `--tui`: terminal defaults
+interactive, `-i` forces it, `-b` stays headless; stale forwarding is removed.
+CI owns the materialized matrix. Dated proofs: `9ab5b6a52`, this heading.
+LOO-422 owns OSC 7501 simplification after adoption. Codex rejected-turn recovery
+remains unresolved; homepage capture follows installation.
 
 LOO-420: Jack Heart's October 8 comments `5f149330-5f5d-4a71-bb05-289b13fe2d94`
 and `76407cd0-b271-45e7-8953-62abe7f9df2b` correct the overexpanded scope:

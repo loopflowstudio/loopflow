@@ -112,3 +112,27 @@ translated YAML frontmatter had been parsed as an option. Captured-source remova
 native model/declaration mapping, native-home continuity and Codex reconnect with
 stale-client rejection also pass. Print/exec substitutes still do not prove terminal
 rendering or live model compliance.
+
+## Context delivery prerequisites
+
+```sh
+uv run python scripts/test_network.py uv run --no-sync python \
+  scripts/benchmarks/skill-invocation/context_delivery.py \
+  --provider claude --output /tmp/lf-context-proof
+# Repeat with --provider codex.
+```
+
+Checks native model-request channels across manual compaction. Disposable Homes,
+loopback fake APIs and fixture-only hook trust keep real accounts untouched.
+Request bodies, hook receipts and results remain under the output directory.
+Claude excludes resume hooks so they cannot impersonate compact refresh. Codex
+checks both that PostCompact ran and that only SessionStart supplied fresh context.
+These probes do not launch Loopflow or prove automatic compaction, terminal UI,
+large-input transport, OpenCode behavior or the completed LOO-444 cutover.
+
+On October 9, Claude 2.1.295 delivered startup/compact context as user content,
+contrary to the 2.1.294 observation above. Codex 0.161.0 delivered SessionStart
+context as developer conversation content and ignored PostCompact context;
+additive developer instructions and its native base survived manual compaction.
+The app-server probe uses exact per-thread fixture hook hashes: the TUI bypass
+flag did not authorize app-server hooks. Never substitute global trust changes.

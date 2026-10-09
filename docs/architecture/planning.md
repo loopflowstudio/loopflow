@@ -118,6 +118,14 @@ unchanged baselines without acknowledging them. Attempts recheck the stored prov
 revision and local deletion. Lost replies retain attempt/error evidence and use
 observation before any further effect; an unresolved attempt is never blindly replayed.
 
+Peer retention and local observation have different frontiers. Journal heads retain
+all mutations for reconciliation. `planning_peer_observed` retains source mutation
+IDs only after scalar/content projection succeeds in its savepoint; import creates
+no echo edit. Local capture consumes and advances that accepted frontier, so a
+rejected or held import cannot become the next save's causal parent. Receipt-owned
+ordering, deletion and provider evidence keep their separate protocols. This does
+not release association holds or implement joint cross-origin projection.
+
 Peer imports can retain uncertain effects in their journal while rejecting the
 object's projection. Common field/deletion, creation/attachment, state and order
 attempts therefore check retained projection conflicts in the same SQLite

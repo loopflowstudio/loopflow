@@ -4,7 +4,9 @@ use anyhow::Context;
 use clap::Subcommand;
 
 use crate::lf::output::print_process;
-use crate::process::{LfProcessCursor, LfProcessFilter, LfProcessOutcomeFilter, LfProcessWorkFilter};
+use crate::process::{
+    LfProcessCursor, LfProcessFilter, LfProcessOutcomeFilter, LfProcessWorkFilter,
+};
 use crate::repository::CanonicalRepo;
 use crate::store::{open_store, storage_config_from_env};
 

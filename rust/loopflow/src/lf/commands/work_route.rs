@@ -45,9 +45,7 @@ fn read_registry() -> Result<Option<SqliteStore>> {
 /// Resolve scoped selectors once, carrying exact IDs to downstream consumers.
 /// Unknown Tasks remain with ordinary repository-scoped planning acquisition.
 pub fn resolve_repository_selection(cli: &mut Cli) -> Result<()> {
-    if cli.repo.is_none() && cli.repository.is_none() {
-        return Ok(());
-    }
+    let explicit_repository = cli.repo.is_some() || cli.repository.is_some();
     let (command_task, parent_task) = match &mut cli.command {
         Some(Commands::Task {
             cmd: TaskCommand::Run {
@@ -66,9 +64,20 @@ pub fn resolve_repository_selection(cli: &mut Cli) -> Result<()> {
     if cli.task.is_none() && command_task.is_none() {
         return Ok(());
     }
-    let repo = crate::repository::CanonicalRepo::current()?
-        .ok_or_else(|| anyhow!("selected repository is unavailable"))?
-        .to_string();
+    // Compare simultaneous selectors by identity, not spelling, even without
+    // --repo. Keep single unscoped selectors on their ordinary resolution path.
+    if !explicit_repository && (cli.task.is_none() || command_task.is_none()) {
+        return Ok(());
+    }
+    let repo = if explicit_repository {
+        Some(
+            crate::repository::CanonicalRepo::current()?
+                .ok_or_else(|| anyhow!("selected repository is unavailable"))?
+                .to_string(),
+        )
+    } else {
+        None
+    };
     let Some(store) = read_registry()? else {
         return Ok(());
     };
@@ -79,7 +88,7 @@ pub fn resolve_repository_selection(cli: &mut Cli) -> Result<()> {
         .chain(command_task)
         .chain(parent_task)
     {
-        if let Some(id) = resolve_task_id(&store, selector, Some(&repo))? {
+        if let Some(id) = resolve_task_id(&store, selector, repo.as_deref())? {
             *selector = id.to_string();
         }
     }

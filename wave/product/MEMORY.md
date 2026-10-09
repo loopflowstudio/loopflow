@@ -93,10 +93,9 @@ ages/baselines and causal frontiers. Import reuses portable fields.
 Entity revisions cannot order relationships; scalar/list replay cannot clear
 freshness or unseen notices. Prior evidence: `7d12ab10a`, this heading.
 
-`d4fbca0ae`/`a73198197`: binding retains local locators, Work and execution;
-imports allocate identity, exporting neither RepositoryId nor delegation.
-Opening/restoration share atomic locator reads and an observation fence: scene
-A→B→A and concurrent locators defeat scene/per-path fences. No native proof.
+Binding retains locators/Work/execution; imports allocate identity, exporting no
+RepositoryId/delegation. Locator readings need observation fences: A→B→A and concurrent
+locators defeat scene/per-path fences. No native proof (`d4fbca0ae`/`a73198197`).
 
 **Unmapping is not association:** it can enable duplicate creation. `66dd3c44f`
 composes LOO-412 through `de3c84b08`: correspondence/full-ID lookup preserves
@@ -133,10 +132,10 @@ readers and suppresses fallback Process writes. Parsed transport retains scoped 
 Checkpoint both stores: an effect-free receiver cannot undo a sender's write.
 Two-CLI fixtures cover routing/Flow previews, not configured SSH or exclusive start.
 
-Session explanation shares opening selection/refusal. Read recorded endpoints
-without probing live-driver protocols; reachability stays unavailable. Re-resolve
-on opening. JSON preparation grants no takeover. Receipt/store fixtures prove no
-native acceptance. Earlier evidence: `859c414d1`, this heading.
+Session explanation reuses opening without probing endpoints; reachability stays
+unavailable; opening re-resolves. JSON preparation grants no takeover. Move previews
+share captured-node validation and prior edges, moving/stopping nothing. End intent grants no completion: reconciliation/cleanup remain unperformed.
+No native proof (`859c414d1`).
 
 ## Terminal-host adoption (2026-10-07)
 

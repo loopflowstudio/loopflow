@@ -87,3 +87,5 @@ selection and unavailable execution evidence. Explanation never grants admission
 takeover, shared legal actions and unavailable evidence without client acquisition.
 
 `repository_identity.json` carries the selected plan and retained Machine-local locators.
+
+`task_move_explanations.json` preserves exact prior Workflow positions, move/restart intent and unperformed completion checks.

@@ -225,13 +225,9 @@ no preparation, Process writes or excerpt persistence. Session explanation reads
 recorded endpoints without probing a live driver's protocol. No removed launch,
 Project/roadmap or callback path is retained beside those owners.
 
-The scalar identity JSON and restored-ID mismatch refusal are replaced by the
-common selected-ID/locator reading. `RepositoryWorkspace` now identifies scenes
-only; the router owns fresh readings and one retention path for opening/restoration.
-Scene equality cannot fence delayed reads: binding A→B→A must still supersede an
-older observation. Receiver/delivery lifetimes and native owners remain separate.
-Bounded CLI reply handling lives outside pane-command dispatch, with unchanged
-exact-request and UTF-8 byte-limit checks.
+Repository/window locator and observation-fence deletion details: `6ce198b75`,
+this section. One retention path owns opening/restoration; scene equality cannot
+fence A→B→A. Receiver, delivery and native lifetimes remain separate.
 
 Repository association replaces the blanket different-ID refusal with one selected
 identity plus retained local IDs in `repository_plans`; no second alias registry.
@@ -407,6 +403,12 @@ mostly explain identity rather than effects; unsupported commands refuse. Broade
 action explanation must reuse each operation's validation, not report the generic
 Work resolution as an invocation plan.
 
+`task move` and Workflow restart now share captured-node validation with execution.
+Preview retains the exact prior node/edge, reason and force choice; restart intends
+`start`, not a Flow. End intent leaves completion reconciliation/gates/cleanup
+explicitly unperformed. No move, Process or provider write is permitted. The
+identity-only predecessor is replaced for these commands; other actions remain.
+
 **Required proof:** cold opens for two repositories arriving before registration and
 registering in reverse order both reach their own windows; same-repo opens reuse
 one. Plain-repo and remote-unavailable cases remain useful. JSON/Swift agree.
@@ -523,4 +525,4 @@ identity/delegation, open them, add shell/Files panes, retain an unfinished draf
 change focus, target a harmless command, read output, hide/restore, and verify the
 original input target and draft survive. Demo owns native usability; preserve comparison evidence and use no real accounts or live user terminals.
 
-Check: focused history PASS (1, `33377eaa5`); foreground planning PASS (5, `263d1f7d7`); full suites: gate/CI; native: demo.
+Check: network-isolated `global_commands task_move_explain` + Task-run regression PASS (3); `dto_fixtures task_move_explanations` / headless Swift counterpart PASS (1 each); build/fmt/Clippy PASS; full suites: gate; native: demo.

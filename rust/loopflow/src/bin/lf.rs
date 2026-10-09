@@ -1780,6 +1780,49 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
         }
         return Ok(());
     }
+    let movement = match &cli.command {
+        Some(Commands::Task {
+            cmd:
+                TaskCommand::Move {
+                    issue,
+                    node,
+                    reason,
+                    force,
+                },
+        }) => Some((issue.as_str(), node.as_str(), reason.as_deref(), *force)),
+        Some(Commands::Task {
+            cmd:
+                TaskCommand::Workflow {
+                    cmd: loopflow::lf::TaskWorkflowCommand::Restart { issue },
+                },
+        }) => Some((issue.as_str(), "start", Some("Restart Workflow"), false)),
+        _ => None,
+    };
+    if let Some((task, node, reason, force)) = movement {
+        anyhow::ensure!(
+            !cli.context,
+            "--context requires an agent invocation; nothing was executed"
+        );
+        if let Some(global) = cli.task.as_deref() {
+            anyhow::ensure!(
+                global == task,
+                "conflicting Task selections: {global} and {task}"
+            );
+        }
+        let report = loopflow::lf::commands::context::explain_task_move(
+            task,
+            cli.wave.as_deref(),
+            node,
+            reason,
+            force,
+        )?;
+        if json {
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        } else {
+            println!("{}", report.render());
+        }
+        return Ok(());
+    }
     let connection = match &cli.command {
         Some(Commands::Session {
             cmd:

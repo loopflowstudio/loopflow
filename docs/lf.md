@@ -573,6 +573,14 @@ not proof of peer-exclusive first start. Remote execution state is unavailable
 without reading that Machine. Completion, future checkout and provider checks are
 not fabricated; a real run checks them again.
 
+`task move TASK NODE --explain` and `task workflow restart TASK --explain`
+validate the captured Workflow without moving it. JSON adds the intended `action`
+(including the exact prior node/edge, reason and force choice), `impediments` and
+`unavailable` to `resolution`. Restart means move to `start`, not run a Flow.
+Moving to `end` describes completion and possible checkout cleanup but leaves PR
+reconciliation and completion gates explicitly unperformed; it grants no permission.
+Missing or remote execution evidence stays unavailable.
+
 `desktop open --explain` reports `resolution`, the proposed `url`, `impediments`
 and `unavailable` evidence using the same Work and opening checks as launch.
 It includes `--session` and `--diff`, and reports unsupported platforms without

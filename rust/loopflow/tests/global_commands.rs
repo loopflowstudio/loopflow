@@ -1812,3 +1812,232 @@ fn repository_identity_binding_is_explicit_and_does_not_select_planning() {
     assert!(explained.contains(through_prior.id.as_str()));
     assert!(store.peer_planning_status(&repo).unwrap().is_empty());
 }
+
+#[test]
+fn task_move_explain_validates_the_captured_graph_without_moving_or_reconciling() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    support::bind_task_planning(&repo);
+    repo.create_branch("move-proof");
+    let registered = support::register_task(
+        &home.path().join(".lf"),
+        &repo.path().canonicalize().unwrap(),
+        "move-proof",
+        &repo.head_sha(),
+    );
+    let path = home.path().join(".lf/loopflow.db");
+    let db = rusqlite::Connection::open(&path).unwrap();
+    let graph = serde_json::json!({"name":"captured", "nodes":[{"name":"review","skill":"demo","description":null}], "edges":[{"from":"review","to":"end","flow":null}]});
+    db.execute(
+        "INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,?2,'review',1)",
+        rusqlite::params![registered.task.id.as_str(), graph.to_string()],
+    )
+    .unwrap();
+    let process = support::record_flow(
+        &home.path().join(".lf"),
+        repo.path(),
+        "prior",
+        "step",
+        "succeeded",
+    );
+    db.execute(
+        "UPDATE task_workflows SET edge=0,process_lfid=?1 WHERE task_id=?2",
+        rusqlite::params![process, registered.task.id.as_str()],
+    )
+    .unwrap();
+    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+    let before = fs::read(&path).unwrap();
+    let read = |args: &[&str]| -> serde_json::Value {
+        serde_json::from_str(&success(
+            command(home.path(), repo.path(), args).output().unwrap(),
+        ))
+        .unwrap()
+    };
+    let preview = read(&[
+        "task",
+        "move",
+        "INF-123",
+        "start",
+        "--reason",
+        " Restart Workflow ",
+        "--explain",
+        "--json",
+    ]);
+    assert_eq!(
+        preview["resolution"]["task"]["value"],
+        registered.task.id.as_str()
+    );
+    assert_eq!(
+        preview["resolution"]["execution_machine"]["source"],
+        "recorded_checkout"
+    );
+    assert_eq!(
+        preview["action"],
+        serde_json::json!({"workflow":"captured","from":{"kind":"edge","edge":0,"process_lfid":process,"running":false},"to":"start","reason":"Restart Workflow","force":false})
+    );
+    assert_eq!(preview["impediments"], serde_json::json!([]));
+    assert_eq!(
+        preview["action"],
+        read(&[
+            "task",
+            "workflow",
+            "restart",
+            "INF-123",
+            "--explain",
+            "--json"
+        ])["action"]
+    );
+    let scoped = read(&[
+        "--task",
+        registered.task.id.as_str(),
+        "task",
+        "move",
+        "INF-123",
+        "start",
+        "--reason",
+        "Restart Workflow",
+        "--explain",
+        "--json",
+    ]);
+    assert_eq!(scoped["action"], preview["action"]);
+    let cases = [
+        (vec!["task", "move", "INF-123", "missing"], "has no node"),
+        (
+            vec!["task", "move", "INF-123", "start", "--force"],
+            "--force applies only",
+        ),
+    ];
+    let mut reasons = Vec::new();
+    for (args, expected) in &cases {
+        let mut args = args.clone();
+        args.extend(["--explain", "--json"]);
+        let report = read(&args);
+        assert!(report["action"].is_null());
+        let reason = report["impediments"][0].as_str().unwrap();
+        assert!(reason.contains(expected), "{report}");
+        reasons.push(reason.to_owned());
+    }
+    let completion = read(&[
+        "task",
+        "move",
+        "INF-123",
+        "end",
+        "--force",
+        "--explain",
+        "--json",
+    ]);
+    assert_eq!(completion["action"]["to"], "end");
+    assert_eq!(completion["action"]["force"], true);
+    assert!(completion["unavailable"][0]
+        .as_str()
+        .unwrap()
+        .contains("none were performed"));
+    let text = success(
+        command(
+            home.path(),
+            repo.path(),
+            &["task", "move", "INF-123", "start", "--explain"],
+        )
+        .output()
+        .unwrap(),
+    );
+    assert!(
+        text.contains("put Task at start of Workflow captured; run nothing"),
+        "{text}"
+    );
+    assert!(text.contains("Nothing was executed"));
+    let invalid_context = command(
+        home.path(),
+        repo.path(),
+        &["task", "move", "INF-123", "start", "--context"],
+    )
+    .output()
+    .unwrap();
+    assert!(!invalid_context.status.success());
+    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+    assert!(
+        fs::read(&path).unwrap() == before,
+        "preview changed checkpointed store bytes"
+    );
+    for ((args, _), reason) in cases.iter().zip(reasons) {
+        let output = command(home.path(), repo.path(), args).output().unwrap();
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains(&reason));
+    }
+    success(
+        command(
+            home.path(),
+            repo.path(),
+            &["task", "workflow", "restart", "INF-123"],
+        )
+        .output()
+        .unwrap(),
+    );
+    let node: String = db
+        .query_row(
+            "SELECT node FROM task_workflows WHERE task_id=?1",
+            [registered.task.id.as_str()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(node, "start");
+    let note: String = db
+        .query_row(
+            "SELECT note FROM task_workflow_moves WHERE task_id=?1 ORDER BY seq DESC LIMIT 1",
+            [registered.task.id.as_str()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(note, "Restart Workflow");
+}
+
+#[test]
+fn task_move_explain_keeps_missing_workflow_and_registry_explicit() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    let read = |args: &[&str]| -> serde_json::Value {
+        serde_json::from_str(&success(
+            command(home.path(), repo.path(), args).output().unwrap(),
+        ))
+        .unwrap()
+    };
+    let absent = read(&["task", "move", "INF-123", "end", "--explain", "--json"]);
+    assert!(absent["action"].is_null());
+    assert!(absent["unavailable"][0]
+        .as_str()
+        .unwrap()
+        .contains("absent"));
+    assert!(!home.path().join(".lf/loopflow.db").exists());
+    support::bind_task_planning(&repo);
+    repo.create_branch("move-proof");
+    support::register_task(
+        &home.path().join(".lf"),
+        &repo.path().canonicalize().unwrap(),
+        "move-proof",
+        &repo.head_sha(),
+    );
+    let path = home.path().join(".lf/loopflow.db");
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+    let before = fs::read(&path).unwrap();
+    let restart = read(&[
+        "task",
+        "workflow",
+        "restart",
+        "INF-123",
+        "--explain",
+        "--json",
+    ]);
+    assert!(restart["action"].is_null());
+    assert!(restart["impediments"][0]
+        .as_str()
+        .unwrap()
+        .contains("has no workflow"));
+    let end = read(&["task", "move", "INF-123", "end", "--explain", "--json"]);
+    assert!(end["action"]["workflow"].is_null());
+    assert!(end["action"]["from"].is_null());
+    assert_eq!(end["action"]["to"], "end");
+    assert!(!end["unavailable"].as_array().unwrap().is_empty());
+    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+    assert!(fs::read(&path).unwrap() == before);
+}

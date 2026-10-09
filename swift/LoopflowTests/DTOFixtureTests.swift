@@ -50,6 +50,27 @@ struct DTOFixtureTests {
         #expect(try JSONDecoder().decode([DesktopOpenExplanation].self, from: JSONEncoder().encode(reports)) == reports)
     }
 
+    @Test func taskMoveExplanationsPreservePositionsAndCompletionUncertainty() throws {
+        let data = try loadFixtureData("task_move_explanations.json")
+        let reports = try JSONDecoder().decode([TaskMoveExplanation].self, from: data)
+        #expect(reports[0].action?.from == .edge(index: 1, processLfid: "process-retained", running: true))
+        #expect(reports[0].action?.to == "start")
+        #expect(reports[0].action?.reason == "Restart Workflow")
+        #expect(reports[1].action?.workflow == nil)
+        #expect(reports[1].action?.from == nil)
+        #expect(reports[1].action?.force == true)
+        #expect(!reports[1].unavailable.isEmpty)
+        #expect(reports[2].action == nil)
+        #expect(try JSONDecoder().decode([TaskMoveExplanation].self, from: JSONEncoder().encode(reports)) == reports)
+        var wire = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
+        var action = try #require(wire[0]["action"] as? [String: Any])
+        action.removeValue(forKey: "force")
+        wire[0]["action"] = action
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode([TaskMoveExplanation].self, from: JSONSerialization.data(withJSONObject: wire))
+        }
+    }
+
     @Test func taskRunExplanationsPreserveActionsAndMissingEvidence() throws {
         let data = try loadFixtureData("task_run_explanations.json")
         let reports = try JSONDecoder().decode([TaskRunExplanation].self, from: data)

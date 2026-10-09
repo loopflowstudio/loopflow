@@ -1,0 +1,213 @@
+[
+  {
+    "resolution": {
+      "observed_at": 1791500000,
+      "machine": {
+        "state": "bound",
+        "value": "home_11111111111111111111111111111111",
+        "source": "observing_machine"
+      },
+      "repository": {
+        "state": "bound",
+        "value": "repo_22222222222222222222222222222222",
+        "source": "selected_plan"
+      },
+      "repository_path": {
+        "state": "bound",
+        "value": "/repo",
+        "source": "local_locator"
+      },
+      "checkout": {
+        "state": "unbound"
+      },
+      "execution_machine": {
+        "state": "unavailable",
+        "reason": "No local execution location; peer execution has not been observed"
+      },
+      "wave": {
+        "state": "bound",
+        "value": "33333333-3333-3333-3333-333333333333",
+        "source": "explicit"
+      },
+      "task": {
+        "state": "bound",
+        "value": "task_44444444444444444444444444444444",
+        "source": "explicit"
+      },
+      "session": {
+        "state": "unbound"
+      },
+      "process": {
+        "state": "unbound"
+      },
+      "planning_observed_at": null
+    },
+    "action": {
+      "workflow": "feature",
+      "from": {
+        "kind": "edge",
+        "edge": 1,
+        "process_lfid": "process-retained",
+        "running": true
+      },
+      "to": "start",
+      "reason": "Restart Workflow",
+      "force": false
+    },
+    "impediments": [],
+    "unavailable": []
+  },
+  {
+    "resolution": {
+      "observed_at": 1791500000,
+      "machine": {
+        "state": "bound",
+        "value": "home_11111111111111111111111111111111",
+        "source": "observing_machine"
+      },
+      "repository": {
+        "state": "bound",
+        "value": "repo_22222222222222222222222222222222",
+        "source": "selected_plan"
+      },
+      "repository_path": {
+        "state": "bound",
+        "value": "/repo",
+        "source": "local_locator"
+      },
+      "checkout": {
+        "state": "unbound"
+      },
+      "execution_machine": {
+        "state": "unavailable",
+        "reason": "No local execution location; peer execution has not been observed"
+      },
+      "wave": {
+        "state": "bound",
+        "value": "33333333-3333-3333-3333-333333333333",
+        "source": "explicit"
+      },
+      "task": {
+        "state": "bound",
+        "value": "task_44444444444444444444444444444444",
+        "source": "explicit"
+      },
+      "session": {
+        "state": "unbound"
+      },
+      "process": {
+        "state": "unbound"
+      },
+      "planning_observed_at": null
+    },
+    "action": {
+      "workflow": null,
+      "from": null,
+      "to": "end",
+      "reason": null,
+      "force": true
+    },
+    "impediments": [],
+    "unavailable": [
+      "Completion reconciliation and cleanup were not performed"
+    ]
+  },
+  {
+    "resolution": {
+      "observed_at": 1791500000,
+      "machine": {
+        "state": "bound",
+        "value": "home_11111111111111111111111111111111",
+        "source": "observing_machine"
+      },
+      "repository": {
+        "state": "bound",
+        "value": "repo_22222222222222222222222222222222",
+        "source": "selected_plan"
+      },
+      "repository_path": {
+        "state": "bound",
+        "value": "/repo",
+        "source": "local_locator"
+      },
+      "checkout": {
+        "state": "unbound"
+      },
+      "execution_machine": {
+        "state": "unavailable",
+        "reason": "No local execution location; peer execution has not been observed"
+      },
+      "wave": {
+        "state": "bound",
+        "value": "33333333-3333-3333-3333-333333333333",
+        "source": "explicit"
+      },
+      "task": {
+        "state": "bound",
+        "value": "task_44444444444444444444444444444444",
+        "source": "explicit"
+      },
+      "session": {
+        "state": "unbound"
+      },
+      "process": {
+        "state": "unbound"
+      },
+      "planning_observed_at": null
+    },
+    "action": null,
+    "impediments": [
+      "workflow feature has no node \"missing\". Nodes: start, review, end"
+    ],
+    "unavailable": []
+  },
+  {
+    "resolution": {
+      "observed_at": 1791500000,
+      "machine": {
+        "state": "bound",
+        "value": "home_11111111111111111111111111111111",
+        "source": "observing_machine"
+      },
+      "repository": {
+        "state": "bound",
+        "value": "repo_22222222222222222222222222222222",
+        "source": "selected_plan"
+      },
+      "repository_path": {
+        "state": "bound",
+        "value": "/repo",
+        "source": "local_locator"
+      },
+      "checkout": {
+        "state": "unbound"
+      },
+      "execution_machine": {
+        "state": "unavailable",
+        "reason": "No local execution location; peer execution has not been observed"
+      },
+      "wave": {
+        "state": "bound",
+        "value": "33333333-3333-3333-3333-333333333333",
+        "source": "explicit"
+      },
+      "task": {
+        "state": "bound",
+        "value": "task_44444444444444444444444444444444",
+        "source": "explicit"
+      },
+      "session": {
+        "state": "unbound"
+      },
+      "process": {
+        "state": "unbound"
+      },
+      "planning_observed_at": null
+    },
+    "action": null,
+    "impediments": [],
+    "unavailable": [
+      "Local registry is absent"
+    ]
+  }
+]

@@ -204,3 +204,13 @@ Logs: `/tmp/loo427-foreground-{build,test,clippy}.log`, failed receipt assertion
 `/tmp/loo427-foreground-receipt-failure.log`. Pre-edit scratch/diff:
 `/tmp/loo427-foreground-before-AgmlKJ/`. Mixed exchange, exclusive admission,
 delegation and remote/native proof remain; neither refusal was lifted.
+
+## Workflow movement explanation — October 9
+
+Identity-only previews skipped node/force validation. Movement/restart now reuse
+execution's captured graph and location readers, preserving exact prior edges.
+End intent leaves reconciliation/cleanup unperformed. Review removed duplicate
+missing-Workflow errors. The first CLI test rejected an ID and alias for the same
+Task: simultaneous selectors now normalize through the shared resolver without
+requiring `--repo`. Failed log: `/tmp/loo427-move-first-failure.log`; recovered
+scratch conflict/notes: `/tmp/loo427-implement-9Chixx/`, checkpoint `6ce198b75`.

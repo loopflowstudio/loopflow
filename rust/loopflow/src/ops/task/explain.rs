@@ -110,26 +110,7 @@ async fn read_task_run(
         .get_task(&id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("Task {id} is missing"))?;
-    let route = match store.task_execution_route(&id).await {
-        Ok(route) => route,
-        Err(error) => {
-            report.resolution.execution_machine = ContextFact::Unavailable {
-                reason: error.to_string(),
-            };
-            return Err(error.into());
-        }
-    };
-    report.resolution.execution_machine = ContextFact::Bound {
-        value: route.machine_id.to_string(),
-        source: match route.source {
-            TaskExecutionSource::RecordedCheckout => "recorded_checkout",
-            TaskExecutionSource::EffectiveDelegation => "effective_delegation",
-        }
-        .into(),
-    };
-    if route.machine_id != store.local_machine().await?.id {
-        anyhow::bail!("Execution state belongs to Machine {}; no peer read or remote preparation was performed", route.machine_id);
-    }
+    read_local_execution(store, &id, &mut report.resolution).await?;
     if task.worktree.is_none() {
         report.unavailable.push("Future checkout and peer-exclusive first-start admission are not observed; definitions are read from the local repository before preparation".into());
     }
@@ -209,5 +190,160 @@ async fn read_task_run(
     report
         .unavailable
         .push("Provider/account checks and post-preparation admission have not run".into());
+    Ok(())
+}
+
+/// An explicit position change, not an edge execution or review approval.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskMoveAction {
+    pub workflow: Option<String>,
+    pub from: Option<crate::ops::workflow::WorkflowPosition>,
+    pub to: String,
+    pub reason: Option<String>,
+    pub force: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskMoveExplanation {
+    pub resolution: ContextExplanation,
+    pub action: Option<TaskMoveAction>,
+    pub impediments: Vec<String>,
+    pub unavailable: Vec<String>,
+}
+
+impl TaskMoveExplanation {
+    pub fn render(&self) -> String {
+        let mut lines = vec![self.resolution.render()];
+        if let Some(action) = &self.action {
+            lines.push(format!(
+                "Intended action: put Task at {}{}; {}",
+                action.to,
+                action
+                    .workflow
+                    .as_ref()
+                    .map(|name| format!(" of Workflow {name}"))
+                    .unwrap_or_default(),
+                if action.to == crate::engine::workflow::END {
+                    "complete and attempt checkout cleanup after reconciliation"
+                } else {
+                    "run nothing; leave existing Processes alone"
+                },
+            ));
+            if let Some(reason) = &action.reason {
+                lines.push(format!("Reason: {reason}"));
+            }
+            if action.force {
+                lines.push(
+                    "Force: bypass only the planning-completion conflict, not completion gates"
+                        .into(),
+                );
+            }
+        } else {
+            lines.push("Intended action: unavailable".into());
+        }
+        lines.extend(
+            self.impediments
+                .iter()
+                .map(|reason| format!("Impediment: {reason}")),
+        );
+        lines.extend(
+            self.unavailable
+                .iter()
+                .map(|reason| format!("Unavailable: {reason}")),
+        );
+        lines.push("Observation only; execution re-reads the Workflow and completion evidence. Nothing was executed.".into());
+        lines.join("\n")
+    }
+}
+
+pub async fn explain_task_move(
+    store: &SharedStore,
+    cwd: &Path,
+    selection: WorkSelection<'_>,
+    node: &str,
+    reason: Option<&str>,
+    end: &super::EndOptions,
+) -> TaskMoveExplanation {
+    let resolution = crate::ops::context::explain_context(store, cwd, selection, None, None).await;
+    let mut report = TaskMoveExplanation {
+        resolution,
+        action: None,
+        impediments: Vec::new(),
+        unavailable: Vec::new(),
+    };
+    if let Err(error) = read_task_move(store, node, reason, end, &mut report).await {
+        report.unavailable.push(error.to_string());
+    }
+    report
+}
+
+async fn read_task_move(
+    store: &SharedStore,
+    node: &str,
+    reason: Option<&str>,
+    end: &super::EndOptions,
+    report: &mut TaskMoveExplanation,
+) -> anyhow::Result<()> {
+    let id = match &report.resolution.task {
+        ContextFact::Bound { value, .. } => crate::durable::TaskId::parse(value)?,
+        ContextFact::Unbound => anyhow::bail!("No Task selected"),
+        ContextFact::Unavailable { reason } => anyhow::bail!("{reason}"),
+    };
+    let task = store
+        .get_task(&id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("Task {id} is missing"))?;
+    read_local_execution(store, &id, &mut report.resolution).await?;
+    let workflow = store.sqlite.workflow(&id)?;
+    if let Err(error) =
+        super::validate_workflow_move(workflow.as_ref(), &task.plan.identifier, node, end)
+    {
+        report.impediments.push(error.to_string());
+        return Ok(());
+    }
+    report.action = Some(TaskMoveAction {
+        workflow: workflow
+            .as_ref()
+            .map(|workflow| workflow.definition.name.clone()),
+        from: workflow.map(|workflow| workflow.position),
+        to: node.into(),
+        reason: reason
+            .map(str::trim)
+            .filter(|reason| !reason.is_empty())
+            .map(str::to_owned),
+        force: end.force,
+    });
+    if node == crate::engine::workflow::END {
+        report.unavailable.push("Completion requires fresh reconciliation, PR gates and checkout cleanup checks; none were performed. This is not completion permission".into());
+    }
+    Ok(())
+}
+
+// Workflow position stays on the execution Machine, never in portable planning.
+async fn read_local_execution(
+    store: &SharedStore,
+    id: &crate::durable::TaskId,
+    resolution: &mut ContextExplanation,
+) -> anyhow::Result<()> {
+    let route = match store.task_execution_route(id).await {
+        Ok(route) => route,
+        Err(error) => {
+            resolution.execution_machine = ContextFact::Unavailable {
+                reason: error.to_string(),
+            };
+            return Err(error.into());
+        }
+    };
+    resolution.execution_machine = ContextFact::Bound {
+        value: route.machine_id.to_string(),
+        source: match route.source {
+            TaskExecutionSource::RecordedCheckout => "recorded_checkout",
+            TaskExecutionSource::EffectiveDelegation => "effective_delegation",
+        }
+        .into(),
+    };
+    if route.machine_id != store.local_machine().await?.id {
+        anyhow::bail!("Execution state belongs to Machine {}; no peer read or remote preparation was performed", route.machine_id);
+    }
     Ok(())
 }

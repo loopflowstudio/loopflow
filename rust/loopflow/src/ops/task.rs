@@ -1,5 +1,8 @@
 mod explain;
-pub use explain::{explain_task_run, TaskRunAction, TaskRunExplanation};
+pub use explain::{
+    explain_task_move, explain_task_run, TaskMoveAction, TaskMoveExplanation, TaskRunAction,
+    TaskRunExplanation,
+};
 mod directory;
 mod lifecycle;
 pub(crate) use lifecycle::{cleanup_completed_task, notice_retained_task, record_abandoned_pr};
@@ -727,9 +730,6 @@ pub fn workflow_set(
             task.plan.identifier
         ));
     }
-    if end.force {
-        return Err(task_error("--force applies only to reaching `end`"));
-    }
     let note = note.map(str::trim).filter(|note| !note.is_empty());
     block_on_task(async {
         let store = task_store().await?;
@@ -739,28 +739,10 @@ pub fn workflow_set(
             .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
             .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
         let issue = &task.plan.identifier;
-        let none = || {
-            task_error(format!(
-                "Task {issue} has no workflow; `lf task run {issue} <workflow>` takes one up"
-            ))
-        };
-        let workflow = store
-            .sqlite
-            .workflow(&task.id)
-            .map_err(task_error)?
-            .ok_or_else(none)?;
+        let workflow = store.sqlite.workflow(&task.id).map_err(task_error)?;
+        validate_workflow_move(workflow.as_ref(), issue, node, end)?;
+        let workflow = workflow.expect("nonterminal move requires a captured Workflow");
         let definition = &workflow.definition;
-        if !workflow.names_node(node) {
-            let nodes: Vec<&str> = std::iter::once(START)
-                .chain(definition.nodes.iter().map(|node| node.name.as_str()))
-                .chain([END])
-                .collect();
-            return Err(task_error(format!(
-                "workflow {} has no node {node:?}. Nodes: {}",
-                definition.name,
-                nodes.join(", ")
-            )));
-        }
         let process = crate::journal::current_process_lfid()
             .ok_or_else(|| task_error("a workflow move requires a registered Process"))?;
         if !store
@@ -768,13 +750,54 @@ pub fn workflow_set(
             .set_workflow_node(&task.id, node, &process, note)
             .map_err(task_error)?
         {
-            return Err(none());
+            return Err(task_error(format!(
+                "Task {issue} no longer has a Workflow; inspect it before retrying the move"
+            )));
         }
         Ok(format!(
             "Task {issue} is at {node} of workflow {}",
             definition.name
         ))
     })
+}
+
+/// Validate the captured graph for both explicit moves and their effect-free previews.
+fn validate_workflow_move(
+    workflow: Option<&crate::ops::workflow::Workflow>,
+    issue: &str,
+    node: &str,
+    end: &EndOptions,
+) -> OpsResult<()> {
+    if node == END {
+        // Completion can create the terminal Workflow; its reconciliation belongs to reach_end.
+        return Ok(());
+    }
+    if end.force {
+        return Err(task_error("--force applies only to reaching `end`"));
+    }
+    let workflow = workflow.ok_or_else(|| {
+        task_error(format!(
+            "Task {issue} has no workflow; `lf task run {issue} <workflow>` takes one up"
+        ))
+    })?;
+    if !workflow.names_node(node) {
+        let nodes: Vec<&str> = std::iter::once(START)
+            .chain(
+                workflow
+                    .definition
+                    .nodes
+                    .iter()
+                    .map(|node| node.name.as_str()),
+            )
+            .chain([END])
+            .collect();
+        return Err(task_error(format!(
+            "workflow {} has no node {node:?}. Nodes: {}",
+            workflow.definition.name,
+            nodes.join(", ")
+        )));
+    }
+    Ok(())
 }
 
 pub fn task_checkout(repo: &Path, issue: &str, options: TaskCheckoutOptions) -> OpsResult<Task> {

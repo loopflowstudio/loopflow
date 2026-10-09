@@ -952,3 +952,34 @@ fn repository_identity_preserves_explicit_local_locators() {
     missing.as_object_mut().unwrap().remove("locators");
     assert!(serde_json::from_value::<RepositoryIdentity>(missing).is_err());
 }
+
+#[test]
+fn task_move_explanations_preserve_positions_and_completion_uncertainty() {
+    use loopflow::ops::task::TaskMoveExplanation;
+    use loopflow::ops::workflow::WorkflowPosition;
+    let json = include_str!("../../../tests/fixtures/dto/task_move_explanations.json");
+    let reports: Vec<TaskMoveExplanation> = serde_json::from_str(json).unwrap();
+    let restart = reports[0].action.as_ref().unwrap();
+    assert!(matches!(
+        restart.from,
+        Some(WorkflowPosition::Edge { running: true, .. })
+    ));
+    assert_eq!(restart.to, "start");
+    assert_eq!(restart.reason.as_deref(), Some("Restart Workflow"));
+    let completion = reports[1].action.as_ref().unwrap();
+    assert!(completion.workflow.is_none());
+    assert!(completion.from.is_none());
+    assert!(completion.force);
+    assert!(!reports[1].unavailable.is_empty());
+    assert!(reports[2].action.is_none());
+    assert_eq!(
+        serde_json::to_value(reports).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+    let mut missing: serde_json::Value = serde_json::from_str(json).unwrap();
+    missing[0]["action"]
+        .as_object_mut()
+        .unwrap()
+        .remove("force");
+    assert!(serde_json::from_value::<Vec<TaskMoveExplanation>>(missing).is_err());
+}

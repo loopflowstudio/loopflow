@@ -136,3 +136,18 @@ public struct SessionConnectExplanation: Codable, Equatable, Sendable {
     public let impediments: [String]
     public let unavailable: [String]
 }
+
+public struct TaskMoveAction: Codable, Equatable, Sendable {
+    public let workflow: String?
+    public let from: Workflow.Position?
+    public let to: String
+    public let reason: String?
+    public let force: Bool
+}
+
+public struct TaskMoveExplanation: Codable, Equatable, Sendable {
+    public let resolution: ContextExplanation
+    public let action: TaskMoveAction?
+    public let impediments: [String]
+    public let unavailable: [String]
+}

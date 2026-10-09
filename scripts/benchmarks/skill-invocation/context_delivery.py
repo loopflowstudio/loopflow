@@ -17,7 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from launch import _codex_response
-from request_mapping import _marker_locations, _response, _run
+from request_mapping import _marker_locations, _message_texts, _response, _run
 
 
 class Requests(ThreadingHTTPServer):
@@ -130,25 +130,13 @@ def _claude(root: Path, env: dict[str, str], port: int) -> None:
         assert result.returncode == 0, f"Claude {phase} failed: see {root}"
 
 
-def _codex(root: Path, env: dict[str, str], port: int) -> None:
-    native = root / "home/.codex"
-    native.mkdir()
-    env["CODEX_HOME"] = str(native)
-    command = json.dumps(_hook(root))
-    (native / "config.toml").write_text(f"""model = "gpt-5.4"
+def _codex_config(port: int) -> str:
+    return f"""model = "gpt-5.4"
 model_provider = "fixture"
 cli_auth_credentials_store = "file"
 allow_login_shell = false
 sandbox_mode = "danger-full-access"
 approval_policy = "never"
-[[hooks.SessionStart]]
-[[hooks.SessionStart.hooks]]
-type = "command"
-command = {command}
-[[hooks.PostCompact]]
-[[hooks.PostCompact.hooks]]
-type = "command"
-command = {command}
 [features]
 shell_snapshot = false
 [model_providers.fixture]
@@ -160,7 +148,27 @@ requires_openai_auth = false
 enabled = false
 [feedback]
 enabled = false
-""")
+"""
+
+
+def _codex(root: Path, env: dict[str, str], port: int) -> None:
+    native = root / "home/.codex"
+    native.mkdir()
+    env["CODEX_HOME"] = str(native)
+    command = json.dumps(_hook(root))
+    (native / "config.toml").write_text(
+        _codex_config(port)
+        + f"""
+[[hooks.SessionStart]]
+[[hooks.SessionStart.hooks]]
+type = "command"
+command = {command}
+[[hooks.PostCompact]]
+[[hooks.PostCompact.hooks]]
+type = "command"
+command = {command}
+"""
+    )
     (root / "work/AGENTS.md").write_text("LOO444_REPO_GUIDE")
     executable = str(Path(shutil.which("codex")).resolve())
     messages: queue.Queue = queue.Queue()
@@ -250,19 +258,6 @@ enabled = false
             (root / "messages.json").write_text(json.dumps(transcript, indent=2))
 
 
-def _contains_context(request: dict, role: str, context: str) -> bool:
-    for message in request.get("messages", request.get("input", [])):
-        if message.get("role") != role:
-            continue
-        content = message.get("content", [])
-        texts = (
-            [content] if isinstance(content, str) else [block.get("text", "") for block in content]
-        )
-        if any(context in text for text in texts):
-            return True
-    return False
-
-
 def _assess(
     provider: str,
     requests: list[dict],
@@ -272,11 +267,13 @@ def _assess(
     first, last = requests[0], requests[-1]
     role = "user" if provider == "claude" else "developer"
     checks = {
-        "startup_context_complete": _contains_context(first, role, context + "_SessionStart"),
-        "fresh_context_complete": _contains_context(
-            last,
-            role,
-            context.replace("LOO444_START_CONTEXT", "LOO444_FRESH_CONTEXT") + "_SessionStart",
+        "startup_context_complete": any(
+            context + "_SessionStart" in text for text in _message_texts(first, role)
+        ),
+        "fresh_context_complete": any(
+            context.replace("LOO444_START_CONTEXT", "LOO444_FRESH_CONTEXT") + "_SessionStart"
+            in text
+            for text in _message_texts(last, role)
         ),
         "startup_context_conversation_only": _marker_locations(first, "LOO444_START_CONTEXT")
         == [role],

@@ -26,21 +26,31 @@ def _output_events(output: str) -> list[dict]:
     return events
 
 
+def _content_texts(content: str | list[dict]) -> list[str]:
+    return (
+        [content]
+        if isinstance(content, str)
+        else [block["text"] for block in content if "text" in block]
+    )
+
+
 def _marker_locations(request: dict, marker: str) -> list[str]:
-    locations = []
-    for field in ("system", "instructions"):
-        if marker in json.dumps(request.get(field, [])):
-            locations.append(field)
-    for field in ("messages", "input"):
-        for message in request.get(field, []):
-            if marker in json.dumps(message.get("content", [])):
-                locations.append(message["role"])
-    return locations
+    channels = [(field, request.get(field, [])) for field in ("system", "instructions")]
+    channels.extend(
+        (message.get("role"), message.get("content", []))
+        for field in ("messages", "input")
+        for message in request.get(field, [])
+    )
+    return [
+        role
+        for role, content in channels
+        if role and any(marker in text for text in _content_texts(content))
+    ]
 
 
 def _assess(requests: list[dict], skill: Path, marker: str, context: str, argument: str) -> dict:
     locations = [_marker_locations(body, context) for body in requests]
-    users = [_user_texts(body) for body in requests]
+    users = [_message_texts(body, "user") for body in requests]
     return {
         "requests": len(requests),
         "request_models": sorted({body["model"] for body in requests}),
@@ -60,17 +70,14 @@ def _assess(requests: list[dict], skill: Path, marker: str, context: str, argume
     }
 
 
-def _user_texts(request: dict) -> list[str]:
-    texts = []
-    for message in request.get("messages", request.get("input", [])):
-        if message.get("role") != "user":
-            continue
-        content = message["content"]
-        if isinstance(content, str):
-            texts.append(content)
-        else:
-            texts.extend(block["text"] for block in content if "text" in block)
-    return texts
+def _message_texts(request: dict, role: str) -> list[str]:
+    return [
+        text
+        for field in ("messages", "input")
+        for message in request.get(field, [])
+        if message.get("role") == role
+        for text in _content_texts(message.get("content", []))
+    ]
 
 
 def _decode_context(text: str) -> str:
@@ -242,7 +249,7 @@ def _probe(claude: str, model: str, lf: str, flow: bool, terminal: bool, command
             result = _run(
                 [
                     lf,
-                    "--tui" if terminal else "-b",
+                    "-i" if terminal else "-b",
                     "--no-loopflow",
                     "--agent",
                     f"claude:{model}",
@@ -280,12 +287,12 @@ def _probe(claude: str, model: str, lf: str, flow: bool, terminal: bool, command
                 native_arguments_exact=any(
                     f"<command-args>{argument}</command-args>" in text
                     for request in requests
-                    for text in _user_texts(request)
+                    for text in _message_texts(request, "user")
                 ),
                 context_bytes_retained=any(
                     context_text in _decode_context(text).replace("&#36;", "$")
                     for request in requests
-                    for text in _user_texts(request)
+                    for text in _message_texts(request, "user")
                 ),
                 unfamiliar_declaration_reported="future-native-setting" in result.stderr,
                 collision_not_selected="WRONG_SOURCE" not in json.dumps(requests),

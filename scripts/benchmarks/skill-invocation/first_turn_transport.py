@@ -14,31 +14,40 @@ import sys
 import tempfile
 import termios
 import time
+from collections.abc import Iterator
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 import pyte
-from context_delivery import Requests
-from request_mapping import _user_texts
+from context_delivery import Requests, _codex_config
+from request_mapping import _message_texts
 
 
 def _assess(requests: list[dict], prompt: str) -> dict[str, bool]:
-    texts = _user_texts(requests[0]) if requests else []
+    texts = _message_texts(requests[0], "user") if requests else []
     return {
         "one_model_request": len(requests) == 1,
         "complete_first_turn": bool(texts) and texts[-1] == prompt and texts.count(prompt) == 1,
     }
 
 
-def _run(command: list[str], root: Path, env: dict[str, str]) -> tuple[int, bytes, bool]:
-    master, slave = pty.openpty()
+@contextmanager
+def _terminal(
+    command: list[str], root: Path, env: dict[str, str], *, file_stdin: bool = False
+) -> Iterator[tuple[subprocess.Popen, int]]:
+    with ExitStack() as resources:
+        master, slave = pty.openpty()
+        resources.callback(os.close, master)
+        with ExitStack() as inputs:
+            inputs.callback(os.close, slave)
+            fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 160, 0, 0))
+            source = inputs.enter_context((root / "prompt.txt").open("rb")) if file_stdin else slave
 
-    def terminal() -> None:
-        os.setsid()
-        # stdout is a real controlling terminal; stdin alone is the prompt file.
-        fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
+            def _controlling_terminal() -> None:
+                os.setsid()
+                # stdout stays a controlling terminal even when stdin is the prompt file.
+                fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
 
-    try:
-        with (root / "prompt.txt").open("rb") as source:
             process = subprocess.Popen(
                 command,
                 cwd=root / "work",
@@ -46,17 +55,29 @@ def _run(command: list[str], root: Path, env: dict[str, str]) -> tuple[int, byte
                 stdin=source,
                 stdout=slave,
                 stderr=slave,
-                preexec_fn=terminal,
+                preexec_fn=_controlling_terminal,
             )
-    except BaseException:
-        os.close(master)
-        raise
-    finally:
-        os.close(slave)
+        try:
+            yield process, master
+        finally:
+            if process.poll() is None:
+                os.killpg(process.pid, signal.SIGKILL)
+            process.wait(timeout=5)
+
+
+def _terminal_replies(output: bytearray, start: int) -> bytes:
+    # Include the preceding bytes only for queries straddling this read boundary.
+    return b"".join(
+        reply * output.count(query, max(0, start - len(query) + 1))
+        for query, reply in [(b"\x1b[6n", b"\x1b[1;1R"), (b"\x1b[c", b"\x1b[?1;2c")]
+    )
+
+
+def _run(command: list[str], root: Path, env: dict[str, str]) -> tuple[int, bytes, bool]:
     output = bytearray()
     deadline = time.monotonic() + 30
     timed_out = False
-    try:
+    with _terminal(command, root, env, file_stdin=True) as (process, master):
         while True:
             if time.monotonic() >= deadline:
                 timed_out = True
@@ -71,143 +92,121 @@ def _run(command: list[str], root: Path, env: dict[str, str]) -> tuple[int, byte
                 break
             if not data:
                 break
+            start = len(output)
             output.extend(data)
-            if b"\x1b[6n" in data:
-                os.write(master, b"\x1b[1;1R")
-            if b"\x1b[c" in data:
-                os.write(master, b"\x1b[?1;2c")
+            if replies := _terminal_replies(output, start):
+                os.write(master, replies)
         try:
             process.wait(timeout=max(0.1, deadline - time.monotonic()))
         except subprocess.TimeoutExpired:
             timed_out = True
-    finally:
-        if process.poll() is None:
-            os.killpg(process.pid, signal.SIGKILL)
-        process.wait(timeout=5)
-        os.close(master)
     return process.returncode, bytes(output), timed_out
 
 
 def _run_paste(
     command: list[str], root: Path, env: dict[str, str], prompt: str, server: Requests
 ) -> tuple[int, bytes, dict[str, bool]]:
-    master, slave = pty.openpty()
-    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 160, 0, 0))
+    with _terminal(command, root, env) as (process, master):
+        os.set_blocking(master, False)
+        output = bytearray()
+        screen = pyte.Screen(160, 40)
+        stream = pyte.ByteStream(screen)
+        pending = bytearray()
+        deadline = time.monotonic() + 45
+        checks = {
+            key: False
+            for key in [
+                "editor_ready",
+                "paste_drained",
+                "resized",
+                "followup_preserves_first_turn",
+                "clean_exit",
+            ]
+        }
 
-    def _terminal() -> None:
-        os.setsid()
-        fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+        def _pump() -> None:
+            readable, writable, _ = select.select([master], [master] if pending else [], [], 0.02)
+            if readable:
+                try:
+                    data = os.read(master, 65536)
+                except BlockingIOError:
+                    data = b""
+                start = len(output)
+                output.extend(data)
+                stream.feed(data)
+                pending.extend(_terminal_replies(output, start))
+            if writable:
+                try:
+                    count = os.write(master, pending[:4096])
+                    del pending[:count]
+                except BlockingIOError:
+                    pass
 
-    try:
-        process = subprocess.Popen(
-            command,
-            cwd=root / "work",
-            env=env,
-            stdin=slave,
-            stdout=slave,
-            stderr=slave,
-            preexec_fn=_terminal,
-        )
-    except BaseException:
-        os.close(master)
-        raise
-    finally:
-        os.close(slave)
-    os.set_blocking(master, False)
-    output = bytearray()
-    screen = pyte.Screen(160, 40)
-    stream = pyte.ByteStream(screen)
-    pending = bytearray()
-    deadline = time.monotonic() + 45
-    checks = {
-        key: False
-        for key in [
-            "editor_ready",
-            "paste_drained",
-            "resized",
-            "followup_preserves_first_turn",
-            "clean_exit",
-        ]
-    }
+        def _wait(predicate) -> None:
+            while not predicate():
+                if process.poll() is not None:
+                    raise RuntimeError("terminal exited before the observation")
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("terminal observation deadline exceeded")
+                _pump()
 
-    def _pump() -> None:
-        readable, writable, _ = select.select([master], [master] if pending else [], [], 0.02)
-        if readable:
-            try:
-                data = os.read(master, 65536)
-            except BlockingIOError:
-                data = b""
-            output.extend(data)
-            stream.feed(data)
-            # Search accumulated output so a split terminal query is answered once.
-            previous = bytes(output[: -len(data)]) if data else bytes(output)
-            for query, reply in [(b"\x1b[6n", b"\x1b[1;1R"), (b"\x1b[c", b"\x1b[?1;2c")]:
-                if output.count(query) > previous.count(query):
-                    pending.extend(reply)
-        if writable:
-            try:
-                count = os.write(master, pending[:4096])
-                del pending[:count]
-            except BlockingIOError:
-                pass
+        def _submit() -> None:
+            # Codex 0.161.0 treats Enter within its 120 ms paste-burst window as
+            # a newline. Separate this key from the rendered paste/typing; never
+            # retry submission, which could conceal a duplicate first turn.
+            ready = time.monotonic() + 0.15
+            _wait(lambda: time.monotonic() >= ready)
+            pending.extend(b"\r")
 
-    def _wait(predicate) -> None:
-        while not predicate():
-            if process.poll() is not None:
-                raise RuntimeError("terminal exited before the observation")
-            if time.monotonic() >= deadline:
-                raise TimeoutError("terminal observation deadline exceeded")
-            _pump()
+        def _visible(text: str) -> bool:
+            return text in "".join("".join(screen.display).split())
 
-    def _visible(text: str) -> bool:
-        return text in "".join("".join(screen.display).split())
-
-    try:
-        _wait(lambda: _visible("AskCodextodoanything"))
-        attrs = termios.tcgetattr(master)
-        if attrs[3] & (termios.ECHO | termios.ICANON):
-            raise RuntimeError("editor is not in raw mode")
-        pending.extend(b"zzlfreadyzz")
-        _wait(lambda: _visible("zzlfreadyzz"))
-        checks["editor_ready"] = True
-        # Remove the unsubmitted readiness marker, then send one bracketed paste.
-        pending.extend(b"\x15\x1b[200~" + prompt.encode() + b"\x1b[201~")
-        _wait(lambda: not pending)
-        checks["paste_drained"] = True
-        _wait(lambda: _visible("Pasted") or _visible("LOO444_END"))
-        # Resize while the first turn is still editable; the same PTY owns input.
-        fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", 32, 120, 0, 0))
-        screen.resize(32, 120)
-        checks["resized"] = termios.tcgetwinsize(master) == (32, 120)
-        pending.extend(b"\r")
-        _wait(lambda: _visible("fixtureresponse"))
-        pending.extend(b"LOO444_FOLLOWUP")
-        _wait(lambda: _visible("LOO444_FOLLOWUP"))
-        pending.extend(b"\r")
-        # Codex can make an independent title-generation request between turns.
-        _wait(lambda: any(_user_texts(body)[-1:] == ["LOO444_FOLLOWUP"] for body in server.bodies))
-        texts = next(
-            _user_texts(body)
-            for body in server.bodies
-            if _user_texts(body)[-1:] == ["LOO444_FOLLOWUP"]
-        )
-        checks["followup_preserves_first_turn"] = (
-            texts.count(prompt) == 1 and texts[-1] == "LOO444_FOLLOWUP"
-        )
-        pending.extend(b"/quit")
-        _wait(lambda: _visible("/quit"))
-        pending.extend(b"\r")
-        _wait(lambda: not pending)
-        while process.poll() is None and time.monotonic() < deadline:
-            _pump()
-        checks["clean_exit"] = process.poll() == 0
-    except (OSError, RuntimeError, TimeoutError) as error:
-        (root / "paste.error").write_text(str(error))
-    finally:
-        if process.poll() is None:
-            os.killpg(process.pid, signal.SIGKILL)
-        process.wait(timeout=5)
-        os.close(master)
+        try:
+            _wait(lambda: _visible("AskCodextodoanything"))
+            attrs = termios.tcgetattr(master)
+            if attrs[3] & (termios.ECHO | termios.ICANON):
+                raise RuntimeError("editor is not in raw mode")
+            pending.extend(b"zzlfreadyzz")
+            _wait(lambda: _visible("zzlfreadyzz"))
+            checks["editor_ready"] = True
+            # Remove the unsubmitted readiness marker, then send one bracketed paste.
+            pending.extend(b"\x15\x1b[200~" + prompt.encode() + b"\x1b[201~")
+            _wait(lambda: not pending)
+            checks["paste_drained"] = True
+            _wait(lambda: _visible("Pasted") or _visible("LOO444_END"))
+            # Resize while the first turn is still editable; the same PTY owns input.
+            fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", 32, 120, 0, 0))
+            screen.resize(32, 120)
+            checks["resized"] = termios.tcgetwinsize(master) == (32, 120)
+            _submit()
+            _wait(lambda: _visible("fixtureresponse"))
+            pending.extend(b"LOO444_FOLLOWUP")
+            _wait(lambda: _visible("LOO444_FOLLOWUP"))
+            _submit()
+            # Codex can make an independent title-generation request between turns.
+            _wait(
+                lambda: any(
+                    _message_texts(body, "user")[-1:] == ["LOO444_FOLLOWUP"]
+                    for body in server.bodies
+                )
+            )
+            texts = next(
+                _message_texts(body, "user")
+                for body in server.bodies
+                if _message_texts(body, "user")[-1:] == ["LOO444_FOLLOWUP"]
+            )
+            checks["followup_preserves_first_turn"] = (
+                texts.count(prompt) == 1 and texts[-1] == "LOO444_FOLLOWUP"
+            )
+            pending.extend(b"/quit")
+            _wait(lambda: _visible("/quit"))
+            _submit()
+            _wait(lambda: not pending)
+            while process.poll() is None and time.monotonic() < deadline:
+                _pump()
+            checks["clean_exit"] = process.poll() == 0
+        except (OSError, RuntimeError, TimeoutError) as error:
+            (root / "paste.error").write_text(str(error))
     return process.returncode, bytes(output), checks
 
 
@@ -249,26 +248,13 @@ def main() -> int:
         check=True,
     ).stdout.strip()
     with Requests("codex") as server:
-        (root / "native/config.toml").write_text(f'''model = "gpt-5.4"
-model_provider = "fixture"
-cli_auth_credentials_store = "file"
-allow_login_shell = false
-sandbox_mode = "danger-full-access"
-approval_policy = "never"
-[features]
-shell_snapshot = false
-[model_providers.fixture]
-name = "Local fixture"
-base_url = "http://127.0.0.1:{server.server_port}/v1"
-wire_api = "responses"
-requires_openai_auth = false
-[analytics]
-enabled = false
-[feedback]
-enabled = false
+        (root / "native/config.toml").write_text(
+            _codex_config(server.server_port)
+            + f'''
 [projects."{root / "work"}"]
 trust_level = "trusted"
-''')
+'''
+        )
         if args.transport == "paste":
             command = [executable, "--no-alt-screen", "--no-daemon"]
             status, output, checks = _run_paste(command, root, env, prompt, server)

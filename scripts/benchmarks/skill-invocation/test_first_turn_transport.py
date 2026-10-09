@@ -1,4 +1,5 @@
-from first_turn_transport import _assess
+import pytest
+from first_turn_transport import _assess, _terminal_replies
 
 
 def _request(text: str, role: str = "user") -> dict:
@@ -49,3 +50,16 @@ def test_terminal_normalization_is_not_exact_delivery():
         ("literal \x1b[201~ request", "literal  request"),
     ]:
         assert not _assess([_request(received)], original)["complete_first_turn"]
+
+
+@pytest.mark.parametrize("query,reply", [(b"\x1b[6n", b"\x1b[1;1R"), (b"\x1b[c", b"\x1b[?1;2c")])
+def test_terminal_queries_are_answered_once_across_read_boundaries(query, reply):
+    for split in range(1, len(query)):
+        output = bytearray(b"old output" + query)
+        start = len(output)
+        output.extend(query[:split])
+        assert _terminal_replies(output, start) == b""
+        start = len(output)
+        output.extend(query[split:] + query)
+        assert _terminal_replies(output, start) == reply * 2
+        assert _terminal_replies(output, len(output)) == b""

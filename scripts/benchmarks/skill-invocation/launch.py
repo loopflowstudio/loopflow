@@ -257,7 +257,7 @@ enabled = false
 [feedback]
 enabled = false
 """)
-        # --tui follows lf's native terminal launcher. Adapt only the final client
+        # -i follows lf's native terminal launcher. Adapt only the final client
         # to print/exec for headless acceptance; this does not test terminal rendering.
         flags = (
             " -p --output-format stream-json --verbose"
@@ -306,7 +306,7 @@ enabled = false
             result = _run(
                 [
                     str(lf),
-                    "--tui" if terminal else "-b",
+                    "-i" if terminal else "-b",
                     "--agent",
                     provider,
                     "--docs",

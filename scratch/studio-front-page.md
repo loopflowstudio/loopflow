@@ -282,3 +282,8 @@ Jack Heart, same turn: "I think Replit should be rebuilt on top of loopflow,
 but its still sort of its own busines". Read: Loopflow is the layer a hosted
 builder would sit on, and the product for people with no agent and no
 repository is a separate business, not this page.
+
+Jack Heart: "so we need a slightly different angle and intention here". Angle
+proposed back: the reader already has a coding agent; the page promises
+engineering-grade results from it and shows the app doing that, with no
+promise to make starting easy.

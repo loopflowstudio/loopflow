@@ -62,8 +62,9 @@ or liveness evidence; never a reason to start a second driver). “Ready” or
    work only; review happens in the conversation. Read composed steps before launching.
    Explain any departure from the default. Scratch history alone cannot approve
    a design or waive a review. A finished Flow proves neither completion nor
-   unfinished work: inspect its outcome, and stop if status confirms the Task
-   is complete. A merged PR alone leaves follow-through pending. Ask about consequential scope
+   unfinished work: inspect its outcome. Completion alone is not a stopping
+   point while required delivery follow-through remains unresolved. A merged
+   PR alone leaves follow-through pending. Ask about consequential scope
    or direction conflicts; when judgment is unavailable, name the exact decision.
 
 3. **Advance the work.** `lf task run <issue> [flow]` runs a
@@ -84,15 +85,18 @@ or liveness evidence; never a reason to start a second driver). “Ready” or
    live driver. Continue through the authored steps, resolve recoverable failures,
    and use inline answers to unblock interactive work. Read a failure's log
    before retrying, and retry with `--reason "<what changed>"` only on new
-   evidence or a repaired cause. Stop when status confirms Task completion or a
-   concrete blocker remains. Report publication, review, merge, follow-through
-   and completion as separate facts. Arming a merge the Flow did not remains the
+   evidence or a repaired cause. Stop when status confirms Task completion and
+   resolved delivery obligations, or a concrete blocker remains. Report publication,
+   review, merge, follow-through and completion as separate facts. Arming a merge the Flow did not remains the
    person's choice. Each Task has zero or one PR; further implementation needing
    another PR belongs in another Task, stacked if dependent. Repeated calls must
    preserve existing work without duplicating Flows or conversations.
 
 5. **Finish merged delivery.** A verified merge, including a manual GitHub merge,
-   leaves the Task pending until follow-ups are filed or none needed is recorded.
+   leaves follow-through pending until follow-ups are filed or none needed is
+   recorded. Linear may already show Done; keep that status without mistaking
+   it for a filing disposition. Do not reopen a completed Task to bypass a
+   finishing refusal; report the unresolved obligation and blocker.
    First inspect every associated live Flow and unfinished Process; a live ship
    Flow owns its finish. With no live driver, if the disposition is already durable,
    run `lf task complete <issue>` and reread status. Otherwise run

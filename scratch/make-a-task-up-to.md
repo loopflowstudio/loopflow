@@ -9,8 +9,8 @@ filing/completion writers; `1fe22f565` adds relation export and `314095b00`
 simplifies completion and shared reads.
 Task completion remains independent of Workflow position and Process liveness.
 The earlier evidence below describes pre-integration populations; it does not
-verify the combined branch. Full gate, stacked/due-return proof and Jack's demo
-remain. Landing and Task completion are unauthorized.
+verify the combined branch. Completion-before-filing recovery, full gate,
+stacked/due-return proof and Jack's demo remain. Landing and Task completion are unauthorized.
 
 ## Decision and intended experience
 
@@ -84,6 +84,32 @@ Integration update (2026-10-08):
   an implementation choice, not a new decision attributed to Jack.
 - Combined CLI/Desktop lifecycle, populated released-data upgrade, stacking and
   due-return acceptance remain with gate; Jack's complete demo remains separate.
+
+### Completion before filing — remaining implementation (2026-10-08)
+
+Source review at `7ae7f8e6b` confirms the previous iteration's reservation,
+historical local conversion and local reopening repairs already exist. They are
+not three new implementation tasks. Historical remote export remains uncertain
+as described above.
+
+A different ordering still fails the accepted independent-completion contract:
+Linear marks the source Done before its first follow-up is reserved.
+`SqliteStore::reserve_follow_through` rejects every terminal source with no
+existing receipt, even with unresolved disposition and an authoritative merge.
+The existing local lifecycle files first, then completes; the export test only
+proves relations can arrive after completion. Neither covers completion first.
+The follow-through and Task operator instructions also stopped at Done; this
+reconciliation corrects those instructions to retain the obligation and report
+a filing refusal, never reopen merely to bypass it.
+
+Remaining implementation must allow finishing accepted, unresolved delivery
+without reversing provider status or changing Workflow, PR or Process identity.
+Resolved disposition must still prevent new scope; completion alone authorizes
+neither new execution nor another PR. Cover first filing after observed Done,
+repeat filing/finish and the operator recovery path. This is a coordinated
+filing/admission/recovery change, not permission to remove all terminal guards.
+It remains before the complete demo; no new product decision is needed to honor
+Jack's existing separation of completion and delivery facts.
 
 LOO-406's design records Jack Heart's Linear-wins policy for observed conflicts.
 Its enabled `task_completion_preserves_linear_reopening_during_delivery` regression
@@ -481,13 +507,15 @@ simulated design review established those failure boundaries, not Jack's approva
 
 One coherent lifecycle landing for LOO-418; internal slices do not authorize a
 serial PR chain. If independent work is split later, each additional PR needs
-its own Task and child-specific design. The original four slices and the independent completion trigger are implemented locally.
+its own Task and child-specific design. The original four slices and independent
+completion trigger exist locally; completion-before-filing recovery is incomplete.
 The common planning integration and crash/local-reopening repairs exist;
 historical remote-creation uncertainty, combined acceptance and the complete
 demo remain within that same boundary.
 
-**Remaining work:** resolve the historical remote-creation uncertainty above,
-run the unified lifecycle acceptance population below and Jack's complete demo. Completion and filing now
+**Remaining work:** repair completion-before-filing recovery above; resolve the
+historical remote-export choice; run the unified lifecycle acceptance population
+below and Jack's complete demo. Completion and filing now
 use local planning; the earlier evidence does not verify the combined source. The affected
 gate ran against the earlier model; its failures have passing focused repairs.
 Those results do not verify the newly accepted completion contract.
@@ -545,6 +573,7 @@ also run `cargo test -p loopflow --lib engine::flow_graph::tests`.
 | --- | --- |
 | Normal delivery completes a merged Task only after follow-through is resolved; CLI, work monitor and Desktop show independent status, Workflow position, PR and links | Extend `task_flow_launch_tests`, `land_tests`, DTO fixtures and `TaskFlowProofTests`/`RegistryQueryTests` with the same lifecycle population |
 | `task complete` changes status without moving Workflow; move/arrival at end triggers the same operation; completion inside follow-through followed by driver arrival records one completion and actual movement | Task launch, authority and command-tree tests; shared Rust/Swift DTO/view population |
+| Observed Done before first filing still permits accepted follow-through without reopening; retries retain one child and one disposition | Follow-through operation and operator recovery tests; current fixtures cover only filing before completion |
 | Accepted Linear completion while a real held Process is running preserves its Process identity, liveness, Workflow edge, Session and checkout; later driver exit records its true result | Public Task/Flow case plus PM observation tests and CLI/monitor/Desktop projection |
 | End is durable before a failed completion; crash/retry finishes only completion, keeps successful Flow history, and exposes the reason; repeated completion is harmless | Task launch, store transactions and operator guidance; verify gate/Flow invocation counts |
 | Newer Linear reopening changes status without Workflow movement; old end and pending retries cannot re-complete it; stale provider observations do not undo newer state; reopening between outbound read and mutation survives | PM revision/writeback and completion trigger tests, including LOO-406's enabled failing concurrent-reopening regression |
@@ -645,4 +674,4 @@ unsupported started-state write and unimported Workflow assumptions were correct
 The enabled unseen-write regression remains unresolved; combined gate, Swift,
 populated installation and Jack's demo remain separate.
 
-Check (2026-10-08): disposable Docker `cargo test -p loopflow --lib ops::task::follow_through::tests` (5, including CLI/monitor lifecycle), `cargo test -p loopflow --test task_follow_through_tests` (3), and `cargo clippy --all-targets -- -D warnings` pass after installing the container’s missing Clippy component; native `cargo fmt --check` and `git diff --check` pass. Combined gate/Swift/installation and Jack’s demo remain.
+Check (2026-10-08): `git diff --check` passes for this prose reconciliation; reused `7ae7f8e6b` evidence: disposable Docker `cargo test -p loopflow --lib ops::task::follow_through::tests` (5, including CLI/monitor lifecycle), `cargo test -p loopflow --test task_follow_through_tests` (3), and `cargo clippy --all-targets -- -D warnings` pass after installing the container’s missing Clippy component; native `cargo fmt --check` and `git diff --check` pass. Combined gate/Swift/installation and Jack’s demo remain.

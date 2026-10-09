@@ -8,9 +8,13 @@ Finish delivered work by giving each accepted remaining obligation its own Task.
    Read its accepted brief, merged PR copy and head, delivery evidence, acceptance
    limits and existing follow-up receipts. Scratch may already be deleted; it
    must not be the only record of an obligation. If there is no Task, report the
-   PR delivery without inventing one. If already done, report the recorded
-   disposition without filing again. A Task with a PR needs authoritative merge
-   evidence; an open, closed-unmerged or unreadable PR leaves it pending.
+   PR delivery without inventing one. Stop without filing again only when Task
+   completion and the required disposition are both recorded. Linear may mark
+   a Task done before filing; preserve that status and inspect its unresolved
+   delivery instead of assuming none is needed. A Task with a PR needs
+   authoritative merge evidence; an open, closed-unmerged or unreadable PR
+   leaves delivery pending. If filing refuses a completed Task, report that
+   blocker; do not reopen it merely to bypass the refusal.
 
 2. **Identify remaining obligations.** File only concrete accepted work whose
    evidence comes later: an installed release, production behavior, real usage

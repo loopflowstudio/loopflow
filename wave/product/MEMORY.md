@@ -5,37 +5,40 @@ iOS, agents and workers. Older “Concerto” notes mean Mac.
 
 ## Task delivery boundary (LOO-418, reconciled 2026-10-08)
 
-Jack Heart decided: zero or one PR per Task; dependent PRs use stacked Tasks.
+Jack Heart decided: zero or one PR per Task; dependencies use stacked Tasks.
 After merge, file follow-ups or record “none needed”, then complete. October 8:
 end triggers completion; Task status, Workflow position and Process liveness
-are independent. Linear completion preserves execution. Failed end requests
-retry without replaying the Flow; reopening supersedes old completion intent.
+are independent. Failed end requests retry without replaying the Flow;
+reopening supersedes old intent. Linear completion preserves execution.
 
-Jack authorized stacking on LOO-406 `558a39232`: one local planning owner,
-optional placement and independent completion. Observed conflicts adopt Linear;
-the enabled unseen-write regression still fails. Matching readback and integration
-prove neither concurrency safety nor acceptance. LOO-385 overlaps without closure authority; full lifecycle
-proof on #1499 precedes Jack’s demo, and landing remains unauthorized.
+Jack authorized stacking on LOO-406 `558a39232`: local planning, optional
+placement, independent completion. Observed conflicts adopt Linear;
+the enabled unseen-write regression still fails despite matching readback.
+LOO-385 overlaps without closure authority. Full #1499 lifecycle proof precedes
+Jack’s demo; landing remains unauthorized.
 
-Task owns placement and one optional PR, retaining history and unresolved scope.
+Task retains placement, PR history and unresolved scope.
 Jack accepted normal delivery or the next Task/Wave pass finishing follow-through,
-without a watcher or implicit wake. Common planning owns local creation/status;
-foreground export owns optional issue creation and relations after mapping, even
-after source completion. Lost replies retain identity. Links read current saved
-names/dates, including removal, without changing immutable filing input.
+without a watcher or wake. Common planning owns creation/status;
+foreground export owns optional issues and relations, even after completion.
+Lost replies retain identity. Links read current saved names/dates, including
+removal, without changing immutable filing input.
 
 Reservation and child commit together; older reservations recover in their
-pinned Project after rotation. Historical intents retain unknown remote creation
-in common export; absence cannot authorize another create. `task reopen`
-supersedes completion intent, preserving execution/PR. Docker: `7671f8e9f`;
-combined acceptance remains.
+pinned Project after rotation. Historical intents retain unknown creation in
+common export; absence cannot authorize another create. `task reopen` preserves
+execution/PR. Recovery: `7671f8e9f`; compression: `81055b278`.
 
-Failed promotion retains confirmed copy; handoffs preserve child edits. Admission
-records performed location; Flow/Started commit atomically. Docker’s integrated
-fixture proves local filing → completion during a real Flow → actual CLI/monitor
-arrival. Observed provider reopening and durable end retry pass; unseen-write
-reopening fails. Combined gate, populated upgrade and native acceptance remain.
-Settlement rechecks merge/disposition in its transaction, not from an earlier read.
+Completion before filing remains broken: terminal status prevents the first
+reservation despite unresolved delivery. Filing-first proof misses this ordering. Operator prose retains the obligation; recovery needs repair without
+reopening or new scope.
+
+Failed promotion retains confirmed copy; handoffs preserve child edits.
+Performed location owns admission; Flow/Started commit atomically. Docker proves
+local filing → completion during a real Flow → CLI/monitor arrival, observed
+reopening and durable end retry, not unseen-write preservation. Combined gate,
+populated upgrade and native acceptance remain. Settlement rechecks merge and
+disposition transactionally.
 
 ## Terminal-host adoption (2026-10-07)
 

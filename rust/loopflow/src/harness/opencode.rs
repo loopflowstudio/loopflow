@@ -113,12 +113,8 @@ impl OpenCodeHarness {
                 store.record_session_provider_launch(session, driver, true)?;
             }
         }
-        let lifeline =
-            crate::engine::process::AgentProcessLifeline::prepare(command.as_std_mut(), None)?;
-        let mut child = command
-            .spawn()
+        let mut child = crate::engine::process::spawn_agent_process(command, None)
             .map_err(|err| anyhow!("failed to spawn opencode serve: {err}"))?;
-        lifeline.retain();
         let stderr = child
             .stderr
             .take()

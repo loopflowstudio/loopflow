@@ -33,7 +33,7 @@ use crate::chat::types::{ConversationEvent, ConversationItem, TurnUsage};
 use crate::engine::agent::{build_codex_thread_start_params, AgentConfig};
 use crate::engine::process::{
     agent_process_lifeline_path, hold_agent_process_lifeline, kill_process_group,
-    AgentProcessLifeline,
+    spawn_agent_process,
 };
 use crate::harness::codex_mapping::ItemPhase;
 use crate::harness::common::spawn_stderr_logger;
@@ -1102,12 +1102,10 @@ impl CodexHarness {
         }
         let lifeline = agent_process_lifeline_path(&endpoint);
         let mut child = if connection.is_none() {
-            let prepared = AgentProcessLifeline::prepare(command.as_std_mut(), Some(&lifeline))?;
-            let child = command
-                .spawn()
-                .map_err(|err| anyhow!("failed to spawn codex app-server: {err}"))?;
-            prepared.retain();
-            Some(child)
+            Some(
+                spawn_agent_process(command, Some(&lifeline))
+                    .map_err(|err| anyhow!("failed to spawn codex app-server: {err}"))?,
+            )
         } else {
             None
         };

@@ -14,66 +14,77 @@ static HELD_LIFELINES: Mutex<Vec<File>> = Mutex::new(Vec::new());
 // stdout acknowledges watchdog startup, not provider output. Ignoring TERM
 // lets the watchdog and its sleep survive the group signal to deliver KILL.
 // dash needs `kill -s TERM -- -pgid`, not `kill -TERM -- -pgid`.
-const WATCHDOG: &std::ffi::CStr = c"printf .; exec 1>&-\nwhile read -r _; do :; done\ntrap '' TERM\nkill -s TERM -- \"-$1\" 2>/dev/null\nsleep 2\nkill -s KILL -- \"-$1\" 2>/dev/null";
+const WATCHDOG: &std::ffi::CStr = cr#"printf .; exec 1>&-
+while read -r _; do :; done
+trap '' TERM
+kill -s TERM -- "-$1" 2>/dev/null
+sleep 2
+kill -s KILL -- "-$1" 2>/dev/null"#;
 
-/// A prepared agent's lifeline. Dropping it after a failed spawn stops the
-/// watchdog; retaining it after success permits live attachment by another lf.
-#[derive(Debug)]
-pub(crate) struct AgentProcessLifeline(File);
+/// Spawn a headless AgentProcess with its watchdog already running. Consume the
+/// command so its inherited descriptors cannot outlive this spawn or be reused.
+/// A successful launch holds the lifeline until this lf invocation exits.
+pub(crate) fn spawn_agent_process(
+    mut command: tokio::process::Command,
+    path: Option<&Path>,
+) -> std::io::Result<tokio::process::Child> {
+    let writer = prepare_lifeline(command.as_std_mut(), path)?;
+    let child = command.spawn()?;
+    retain_lifeline(writer);
+    Ok(child)
+}
 
-impl AgentProcessLifeline {
-    pub(crate) fn prepare(command: &mut Command, path: Option<&Path>) -> std::io::Result<Self> {
-        let (reader, writer) = match path {
-            Some(path) => {
-                let name = std::ffi::CString::new(path.as_os_str().as_encoded_bytes())?;
-                // SAFETY: name is a valid NUL-terminated path.
-                if unsafe { libc::mkfifo(name.as_ptr(), 0o600) } != 0 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                let reader = above_stdio(
-                    File::options()
-                        .read(true)
-                        .custom_flags(libc::O_NONBLOCK)
-                        .open(path)?,
-                )?;
-                let writer = above_stdio(File::options().write(true).open(path)?)?;
-                // SAFETY: reader is owned here; the watchdog needs blocking read.
-                if unsafe { libc::fcntl(reader.as_raw_fd(), libc::F_SETFL, 0) } != 0 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                (reader, writer)
+fn prepare_lifeline(command: &mut Command, path: Option<&Path>) -> std::io::Result<File> {
+    let (reader, writer) = match path {
+        Some(path) => {
+            let name = std::ffi::CString::new(path.as_os_str().as_encoded_bytes())?;
+            // SAFETY: name is a valid NUL-terminated path.
+            if unsafe { libc::mkfifo(name.as_ptr(), 0o600) } != 0 {
+                return Err(std::io::Error::last_os_error());
             }
-            None => {
-                let (reader, writer) = std::io::pipe()?;
-                (
-                    above_stdio(File::from(OwnedFd::from(reader)))?,
-                    above_stdio(File::from(OwnedFd::from(writer)))?,
-                )
+            let reader = above_stdio(
+                File::options()
+                    .read(true)
+                    .custom_flags(libc::O_NONBLOCK)
+                    .open(path)?,
+            )?;
+            let writer = above_stdio(File::options().write(true).open(path)?)?;
+            // SAFETY: reader is owned here; the watchdog needs blocking read.
+            if unsafe { libc::fcntl(reader.as_raw_fd(), libc::F_SETFL, 0) } != 0 {
+                return Err(std::io::Error::last_os_error());
             }
-        };
-        let null = above_stdio(File::options().write(true).open("/dev/null")?)?;
-        command.process_group(0);
-        let writer_fd = writer.as_raw_fd();
-        // SAFETY: after fork this closure performs only stack operations and
-        // async-signal-safe syscalls. Captured files stay owned by Command in
-        // the parent; neither branch unwinds, allocates, or locks after fork.
-        unsafe {
-            command.pre_exec(move || {
-                // CLOEXEC alone is too late: a launcher stalled before exec
-                // would otherwise keep its own lifeline alive after lf dies.
-                libc::close(writer_fd);
-                start_watchdog(reader.as_raw_fd(), null.as_raw_fd())
-            });
+            (reader, writer)
         }
-        Ok(Self(writer))
+        None => {
+            let (reader, writer) = std::io::pipe()?;
+            (
+                above_stdio(File::from(OwnedFd::from(reader)))?,
+                above_stdio(File::from(OwnedFd::from(writer)))?,
+            )
+        }
+    };
+    let null = above_stdio(File::options().write(true).open("/dev/null")?)?;
+    command.process_group(0);
+    let writer_fd = writer.as_raw_fd();
+    // SAFETY: after fork this closure performs only stack operations and
+    // async-signal-safe syscalls. Captured files stay owned by Command in
+    // the parent; neither branch unwinds, allocates, or locks after fork.
+    unsafe {
+        command.pre_exec(move || {
+            // CLOEXEC alone is too late: a launcher stalled before exec
+            // would otherwise keep its own lifeline alive after lf dies.
+            libc::close(writer_fd);
+            start_watchdog(reader.as_raw_fd(), null.as_raw_fd())
+        });
     }
+    Ok(writer)
+}
 
-    pub(crate) fn retain(self) {
-        HELD_LIFELINES
-            .lock()
-            .expect("lifeline list poisoned")
-            .push(self.0);
-    }
+fn retain_lifeline(writer: File) {
+    HELD_LIFELINES
+        .lock()
+        .expect("lifeline list poisoned")
+        .push(writer);
 }
 
 // Command installs native stdio before pre_exec. An invocation with a closed
@@ -102,25 +113,20 @@ fn start_watchdog(reader: libc::c_int, null: libc::c_int) -> std::io::Result<()>
         if libc::pipe(ready.as_mut_ptr()) != 0 {
             return Err(std::io::Error::last_os_error());
         }
-        for fd in ready {
-            if libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) == -1 {
-                let error = std::io::Error::last_os_error();
-                libc::close(ready[0]);
-                libc::close(ready[1]);
-                return Err(error);
+        let ready = ready.map(|fd| OwnedFd::from_raw_fd(fd));
+        for fd in &ready {
+            if libc::fcntl(fd.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) == -1 {
+                return Err(std::io::Error::last_os_error());
             }
         }
         let pid = libc::fork();
         if pid == -1 {
-            let error = std::io::Error::last_os_error();
-            libc::close(ready[0]);
-            libc::close(ready[1]);
-            return Err(error);
+            return Err(std::io::Error::last_os_error());
         }
         if pid == 0 {
-            libc::close(ready[0]);
+            libc::close(ready[0].as_raw_fd());
             if libc::dup2(reader, libc::STDIN_FILENO) == -1
-                || libc::dup2(ready[1], libc::STDOUT_FILENO) == -1
+                || libc::dup2(ready[1].as_raw_fd(), libc::STDOUT_FILENO) == -1
                 || libc::dup2(null, libc::STDERR_FILENO) == -1
             {
                 libc::_exit(127);
@@ -150,22 +156,21 @@ fn start_watchdog(reader: libc::c_int, null: libc::c_int) -> std::io::Result<()>
             libc::execve(c"/bin/sh".as_ptr(), argv.as_ptr(), env.as_ptr());
             libc::_exit(127);
         }
-        libc::close(ready[1]);
+        let [ready_reader, ready_writer] = ready;
+        drop(ready_writer);
         let mut byte = 0u8;
-        let result = loop {
-            match libc::read(ready[0], (&mut byte as *mut u8).cast(), 1) {
-                1 if byte == b'.' => break Ok(()),
+        loop {
+            match libc::read(ready_reader.as_raw_fd(), (&mut byte as *mut u8).cast(), 1) {
+                1 if byte == b'.' => return Ok(()),
                 -1 => {
                     let error = std::io::Error::last_os_error();
                     if error.kind() != std::io::ErrorKind::Interrupted {
-                        break Err(error);
+                        return Err(error);
                     }
                 }
-                _ => break Err(std::io::Error::from_raw_os_error(libc::EIO)),
+                _ => return Err(std::io::Error::from_raw_os_error(libc::EIO)),
             }
-        };
-        libc::close(ready[0]);
-        result
+        }
     }
 }
 
@@ -178,7 +183,7 @@ pub(crate) fn hold_agent_process_lifeline(path: &Path) -> std::io::Result<bool> 
         .open(path)
     {
         Ok(writer) => {
-            AgentProcessLifeline(writer).retain();
+            retain_lifeline(writer);
             Ok(true)
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
@@ -200,7 +205,9 @@ mod tests {
     use std::process::{Child, Command, Stdio};
     use std::time::{Duration, Instant};
 
-    use super::{hold_agent_process_lifeline, AgentProcessLifeline};
+    use super::{
+        hold_agent_process_lifeline, prepare_lifeline, retain_lifeline, spawn_agent_process,
+    };
     use crate::engine::process::{kill_process_group, terminate_process_group};
 
     const ATTACHED_MODE: &str = "LF_TEST_LIFELINE_LF";
@@ -249,8 +256,7 @@ mod tests {
             .stderr(Stdio::null());
         let fifo = std::env::var_os(ATTACHED_FIFO);
         let out = std::env::var(ATTACHED_OUT).unwrap();
-        let lifeline =
-            AgentProcessLifeline::prepare(&mut command, fifo.as_deref().map(Path::new)).unwrap();
+        let lifeline = prepare_lifeline(&mut command, fifo.as_deref().map(Path::new)).unwrap();
         if mode == "before_exec" {
             let pending = format!("{out}.tmp");
             let file = std::fs::File::create(&pending).unwrap();
@@ -272,7 +278,7 @@ mod tests {
             }
         }
         let agent = command.spawn().unwrap();
-        lifeline.retain();
+        retain_lifeline(lifeline);
         std::fs::write(format!("{out}.tmp"), agent.id().to_ne_bytes()).unwrap();
         std::fs::rename(format!("{out}.tmp"), &out).unwrap();
         match mode.as_str() {
@@ -372,16 +378,13 @@ mod tests {
         agent_dies_when_attached_lf_ends("closed_stdio", Some(libc::SIGKILL));
     }
 
-    #[test]
-    fn failed_exec_releases_its_watchdog_and_keeps_the_spawn_error() {
+    #[tokio::test]
+    async fn failed_exec_releases_its_watchdog_and_keeps_the_spawn_error() {
         let dir = tempfile::tempdir().unwrap();
         let fifo = dir.path().join("lifeline");
-        let mut command = Command::new(dir.path().join("absent-provider"));
-        let lifeline = AgentProcessLifeline::prepare(&mut command, Some(&fifo)).unwrap();
-        let error = command.spawn().unwrap_err();
+        let command = tokio::process::Command::new(dir.path().join("absent-provider"));
+        let error = spawn_agent_process(command, Some(&fifo)).unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
-        drop(command); // release the parent's read end as well
-        drop(lifeline);
         assert!(
             wait_until(|| {
                 std::fs::File::options()
@@ -394,10 +397,10 @@ mod tests {
         );
     }
 
-    #[test]
-    fn launch_preserves_native_stdio_arguments_and_exit_status() {
-        use std::io::Write;
-        let mut command = Command::new("/bin/sh");
+    #[tokio::test]
+    async fn launch_preserves_native_stdio_arguments_and_exit_status() {
+        use tokio::io::AsyncWriteExt;
+        let mut command = tokio::process::Command::new("/bin/sh");
         command
             .args([
                 "-c",
@@ -408,16 +411,15 @@ mod tests {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        let lifeline = AgentProcessLifeline::prepare(&mut command, None).unwrap();
-        let mut child = command.spawn().unwrap();
+        let mut child = spawn_agent_process(command, None).unwrap();
         child
             .stdin
             .take()
             .unwrap()
             .write_all(b"input bytes\n")
+            .await
             .unwrap();
-        let output = child.wait_with_output().unwrap();
-        drop(lifeline);
+        let output = child.wait_with_output().await.unwrap();
         assert_eq!(output.status.code(), Some(42));
         assert_eq!(output.stdout, b"input bytes|arg with 'quotes'");
         assert_eq!(output.stderr, b"stderr");

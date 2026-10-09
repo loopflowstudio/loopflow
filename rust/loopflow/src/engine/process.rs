@@ -127,7 +127,7 @@ pub(crate) fn terminate_process_group(_pgid: u32) -> bool {
 
 mod lifeline;
 pub(crate) use lifeline::{
-    agent_process_lifeline_path, hold_agent_process_lifeline, AgentProcessLifeline,
+    agent_process_lifeline_path, hold_agent_process_lifeline, spawn_agent_process,
 };
 
 pub(crate) fn current_process_group_id() -> Option<u32> {

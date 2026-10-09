@@ -18,22 +18,27 @@ pub(super) fn ingest_task_comment(
     let incoming_revision = super::planning::revision_nanos(comment.revision.as_deref())?;
     let existing = conn
         .query_row(
-            "SELECT id,body,author,created_at,task_id,provider_revision,
-            NOT EXISTS(SELECT 1 FROM task_comment_deliveries WHERE comment_id=?1
-                AND acknowledged=0 AND conflicting_comment_json IS NULL)
-         FROM task_comments WHERE id=?1",
+            "SELECT c.id,c.body,c.author,c.created_at,c.task_id,c.provider_revision,
+                json_extract(d.comment_json,'$.body'),d.acknowledged
+         FROM task_comments c LEFT JOIN task_comment_deliveries d
+            ON d.comment_id=c.id AND d.conflicting_comment_json IS NULL
+         WHERE c.id=?1",
             [&comment.id],
             |row| {
                 Ok((
                     read_comment(row)?,
                     row.get::<_, String>(4)?,
                     row.get::<_, Option<String>>(5)?,
-                    row.get::<_, bool>(6)?,
+                    row.get::<_, Option<bool>>(7)?
+                        .map(|acknowledged| {
+                            row.get::<_, String>(6).map(|body| (body, acknowledged))
+                        })
+                        .transpose()?,
                 ))
             },
         )
         .optional()?;
-    if let Some((saved, owner, revision, acquired)) = existing {
+    if let Some((saved, owner, revision, delivery)) = existing {
         if owner != task.as_str() {
             return Err(StoreError::InvalidData(
                 "comment belongs to another Task".into(),
@@ -43,33 +48,28 @@ pub(super) fn ingest_task_comment(
         if previous.is_some() && incoming_revision < previous {
             return Ok(false);
         }
+        let acquired = delivery
+            .as_ref()
+            .is_none_or(|(_, acknowledged)| *acknowledged);
         if (previous.is_some() || acquired) && incoming_revision == previous && saved != incoming {
             return Err(StoreError::ProviderObservationConflict {
                 entity: "comment",
                 id: comment.id.clone(),
             });
         }
-    }
-    let delivery: Option<(String, bool)> = conn
-        .query_row(
-            "SELECT json_extract(comment_json,'$.body'),acknowledged FROM task_comment_deliveries
-             WHERE comment_id=?1 AND conflicting_comment_json IS NULL",
-            [&comment.id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .optional()?;
-    if let Some((body, acknowledged)) = delivery {
-        if body == comment.body {
-            conn.execute(
-                "UPDATE task_comment_deliveries SET acknowledged=1,error=NULL WHERE comment_id=?1 AND (acknowledged=0 OR error IS NOT NULL)",
-                [&comment.id],
-            )?;
-        } else if !acknowledged {
-            // Adopt Linear and retain the complete losing comment and observation.
-            conn.execute(
-                "UPDATE task_comment_deliveries SET conflicting_comment_json=?2,error=NULL WHERE comment_id=?1",
-                params![comment.id, serde_json::to_string(comment)?],
-            )?;
+        if let Some((body, acknowledged)) = delivery {
+            if body == comment.body {
+                conn.execute(
+                    "UPDATE task_comment_deliveries SET acknowledged=1,error=NULL WHERE comment_id=?1 AND (acknowledged=0 OR error IS NOT NULL)",
+                    [&comment.id],
+                )?;
+            } else if !acknowledged {
+                // Adopt Linear and retain the complete losing comment and observation.
+                conn.execute(
+                    "UPDATE task_comment_deliveries SET conflicting_comment_json=?2,error=NULL WHERE comment_id=?1",
+                    params![comment.id, serde_json::to_string(comment)?],
+                )?;
+            }
         }
     }
     super::planning_peers::observe_comment(conn, task, comment, observed_at)?;

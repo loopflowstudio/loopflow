@@ -929,18 +929,13 @@ fn project_comment(
             .ok_or_else(|| invalid("comment requires a Task"))?,
     );
     let winner = winners["content"].1;
-    let mut observations = snapshot
-        .changes
-        .values()
-        .filter(|change| change.object == *object && change.field == "content")
-        .filter_map(|change| change.linear.as_ref())
-        .collect::<Vec<_>>();
-    observations.sort_by_key(|observation| (observation.revision_time(), observation.observed_at));
-    if let Some(latest) = observations.last() {
-        let latest = latest.revision_time();
-        observations.retain(|observation| observation.revision_time() == latest);
-    }
-    observations.dedup();
+    let observations = latest_observations(
+        snapshot
+            .changes
+            .values()
+            .filter(|change| change.object == *object && change.field == "content")
+            .filter_map(|change| change.linear.as_ref()),
+    )?;
     for observation in observations {
         let comment = serde_json::from_value(observation.body.clone())?;
         if !super::task_comments::ingest_task_comment(
@@ -970,6 +965,29 @@ fn project_comment(
     Ok(())
 }
 
+/// Superseded facts remain in the journal, not in acquisition. Keep every body
+/// at the latest revision so the common reader can reject contradictions; receipt
+/// time orders acquisition within that frontier, never across provider revisions.
+fn latest_observations<'a>(
+    observations: impl Iterator<Item = &'a LinearObservation>,
+) -> StoreResult<Vec<&'a LinearObservation>> {
+    let mut observations = observations
+        .map(|observation| {
+            Ok((
+                super::planning::revision_nanos(observation.revision())?,
+                observation,
+            ))
+        })
+        .collect::<StoreResult<Vec<_>>>()?;
+    observations.sort_by_key(|(revision, observation)| (*revision, observation.observed_at));
+    if let Some((latest, _)) = observations.last() {
+        let latest = *latest;
+        observations.retain(|(revision, _)| *revision == latest);
+    }
+    observations.dedup_by(|a, b| a.1 == b.1);
+    Ok(observations.into_iter().map(|(_, fact)| fact).collect())
+}
+
 /// Reuse provider acquisition's revision and equal-revision checks, rather than
 /// treating peer receipt time as a fresh read. This is inside the object's
 /// projection savepoint: rejected ownership never advances its provider cache.
@@ -988,30 +1006,16 @@ fn acquire_linear_frontier(
     let Some(provider_id) = winners[mapping].1.value.as_str() else {
         return Ok(());
     };
-    let mut observations = snapshot
-        .changes
-        .values()
-        .filter(|change| change.object == *object)
-        .filter_map(|change| change.linear.as_ref())
-        .filter(|observation| observation.body["id"].as_str() == Some(provider_id))
-        .map(|observation| {
-            Ok((
-                super::planning::revision_nanos(observation.revision())?,
-                observation,
-            ))
-        })
-        .collect::<StoreResult<Vec<_>>>()?;
-    observations.sort_by_key(|(revision, observation)| (*revision, observation.observed_at));
-    // History remains in the journal. Replaying an older unversioned body after
-    // a newer frontier was accepted can manufacture a same-import contradiction.
-    // Equal-revision observations still pass through the common conflict checks.
-    if let Some((latest, _)) = observations.last() {
-        let latest = *latest;
-        observations.retain(|(revision, _)| *revision == latest);
-    }
-    observations.dedup_by(|a, b| a.1 == b.1);
+    let observations = latest_observations(
+        snapshot
+            .changes
+            .values()
+            .filter(|change| change.object == *object)
+            .filter_map(|change| change.linear.as_ref())
+            .filter(|observation| observation.body["id"].as_str() == Some(provider_id)),
+    )?;
     let mut accepted = true;
-    for (_, observation) in observations {
+    for observation in observations {
         let retained: Option<(String, i64)> = conn.query_row(
             &format!("SELECT body,observed_at FROM {provider_table} WHERE repo=?1 AND provider='linear' AND id=?2"),
             params![repo, provider_id], |row| Ok((row.get(0)?, row.get(1)?)),
@@ -1806,6 +1810,30 @@ mod tests {
                 .unwrap(),
             incoming
         );
+        // A versioned edit supersedes the unversioned body without replaying it
+        // as a contradictory acquisition on the next import.
+        let edited = crate::pm::IssueComment {
+            body: "Corrected provider direction".into(),
+            revision: Some("2026-10-08T11:00:00Z".into()),
+            ..comment.clone()
+        };
+        acquire_comment(&source, &task, &edited);
+        let incoming = source
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        target
+            .import_peer_planning("/target", &destination(), "edited", &incoming)
+            .unwrap();
+        assert_eq!(
+            target.task_comments(&task).unwrap().comments,
+            vec![TaskComment::from(&edited)]
+        );
+        assert!(target.pending_task_comments(&task).unwrap().is_empty());
+        let revisions = target.revisions().unwrap();
+        target
+            .import_peer_planning("/target", &destination(), "edited", &incoming)
+            .unwrap();
+        assert_eq!(target.revisions().unwrap(), revisions);
         let mut malformed = incoming.clone();
         let fact = malformed
             .changes
@@ -1822,7 +1850,7 @@ mod tests {
             .is_err());
         assert_eq!(
             import_revision(&target, "/target", &destination()).as_deref(),
-            Some("provider")
+            Some("edited")
         );
     }
 
@@ -3309,7 +3337,7 @@ mod tests {
                     id: "held-comment".into(),
                     body: "Retain this with the Task".into(),
                     author: TaskCommentAuthor::Person { name: None },
-                    created_at: None,
+                    created_at: Some("2026-10-08T12:00:00Z".into()),
                 },
             )
             .unwrap();
@@ -3983,7 +4011,8 @@ mod tests {
             .is_empty());
         conn.execute(
             "INSERT INTO planning_members(kind,object_id,repo,destination)
-            SELECT DISTINCT kind,object_id,'/fixture',?1 FROM planning_peer_changes",
+            SELECT DISTINCT kind,object_id,'/fixture',?1 FROM planning_peer_changes
+            UNION SELECT 'comment',id,'/fixture',?1 FROM task_comments",
             [destination()],
         )
         .unwrap();
@@ -4187,7 +4216,7 @@ mod tests {
                 author: TaskCommentAuthor::Person {
                     name: Some("Maya".into()),
                 },
-                created_at: None,
+                created_at: Some("2026-10-08T12:00:00Z".into()),
             },
         )
         .unwrap();

@@ -225,8 +225,8 @@ Jack Heart requested one inventory. #1512: `3e1e6245c`; records: `446cfb2b5`;
 reads: `ea205e3d0`. Integrate LOO-441 before publication. Retain detached rows;
 duplicate PID/birth and late history grant no control. Tokens fence A → B → A.
 
-`6fe75717f` advances only Claude's capture-owner snapshot on replacement;
-`a81397932` shares fenced admission. Runtime checks are unrun. Async cancellation
+`6fe75717f`: Claude capture-owner replacement; `a81397932`: fenced admission.
+Runtime untested. Async cancellation
 must not detach an admitted child. Hold the Session lock, not SQLite across I/O
 or nested reads. Synchronous admission cannot depend on its blocked reactor.
 Only Codex has FIFO handoff; live-orphan termination covers noninteractive

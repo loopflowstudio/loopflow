@@ -12,7 +12,7 @@ are independent. Linear completion preserves execution. Failed end requests
 retry without replaying the Flow; reopening supersedes old completion intent.
 
 Jack authorized stacking on LOO-406 `558a39232`: one local planning owner,
-optional placement and independent completion. `314095b00` retains that cut.
+optional placement and independent completion.
 Observed conflicts adopt Linear; the enabled unseen read/write-race regression
 still fails. Matching readback proves no concurrency guarantee. Integration
 proves no acceptance. LOO-385 overlaps without closure authority; full lifecycle

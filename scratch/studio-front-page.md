@@ -277,3 +277,8 @@ The prototype is not ported. The audience for `/` is open again. Candidates
 put to Jack Heart: people who already run a coding agent and have outgrown one
 chat window; `/cli` as the front page with the Mac app as a surface of it; or
 "anyone" kept but pitched as where you go after a hosted builder.
+
+Jack Heart, same turn: "I think Replit should be rebuilt on top of loopflow,
+but its still sort of its own busines". Read: Loopflow is the layer a hosted
+builder would sit on, and the product for people with no agent and no
+repository is a separate business, not this page.

@@ -221,21 +221,21 @@ unpublished code retained, without deletion or delivery authorization.
 
 ## AgentProcess (LOO-443, 2026-10-09)
 
-Jack Heart requested one inventory; #1516 is integrated.
-Detached rows survive; duplicate PID/birth and late history grant no control.
-Tokens fence A → B → A. Preserve TTY groups, immutable waits and Session-only
-teardown locks; consume reservations once. Cleanup proofs: `e0d360e6a`/`263b6adfb`.
+Jack Heart requested one inventory; #1512/#1516 are integrated. Tokens fence
+A → B → A; duplicate PID/birth grants no control. Other preservation constraints
+and proofs: `48aaf72a1`, this heading.
 
-Native admission requires an attachment; remote clients never settle their provider.
-Library admission conflicts with retained Codex threads on account failover;
-resolve replacement. Raw headless admission remains.
+Native admission requires attachment; remote clients never settle providers.
+Library failover fails against retained Codex threads. Replacement needs exact
+settlement and preserved history, not weaker thread checks. Raw headless admission
+remains optional.
 
-One OS reader now serves top, active Sessions, gates and reaping: zombies are
-dead; invalid observations stay unknown. Top still omits missing identities.
-Keep blockers visible without weakening uncertainty (Release's entry-point lesson).
-Codex alone has FIFO handoff; reaping covers noninteractive Codex/OpenCode.
-Generations, foreground cleanup, death orders, public-entry agreement,
-two-second removal and installed settlement remain open.
+One OS parser does not establish reader agreement: top omits unknown agents and
+receipt-less lf rows; sampling failure aborts it. The gate retains unknown
+blockers. Keep them visible by LFID without control; zombies are dead. Release's
+entry-point lesson applies. Codex alone has FIFO handoff; live reaping covers
+noninteractive Codex/OpenCode. Generations, foreground cleanup, death orders,
+public agreement, two-second removal and installed settlement remain open.
 
 ## Execution ownership names (LOO-441, 2026-10-09)
 

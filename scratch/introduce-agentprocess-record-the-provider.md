@@ -18,11 +18,12 @@ attribution survive.
 
 ## Inventory and draft choices (reconciled 2026-10-09)
 
-- `process.rs::Process` and `store/sqlite/processes.rs` own recorded lf invocations.
-  Choose **one processes table**, with lf/agent kind and nullable kind-specific
+- `process.rs::LfProcess` and `store/sqlite/processes.rs` own recorded lf invocations.
+  The draft uses **one processes table**, with lf/agent kind and nullable kind-specific
   fields; common identity, PID/birth, parent, command, cwd and terminal evidence
-  remain shared. Keep the incoming LOO-441 LfProcess name for lf invocations;
-  do not make AgentProcess a fake lf invocation.
+  remain shared. LOO-441 is integrated; the common projection still carries both
+  kinds. Separate that projection from the lf-only model without inventing a
+  second inventory or making AgentProcess a fake lf invocation.
 - Attachment control uses a fresh opaque `AttachmentToken` on every claim and
   release. `SessionAttachment` is a compare-and-swap capability, not another
   process record or lifecycle owner. A → B → A cannot revive A's first token.
@@ -57,7 +58,7 @@ attribution survive.
   `kill -s TERM -- -pgid`. Native foreground terminals need their own process
   control treatment; no headless process-group change may break their TTY.
 
-## Delete — do not maintain (record cut removes these predecessors)
+## Predecessor removal (completed and remaining cuts)
 
 - Session `provider_pid`, `provider_started_at`, `provider_endpoint`,
   `provider_generation` and `provider_process_lfid`; replace with AgentProcess.
@@ -101,8 +102,9 @@ spawn/exit evidence before dropping Session process columns. Duplicate PID/birth
 rows stay separate and non-signallable. Native thread/history stay on the Session;
 provider generation still survives in records and caller/status/history wires.
 
-Top, active Sessions, Task membership and scheduled orphan settlement read
-unfinished AgentProcesses, including detached/replaced rows. Settlement rechecks
+Top, active Sessions, Task membership and scheduled orphan settlement query
+unfinished AgentProcesses, including detached/replaced rows; live views still
+filter out unknown identities. Settlement rechecks
 attachment under the Session lock without holding SQLite across OS I/O. It still
 excludes interactive agents and recognizes only Codex app-server/OpenCode serve
 for live-orphan termination. Only Codex supplies a named FIFO for reconnect;
@@ -150,13 +152,21 @@ Session thread check refuses it. The metadata-only `fail_and_begin_attempt` does
 not transition the AgentProcess or preserve a selected replacement thread.
 Dependent admission expansion stopped rather than bypassing that check.
 
-Revise the retry design before completing this slice: a selected account failover
-must end the exact old AgentProcess, retain its account/native history, reserve a
-new AgentProcess, and explicitly select fresh-thread versus same-thread resume.
-No old capture or delayed wait may settle the replacement. Same-account transient
-retry needs the corresponding reuse/replacement proof. This is unfinished lifecycle
-implementation, not authorization to remove the saved-thread check or resurrect
-unrecorded spawns. The working code remains a draft with this failing regression.
+The next lifecycle change is invocation-owned replacement, not a broader
+`Harness::stop` kill: attached Codex stop intentionally relinquishes the connection
+so takeover can preserve the provider. `_run_harness_once` currently ignores its
+stop result and `fail_and_begin_attempt` changes capture metadata only.
+`prepare_session_agent_process` refuses a running row; calling it alone cannot
+repair failover. Under the exact attachment, selected account failover needs an
+observed old-process end, retained account/native history, a fresh reservation and
+an explicit fresh-thread selection. Same-account retry must deliberately reuse
+its native thread or replace the process while retaining that thread. Failed close
+or lost authority leaves uncertainty, never replacement permission. Late waits
+and history keep the old snapshot; only the capture owner advances settlement.
+These are remaining implementation requirements, not permission to remove the
+saved-thread check. The existing failing regression remains valid; extend it to
+assert distinct process identities and preserved old history, not only fallback
+text. The fixture currently returns the same synthetic thread ID for both accounts.
 
 
 1. Eliminate optional attachment paths in raw headless harness starts. `run_agent`
@@ -166,7 +176,7 @@ unrecorded spawns. The working code remains a draft with this failing regression
    provenance no longer selects the remote-client path. Explicit remote endpoints
    are checked against the saved AgentProcess, and client spawn holds its attachment
    fence without recording provider exit. The library slice is not complete:
-   account failover below fails. Raw `Harness::start` also remains: its
+   the account-failover regression above fails. Raw `Harness::start` also remains: its
    optional config/open_owner/headless spawn still
    permits unrecorded children. Admission belongs at the invocation entry, not in
    a spawn callback inventing a parent. Keep the lock across admission/recording;
@@ -194,12 +204,20 @@ unrecorded spawns. The working code remains a draft with this failing regression
 4. Replace remaining predecessor fixture assumptions and restore required
    active-Session, native-history and Task-membership coverage on records. Prove
    headless public top/Task-status/scheduled-entry agreement, not only reducers
-   or SQL. `execution_blockers` retains unfinished unknown-identity records, but
-   `collect_activity` omits missing PID/birth or unmatched OS samples. A shared
-   table therefore still permits an invisible blocker. Keep uncertainty visible
-   under the same LFID rather than weakening the gate; cover missing identity,
-   failed OS observation and zombies alongside live/dead cases. The old
-   directory-watcher costs no longer describe this reader. The
+   or SQL. Source inspection at `48aaf72a1` separates three visibility gaps:
+   - `collect_activity` drops AgentProcesses lacking PID/birth; valid absence,
+     birth mismatch and zombies are dead, not unknown rows to resurrect.
+   - `load_snapshot` selects LfProcesses through receipts, unlike the gate's
+     `open_processes` inventory. An unfinished same-boot lf row without a receipt
+     can block a Task without ever reaching activity projection.
+   - OS sampling errors fail the entire top snapshot (and prune before reaping);
+     active Sessions clear their list and report Unavailable. The gate retains
+     Unknown. `ActivityState` has no unknown case yet.
+   Rendering needs recorded identities plus explicit unavailable observations for
+   both kinds, with Rust/Swift/DTO changes together; it must not infer liveness or
+   control from display. Public fixtures need missing receipts, missing agent
+   birth, failed sampling and exact death, preserving caller-lineage exclusion.
+   One OS parser does not supply equal record selection or error handling. The
    detached/replaced-record observation fixture now passes: rename, capture
    replacement, provider snapshots, exact Task exclusion and observed death
    without payload files. This does not exercise public commands or uncertain OS
@@ -238,11 +256,12 @@ the group, so no second slot is needed. Combining native setup errors must not
 drop the published client guard before cleanup; it remains in the outer scope.
 No new signal authority, attachment refresh or lifecycle owner is introduced.
 
-October 9 realignment rechecked Release's objective and completion/operation-entry
-lessons; its other sections were not reread. The owned sync now integrates #1516
-(LOO-441). Raw headless admission remains unfinished.
-Reader agreement needs behavior changes, not merely more tests. These gaps require
-no new product decision and do not relax the requested demo.
+October 9 realignment read Release's GOAL and full MEMORY, the only immediate
+child scope found here. Its operation-entry lesson applies to both visibility
+and scheduled settlement: shared internals do not prove public outcomes. Local
+main remains `461577746`; #1512 and #1516 are integrated. No additional upstream
+integration is claimed. The lifecycle and visibility gaps need implementation,
+not a new product decision or relaxed acceptance.
 
 Review caught two boundary errors and repaired them: native clients must hold the
 attachment fence at spawn, and a helper-created capture must finish with the
@@ -260,4 +279,4 @@ moves OS observation below presentation and deletes the native-client copy of
 elapsed-time parsing. Invalid ages report unavailability instead of disappearing
 from the sample. Missing PID/birth rows still require visible unknown nodes.
 
-Check: `uv run --no-sync python scripts/test_network.py cargo test --offline -p loopflow --lib harness::agent_process::tests::headless_spawn_retains_attempts_and_refuses_stale_attachments -- --exact --test-threads=1` passes (1 test) after #1516 sync; prior checks remain at `ff185aca1`, this plan; broader Rust/Swift/DTO/materialized and Linux checks remain gate/CI-owned.
+Check: `git diff --check` passes; prose-only reconciliation, no runtime rerun. Prior focused sync pass: `48aaf72a1`, this plan; failing account-failover proof: `91d184b1c`; broader Rust/Swift/DTO/materialized and Linux checks remain gate/CI-owned.

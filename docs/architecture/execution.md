@@ -78,10 +78,16 @@ Captured Claude and native restarts reserve a fresh AgentProcess and update the
 capture's attachment; pending operations retain their old snapshots. Owned native
 launches record before exec without changing their terminal or process group.
 Focused admission, replacement and cleanup fixtures pass; public-reader agreement
-and installed acceptance remain unproved. Top omits records without matching
-PID/birth evidence, while the Task gate retains unknown execution as a blocker.
-Activity, gates and reaping share one PID/birth/state reader. Zombies count as
-dead; malformed readings remain unavailable, not absence.
+and installed acceptance remain unproved. Top omits agents without matching
+PID/birth evidence and selects lf rows through receipts; the Task gate can retain
+both kinds as unknown blockers. OS sampling errors fail top's snapshot rather
+than showing those recorded rows as unavailable. Activity, gates and reaping share
+one PID/birth/state parser, not identical inventory selection or error handling.
+Zombies count as dead; malformed readings remain unavailable, not absence.
+Library admission also exposes an unresolved account-failover regression: attached
+Codex stop retains its provider for capture settlement, while metadata-only retry
+requests a fresh thread against the old attachment. Invocation-owned replacement
+must preserve the old native history without weakening saved-thread checks.
 Generation-based caller/status wires and optional launches remain publication
 blockers.
 

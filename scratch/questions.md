@@ -164,3 +164,15 @@ remain separate. No new product decision is selected.
   owner pending full receipt composition. Creation/link attempt transport, independent
   relationship ordering and mixed-provider activation remain unfinished; this cut
   selects no new product policy.
+
+- October 9 receipt transport exposed an ownership error: importing Project export
+  columns through `project_transitions` would fabricate a local rotation or its
+  settlement. Move those creation/link columns to the existing Project row in the
+  peer draft and delete their transition copies; the common `planning_export.rs`
+  writer/readback remains the sole protocol owner. Import no transition at all.
+  Capture stable change IDs rather than machine-local sequence positions. Competing
+  effect snapshots stay journal conflicts, not clock-selected retry authority.
+  Review removed per-object journal rescans and corrected imported Task receipts
+  to retain the captured parent after a later move. Their immutable delivery
+  snapshot is not the current Task membership. Source authoring inputs remain
+  unchanged; transport of unprepared local-born creation remains unfinished.

@@ -144,6 +144,14 @@ this heading. Keep these replacements deleted:
   identical-body acquisition bypasses and replay of superseded provider revisions.
   Common acquisition owns validation; savepoints isolate valid contradictions and
   retain membership evidence after rollback. Entity revisions never order relationships.
+- Project creation/link fields on `project_transitions` and imported synthetic
+  transition settlements. The existing Project row now owns those effect columns;
+  the peer draft preserves them and drops the transition copies. Common
+  `planning_export.rs` still owns capture, attempts and readback. Local transitions,
+  activation, transfer membership and selection remain local.
+- Machine-local creation sequence cutoffs. Captured local/peer change IDs bound
+  acknowledgement; the original parent is retained for private-selection holds.
+  Optional creation groups use the same journal, not a second receipt transport.
 - Task creation receipt bypass after mapping-only import, missing-list readiness
   rejection and required ancestor placement on first local use. Readback reconciles
   captured saves, not later intentions; local execution placement stays local.
@@ -174,18 +182,24 @@ receipts (`7e56c01fd`), and semantic Project content (`a518b985b`) are integrate
 Their owners and preservation boundaries are described under **Delete — do not
 maintain** and item 4 below.
 
-The next implementation boundary is item 4's creation/link attempt transport and
-Project readback through `planning_export.rs`, followed by ordering/deletion receipts
-and alternate provider/relationship acquisition. A peer mapping or retained import
-checkpoint cannot settle an uncertain provider effect. Existing Task readback only
-reconciles a receipt already present locally; it does not transport that receipt.
-Legacy association and Desktop presentation then complete the remaining surface.
-Only after those owners compose can mixed-provider exchange be enabled and its
-public reconnect/preservation acceptance run. These are implementation gaps, not a
-missing parent dependency or verification-only work. Publication still requires the
-acceptance below; landing remains excluded. Earlier cut-by-cut evidence remains at
-`3bebc219d:scratch/work-on-another-machine-name.md`, this heading; the focused
-executable results below supersede its blanket Rust-unavailability claims.
+Prepared Task/Project creation and link attempts now travel through the common
+`planning_export.rs` owner. Stable saved IDs, original input/parent, captured change
+IDs and attempted flags survive import. Historical uncertainty is unioned, never
+clock-selected away; competing effect snapshots isolate projection while the journal
+and independent plans commit. Project readback, like Task readback, can reconcile
+a receipt after a mapping-only import. Entity readback does not clear an uncertain
+attachment without matching Initiative evidence, and later accepted moves remain
+legal. Import fabricates no local transition or execution.
+
+The next boundary is complete foreground creation composition: unprepared local-born
+records, mapped-but-unconfirmed receipt acquisition/status, and connected-provider
+recovery through public commands. Then ordering/deletion receipts and alternate
+provider/relationship acquisition remain, followed by legacy association and Desktop.
+Mixed-provider exchange stays disabled until those owners compose. Existing mapping
+or an import checkpoint is never effect acknowledgement. These are implementation
+gaps, not a missing parent dependency or verification-only work. Publication still
+requires the acceptance below; landing remains excluded. Earlier cut-by-cut evidence:
+`3f7d9f2da:scratch/work-on-another-machine-name.md`, this heading.
 
 Executable feedback took priority over creation/link composition on October 8.
 The isolated Linux build exposed invalid registry-error conversion and SQLite
@@ -197,14 +211,14 @@ Review kept the strict reader and portable-field exclusion rather than adding
 fallback values or exporting placement. Prior global Rust-unavailability claims
 are superseded by the focused results below, not by full composed acceptance.
 
-October 9 implements Task creation **readback**, not Project/link or attempt transport.
+The earlier October 9 cut implemented Task creation **readback**, before the prepared-receipt composition above.
 Accepted peer provider bodies now reconcile the original `planning_export.rs` receipt even when
 an earlier mapping-only import already attached the identity. Mapping alone retains
 uncertainty; the captured save boundary limits acknowledgement. Later losing saves,
 creation attempts and their identities survive. Review rejected an added check
 freezing Project membership to its creation snapshot: a later accepted move must
-remain possible. Project/link readback retains its existing owner until full receipt
-composition supplies explicit settlement. The focused regression covers mapping-only
+remain possible. That cut left Project/link readback with its existing owner; the prepared-receipt
+composition above extends it. The focused regression covers mapping-only
 import, lost creation reply, later save, selected Linear winner and idempotent readback.
 
 Executable foreground feedback exposed missing acquisition ages and a readiness
@@ -326,7 +340,9 @@ provenance gap; revise it with the completed composition, not as a product limit
    Task test preserves a pending local value on an unchanged provider baseline.
    The focused storage suite passes; connected-provider composition remains unproved.
 
-   Creation, ordering and deletion receipts remain uncomposed. Comments now use the common owners described below. Task disposition now uses the common receipt owner;
+   Prepared creation/link receipts now compose at storage; foreground completion,
+   ordering and deletion remain uncomposed. Comments now use the common owners
+   described below. Task disposition now uses the common receipt owner;
    authored regressions cover lost replies, later reopening, late readback exclusion,
    unchanged-state provider conflict, idempotence and transaction-wide receipt failure.
    Cancellation passes in that storage test. Common accepted Task/Project acquisition captures
@@ -373,9 +389,13 @@ provenance gap; revise it with the completed composition, not as a product limit
 
    Complete grouped receipts through their existing common owners, not the scalar
    field loop. Source inspection identifies the remaining seams:
-   - `planning_export.rs` owns creation/link attempts. Accepted peer Task observations
-     reconcile original receipts after a mapping-only import, without acknowledging
-     later saves. Portable creation/link attempt capture and recovery remain.
+   - `planning_export.rs` owns creation/link attempts. Prepared receipts now travel
+     with exact input, original parent and stable captured change IDs. Common
+     acquisition reconciles Task and Project receipts after mapping-only import,
+     without acknowledging later saves. The Project row replaces transition-owned
+     effect columns; peer imports create no transition. Attempt flags only accumulate;
+     competing effect snapshots retain both histories and isolate projection. Full
+     foreground recovery, unprepared creations and mapped uncertainty remain above.
    - Peer comments now reuse `task_comments.rs::ingest_task_comment` and
      `insert_authored_comment`. Comment ID remains delivery identity; reimport
      retains errors/acknowledgement/conflicts, and acquired comments create no
@@ -523,7 +543,7 @@ all 46 tests; all-target Clippy and fmt passed. The sync did not change that sto
 module. Public Task admission changed upstream, so these results do not establish
 combined cold-worker, provider-lifetime or mixed-provider acceptance.
 
-Check (October 9 realign): `git diff --check` and `lf context --skill realign` pass; prose-only reconciliation reuses `19f0a4b6d`'s focused proof; gate owns the combined candidate's remaining acceptance.
+Check (October 9 implement): `cargo fmt`, Linux `cargo clippy --all-targets -- -D warnings` and `cargo test` pass: 48 peer-storage (including migration), 4 `planning_export_`, 1 public `planning_sync_tracks_creation_errors_uncertainty_conflicts_and_settlement`; final `peer_creation_` rerun passes 3 after captured-parent repair. `git diff --check` and `lf context --skill implement` pass; broader connected-provider/Desktop acceptance stays with gate.
 
 Prior SQL proofs and macOS startup samples remain at
 `e77d2d1c8:scratch/work-on-another-machine-name.md`. A fresh bounded attempt

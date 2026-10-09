@@ -88,6 +88,8 @@ pub enum StoreError {
     NotFound,
     #[error("invalid data: {0}")]
     InvalidData(String),
+    #[error("Project {project_id} membership changed without relationship ordering evidence")]
+    ProjectMembershipConflict { project_id: String },
     #[error("development store is incompatible: {0}")]
     IncompatibleDevelopment(String),
     #[error("invalid control authority: {0}")]

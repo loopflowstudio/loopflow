@@ -424,6 +424,13 @@ impl SqliteStore {
                     }
                     Err(error) if projection_conflict(&error) => {
                         tx.execute_batch("ROLLBACK TO peer_projection; RELEASE peer_projection")?;
+                        if let StoreError::ProjectMembershipConflict { project_id } = &error {
+                            // The rejected projection rolls back, not the contrary
+                            // relationship evidence. Independent objects still commit.
+                            super::planning::retain_membership_conflict(
+                                &tx, repo, "linear", project_id,
+                            )?;
+                        }
                         conflicts.insert((object.clone(), error.to_string()));
                         retry.push((object, winners));
                     }
@@ -881,6 +888,7 @@ fn insert_and_project(
         validate_wave(conn, object, &fields, repo)?;
     }
     let previous = delivery_fields(conn, object)?;
+    acquire_linear_frontier(conn, object, &fields, repo, snapshot)?;
     project_fields(
         conn,
         object,
@@ -891,7 +899,6 @@ fn insert_and_project(
             })
             .map(|(&field, &value)| (field, value)),
     )?;
-    acquire_linear_frontier(conn, object, &fields, repo, snapshot)?;
     project_delivery_fields(conn, object, winners, snapshot, &previous)?;
     require_repository(conn, object, repo)
 }
@@ -928,39 +935,97 @@ fn acquire_linear_frontier(
         })
         .collect::<StoreResult<Vec<_>>>()?;
     observations.sort_by_key(|(revision, observation)| (*revision, observation.observed_at));
+    // History remains in the journal. Replaying an older unversioned body after
+    // a newer frontier was accepted can manufacture a same-import contradiction.
+    // Equal-revision observations still pass through the common conflict checks.
+    if let Some((latest, _)) = observations.last() {
+        let latest = *latest;
+        observations.retain(|(revision, _)| *revision == latest);
+    }
     observations.dedup_by(|a, b| a.1 == b.1);
+    let mut accepted = true;
     for (_, observation) in observations {
         let retained: Option<(String, i64)> = conn.query_row(
             &format!("SELECT body,observed_at FROM {provider_table} WHERE repo=?1 AND provider='linear' AND id=?2"),
             params![repo, provider_id], |row| Ok((row.get(0)?, row.get(1)?)),
         ).optional()?;
+        // Reuse the retained age for an identical fact, but still call the
+        // acquisition owner: removal/archive can invalidate an unchanged body.
+        let mut observed_at = observation.observed_at;
         if let Some((body, acquired)) = retained {
-            let body: Value = serde_json::from_str(&body)?;
-            if body == observation.body && acquired >= observation.observed_at {
-                continue;
+            if serde_json::from_str::<Value>(&body)? == observation.body {
+                observed_at = observed_at.max(acquired);
             }
         }
-        match object.kind {
+        accepted = match object.kind {
             PlanningKind::Task => {
                 let item = serde_json::from_value(observation.body.clone())?;
-                if super::planning::put_item(conn, repo, "linear", observation.observed_at, &item)?
-                {
+                let accepted = super::planning::put_item(conn, repo, "linear", observed_at, &item)?;
+                if accepted {
                     conn.execute("UPDATE pm_items SET needs_refresh=0 WHERE repo=?1 AND provider='linear' AND id=?2 AND needs_refresh!=0", params![repo, provider_id])?;
                 }
+                accepted
             }
             PlanningKind::Project => {
                 let project = serde_json::from_value(observation.body.clone())?;
                 super::planning::validate_project_membership(conn, repo, "linear", &project)?;
-                super::planning::put_project(
-                    conn,
-                    repo,
-                    "linear",
-                    observation.observed_at,
-                    &project,
-                )?;
+                super::planning::put_project(conn, repo, "linear", observed_at, &project)?
             }
             _ => unreachable!("only Tasks and Projects have entity frontiers"),
+        };
+    }
+    // Even a locally authored winner cannot erase retained provider removal or
+    // unresolved relationship evidence. These facts have independent ordering.
+    match object.kind {
+        PlanningKind::Task => {
+            let removed: bool = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM pm_issue_changes WHERE issue_id=?1 AND removed=1)",
+                [provider_id],
+                |row| row.get(0),
+            )?;
+            if removed {
+                return Err(invalid("Linear removal prevents peer Task projection"));
+            }
         }
+        PlanningKind::Project => {
+            let retained: Option<(String, bool, bool)> = conn
+                .query_row(
+                    "SELECT body,archived,membership_unresolved FROM pm_projects
+                 WHERE repo=?1 AND provider='linear' AND id=?2",
+                    params![repo, provider_id],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .optional()?;
+            if let Some((body, archived, unresolved)) = retained {
+                if archived {
+                    return Err(invalid("Linear archive prevents peer Project projection"));
+                }
+                if unresolved {
+                    return Err(StoreError::ProjectMembershipConflict {
+                        project_id: provider_id.into(),
+                    });
+                }
+                let mut project: crate::pm::PmProject = serde_json::from_str(&body)?;
+                // Never promote the entity revision into relationship authority.
+                project.initiative_ids = serde_json::from_str(
+                    fields["planning_initiatives"]
+                        .as_str()
+                        .expect("validated relationship JSON"),
+                )?;
+                project.team_ids = serde_json::from_str(
+                    fields["planning_teams"]
+                        .as_str()
+                        .expect("validated relationship JSON"),
+                )?;
+                super::planning::validate_project_membership(conn, repo, "linear", &project)?;
+            }
+        }
+        _ => unreachable!("only Tasks and Projects have entity frontiers"),
+    }
+    if !accepted {
+        return Err(invalid(
+            "peer provider frontier is older than retained evidence",
+        ));
     }
     conn.execute(
         &format!(
@@ -1101,8 +1166,13 @@ fn projection_conflict(error: &StoreError) -> bool {
         }
         StoreError::InvalidData(reason) => matches!(
             reason.as_str(),
-            "Wave parent would create a cycle" | "Wave parent is unavailable"
+            "Wave parent would create a cycle"
+                | "Wave parent is unavailable"
+                | "peer provider frontier is older than retained evidence"
+                | "Linear removal prevents peer Task projection"
+                | "Linear archive prevents peer Project projection"
         ),
+        StoreError::ProjectMembershipConflict { .. } => true,
         _ => false,
     }
 }
@@ -1621,6 +1691,259 @@ mod tests {
     }
 
     #[test]
+    fn peer_rejection_preserves_removed_tasks_and_archived_projects() {
+        for (archived, new_frontier) in [(false, false), (false, true), (true, false), (true, true)]
+        {
+            let (_source_home, source) = store();
+            let (_target_home, target) = store();
+            let (wave, row, task) = linear_seed(&source);
+            let base = source
+                .export_peer_planning("/source", &destination())
+                .unwrap();
+            target
+                .import_peer_planning("/target", &destination(), "base", &base)
+                .unwrap();
+            let project = target.task(&task).unwrap().unwrap().project_id;
+            preserve_execution(&target, &wave, &task);
+            if archived {
+                target
+                    .confirm_pm_project_archival("/target", "linear", &row.snapshot.projects[0], 60)
+                    .unwrap();
+            } else {
+                target
+                    .observe_pm_issue_change(
+                        &row.snapshot.items[0].id,
+                        Some("2026-10-08T13:00:00Z"),
+                        true,
+                    )
+                    .unwrap();
+            }
+            let retained_task = target.task(&task).unwrap().unwrap();
+            let retained_project = target.project(&project).unwrap().unwrap();
+            let workflow = target.workflow(&task).unwrap();
+            let execution = target.revisions().unwrap();
+            let journal = target
+                .export_peer_planning("/target", &destination())
+                .unwrap();
+            // An unrelated selected Wave must still enter the same import.
+            let independent = Wave::new(WaveId::new(), "independent".into(), "/source".into());
+            source.create_wave(&independent).unwrap();
+            source
+                .select_peer_waves(
+                    "/source",
+                    &destination(),
+                    std::slice::from_ref(independent.id()),
+                )
+                .unwrap();
+            if !new_frontier {
+                // Identical cached bodies must not bypass later removal/archive.
+                if archived {
+                    source
+                        .edit_project(&project, Some("Rejected local name"), None)
+                        .unwrap();
+                } else {
+                    edit_title(&source, &task, "Rejected local title");
+                }
+            } else if archived {
+                let mut changed = row.snapshot.projects[0].clone();
+                changed.name = "Must not replace archived Project".into();
+                changed.revision = Some("2026-10-08T14:00:00Z".into());
+                source
+                    .put_pm_project(&wave, "linear", "initiative", &changed, 70)
+                    .unwrap();
+            } else {
+                let mut item = row.snapshot.items[0].clone();
+                item.name = "Must not replace removed Task".into();
+                item.revision = Some("2026-10-08T14:00:00Z".into());
+                source
+                    .put_pm_task(
+                        "/source",
+                        "linear",
+                        &crate::store::PmTaskRecord {
+                            item,
+                            project: None,
+                            observed_at: 70,
+                        },
+                        Some((&wave, "initiative")),
+                    )
+                    .unwrap();
+            }
+            let incoming = source
+                .export_peer_planning("/source", &destination())
+                .unwrap();
+            target
+                .import_peer_planning("/target", &destination(), "rejected", &incoming)
+                .unwrap();
+            assert!(target.get_wave(independent.id()).unwrap().is_some());
+            assert_eq!(target.task(&task).unwrap().unwrap(), retained_task);
+            assert_eq!(target.project(&project).unwrap().unwrap(), retained_project);
+            assert_eq!(target.workflow(&task).unwrap(), workflow);
+            let after = target.revisions().unwrap();
+            assert_eq!(
+                (after.sessions, after.processes, after.flows),
+                (execution.sessions, execution.processes, execution.flows)
+            );
+            assert_eq!(
+                target
+                    .export_peer_planning("/target", &destination())
+                    .unwrap(),
+                journal.merge(&incoming).unwrap()
+            );
+            assert_eq!(
+                import_revision(&target, "/target", &destination()).as_deref(),
+                Some("rejected")
+            );
+            let rejected_id = if archived {
+                project.as_str()
+            } else {
+                task.as_str()
+            };
+            let conflicts = target.peer_projection_conflicts("/target").unwrap();
+            assert!(conflicts
+                .iter()
+                .any(|conflict| conflict.object.id == rejected_id));
+            target
+                .import_peer_planning("/target", &destination(), "rejected", &incoming)
+                .unwrap();
+            assert_eq!(target.revisions().unwrap(), after);
+            assert_eq!(
+                target.peer_projection_conflicts("/target").unwrap(),
+                conflicts
+            );
+        }
+    }
+
+    #[test]
+    fn peer_membership_conflict_survives_projection_rollback_and_independent_import() {
+        // Neither a newer entity revision nor an unproven relationship-only edit
+        // supplies the separately ordered membership evidence.
+        for provider_observation in [false, true] {
+            let (_source_home, source) = store();
+            let (_target_home, target) = store();
+            let (wave, row, task) = linear_seed(&source);
+            let base = source
+                .export_peer_planning("/source", &destination())
+                .unwrap();
+            target
+                .import_peer_planning("/target", &destination(), "base", &base)
+                .unwrap();
+            let project = target.task(&task).unwrap().unwrap().project_id;
+            preserve_execution(&target, &wave, &task);
+            let retained = target.project(&project).unwrap().unwrap();
+            let retained_task = target.task(&task).unwrap().unwrap();
+            let execution = target.revisions().unwrap();
+            let workflow = target.workflow(&task).unwrap();
+            if provider_observation {
+                let mut changed = row.snapshot.projects[0].clone();
+                changed.team_ids = vec!["other-team".into()];
+                changed.name = "Newer entity with unordered membership".into();
+                changed.revision = Some("2099-01-01T00:00:00Z".into());
+                source
+                    .reconcile_pm_project_teams(&wave, "linear", "initiative", &changed, 70)
+                    .unwrap();
+            } else {
+                source
+                    .conn
+                    .lock()
+                    .unwrap()
+                    .execute(
+                        "UPDATE projects SET planning_teams='[\"other-team\"]' WHERE id=?1",
+                        [&project],
+                    )
+                    .unwrap();
+            }
+            let independent = Wave::new(WaveId::new(), "independent".into(), "/source".into());
+            source.create_wave(&independent).unwrap();
+            source
+                .select_peer_waves(
+                    "/source",
+                    &destination(),
+                    std::slice::from_ref(independent.id()),
+                )
+                .unwrap();
+            let incoming = source
+                .export_peer_planning("/source", &destination())
+                .unwrap();
+            target
+                .import_peer_planning("/target", &destination(), "disputed", &incoming)
+                .unwrap();
+            assert!(target.get_wave(independent.id()).unwrap().is_some());
+            assert_eq!(target.project(&project).unwrap().unwrap(), retained);
+            assert_eq!(target.task(&task).unwrap().unwrap(), retained_task);
+            assert_eq!(target.workflow(&task).unwrap(), workflow);
+            let after = target.revisions().unwrap();
+            assert_eq!(
+                (after.sessions, after.processes, after.flows),
+                (execution.sessions, execution.processes, execution.flows)
+            );
+            let conn = target.conn.lock().unwrap();
+            let (body, unresolved): (String, bool) = conn.query_row(
+                "SELECT body,membership_unresolved FROM pm_projects WHERE repo='/target' AND id=?1",
+                [&row.snapshot.projects[0].id], |row| Ok((row.get(0)?, row.get(1)?)),
+            ).unwrap();
+            assert!(unresolved);
+            assert_eq!(
+                serde_json::from_str::<crate::pm::PmProject>(&body).unwrap(),
+                row.snapshot.projects[0]
+            );
+            drop(conn);
+            assert_eq!(
+                target
+                    .export_peer_planning("/target", &destination())
+                    .unwrap(),
+                incoming
+            );
+            let conflicts = target.peer_projection_conflicts("/target").unwrap();
+            assert!(conflicts
+                .iter()
+                .any(|conflict| conflict.object.id == project.as_str()
+                    && conflict.reason.contains("relationship ordering evidence")));
+            target
+                .import_peer_planning("/target", &destination(), "disputed", &incoming)
+                .unwrap();
+            assert_eq!(target.revisions().unwrap(), after);
+            assert_eq!(
+                target.peer_projection_conflicts("/target").unwrap(),
+                conflicts
+            );
+        }
+    }
+
+    fn preserve_execution(store: &SqliteStore, wave: &WaveId, task: &TaskId) {
+        let driver = ProcessLfid::new();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE tasks SET worktree='/retained/work',started_at=7 WHERE id=?1",
+                [task],
+            )
+            .unwrap();
+            conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id)
+                VALUES('retained','Retained','human',1,0,'/retained/work',?1,?2)", params![task,wave]).unwrap();
+            conn.execute(
+                "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,?2,1)",
+                params![driver, TraceId::new()],
+            )
+            .unwrap();
+        }
+        let definition = crate::engine::workflow::WorkflowDefinition {
+            name: "review".into(),
+            nodes: vec![crate::engine::workflow::WorkflowNode {
+                name: "review".into(),
+                skill: "review".into(),
+                description: None,
+            }],
+            edges: Vec::new(),
+        };
+        store
+            .take_up_workflow(task, &definition, &driver, None)
+            .unwrap();
+        store
+            .set_workflow_node(task, "review", &driver, None)
+            .unwrap();
+    }
+
+    #[test]
     fn equal_value_provider_revision_does_not_relabel_a_pending_local_value() {
         let (_home, source) = store();
         let (wave, row, task) = linear_seed(&source);
@@ -1687,6 +2010,11 @@ mod tests {
         let before = target
             .export_peer_planning("/target", &destination())
             .unwrap();
+        let revisions = target.revisions().unwrap();
+        target
+            .import_peer_planning("/target", &destination(), "project", &before)
+            .unwrap();
+        assert_eq!(target.revisions().unwrap(), revisions);
         project.name = "Delayed Project".into();
         project.revision = Some("2026-10-08T11:30:00Z".into());
         let accepted = target

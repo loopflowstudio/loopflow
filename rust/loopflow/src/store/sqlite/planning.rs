@@ -780,13 +780,25 @@ pub(super) fn validate_project_membership(
     if !same_ids(&project.initiative_ids, &previous.initiative_ids)
         || !same_ids(&project.team_ids, &previous.team_ids)
     {
-        conn.execute("UPDATE pm_projects SET membership_unresolved=1 WHERE repo=?1 AND provider=?2 AND id=?3",
-            params![repo, provider, project.id])?;
-        return Err(StoreError::InvalidData(format!(
-            "Project {} membership changed without relationship ordering evidence",
-            project.id
-        )));
+        retain_membership_conflict(conn, repo, provider, &project.id)?;
+        return Err(StoreError::ProjectMembershipConflict {
+            project_id: project.id.clone(),
+        });
     }
+    Ok(())
+}
+
+pub(super) fn retain_membership_conflict(
+    conn: &Connection,
+    repo: &str,
+    provider: &str,
+    project_id: &str,
+) -> StoreResult<()> {
+    conn.execute(
+        "UPDATE pm_projects SET membership_unresolved=1
+         WHERE repo=?1 AND provider=?2 AND id=?3 AND membership_unresolved=0",
+        params![repo, provider, project_id],
+    )?;
     Ok(())
 }
 
@@ -796,7 +808,7 @@ pub(super) fn put_project(
     provider: &str,
     observed_at: i64,
     project: &PmProject,
-) -> StoreResult<()> {
+) -> StoreResult<bool> {
     let previous: Option<(String, i64, bool)> = conn
         .query_row(
             "SELECT body,observed_at,archived FROM pm_projects WHERE repo=?1 AND provider=?2 AND id=?3",
@@ -806,7 +818,7 @@ pub(super) fn put_project(
         .optional()?;
     // A later list/detail response cannot undo a confirmed archive receipt.
     if previous.as_ref().is_some_and(|(_, _, archived)| *archived) {
-        return Ok(());
+        return Ok(false);
     }
     let pending_name_cutover: bool = conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM pm_project_name_cutover
@@ -819,7 +831,7 @@ pub(super) fn put_project(
         let previous: PmProject = serde_json::from_str(&previous)?;
         let previous_revision = revision_nanos(previous.revision.as_deref())?;
         if revision.is_some() && revision < previous_revision {
-            return Ok(());
+            return Ok(false);
         }
         let mut comparable = project.clone();
         comparable.revision = previous.revision.clone();
@@ -839,12 +851,13 @@ pub(super) fn put_project(
         if revision.is_none() && previous_revision.is_some()
             || revision == previous_revision && observed_at < acquired
         {
-            return Ok(());
+            return Ok(false);
         }
     }
     conn.execute(
         "INSERT INTO pm_projects(repo,provider,id,observed_at,body) VALUES(?1,?2,?3,?4,?5)
-         ON CONFLICT(repo,provider,id) DO UPDATE SET observed_at=excluded.observed_at,body=excluded.body",
+         ON CONFLICT(repo,provider,id) DO UPDATE SET observed_at=excluded.observed_at,body=excluded.body
+         WHERE pm_projects.observed_at IS NOT excluded.observed_at OR pm_projects.body IS NOT excluded.body",
         params![repo,provider,project.id,observed_at,serde_json::to_string(project)?],
     )?;
     if pending_name_cutover {
@@ -854,7 +867,7 @@ pub(super) fn put_project(
             params![repo, provider, project.id, observed_at],
         )?;
     }
-    Ok(())
+    Ok(true)
 }
 
 pub(super) fn revision_nanos(revision: Option<&str>) -> StoreResult<Option<i64>> {
@@ -936,7 +949,8 @@ pub(super) fn put_item(
     conn.execute(
         "INSERT INTO pm_items(repo,provider,id,identifier,project_id,observed_at,body) VALUES(?1,?2,?3,?4,?5,?6,?7)
          ON CONFLICT(repo,provider,id) DO UPDATE SET identifier=excluded.identifier,
-         project_id=excluded.project_id,observed_at=excluded.observed_at,body=excluded.body",
+         project_id=excluded.project_id,observed_at=excluded.observed_at,body=excluded.body
+         WHERE pm_items.observed_at IS NOT excluded.observed_at OR pm_items.body IS NOT excluded.body",
         params![repo,provider,item.id,item.identifier,item.project_id,observed_at,serde_json::to_string(item)?],
     )?;
     Ok(true)

@@ -80,8 +80,8 @@ launches record before exec without changing their terminal or process group.
 Focused admission, replacement and cleanup fixtures pass; public-reader agreement
 and installed acceptance remain unproved. Top omits records without matching
 PID/birth evidence, while the Task gate retains unknown execution as a blocker.
-Top excludes zombies; the gate/reaper identity reader currently checks elapsed
-time without that state check. One inventory does not yet mean one OS judgment.
+Activity, gates and reaping share one PID/birth/state reader. Zombies count as
+dead; malformed readings remain unavailable, not absence.
 Generation-based caller/status wires and optional launches remain publication
 blockers.
 

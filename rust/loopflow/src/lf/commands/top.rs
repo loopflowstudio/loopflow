@@ -11,14 +11,15 @@ use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::journal::{prune_process_receipts_at, read_process_receipts_at, ProcessReceipt};
+use crate::journal::{
+    prune_process_receipts_at, read_process_receipts_at, OsProcess, ProcessReceipt,
+};
 use crate::lf::output::truncate;
 use crate::store::sqlite::SqliteStore;
 
 const SCHEMA_VERSION: u32 = 1;
 const COMMAND_WIDTH: usize = 82;
 const REFRESH_INTERVAL: Duration = Duration::from_secs(2);
-const PROCESS_START_TOLERANCE_SECONDS: i64 = 3;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -80,17 +81,10 @@ pub struct ProcessPruneReport {
     pub errors: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct OsProcess {
-    pid: u32,
-    started_at: i64,
-    kernel_state: String,
-}
-
 #[derive(Debug, Clone)]
-pub(crate) struct ProcessSnapshot {
-    pub(crate) processes: Vec<OsProcess>,
-    pub(crate) receipts: Vec<ProcessReceipt>,
+struct ProcessSnapshot {
+    processes: Vec<OsProcess>,
+    receipts: Vec<ProcessReceipt>,
 }
 
 /// Read-local OS evidence for a recorded AgentProcess; no inferred ownership.
@@ -110,7 +104,7 @@ pub(crate) fn observe_agent_process(
     let start = agent.process.os_started_at?;
     let process = processes
         .iter()
-        .find(|process| process.matches_start(pid, start, PROCESS_START_TOLERANCE_SECONDS))?;
+        .find(|process| process.matches_start(pid, start))?;
     Some(AgentProcessObservation {
         lfid: agent.process.lfid.clone(),
         pid,
@@ -255,70 +249,10 @@ pub(crate) fn load_snapshot() -> Result<ActivitySnapshot> {
 
 fn observe_processes(now: i64, lf_home: &Path) -> Result<ProcessSnapshot> {
     Ok(ProcessSnapshot {
-        processes: sample_processes(now)?,
+        processes: OsProcess::sample(now)?,
         receipts: read_process_receipts_at(lf_home)
             .context("failed to read live Process receipts")?,
     })
-}
-
-pub(crate) fn sample_processes(now: i64) -> Result<Vec<OsProcess>> {
-    let output = Command::new("ps")
-        .args(["-axo", "pid=,state=,etime="])
-        .output()
-        .context("failed to inspect processes")?;
-    if !output.status.success() {
-        return Err(anyhow!("ps failed while collecting Loopflow activity"));
-    }
-    Ok(parse_processes(
-        &String::from_utf8_lossy(&output.stdout),
-        now,
-    ))
-}
-
-impl OsProcess {
-    pub(crate) fn matches_start(&self, pid: u32, started_at: i64, tolerance: i64) -> bool {
-        self.pid == pid
-            && !self.kernel_state.starts_with('Z')
-            && (self.started_at - started_at).abs() <= tolerance
-    }
-}
-
-fn parse_processes(output: &str, now: i64) -> Vec<OsProcess> {
-    output
-        .lines()
-        .filter_map(|line| {
-            let mut fields = line.split_whitespace();
-            let pid = fields.next()?.parse::<u32>().ok()?;
-            let kernel_state = fields.next()?.to_string();
-            let elapsed = fields.next()?;
-            Some(OsProcess {
-                pid,
-                started_at: now.saturating_sub(i64::try_from(elapsed_seconds(elapsed)?).ok()?),
-                kernel_state,
-            })
-        })
-        .collect()
-}
-
-fn elapsed_seconds(elapsed: &str) -> Option<u64> {
-    let (days, clock) = match elapsed.split_once('-') {
-        Some((days, clock)) => (days.parse::<u64>().ok()?, clock),
-        None => (0, elapsed),
-    };
-    let parts = clock
-        .split(':')
-        .map(str::parse::<u64>)
-        .collect::<Result<Vec<_>, _>>()
-        .ok()?;
-    let clock_seconds = match parts.as_slice() {
-        [minutes, seconds] => minutes.saturating_mul(60).saturating_add(*seconds),
-        [hours, minutes, seconds] => hours
-            .saturating_mul(3_600)
-            .saturating_add(minutes.saturating_mul(60))
-            .saturating_add(*seconds),
-        _ => return None,
-    };
-    Some(days.saturating_mul(86_400).saturating_add(clock_seconds))
 }
 
 fn collect_activity(
@@ -350,7 +284,7 @@ fn collect_activity(
         let Some(os) = snapshot
             .processes
             .iter()
-            .find(|os| os.matches_start(pid, start, PROCESS_START_TOLERANCE_SECONDS))
+            .find(|os| os.matches_start(pid, start))
         else {
             continue;
         };
@@ -439,13 +373,9 @@ fn receipt_matches_live_process(
     receipt: &ProcessReceipt,
     processes: &HashMap<u32, &OsProcess>,
 ) -> bool {
-    processes.get(&receipt.pid).is_some_and(|process| {
-        process.matches_start(
-            receipt.pid,
-            receipt.started_at,
-            PROCESS_START_TOLERANCE_SECONDS,
-        )
-    })
+    processes
+        .get(&receipt.pid)
+        .is_some_and(|process| process.matches_start(receipt.pid, receipt.started_at))
 }
 
 fn os_activity_state(process: &OsProcess) -> ActivityState {
@@ -682,21 +612,6 @@ mod tests {
     use super::{collect_activity, ActivityNodeKind, OsProcess, ProcessSnapshot};
     use crate::id::{ProcessLfid, TraceId};
     use crate::process::{Process, ProcessKind};
-
-    #[test]
-    fn process_sample_needs_only_identity_and_state_and_rejects_unknown_birth() {
-        let rows = super::parse_processes(
-            "10 S 01:00\n11 R 02:00:00\n12 Z 1-00:00:00\n13 S ?\n14 S 00:bad:01\n",
-            100_000,
-        );
-        assert_eq!(
-            rows.iter().map(|row| row.started_at).collect::<Vec<_>>(),
-            [99_940, 92_800, 13_600]
-        );
-        assert!(rows[0].matches_start(10, 99_940, 3));
-        assert!(!rows[0].matches_start(10, 99_930, 3));
-        assert!(!rows[2].matches_start(12, 13_600, 3));
-    }
 
     #[test]
     fn detached_agent_is_a_recorded_node_without_its_parent_or_a_client_receipt() {

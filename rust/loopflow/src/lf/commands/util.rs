@@ -8,6 +8,7 @@ use std::process::{Command, Stdio};
 use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
 
 use crate::engine::{codex_permission_args, missing_agent_message, workspace_add_dirs};
+use crate::journal::elapsed_seconds;
 use crate::provider_auth::Provider;
 use crate::session_record::{ProviderClientRef, ProviderClientStopReason};
 use crate::store::sqlite::SqliteStore;
@@ -430,27 +431,6 @@ fn provider_client_is_live(client: &ProviderClientRef, harness: &str) -> Result<
         expected_start,
         &command,
     ))
-}
-
-fn elapsed_seconds(value: &str) -> Option<u64> {
-    let (days, clock) = match value.split_once('-') {
-        Some((days, clock)) => (days.parse::<u64>().ok()?, clock),
-        None => (0, value),
-    };
-    let parts = clock
-        .split(':')
-        .map(str::parse::<u64>)
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .ok()?;
-    let clock = match parts.as_slice() {
-        [minutes, seconds] => minutes.checked_mul(60)?.checked_add(*seconds)?,
-        [hours, minutes, seconds] => hours
-            .checked_mul(3_600)?
-            .checked_add(minutes.checked_mul(60)?)?
-            .checked_add(*seconds)?,
-        _ => return None,
-    };
-    days.checked_mul(86_400)?.checked_add(clock)
 }
 
 #[cfg(unix)]
@@ -2389,12 +2369,5 @@ mod tests {
                 cwd: path(),
             }
         );
-    }
-
-    #[test]
-    fn process_elapsed_time_accepts_ps_formats() {
-        assert_eq!(elapsed_seconds("02:03"), Some(123));
-        assert_eq!(elapsed_seconds("01:02:03"), Some(3_723));
-        assert_eq!(elapsed_seconds("2-01:02:03"), Some(176_523));
     }
 }

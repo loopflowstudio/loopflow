@@ -56,7 +56,7 @@ pub fn snapshot(home: &Path, store: &SqliteStore, task: Option<WorkRef>) -> Acti
 
 fn observe(store: &SqliteStore, result: &mut ActiveSessionsSnapshot) -> anyhow::Result<()> {
     let agents = store.agent_processes()?;
-    let os = crate::lf::commands::top::sample_processes(result.observed_at)?;
+    let os = crate::journal::OsProcess::sample(result.observed_at)?;
     let mut sessions = std::collections::BTreeMap::<String, ActiveSession>::new();
     for agent in &agents {
         let Some(process) = crate::lf::commands::top::observe_agent_process(&os, agent) else {

@@ -231,11 +231,12 @@ Native admission requires an attachment; remote clients never settle their provi
 Library admission exposes a Codex account-failover conflict with retained native
 threads; resolve replacement before claiming completion. Raw headless admission remains.
 
-Top omits unknown identities and zombies; gates retain unknowns and gate/reaper
-reads omit zombie state. Keep blockers visible without weakening uncertainty
-(Release's entry-point lesson). Codex alone has FIFO handoff; reaping covers
-noninteractive Codex/OpenCode. Generations, foreground cleanup, death orders,
-public-entry agreement, two-second removal and installed settlement remain open.
+One OS reader now serves top, active Sessions, gates and reaping: zombies are
+dead; invalid observations stay unknown. Top still omits missing identities.
+Keep blockers visible without weakening uncertainty (Release's entry-point lesson).
+Codex alone has FIFO handoff; reaping covers noninteractive Codex/OpenCode.
+Generations, foreground cleanup, death orders, public-entry agreement,
+two-second removal and installed settlement remain open.
 
 ## Process vocabulary (LOO-400, curated 2026-10-09)
 

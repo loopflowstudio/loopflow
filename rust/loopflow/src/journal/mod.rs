@@ -1,3 +1,6 @@
+mod os_process;
+pub(crate) use os_process::{elapsed_seconds, OsProcess};
+
 use std::cell::RefCell;
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
@@ -169,13 +172,7 @@ pub(crate) struct ProcessReceipt {
 
 impl ProcessReceipt {
     fn process_evidence(&self) -> ProcessIdentityEvidence {
-        match process_started_at(self.pid) {
-            Ok(Some(started_at)) if (started_at - self.started_at).abs() <= 3 => {
-                ProcessIdentityEvidence::Live
-            }
-            Ok(Some(_)) | Ok(None) => ProcessIdentityEvidence::Dead,
-            Err(_) => ProcessIdentityEvidence::Unknown,
-        }
+        process_identity_evidence(self.pid, self.started_at)
     }
 }
 
@@ -973,9 +970,9 @@ pub(crate) fn current_process_lfid() -> Option<ProcessLfid> {
 }
 
 pub(crate) fn process_identity_evidence(pid: u32, started_at: i64) -> ProcessIdentityEvidence {
-    match process_started_at(pid) {
-        Ok(Some(observed)) if observed.abs_diff(started_at) <= 3 => ProcessIdentityEvidence::Live,
-        Ok(Some(_)) | Ok(None) => ProcessIdentityEvidence::Dead,
+    match OsProcess::read(pid) {
+        Ok(Some(process)) => process.evidence(started_at),
+        Ok(None) => ProcessIdentityEvidence::Dead,
         Err(_) => ProcessIdentityEvidence::Unknown,
     }
 }
@@ -984,7 +981,8 @@ pub(crate) fn process_evidence(
     store: &SqliteStore,
     process: &ProcessLfid,
 ) -> ProcessIdentityEvidence {
-    if let Ok(Some(record)) = store.process(process) {
+    let record = store.process(process);
+    if let Ok(Some(record)) = &record {
         if record.kind == crate::process::ProcessKind::Agent {
             return match (record.pid, record.os_started_at) {
                 (Some(pid), Some(start)) => process_identity_evidence(pid, start),
@@ -1003,7 +1001,7 @@ pub(crate) fn process_evidence(
         return receipt.process_evidence();
     }
     // Historical Processes can lack identity evidence. A restart still proves exit.
-    match store.process(process) {
+    match record {
         Ok(Some(record))
             if record.completed_at.is_some() || began_before_boot(record.started_at) =>
         {
@@ -1061,47 +1059,7 @@ fn parse_sysctl_boottime(value: &str) -> Option<i64> {
 }
 
 pub(crate) fn process_started_at(pid: u32) -> Result<Option<i64>, std::io::Error> {
-    let output = Command::new("ps")
-        .args(["-p", &pid.to_string(), "-o", "etime="])
-        .output()?;
-    if !output.status.success() {
-        if output.status.code() == Some(1) && output.stdout.is_empty() && output.stderr.is_empty() {
-            return Ok(None);
-        }
-        return Err(std::io::Error::other(format!(
-            "process start-time query failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        )));
-    }
-    let elapsed = String::from_utf8_lossy(&output.stdout);
-    let seconds = elapsed_seconds(elapsed.trim())
-        .ok_or_else(|| std::io::Error::other("process start-time query returned invalid age"))?;
-    Ok(Some(
-        OffsetDateTime::now_utc()
-            .unix_timestamp()
-            .saturating_sub(i64::try_from(seconds).unwrap_or(i64::MAX)),
-    ))
-}
-
-fn elapsed_seconds(value: &str) -> Option<u64> {
-    let (days, clock) = match value.split_once('-') {
-        Some((days, clock)) => (days.parse().ok()?, clock),
-        None => (0_u64, value),
-    };
-    let parts = clock
-        .split(':')
-        .map(str::parse::<u64>)
-        .collect::<Result<Vec<_>, _>>()
-        .ok()?;
-    let clock = match parts.as_slice() {
-        [minutes, seconds] => minutes.checked_mul(60)?.checked_add(*seconds)?,
-        [hours, minutes, seconds] => hours
-            .checked_mul(3_600)?
-            .checked_add(minutes.checked_mul(60)?)?
-            .checked_add(*seconds)?,
-        _ => return None,
-    };
-    days.checked_mul(86_400)?.checked_add(clock)
+    Ok(OsProcess::read(pid)?.map(|process| process.started_at))
 }
 
 fn set_context(context: ProcessContext) {

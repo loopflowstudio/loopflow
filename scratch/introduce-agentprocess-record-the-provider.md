@@ -83,6 +83,9 @@ attribution survive.
 - Native `spawn_native(None)`, capture launch without an attachment, and
   `native_provider_driver`'s missing-provenance-as-client inference are removed.
   Raw headless optional admission remains a deletion target.
+- Top’s private OS sampler/elapsed parser and receipt-only birth comparison are
+  removed. `journal::OsProcess` owns single-PID and inventory observation, including
+  zombie rejection. Malformed samples fail observation rather than inventing absence.
 - Remaining provider-engine close names and messages (`close_engine` is removed).
   `bind_group_to_driver`, `prepare_lifeline` and the exposed prepare/retain
   lifeline type are deleted. Keep `engine/` as Loopflow machinery and the
@@ -183,11 +186,11 @@ unrecorded spawns. The working code remains a draft with this failing regression
    until lf exit. No current live attachment means orphan settlement, not invented exit;
    unknown attachment liveness stays unknown. Resume must consult the AgentProcess
    before treating a detached attachment as replaceable. Unfinished rows with
-   unknown PID remain diagnosable. Unify OS evidence across gate/top/reaper: top
-   excludes zombies in `OsProcess::matches_start`, while
-   `journal::process_identity_evidence` reads only elapsed time and can call the
-   same PID/birth live. This is a source-level discrepancy, not an observed
-   configured orphan or permission to infer successful exit.
+   unknown PID remain diagnosable. Top, active Sessions, receipt checks, gate and
+   reaper now share `journal::OsProcess` parsing and identity judgment; zombies
+   are dead, invalid observations remain errors/Unknown. This removes the prior
+   source-level disagreement, not the missing-identity display gap below. No
+   configured orphan was signaled and OS death supplies no successful outcome.
 4. Replace remaining predecessor fixture assumptions and restore required
    active-Session, native-history and Task-membership coverage on records. Prove
    headless public top/Task-status/scheduled-entry agreement, not only reducers
@@ -236,8 +239,8 @@ the group, so no second slot is needed. Combining native setup errors must not
 drop the published client guard before cleanup; it remains in the outer scope.
 No new signal authority, attachment refresh or lifecycle owner is introduced.
 
-October 9 realignment rechecked Release's objective and its completion/operation-entry
-lessons; other child sections were not reread in this pass. The supplied #1512
+October 9 realignment rechecked Release's objective and completion/operation-entry
+lessons; its other sections were not reread. The supplied #1512
 base remains; LOO-441 is not integrated. Raw headless admission remains unfinished.
 Reader agreement needs behavior changes, not merely more tests. These gaps require
 no new product decision and do not relax the requested demo.
@@ -252,4 +255,10 @@ external networking denied. No configured-provider acceptance is claimed.
 Integration EnvGuard now pins the compiled CLI inside the boundary. Source review
 also removed the eager cwd lookup when an explicit working directory is supplied.
 
-Check: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings` and lib/agent_tests builds pass; network-isolated `agent_tests` has 13 passes and the retained account-failover failure above; native remote/setup/replacement/OpenCode/name/move/signal and helper-admission filters pass (9 tests); pre-exec PID recording survives failed exec; full Rust/Swift/DTO/materialized and Linux matrix remain gate/CI-owned.
+Prior admission checks and the retained 13-pass/one-failure `agent_tests` result:
+`91d184b1c:scratch/introduce-agentprocess-record-the-provider.md`. Compression
+moves OS observation below presentation and deletes the native-client copy of
+elapsed-time parsing. Invalid ages report unavailability instead of disappearing
+from the sample. Missing PID/birth rows still require visible unknown nodes.
+
+Check: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test -p loopflow --lib --no-run` pass; `uv run --no-sync python scripts/test_network.py target/debug/deps/loopflow-0b179d3755b15c2d journal::os_process::tests journal::tests::process_lifecycle_publishes_and_removes_exact_process_ownership journal::tests::unfinished_process_retains_identity_across_terminal_failure_interrupt_and_pid_reuse lf::commands::top::tests session_record::active::tests harness::agent_process::tests lf::commands::util::tests::provider_client --test-threads=1` passes (19 tests); full Rust/Swift/DTO/materialized and Linux matrix remain gate/CI-owned.

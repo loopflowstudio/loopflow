@@ -133,8 +133,8 @@ cleanup. Codex relay and close terminology now uses attachment/AgentProcess;
 retained socket/FIFO names remain unchanged. This does not complete the broader
 vocabulary or optional-launch cut.
 
-Local base remains `3e1e6245c` (#1512); LOO-441 is not integrated. No remote
-freshness, publication, installed-store migration or installed acceptance is claimed.
+LOO-441 is integrated from pinned main `461577746` (#1516) through the owned
+sync. No publication, installed-store migration or installed acceptance is claimed.
 Earlier implementation/review detail and contrary evidence:
 `e0d360e6a:scratch/introduce-agentprocess-record-the-provider.md`.
 
@@ -205,10 +205,9 @@ unrecorded spawns. The working code remains a draft with this failing regression
    without payload files. This does not exercise public commands or uncertain OS
    identity. CLI Waiting and work-watch fixtures now join process
    rows rather than deleted Session columns; other fixture repairs remain.
-5. Integrate LOO-441's LfProcess/LfSession rename before publication. The current
-   source still names `Process` and `AgentSession`; no dependency integration or
-   partial publication is claimed. Update the final model/API docs and all wire
-   fixtures after the generation cut.
+5. LOO-441's LfProcess/LfSession rename is integrated from #1516. Update the final
+   model/API docs and all wire fixtures after the generation cut. The common
+   LfProcess projection still carries both kinds during this draft cutover.
 6. Gate owns affected Rust/Swift/DTO and materialized-migration verification plus
    Linux lifeline checks. Demo still requires exact SIGKILL removal within two
    seconds and no invisible Task blocker. Only the installed scheduled path may
@@ -240,8 +239,8 @@ drop the published client guard before cleanup; it remains in the outer scope.
 No new signal authority, attachment refresh or lifecycle owner is introduced.
 
 October 9 realignment rechecked Release's objective and completion/operation-entry
-lessons; its other sections were not reread. The supplied #1512
-base remains; LOO-441 is not integrated. Raw headless admission remains unfinished.
+lessons; its other sections were not reread. The owned sync now integrates #1516
+(LOO-441). Raw headless admission remains unfinished.
 Reader agreement needs behavior changes, not merely more tests. These gaps require
 no new product decision and do not relax the requested demo.
 
@@ -261,4 +260,4 @@ moves OS observation below presentation and deletes the native-client copy of
 elapsed-time parsing. Invalid ages report unavailability instead of disappearing
 from the sample. Missing PID/birth rows still require visible unknown nodes.
 
-Check: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test -p loopflow --lib --no-run` pass; `uv run --no-sync python scripts/test_network.py target/debug/deps/loopflow-0b179d3755b15c2d journal::os_process::tests journal::tests::process_lifecycle_publishes_and_removes_exact_process_ownership journal::tests::unfinished_process_retains_identity_across_terminal_failure_interrupt_and_pid_reuse lf::commands::top::tests session_record::active::tests harness::agent_process::tests lf::commands::util::tests::provider_client --test-threads=1` passes (19 tests); full Rust/Swift/DTO/materialized and Linux matrix remain gate/CI-owned.
+Check: `uv run --no-sync python scripts/test_network.py cargo test --offline -p loopflow --lib harness::agent_process::tests::headless_spawn_retains_attempts_and_refuses_stale_attachments -- --exact --test-threads=1` passes (1 test) after #1516 sync; prior checks remain at `ff185aca1`, this plan; broader Rust/Swift/DTO/materialized and Linux checks remain gate/CI-owned.

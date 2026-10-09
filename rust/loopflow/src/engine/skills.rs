@@ -3,7 +3,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::engine::definition_name::portable_name;
-use crate::engine::flow::split_frontmatter;
+use crate::engine::flow::{compile_flow_with_catalog, split_frontmatter, DefinitionLoader};
+use crate::engine::flow_instructions::render_flow_instructions;
 use crate::engine::skill_catalog::{is_generated, SkillCatalog, SkillDialect, SkillSource};
 use crate::engine::LoadError;
 
@@ -61,6 +62,12 @@ pub fn sync_skills(options: &SkillSyncOptions) -> Result<SkillSyncReport, LoadEr
             .collect(),
     };
     let repo = options.repo.as_ref().map(std::path::absolute).transpose()?;
+    let mut all_flows = crate::engine::builtins::builtin_flow_names()
+        .into_iter()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    all_flows.extend(flows.iter().cloned());
+    let mut recipes = BTreeMap::new();
     let mut targets = Vec::new();
     let mut report = SkillSyncReport::default();
     // Resolve and validate the entire export set before touching either provider.
@@ -100,7 +107,19 @@ pub fn sync_skills(options: &SkillSyncOptions) -> Result<SkillSyncReport, LoadEr
                 report.skipped.push(path);
                 continue;
             }
-            exports.insert(name.clone(), render_flow_skill(&flow, &name, vendor));
+            let recipe = match recipes.entry(flow.clone()) {
+                std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
+                std::collections::btree_map::Entry::Vacant(entry) => {
+                    let definition = DefinitionLoader::new(options.repo.as_deref(), &catalog)
+                        .load_flow(&flow)?;
+                    let steps = compile_flow_with_catalog(&definition, &catalog)?;
+                    entry.insert(render_flow_instructions(&flow, &steps, &all_flows)?)
+                }
+            };
+            exports.insert(
+                name.clone(),
+                render_flow_skill(&flow, &name, vendor, recipe),
+            );
         }
         let blocked = exports
             .keys()
@@ -223,13 +242,13 @@ fn writable_target(root: &Path, name: &str) -> bool {
         || fs::read_dir(&directory).is_ok_and(|mut entries| entries.next().is_none())
 }
 
-fn render_flow_skill(flow: &str, name: &str, vendor: Vendor) -> String {
+fn render_flow_skill(flow: &str, name: &str, vendor: Vendor, recipe: &str) -> String {
     let user_only = if vendor == Vendor::Claude {
         "disable-model-invocation: true\n"
     } else {
         ""
     };
-    format!("---\nname: {name}\ndescription: Follow the {name} Flow in this conversation.\nloopflow: true\nloopflow-kind: flow\nloopflow-flow: {}\n{user_only}---\nCarry out this Flow in the current conversation using the current request.\nRun `lf flow show {flow} --instructions` to read its resolved instructions.\nFollow that frozen plan here, including its loop decisions, commands, branches and review boundaries.\nDo not launch `lf run` or new Sessions to carry out its skill steps.\n", yaml_string(flow))
+    format!("---\nname: {name}\ndescription: Follow the {name} Flow in this conversation.\nloopflow: true\nloopflow-kind: flow\nloopflow-flow: {}\n{user_only}---\n{recipe}", yaml_string(flow))
 }
 
 fn write_targets(
@@ -308,9 +327,6 @@ fn render_skill(skill: &SkillSource, name: &str, vendor: Vendor) -> Result<Strin
     frontmatter.push(LOOPFLOW_MARKER.to_string());
     frontmatter.push("loopflow-kind: skill".into());
     frontmatter.push(format!("loopflow-skill: {}", yaml_string(&skill.name)));
-    if vendor == Vendor::Claude && skill.dialect == SkillDialect::Loopflow {
-        frontmatter.push("disable-model-invocation: true".to_string());
-    }
 
     if skill.dialect != SkillDialect::Loopflow {
         // Preserve authored declarations; the destination provider decides which it supports.
@@ -552,15 +568,73 @@ mod tests {
         for provider in [".agents", ".claude"] {
             let root = repo.path().join(provider).join("skills");
             let wrapper = fs::read_to_string(root.join("team-ship/SKILL.md")).unwrap();
-            assert!(wrapper.contains("lf flow show team/ship --instructions"));
+            assert!(wrapper.contains("# Flow: team/ship"));
+            assert!(wrapper.contains("1. Run `lf -b implement`."));
             assert!(wrapper.contains("loopflow-kind: flow"));
-            assert!(wrapper.contains("Do not launch `lf run`"));
+            assert!(!wrapper.contains("--instructions"));
             assert!(root.join("team-check/SKILL.md").exists());
             assert!(!root.join("pursue/SKILL.md").exists());
         }
         assert!(sync_skills(&options).unwrap().written.is_empty());
         fs::remove_file(repo.path().join(".lf/flows/team/ship.yaml")).unwrap();
         assert_eq!(sync_skills(&options).unwrap().pruned.len(), 3);
+    }
+
+    #[test]
+    fn chat_recipes_refresh_repository_overrides_and_keep_global_scope() {
+        let home = TempDir::new().unwrap();
+        let repo = TempDir::new().unwrap();
+        fs::create_dir_all(home.path().join(".lf/skills")).unwrap();
+        fs::write(
+            home.path().join(".lf/skills/loop-or-next.md"),
+            "Personal decision criteria",
+        )
+        .unwrap();
+        sync_skills(&options_for(&home)).unwrap();
+        let global = home.path().join(".claude/skills/pursue/SKILL.md");
+        let original = fs::read_to_string(&global).unwrap();
+        assert!(original.contains("Execute the skill `loop-or-next` in this conversation."));
+        assert!(original.contains(
+            &home
+                .path()
+                .join(".lf/skills/loop-or-next.md")
+                .display()
+                .to_string()
+        ));
+        assert!(!original.contains("Personal decision criteria"));
+
+        fs::create_dir_all(repo.path().join(".lf/flows")).unwrap();
+        let flow = repo.path().join(".lf/flows/pursue.yaml");
+        fs::write(&flow, "- step: {name: demo, id: review, human: true}\n").unwrap();
+        let options = SkillSyncOptions {
+            repo: Some(repo.path().to_path_buf()),
+            ..options_for(&home)
+        };
+        sync_skills(&options).unwrap();
+        let local = repo.path().join(".claude/skills/pursue/SKILL.md");
+        assert!(fs::read_to_string(&local)
+            .unwrap()
+            .contains("1. Execute the skill `demo` in this conversation."));
+        fs::write(&flow, "- compress\n").unwrap();
+        sync_skills(&options).unwrap();
+        let updated = fs::read_to_string(local).unwrap();
+        assert!(updated.contains("1. Run `lf -b compress`."));
+        assert!(!updated.contains("Execute the skill `demo`"));
+        assert_eq!(fs::read_to_string(global).unwrap(), original);
+    }
+
+    #[test]
+    fn chat_recipes_preserve_native_user_only_controls() {
+        let home = TempDir::new().unwrap();
+        let source = home.path().join(".claude/skills/restricted/SKILL.md");
+        fs::create_dir_all(source.parent().unwrap()).unwrap();
+        let body = "---\nname: restricted\ndisable-model-invocation: true\n---\nOnly on request.\n";
+        fs::write(&source, body).unwrap();
+        sync_skills(&options_for(&home)).unwrap();
+        assert_eq!(fs::read_to_string(source).unwrap(), body);
+        let exported =
+            fs::read_to_string(home.path().join(".agents/skills/restricted/SKILL.md")).unwrap();
+        assert!(exported.contains("disable-model-invocation: true"));
     }
 
     #[test]
@@ -576,7 +650,19 @@ mod tests {
                 };
                 let path = repo.path().join(format!(".lf/{kind}/{name}.{extension}"));
                 fs::create_dir_all(path.parent().unwrap()).unwrap();
-                fs::write(path, body).unwrap();
+                let content = if kind == "flows" {
+                    format!(
+                        "- step: {}\n",
+                        if name.contains('/') {
+                            "team/check"
+                        } else {
+                            "team-check"
+                        }
+                    )
+                } else {
+                    body.to_string()
+                };
+                fs::write(path, content).unwrap();
             }
         }
         let options = SkillSyncOptions {
@@ -592,7 +678,15 @@ mod tests {
             let body = fs::read_to_string(path).unwrap();
             assert!(body.contains(&format!("name: {name}\n")));
             if name.contains("ship") {
-                assert!(body.contains(&format!("lf flow show {name} --instructions")));
+                assert!(body.contains(&format!("# Flow: {name}\n")));
+                assert!(body.contains(&format!(
+                    "lf -b {}",
+                    if name.contains('/') {
+                        "team/check"
+                    } else {
+                        "team-check"
+                    }
+                )));
             } else {
                 assert!(body.contains(if name.contains('/') { "Slash" } else { "Dash" }));
             }
@@ -604,7 +698,7 @@ mod tests {
             .contains("Dash"));
         assert!(fs::read_to_string(root.join("team-ship/SKILL.md"))
             .unwrap()
-            .contains("lf flow show team-ship --instructions"));
+            .contains("# Flow: team-ship"));
         let again = sync_skills(&options).unwrap();
         assert!(again.written.is_empty() && again.pruned.is_empty());
     }
@@ -707,7 +801,7 @@ mod tests {
         assert!(claude.contains("description: Local skill summary."));
         assert!(claude.contains("loopflow: true"));
         assert!(claude.contains("loopflow-skill: local"));
-        assert!(claude.contains("disable-model-invocation: true"));
+        assert!(!claude.contains("disable-model-invocation"));
         assert!(!claude.contains("agent: codex:o3"));
         assert!(claude.contains("Do it."));
 

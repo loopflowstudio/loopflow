@@ -296,24 +296,9 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
                 crate::lf::commands::flow::list(&repo, *json)?;
             }
             Commands::Flow {
-                cmd:
-                    FlowCommand::Show {
-                        name,
-                        json,
-                        instructions,
-                        ..
-                    },
+                cmd: FlowCommand::Show { name, json, .. },
             } => {
-                if *instructions {
-                    let flow = crate::engine::flow::load_authored_flow(name, &repo)?;
-                    let steps = crate::engine::compile_flow(&flow, &repo)?;
-                    print!(
-                        "{}",
-                        crate::engine::flow_instructions::render_flow_instructions(
-                            &flow.name, &steps
-                        )?
-                    );
-                } else if *json {
+                if *json {
                     let entry = crate::engine::flow_graph::flow_catalog_entry(name, &repo)?;
                     println!("{}", serde_json::to_string(&entry)?);
                 } else {

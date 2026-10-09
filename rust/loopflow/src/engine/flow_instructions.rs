@@ -1,95 +1,121 @@
-//! Render the compiler's captured plan for execution in the current conversation.
-use crate::engine::flow::return_target;
-use crate::engine::flow_output::FlowOutput;
-use crate::engine::{ConcreteStep, LoadError, Skill};
+//! Render compiled Flow topology as a native chat skill's checklist.
+use clap::CommandFactory;
 
-pub fn render_flow_instructions(name: &str, steps: &[ConcreteStep]) -> Result<String, LoadError> {
-    let mut output = format!("# Flow: {}\n\n", name);
-    output.push_str("Carry out this frozen plan in the current conversation using the current request and accumulated evidence. Apply the resolved skill bodies below here; naming another slash command is not execution. Do not launch `lf run`, new Sessions, or workers to carry out these steps.\n\n\
-Track the current occurrence, loop pass, decision and pending input in the transcript. Follow every command, loop, branch and review boundary. Stop on command failure. Never automatically replay a successful side effect after interruption: inspect evidence first; if the position is uncertain, ask here.\n\n\
-A review requires the participant's response in this conversation; never fabricate approval or substitute an agent. If no participant is available, explain the missing input and stop. A blocked decision stops here pending new direction. Correct invalid decisions at that decision, without rerunning preceding work. There is no arbitrary iteration limit.\n\n\
-The current model performs the work. Agent preferences and native declarations below are disclosed, not permission to switch providers or bypass controls. Preserve resource bases. If a step requires unavailable native execution, explain the specific limitation and stop. Source edits take effect only on a fresh invocation. This instruction-driven plan has no autonomous driver's enforcement or crash recovery; it creates no FlowProcess or step Process and does not advance a Task's Workflow. Explicit LF commands keep their normal effects and authorization boundaries. Completing this chat Flow is not Task completion.\n\n## Plan\n\n");
-    let mut bodies = Vec::new();
-    render_steps(steps, "", &mut bodies, &mut output)?;
-    output.push_str("\n## Resolved skill bodies\n");
-    for (index, skill) in bodies.iter().enumerate() {
-        output.push_str(&format!("\n### Body {}: {}\n\n", index + 1, skill.name));
-        if let Some(source) = &skill.source {
-            output.push_str(&format!(
-                "Source: {} ({:?})\nBase directory for this skill: {}\n\n",
-                source.path.display(),
-                source.dialect,
-                source.path.parent().expect("source has a parent").display()
-            ));
-        }
-        if skill.agent.is_some() || skill.default_agent.is_some() || skill.action_style.is_some() {
-            output.push_str(&format!("Authored preferences: agent={:?}, default_agent={:?}, action_style={:?}. These do not switch the current model.\n\n", skill.agent, skill.default_agent, skill.action_style));
-        }
-        output.push_str(&skill.source_text());
-        output.push('\n');
-    }
+use crate::engine::flow::{return_target, split_frontmatter};
+use crate::engine::{ConcreteStep, LoadError, Skill};
+use crate::lf::navigation::resolve_child;
+
+pub fn render_flow_instructions(
+    name: &str,
+    steps: &[ConcreteStep],
+    flow_names: &[String],
+) -> Result<String, LoadError> {
+    let mut output = format!("# Flow: {name}\n\n");
+    output.push_str("Carry out these steps using the current request. Wait for each command to finish and inspect its result; stop on failure. Give headless skill runs the relevant request, findings and next action as their message.\n\n\
+For conversational steps, load and follow the named skill here, retaining its native controls and resource base. If it requires user invocation, ask here. After interruption, inspect results before repeating a successful command. Completing this checklist does not move the Task's Workflow.\n\n");
+    render_steps(
+        steps,
+        "",
+        flow_names,
+        &crate::lf::Cli::command(),
+        &mut output,
+    )?;
     Ok(output)
 }
 
-fn body_number<'a>(skill: &'a Skill, bodies: &mut Vec<&'a Skill>) -> usize {
-    if let Some(index) = bodies.iter().position(|body| *body == skill) {
-        index + 1
-    } else {
-        bodies.push(skill);
-        bodies.len()
+fn conversational_skill(skill: &Skill) -> String {
+    let mut instruction = format!("Execute the skill `{}` in this conversation.", skill.name);
+    if let Some(source) = &skill.source {
+        instruction.push_str(&format!(" Source: `{}`.", source.path.display()));
     }
+    instruction
 }
 
-fn render_steps<'a>(
-    steps: &'a [ConcreteStep],
+fn builtin(skill: &Skill, name: &str) -> bool {
+    let source =
+        crate::engine::builtins::get_builtin_skill(name).expect("known builtin decision skill");
+    let body = split_frontmatter(source).map_or(source, |(_, body)| body);
+    skill.name == name && skill.source.is_none() && skill.content.as_deref() == Some(body)
+}
+
+fn render_steps(
+    steps: &[ConcreteStep],
     prefix: &str,
-    bodies: &mut Vec<&'a Skill>,
+    flow_names: &[String],
+    commands: &clap::Command,
     output: &mut String,
 ) -> Result<(), LoadError> {
     for (index, step) in steps.iter().enumerate() {
         let position = format!("{prefix}{}", index + 1);
         match step {
             ConcreteStep::Skill(occurrence) => {
-                let body = body_number(&occurrence.skill, bodies);
-                output.push_str(&format!(
-                    "{position}. Apply **{}** (body {body})",
-                    occurrence.skill.name
-                ));
-                if let Some(id) = &occurrence.id {
-                    output.push_str(&format!("; occurrence ID `{id}`"));
-                }
-                output.push_str(".\n");
-                if occurrence.human {
-                    output.push_str("   Review with the participant here and pause for their response before continuing.\n");
-                }
+                let skill = &occurrence.skill;
                 if occurrence.returns.is_some() {
                     let target = return_target(steps, index).ok_or_else(|| {
                         LoadError::InvalidFlow(format!(
                             "invalid compiled return target at {position}"
                         ))
                     })?;
-                    output.push_str(&format!("   Loop decision: iterate returns to {prefix}{} and repeats the entire range {prefix}{} through {position}, inclusive (including intervening commands and branches). Advance continues after {position}. Blocked explains missing input and stops here.\n   Decision contract: {}\n", target + 1, target + 1, FlowOutput::Decision.schema()));
+                    if builtin(skill, "loop-or-next") {
+                        output.push_str(&format!("{position}. Review the objective, changes and remaining findings in this conversation.\n   If this boundary's requirements are satisfied, continue after step {position}.\n   If the last pass made meaningful progress and specific work remains, state the next action and repeat steps {prefix}{} through {prefix}{index}, including intervening commands and branches, then reassess at step {position}.\n   If progress requires missing input or repeats a failure without new evidence, explain what needs resolving and stop. A deferred check alone is not a blocker; leave it to its declared gate/CI or review. There is no arbitrary pass limit.\n", target + 1));
+                    } else {
+                        output.push_str(&format!("{position}. {}\n   Use its criteria to decide in ordinary language: advance continues after step {position}; iterate repeats steps {prefix}{} through {prefix}{index}, including intervening commands and branches, then returns to this decision; blocked explains what needs resolving and stops here.\n", conversational_skill(skill), target + 1));
+                    }
+                } else if occurrence.human {
+                    output.push_str(&format!("{position}. {}\n", conversational_skill(skill)));
+                } else {
+                    let explicit = flow_names.contains(&skill.name)
+                        || resolve_child(commands, &skill.name, &[])
+                            .map_or(true, |command| command.is_some());
+                    let name = shlex::try_quote(&skill.name)
+                        .map_err(|error| LoadError::InvalidFlow(error.to_string()))?;
+                    let agent = skill
+                        .agent
+                        .as_deref()
+                        .map(shlex::try_quote)
+                        .transpose()
+                        .map_err(|error| LoadError::InvalidFlow(error.to_string()))?;
+                    let launcher = agent
+                        .map_or_else(|| "lf -b".to_string(), |agent| format!("lf -b -a {agent}"));
+                    let command = if explicit {
+                        format!("{launcher} skill -- {name}")
+                    } else {
+                        format!("{launcher} {name}")
+                    };
+                    output.push_str(&format!("{position}. Run `{command}`.\n"));
+                }
+                if occurrence.human {
+                    output.push_str("   Wait for the participant's response here before continuing; never substitute another reviewer or assume approval.\n");
                 }
             }
             ConcreteStep::Command(command) => {
                 let argv = command.item.argv();
-                let quoted = argv
-                    .iter()
-                    .map(|arg| crate::engine::process::shell_escape(arg))
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                output.push_str(&format!("{position}. Execute this exact LF argv in order; stop on failure:\n\n```sh\n{quoted}\n```\n\n"));
+                let quoted = shlex::try_join(argv.iter().map(String::as_str))
+                    .map_err(|error| LoadError::InvalidFlow(error.to_string()))?;
+                output.push_str(&format!("{position}. Run:\n\n```sh\n{quoted}\n```\n\n"));
             }
             ConcreteStep::Xor(branch) => {
-                let body = body_number(&branch.router, bodies);
-                let mut paths: Vec<_> = branch.paths.keys().cloned().collect();
-                paths.sort();
-                output.push_str(&format!("{position}. Route with **{}** (body {body}). Choose exactly one declared path, complete it, then rejoin after {position}. An invalid route never defaults to a branch.\n   Route contract: {}\n", branch.router.name, FlowOutput::Route(paths.clone()).schema()));
-                for name in paths {
-                    let path = &branch.paths[&name];
+                let instruction = if builtin(&branch.router, "xor-route") {
+                    "Review the preceding findings and the path descriptions in this conversation."
+                        .to_string()
+                } else {
+                    conversational_skill(&branch.router)
+                };
+                output.push_str(&format!("{position}. {instruction} Choose exactly one declared path, explain the choice, complete its steps, then rejoin after step {position}. If the choice is unresolved, explain and stop here.\n"));
+                let mut paths: Vec<_> = branch.paths.iter().collect();
+                paths.sort_by_key(|(name, _)| *name);
+                for (name, path) in paths {
                     output.push_str(&format!("\nPath `{name}`: {}\n\n", path.description));
-                    render_steps(&path.steps, &format!("{position}[{name}]."), bodies, output)?;
-                    output.push_str(&format!("End path `{name}`: rejoin after {position}.\n\n"));
+                    render_steps(
+                        &path.steps,
+                        &format!("{position}[{name}]."),
+                        flow_names,
+                        commands,
+                        output,
+                    )?;
+                    output.push_str(&format!(
+                        "End path `{name}`: rejoin after step {position}.\n\n"
+                    ));
                 }
             }
         }
@@ -100,34 +126,24 @@ fn render_steps<'a>(
 #[cfg(test)]
 mod tests {
     use super::render_flow_instructions;
-    use crate::engine::flow::{compile_flow, load_authored_flow};
+    use crate::engine::flow::{available_flow_names, compile_flow, load_authored_flow};
     use std::fs;
     use tempfile::TempDir;
 
+    fn recipe(repo: &std::path::Path, name: &str) -> String {
+        let flow = load_authored_flow(name, repo).unwrap();
+        let steps = compile_flow(&flow, repo).unwrap();
+        render_flow_instructions(name, &steps, &available_flow_names(repo).unwrap()).unwrap()
+    }
+
     #[test]
-    fn portable_plan_renders_compiled_loops_branches_reviews_and_frozen_bodies() {
+    fn chat_recipe_runs_work_and_keeps_reviews_and_nested_decisions_here() {
         let repo = TempDir::new().unwrap();
         fs::create_dir_all(repo.path().join(".lf/flows")).unwrap();
         fs::create_dir_all(repo.path().join(".lf/skills")).unwrap();
-        fs::create_dir_all(repo.path().join(".claude/skills/native-check")).unwrap();
         fs::write(
             repo.path().join(".lf/skills/work.md"),
-            "Original work body.",
-        )
-        .unwrap();
-        fs::write(
-            repo.path().join(".lf/skills/loop-or-next.md"),
-            "Decide using evidence.",
-        )
-        .unwrap();
-        fs::write(
-            repo.path().join(".lf/skills/xor-route.md"),
-            "Route using findings.",
-        )
-        .unwrap();
-        fs::write(
-            repo.path().join(".claude/skills/native-check/SKILL.md"),
-            "---\nname: NativeCheck\nallowed-tools: Read\n---\nOriginal native body.",
+            "Work body must not be bundled.",
         )
         .unwrap();
         fs::write(
@@ -140,8 +156,6 @@ mod tests {
             r#"
 - step: {name: work, id: first}
 - cmd: commit -m don't-expand-$HOME;echo-unsafe
-- step: {name: work, id: second}
-- loop: first
 - xor:
     paths:
       repair:
@@ -149,39 +163,24 @@ mod tests {
         description: Repair the findings
       skip:
         description: Nothing to repair
-- step: {name: native-check, id: review, human: true}
+- loop: first
+- step: {name: demo, id: review, human: true}
 "#,
         )
         .unwrap();
-        let steps = compile_flow(
-            &load_authored_flow("chat", repo.path()).unwrap(),
-            repo.path(),
-        )
-        .unwrap();
-        fs::write(
-            repo.path().join(".lf/skills/work.md"),
-            "Changed after capture",
-        )
-        .unwrap();
-        let plan = render_flow_instructions("chat", &steps).unwrap();
-        assert!(plan.contains("entire range 1 through 4"));
-        assert!(plan.contains("entire range 5[repair].1 through 5[repair].2"));
-        assert!(plan.contains("rejoin after 5"));
-        assert!(plan.contains("occurrence ID `first`"));
-        assert!(plan.contains("occurrence ID `second`"));
-        assert!(plan.contains("pause for their response"));
+        let plan = recipe(repo.path(), "chat");
+        assert!(plan.contains("1. Run `lf -b skill -- work`."));
+        assert!(plan.contains("repeat steps 1 through 3"));
+        assert!(plan.contains("repeat steps 3[repair].1 through 3[repair].1"));
+        assert!(plan.contains("reassess at step 3[repair].2"));
+        assert!(plan.contains("rejoin after step 3"));
+        assert!(plan.contains("5. Execute the skill `demo` in this conversation."));
+        assert!(plan.contains("Wait for the participant's response"));
         assert!(plan.contains("Repair the findings"));
-        assert!(plan.contains("\"advance\",\"iterate\",\"blocked\""));
-        assert_eq!(plan.matches("Original work body.").count(), 1);
-        assert!(!plan.contains("Changed after capture"));
-        assert!(plan.contains("allowed-tools: Read"));
-        assert!(plan.contains(
-            &repo
-                .path()
-                .join(".claude/skills/native-check")
-                .display()
-                .to_string()
-        ));
+        assert!(plan.contains("A deferred check alone is not a blocker"));
+        assert!(!plan.contains("Work body must not be bundled"));
+        assert!(!plan.contains("JSON"));
+        assert!(!plan.contains("Resolved skill bodies"));
         let command = plan
             .split("```sh\n")
             .nth(1)
@@ -193,7 +192,52 @@ mod tests {
             shlex::split(command).unwrap(),
             vec!["lf", "commit", "-m", "don't-expand-$HOME;echo-unsafe"]
         );
-        assert!(plan.contains("no arbitrary iteration limit"));
-        assert!(plan.contains("does not advance a Task's Workflow"));
+    }
+
+    #[test]
+    fn chat_recipe_preserves_overridden_loop_and_router_skills() {
+        let repo = TempDir::new().unwrap();
+        fs::create_dir_all(repo.path().join(".lf/flows")).unwrap();
+        fs::create_dir_all(repo.path().join(".lf/skills")).unwrap();
+        for name in ["loop-or-next", "xor-route"] {
+            fs::write(
+                repo.path().join(format!(".lf/skills/{name}.md")),
+                "Custom criteria",
+            )
+            .unwrap();
+        }
+        fs::write(repo.path().join(".lf/flows/chat.yaml"), "- implement\n- loop: implement\n- xor:\n    paths:\n      done:\n        description: Finished\n").unwrap();
+        let plan = recipe(repo.path(), "chat");
+        for name in ["loop-or-next", "xor-route"] {
+            assert!(plan.contains(&format!("Execute the skill `{name}` in this conversation.")));
+            assert!(plan.contains(
+                &repo
+                    .path()
+                    .join(format!(".lf/skills/{name}.md"))
+                    .display()
+                    .to_string()
+            ));
+        }
+        assert!(plan.contains("iterate repeats steps 1 through 1"));
+        assert!(!plan.contains("If the last pass made meaningful progress"));
+    }
+
+    #[test]
+    fn chat_recipe_uses_explicit_skills_for_flow_and_command_collisions() {
+        let repo = TempDir::new().unwrap();
+        fs::create_dir_all(repo.path().join(".lf/flows")).unwrap();
+        fs::create_dir_all(repo.path().join(".lf/skills")).unwrap();
+        fs::write(repo.path().join(".lf/skills/sync.md"), "Skill, not command").unwrap();
+        fs::write(repo.path().join(".lf/skills/ship.md"), "Skill, not Flow").unwrap();
+        fs::write(repo.path().join(".lf/flows/ship.yaml"), "- implement\n").unwrap();
+        fs::write(
+            repo.path().join(".lf/flows/chat.yaml"),
+            "- step: sync\n- step: ship\n- step: {name: implement, agent: codex:mini}\n",
+        )
+        .unwrap();
+        let plan = recipe(repo.path(), "chat");
+        assert!(plan.contains("Run `lf -b skill -- sync`"));
+        assert!(plan.contains("Run `lf -b skill -- ship`"));
+        assert!(plan.contains("Run `lf -b -a codex:mini implement`"));
     }
 }

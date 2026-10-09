@@ -98,40 +98,43 @@ remain separate targets; `lf run NAME` selects only those definitions. Use
 
 ```bash
 lf sync-skills --repo
-lf flow show ship-api --instructions
 ```
 
-Select `ship-api` as a native skill to run its compiled plan in the current
-conversation. The wrapper reads the current checkout’s definitions, including
-local overrides, and returns the numbered plan plus each resolved skill body.
-No separate chat parser or authored Flow copy is involved. Skills and Flows keep
-exact literal names. Slash and dash definitions can coexist;
-normalization is only a fallback when the exact name is absent. Codex retains both
-names; Claude uses the literal dashed name when flattening would collide.
-
-Follow commands in order, loop over the named range on `iterate`, continue on
-`advance`, and stop for missing input on `blocked`. XOR selects one declared
-path and rejoins afterward. A `human: true` occurrence performs its review here
-and pauses for the participant’s response. Keep occurrence IDs exact:
+Select the Flow's name as a native skill. Its `SKILL.md` contains a direct
+checklist: ordinary steps run `lf -b implement` and wait for the result;
+`human: true` steps execute the skill in the current conversation and wait for
+the participant's response.
 
 ```yaml
 - step: {name: implement, id: build}
 - loop: build
-- step: {name: review-design, id: review, human: true}
+- step: {name: demo, id: review, human: true}
 ```
 
-The returned plan is frozen for this invocation. Source edits apply on the next
-invocation. After interruption, inspect evidence before continuing; never blindly
-replay a successful command. This is instruction-driven execution, not the
-autonomous driver’s enforcement or crash recovery. It starts no synthetic
-FlowProcess, step Process or new Session, and does not move the Task’s Workflow.
-Explicit LF command steps retain their normal effects. Native controls and agent
-preferences are disclosed, not silently translated or used to switch models.
+Default loops use natural-language instructions: continue when this boundary's
+requirements are met, repeat the named range when useful work remains, or explain
+what prevents progress and stop. Custom decision skills execute in the
+conversation with their own criteria. XOR chooses one declared path and rejoins
+afterward. Reviews stay in the conversation; no substitute reviewer or assumed
+approval. Skill bodies and JSON verdict schemas are not bundled into recipes.
 
-Native names have no Flow prefix. If a skill already owns the same native
-name, sync skips that Flow export and preserves the skill. `lf flow show NAME
---instructions` still reads that Flow explicitly. Newly added repository names
-need another `sync-skills --repo`; editing an existing Flow does not.
+Skills and Flows keep exact literal names. Slash and dash definitions can coexist;
+normalization is a fallback when the exact name is absent. Codex retains both
+names; Claude uses the literal dashed name when flattening would collide.
+Recipes retain source paths for conversational skills so a flattened name cannot
+silently select another definition. Native controls and resource bases still apply;
+a user-only native skill requires invocation by the participant. Loopflow skill
+exports allow model invocation; Flow entry points remain user-invoked in Claude.
+
+Headless commands retain normal LF execution records and agent settings. The
+coordinating conversation creates no outer Flow process or Task Workflow move.
+After interruption, inspect results before repeating a successful command.
+
+Native names have no Flow prefix. If a skill already owns the same native name,
+sync skips the Flow export and preserves the skill. Recipes capture topology at
+sync time: run `sync-skills --repo` after adding, editing or overriding a repository
+Flow. Repository recipes stay in the checkout; global sync exports builtin Flows.
+Headless commands load their skills normally when launched.
 
 ### Working notes and feedback
 

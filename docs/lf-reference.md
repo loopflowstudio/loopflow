@@ -1911,7 +1911,6 @@ Inspect an authored flow, or one that ran
 | `<name>` | name |
 | `--json` | json Default: false. |
 | `--processes` | processes Default: false. |
-| `--instructions` | Read the resolved plan and skill bodies for this conversation Default: false. |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 

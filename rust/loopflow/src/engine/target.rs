@@ -54,7 +54,8 @@ pub fn resolve_definition(
     name: &str,
     kind: Option<DefinitionKind>,
 ) -> Result<Target, LoadError> {
-    DefinitionLoader::new(repo).resolve(name, kind)
+    let catalog = crate::engine::skill_catalog::SkillCatalog::discover(Some(repo))?;
+    DefinitionLoader::new(Some(repo), &catalog).resolve(name, kind)
 }
 
 #[cfg(test)]
@@ -117,16 +118,34 @@ mod tests {
         let skills = tmp.path().join(".lf/skills/repo");
         fs::create_dir_all(&skills).unwrap();
         fs::write(skills.join("operate.md"), "Repository operation override").unwrap();
-        for name in ["operate", "repo/operate"] {
-            let Target::Skill(skill) = resolve_definition(tmp.path(), name, None).unwrap() else {
-                panic!("expected a skill for {name}");
-            };
-            assert_eq!(skill.name, "repo-operate");
-            assert_eq!(
-                skill.content.as_deref(),
-                Some("Repository operation override")
-            );
-        }
+        let Target::Skill(hierarchical) =
+            resolve_definition(tmp.path(), "repo/operate", None).unwrap()
+        else {
+            panic!("expected hierarchical skill");
+        };
+        assert_eq!(hierarchical.name, "repo/operate");
+        assert_eq!(
+            hierarchical.content.as_deref(),
+            Some("Repository operation override")
+        );
+        let Target::Skill(shortcut) = resolve_definition(tmp.path(), "operate", None).unwrap()
+        else {
+            panic!("expected builtin shortcut");
+        };
+        assert_eq!(shortcut.name, "repo-operate");
+        assert!(shortcut.source.is_none());
+
+        fs::write(
+            tmp.path().join(".lf/skills/repo-operate.md"),
+            "Literal dashed override",
+        )
+        .unwrap();
+        let Target::Skill(shortcut) = resolve_definition(tmp.path(), "operate", None).unwrap()
+        else {
+            panic!("expected override of the shortcut's exact builtin name");
+        };
+        assert_eq!(shortcut.name, "repo-operate");
+        assert_eq!(shortcut.content.as_deref(), Some("Literal dashed override"));
     }
 
     #[test]

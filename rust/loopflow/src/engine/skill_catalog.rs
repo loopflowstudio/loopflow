@@ -129,6 +129,12 @@ impl SkillCatalog {
         Ok(catalog)
     }
 
+    pub(crate) fn load_skill(&self, name: &str) -> Result<Skill, LoadError> {
+        self.resolve(name)?
+            .ok_or_else(|| LoadError::SkillNotFound(name.to_string()))?
+            .load()
+    }
+
     pub fn entries(&self) -> impl Iterator<Item = &SkillSource> {
         self.sources.values()
     }

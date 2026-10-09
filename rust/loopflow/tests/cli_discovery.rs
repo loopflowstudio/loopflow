@@ -859,48 +859,6 @@ fn native_skill_help_and_flow_capture_keep_the_selected_source_and_declarations(
 }
 
 #[test]
-fn portable_flow_instructions_are_read_only_and_resolve_current_overrides() {
-    let repo = fixture();
-    let home = tempfile::tempdir().unwrap();
-    fs::create_dir_all(repo.path().join(".lf/flows/team")).unwrap();
-    fs::write(
-        repo.path().join(".lf/flows/team/chat.yaml"),
-        "- step: {name: solo, id: review, human: true}\n",
-    )
-    .unwrap();
-    for name in ["team/chat", "team-chat"] {
-        let output = success(run(
-            repo.path(),
-            home.path(),
-            &["flow", "show", name, "--instructions"],
-        ));
-        let output = String::from_utf8(output).unwrap();
-        assert!(output.contains("# Flow: team/chat"));
-        assert!(output.contains("Skill solo body."));
-        assert!(output.contains("pause for their response"));
-    }
-    fs::write(repo.path().join(".lf/skills/solo.md"), "Updated override").unwrap();
-    let output = success(run(
-        repo.path(),
-        home.path(),
-        &["flow", "show", "team-chat", "--instructions"],
-    ));
-    assert!(String::from_utf8(output)
-        .unwrap()
-        .contains("Updated override"));
-    for conflict in ["--json", "--processes"] {
-        assert!(!run(
-            repo.path(),
-            home.path(),
-            &["flow", "show", "team-chat", "--instructions", conflict]
-        )
-        .status
-        .success());
-    }
-    assert!(!home.path().join(".lf").exists());
-}
-
-#[test]
 fn portable_help_describes_exact_kind_selection() {
     let repo = fixture();
     let home = tempfile::tempdir().unwrap();

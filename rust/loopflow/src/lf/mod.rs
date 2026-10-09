@@ -550,9 +550,6 @@ pub enum FlowCommand {
         json: bool,
         #[arg(long)]
         processes: bool,
-        /// Read the resolved plan and skill bodies for this conversation
-        #[arg(long, conflicts_with_all = ["json", "processes"])]
-        instructions: bool,
     },
     /// Print the repository file that defines a Flow, creating
     /// it from the builtin when the repository has none

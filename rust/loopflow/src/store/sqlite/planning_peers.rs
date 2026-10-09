@@ -18,6 +18,7 @@ use crate::store::{PeerPlanningStatus, PeerProjectionConflict, StoreError, Store
 
 use super::planning::ProviderEvidence;
 use super::planning_changes::PlanningChanges;
+use super::planning_export::CreationReceipt;
 use super::SqliteStore;
 
 const SHARING_PROJECTION_PENDING: &str = "peer projection skipped by sharing hold; import required";
@@ -34,7 +35,7 @@ struct ObjectChanges<'a> {
     observations: Vec<&'a LinearObservation>,
     origins: BTreeSet<&'a PlanningObject>,
     heads: BTreeMap<&'a str, &'a PlanningMutation>,
-    creation: BTreeMap<&'a PlanningObject, FieldHistory<&'a Value>>,
+    creation: BTreeMap<&'a PlanningObject, FieldHistory<CreationReceipt>>,
     deletions: BTreeMap<&'a str, Vec<&'a Value>>,
     orders: BTreeMap<&'a str, FieldHistory<&'a Value>>,
     evidence: BTreeMap<&'a str, FieldHistory<ProviderEvidence>>,
@@ -161,7 +162,7 @@ fn changes_by_object<'a>(
                 .creation
                 .entry(&change.object)
                 .or_default()
-                .push(&change.value, is_head);
+                .push(serde_json::from_value(change.value.clone())?, is_head);
         }
         if let Some(receipt) = change.deletion_receipt() {
             object
@@ -1646,7 +1647,7 @@ fn project_creation(
                 _ => return Err(invalid("creation requires a Task or Project")),
             },
             winner,
-            &history.values().copied().collect::<Vec<_>>(),
+            history.values(),
         )?;
     }
     Ok(())
@@ -2208,19 +2209,11 @@ fn project_delivery_fields(
 }
 
 fn linear_predecessor(snapshot: &PlanningSnapshot, change: &PlanningMutation) -> Option<Value> {
-    let mut latest = None;
-    for (id, prior) in snapshot.ancestors(change.parents.iter().map(String::as_str)) {
-        if let Some(observation) = &prior.linear {
-            let candidate = (observation.revision_time(), prior.clock, id);
-            if latest.is_none_or(|previous| candidate > previous) {
-                latest = Some(candidate);
-            }
-        }
-    }
-    latest.map(|(_, _, id)| {
-        let prior = &snapshot.changes[id];
-        serde_json::json!({"value":prior.value,"revision":prior.linear.as_ref().and_then(LinearObservation::revision)})
-    })
+    snapshot
+        .ancestors(change.parents.iter().map(String::as_str))
+        .filter_map(|(id, prior)| prior.linear.as_ref().map(|fact| (id, prior, fact)))
+        .max_by_key(|(id, prior, fact)| (fact.revision_time(), prior.clock, *id))
+        .map(|(_, prior, fact)| serde_json::json!({"value":prior.value,"revision":fact.revision()}))
 }
 
 fn projection_conflict(error: &StoreError) -> bool {

@@ -455,22 +455,23 @@ pub(crate) fn validate_peer_receipt(
     Ok(receipt)
 }
 
-pub(super) fn import_peer_receipts(
+/// Projection retries reuse decoded receipts from the validated snapshot.
+pub(super) fn import_peer_receipts<'a>(
     conn: &Connection,
     object: &crate::engine::planning_exchange::PlanningObject,
     owner: PlanningChanges<'_>,
-    winner: &Value,
-    history: &[&Value],
+    winner: &CreationReceipt,
+    history: impl IntoIterator<Item = &'a CreationReceipt>,
 ) -> StoreResult<()> {
-    let mut receipt = validate_peer_receipt(object, winner)?;
+    let mut receipt = winner.clone();
     let (kind, local) = owner.owner();
     if kind != object.kind.as_str() {
         return Err(StoreError::InvalidData(
             "creation origin and projection kinds differ".into(),
         ));
     }
-    for &value in history {
-        merge_receipt(&mut receipt, validate_peer_receipt(object, value)?)?;
+    for prior in history {
+        merge_receipt(&mut receipt, prior)?;
     }
     let mut query = conn.prepare(
         "SELECT COALESCE(task_id,project_id),export_json,export_attempted,
@@ -501,7 +502,7 @@ pub(super) fn import_peer_receipts(
             });
         }
         if let Some(mut retained) = saved {
-            merge_receipt(&mut retained, receipt)?;
+            merge_receipt(&mut retained, &receipt)?;
             receipt = retained;
         }
     }
@@ -515,7 +516,7 @@ pub(super) fn import_peer_receipts(
     Ok(())
 }
 
-fn merge_receipt(saved: &mut CreationReceipt, incoming: CreationReceipt) -> StoreResult<()> {
+fn merge_receipt(saved: &mut CreationReceipt, incoming: &CreationReceipt) -> StoreResult<()> {
     // No clock can discard a competing effect. Keep both in the journal and
     // isolate projection until that ambiguity is resolved.
     let mut before = saved.export.clone();
@@ -528,12 +529,12 @@ fn merge_receipt(saved: &mut CreationReceipt, incoming: CreationReceipt) -> Stor
         return Err(StoreError::PlanningReceiptConflict { effect: "creation" });
     }
     if !saved.attempted && incoming.attempted {
-        saved.export.input = incoming.export.input;
+        saved.export.input.clone_from(&incoming.export.input);
     }
     if (!saved.attempted && incoming.attempted)
         || (!saved.link_attempted && incoming.link_attempted)
     {
-        saved.error = incoming.error;
+        saved.error.clone_from(&incoming.error);
     }
     saved.attempted |= incoming.attempted;
     saved.link_attempted |= incoming.link_attempted;

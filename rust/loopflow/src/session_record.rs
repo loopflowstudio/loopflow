@@ -2301,28 +2301,21 @@ impl CaptureHandle {
     /// Claim an admitted conversation and retain the exact provider provenance
     /// used by its tools. A later driver transfer never rewrites this process.
     pub(crate) fn claim_conversation_driver(&self) -> StoreResult<()> {
-        let Some(process_lfid) = crate::journal::current_process_lfid() else {
-            if crate::journal::is_cli_process() {
-                return Err(StoreError::InvalidAuthority(
-                    "agent Process requires an admitted Process; command observation failed".into(),
-                ));
-            }
-            // Library callers outside an actual lf process have no Process to name.
-            return Ok(());
-        };
+        let process_lfid = crate::journal::current_process_lfid().ok_or_else(|| {
+            StoreError::InvalidAuthority("AgentProcess requires an admitted invocation".into())
+        })?;
         let mut capture = self.0.lock().expect("Session capture mutex poisoned");
         if capture.driver.is_some() {
             return Ok(());
         }
         let store = row_store(&capture.dir)?;
-        let Some(session) = store.session_for_artifact(&capture.manifest.artifact_key)? else {
-            if crate::journal::is_cli_process() {
-                return Err(StoreError::InvalidAuthority(
-                    "agent Process requires an admitted conversation".into(),
-                ));
-            }
-            return Ok(());
-        };
+        let session = store
+            .session_for_artifact(&capture.manifest.artifact_key)?
+            .ok_or_else(|| {
+                StoreError::InvalidAuthority(
+                    "AgentProcess requires an admitted conversation".into(),
+                )
+            })?;
         let driver = claim_provider_driver(&store, &session.id, &process_lfid)?;
         capture.driver = Some((session.id, driver));
         drop(capture);
@@ -2356,20 +2349,14 @@ impl CaptureHandle {
     pub(crate) fn spawn_native_agent(
         &self,
         mut command: std::process::Command,
-    ) -> anyhow::Result<(
-        std::process::Child,
-        Option<crate::process::SessionAttachment>,
-    )> {
+    ) -> anyhow::Result<(std::process::Child, crate::process::SessionAttachment)> {
         let mut capture = self.0.lock().expect("Session capture mutex poisoned");
         if capture.settled_outcome.is_some() {
             return Err(StoreError::InvalidAuthority("Capture already settled".into()).into());
         }
-        let Some((session, expected)) = &capture.driver else {
-            return Ok((
-                crate::harness::agent_process::spawn_native(command, None)?,
-                None,
-            ));
-        };
+        let (session, expected) = capture.driver.as_ref().ok_or_else(|| {
+            StoreError::InvalidAuthority("AgentProcess launch has no attachment".into())
+        })?;
         let store = row_store(&capture.dir)?;
         let session = session.clone();
         let attachment = store.prepare_session_agent_process(&session, expected)?;
@@ -2382,9 +2369,9 @@ impl CaptureHandle {
         // recorder only touches the store, never this mutex.
         let child = crate::harness::agent_process::spawn_native(
             command,
-            Some(&(store, session, attachment.clone())),
+            &(store, session, attachment.clone()),
         )?;
-        Ok((child, Some(attachment)))
+        Ok((child, attachment))
     }
 
     pub(crate) fn record_native_agent_exit(
@@ -3450,7 +3437,7 @@ mod tests {
                 command
             };
             let (mut child, snapshot) = capture.spawn_native_agent(command())?;
-            assert_eq!(snapshot.as_ref(), Some(&first));
+            assert_eq!(snapshot, first);
             assert_eq!(child.wait()?.code(), Some(42));
             // Observed wait, not successful spawn or a finished capture, ends it.
             capture.record_native_agent_exit(&first)?;
@@ -3459,7 +3446,7 @@ mod tests {
             assert!(ended.completed_at.is_some());
 
             let (mut child, snapshot) = capture.spawn_native_agent(command())?;
-            let second = snapshot.unwrap();
+            let second = snapshot;
             assert_ne!(first.agent_process_lfid, second.agent_process_lfid);
             assert_eq!(
                 capture.session_attachment(),

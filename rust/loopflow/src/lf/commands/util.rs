@@ -49,6 +49,7 @@ pub(crate) struct SessionCommand {
     pub(crate) program: String,
     pub(crate) args: Vec<String>,
     pub(crate) cwd: PathBuf,
+    pub(crate) remote: Option<PathBuf>,
 }
 
 #[allow(clippy::too_many_arguments)] // Provider inputs plus native skill flags and context file.
@@ -146,6 +147,7 @@ pub(crate) fn build_session_command(
         ),
     };
     Ok(SessionCommand {
+        remote: None,
         program: harness.to_string(),
         args,
         cwd: worktree.to_path_buf(),
@@ -189,6 +191,7 @@ pub(crate) fn resume_session_with_env(
         worktree,
         &provider_session.provider_session_id,
     )?;
+    command.remote = remote.map(Path::to_path_buf);
     if let Some(remote) = remote {
         if harness != "codex" {
             bail!("This provider has no native remote connection");
@@ -522,6 +525,7 @@ fn build_resume_session_command(
         }
     };
     Ok(SessionCommand {
+        remote: None,
         program: harness.to_string(),
         args,
         cwd,
@@ -601,16 +605,16 @@ fn record_interactive_opened(environment: &BTreeMap<String, String>) -> Result<(
     Ok(())
 }
 
-fn native_provider_driver(
+fn native_provider_attachment(
     environment: &BTreeMap<String, String>,
-) -> Result<Option<(SqliteStore, String, crate::process::SessionAttachment)>> {
-    let Some(caller) = environment.get(crate::process::AGENT_CALLER_ENV) else {
-        return Ok(None);
-    };
+    remote: Option<&Path>,
+) -> Result<(SqliteStore, String, crate::process::SessionAttachment)> {
+    let caller = environment
+        .get(crate::process::AGENT_CALLER_ENV)
+        .ok_or_else(|| anyhow!("Native launch has no admitted conversation"))?;
     let caller: crate::process::AgentCaller = serde_json::from_str(caller)?;
-    let Some(process) = crate::journal::current_process_lfid() else {
-        return Ok(None);
-    };
+    let process = crate::journal::current_process_lfid()
+        .ok_or_else(|| anyhow!("Native launch has no admitted invocation"))?;
     let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
     let driver = store
         .session_attachment(&caller.session_id)?
@@ -620,13 +624,113 @@ fn native_provider_driver(
     {
         bail!("Session driver changed before provider launch");
     }
-    if driver.provider_process_lfid != process {
-        return Ok(None);
+    if let Some(remote) = remote {
+        let connection = store
+            .session_connection(&caller.session_id)?
+            .ok_or_else(|| anyhow!("Remote client has no recorded AgentProcess endpoint"))?;
+        if Path::new(&connection.0) != remote {
+            bail!("Remote client endpoint differs from its AgentProcess");
+        }
+    } else if driver.provider_process_lfid != process {
+        bail!("Native provider launch does not own the admitted AgentProcess");
     }
-    Ok(Some((store, caller.session_id, driver)))
+    Ok((store, caller.session_id, driver))
 }
 
 fn session_command_status_with_env(
+    command: &SessionCommand,
+    environment: &BTreeMap<String, String>,
+    provider_session_id: Option<&str>,
+    exact_account_id: Option<&crate::store::ProviderAccountId>,
+    launch_lock: Option<File>,
+) -> Result<SessionCommandOutcome> {
+    let argv = std::env::args().collect::<Vec<_>>();
+    crate::journal::with_runtime(&command.cwd, &argv, || {
+        let mut environment = environment.clone();
+        let mut capture = None;
+        let admitted = if !environment.contains_key(crate::process::AGENT_CALLER_ENV) {
+            if command.remote.is_some() {
+                bail!("Remote client has no admitted attachment");
+            }
+            if !environment.contains_key(crate::session_record::CAPTURE_KEY_ENV) {
+                let context = crate::trace::PreparedTurnContext::from_prompts("", "");
+                let created = crate::session_record::CaptureHandle::begin_with_context(
+                    crate::session_record::SessionCaptureSpec {
+                        harness: command.program.clone(),
+                        model: None,
+                        surface: "tui".into(),
+                        cwd: command.cwd.clone(),
+                        repo: None,
+                        worktree: Some(command.cwd.clone()),
+                        skill: None,
+                        subjects: Vec::new(),
+                        flow: crate::session_record::SessionFlowMembership::Independent,
+                        work: None,
+                    },
+                    &context,
+                    None,
+                )?;
+                environment.extend(created.environment());
+                capture = Some(created);
+            }
+            let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
+            let input = environment
+                .get(crate::session_record::CAPTURE_KEY_ENV)
+                .expect("native launch has a capture");
+            let session = store
+                .session_for_artifact(input)?
+                .ok_or_else(|| anyhow!("Session input {input} is not recorded"))?;
+            let process = crate::journal::current_process_lfid()
+                .ok_or_else(|| anyhow!("Native launch has no admitted invocation"))?;
+            let attachment =
+                crate::session_record::claim_provider_driver(&store, &session.id, &process)?;
+            environment.insert(
+                crate::process::AGENT_CALLER_ENV.into(),
+                serde_json::to_string(&attachment.caller(session.id.clone()))?,
+            );
+            crate::session_record::register_session_attachment_interrupt(
+                &store,
+                session.id.clone(),
+                attachment.clone(),
+            );
+            Some((store, session.id, attachment))
+        } else {
+            None
+        };
+        let result = run_native_session(
+            command,
+            &environment,
+            provider_session_id,
+            exact_account_id,
+            launch_lock,
+        );
+        let outcome = if result
+            .as_ref()
+            .is_ok_and(|outcome| outcome.status.success())
+        {
+            "completed"
+        } else {
+            "failed"
+        };
+        if let Some((store, session, attachment)) = admitted {
+            match crate::session_record::finish_session_attachment(
+                &store,
+                &session,
+                &attachment,
+                outcome,
+            ) {
+                Ok(()) | Err(crate::store::StoreError::InvalidAuthority(_)) => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        if let Some(capture) = capture {
+            capture.finish(outcome)?;
+        }
+        result
+    })
+}
+
+fn run_native_session(
     command: &SessionCommand,
     environment: &BTreeMap<String, String>,
     provider_session_id: Option<&str>,
@@ -716,24 +820,32 @@ fn session_command_status_with_env(
                 .map(|route| route.account_id().clone()),
         )?;
     }
-    // A remote terminal is only a client of the surviving engine. A local
-    // terminal owns the provider generation created by this exact Process.
-    let owned = native_provider_driver(environment)?;
+    // Only an explicit remote connection is a client of a surviving AgentProcess.
+    let attachment = native_provider_attachment(environment, command.remote.as_deref())?;
+    let owned = command.remote.is_none().then_some(&attachment);
     tracing::debug!(
         elapsed_ms = started.elapsed().as_millis(),
         "prepared native provider launch"
     );
-    let mut child =
-        crate::harness::agent_process::spawn_native(process, owned.as_ref()).map_err(|error| {
-            if error
-                .downcast_ref::<std::io::Error>()
-                .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound)
-            {
-                anyhow!(missing_agent_message(&command.program))
-            } else {
-                error
-            }
-        })?;
+    let spawned = match owned {
+        Some(owner) => crate::harness::agent_process::spawn_native(process, owner),
+        None => {
+            let (store, session, expected) = &attachment;
+            store
+                .with_session_attachment(session, expected, || Ok(process.spawn()))?
+                .map_err(Into::into)
+        }
+    };
+    let mut child = spawned.map_err(|error| {
+        if error
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+        {
+            anyhow!(missing_agent_message(&command.program))
+        } else {
+            error
+        }
+    })?;
 
     drop(activation);
     // Retain a published client through cleanup if recording the opening fails.
@@ -743,8 +855,7 @@ fn session_command_status_with_env(
         record_interactive_opened(environment)
     })();
     if let Err(error) = setup {
-        if let Err(cleanup) = crate::harness::agent_process::stop_native(&mut child, owned.as_ref())
-        {
+        if let Err(cleanup) = crate::harness::agent_process::stop_native(&mut child, owned) {
             tracing::warn!(%cleanup, "native setup cleanup remains unresolved");
         }
         return Err(error);
@@ -764,7 +875,7 @@ fn session_command_status_with_env(
     } else {
         child.wait()?
     };
-    if let Some((store, session, driver)) = &owned {
+    if let Some((store, session, driver)) = owned {
         store.record_native_provider_exit(session, driver, true)?;
     }
     if let Some(observer) = observer {
@@ -1430,8 +1541,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn intentional_session_move_exits_cleanly() {
-        let _lock = crate::journal::test_env_lock();
+        let ledger = crate::journal::TestLedgerGuard::new();
         let temp = tempfile::tempdir().unwrap();
+        ledger.set_db_path(temp.path().join("loopflow.db"));
         let _home = EnvRestore::capture(&["LF_HOME"]);
         std::env::set_var("LF_HOME", temp.path());
         let provider = fake_provider(&temp, "trap 'exit 143' TERM\ni=0; while [ \"$i\" -lt 100 ]; do sleep 0.05; i=$((i + 1)); done");
@@ -1477,6 +1589,7 @@ mod tests {
             pid
         });
         let command = SessionCommand {
+            remote: None,
             program: provider.display().to_string(),
             args: Vec::new(),
             cwd: temp.path().to_path_buf(),
@@ -1509,8 +1622,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn provider_sigterm_without_stop_intent_remains_an_error() {
-        let _lock = crate::journal::test_env_lock();
+        let ledger = crate::journal::TestLedgerGuard::new();
         let temp = tempfile::tempdir().unwrap();
+        ledger.set_db_path(temp.path().join("loopflow.db"));
         let _home = EnvRestore::capture(&["LF_HOME"]);
         std::env::set_var("LF_HOME", temp.path());
         let provider = fake_provider(&temp, "kill -TERM $$");
@@ -1531,6 +1645,7 @@ mod tests {
         )
         .unwrap();
         let command = SessionCommand {
+            remote: None,
             program: provider.display().to_string(),
             args: Vec::new(),
             cwd: temp.path().to_path_buf(),
@@ -1610,6 +1725,7 @@ mod tests {
         assert_eq!(
             launch,
             SessionCommand {
+                remote: None,
                 program: "claude".to_string(),
                 args: args(&["--model", "sonnet", "--", "fix it"]),
                 cwd: path(),
@@ -1666,8 +1782,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn preferred_name_resume_uses_config_when_forwarded_name_is_empty() {
-        let _lock = crate::journal::test_env_lock();
+        let ledger = crate::journal::TestLedgerGuard::new();
         let temp = tempfile::tempdir().unwrap();
+        ledger.set_db_path(temp.path().join("loopflow.db"));
         let _restore = EnvRestore::capture(&["LF_HOME", "LF_USER_NAME", "PATH"]);
         std::env::set_var("LF_HOME", temp.path());
         std::env::remove_var("LF_USER_NAME");
@@ -1759,8 +1876,9 @@ mod tests {
     #[allow(clippy::await_holding_lock)]
     #[tokio::test]
     async fn opencode_tui_records_its_native_session_without_wrapping_stdout() {
-        let _lock = crate::journal::test_env_lock();
+        let ledger = crate::journal::TestLedgerGuard::new();
         let temp = tempfile::tempdir().unwrap();
+        ledger.set_db_path(temp.path().join("loopflow.db"));
         let _home = EnvRestore::capture(&["LF_HOME"]);
         std::env::set_var("LF_HOME", temp.path());
         let _restore = EnvRestore::capture(&["PATH"]);
@@ -1802,6 +1920,7 @@ mod tests {
         )
         .unwrap();
         let command = SessionCommand {
+            remote: None,
             program: "opencode".to_string(),
             args: vec![temp.path().display().to_string()],
             cwd: temp.path().to_path_buf(),
@@ -1818,6 +1937,139 @@ mod tests {
                 .map(|session| session.provider_session_id),
             Some("ses_native".to_string())
         );
+    }
+
+    #[test]
+    fn native_helper_admits_its_invocation_and_records_spawn_failure() {
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let home = ledger.home();
+        let mut command = SessionCommand {
+            program: "/bin/sh".into(),
+            args: vec!["-c".into(), "printf '%s' \"$$\" > pid".into()],
+            cwd: home.into(),
+            remote: None,
+        };
+        assert!(
+            session_command_status_with_env(&command, &BTreeMap::new(), None, None, None)
+                .unwrap()
+                .status
+                .success()
+        );
+        let pid: u32 = std::fs::read_to_string(home.join("pid"))
+            .unwrap()
+            .parse()
+            .unwrap();
+        command.program = home.join("absent").display().to_string();
+        assert!(
+            session_command_status_with_env(&command, &BTreeMap::new(), None, None, None)
+                .unwrap_err()
+                .to_string()
+                .contains("not installed")
+        );
+        let store = SqliteStore::new(&home.join("loopflow.db")).unwrap();
+        let rows = store.processes_since(0).unwrap();
+        let agents = rows
+            .iter()
+            .filter(|row| row.kind == crate::process::ProcessKind::Agent)
+            .collect::<Vec<_>>();
+        assert_eq!(agents.len(), 2);
+        assert!(agents
+            .iter()
+            .any(|row| row.pid == Some(pid) && row.completed_at.is_some()));
+        assert!(agents.iter().all(|row| row.completed_at.is_some()));
+        let sql = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
+        let failed: i64 = sql
+            .query_row(
+                "SELECT COUNT(*) FROM processes WHERE kind='agent' AND spawn_state='spawn_failed'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(failed, 1);
+        for agent in agents {
+            let parent = store
+                .process(agent.parent_process_lfid.as_ref().unwrap())
+                .unwrap()
+                .unwrap();
+            assert_eq!(parent.pid, Some(std::process::id()));
+            assert!(parent.completed_at.is_some());
+            assert!(agent.agent_session_id.is_some());
+        }
+    }
+
+    #[test]
+    fn native_remote_client_preserves_the_provider_and_requires_explicit_endpoint() {
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let home = ledger.home();
+        crate::journal::with_runtime(home, &["lf".into(), "session".into()], || {
+            let store = SqliteStore::new(&home.join("loopflow.db"))?;
+            let session = store.test_session("remote", &crate::session_record::new_artifact_key());
+            let original = store.claim_session_attachment(
+                &session.id,
+                None,
+                &crate::id::ProcessLfid::new(),
+                true,
+            )?;
+            let mut command = Command::new("/bin/sleep");
+            command.env_clear().arg("60");
+            let mut provider = crate::harness::agent_process::spawn_native(
+                command,
+                &(store.clone(), session.id.clone(), original.clone()),
+            )?;
+            let endpoint = home.join("provider.sock");
+            store.record_session_connection(
+                &session.id,
+                &original,
+                endpoint.to_str().unwrap(),
+                "thread",
+            )?;
+            let attached = store.claim_session_attachment(
+                &session.id,
+                Some(&original),
+                &crate::journal::current_process_lfid().unwrap(),
+                false,
+            )?;
+            let environment = BTreeMap::from([(
+                crate::process::AGENT_CALLER_ENV.into(),
+                serde_json::to_string(&attached.caller(session.id.clone()))?,
+            )]);
+            let before = store.process(&attached.agent_process_lfid)?.unwrap();
+            let mut command = SessionCommand {
+                program: "/usr/bin/true".into(),
+                args: vec![],
+                cwd: home.into(),
+                remote: Some(endpoint),
+            };
+            let result = session_command_status_with_env(&command, &environment, None, None, None);
+            let alive = provider.try_wait()?.is_none();
+            let unchanged = store.process(&attached.agent_process_lfid)? == Some(before);
+            command.remote = None;
+            let local = session_command_status_with_env(&command, &environment, None, None, None);
+            command.remote = Some(home.join("other.sock"));
+            let wrong_endpoint =
+                session_command_status_with_env(&command, &environment, None, None, None);
+            let unadmitted =
+                session_command_status_with_env(&command, &BTreeMap::new(), None, None, None);
+            crate::harness::agent_process::stop_native(
+                &mut provider,
+                Some(&(store, session.id, attached)),
+            )?;
+            assert!(result?.status.success());
+            assert!(alive && unchanged);
+            assert!(local.unwrap_err().to_string().contains("does not own"));
+            assert!(wrong_endpoint
+                .unwrap_err()
+                .to_string()
+                .contains("endpoint differs"));
+            assert!(unadmitted
+                .unwrap_err()
+                .to_string()
+                .contains("no admitted attachment"));
+            Ok(())
+        })
+        .unwrap();
     }
 
     #[test]
@@ -1864,6 +2116,7 @@ mod tests {
                     std::fs::write(capture.artifact_dir().join("provider-clients"), "occupied")?;
                 }
                 let command = SessionCommand {
+                    remote: None,
                     program: "/bin/sleep".into(),
                     args: vec!["60".into()],
                     cwd: home.into(),
@@ -2124,6 +2377,7 @@ mod tests {
         assert_eq!(
             launch,
             SessionCommand {
+                remote: None,
                 program: "opencode".to_string(),
                 args: args(&[
                     "/tmp/loop flow",

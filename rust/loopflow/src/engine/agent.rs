@@ -1191,6 +1191,26 @@ pub fn run_agent(
     process: &ProcessConfig,
     capabilities: &AgentCapabilities,
 ) -> Result<AgentProcessResult, CoreError> {
+    let cwd = match &launch.cwd {
+        Some(cwd) => cwd.clone(),
+        None => std::env::current_dir()?,
+    };
+    let command = std::env::args().collect::<Vec<_>>();
+    crate::journal::with_runtime(&cwd, &command, || {
+        run_admitted_agent(launch, process, capabilities).map_err(Into::into)
+    })
+    .map_err(|error| {
+        error
+            .downcast::<CoreError>()
+            .unwrap_or_else(|error| CoreError::ExecutionFailed(error.to_string()))
+    })
+}
+
+fn run_admitted_agent(
+    launch: &AgentConfig,
+    process: &ProcessConfig,
+    capabilities: &AgentCapabilities,
+) -> Result<AgentProcessResult, CoreError> {
     let mut launch = launch.clone();
     launch.chrome = capabilities.chrome;
     if launch.resume_token.is_none() {
@@ -1992,21 +2012,24 @@ fn _run_agent_once(
         );
     }
 
+    let admitted_capture = capture.ok_or_else(|| {
+        CoreError::ExecutionFailed("AgentProcess launch has no admitted capture".into())
+    })?;
     let result = if process.auto && process.stream {
         // Stream mode: capture stdout line by line
         run_streaming(
             cmd,
             process.stream_format,
             process.timeout,
-            capture,
+            admitted_capture,
             activation,
         )
     } else if process.auto {
         // Batch mode: capture all output
-        run_batch(cmd, process.timeout, capture, activation)
+        run_batch(cmd, process.timeout, admitted_capture, activation)
     } else {
         // Interactive mode: inherit stdio
-        run_interactive(cmd, process.timeout, capture, activation, title)
+        run_interactive(cmd, process.timeout, admitted_capture, activation, title)
     };
     if let (Some(capture), Ok(result)) = (capture, &result) {
         capture.observe_provider(
@@ -2048,34 +2071,20 @@ fn _run_agent_once(
 /// released once the provider process exists.
 fn spawn_agent_child(
     cmd: Command,
-    capture: Option<&CaptureHandle>,
+    capture: &CaptureHandle,
     activation: Option<std::fs::File>,
-) -> Result<(Child, Option<crate::process::SessionAttachment>), CoreError> {
-    let child = match capture {
-        Some(capture) => capture.spawn_native_agent(cmd),
-        None => crate::harness::agent_process::spawn_native(cmd, None).map(|child| (child, None)),
-    }
-    .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
+) -> Result<(Child, crate::process::SessionAttachment), CoreError> {
+    let child = capture
+        .spawn_native_agent(cmd)
+        .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     drop(activation);
     Ok(child)
-}
-
-fn record_native_agent_exit(
-    capture: Option<&CaptureHandle>,
-    attachment: Option<&crate::process::SessionAttachment>,
-) -> Result<(), CoreError> {
-    if let Some((capture, attachment)) = capture.zip(attachment) {
-        capture
-            .record_native_agent_exit(attachment)
-            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
-    }
-    Ok(())
 }
 
 fn run_batch(
     mut cmd: Command,
     timeout: Option<Duration>,
-    capture: Option<&CaptureHandle>,
+    capture: &CaptureHandle,
     activation: Option<std::fs::File>,
 ) -> Result<AgentProcessResult, CoreError> {
     let start = Instant::now();
@@ -2107,7 +2116,9 @@ fn run_batch(
     });
 
     let (status, timed_out) = wait_for_exit(&mut child, timeout, || {})?;
-    record_native_agent_exit(capture, attachment.as_ref())?;
+    capture
+        .record_native_agent_exit(&attachment)
+        .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     tracing::debug!(
         elapsed_ms = start.elapsed().as_millis(),
         "agent batch completed"
@@ -2122,19 +2133,17 @@ fn run_batch(
         .map_err(|_| CoreError::ExecutionFailed("stderr reader thread panicked".to_string()))?
         .map_err(|err| CoreError::ExecutionFailed(err.to_string()))?;
 
-    if let Some(capture) = capture {
-        let mut parser = StreamParser::new();
-        for line in String::from_utf8_lossy(&stdout_bytes).lines() {
-            capture.record_raw("stdout", line);
-            if let ParseResult::Events(events) = parser.feed_line(line) {
-                for event in &events {
-                    capture.record_stream_event(event);
-                }
+    let mut parser = StreamParser::new();
+    for line in String::from_utf8_lossy(&stdout_bytes).lines() {
+        capture.record_raw("stdout", line);
+        if let ParseResult::Events(events) = parser.feed_line(line) {
+            for event in &events {
+                capture.record_stream_event(event);
             }
         }
-        for line in String::from_utf8_lossy(&stderr_bytes).lines() {
-            capture.record_raw("stderr", line);
-        }
+    }
+    for line in String::from_utf8_lossy(&stderr_bytes).lines() {
+        capture.record_raw("stderr", line);
     }
 
     if timed_out {
@@ -2156,7 +2165,7 @@ fn run_batch(
 fn run_interactive(
     cmd: Command,
     timeout: Option<Duration>,
-    capture: Option<&CaptureHandle>,
+    capture: &CaptureHandle,
     activation: Option<std::fs::File>,
     mut title: Option<crate::engine::terminal_title::TerminalTitle>,
 ) -> Result<AgentProcessResult, CoreError> {
@@ -2172,7 +2181,9 @@ fn run_interactive(
             title.refresh();
         }
     })?;
-    record_native_agent_exit(capture, attachment.as_ref())?;
+    capture
+        .record_native_agent_exit(&attachment)
+        .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     tracing::debug!(
         elapsed_ms = start.elapsed().as_millis(),
         "agent interactive completed"
@@ -2196,7 +2207,7 @@ fn run_streaming(
     mut cmd: Command,
     stream_format: StreamFormat,
     timeout: Option<Duration>,
-    capture: Option<&CaptureHandle>,
+    capture: &CaptureHandle,
     activation: Option<std::fs::File>,
 ) -> Result<AgentProcessResult, CoreError> {
     cmd.stdout(Stdio::piped());
@@ -2265,16 +2276,14 @@ fn run_streaming(
                 }
                 match stream {
                     StreamKind::Stdout => {
-                        if let Some(capture) = capture {
-                            capture.record_raw("stdout", &line);
-                        }
+                        capture.record_raw("stdout", &line);
+
                         if let Some(color) = use_color {
                             match parser.feed_line(&line) {
                                 ParseResult::Events(events) => {
                                     for event in &events {
-                                        if let Some(capture) = capture {
-                                            capture.record_stream_event(event);
-                                        }
+                                        capture.record_stream_event(event);
+
                                         format_event(event, color);
                                     }
                                 }
@@ -2284,9 +2293,7 @@ fn run_streaming(
                         } else {
                             if let ParseResult::Events(events) = parser.feed_line(&line) {
                                 for event in &events {
-                                    if let Some(capture) = capture {
-                                        capture.record_stream_event(event);
-                                    }
+                                    capture.record_stream_event(event);
                                 }
                             }
                             println!("{line}");
@@ -2295,9 +2302,8 @@ fn run_streaming(
                         stdout_content.push('\n');
                     }
                     StreamKind::Stderr => {
-                        if let Some(capture) = capture {
-                            capture.record_raw("stderr", &line);
-                        }
+                        capture.record_raw("stderr", &line);
+
                         if use_color.is_some() {
                             // In Human mode, Claude --verbose duplicates stream-json
                             // on stderr. Parse it and skip recognized events to avoid
@@ -2325,7 +2331,9 @@ fn run_streaming(
     }
 
     let status = child.wait()?;
-    record_native_agent_exit(capture, attachment.as_ref())?;
+    capture
+        .record_native_agent_exit(&attachment)
+        .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     tracing::debug!(
         elapsed_ms = start.elapsed().as_millis(),
         "agent streaming completed"

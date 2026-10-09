@@ -144,6 +144,7 @@ pub struct EnvGuard {
     previous_path: Option<String>,
     previous_home: Option<String>,
     previous_lf_home: Option<OsString>,
+    previous_lf_bin: Option<OsString>,
     previous_codex_home: Option<OsString>,
     previous_claude_home: Option<OsString>,
     _ambient: ambient::EnvGuard,
@@ -190,6 +191,8 @@ impl EnvGuard {
         }
         let previous_lf_home = env::var_os("LF_HOME");
         let ambient = ambient::EnvGuard::new();
+        let previous_lf_bin = env::var_os("LF_BIN");
+        env::set_var("LF_BIN", env!("CARGO_BIN_EXE_lf"));
         let lf_home = TempDir::new().expect("temp lf machine dir");
         env::remove_var("LF_HOME");
         if let Some(home) = home {
@@ -209,6 +212,7 @@ impl EnvGuard {
             previous_path,
             previous_home,
             previous_lf_home,
+            previous_lf_bin,
             previous_codex_home,
             previous_claude_home,
             _ambient: ambient,
@@ -236,6 +240,10 @@ impl Drop for EnvGuard {
             env::set_var("HOME", prev);
         } else {
             env::remove_var("HOME");
+        }
+        match &self.previous_lf_bin {
+            Some(previous) => env::set_var("LF_BIN", previous),
+            None => env::remove_var("LF_BIN"),
         }
         match &self.previous_lf_home {
             Some(prev) => env::set_var("LF_HOME", prev),

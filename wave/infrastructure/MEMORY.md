@@ -222,21 +222,20 @@ unpublished code retained, without deletion or delivery authorization.
 ## AgentProcess (LOO-443, 2026-10-09)
 
 Jack Heart requested one inventory; integrate LOO-441 before publication.
-Record/read proofs: `263b6adfb:wave/infrastructure/MEMORY.md`, this heading.
 Detached rows survive; duplicate PID/birth and late history grant no control.
-Tokens fence A → B → A.
+Tokens fence A → B → A. Preserve TTY groups, immutable waits and Session-only
+teardown locks; reservations are consumed once. Exact cleanup proofs remain at
+`e0d360e6a`/`263b6adfb`.
 
-Preserve TTY groups, immutable waits and Session-only teardown locks. Admission
-survives cancellation without reactor progress and consumes reservations once.
-`e0d360e6a`/`263b6adfb` retain successful waits, failed-wait uncertainty and
-stale/client refusal.
+Native admission requires an attachment; remote clients never settle their provider.
+Library admission exposes a Codex account-failover conflict with retained native
+threads; resolve replacement before claiming completion. Raw headless admission remains.
 
-Shared storage does not unify readers: top omits unknown identities and zombies;
-gates retain unknowns and gate/reaper reads omit zombie state.
-Keep blockers visible without weakening uncertainty (Release's entry-point lesson).
-Codex alone has FIFO handoff; reaping covers noninteractive Codex/OpenCode.
-Optional launches, generations, foreground cleanup, death orders, public-entry
-agreement, two-second removal and installed settlement remain unfinished.
+Top omits unknown identities and zombies; gates retain unknowns and gate/reaper
+reads omit zombie state. Keep blockers visible without weakening uncertainty
+(Release's entry-point lesson). Codex alone has FIFO handoff; reaping covers
+noninteractive Codex/OpenCode. Generations, foreground cleanup, death orders,
+public-entry agreement, two-second removal and installed settlement remain open.
 
 ## Process vocabulary (LOO-400, curated 2026-10-09)
 

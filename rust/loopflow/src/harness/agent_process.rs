@@ -79,12 +79,10 @@ pub(super) fn spawn(
 /// own the provider; owned native launches use the same admission fence and
 /// pre-exec recording as headless launches.
 pub(crate) fn spawn_native(
-    mut command: std::process::Command,
-    owner: Option<&(SqliteStore, String, SessionAttachment)>,
+    command: std::process::Command,
+    owner: &(SqliteStore, String, SessionAttachment),
 ) -> Result<std::process::Child> {
-    let Some((store, session, attachment)) = owner else {
-        return Ok(command.spawn()?);
-    };
+    let (store, session, attachment) = owner;
     store
         .with_session_attachment(session, attachment, || {
             store.record_session_provider_launch(session, attachment, &command)?;
@@ -363,7 +361,7 @@ mod tests {
             command.env_clear().arg("60");
             command
         };
-        let mut child = super::spawn_native(command(), Some(&first_owner)).unwrap();
+        let mut child = super::spawn_native(command(), &first_owner).unwrap();
         let pid = child.id();
         super::stop_native(&mut child, Some(&first_owner)).unwrap();
         let exited = store.process(&first.agent_process_lfid).unwrap().unwrap();
@@ -375,11 +373,11 @@ mod tests {
             .prepare_session_agent_process(&session.id, &first)
             .unwrap();
         let next_owner = (store.clone(), session.id.clone(), next.clone());
-        let mut provider = super::spawn_native(command(), Some(&next_owner)).unwrap();
+        let mut provider = super::spawn_native(command(), &next_owner).unwrap();
         let recorded = store.process(&next.agent_process_lfid).unwrap().unwrap();
         // Reusing the current attachment is not permission for a second spawn.
         // Reject before fork, without recording failure on the running process.
-        let duplicate = super::spawn_native(command(), Some(&next_owner));
+        let duplicate = super::spawn_native(command(), &next_owner);
         assert!(duplicate.is_err());
         assert_eq!(
             store.process(&next.agent_process_lfid).unwrap(),
@@ -413,7 +411,7 @@ mod tests {
         let first_owner = (store.clone(), session.id.clone(), first.clone());
         let mut command = Command::new("/bin/sleep");
         command.env_clear().arg("60");
-        let mut child = super::spawn_native(command, Some(&first_owner)).unwrap();
+        let mut child = super::spawn_native(command, &first_owner).unwrap();
         let next = store
             .claim_session_attachment(&session.id, Some(&first), &ProcessLfid::new(), false)
             .unwrap();
@@ -437,7 +435,7 @@ mod tests {
         let owner = (store.clone(), session.id.clone(), attachment.clone());
         let mut command = Command::new("/bin/sh");
         command.env_clear().args(["-c", "exit 42"]);
-        let mut child = super::spawn_native(command, Some(&owner)).unwrap();
+        let mut child = super::spawn_native(command, &owner).unwrap();
         // Reap only this throwaway child outside its handle, forcing ECHILD.
         // SAFETY: waitpid observes the exact fixture child; it signals nothing.
         assert_eq!(
@@ -537,7 +535,7 @@ mod tests {
         let owner = (store.clone(), session.id.clone(), first.clone());
         let mut command = Command::new("/bin/sh");
         command.env_clear().args(["-c", "exit 42"]);
-        let mut child = super::spawn_native(command, Some(&owner)).unwrap();
+        let mut child = super::spawn_native(command, &owner).unwrap();
         let recorded = store.process(&first.agent_process_lfid).unwrap().unwrap();
         assert_eq!(recorded.pid, Some(child.id()));
         assert!(recorded.os_started_at.is_some());
@@ -554,15 +552,15 @@ mod tests {
             .env_clear()
             .args(["-c", "printf effect > \"$1\"", "fixture"])
             .arg(&marker);
-        assert!(super::spawn_native(stale, Some(&owner)).is_err());
+        assert!(super::spawn_native(stale, &owner).is_err());
         assert!(!marker.exists());
         assert_eq!(
             store.session_attachment(&session.id).unwrap(),
             Some(next.clone())
         );
         let owner = (store.clone(), session.id.clone(), next.clone());
-        let error = super::spawn_native(Command::new(home.path().join("absent")), Some(&owner))
-            .unwrap_err();
+        let error =
+            super::spawn_native(Command::new(home.path().join("absent")), &owner).unwrap_err();
         assert_eq!(
             error.downcast_ref::<std::io::Error>().unwrap().kind(),
             std::io::ErrorKind::NotFound

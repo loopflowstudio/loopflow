@@ -1104,6 +1104,9 @@ to PATH, so an inherited CLI directory containing `claude` can outrank a fixture
 fake provider and launch the real one. A temporary `LF_HOME` alone does not prevent
 this. Keep the failed evidence if this occurs, stop the test group, and verify the
 fixture under the corrected executable context before completing the suite.
+`test_network.py` clears `LF_*` before exec; provider fixtures must pin `LF_BIN`
+inside that boundary. Integration `EnvGuard` uses `CARGO_BIN_EXE_lf`, not the
+installed CLI directory, so its provider stand-ins remain first on PATH.
 
 Default-runtime selection reads the OS account's installation records. Use the
 installation harness for default-runtime proofs; never replace the machine's

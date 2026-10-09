@@ -59,6 +59,90 @@ fn claude_batch_reads_large_context_without_argv_limits() {
 }
 
 #[test]
+fn library_launch_records_each_provider_under_its_invocation() {
+    let _env = EnvGuard::new(&[("claude", "#!/bin/sh\nprintf '%s' \"$$\"\n")]);
+    let directory = TempDir::new().unwrap();
+    let launch = AgentConfig {
+        cwd: Some(directory.path().to_path_buf()),
+        ..base_launch()
+    };
+    for _ in 0..2 {
+        let result = run_agent(&launch, &base_process(), &AgentCapabilities::default()).unwrap();
+        assert_eq!(result.exit_code, 0);
+        let pid: u32 = result
+            .stdout
+            .trim()
+            .parse()
+            .unwrap_or_else(|error| panic!("{error}: fixture output {:?}", result.stdout));
+        let store = loopflow::store::sqlite::SqliteStore::new(
+            &loopflow::store::database_path_from_env().unwrap(),
+        )
+        .unwrap();
+        let rows = store.processes_since(0).unwrap();
+        let agent = rows.iter().find(|row| row.pid == Some(pid)).unwrap();
+        assert_eq!(agent.kind, loopflow::process::ProcessKind::Agent);
+        assert!(agent.os_started_at.is_some());
+        assert!(agent.completed_at.is_some());
+        let parent = store
+            .process(agent.parent_process_lfid.as_ref().unwrap())
+            .unwrap()
+            .unwrap();
+        assert_eq!(parent.kind, loopflow::process::ProcessKind::Lf);
+        assert_eq!(parent.pid, Some(std::process::id()));
+        assert!(parent.completed_at.is_some());
+        assert!(agent.agent_session_id.is_some());
+    }
+    let store = loopflow::store::sqlite::SqliteStore::new(
+        &loopflow::store::database_path_from_env().unwrap(),
+    )
+    .unwrap();
+    let rows = store.processes_since(0).unwrap();
+    assert_eq!(rows.len(), 4);
+    assert_eq!(
+        rows.iter()
+            .filter(|row| row.kind == loopflow::process::ProcessKind::Agent)
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn library_launch_reuses_the_enclosing_invocation() {
+    let _env = EnvGuard::new(&[("claude", "#!/bin/sh\nexit 0\n")]);
+    let directory = TempDir::new().unwrap();
+    let launch = AgentConfig {
+        cwd: Some(directory.path().to_path_buf()),
+        ..base_launch()
+    };
+    loopflow::journal::with_runtime(directory.path(), &["fixture".into()], || {
+        for _ in 0..2 {
+            let result = run_agent(&launch, &base_process(), &AgentCapabilities::default())?;
+            assert_eq!(result.exit_code, 0);
+        }
+        let store =
+            loopflow::store::sqlite::SqliteStore::new(&loopflow::store::database_path_from_env()?)?;
+        let rows = store.processes_since(0)?;
+        let parents = rows
+            .iter()
+            .filter(|row| row.kind == loopflow::process::ProcessKind::Lf)
+            .collect::<Vec<_>>();
+        assert_eq!(parents.len(), 1);
+        assert!(parents[0].completed_at.is_none());
+        let agents = rows
+            .iter()
+            .filter(|row| row.kind == loopflow::process::ProcessKind::Agent)
+            .collect::<Vec<_>>();
+        assert_eq!(agents.len(), 2);
+        for agent in agents {
+            assert_eq!(agent.parent_process_lfid.as_ref(), Some(&parents[0].lfid));
+            assert!(agent.completed_at.is_some());
+        }
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[test]
 fn launch_returns_exit_code() {
     let _env = EnvGuard::new(&[("claude", "#!/bin/sh\nexit 0\n")]);
     let result = run_agent(

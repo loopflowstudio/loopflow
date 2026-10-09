@@ -174,6 +174,7 @@ When editing Rust tests:
 - Use `#[test]` for unit tests in the same file
 - Integration tests go in `tests/` directory
 - Mock via closures or `#[cfg(test)]`, not factory traits or extra abstractions
+- Pin fixture `LF_BIN` inside the network boundary; the runner clears inherited `LF_*`. Never let an installed provider outrank a stand-in.
 
 # Goals
 

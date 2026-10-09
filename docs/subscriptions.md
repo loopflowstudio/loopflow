@@ -296,15 +296,28 @@ lf --isolate --account codex=work@ -a codex : "say hi"   # stays in work@'s own 
 lf account claude use work@               # the same for ~/.claude and plain claude
 ```
 
-`lf account <provider> use` is the only command that changes which stored account a
-provider's home is signed in as. It first saves the current login back to its
+`lf account <provider> use` signs the provider's home in as a stored account.
+It first saves the current login back to its
 stored account, so a token the provider refreshed while active is kept; a login
 Loopflow has never seen is kept as a new explicit-only account.
+
+For Codex, `use` also restarts its shared background app-server if it still holds
+another login, even when the file was already correct. Running turns get up to
+five minutes to finish; a turn still running at restart is interrupted. The login
+is installed before that wait, so new lf launches need not wait. lf's Codex
+terminals use `--no-daemon` and keep their own login until restarted.
+An unreadable daemon login returns an error without restarting it; the selected
+login remains installed. Failed activity checks keep the grace period rather than
+ending it early. Expiry warns that restarting may interrupt remaining turns.
+Cancelling during the wait leaves the installed login in place; repeat `use` to
+reconcile the daemon later.
+This flag was verified with codex-cli 0.161.0; older versions without it reject
+lf's terminal launches.
 
 | | Codex | Claude |
 |---|---|---|
 | Where the home's login lives | `auth.json` | macOS Keychain item; `.credentials.json` elsewhere |
-| A process already running | keeps the login it started with until it restarts | follows the switch |
+| An lf process already running | keeps the login it started with until it restarts | follows the switch |
 | A turn in flight during a switch | may fail once; a headless run resumes it under the new account | continues |
 | Whose login the home holds | read from the login | asked of Claude once after Claude refreshes it |
 
@@ -316,6 +329,8 @@ unrecognized login beside the stored accounts rather than discarding it.
 A shared launch follows the active account while it is eligible and below the
 95% threshold, and otherwise moves the home to the next account in the route.
 `--account codex=work@` makes that account active before launching.
+These launch-time switches do not restart Codex's shared daemon. If plain
+`codex` keeps the old login, run `lf account codex use` with the selected account.
 
 `--isolate` runs the invocation and its children in the selected account's own
 home, unmoved by any switch. `isolate: true` in `.lf/config.yaml` makes that the

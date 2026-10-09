@@ -170,6 +170,12 @@ Keep these replacements deleted:
   now share a destination-scoped membership join: no global conflict regrouping or
   per-conflict membership reads. The isolation fixture also resolves one plan while
   retaining the other plan's conflicts; Rust execution remains unproved.
+- Duplicated cache-miss acquisition in `pm::resolve_saved_task` and
+  `task::prepare_task` is replaced by `planning_peer::find_task`: saved Tasks need
+  no acquisition, missing Tasks acquire once without execution allocation.
+  Launch's unconditional acquisition and pushed-code checks remain separate.
+  Project content validation lives in the common transactional save, not both
+  its public edit entry and save owner.
 - Task-attributed sync startup, status rendering as a dispatch prerequisite and
   async waiters owning blocking-worker locks. Repository/provider lifetimes drive
   exchange; each worker retains its effect lock through readback and status writes.
@@ -182,31 +188,13 @@ omission is not convergence. Remaining grouped owners and acceptance are below.
 
 ## Remaining integration — October 8
 
-Reconciled against `de9470d5a` on October 8, retaining parent `ffe986160`.
-`b9f88eafd` isolates damaged destination journals in status; `de9470d5a` uses
-one destination-scoped membership join for conflict display and settlement.
-The regression now resolves one destination while retaining another's conflicts.
-These cuts do not complete grouped Linear composition or establish executable
-acceptance. Earlier disposition/winner-index evidence remains at
-`e77d2d1c8:scratch/work-on-another-machine-name.md`, this heading.
-
-October 8 comment composition (`7e56c01fd`) replaces direct peer row writes with the common
-comment acquisition and authored-delivery owners. Raw provider observations and
-original acquisition times travel in the journal; imported authorship creates no
-local steer. Authored regressions cover lost replies, later edits, conflicts,
-no echo, migration and execution preservation. Rust execution remains unavailable.
-
-October 8 semantic Project content (`a518b985b`) replaces the raw Markdown mutation and its
-separately duplicated workflow. The common content owner captures workflow, KRs
-and metric targets independently in the existing journal, then renders their
-combined winners. Creation, selection, rotation and accepted acquisition capture
-inside their existing transactions. Migration application seeds retained content
-through the same parser in the SQL transaction, without rewriting its source bytes.
-No SQLite Markdown parser, parallel content table or export-time mutation exists.
-The common field receipts retain peer mutation IDs, causal provider baselines,
-uncertain attempts and Linear losers. Rust tests are authored for two-store
-independent edits, same-field losers, receipt retention, provider winners,
-malformed-input rollback, failed capture and populated migration; not executed.
+Current implementation: `3bebc219d`, retaining parent `ffe986160`.
+Destination-scoped status/conflicts (`de9470d5a`), common comment acquisition and
+receipts (`7e56c01fd`), and semantic Project content (`a518b985b`) are integrated.
+Their owners and preservation boundaries are described under **Delete — do not
+maintain** and item 4 below. Earlier cut-by-cut evidence remains at
+`3bebc219d:scratch/work-on-another-machine-name.md`, this heading; the focused
+executable results below supersede its blanket Rust-unavailability claims.
 
 Executable feedback took priority over creation/link composition on October 8.
 The isolated Linux build exposed invalid registry-error conversion and SQLite
@@ -507,7 +495,15 @@ Infrastructure child memory exists in this checkout.
 7. Replace PR copy and create a walkthrough of final behavior and evidence;
    publish #1491 for Jack Heart's review and stop without landing.
 
-Check (October 8 executable repair): disposable Linux `cargo test --offline -p loopflow --lib peer_comments_acquired_without_local_delivery_never_echo`, library cases `peer_import_keeps_identity_execution_and_concurrent_local_saves`, `joining_a_plan_keeps_unrelated_local_work_out_of_its_publication`, `protected_session_ancestry_does_not_block_independent_planning`, and `cargo test --offline -p loopflow --test planning_setup_tests public_setup_recovers_user_identity_and_selects_without_publishing` pass; `cargo clippy --offline --all-targets -- -D warnings`, local `cargo fmt --all --check`, `git diff --check` and `lf context --skill implement` pass. Gate retains the broader/materialized, public reconnect and Desktop checks; review retains the walkthrough. No publication, installation or landing.
+The compression check exposed an inherited storage fixture that expected
+`select_project_workflow` to parse malformed YAML. `ops::project::workflow` owns
+that parse before saving; storage owns name validation and atomic persistence.
+The fixture now rejects an invalid Workflow name and verifies the stored definition
+and selection survive. No duplicate YAML parser was added. Earlier passing
+comment/import/setup proofs remain at
+`3bebc219d:scratch/work-on-another-machine-name.md`, this heading.
+
+Check (October 8 compression): `cargo fmt --all --check`, `git diff --check` and `lf context --skill compress` pass; isolated Linux `cargo test --offline -p loopflow --lib store::sqlite::project_content::tests` compiled and reported one pass/one stale fixture failure (repaired above); recheck, `planning_foreground_tests public_work_connections_exchange_offline_edits_without_replaying_execution` and `cargo clippy --offline --all-targets -- -D warnings` deferred to capable gate after the shared build-cache lock stayed held for 60 seconds. Local Clippy stopped after 180 seconds with the owned build script sampled at `_dyld_start`; no compiler verdict. No publication, installation or landing.
 
 Prior SQL proofs and macOS startup samples remain at
 `e77d2d1c8:scratch/work-on-another-machine-name.md`. A fresh bounded attempt
@@ -519,3 +515,5 @@ Historical Flow `93d4d4f6-4723-4027-951b-b3aee2e696a2` still retains realign
 step `e94edd38-2a26-4047-9650-41a65ab814f7` without a recorded exit, confirmed
 by `lf flow show --processes` on October 8. No exit or replacement authority is
 inferred. Its reconciliation checkpoint `e8ff4c7f6` remains preserved.
+
+Sync check (October 8, parent `4350a50d0`): `cargo test --offline -p loopflow --lib task_completion_preserves_linear_reopening_during_delivery` timed out after 60 seconds during compilation, before test output; executable verification remains with capable gate/CI. Memory retains LOO-406's newer landing authorization without extending LOO-412's review-only boundary.

@@ -73,6 +73,13 @@ installed help or reviewed Desktop code, not proof that no external tool exists.
   `connect`). This does not establish composed Work opening or native readiness.
   The tables retain October 7's baseline judgments; no cmux/herdr behavior was
   re-exercised for these deltas.
+- **October 9 source delta (`87180d962`):** Machine-local repository root/path
+  lookup and scoped Task IDs now feed downstream dispatch. Local skill/inline
+  `--context` shares launch assembly, including bound Work and unwritten excerpt
+  sources; `--explain` reports local identity before admission. Focused fake-provider
+  input parity and absent-storage checks passed. Remote/Flow-wide preview, broader
+  action explanation, Wave planning and composed opening remain incomplete.
+  This updates source capability, not the installed baseline or host judgments.
 - Public [cmux API](https://cmux.com/docs/api) and
   [concepts](https://cmux.com/docs/concepts) provide context, but the tables below
   use the installed command discovery and our local observations. The public API

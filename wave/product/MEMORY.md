@@ -46,7 +46,7 @@ authorized through demo review. Owned cmux probe cleaned up; no Desktop proof.
 
 October 8: LOO-427 leaves unknown checkout location unavailable. `92cafe61d`
 removes copied placements, preserves legacy overrides and routes known Tasks
-without rewriting Machine defaults. Inheritance is unapproved; Rust unverified.
+without rewriting Machine defaults. Inheritance is unapproved; placement suites remain with gate.
 Neither negative peer observation nor local SQLite reserves first start; runtime
 must not synchronize. Seeded IDs prove routing, not exchange/admission.
 
@@ -62,14 +62,14 @@ is broader; `--chrome` controls execution. Root `run`, `--max-turns` and
 `--no-loopflow` are removed; Task skill/Flow selection survives. History owns
 activity, Process pages, show/replay and usage. Desktop owns open/list; root
 `open` is ambiguous with PR opening; Sessions use `connect`. Composed opening and
-Wave planning remain. Local previews and launches share Work assembly; explanation bypasses admission. Remote/Flow-wide input and full action
-explanation remain. Discord is unchanged; `--steers-after` filters nodes, not restarts.
+Wave planning remain. Local preview/launch share Work assembly; explanation bypasses admission.
+Remote/Flow input and full action explanation remain. Discord is unchanged;
+`--steers-after` filters nodes, not restarts.
 Lookup uses Machine-local `repo_root` (default `~/src`) or explicit paths,
 expanded on the selected Machine, never portable identity. Remembered names are
-open. Scoped Task IDs survive dispatch, without reparsing
-raw argv. Preview/routing use read-only SQLite; unreadable is not absent. Prompt
-assembly returns excerpt sources; only launch persists them. Fake-provider parity
-proves no remote/native acceptance.
+open. Scoped IDs survive dispatch without argv reparsing. Preview/routing use read-only
+SQLite; unreadable is not absent. Assembly returns excerpts; only launch writes
+them. Fake-provider parity proves no remote/native acceptance.
 
 Jack selected local planning/Git sync: 406 owns writes/Linear, 412 exchange.
 Imported completion cannot move Workflow or clean execution. Preserve pending
@@ -87,12 +87,14 @@ Multiple destinations must not split the repository window.
 Private-ancestry holds retain journals/dependents and local moves;
 peers keep old values, so omission is not convergence.
 
-Mixed Linear/Git stays disabled. `270019c8d` acquires before
-projection, rolls rejected objects back and retains typed conflicts independently;
-malformed imports abort. `a388ed425` uses common receipts for peer Task decisions,
-retaining uncertain attempts with stable IDs/causal baselines and no Workflow move.
-SQL checks pass, not Rust execution. Other grouped receipts, alternate acquisition
-and Desktop remain; precedence solves neither Linear's race nor start admission.
+Mixed Linear/Git stays disabled. Unintegrated LOO-412 `88cd47572`
+acquires before projection, rolls rejected objects back and retains typed conflicts;
+malformed imports abort. Common disposition, comment, Project-content and
+creation/link receipts have focused Linux proof.
+Captured parents/save IDs and uncertain effects travel; mapping settles nothing.
+Project effects import no chapter transition. Foreground creation, order/deletion,
+alternate acquisition, relationship ordering, legacy association and Desktop remain.
+Storage proof is not mixed-provider acceptance.
 
 ## Terminal-host adoption (2026-10-07)
 

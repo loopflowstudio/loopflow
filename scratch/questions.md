@@ -45,7 +45,7 @@ horizontal), within one Machine/checkout; it never reassigns Work. Resize names
 two exact panes and the target side's share of their separating divider. Zoom
 changes visibility only; focus explicitly selects/reveals the exact pane in its
 workspace, without switching Work or foregrounding the window. No view operation
-authorizes native input. Q2 remains open.
+authorizes native input.
 
 ## Reversible companion choices — October 8
 

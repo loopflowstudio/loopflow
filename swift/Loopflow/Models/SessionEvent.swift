@@ -5,15 +5,6 @@ public struct AgentSessionId: RawRepresentable, Codable, Sendable, Hashable {
     public let rawValue: String
 
     public init(rawValue: String) { self.rawValue = rawValue }
-
-    public init(from decoder: Decoder) throws {
-        rawValue = try decoder.singleValueContainer().decode(String.self)
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        var value = encoder.singleValueContainer()
-        try value.encode(rawValue)
-    }
 }
 
 /// Native receipts retain missing attribution and provider-specific evidence.

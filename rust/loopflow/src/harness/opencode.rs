@@ -146,17 +146,8 @@ impl OpenCodeHarness {
         }
 
         let agent_session =
-            match resume_provider_session(&self.client, &base_url, self.agent_session.as_ref())
-                .await
-            {
-                Ok(Some(id)) => id,
-                Ok(None) => match create_provider_session(&self.client, &base_url).await {
-                    Ok(id) => id,
-                    Err(error) => {
-                        shutdown_child(&mut child).await;
-                        return Err(error);
-                    }
-                },
+            match open_agent_session(&self.client, &base_url, self.agent_session.as_ref()).await {
+                Ok(id) => id,
                 Err(error) => {
                     shutdown_child(&mut child).await;
                     return Err(error);
@@ -598,7 +589,7 @@ impl Harness for OpenCodeHarness {
 
         self.turn_in_progress.store(false, Ordering::SeqCst);
         // Keep `agent_session`: the runner persists it after stop so the
-        // next launch can resume the session (see `resume_provider_session`).
+        // next launch can resume the session (see `open_agent_session`).
         self.server_base_url = None;
 
         Ok(())
@@ -624,26 +615,20 @@ async fn shutdown_child(child: &mut Child) {
 }
 
 /// A saved conversation must remain the same conversation after a retry.
-async fn resume_provider_session(
+async fn open_agent_session(
     client: &reqwest::Client,
     base_url: &str,
     stored: Option<&AgentSessionId>,
-) -> Result<Option<AgentSessionId>> {
-    let Some(session_id) = stored else {
-        return Ok(None);
-    };
-    client
-        .get(format!("{base_url}/session/{session_id}"))
-        .send()
-        .await?
-        .error_for_status()?;
-    Ok(Some(session_id.clone()))
-}
-
-async fn create_provider_session(
-    client: &reqwest::Client,
-    base_url: &str,
 ) -> Result<AgentSessionId> {
+    if let Some(session_id) = stored {
+        client
+            .get(format!("{base_url}/session/{session_id}"))
+            .send()
+            .await?
+            .error_for_status()?;
+        return Ok(session_id.clone());
+    }
+
     let session_url = format!("{base_url}/session");
     let response =
         send_request_with_retry(client, Method::POST, &session_url, Some(json!({}))).await?;
@@ -1045,10 +1030,8 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
-    /// A stored session id is reused when the serve instance still has it and
-    /// dropped when it's gone — resume is an optimization, never a failure.
     #[tokio::test]
-    async fn resume_probe_preserves_saved_identity_on_failure() {
+    async fn open_agent_session_creates_only_without_saved_identity() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         let base_url = format!("http://127.0.0.1:{port}");
@@ -1063,6 +1046,8 @@ mod tests {
                 let request = String::from_utf8_lossy(&buf[..n]).to_string();
                 let response = if request.starts_with("GET /session/live") {
                     "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}"
+                } else if request.starts_with("POST /session ") {
+                    "HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\n{\"id\":\"new\"}"
                 } else {
                     "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n"
                 };
@@ -1072,21 +1057,17 @@ mod tests {
 
         let client = reqwest::Client::new();
         assert_eq!(
-            resume_provider_session(&client, &base_url, Some(&"live".into()))
+            open_agent_session(&client, &base_url, Some(&"live".into()))
                 .await
                 .unwrap(),
-            Some("live".into())
+            "live".into()
         );
-        assert!(
-            resume_provider_session(&client, &base_url, Some(&"gone".into()))
-                .await
-                .is_err()
-        );
+        assert!(open_agent_session(&client, &base_url, Some(&"gone".into()))
+            .await
+            .is_err());
         assert_eq!(
-            resume_provider_session(&client, &base_url, None)
-                .await
-                .unwrap(),
-            None
+            open_agent_session(&client, &base_url, None).await.unwrap(),
+            "new".into()
         );
     }
 

@@ -14,6 +14,10 @@ on #1516; merging is explicitly excluded.
   and accessors: replaced end to end by `agent_session: AgentSessionId`.
 - Codex's duplicate getter and OpenCode's intermediate string parser: removed;
   retain opaque provider bytes, resume behavior and account attribution.
+- OpenCode's separate resume/create helpers and optional success result are
+  replaced by `open_agent_session`: create only without saved identity, and
+  share startup failure cleanup. Swift uses RawRepresentable's string Codable
+  implementation instead of duplicating its encoder and decoder.
 - Keep the SQL/JSON encodings and historical fixtures below, not parallel
   compatibility paths. Engine/driver columns remain outside this Task.
 
@@ -22,9 +26,7 @@ on #1516; merging is explicitly excluded.
 `AgentSessionId` preserves provider-issued strings, including non-UUID ids.
 Rust resume configuration, harnesses, native turn keys, capture evidence and
 account routing now carry it; Swift mirrors SessionEvent and native history
-references. The former `provider_thread` / `provider_session_id` code fields
-and accessors are gone, as are Codex's duplicate getter and OpenCode's
-intermediate string parser. Provider protocol names remain vendor-owned.
+references. Provider protocol names remain vendor-owned.
 
 The LfSession row holds the current connection; a provider announcing a new
 conversation replaces that selection. Immutable turn/capture events retain
@@ -64,4 +66,4 @@ Full materialized Rust and broader Swift suites remain with gate/CI. Publication
 is authorized after these focused checks, stacked on #1516; no merge or Task
 completion. No installed or live-provider acceptance is claimed.
 
-Checks: `cargo fmt --check`, `cargo clippy --all-targets -j 4 -- -D warnings`, `cargo test -p loopflow --lib --no-run -j 4`, `cargo test -p loopflow --test dto_fixtures --no-run -j 4`, network-isolated lib filters (9) and DTO binary (22), `scripts/test_desktop.sh --jobs 2 -Xswiftc -gnone --filter DTOFixtureTests` (build + 23 tests), `git diff --check` and the retained SQL/JSON name audit pass; full matrix remains gate/CI-owned.
+Checks: `cargo fmt --check`, `cargo clippy --all-targets -j 4 -- -D warnings`, `cargo test -p loopflow --lib --no-run -j 4`, network-isolated `open_agent_session_creates_only_without_saved_identity` (1), `scripts/test_desktop.sh --jobs 2 -Xswiftc -gnone --filter DTOFixtureTests` (build + 23 tests), and `git diff --check` pass after compression; prior nine Rust identity/account checks and Rust DTO fixtures (22) remain applicable; full matrix remains gate/CI-owned.

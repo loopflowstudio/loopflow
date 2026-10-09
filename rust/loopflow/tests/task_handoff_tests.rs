@@ -9,7 +9,7 @@ use loopflow::work::task::{GithubPr, PrPublication, Task};
 use loopflow_test_support::TestRepo;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use support::{register_sibling_task, register_unrun_task, EnvGuard};
+use support::{register_sibling_task, register_task_with_pr, EnvGuard};
 
 fn checkout(home: &Path, caller: &Path, child: &Task, design: &str) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
@@ -66,7 +66,7 @@ fn checkout_hands_each_child_only_its_selected_design_with_source_receipt() {
     repo.create_file("scratch/parent.md", "Whole parent plan");
     repo.stage_all();
     repo.commit("Parent plan");
-    let parent = register_unrun_task(home.path(), repo.path(), "parent", &repo.head_sha());
+    let parent = register_task_with_pr(home.path(), repo.path(), "parent", &repo.head_sha());
     let head = repo.head_sha();
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let mut parent_pr = parent.pr.clone();
@@ -151,7 +151,7 @@ fn repeated_handoff_preserves_edited_and_deleted_child_notes_after_parent_commit
     let target = tempfile::tempdir().unwrap();
     let _env = EnvGuard::with_lf_home(&[], home.path());
     repo.create_branch("parent");
-    let parent = register_unrun_task(home.path(), repo.path(), "parent", &repo.head_sha());
+    let parent = register_task_with_pr(home.path(), repo.path(), "parent", &repo.head_sha());
     let child = register_sibling_task(&parent, "INF-124", "child", &target.path().join("child"));
     repo.create_file("design.md", "Original selected design");
     assert_success(checkout(home.path(), repo.path(), &child, "design.md"));
@@ -177,7 +177,7 @@ fn conflicting_design_retains_both_versions_and_repeated_conflict_stays_failed()
     let target = tempfile::tempdir().unwrap();
     let _env = EnvGuard::with_lf_home(&[], home.path());
     repo.create_branch("parent");
-    let parent = register_unrun_task(home.path(), repo.path(), "parent", &repo.head_sha());
+    let parent = register_task_with_pr(home.path(), repo.path(), "parent", &repo.head_sha());
     let child = register_sibling_task(&parent, "INF-124", "child", &target.path().join("child"));
     repo.create_file("design.md", "Original selected design");
     assert_success(checkout(home.path(), repo.path(), &child, "design.md"));
@@ -208,7 +208,7 @@ fn unreadable_design_does_not_place_child() {
     let home = tempfile::tempdir().unwrap();
     let target = tempfile::tempdir().unwrap();
     let _env = EnvGuard::with_lf_home(&[], home.path());
-    let parent = register_unrun_task(home.path(), repo.path(), "main", &repo.head_sha());
+    let parent = register_task_with_pr(home.path(), repo.path(), "main", &repo.head_sha());
     let child = register_sibling_task(&parent, "INF-124", "child", &target.path().join("child"));
     assert!(!checkout(home.path(), repo.path(), &child, "missing.md")
         .status

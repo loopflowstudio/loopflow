@@ -15,8 +15,8 @@ use loopflow::work::task::{
 };
 use loopflow_test_support::TestRepo;
 use support::{
-    codex_app_server_script, counting_open_script, presentation_attempts, register_task,
-    register_unrun_task, EnvGuard,
+    codex_app_server_script, counting_open_script, presentation_attempts, register_task_with_pr,
+    EnvGuard,
 };
 
 fn write_gh_script(pr_list: &str, pr_diff: Option<&str>) -> String {
@@ -162,7 +162,7 @@ fn draft_open_stays_draft_until_publish() {
         let repo = TestRepo::new();
         let base = repo.head_sha();
         create_changed_branch(&repo, "feature");
-        let task = register_task(home.path(), repo.path(), "feature", &base);
+        let task = register_task_with_pr(home.path(), repo.path(), "feature", &base);
         let runtime = tokio::runtime::Runtime::new().unwrap();
 
         for (command, expected) in [
@@ -220,7 +220,7 @@ fn failed_draft_promotion_stays_draft_and_can_retry() {
     let repo = TestRepo::new();
     let base = repo.head_sha();
     create_changed_branch(&repo, "feature");
-    let task = register_task(home.path(), repo.path(), "feature", &base);
+    let task = register_task_with_pr(home.path(), repo.path(), "feature", &base);
     let mut options = PrOptions {
         title: Some("Ready work".to_string()),
         body: Some("Current work.".to_string()),
@@ -278,7 +278,7 @@ fn existing_draft_without_local_publication_retains_identity_when_promotion_fail
     let repo = TestRepo::new();
     let base = repo.head_sha();
     create_changed_branch(&repo, "feature");
-    let task = register_task(home.path(), repo.path(), "feature", &base);
+    let task = register_task_with_pr(home.path(), repo.path(), "feature", &base);
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let options = PrOptions {
         title: Some("Adopt existing work".into()),
@@ -489,7 +489,7 @@ fn task_snapshot_reads_its_current_parent_project() {
     let base = repo.head_sha();
     let branch = "jack/task-pr-proof";
     repo.create_branch(branch);
-    let task = register_task(home.path(), repo.path(), branch, &base);
+    let task = register_task_with_pr(home.path(), repo.path(), branch, &base);
     let runtime = tokio::runtime::Runtime::new().expect("task runtime");
     let mut planning = runtime
         .block_on(task.store.pm_snapshot(&task.task.wave_id))
@@ -746,7 +746,7 @@ fn github_failure_leaves_publication_intent_observable() {
     repo.stage_all();
     repo.commit("add publication proof");
     repo.push_new_branch(branch);
-    let task = register_task(home.path(), repo.path(), branch, &base);
+    let task = register_task_with_pr(home.path(), repo.path(), branch, &base);
 
     let result = create_or_update_pr(
         repo.path(),
@@ -794,7 +794,7 @@ fn configured_feature_generation_adds_task_intent_and_lifecycle_to_pr_copy() {
     repo.stage_all();
     repo.commit("add configured generation proof");
     repo.push_new_branch(branch);
-    let task = register_task(home.path(), repo.path(), branch, &base);
+    let task = register_task_with_pr(home.path(), repo.path(), branch, &base);
 
     create_or_update_pr(
         repo.path(),
@@ -856,7 +856,7 @@ fn task_pr_generation_does_not_require_a_controller() {
     repo.stage_all();
     repo.commit("add configured fix generation proof");
     repo.push_new_branch(branch);
-    let registered = register_task(home.path(), repo.path(), branch, &base);
+    let registered = register_task_with_pr(home.path(), repo.path(), branch, &base);
     let runtime = tokio::runtime::Runtime::new().expect("update Task runtime");
 
     create_or_update_pr(
@@ -906,7 +906,7 @@ fn task_pr_missing_cached_linear_url_refuses_before_remote_mutation() {
     repo.commit("add identity proof");
     let remote_head_before = repo.head_sha();
     push_branch(&repo, branch);
-    let task = register_task(home.path(), repo.path(), branch, &base);
+    let task = register_task_with_pr(home.path(), repo.path(), branch, &base);
     let runtime = tokio::runtime::Runtime::new().expect("task runtime");
     let mut snapshot = runtime
         .block_on(task.store.pm_snapshot(&task.task.wave_id))
@@ -963,7 +963,7 @@ fn manual_merge_observation_preserves_the_task_and_sole_pr() {
     repo.create_branch(branch);
     push_branch(&repo, branch);
     point_origin_at_github(&repo);
-    let task = register_task(home.path(), repo.path(), branch, &base);
+    let task = register_task_with_pr(home.path(), repo.path(), branch, &base);
     let mut pr = task.pr.clone();
     pr.publication = Some(PrPublication {
         requested_at: time::OffsetDateTime::now_utc(),
@@ -980,6 +980,8 @@ fn manual_merge_observation_preserves_the_task_and_sole_pr() {
         .block_on(task.store.update_task_pr(&pr))
         .expect("mark PR as published");
 
+    let report = loopflow::ops::pr_landing::reconcile_repository(repo.path()).unwrap();
+    assert!(report.errors.is_empty(), "{:?}", report.errors);
     let persisted_task = task_status(repo.path(), Some("INF-123"))
         .expect("reconcile Task PR")
         .execution
@@ -988,9 +990,9 @@ fn manual_merge_observation_preserves_the_task_and_sole_pr() {
     assert!(
         matches!(
             persisted_task.observation,
-            loopflow::work::task::Observation::Fresh { .. }
+            loopflow::work::task::Observation::NotRequired
         ),
-        "manual merge reconciliation should use the bounded REST observation: {persisted_task:?}"
+        "status must not repeat merge reconciliation: {persisted_task:?}"
     );
     let cached_task = task_status(repo.path(), Some("INF-123"))
         .expect("reuse partial merge-time observation")
@@ -1034,7 +1036,7 @@ fn changed_head_revokes_auto_merge_and_clears_the_stale_request() {
     let branch = "jack/task-pr-proof";
     repo.create_branch(branch);
     point_origin_at_github(&repo);
-    let task = register_task(home.path(), repo.path(), branch, &base);
+    let task = register_task_with_pr(home.path(), repo.path(), branch, &base);
     let now = time::OffsetDateTime::now_utc();
     let mut pr = task.pr.clone();
     pr.publication = Some(PrPublication {
@@ -1056,6 +1058,8 @@ fn changed_head_revokes_auto_merge_and_clears_the_stale_request() {
         .block_on(task.store.update_task_pr(&pr))
         .expect("store auto-merge request");
 
+    let report = loopflow::ops::pr_landing::reconcile_repository(repo.path()).unwrap();
+    assert!(report.errors.is_empty(), "{:?}", report.errors);
     task_status(repo.path(), Some("INF-123"))
         .expect("reconcile changed head")
         .execution
@@ -1085,7 +1089,7 @@ fn pushed_task_commit_revokes_auto_before_exposing_the_new_head() {
     repo.stage_all();
     repo.commit("first head");
     push_branch(&repo, branch);
-    let task = register_task(home.path(), repo.path(), branch, &base);
+    let task = register_task_with_pr(home.path(), repo.path(), branch, &base);
     let now = time::OffsetDateTime::now_utc();
     let mut pr = task.pr.clone();
     pr.publication = Some(PrPublication {
@@ -1159,7 +1163,7 @@ fn observed_merge_does_not_complete_a_task_from_status() {
     let branch = "jack/task-pr-proof";
     repo.create_branch(branch);
     point_origin_at_github(&repo);
-    let task = register_task(home.path(), repo.path(), branch, &base);
+    let task = register_task_with_pr(home.path(), repo.path(), branch, &base);
     let head = repo.head_sha();
     let now = time::OffsetDateTime::now_utc();
     let mut pr = task.pr.clone();
@@ -1182,6 +1186,8 @@ fn observed_merge_does_not_complete_a_task_from_status() {
         .block_on(task.store.update_task_pr(&pr))
         .expect("mark PR as completing");
 
+    let report = loopflow::ops::pr_landing::reconcile_repository(repo.path()).unwrap();
+    assert!(report.errors.is_empty(), "{:?}", report.errors);
     let persisted_task = task_status(repo.path(), Some("INF-123"))
         .expect("reconcile completing PR")
         .execution
@@ -1189,9 +1195,9 @@ fn observed_merge_does_not_complete_a_task_from_status() {
     assert!(
         matches!(
             persisted_task.observation,
-            loopflow::work::task::Observation::Fresh { .. }
+            loopflow::work::task::Observation::NotRequired
         ),
-        "status should use the bounded REST observation: {persisted_task:?}"
+        "status must only read the observed merge: {persisted_task:?}"
     );
     assert!(!persisted_task.status.is_terminal());
     let prs = runtime
@@ -1203,7 +1209,7 @@ fn observed_merge_does_not_complete_a_task_from_status() {
 
 /// A Flow launch no longer reconciles the Task's PR first. Work a Flow commits
 /// after that PR merged reaches publication, which names the settled PR and
-/// the command that opens its successor.
+/// the need for another Task, without creating a successor PR.
 #[test]
 fn publishing_after_the_pr_merged_names_the_next_step() {
     let home = tempfile::TempDir::new().expect("temp home");
@@ -1213,7 +1219,7 @@ fn publishing_after_the_pr_merged_names_the_next_step() {
     let branch = "jack/task-pr-proof";
     repo.create_branch(branch);
     point_origin_at_github(&repo);
-    let task = register_task(home.path(), repo.path(), branch, &base);
+    let task = register_task_with_pr(home.path(), repo.path(), branch, &base);
     let head = repo.head_sha();
     let mut pr = task.pr.clone();
     pr.publication = Some(PrPublication {
@@ -1230,6 +1236,8 @@ fn publishing_after_the_pr_merged_names_the_next_step() {
     runtime
         .block_on(task.store.update_task_pr(&pr))
         .expect("record the published PR");
+    let report = loopflow::ops::pr_landing::reconcile_repository(repo.path()).unwrap();
+    assert!(report.errors.is_empty(), "{:?}", report.errors);
     task_status(repo.path(), Some("INF-123")).expect("observe the merge");
     repo.create_file("later.txt", "committed after the merge\n");
     repo.stage_all();
@@ -1269,7 +1277,7 @@ fn observed_auto_merge_waits_for_follow_through_to_complete_the_task() {
     let branch = "jack/task-pr-proof";
     repo.create_branch(branch);
     point_origin_at_github(&repo);
-    let task = register_task(home.path(), repo.path(), branch, &base);
+    let task = register_task_with_pr(home.path(), repo.path(), branch, &base);
     let head = repo.head_sha();
     let now = time::OffsetDateTime::now_utc();
     let mut pr = task.pr.clone();
@@ -1292,6 +1300,8 @@ fn observed_auto_merge_waits_for_follow_through_to_complete_the_task() {
         .block_on(task.store.update_task_pr(&pr))
         .expect("mark PR as completing");
 
+    let report = loopflow::ops::pr_landing::reconcile_repository(repo.path()).unwrap();
+    assert!(report.errors.is_empty(), "{:?}", report.errors);
     let persisted_task = task_status(repo.path(), Some("INF-123"))
         .expect("reconcile watched PR merge")
         .execution
@@ -1312,7 +1322,7 @@ fn repeated_status_of_merged_task_never_completes_work() {
     let branch = "jack/task-pr-proof";
     repo.create_branch(branch);
     point_origin_at_github(&repo);
-    let task = register_unrun_task(home.path(), repo.path(), branch, &base);
+    let task = register_task_with_pr(home.path(), repo.path(), branch, &base);
     let head = repo.head_sha();
     let now = time::OffsetDateTime::now_utc();
     let mut pr = task.pr.clone();
@@ -1396,7 +1406,7 @@ fn end_is_refused_while_a_published_pr_is_unmerged() {
     repo.create_file("notes.md", "unpublished\n");
     repo.stage_all();
     repo.commit("Unpublished work");
-    let task = register_task(home.path(), repo.path(), branch, &base);
+    let task = register_task_with_pr(home.path(), repo.path(), branch, &base);
 
     let runtime = tokio::runtime::Runtime::new().expect("read runtime");
     let mut pr = task.pr.clone();

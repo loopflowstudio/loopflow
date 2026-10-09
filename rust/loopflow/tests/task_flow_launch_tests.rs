@@ -52,7 +52,7 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
             ("open", "#!/bin/sh\nexit 0\n"),
             ("gh", "#!/bin/sh\nexit 1\n"),
         ]);
-        let registered = support::register_task(
+        let registered = support::register_task_with_pr(
             home.path(),
             &repo.path().canonicalize().unwrap(),
             "launch-proof",
@@ -502,6 +502,7 @@ impl WorkflowTask {
         // The Task's branch starts from these definitions and holds nothing.
         repo.stage_all();
         repo.commit("Define the fixture Flows and workflows");
+        repo.create_branch("launch-proof");
         let registered = support::register_task_without_pr(
             home.path(),
             &repo.path().canonicalize().unwrap(),
@@ -516,6 +517,18 @@ impl WorkflowTask {
         };
         fixture.ok(&["task", "checkout", "INF-123"]);
         fixture
+    }
+
+    fn select_workflow(&self, name: &str) {
+        let store =
+            loopflow::store::sqlite::SqliteStore::new(&self.home.path().join("loopflow.db"))
+                .unwrap();
+        let content =
+            fs::read_to_string(self.repo.path().join(format!(".lf/workflows/{name}.yaml")))
+                .unwrap();
+        store
+            .select_project_workflow(&self.registered.task.project_id, name, &content)
+            .unwrap();
     }
 
     fn publish(&self, merged: bool) {
@@ -533,10 +546,20 @@ impl WorkflowTask {
         if merged {
             pr.merge_commit = Some(self.repo.head_sha());
         }
-        tokio::runtime::Runtime::new()
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        if runtime
+            .block_on(self.registered.store.active_task_pr(&pr.task_id))
             .unwrap()
-            .block_on(self.registered.store.insert_task_pr(&pr))
-            .unwrap();
+            .is_some()
+        {
+            runtime
+                .block_on(self.registered.store.update_task_pr(&pr))
+                .unwrap();
+        } else {
+            runtime
+                .block_on(self.registered.store.insert_task_pr(&pr))
+                .unwrap();
+        }
     }
 
     fn status(&self) -> serde_json::Value {
@@ -550,7 +573,7 @@ impl WorkflowTask {
         status["execution"].clone()
     }
 
-    /// The Task's state as `lf task status` reads it from the Workflow.
+    /// Planning status, independent of Workflow position.
     fn state(&self) -> String {
         self.status()["status"].as_str().unwrap().to_string()
     }
@@ -595,8 +618,9 @@ impl WorkflowTask {
     }
 
     fn finish_after_provider_observation(&self, args: &[&str]) {
-        let error = refusal(self.run(args));
-        assert!(self.status()["completion_pending"].is_string(), "{error}");
+        self.ok(args);
+        assert_eq!(self.state(), "done");
+        assert!(self.status()["completion_pending"].is_null());
         let workflow = self.workflow();
         self.complete_in_linear();
         self.ok(&["task", "complete", "INF-123"]);
@@ -636,6 +660,7 @@ fn refusal(output: std::process::Output) -> String {
 #[test]
 fn checkout_leaves_workflow_selection_to_the_first_run() {
     let fixture = WorkflowTask::new();
+    fixture.repo.push_new_branch("main");
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let store = &fixture.registered.store;
     let sqlite =
@@ -666,7 +691,7 @@ fn checkout_leaves_workflow_selection_to_the_first_run() {
         ).unwrap();
     };
     select("before-checkout");
-    fixture.ok(&["task", "checkout", "INF-124"]);
+    fixture.ok(&["task", "checkout", "INF-124", "--name", "first-workflow"]);
     assert!(sqlite.task_work(&task.id).unwrap().workflow.is_none());
     select("at-first-run");
     fixture.ok(&["-b", "task", "run", "INF-124"]);
@@ -817,7 +842,7 @@ fn a_landing_that_settles_later_is_recorded_by_moving_the_task() {
     // The Task is done; nothing runs until it is put back on its workflow.
     assert_eq!(task.state(), "done");
     let error = refusal(task.run(&["-b", "task", "run", "INF-123", "findings"]));
-    assert!(error.contains("reopen its planning status"), "{error}");
+    assert!(error.contains("lf task reopen INF-123"), "{error}");
 }
 
 #[test]
@@ -1572,17 +1597,27 @@ fn provider_completion_without_merged_delivery_does_not_admit_first_filing() {
 #[test]
 fn failed_completion_in_finishing_flow_is_retryable_without_replaying_it() {
     let task = WorkflowTask::new();
-    fs::write(task.repo.path().join(".lf/flows/finish-proof.yaml"),
-        "- cmd: task follow-up INF-123 --none Accepted-checks-complete\n- cmd: task complete INF-123\n").unwrap();
+    fs::write(
+        task.repo.path().join(".lf/flows/finish-proof.yaml"),
+        "- cmd: task complete INF-123\n",
+    )
+    .unwrap();
     fs::write(
         task.repo.path().join(".lf/workflows/delivery.yaml"),
         "edges:\n  - {from: start, to: end, flow: finish-proof}\n",
     )
     .unwrap();
     task.publish(true);
+    task.select_workflow("delivery");
     let error = refusal(task.run(&["-b", "task", "run", "INF-123", "delivery"]));
     assert!(task.status()["completion_pending"].is_string(), "{error}");
-    task.complete_in_linear();
+    task.ok(&[
+        "task",
+        "follow-up",
+        "INF-123",
+        "--none",
+        "Accepted checks complete",
+    ]);
     task.ok(&["task", "complete", "INF-123"]);
     task.ok(&["task", "move", "INF-123", "end"]);
     assert_eq!(task.state(), "done");
@@ -1711,6 +1746,8 @@ fn successful_final_flow_keeps_arrival_when_completion_fails_and_never_replays()
         ".lf/workflows/final.yaml",
         "edges:\n  - {from: start, to: end, flow: proof}\n",
     );
+    task.select_workflow("final");
+    task.publish(false);
     let error = refusal(task.run(&["-b", "task", "run", "INF-123", "final"]));
     assert!(task.status()["completion_pending"].is_string(), "{error}");
     let arrived = task.workflow();
@@ -1722,7 +1759,15 @@ fn successful_final_flow_keeps_arrival_when_completion_fails_and_never_replays()
     let flows = support::recorded_flows(task.home.path());
     assert_eq!(flows.len(), 1);
     assert_eq!(flows[0].0.as_deref(), Some("succeeded"));
-    task.finish_after_provider_observation(&["task", "complete", "INF-123"]);
+    task.publish(true);
+    task.ok(&[
+        "task",
+        "follow-up",
+        "INF-123",
+        "--none",
+        "Accepted checks complete",
+    ]);
+    task.ok(&["task", "complete", "INF-123"]);
     assert_eq!(task.workflow(), arrived);
     assert_eq!(support::recorded_flows(task.home.path()), flows);
 }

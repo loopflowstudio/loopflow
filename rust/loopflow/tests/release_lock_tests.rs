@@ -1684,7 +1684,7 @@ NOTES
         let branch = git_read(&["branch", "--show-current"]);
         // Register the actual generated branch, not the caller's ambient Task.
         let home = PathBuf::from(std::env::var_os("LF_HOME").unwrap());
-        let task = support::register_task(&home, &checkout, &branch, &head);
+        let task = support::register_task_with_pr(&home, &checkout, &branch, &head);
         let now = time::OffsetDateTime::now_utc();
         let mut pr = task.pr.clone();
         pr.publication = Some(PrPublication {

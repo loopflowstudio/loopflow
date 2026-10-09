@@ -4,7 +4,7 @@ use loopflow::store::sqlite::SqliteStore;
 use loopflow::work::task::follow_through::{FollowThroughIntent, FollowThroughLink};
 use loopflow::work::task::{TaskEventKind, TaskFollowUp};
 use loopflow_test_support::TestRepo;
-use support::register_task;
+use support::register_task_with_pr;
 
 fn intent(key: &str) -> FollowThroughIntent {
     FollowThroughIntent {
@@ -26,7 +26,7 @@ fn intent(key: &str) -> FollowThroughIntent {
 fn retry_retains_original_issue_payload_and_destination() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
-    let fixture = register_task(
+    let fixture = register_task_with_pr(
         home.path(),
         repo.path(),
         "test/follow-through",
@@ -60,7 +60,7 @@ fn retry_retains_original_issue_payload_and_destination() {
 fn filing_cannot_finish_until_every_issue_and_link_is_confirmed() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
-    let fixture = register_task(
+    let fixture = register_task_with_pr(
         home.path(),
         repo.path(),
         "test/follow-through",
@@ -123,7 +123,7 @@ fn filing_cannot_finish_until_every_issue_and_link_is_confirmed() {
 fn historical_remaining_work_requires_a_new_disposition() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
-    let fixture = register_task(
+    let fixture = register_task_with_pr(
         home.path(),
         repo.path(),
         "test/follow-through",

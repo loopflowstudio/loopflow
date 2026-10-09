@@ -1157,6 +1157,7 @@ mod tests {
     fn due_dates_enrich_absent_history_but_preserve_observed_null_at_equal_revision() {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("CREATE TABLE pm_items(repo TEXT,provider TEXT,id TEXT,identifier TEXT,project_id TEXT,observed_at INTEGER,body TEXT,PRIMARY KEY(repo,provider,id)); CREATE TABLE pm_issue_changes(issue_id TEXT,revision_ns INTEGER,removed INTEGER);").unwrap();
+        conn.execute_batch("CREATE TABLE tasks(id TEXT,external_issue_id TEXT,project_id TEXT,planning_completed INTEGER,completion_request INTEGER,completion_error TEXT); CREATE TABLE projects(id TEXT,wave_id TEXT); CREATE TABLE waves(id TEXT,repo TEXT); CREATE TABLE task_events(task_id TEXT,kind_json TEXT,created_at INTEGER);").unwrap();
         let planning: crate::pm::PmSnapshot = serde_json::from_str(include_str!(
             "../../../../../tests/fixtures/dto/task_history_planning.json"
         ))

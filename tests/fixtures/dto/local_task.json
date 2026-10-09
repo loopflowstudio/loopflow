@@ -11,17 +11,16 @@
         "id": "00000000-0000-4000-8000-000000000001"
       }
     ],
+    "conflicts": {},
     "identifier": "lf-0123456",
     "pending_sync": [],
-    "refresh_error": null,
-    "conflicts": {}
+    "refresh_error": null
   },
   "task": {
     "actions": {
       "reason": "run the next work with `lf task run`; inspect earlier Flows and independent Sessions first",
       "recommended": "resume"
     },
-    "active_pr": null,
     "condition": {
       "evidence_age_secs": 0,
       "local_progress": {
@@ -43,11 +42,19 @@
       "state": "idle",
       "step": null
     },
+    "follow_through": {
+      "intents": [],
+      "links": [],
+      "needs_conversion": false,
+      "reason": null,
+      "scope_notes": []
+    },
     "latest_flow_process": null,
     "next_move": {
       "owner": "wave",
       "reason": "ready"
     },
+    "pr": null,
     "reference": {
       "issue_url": null,
       "workspace": null
@@ -56,14 +63,14 @@
       "unavailable": null
     },
     "runtime": {
-      "planning_conflict": null,
+      "completion_pending": null,
+      "pending_sync": null,
       "provider": "codex",
       "reason": "No Task Flow has run; independent Sessions may still be active",
       "started": false,
       "status": "not_ready",
       "updated_at": "2026-10-08T00:00:00Z",
-      "work_id": "task_0123456789ab40008000000000000001",
-      "pending_sync": null
+      "work_id": "task_0123456789ab40008000000000000001"
     },
     "section": "waiting",
     "task": {
@@ -71,6 +78,8 @@
       "completed": false,
       "completed_at": null,
       "description": "Keep the escaped quote",
+      "due_date": null,
+      "follow_up_sources": [],
       "id": "task_0123456789ab40008000000000000001",
       "identifier": "lf-0123456",
       "name": "Retain quoted input",

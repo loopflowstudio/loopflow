@@ -347,9 +347,36 @@ pub(crate) fn repository_team_id(repo: &Path) -> OpsResult<String> {
 /// Expected Team for strict cached reads after migration. During the deliberate
 /// PRD-43/PRD-44 mixed state, legacy snapshots remain inspectable and validate
 /// their own singular Team rather than pretending they already carry the new one.
-pub(crate) fn repository_team_for_snapshot_validation(repo: &Path) -> OpsResult<Option<String>> {
-    if !legacy_pm_sentinels(repo)?.is_empty() {
+pub(crate) fn repository_team_for_snapshot_validation(
+    repo: &Path,
+    store: &Store,
+) -> OpsResult<Option<String>> {
+    let config = load_repo_config(repo)
+        .map_err(|error| OpsError::Message(error.to_string()))?
+        .unwrap_or_default();
+    if config.linear.team.is_some() {
         return Ok(None);
+    }
+    for wave in store
+        .sqlite
+        .list_waves(Some(&repo.to_string_lossy()))
+        .map_err(|error| OpsError::Message(error.to_string()))?
+    {
+        let Some(goal) = store
+            .sqlite
+            .wave_document(wave.id(), "GOAL.md")
+            .map_err(|error| OpsError::Message(error.to_string()))?
+        else {
+            continue;
+        };
+        let definition = crate::work::wave::config::parse_wave_config(&goal)
+            .map_err(|error| OpsError::Message(error.to_string()))?;
+        if definition
+            .pm
+            .is_some_and(|pm| pm.provider.is_some() || pm.linear_team.is_some())
+        {
+            return Ok(None);
+        }
     }
     require_linear_config(repo)?;
     read_repository_team(repo)
@@ -2297,6 +2324,11 @@ pub fn list_local_waves(repo: &Path) -> OpsResult<Vec<String>> {
     let canonical = crate::repository::CanonicalRepo::discover(repo)
         .map_err(|error| OpsError::Message(error.to_string()))?;
     let StorageConfig::Sqlite { path } = storage_config_from_env()?;
+    match std::fs::metadata(&path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(OpsError::Message(error.to_string())),
+        Ok(_) => {}
+    }
     let store = crate::store::sqlite::SqliteStore::open_read_only(&path)
         .map_err(|error| OpsError::Message(error.to_string()))?;
     Ok(store

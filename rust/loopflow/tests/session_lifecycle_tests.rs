@@ -420,7 +420,7 @@ esac
 #[test]
 fn task_conversation_reopens_after_terminal_startup_failure() {
     let fixture = Fixture::new(false);
-    let task = support::register_unrun_task(
+    let task = support::register_task_with_pr(
         fixture.home.path(),
         &fixture.repo.path().canonicalize().unwrap(),
         "reopen",
@@ -566,7 +566,7 @@ fn sigint_records_session_interruption_and_retires_the_orphan() {
 #[test]
 fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
     let fixture = Fixture::new(false);
-    let task = support::register_unrun_task(
+    let task = support::register_task_with_pr(
         fixture.home.path(),
         fixture.repo.path(),
         "inventory",
@@ -742,7 +742,7 @@ fn public_history_discovers_unlinked_native_receipts_without_borrowing_a_later_b
     let launched = fixture.run(&LAUNCH);
     assert!(launched.status.success(), "{launched:?}");
     let (session, ..) = fixture.session_row(&fixture.launches()[0]);
-    let task = support::register_unrun_task(
+    let task = support::register_task_with_pr(
         fixture.home.path(),
         fixture.repo.path(),
         "native-history",
@@ -797,7 +797,7 @@ fn public_history_discovers_unlinked_native_receipts_without_borrowing_a_later_b
 fn binding_starts_the_task_once_without_reattributing_prior_work() {
     let fixture = Fixture::new(false);
     let task_path = fixture.repo.create_named_worktree("task-binding");
-    let task = support::register_unrun_task(
+    let task = support::register_task_with_pr(
         fixture.home.path(),
         &task_path,
         "task-binding",
@@ -955,7 +955,7 @@ fn binding_starts_the_task_once_without_reattributing_prior_work() {
 fn a_task_primary_is_one_of_its_own_conversations() {
     let fixture = Fixture::new(false);
     let sole_path = fixture.repo.create_named_worktree("task-sole");
-    let task = support::register_unrun_task(
+    let task = support::register_task_with_pr(
         fixture.home.path(),
         &sole_path,
         "task-sole",
@@ -1093,7 +1093,7 @@ fn a_task_primary_is_one_of_its_own_conversations() {
 fn provider_parentage_does_not_assign_work_outside_its_checkout() {
     let fixture = Fixture::new(false);
     let task_path = fixture.repo.create_named_worktree("task-binding");
-    let task = support::register_unrun_task(
+    let task = support::register_task_with_pr(
         fixture.home.path(),
         &task_path,
         "task-binding",
@@ -1195,7 +1195,7 @@ fn declared_agent_tools_use_their_checkout_and_keep_the_process_parent() {
     let fixture = Fixture::new(false);
     let x = fixture.repo.create_named_worktree("task-x");
     let task =
-        support::register_unrun_task(fixture.home.path(), &x, "task-x", &fixture.repo.head_sha());
+        support::register_task_with_pr(fixture.home.path(), &x, "task-x", &fixture.repo.head_sha());
     let y = fixture.repo.create_named_worktree("task-y");
     let sibling = support::register_sibling_task(&task, "INF-124", "task-y", &y);
     std::fs::write(fixture.home.path().join("tool-command.json"), serde_json::to_vec(&serde_json::json!({
@@ -1247,7 +1247,7 @@ fn declared_agent_can_start_another_tasks_flow() {
     support::bind_task_planning(&fixture.repo);
     let y = fixture.repo.create_named_worktree("task-y");
     let target =
-        support::register_unrun_task(fixture.home.path(), &y, "task-y", &fixture.repo.head_sha());
+        support::register_task_with_pr(fixture.home.path(), &y, "task-y", &fixture.repo.head_sha());
     let x = fixture.repo.create_named_worktree("task-x");
     let caller = support::register_sibling_task(&target, "INF-124", "task-x", &x);
     std::fs::create_dir_all(y.join(".lf/flows")).unwrap();
@@ -1267,6 +1267,13 @@ fn declared_agent_can_start_another_tasks_flow() {
     // Y needs a harness that supports the checkout boundary. Its mechanical
     // Flow never starts a provider; X's interactive OpenCode only issues the command.
     store.set_task_agent(&target.task.id, "claude").unwrap();
+    store
+        .select_project_workflow(
+            &target.task.project_id,
+            "switch-proof",
+            &std::fs::read_to_string(y.join(".lf/workflows/switch-proof.yaml")).unwrap(),
+        )
+        .unwrap();
     let bin = fixture.home.path().join("bin");
     std::fs::remove_file(bin.join("lf")).unwrap();
     std::fs::write(
@@ -1462,7 +1469,7 @@ fn unavailable_store_starts_no_provider() {
 #[test]
 fn headless_history_is_discoverable_without_entering_the_interactive_list() {
     let fixture = Fixture::new(false);
-    support::register_unrun_task(
+    support::register_task_with_pr(
         fixture.home.path(),
         fixture.repo.path(),
         "history",

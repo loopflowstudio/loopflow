@@ -1623,6 +1623,8 @@ mod cron_catalog_tests {
 
     #[test]
     fn declared_cron_flow_cannot_fall_back_to_builtin_skill() {
+        let _lock = crate::journal::test_env_lock();
+        let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
         let repo = tempfile::tempdir().unwrap();
         fs::create_dir_all(repo.path().join("wave/infrastructure")).unwrap();
         fs::create_dir_all(repo.path().join(".lf/flows")).unwrap();
@@ -1644,6 +1646,14 @@ mod cron_catalog_tests {
             placed_machine: home,
             repo: repo.path().to_path_buf(),
         };
+        std::env::set_var("LF_HOME", &authority.host.lf_home);
+        let store = crate::store::sqlite::SqliteStore::open_ephemeral(
+            &authority.host.lf_home.join("loopflow.db"),
+        )
+        .unwrap();
+        store
+            .ensure_wave(repo.path().to_str().unwrap(), "infrastructure")
+            .unwrap();
         let specs = cron_specs(&authority, "infrastructure").unwrap();
         assert_eq!(specs.len(), 1);
         assert_eq!(specs[0].target_kind, CronTargetKind::Flow);

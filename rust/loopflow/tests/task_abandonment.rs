@@ -4,7 +4,7 @@ use std::process::Command;
 
 use loopflow_test_support::TestRepo;
 use rusqlite::params;
-use support::{register_unrun_task, EnvGuard};
+use support::{register_task_with_pr, EnvGuard};
 
 #[test]
 fn task_abandonment_cli_saves_offline_and_preserves_unresolved_work() {
@@ -12,7 +12,7 @@ fn task_abandonment_cli_saves_offline_and_preserves_unresolved_work() {
         let home = tempfile::tempdir().unwrap();
         let _env = EnvGuard::with_lf_home(&[], home.path());
         let repo = TestRepo::new();
-        let registered = register_unrun_task(home.path(), repo.path(), "main", &repo.head_sha());
+        let registered = register_task_with_pr(home.path(), repo.path(), "main", &repo.head_sha());
         std::fs::create_dir_all(repo.path().join(".lf")).unwrap();
         std::fs::write(
             repo.path().join(".lf/config.yaml"),

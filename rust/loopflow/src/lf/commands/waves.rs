@@ -1040,7 +1040,7 @@ async fn validate_pm_portfolio(
             Ok(None) | Err(_) => continue,
         };
         let planning = row.snapshot;
-        let expected_team = crate::ops::pm::repository_team_for_snapshot_validation(&repo)?;
+        let expected_team = crate::ops::pm::repository_team_for_snapshot_validation(&repo, store)?;
         ownership.entry(repo).or_default().validate(
             wave.slug(),
             &row.initiative,
@@ -1563,7 +1563,7 @@ fn derive_task_condition(
 ) -> TaskConditionSnapshot {
     // A removed historical checkout does not reopen settled work.
     let unresolved_execution = runtime.is_some_and(|runtime| {
-        !runtime.status.is_terminal()
+        (runtime.started && !runtime.status.is_terminal())
             || action_evidence.is_some_and(|evidence| evidence.completion_refusal.is_some())
             || execution.is_some_and(|execution| execution.state != TaskExecutionState::Idle)
             || (local_progress.state == LocalProgressEvidenceState::Observed
@@ -2528,6 +2528,7 @@ mod tests {
         let store = Arc::new(store);
         let mut waves = Vec::new();
         for (name, repository) in [("ear", "first"), ("ear", "second"), ("duplicate", "first")] {
+            std::fs::create_dir_all(directory.path().join(repository)).unwrap();
             let wave = Wave::new(
                 crate::id::WaveId::new(),
                 name.into(),

@@ -12,8 +12,9 @@ are independent. Failed end requests retry without replaying the Flow;
 reopening supersedes old intent. Linear completion preserves execution.
 
 Jack authorized stacking on LOO-406 `558a39232`: local planning, optional
-placement, independent completion. Observed conflicts adopt Linear;
-the enabled unseen-write regression still fails despite matching readback.
+placement, independent completion. Jack retained best-effort unseen concurrency:
+observed Linear conflicts win; the enabled counterexample documents an overwritten
+unseen reopening despite matching readback, not an atomic-write guarantee.
 LOO-385 overlaps without closure authority. Full #1499 lifecycle proof precedes
 Jack’s demo; landing remains unauthorized.
 
@@ -26,7 +27,8 @@ removal, without changing immutable filing input.
 
 Reservation and child commit together; older reservations recover in their
 pinned Project after rotation. Historical intents retain unknown creation in
-common export; absence cannot authorize another create. Reopening preserves
+common export; absence cannot authorize another create. Jack accepted usable local
+Tasks while that export stays pending. Reopening preserves
 execution/PR (`7671f8e9f`).
 
 Merged delivery can finish after Done without reopening (`1c4f10f96`). Resolved
@@ -34,11 +36,10 @@ disposition blocks new scope; unresolved delivery retains its checkout (`0865e43
 Fixtures prove neither scheduled operation nor native acceptance.
 
 Failed promotion retains confirmed copy; handoffs preserve child edits.
-Performed location owns admission; Flow/Started commit atomically. Docker covers
-local filing → completion during a real Flow → CLI/monitor arrival, observed
-reopening and durable end retry, not unseen-write preservation. Combined gate,
-populated upgrade and native acceptance remain. Settlement rechecks merge and
-disposition transactionally.
+Placement owns admission; Flow/Started commit atomically. Docker fixtures cover
+filing, independent completion, CLI/monitor arrival, reopening and end retry.
+Populated upgrades pass; combined gate and native acceptance remain. Settlement
+rechecks merge and disposition together.
 
 ## Terminal-host adoption (2026-10-07)
 
@@ -66,9 +67,8 @@ preserve evidence and limits. No external-progress proof.
 
 ## Live Home reconciliation (2026-10-05)
 
-LOO-380’s dated cleanup/sidebar proof and unresolved LOO-367/366/343 and test-Wave
-findings remain at `314095b00:wave/product/MEMORY.md`, this heading. Not rechecked;
-no rendered proof or new cleanup authority follows. Parent #1439 landed.
+LOO-380 proof and unresolved LOO-367/366/343/test-Wave findings:
+`314095b00:wave/product/MEMORY.md`, this heading. Unrechecked; no new cleanup authority.
 
 ## Reactive workspace (2026-10-05)
 

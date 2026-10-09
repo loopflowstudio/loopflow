@@ -318,24 +318,20 @@ pub struct RegisteredTask {
     pub pr: TaskPr,
 }
 
-#[allow(dead_code)] // Shared helper compiled into integration tests that do not need Task state.
-pub fn register_task(
+/// Seed a retained PR row explicitly, independently of checkout placement.
+#[allow(dead_code)] // Shared helper compiled into tests without delivery fixtures.
+pub fn register_task_with_pr(
     home: &Path,
     worktree: &Path,
     branch: &str,
     base_commit: &str,
 ) -> RegisteredTask {
-    register_task_fixture(home, worktree, branch, base_commit)
-}
-
-#[allow(dead_code)] // Shared helper compiled into integration tests without this incident shape.
-pub fn register_unrun_task(
-    home: &Path,
-    worktree: &Path,
-    branch: &str,
-    base_commit: &str,
-) -> RegisteredTask {
-    register_task_fixture(home, worktree, branch, base_commit)
+    let registered = register_task_fixture(home, worktree, branch, base_commit);
+    tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(registered.store.insert_task_pr(&registered.pr))
+        .unwrap();
+    registered
 }
 
 #[allow(dead_code)] // Shared helper compiled into suites with published Tasks only.
@@ -501,6 +497,16 @@ fn register_task_fixture(
             )
             .await
             .expect("create test Task");
+        store
+            .append_task_event(
+                &task.id,
+                &loopflow::work::task::TaskEventKind::CheckoutReady {
+                    branch: branch.to_string(),
+                    base_commit: base_commit.to_string(),
+                },
+            )
+            .await
+            .unwrap();
     });
     RegisteredTask {
         store,
@@ -530,6 +536,7 @@ pub fn register_sibling_task(
     task.plan.identifier = identifier.to_string();
     task.plan.title = format!("Sibling {identifier}");
     task.workspace_slug = branch.to_string();
+    task.branch = branch.to_string();
     task.worktree = Some(worktree.to_path_buf());
     task.created_at = now;
     task.updated_at = now;
@@ -552,6 +559,17 @@ pub fn register_sibling_task(
             None,
         ))
         .expect("create sibling Task");
+    if worktree.is_dir() {
+        runtime
+            .block_on(registered.store.append_task_event(
+                &task.id,
+                &loopflow::work::task::TaskEventKind::CheckoutReady {
+                    branch: branch.to_string(),
+                    base_commit: task.base_commit.clone(),
+                },
+            ))
+            .unwrap();
+    }
     task
 }
 

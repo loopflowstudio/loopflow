@@ -425,7 +425,11 @@ effect, so it cannot settle a newer decision. State acquisition and delivery sha
 one transactional reconciliation rule: observed conflicts adopt Linear and settle
 the losing receipt without changing the Workflow. No local/provider clock comparison orders edits.
 The provider read and mutation remain separate requests; they do not prevent a
-concurrent Linear edit between them. Abandonment saves the decision and cancellation
+concurrent Linear edit between them. An unseen reopening can be overwritten by
+completion, and matching readback cannot reveal that lost edit. The enabled
+`task_completion_documents_unseen_linear_reopening_overwrite` test retains this
+counterexample; observed-conflict precedence is tested separately. Delivery is
+best effort, not an atomic provider write. Abandonment saves the decision and cancellation
 receipt together without provider access. Cleanup failures preserve the decision;
 unknown or live execution prevents cleanup before provider inspection. Cancellation
 uses the same state delivery path as completion and reopening. Resolve the issue

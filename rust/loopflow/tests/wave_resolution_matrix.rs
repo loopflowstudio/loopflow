@@ -242,7 +242,7 @@ fn make_envs(product_uuid: &str, stale_uuid: &str) -> Vec<Env> {
 /// documented special cases.
 fn expected_outcome(cmd: &Cmd, env: &Env) -> Outcome {
     // Connection may register the selected Wave.
-    if env.id == "explicit-unknown" && cmd.id == "repo connect" {
+    if env.id == "explicit-unknown" && matches!(cmd.id, "repo connect" | "task create") {
         return Outcome::Resolved;
     }
 
@@ -458,19 +458,17 @@ fn matrix_every_command_every_environment() {
         }
 
         for cmd in reads.iter().chain(mutations.iter()) {
-            // `lf project start` calls `ensure_clean_main` before wave
-            // resolution. Earlier mutations can dirty the repo; reset so
-            // project start reaches the resolver.
-            if cmd.id == "project start" {
-                let _ = std::process::Command::new("git")
-                    .args(["reset", "--hard", "HEAD"])
-                    .current_dir(&repo)
-                    .output();
-                let _ = std::process::Command::new("git")
-                    .args(["clean", "-fdx"])
-                    .current_dir(&repo)
-                    .output();
-            }
+            // Every cell owns its saved plan: an earlier creation must not make
+            // a later unknown selector appear registered.
+            let cell = tempfile::tempdir().unwrap();
+            let home = cell.path().join("home");
+            let repo = cell.path().join("repo");
+            let wave = seed(&home, &repo);
+            let environments = make_envs(wave.id().as_str(), &stale_uuid);
+            let env = environments
+                .iter()
+                .find(|value| value.id == env.id)
+                .unwrap();
 
             total += 1;
             let output = run_lf(&home, &repo, cmd, env);

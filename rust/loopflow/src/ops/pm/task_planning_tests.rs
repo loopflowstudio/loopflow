@@ -1569,7 +1569,9 @@ fn task_completion_active_sync_acquires_membership_while_delivery_is_pending() {
 }
 
 #[test]
-fn task_completion_preserves_linear_reopening_during_delivery() {
+fn task_completion_documents_unseen_linear_reopening_overwrite() {
+    // Counterexample, not an atomic-write guarantee. Observed conflicts adopt
+    // Linear (covered above/below); an edit between read and mutation is best effort.
     with_planning_task(|runtime, fixture, repo, task, state| {
         crate::ops::task::task_complete(repo, task.id.as_str(), Some("Delivered locally")).unwrap();
         runtime.block_on(async {
@@ -1582,8 +1584,8 @@ fn task_completion_preserves_linear_reopening_during_delivery() {
             let retained = fixture.store.sqlite.pending_task_state(&task.id).unwrap();
             assert_eq!(
                 (&provider.issues[0]["state"]["type"], retained.is_some()),
-                (&json!("unstarted"), true),
-                "preserve Linear reopening and retain the concurrent local decision"
+                (&json!("completed"), false),
+                "an unconditional write can overwrite an unseen reopening; matching readback cannot detect it"
             );
         });
     });

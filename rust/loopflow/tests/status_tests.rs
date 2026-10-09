@@ -401,6 +401,11 @@ fn seed_persisted_merge_request_without_copy(home: &Path) {
             [PERSISTED_TASK_ID],
         )
         .expect("move persisted Task into the current PM Project");
+    connection.execute(
+        "INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,created_at,updated_at)
+         SELECT 'pr-copy-fixture',id,1,workspace_slug,branch,base_commit,?2,?2 FROM tasks WHERE id=?1",
+        rusqlite::params![PERSISTED_TASK_ID, now],
+    ).unwrap();
     connection
         .execute(
             "UPDATE task_prs SET
@@ -960,12 +965,12 @@ fn exact_task_roadmap_retains_history_without_starting_work() {
                 tasks[0]["task"]["name"],
                 "Preserve historical architecture evidence"
             );
-            assert_eq!(
+            assert!(
                 result["waves"][0]["unavailable_tasks"]
                     .as_array()
                     .unwrap()
-                    .len(),
-                1
+                    .is_empty(),
+                "saved local planning remains readable without a current provider inventory"
             );
         }
     }

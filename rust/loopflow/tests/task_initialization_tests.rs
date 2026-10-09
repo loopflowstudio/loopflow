@@ -8,7 +8,7 @@ use loopflow::ops::task::task_status;
 use loopflow::ops::task_actions::TaskAction;
 use loopflow::work::task::{GithubPr, PrPublication, TaskEventKind};
 use loopflow_test_support::TestRepo;
-use support::{register_unrun_task, EnvGuard};
+use support::{register_task_with_pr, EnvGuard};
 
 fn unbound_command(cli: &Path, repo: &Path, args: &[&str]) -> Command {
     let mut command = Command::new(cli);
@@ -33,7 +33,7 @@ fn stacked_checkout_starts_with_one_scratch_deletion_commit() {
     repo.stage_all();
     repo.commit("Parent notes");
     let parent_head = repo.head_sha();
-    let parent = register_unrun_task(home.path(), repo.path(), "parent", &parent_head);
+    let parent = register_task_with_pr(home.path(), repo.path(), "parent", &parent_head);
     let child =
         support::register_sibling_task(&parent, "INF-124", "child", &target.path().join("child"));
     let worktree = child.worktree.as_ref().unwrap();
@@ -50,7 +50,7 @@ fn stacked_checkout_starts_with_one_scratch_deletion_commit() {
         merge: None,
     });
     runtime
-        .block_on(parent.store.insert_task_pr(&parent_pr))
+        .block_on(parent.store.update_task_pr(&parent_pr))
         .unwrap();
     rusqlite::Connection::open(home.path().join("loopflow.db"))
         .unwrap()
@@ -111,9 +111,15 @@ fn stacked_checkout_starts_with_one_scratch_deletion_commit() {
 #[test]
 fn checkout_restores_exact_task_history_from_a_dirty_checkout() {
     let repo = TestRepo::new();
+    assert!(Command::new("git")
+        .current_dir(repo.path())
+        .args(["branch", "test/checkout-recovery"])
+        .status()
+        .unwrap()
+        .success());
     let home = tempfile::tempdir().unwrap();
     let target = tempfile::tempdir().unwrap();
-    let mut fixture = register_unrun_task(
+    let mut fixture = register_task_with_pr(
         home.path(),
         repo.path(),
         "test/checkout-recovery",
@@ -235,7 +241,7 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
     let base = repo.head_sha();
     let branch = "jack/initializing-task";
     repo.create_branch(branch);
-    let mut task = register_unrun_task(home.path(), repo.path(), branch, &base);
+    let mut task = register_task_with_pr(home.path(), repo.path(), branch, &base);
     let missing_worktree = home.path().join("not-yet-created-worktree");
     task.task.worktree = Some(missing_worktree.clone());
     let runtime = tokio::runtime::Runtime::new().expect("initialization fixture runtime");
@@ -366,7 +372,7 @@ fn missing_worktree_status_is_actionable_and_read_only() {
         let base = repo.head_sha();
         let branch = "jack/missing-worktree";
         repo.create_branch(branch);
-        let task = register_unrun_task(home.path(), repo.path(), branch, &base);
+        let task = register_task_with_pr(home.path(), repo.path(), branch, &base);
         (task, repo.path().to_path_buf(), branch.to_string())
     };
     assert!(!missing_path.exists(), "fixture worktree is absent");
@@ -416,7 +422,7 @@ fn research_checkout_restores_and_reads_files_without_a_pull_request() {
     let home = tempfile::tempdir().unwrap();
     let target = tempfile::tempdir().unwrap();
     let _env = EnvGuard::with_lf_home(&[], home.path());
-    let parent = register_unrun_task(home.path(), repo.path(), "main", &repo.head_sha());
+    let parent = register_task_with_pr(home.path(), repo.path(), "main", &repo.head_sha());
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let research = support::register_sibling_task(
         &parent,

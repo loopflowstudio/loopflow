@@ -11,7 +11,8 @@ use loopflow::ops::{
 use loopflow::work::task::PrMergeMode;
 use loopflow_test_support::TestRepo;
 use support::{
-    codex_app_server_script, counting_open_script, presentation_attempts, register_task, EnvGuard,
+    codex_app_server_script, counting_open_script, presentation_attempts, register_task_with_pr,
+    EnvGuard,
 };
 
 fn push_branch(repo: &TestRepo, name: &str) {
@@ -1107,7 +1108,7 @@ fn submit_records_user_merge_for_a_managed_task() {
         &[("gh", script.as_str()), ("open", noop_open_script())],
         home.path(),
     );
-    let task = register_task(home.path(), repo.path(), branch, &base);
+    let task = register_task_with_pr(home.path(), repo.path(), branch, &base);
 
     submit(
         repo.path(),
@@ -1159,7 +1160,7 @@ fn land_clears_the_durable_request_when_auto_arm_fails() {
         &[("gh", script.as_str()), ("open", noop_open_script())],
         home.path(),
     );
-    let task = register_task(home.path(), repo.path(), branch, &base);
+    let task = register_task_with_pr(home.path(), repo.path(), branch, &base);
 
     let result = land(
         repo.path(),
@@ -1208,7 +1209,7 @@ fn same_head_publication_preserves_the_armed_merge_request() {
     repo.stage_all();
     repo.commit("feature work");
     repo.push_new_branch(branch);
-    let task = register_task(home.path(), repo.path(), branch, &base);
+    let task = register_task_with_pr(home.path(), repo.path(), branch, &base);
     fs::write(format!("{}.auto", log_path.display()), "armed externally")
         .expect("seed external auto-merge state");
 
@@ -1279,7 +1280,7 @@ fn repeated_identical_land_preserves_the_armed_task_request() {
     repo.stage_all();
     repo.commit("feature work");
     repo.push_new_branch(branch);
-    let task = register_task(home.path(), repo.path(), branch, &base);
+    let task = register_task_with_pr(home.path(), repo.path(), branch, &base);
     let options = LandOptions {
         strict: true,
         local: false,
@@ -2165,7 +2166,7 @@ fn waited_task_landing_repairs_without_a_watcher_and_preserves_other_work() {
         ("gh", &gh), ("codex", &codex), ("open", noop_open_script()),
         ("tmux", "#!/bin/sh\nif [ \"$1\" = new-session ]; then\nfor arg do command=$arg; done\n/bin/sh -c \"$command\" </dev/null >/dev/null 2>&1 &\nfi\n"),
     ], home.path());
-    let fixture = register_task(home.path(), &worktree, "waited-repair", &base);
+    let fixture = register_task_with_pr(home.path(), &worktree, "waited-repair", &base);
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     let unrelated = loopflow::id::ProcessLfid::new();
     db.execute("INSERT INTO processes(lfid,trace_id,pid,cwd,command,started_at) VALUES(?1,?2,?3,?4,'independent-edit',?5)",
@@ -2388,7 +2389,7 @@ esac
         &[("gh", &script), ("open", noop_open_script())],
         home.path(),
     );
-    let fixture = register_task(home.path(), &worktree, branch, &base);
+    let fixture = register_task_with_pr(home.path(), &worktree, branch, &base);
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     let command = || {
@@ -2593,13 +2594,34 @@ esac
         String::from_utf8_lossy(&selected.stderr)
     );
     assert!(String::from_utf8_lossy(&selected.stdout).contains("already merged"));
-    // A completed Task must also make repeated landing harmless. This fixture
-    // supplies an already-completed Workflow; completion itself has separate tests.
-    database.execute(
-        "INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,
-        '{\"name\":\"unplanned\",\"nodes\":[],\"edges\":[{\"from\":\"start\",\"to\":\"end\",\"flow\":null}]}','end',1)",
-        [fixture.task.id.as_str()],
-    ).unwrap();
+    // Completion is durable even when dirty notes prevent checkout cleanup.
+    let disposition = command()
+        .args([
+            "task",
+            "follow-up",
+            "INF-123",
+            "--none",
+            "No remaining obligation",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        disposition.status.success(),
+        "{}",
+        String::from_utf8_lossy(&disposition.stderr)
+    );
+    let completed = command()
+        .args(["task", "complete", "INF-123"])
+        .output()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&completed.stderr)
+        .contains("is complete, but cleanup is incomplete"));
+    assert_eq!(
+        runtime
+            .block_on(fixture.store.task_state(&fixture.task.id))
+            .unwrap(),
+        loopflow::durable::TaskState::Done
+    );
     for args in [&["land"][..], &["land", "--wait-and-fix"]] {
         let output = command().args(args).output().unwrap();
         assert!(

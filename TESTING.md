@@ -491,8 +491,10 @@ cargo +stable fmt --all -- --check
 cargo +stable clippy --all-targets -- -D warnings
 ```
 
-The installation harness pulls `rust:bookworm` on each run to follow stable
-alongside CI's Rust jobs, and logs its compiler version. After adopting a newer
+The installation harness pulls `rust:trixie` on each run to follow stable
+alongside CI's Rust jobs, and logs its compiler version. Trixie also supplies
+Git with `merge-tree --merge-base`; Bookworm's Git 2.39 cannot run stacked replay
+checks. After adopting a newer
 standard-library API, run `uv run python scripts/test_task_installation.py` too;
 a local lint pass does not prove that the disposable installation builds.
 

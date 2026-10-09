@@ -277,12 +277,13 @@ mod tests {
                 store.project(&project).unwrap().unwrap().plan.workflow,
                 "review"
             );
-            assert!(store
-                .select_project_workflow(&project, "review", "changed")
-                .is_err());
+            let changed = "nodes: {}\nedges: []\n";
+            store
+                .select_project_workflow(&project, "review", changed)
+                .unwrap();
             assert_eq!(
                 store.wave_workflow(&wave, "review").unwrap().as_deref(),
-                Some(definition)
+                Some(changed)
             );
             assert_eq!(
                 store.project(&project).unwrap().unwrap().plan.workflow,

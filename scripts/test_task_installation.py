@@ -18,7 +18,7 @@ PROOFS = {
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--image", default="rust:bookworm")
+    parser.add_argument("--image", default="rust:trixie")
     parser.add_argument("--test", nargs="+", choices=PROOFS, help="run selected named proofs")
     parser.add_argument(
         "--native-titles", action="store_true", help="prove published title hook installation"

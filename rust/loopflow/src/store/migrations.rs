@@ -2343,7 +2343,7 @@ mod tests {
         let states: Vec<(String, String)> = conn
             .prepare(&format!(
                 "SELECT t.id,{} FROM tasks t ORDER BY t.id",
-                crate::store::sqlite::task_state_sql("t")
+                "CASE WHEN t.abandoned_at IS NOT NULL THEN 'abandoned' WHEN EXISTS(SELECT 1 FROM task_workflows w WHERE w.task_id=t.id AND w.node='end') THEN 'done' ELSE 'not_ready' END"
             ))
             .unwrap()
             .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))

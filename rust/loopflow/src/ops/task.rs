@@ -1240,11 +1240,12 @@ pub fn task_create(
                 super::project::ensure(&main, name).await?;
             }
         }
+        let ambient = std::env::var(crate::work::wave::context::WAVE_ID_ENV).ok();
         let selected = match crate::work::wave::context::resolve_managed_wave(
             Some(&store),
             Some(&main),
             wave,
-            None,
+            ambient.as_deref(),
         )
         .await
         {

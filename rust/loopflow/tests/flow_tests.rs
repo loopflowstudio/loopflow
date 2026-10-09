@@ -412,7 +412,30 @@ fn publish_stack_fixture_pr(
     let mut pr = runtime
         .block_on(store.active_task_pr(task))
         .unwrap()
-        .unwrap();
+        .unwrap_or_else(|| {
+            let task = runtime.block_on(store.get_task(task)).unwrap().unwrap();
+            let pr = loopflow::work::task::TaskPr {
+                id: loopflow::work::task::TaskPrId::new(),
+                task_id: task.id,
+                sequence: 1,
+                slug: task.workspace_slug,
+                branch: task.branch,
+                base_commit: task.base_commit,
+                parent_pr_id: task.parent_pr_id,
+                publication: None,
+                merge_commit: None,
+                abandoned_at: None,
+                ci_observation: None,
+                github_observation: None,
+                linear_attachment_id: None,
+                linear_comment_id: None,
+                linear_link_error: None,
+                created_at: task.created_at,
+                updated_at: task.updated_at,
+            };
+            runtime.block_on(store.insert_task_pr(&pr)).unwrap();
+            pr
+        });
     pr.publication = Some(loopflow::work::task::PrPublication {
         requested_at: pr.created_at,
         presentation: None,
@@ -443,7 +466,7 @@ fn task_checkout_selects_parent_without_rewriting_work_or_publication() {
     let repo = loopflow_test_support::TestRepo::new();
     let home = TempDir::new().unwrap();
     let child =
-        support::register_unrun_task(home.path(), repo.path(), "child-task", &repo.head_sha());
+        support::register_task_with_pr(home.path(), repo.path(), "child-task", &repo.head_sha());
     let parent_path = repo.create_named_worktree("parent-task");
     let parent = support::register_sibling_task(&child, "INF-124", "parent-task", &parent_path);
     repo.create_branch("child-task");
@@ -609,7 +632,7 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
         let home = TempDir::new().unwrap();
         let checkout = repo.path().canonicalize().unwrap();
         let child =
-            support::register_unrun_task(home.path(), &checkout, "child-task", &repo.head_sha());
+            support::register_task_with_pr(home.path(), &checkout, "child-task", &repo.head_sha());
         observe_planning(&child, &checkout);
         let parent_path = repo.create_named_worktree("parent-task");
         let parent = support::register_sibling_task(&child, "INF-124", "parent-task", &parent_path);
@@ -1031,9 +1054,9 @@ fn flow_output_shows_steps_and_agent_messages_with_opt_in_diagnostics() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(output.status.success(), "{stderr}");
         assert!(String::from_utf8_lossy(&output.stdout).contains("agent-readable-text"));
-        assert!(stderr.contains("[1/3] default"), "{stderr}");
-        assert!(stderr.contains("[2/3] flow list"), "{stderr}");
-        assert!(stderr.contains("[3/3] work"), "{stderr}");
+        assert!(stderr.contains("  default"), "{stderr}");
+        assert!(stderr.contains("  cmd: flow list"), "{stderr}");
+        assert!(stderr.contains("  work"), "{stderr}");
         assert_eq!(stderr.contains("INFO"), verbose, "{stderr}");
         assert_eq!(stderr.contains("total"), verbose, "{stderr}");
         assert!(!stderr.contains("private-message-marker"), "{stderr}");
@@ -1166,7 +1189,7 @@ fn killed_driver_leaves_its_agent_step_as_history_without_another_turn() {
 fn observing_and_preparing_a_task_are_not_execution() {
     let repo = loopflow_test_support::TestRepo::new();
     let home = TempDir::new().unwrap();
-    let task = support::register_unrun_task(
+    let task = support::register_task_with_pr(
         home.path(),
         repo.path(),
         "task-observation",
@@ -1251,7 +1274,7 @@ fn task_run_history_reads_only_that_tasks_runs_without_starting_it() {
     repo.create_branch("task-history");
     let home = TempDir::new().unwrap();
     let task =
-        support::register_unrun_task(home.path(), repo.path(), "task-history", &repo.head_sha());
+        support::register_task_with_pr(home.path(), repo.path(), "task-history", &repo.head_sha());
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let events = || {
         runtime
@@ -1358,7 +1381,7 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
     let repo = loopflow_test_support::TestRepo::new();
     let home = TempDir::new().unwrap();
     let task =
-        support::register_unrun_task(home.path(), repo.path(), "task-binding", &repo.head_sha());
+        support::register_task_with_pr(home.path(), repo.path(), "task-binding", &repo.head_sha());
     let sibling_worktree = repo.create_named_worktree("task-sibling");
     let sibling =
         support::register_sibling_task(&task, "INF-124", "task-sibling", &sibling_worktree);
@@ -1539,7 +1562,7 @@ fn bound_flows_keep_task_context_and_leave_other_flows_and_shared_edits_alone() 
     let caller = TestRepo::new();
     let home = TempDir::new().unwrap();
     let checkout = repo.path().canonicalize().unwrap();
-    let task = support::register_unrun_task(
+    let task = support::register_task_with_pr(
         home.path(),
         &checkout,
         "task-contribution",
@@ -1983,7 +2006,7 @@ fn task_flow_read_keeps_captured_topology_and_counts_both_returns() {
     // A Task's Flows are those whose Processes ran in its checkout, as Processes name it.
     let checkout = repo.path().canonicalize().unwrap();
     let task =
-        support::register_unrun_task(home.path(), &checkout, "task-flow-read", &repo.head_sha());
+        support::register_task_with_pr(home.path(), &checkout, "task-flow-read", &repo.head_sha());
     observe_planning(&task, &checkout);
     repo.create_branch("task-flow-read");
     for skill in [
@@ -2015,7 +2038,7 @@ fn task_flow_read_keeps_captured_topology_and_counts_both_returns() {
     let flow = roadmap_task(repo.path(), home.path());
     assert_eq!(flow["workflow_name"], "feature");
     assert!(flow["latest_flow_process"].is_null());
-    assert!(flow["run_control"]["unavailable"].is_null());
+    assert!(flow["run_control"]["unavailable"].is_null(), "{flow}");
     assert_eq!(task_flow()["work"]["flow_processes"], serde_json::json!([]));
 
     // The catalogue previews the authored topology through the shared loader.
@@ -2122,7 +2145,7 @@ fn task_flow_read_keeps_captured_topology_and_counts_both_returns() {
 
     // A stopped Flow is history: a fresh launch stays legal, and no command
     // restarts or resumes this one.
-    assert!(flow["run_control"]["unavailable"].is_null());
+    assert!(flow["run_control"]["unavailable"].is_null(), "{flow}");
     for removed in [
         vec!["task", "restart", "INF-123", "--flow", "two-loops"],
         vec!["--task", "INF-123", "flow", "start", "two-loops"],
@@ -2181,7 +2204,7 @@ fn three_nested_loops_return_to_named_occurrences_of_one_skill() {
     let home = TempDir::new().unwrap();
     let checkout = repo.path().canonicalize().unwrap();
     let task =
-        support::register_unrun_task(home.path(), &checkout, "nested-loops", &repo.head_sha());
+        support::register_task_with_pr(home.path(), &checkout, "nested-loops", &repo.head_sha());
     observe_planning(&task, &checkout);
     repo.create_branch("nested-loops");
     write_skill(repo.path(), "work-proof", "Fixture step.");
@@ -2281,7 +2304,7 @@ fn a_repeated_node_receives_only_task_direction_newer_than_its_last_run() {
     let home = TempDir::new().unwrap();
     let checkout = repo.path().canonicalize().unwrap();
     let task =
-        support::register_unrun_task(home.path(), &checkout, "repeat-steers", &repo.head_sha());
+        support::register_task_with_pr(home.path(), &checkout, "repeat-steers", &repo.head_sha());
     observe_planning(&task, &checkout);
     repo.create_branch("repeat-steers");
     write_skill(repo.path(), "work-proof", "Fixture step.");
@@ -2541,7 +2564,7 @@ fn wave_context_keeps_task_location_and_rejects_another_owner() {
     repo.create_branch("wave-context");
     let home = TempDir::new().unwrap();
     let task =
-        support::register_unrun_task(home.path(), repo.path(), "wave-context", &repo.head_sha());
+        support::register_task_with_pr(home.path(), repo.path(), "wave-context", &repo.head_sha());
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let other = Wave::new(
         WaveId::new(),

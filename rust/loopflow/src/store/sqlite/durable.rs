@@ -1365,7 +1365,7 @@ mod durable_store_tests {
             store.task(&task.id).unwrap().unwrap().worktree,
             task.worktree
         );
-        assert_eq!(store.task_prs(&task.id).unwrap(), vec![pr]);
+        assert!(store.task_prs(&task.id).unwrap().is_empty());
     }
 
     #[test]

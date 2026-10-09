@@ -871,7 +871,7 @@ fn terminal_titles_follow_session_rename_and_reconnect_without_provider_accounts
             "# Loopflow operating guide\nFollow the repository instructions.",
         );
         let task = bound.then(|| {
-            support::register_unrun_task(
+            support::register_task_with_pr(
                 home.path(),
                 &repo.path().canonicalize().unwrap(),
                 "main",

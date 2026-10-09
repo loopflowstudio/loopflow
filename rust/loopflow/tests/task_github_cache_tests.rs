@@ -7,7 +7,7 @@ use loopflow::durable::WorkRef;
 use loopflow::ops::task::{task_interrupt, task_status};
 use loopflow::work::task::{GithubPr, Observation, PrPublication};
 use loopflow_test_support::TestRepo;
-use support::{register_task, EnvGuard, RegisteredTask};
+use support::{register_task_with_pr, EnvGuard, RegisteredTask};
 use time::{Duration, OffsetDateTime};
 
 fn publish_task(task: &mut RegisteredTask) {
@@ -110,7 +110,7 @@ fn graph_ql_exhaustion_never_blocks_task_control_or_forces_pr_enumeration() {
     repo.create_branch("jack/task-pr-proof");
     point_origin_at_github(&repo);
     let base = repo.head_sha();
-    let mut task = register_task(home.path(), repo.path(), "jack/task-pr-proof", &base);
+    let mut task = register_task_with_pr(home.path(), repo.path(), "jack/task-pr-proof", &base);
     publish_task(&mut task);
     let log = home.path().join("gh.log");
     let script = gh_success_script(log.to_string_lossy().as_ref());
@@ -163,7 +163,7 @@ fn rest_failure_opens_one_durable_circuit_while_local_controls_continue() {
     repo.create_branch("jack/task-pr-proof");
     point_origin_at_github(&repo);
     let base = repo.head_sha();
-    let mut task = register_task(home.path(), repo.path(), "jack/task-pr-proof", &base);
+    let mut task = register_task_with_pr(home.path(), repo.path(), "jack/task-pr-proof", &base);
     publish_task(&mut task);
     let cached_as_of = task.pr.updated_at;
     let log = home.path().join("gh.log");

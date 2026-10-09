@@ -205,10 +205,11 @@ impl SqliteStore {
             "INSERT INTO flow_processes(process_lfid,flow,graph) VALUES(?1,?2,?3)",
             params![driver, graph.name, serde_json::to_string(graph)?],
         )?;
-        if let Some(task) = task {
+        let associated = super::task_work::task_of_process(&tx, driver)?;
+        if let Some(task) = task.map(TaskId::as_str).or(associated.as_deref()) {
             tx.execute(
                 "UPDATE tasks SET started_at=?2 WHERE id=?1 AND started_at IS NULL",
-                params![task.as_str(), crate::store::rows::now_unix()],
+                params![task, crate::store::rows::now_unix()],
             )?;
         }
         tx.commit()?;

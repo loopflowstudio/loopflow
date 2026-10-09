@@ -7,7 +7,7 @@ use loopflow::store::{CredentialType, ProviderToken};
 use loopflow::work::task::{GithubPr, PrPublication};
 use loopflow_test_support::TestRepo;
 use std::process::Command;
-use support::{register_unrun_task, EnvGuard};
+use support::{register_task_with_pr, EnvGuard};
 
 #[test]
 fn task_abandon_binary_preserves_unresolved_execution() {
@@ -18,7 +18,7 @@ fn task_management_fixture() {
     let home = tempfile::tempdir().unwrap();
     let _env = EnvGuard::with_lf_home(&[], home.path());
     let repo = TestRepo::new();
-    let mut registered = register_unrun_task(home.path(), repo.path(), "main", &repo.head_sha());
+    let mut registered = register_task_with_pr(home.path(), repo.path(), "main", &repo.head_sha());
     let runtime = tokio::runtime::Runtime::new().unwrap();
     registered.pr.publication = Some(PrPublication {
         requested_at: time::OffsetDateTime::now_utc(),

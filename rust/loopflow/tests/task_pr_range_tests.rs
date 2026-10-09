@@ -21,7 +21,7 @@ use loopflow::ops::{
 };
 use loopflow::work::task::{GithubPr, PrMergeMode, PrMergeRequest, PrPresentation, PrPublication};
 use loopflow_test_support::TestRepo;
-use support::{register_task, EnvGuard};
+use support::{register_task_with_pr, EnvGuard};
 use time::OffsetDateTime;
 
 fn land_options(create_pr: bool, pr_title: &str) -> LandOptions {
@@ -152,7 +152,7 @@ fn submit_refuses_a_contaminated_range_before_any_push() {
     repo.commit("task commit");
     // Deliberately NOT pushed: the refusal must precede the first push.
 
-    register_task(home.path(), repo.path(), branch, &contaminated_base);
+    register_task_with_pr(home.path(), repo.path(), branch, &contaminated_base);
 
     let err = submit(
         repo.path(),
@@ -220,7 +220,7 @@ fn task_pr_heals_stale_base_and_aligns_the_three_views() {
     let advanced = repo.head_sha();
     repo.checkout(branch);
 
-    let task = register_task(home.path(), repo.path(), branch, &stale_base);
+    let task = register_task_with_pr(home.path(), repo.path(), branch, &stale_base);
 
     land(repo.path(), &land_options(false, "Task PR"), &NullProgress)
         .expect("stale base heals and lands");
@@ -287,7 +287,7 @@ fn failed_sync_push_does_not_advance_the_recorded_task_base() {
     let target = repo.head_sha();
     repo.checkout(branch);
 
-    let task = register_task(home.path(), repo.path(), branch, &stale_base);
+    let task = register_task_with_pr(home.path(), repo.path(), branch, &stale_base);
     let hook = repo.bare_path().join("hooks/pre-receive");
     fs::write(
         &hook,
@@ -380,7 +380,7 @@ fn sync_onto_the_prs_own_remote_branch_keeps_the_recorded_base() {
     let _env = EnvGuard::with_lf_home(&[], home.path());
     let branch = "jack/own-remote-sync";
     let base = task_behind_its_own_remote(&repo, branch);
-    let task = register_task(home.path(), repo.path(), branch, &base);
+    let task = register_task_with_pr(home.path(), repo.path(), branch, &base);
 
     sync_onto(&repo, &format!("origin/{branch}"));
 
@@ -411,7 +411,7 @@ fn sync_onto_main_recovers_a_base_recorded_at_the_prs_own_remote_tip() {
     repo.push();
     let advanced = repo.head_sha();
     repo.checkout(branch);
-    let task = register_task(home.path(), repo.path(), branch, &own_tip);
+    let task = register_task_with_pr(home.path(), repo.path(), branch, &own_tip);
 
     sync_onto(&repo, "origin/main");
 
@@ -448,7 +448,7 @@ fn sync_onto_main_refuses_a_base_carrying_another_branchs_commits() {
     repo.stage_all();
     repo.commit("task commit");
     repo.push_new_branch(branch);
-    let task = register_task(home.path(), repo.path(), branch, &foreign);
+    let task = register_task_with_pr(home.path(), repo.path(), branch, &foreign);
 
     let error = sync_with_recovery(
         repo.path(),
@@ -483,7 +483,7 @@ fn sync_revokes_auto_before_force_pushing_a_new_task_head() {
     repo.stage_all();
     repo.commit("task commit");
     repo.push_new_branch(branch);
-    let task = register_task(home.path(), repo.path(), branch, &stale_base);
+    let task = register_task_with_pr(home.path(), repo.path(), branch, &stale_base);
     let old_head = repo.head_sha();
     let now = OffsetDateTime::now_utc();
     let mut pr = task.pr.clone();
@@ -590,7 +590,7 @@ fn publish_uses_managed_worktree_even_with_unknown_ambient_run() {
     repo.checkout(branch);
     let before_publish = repo.head_sha();
 
-    let task = register_task(home.path(), repo.path(), branch, &stale_base);
+    let task = register_task_with_pr(home.path(), repo.path(), branch, &stale_base);
     std::env::set_var("LF_CAPTURE_KEY", "run_00000000000000000000000000000000");
 
     create_or_update_pr(
@@ -696,7 +696,7 @@ fn submit_refuses_divergent_ancestry_naming_both_sides() {
         ],
     );
 
-    register_task(home.path(), repo.path(), branch, &contaminated_base);
+    register_task_with_pr(home.path(), repo.path(), branch, &contaminated_base);
 
     let err = submit(repo.path(), &land_options(true, "divergent"), &NullProgress)
         .expect_err("divergent ancestry must refuse");
@@ -782,7 +782,7 @@ fn submit_refuses_contaminated_range_after_squash_merged_parent() {
     repo.stage_all();
     repo.commit("PR2 commit");
 
-    register_task(home.path(), repo.path(), second_branch, &pr1_tip);
+    register_task_with_pr(home.path(), repo.path(), second_branch, &pr1_tip);
 
     let err = submit(
         repo.path(),
@@ -850,7 +850,7 @@ fn submit_refuses_contaminated_range_without_a_remote() {
     git_out(&repo, &["reset", "--hard", &base]);
     repo.checkout(branch);
 
-    register_task(home.path(), repo.path(), branch, &contaminated_base);
+    register_task_with_pr(home.path(), repo.path(), branch, &contaminated_base);
 
     let err = submit(
         repo.path(),
@@ -894,7 +894,7 @@ fn submit_refuses_an_empty_range_before_any_gh_call() {
 
     let branch = "jack/empty-range";
     repo.create_branch(branch);
-    let task = register_task(home.path(), repo.path(), branch, &base);
+    let task = register_task_with_pr(home.path(), repo.path(), branch, &base);
 
     // Simulate a previously-published PR so the old guard's
     // `pr.github().is_none()` condition is false — the exact case it skipped.
@@ -964,7 +964,7 @@ fn completed_merge_updates_recorded_base_for_publish_submit_and_land() {
         repo.stage_all();
         repo.commit("Task work");
         let authored = repo.head_sha();
-        let task = register_task(home.path(), repo.path(), branch, &base);
+        let task = register_task_with_pr(home.path(), repo.path(), branch, &base);
         repo.checkout("main");
         repo.create_file("upstream.txt", "Main advances\n");
         repo.stage_all();

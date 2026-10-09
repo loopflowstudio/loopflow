@@ -2190,20 +2190,39 @@ mod local_planning_tests {
             "pm_projects",
             "pm_items",
         ];
-        let rows = |conn: &rusqlite::Connection, table: &str| {
-            let mut query = conn.prepare(&format!("SELECT * FROM {table}")).unwrap();
+        let queries: Vec<_> = tables
+            .iter()
+            .map(|table| {
+                let statement = conn.prepare(&format!("SELECT * FROM {table}")).unwrap();
+                format!("SELECT {} FROM {table}", statement.column_names().join(","))
+            })
+            .collect();
+        let rows = |conn: &rusqlite::Connection, sql: &str| {
+            let mut query = conn.prepare(sql).unwrap();
             let columns = query.column_count();
             query
                 .query_map([], |row| {
                     (0..columns)
-                        .map(|i| row.get::<_, rusqlite::types::Value>(i))
+                        .map(|i| {
+                            row.get::<_, rusqlite::types::Value>(i)
+                                .map(|value| match value {
+                                    rusqlite::types::Value::Text(text) => {
+                                        serde_json::from_str::<serde_json::Value>(&text)
+                                            .map(|json| {
+                                                rusqlite::types::Value::Text(json.to_string())
+                                            })
+                                            .unwrap_or(rusqlite::types::Value::Text(text))
+                                    }
+                                    other => other,
+                                })
+                        })
                         .collect::<rusqlite::Result<Vec<_>>>()
                 })
                 .unwrap()
                 .collect::<rusqlite::Result<Vec<_>>>()
                 .unwrap()
         };
-        let before: Vec<_> = tables.iter().map(|table| rows(&conn, table)).collect();
+        let before: Vec<_> = queries.iter().map(|sql| rows(&conn, sql)).collect();
         conn.execute_batch("PRAGMA foreign_keys=OFF; BEGIN IMMEDIATE;")
             .unwrap();
         conn.execute_batch(&current_draft_sql("local_planning"))
@@ -2216,9 +2235,11 @@ mod local_planning_tests {
         assert_eq!(violations, 0);
         conn.execute_batch("COMMIT; PRAGMA foreign_keys=ON;")
             .unwrap();
-        for (table, expected) in tables.iter().zip(before) {
-            assert_eq!(rows(&conn, table), expected, "{table}");
+        for ((table, sql), expected) in tables.iter().zip(&queries).zip(before) {
+            assert_eq!(rows(&conn, sql), expected, "{table}");
         }
+        conn.execute_batch(&current_draft_sql("optional_task_pr"))
+            .unwrap();
         let store = SqliteStore {
             conn: Arc::new(Mutex::new(conn)),
         };

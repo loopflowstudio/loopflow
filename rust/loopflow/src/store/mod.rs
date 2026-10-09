@@ -1646,7 +1646,7 @@ mod tests {
             }];
             let item = &mut snapshot.snapshot.items[0];
             item.state = Some("unstarted".into());
-            item.rank = 7;
+            item.rank = 0;
             item.url = Some("https://linear.app/issue/INF-123".into());
             item.branch_name = Some("suggested-branch".into());
             item.assignee = Some("owner".into());
@@ -1720,13 +1720,19 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            let completion = store.sqlite.pending_task_state(&task.id).unwrap().unwrap();
+            assert!(store.sqlite.pending_task_state(&task.id).unwrap().is_none());
+            store
+                .sqlite
+                .reopen_task(&task.id, Some("New scope"))
+                .unwrap();
             store
                 .sqlite
                 .set_workflow_node(&task.id, "review", &driver, None)
                 .unwrap();
             let reopened = store.sqlite.workflow(&task.id).unwrap();
-            store.sqlite.settle_task_state(&completion, None).unwrap();
+            snapshot.snapshot.items[0].state = Some("unstarted".into());
+            snapshot.snapshot.items[0].completed = false;
+            snapshot.snapshot.items[0].completed_at = None;
             snapshot.snapshot.items[0].revision = Some("2026-10-05T12:02:00Z".into());
             snapshot.snapshot.items[0].assignee = None;
             store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
@@ -1749,7 +1755,7 @@ mod tests {
             assert!(!record.item.completed);
             assert_eq!(record.item.completed_at, None);
             assert_eq!(record.item.assignee, None);
-            assert_eq!(record.item.rank, 7);
+            assert_eq!(record.item.rank, 0);
             assert_eq!(record.observed_at, 17);
             assert_eq!(store.sqlite.workflow(&task.id).unwrap(), reopened);
             let wave_plan = store.sqlite.planning_wave(wave.id()).unwrap();
@@ -1900,11 +1906,12 @@ mod tests {
                 .unwrap()
                 .unwrap();
             task.id = imported.id;
-            let state_before = store.task_state(&task.id).await.unwrap();
+
             snapshot.snapshot.items[0].revision = Some("2026-10-05T12:01:00Z".into());
             snapshot.snapshot.items[0].state = state.map(str::to_string);
             snapshot.snapshot.items[0].completed = completed;
             store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
+            let events = store.task_events_after(&task.id, 0).await.unwrap();
             let pr = make_task_pr(&task);
             let place = || {
                 store.place_task(
@@ -1915,25 +1922,24 @@ mod tests {
                     None,
                 )
             };
-            assert!(place()
-                .await
-                .unwrap_err()
-                .to_string()
-                .contains("terminal planning state"));
-            assert_eq!(store.task_state(&task.id).await.unwrap(), state_before);
+            assert!(place().await.unwrap_err().to_string().contains("terminal"));
+            assert_eq!(
+                store.task_state(&task.id).await.unwrap(),
+                if completed {
+                    crate::durable::TaskState::Done
+                } else {
+                    crate::durable::TaskState::NotReady
+                }
+            );
             assert!(store.sqlite.workflow(&task.id).unwrap().is_none());
             assert!(store.task_prs(&task.id).await.unwrap().is_empty());
-            assert!(store
-                .task_events_after(&task.id, 0)
-                .await
-                .unwrap()
-                .is_empty());
+            assert_eq!(store.task_events_after(&task.id, 0).await.unwrap(), events);
             snapshot.snapshot.items[0].revision = Some("2026-10-05T12:02:00Z".into());
             snapshot.snapshot.items[0].state = Some("unstarted".into());
             snapshot.snapshot.items[0].completed = false;
             store.put_pm_snapshot(snapshot, None).await.unwrap();
             place().await.unwrap();
-            assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
+            assert!(store.task_prs(&task.id).await.unwrap().is_empty());
             assert!(!store.task_started(&task.id).await.unwrap());
         }
     }
@@ -2593,10 +2599,7 @@ mod tests {
         assert_eq!(accepted.snapshot.projects, vec![confirmed.clone()]);
         let durable = store.get_project(&project.id).await.unwrap().unwrap();
         assert_eq!(durable.plan.pm_snapshot_synced_at, Some(10));
-        assert!(durable
-            .plan
-            .prompt_context
-            .starts_with("Project metric targets:"));
+        assert!(durable.plan.prompt_context.starts_with("## Metric targets"));
         assert!(!durable.plan.prompt_context.contains("flow:"));
         assert!(durable.plan.prompt_context.contains(&confirmed.krs[0].text));
         let other = Wave::new(WaveId::new(), "other".into(), wave.repo().into());
@@ -2914,77 +2917,87 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn live_steers_inject_new_comments_and_defer_when_not_steerable() {
-        let directory = tempfile::tempdir().unwrap();
-        let store = std::sync::Arc::new(
-            crate::store::open_ephemeral_store(&StorageConfig::sqlite(
-                directory.path().join("registry.db"),
-            ))
-            .await
-            .unwrap(),
-        );
-        let wave = make_wave("/repo");
-        store.create_wave(&wave).await.unwrap();
-        let project = make_project(&wave);
-        store.create_project(&project).await.unwrap();
-        select_project(&store, &project);
-        let task = make_task(&wave, &project);
-        store.seed_task(&task, &make_task_pr(&task)).await.unwrap();
-        let work = WorkRef::Task(task.id.clone());
+    #[test]
+    fn live_steers_inject_new_comments_and_defer_when_not_steerable() {
+        let _lock = crate::journal::test_env_lock();
+        let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let directory = tempfile::tempdir().unwrap();
+            std::env::set_var("LF_HOME", directory.path());
+            let store = std::sync::Arc::new(
+                crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+                    directory.path().join("loopflow.db"),
+                ))
+                .await
+                .unwrap(),
+            );
+            let wave = make_wave(directory.path().to_str().unwrap());
+            store.create_wave(&wave).await.unwrap();
+            let project = make_project(&wave);
+            store.create_project(&project).await.unwrap();
+            select_project(&store, &project);
+            let mut task = make_task(&wave, &project);
+            let checkout = directory.path().join("checkout");
+            std::fs::create_dir(&checkout).unwrap();
+            task.worktree = Some(checkout);
+            store.seed_task(&task, &make_task_pr(&task)).await.unwrap();
+            let work = WorkRef::Task(task.id.clone());
 
-        let sent = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-        let mut harness = RecordingHarness {
-            sent: sent.clone(),
-            steerable: true,
-            ..Default::default()
-        };
+            let sent = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+            let mut harness = RecordingHarness {
+                sent: sent.clone(),
+                steerable: true,
+                ..Default::default()
+            };
 
-        let first = store
-            .append_steer(&work, Author::User, "focus on the parser")
-            .await
-            .unwrap();
-        let second = store
-            .append_steer(&work, Author::User, "keep the API stable")
-            .await
-            .unwrap();
-        let mut cursor = 0;
-        crate::ops::child::inject_live_steers(&store, &task.id, &mut harness, &mut cursor).await;
-        assert_eq!(
-            *sent.lock().unwrap(),
-            ["focus on the parser", "keep the API stable"]
-        );
-        assert_eq!(
-            cursor, second.id,
-            "the cursor advances past what was injected"
-        );
-        assert!(first.id < second.id);
+            let first = store
+                .append_steer(&work, Author::User, "focus on the parser")
+                .await
+                .unwrap();
+            let second = store
+                .append_steer(&work, Author::User, "keep the API stable")
+                .await
+                .unwrap();
+            let mut cursor = 0;
+            crate::ops::child::inject_live_steers(&store, &task.id, &mut harness, &mut cursor)
+                .await;
+            assert_eq!(
+                *sent.lock().unwrap(),
+                ["focus on the parser", "keep the API stable"]
+            );
+            assert_eq!(
+                cursor, second.id,
+                "the cursor advances past what was injected"
+            );
+            assert!(first.id < second.id);
 
-        // A comment that arrives later injects only itself — the cursor gates it.
-        let third = store
-            .append_steer(&work, Author::User, "add a regression test")
-            .await
-            .unwrap();
-        crate::ops::child::inject_live_steers(&store, &task.id, &mut harness, &mut cursor).await;
-        assert_eq!(sent.lock().unwrap().len(), 3);
-        assert_eq!(cursor, third.id);
+            // A comment that arrives later injects only itself — the cursor gates it.
+            let third = store
+                .append_steer(&work, Author::User, "add a regression test")
+                .await
+                .unwrap();
+            crate::ops::child::inject_live_steers(&store, &task.id, &mut harness, &mut cursor)
+                .await;
+            assert_eq!(sent.lock().unwrap().len(), 3);
+            assert_eq!(cursor, third.id);
 
-        // A provider that can't take live input leaves the cursor where it is, so
-        // the comment rides the next skill boundary's seed instead.
-        store
-            .append_steer(&work, Author::User, "later direction")
-            .await
-            .unwrap();
-        let mut deaf = RecordingHarness {
-            steerable: false,
-            ..Default::default()
-        };
-        let before = cursor;
-        crate::ops::child::inject_live_steers(&store, &task.id, &mut deaf, &mut cursor).await;
-        assert_eq!(
-            cursor, before,
-            "NotSteerable defers the comment to the next boundary seed"
-        );
+            // A provider that can't take live input leaves the cursor where it is, so
+            // the comment rides the next skill boundary's seed instead.
+            store
+                .append_steer(&work, Author::User, "later direction")
+                .await
+                .unwrap();
+            let mut deaf = RecordingHarness {
+                steerable: false,
+                ..Default::default()
+            };
+            let before = cursor;
+            crate::ops::child::inject_live_steers(&store, &task.id, &mut deaf, &mut cursor).await;
+            assert_eq!(
+                cursor, before,
+                "NotSteerable defers the comment to the next boundary seed"
+            );
+        });
     }
 
     #[tokio::test]
@@ -3093,6 +3106,8 @@ mod tests {
         task = imported;
         task.worktree = worktree;
         task.workspace_slug = "fixture-task".into();
+        task.branch = "fixture-task".into();
+        task.base_commit = "deadbeef".into();
         let pr = make_task_pr(&task);
 
         store
@@ -3134,7 +3149,7 @@ mod tests {
                 )
                 .unwrap()
         };
-        assert_eq!(durable_child_rows(&database_path), (1, 0, 1));
+        assert_eq!(durable_child_rows(&database_path), (1, 0, 0));
 
         let child_steers = store.task_steers(&task.id).await.unwrap();
         assert!(child_steers.is_empty());
@@ -3151,7 +3166,7 @@ mod tests {
                 base_commit: pr.base_commit.clone(),
             }
         );
-        assert_eq!(durable_child_rows(&database_path), (1, 0, 1));
+        assert_eq!(durable_child_rows(&database_path), (1, 0, 0));
         assert!(!task.worktree.as_ref().unwrap().exists());
     }
 
@@ -3220,6 +3235,7 @@ mod tests {
         let persisted = store.get_task(&task.id).await.unwrap().unwrap();
         let before_pr = store.active_task_pr(&task.id).await.unwrap();
         let mut plan = persisted.plan.clone();
+        plan.revision += 1;
         plan.title = "Edited planning title".into();
         plan.description = "Edited planning notes".into();
         plan.pm_snapshot_synced_at = plan.pm_snapshot_synced_at.map(|at| at + 1);

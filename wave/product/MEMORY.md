@@ -109,12 +109,13 @@ frontiers from rejected heads (counterexample: `29fa9a90e`). `7165f9a62`/`dffdba
 jointly project associated origins, retaining original journals/receipts/private
 holds. `1ece5cc52` retires foreign-bridge ancestry before ranking. Mapping validation,
 per-origin heads and creation inputs survive; causality grants no identity/selection.
-October 9's foreground fixture replaces direct transport proof: public Work watch
-and Task saves cover offline/reconnect, associated continuation, observed reopening,
-publication recovery and unchanged seeded execution. Git confirmation never
-acknowledges provider delivery; comment errors stay local. No live Linear, running
-provider or mounted Desktop proof. Mixed exchange, delegation, admission and remote
-opening remain; mixed-provider and first-start refusals stay.
+The foreground fixture covers offline/reconnect,
+associated continuation, causal reopening, recovery and unchanged seeded execution.
+Cached confirmation cannot prove repeat exchange: require fresh stream confirmation
+of an unconfirmed receipt. Git confirmation never acknowledges provider
+delivery; comment errors stay local. No live Linear, running-provider or mounted
+Desktop proof. Mixed exchange, delegation, admission and remote opening remain;
+mixed-provider and first-start refusals stay.
 
 #1512: live connect hands off; dead-driver resume uses native history, never
 import-triggered launch. Native proof remains.

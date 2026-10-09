@@ -302,6 +302,3 @@ fn divergent_fetch_and_push_endpoints_cannot_be_bound() {
     );
     assert!(PlanningDestination::resolve(repo.path(), "origin", PLANNING_REF).is_err());
 }
-
-// Provider records here are fixture data, not a configured Linear connection.
-// Exercise the real Git bytes and common writer without enabling mixed sync.

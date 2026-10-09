@@ -306,18 +306,6 @@ struct TaskFilesTests {
         }
     }
 
-    @Test func finishingSessionKeepsOtherRepositoryPanes() {
-        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
-        let first = registry.workspace(for: fixtureWorkspace("/repo-one/task")).multiplexer
-        let other = registry.workspace(for: fixtureWorkspace("/repo-two/task")).multiplexer
-        first.load(sessionId: "finished")
-        other.load(sessionId: "still-running")
-        let retained = other.layout
-        registry.removeSessions(["finished"], machineId: fixtureMachineId)
-        #expect(first.pane(forSessionId: "finished") == nil)
-        #expect(other.layout == retained)
-    }
-
     @Test func wirePreservesExactBaseAndLosslessText() throws {
         let fixture = try fixture()
         #expect(fixture.directory.entries.map(\.kind) == [.directory, .file, .symlink])

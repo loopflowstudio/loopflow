@@ -126,7 +126,8 @@ struct WorktreeWorkspaceTests {
         #expect(source.multiplexer.shellCommands[shell] == ["server"])
         #expect(target.multiplexer.pane(forSessionId: record.id) != nil)
         #expect(otherRepo.multiplexer.layout == otherLayout)
-        registry.removeSessions([record.id], machineId: "peer")
+        peerRecord.workspace = SessionWorkspace(machineId: "peer", worktree: "/moved", taskId: "task", unavailable: nil)
+        registry.reconcileMembership([peerRecord])
         #expect(peer.multiplexer.pane(forSessionId: record.id) == nil)
         #expect(target.multiplexer.pane(forSessionId: record.id) != nil)
         // Absence from another repository's reading cannot remove a retained pane.
@@ -138,16 +139,26 @@ struct WorktreeWorkspaceTests {
         #endif
     }
 
-    @Test("A confirmed resolution removes a closed Session from Undo without touching other Sessions")
-    func resolutionInvalidatesUndo() {
+    @Test("A membership move invalidates old Undo without touching other Sessions or Machines")
+    func reassociationInvalidatesUndo() throws {
         let registry = SessionsWorkspaceRegistry()
         let panes = registry.workspace(for: fixtureWorkspace("/repo")).multiplexer
+        let peer = registry.workspace(for: WorkspaceIdentity(machineId: "peer", worktree: "/repo")).multiplexer
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        var moved = try JSONDecoder().decode(SessionRecord.self, from:
+            Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/session.json")))
+        moved.workspace = SessionWorkspace(machineId: fixtureMachineId, worktree: "/moved", taskId: nil, unavailable: nil)
         panes.reveal(sessionId: "retained")
-        panes.reveal(sessionId: "resolved")
+        panes.reveal(sessionId: moved.id)
+        peer.reveal(sessionId: moved.id)
         panes.close(panes.focusedPaneId)
+        peer.close(peer.focusedPaneId)
         #expect(panes.canUndoClose)
-        registry.removeSessions(["resolved"], machineId: fixtureMachineId)
+        registry.reconcileMembership([])
+        #expect(panes.canUndoClose)
+        registry.reconcileMembership([moved])
         #expect(!panes.canUndoClose)
+        #expect(peer.canUndoClose)
         #expect(panes.pane(forSessionId: "retained") != nil)
     }
 

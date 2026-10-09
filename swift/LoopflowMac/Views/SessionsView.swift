@@ -192,23 +192,14 @@ final class SessionsWorkspaceRegistry {
         workspaces.first { $0.key.machineId == machineId && $0.value.multiplexer.layout.pane(for: id)?.content == .shell }?.key
     }
 
-    func removeSessions(_ ids: Set<String>, machineId: String) {
-        for (identity, workspace) in workspaces where identity.machineId == machineId {
-            workspace.multiplexer.removeSessions(ids)
-        }
-    }
-
     /// A repository reading establishes moves, not absence from the whole window.
     /// Removing old placements never releases their native surfaces.
     func reconcileMembership(_ records: [SessionRecord]) {
-        let locations = Dictionary(uniqueKeysWithValues: records.compactMap { record in
-            record.workspace.map { (TerminalIdentity.session(record.id, machineId: $0.machineId), $0.identity) }
-        })
         for (identity, workspace) in workspaces {
-            let moved = Set(locations.compactMap { terminal, location -> String? in
-                guard case .session(let id, let machineId) = terminal,
-                      machineId == identity.machineId, location != identity else { return nil }
-                return id
+            let moved = Set(records.compactMap { record -> String? in
+                guard let location = record.workspace?.identity,
+                      location.machineId == identity.machineId, location != identity else { return nil }
+                return record.id
             })
             workspace.multiplexer.removeSessions(moved)
         }
@@ -369,15 +360,6 @@ final class SessionsStore: ObservableObject {
         if let index = _index(id), case .prepared = sessions[index].state {
             sessions[index].state = .live
         }
-    }
-
-
-
-    /// Release a surface only after its Session is confirmed absent.
-    func releaseSurface(_ id: String) {
-        guard let record = sessions.first(where: { $0.id == id })?.record,
-              let machineId = record.workspace?.machineId else { return }
-        surfaces.release(.session(id, machineId: machineId))
     }
 
     /// A retained surface's child ended — provider exit or an external
@@ -697,10 +679,6 @@ struct SessionsContentView: View {
             model.linkedSession = nil
             store.reconcile(model.sessions.value ?? [])
             openSession(record)
-        }
-        .onChange(of: store.sessions.map(\.id)) { previous, ids in
-            for id in Set(previous).subtracting(ids) { store.releaseSurface(id) }
-            workspaces.removeSessions(Set(previous).subtracting(ids), machineId: machineId)
         }
         .onReceive(NotificationCenter.default.publisher(for: .ghosttySurfaceClosed)) { notification in
             guard let terminal = notification.object as? TerminalIdentity else { return }

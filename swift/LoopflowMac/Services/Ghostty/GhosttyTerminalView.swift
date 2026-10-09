@@ -179,14 +179,18 @@ final class GhosttySurfacePool {
     func associateProgramStatus(_ records: [SessionRecord]) {
         for view in views.values {
             let marker = view.terminalMarker
-            let records = records.filter { $0.workspace?.machineId == view.terminal.machineId }
             if case .session(let id, _) = view.terminal {
-                if let record = records.first(where: { $0.id == id }) {
+                if let record = records.first(where: {
+                    $0.id == id && $0.workspace?.machineId == view.terminal.machineId
+                }) {
                     view.programStatus.associate(sessionId: id, terminalId: marker, generation: record.providerGeneration)
                 }
                 continue
             }
-            let matches = records.filter { $0.state == .active && $0.terminalIds.contains(marker) }
+            let matches = records.filter {
+                $0.workspace?.machineId == view.terminal.machineId
+                    && $0.state == .active && $0.terminalIds.contains(marker)
+            }
             view.programStatus.associate(
                 sessionId: matches.count == 1 ? matches[0].id : nil,
                 terminalId: matches.count == 1 ? marker : nil,

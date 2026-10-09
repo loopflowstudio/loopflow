@@ -150,10 +150,12 @@ struct SessionsStoreTests {
         store.recordPaneLive("native")
         #expect(item(store, "native")?.state == .live)
 
-        store.noteSurfaceClosed(.shell("native"))
+        store.noteSurfaceClosed(.shell("native", machineId: fixtureMachineId))
+        #expect(item(store, "native")?.state == .live)
+        store.noteSurfaceClosed(.session("native", machineId: "peer"))
         #expect(item(store, "native")?.state == .live)
 
-        store.noteSurfaceClosed(.session("native"))
+        store.noteSurfaceClosed(.session("native", machineId: fixtureMachineId))
 
         #expect(item(store, "native")?.state == .elsewhere)
         #expect(item(store, "native")?.surface == nil)
@@ -247,6 +249,7 @@ private func session(id: String, state: String, replacing: Bool = false) -> Stri
       "title": "Design the control surface",
       "detail": "review-design",
       "cwd": "/tmp/repo.\(id)",
+      "workspace": {"machine_id": "\(fixtureMachineId)", "worktree": "/tmp/repo.\(id)", "task_id": null, "unavailable": null},
       "state": "\(wire)", "attention": \(state == "waiting" ? "\"waiting\"" : "null"),
       "ready_summary": \(state == "waiting" ? "\"Ready for review\"" : "null"),
       "work_path": "product / Desktop / LOO-291",
@@ -268,11 +271,4 @@ private func runGit(_ args: [String], at directory: URL) throws {
     try #require(process.terminationStatus == 0, "git \(args.joined(separator: " "))")
 }
 
-private actor SessionCalls {
-    private(set) var values: [[String]] = []
-
-    func append(_ value: [String]) {
-        values.append(value)
-    }
-}
 #endif

@@ -424,14 +424,19 @@ async fn planning_graphql(
                 .comments
                 .iter()
                 .filter(|comment| {
-                    comment.get("issue").is_none() || comment["issue"]["id"] == vars["id"]
+                    // Unqualified fixture comments belong to the initial issue,
+                    // never to every issue a repository-wide reader discovers.
+                    comment["issue"]["id"].as_str().unwrap_or("issue-1")
+                        == vars["id"].as_str().unwrap()
                 })
                 .cloned()
                 .collect::<Vec<_>>(),
         );
         json!({"issue":issue})
     } else if query.contains("query IssueComments") {
-        json!({"issue":{"comments":page(state.comments.clone())}})
+        json!({"issue":{"comments":page(state.comments.iter().filter(|comment| {
+            comment["issue"]["id"].as_str().unwrap_or("issue-1") == vars["id"].as_str().unwrap()
+        }).cloned().collect::<Vec<_>>())}})
     } else if query.contains("query CommentDelivery") {
         let mut comment = state
             .comments
@@ -439,7 +444,7 @@ async fn planning_graphql(
             .find(|c| c["id"] == vars["id"])
             .cloned()
             .unwrap_or(serde_json::Value::Null);
-        if !comment.is_null() {
+        if !comment.is_null() && comment["issue"].is_null() {
             comment["issue"] = json!({"id":"issue-1"});
         }
         json!({"comment":comment})
@@ -448,10 +453,10 @@ async fn planning_graphql(
         if state.comments.iter().any(|c| c["id"] == id) {
             return axum::Json(json!({"errors":[{"message":"ID already exists"}]}));
         }
-        state
-            .comments
-            .push(json!({"id":id,"body":vars["body"],"user":null,
-            "createdAt":"2026-10-08T12:00:01Z","updatedAt":"2026-10-08T12:00:01Z"}));
+        state.comments.push(
+            json!({"id":id,"body":vars["body"],"user":null,"issue":{"id":vars["issueId"]},
+            "createdAt":"2026-10-08T12:00:01Z","updatedAt":"2026-10-08T12:00:01Z"}),
+        );
         if std::mem::take(&mut state.lose_comment) {
             return axum::Json(json!({"errors":[{"message":"lost comment response"}]}));
         }
@@ -460,7 +465,7 @@ async fn planning_graphql(
         let id = format!("comment-{}", state.comments.len() + 1);
         state
             .comments
-            .push(json!({"id":id,"body":vars["body"],"user":null}));
+            .push(json!({"id":id,"body":vars["body"],"user":null,"issue":{"id":vars["issueId"]}}));
         if state.lose_comment {
             state.lose_comment = false;
             return axum::Json(json!({"errors":[{"message":"lost comment response"}]}));
@@ -1626,6 +1631,16 @@ fn repository_sync_acquires_comments_without_a_task_anchor() {
                 "issue":{"id":item.id}, "user":{"id":"maya", "name":"Maya"},
                 "createdAt":"2026-10-08T12:00:00Z", "updatedAt":"2026-10-08T12:00:00Z"
             }));
+            state.lock().await.comments.push(json!({
+                "id":"first-task-comment", "body":"Direction for the first Task",
+                "user":{"id":"maya", "name":"Maya"},
+                "createdAt":"2026-10-08T12:00:00Z", "updatedAt":"2026-10-08T12:00:00Z"
+            }));
+            // Read the other Task first: provider comments cannot change owners
+            // just because independent acquisition requests arrive in this order.
+            crate::ops::linear_observe::refresh_task_comments(&fixture.store, &other)
+                .await
+                .unwrap();
         });
         let workflow = fixture.store.sqlite.workflow(&other.id).unwrap();
         let sync = crate::ops::linear_observe::PlanningSync::start(
@@ -1644,6 +1659,14 @@ fn repository_sync_acquires_comments_without_a_task_anchor() {
                         .comments
                         .iter()
                         .any(|comment| comment.id == "unselected-comment")
+                        && fixture
+                            .store
+                            .sqlite
+                            .task_comments(&task.id)
+                            .unwrap()
+                            .comments
+                            .iter()
+                            .any(|comment| comment.id == "first-task-comment")
                     {
                         break;
                     }
@@ -1654,13 +1677,26 @@ fn repository_sync_acquires_comments_without_a_task_anchor() {
             .unwrap();
         });
         drop(sync);
-        assert!(fixture
-            .store
-            .sqlite
-            .task_comments(&task.id)
-            .unwrap()
-            .comments
-            .is_empty());
+        assert_eq!(
+            fixture
+                .store
+                .sqlite
+                .task_comments(&task.id)
+                .unwrap()
+                .comments
+                .len(),
+            1
+        );
+        assert_eq!(
+            fixture
+                .store
+                .sqlite
+                .task_comments(&other.id)
+                .unwrap()
+                .comments
+                .len(),
+            1
+        );
         assert_eq!(fixture.store.sqlite.workflow(&other.id).unwrap(), workflow);
         assert!(runtime
             .block_on(fixture.store.get_task(&other.id))
@@ -1828,6 +1864,7 @@ exit 0
                         provider.issues.push(added);
                         provider.comments.push(
                             json!({"id":"incoming-reconnect", "body":"Arrived during outage",
+                            "issue":{"id":task.plan.linear_id.as_ref().unwrap()},
                             "createdAt":"2026-10-08T12:00:00Z", "updatedAt":"2026-10-08T12:00:00Z",
                             "user":{"id":"fixture-person","displayName":"Maya","name":"Maya"}}),
                         );

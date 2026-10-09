@@ -314,3 +314,11 @@ Prototypes in `scratch/prototypes/`:
 Not checked against the running app: the Skill picker on a new Session, the
 Task header showing its Workflow, the waiting mark, and splits across Tasks.
 These come from reading the source.
+
+Jack Heart on the four: "ok i like x2 structure x4 copy (x4 structure also ok,
+maybe a little of oth)". Mid-turn: "Build something you can actually ship to
+users. doesnt actually land for me". `x5-goal.html` is the combination: the
+page drawn as a Loopflow window whose goal is the rotating headline, his
+paragraph under it, "You need", the eight `x4` items as its tasks, download;
+then the real capture and a three-item plain list. The "ship to users" line is
+out of `x5`; it is still the headline on the real `/`.

@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <title>Loopflow — The CLI for agent workflows</title>
+    <link rel="canonical" href="https://localhost:5001/cli">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.7/dist/htmx.js"></script><script src="https://cdn.jsdelivr.net/gh/answerdotai/fasthtml-js@1.0.12/fasthtml.js"></script><script src="https://cdn.jsdelivr.net/gh/answerdotai/surreal@main/surreal.js"></script><script src="https://cdn.jsdelivr.net/gh/gnat/css-scope-inline@main/script.js"></script>    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@latest/css/pico.min.css">
+    <style>:root { --pico-font-size: 100%; }</style>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" href="../../website/static/logo.svg" type="image/svg+xml">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&amp;family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+    <link rel="stylesheet" href="../../website/static/style.css?v=338b76b3cc89">
+  <style>
+.home-page .reading.wide{max-width:none;padding-top:64px;padding-bottom:80px}.home-page .reading.wide .plain,.home-page .reading.wide .more{max-width:900px}
+.x5{padding-top:56px}
+.x5 .win{background:#fdfbf7;border:1px solid #d9d4cc;border-radius:12px;box-shadow:0 30px 70px -30px #722f3755,0 2px 6px #0001;display:grid;grid-template-columns:230px minmax(0,1fr);overflow:hidden}
+.x5 .side{background:#f1ece4;padding:24px 20px;border-right:1px solid #e2dcd2;font-size:13px}
+.x5 .side h4{font:400 21px var(--font-serif);color:var(--burgundy);margin:0 0 16px}
+.x5 .side p{margin:0 0 4px;color:var(--text-secondary);font-size:13px}
+.x5 .side .on{color:var(--text);font-weight:600;border-left:2px solid var(--wine);padding-left:8px;margin-left:-10px}
+.x5 .side ul{list-style:none;margin:0 0 16px;padding:0 0 0 12px}.x5 .side li{list-style:none;padding:3px 0;margin:0;color:var(--text-secondary);font-size:13px}
+.x5 .pane{padding:36px 40px 40px}
+.x5 .lab{font:500 11px/1.6 var(--font-mono);text-transform:uppercase;letter-spacing:.1em;color:var(--text-secondary);margin:0 0 6px}
+.x5 h1{font-size:clamp(28px,3.5vw,46px);line-height:1.12;margin:0 0 16px}
+.x5 .obj{font:18px/1.55 var(--font-serif);color:#3a3532;max-width:62ch;margin:0 0 26px}
+.x5 .krs{list-style:none;padding:0;margin:0 0 26px}.x5 .krs li{list-style:none;margin:0;padding:4px 0 4px 26px;position:relative;font-size:14.5px}
+.x5 .krs li::before{content:"";position:absolute;left:2px;top:10px;width:12px;height:12px;border:1.5px solid #b9b1a6;border-radius:50%}
+.x5 .tasks{border:1px solid var(--border);border-radius:8px;background:#fff;margin:6px 0 0;padding:0;counter-reset:t}
+.x5 .tasks li{list-style:none;margin:0;counter-increment:t;display:grid;grid-template-columns:26px minmax(0,1fr);gap:10px;align-items:baseline;padding:12px 16px;border-bottom:1px solid var(--border);font-size:14.5px}
+.x5 .tasks li:last-child{border-bottom:0}.x5 .tasks li::before{content:counter(t);font:12px var(--font-mono);color:var(--text-secondary)}
+.x5 .tasks b{font-weight:600}.x5 .tasks small{display:block;color:#444;font-size:13.5px;line-height:1.55;max-width:74ch}
+.x5 .foot{display:flex;gap:14px 24px;align-items:center;flex-wrap:wrap;margin-top:30px}.x5 .foot .cost{margin:0;max-width:44ch}
+@media (max-width:760px){.x5 .win{grid-template-columns:1fr}.x5 .side{display:none}.x5 .pane{padding:24px 18px}}
+</style></head>
+  <body>
+<a href="#main-content" class="skip-link">Skip to main content</a>    <div class="home-page">
+      <header>
+<a href="/" class="brand"><img src="../../website/static/logo.svg" alt="">loopflow</a>        <nav aria-label="Main navigation">
+<a href="/#mac" class="optional">For you</a><a href="/cli" aria-current="page">CLI</a><a href="/docs">Docs</a><details><summary>Company</summary>            <div class="menu">
+<a href="/studio">Loopflow Studio</a><a href="/etude">Etude</a><a href="/fantasia">Fantasia</a><a href="/about">About</a>            </div>
+</details><a href="https://github.com/loopflowstudio/loopflow" class="optional">GitHub ↗</a><a href="/#start" class="button solid">Install</a>        </nav>
+      </header>
+<main id="main-content" class="home">
+<section id="mac" class="x5">
+  <div class="win">
+    <aside class="side">
+      <h4>loopflow</h4>
+      <p class="on">for mac</p>
+      <ul><li>A terminal</li>
+<li>Skills</li>
+<li>Sessions</li>
+<li>Waves and Tasks</li>
+<li>One Task, one copy of the code</li>
+<li>Workflows</li>
+<li>Waiting on you</li>
+<li>Side by side</li></ul>
+      <p>underneath</p>
+      <ul><li><a href="/cli">lf, the CLI ↗</a></li></ul>
+    </aside>
+    <div class="pane">
+      <p class="lab">Goal</p>
+      <h1 aria-label="Loopflow is where you design, build, review and ship software with agents."><span aria-hidden="true">Loopflow is where you <span class="rotating"><span>design</span><span>build</span><span>review</span><span>ship</span></span> software with agents.</span></h1>
+      <p class="obj">We’ll get you building whatever software you want like a software engineer, by guiding you through workflows that get the most out of you and ensure high quality software, not slop.</p>
+      <p class="lab">You need</p>
+      <ul class="krs"><li>A coding agent (Claude Code, Codex, or OpenCode)</li><li>A GitHub account</li></ul>
+      <p class="lab">What you get · 8</p>
+      <ol class="tasks"><li><div><b>A terminal</b><small>At its most basic, Loopflow for Mac is a terminal. Open a repository and start a Session with Claude Code, Codex, or OpenCode, the same way every time.</small></div></li>
+<li><div><b>Skills</b><small>Start a Session from a Skill instead of an empty prompt, so you stop retyping how you like work done. Pick one when you open the Session.</small></div></li>
+<li><div><b>Sessions</b><small>Every conversation is kept, whichever agent ran it. Close the window and it is still there when you come back.</small></div></li>
+<li><div><b>Waves and Tasks</b><small>The sidebar is your work, not a list of chats: Waves (long-lived streams), the Tasks under each (concrete outcomes, i.e. PRs), and the Sessions under each Task.</small></div></li>
+<li><div><b>One Task, one copy of the code</b><small>Each Task works in its own copy, on its own branch, toward one pull request, so many agents can work without colliding.</small></div></li>
+<li><div><b>Workflows</b><small>A Task’s header shows the stages it goes through to become a shipped and validated PR: where it is now, and where it waits for you.</small></div></li>
+<li><div><b>Waiting on you</b><small>A Task that needs you is marked, so you look where you are needed and leave the rest running.</small></div></li>
+<li><div><b>Side by side</b><small>Split the window to follow several Sessions, or several Tasks, at once.</small></div></li></ol>
+      <div class="foot"><a class="button solid" href="#">Download for Mac</a><p class="cost">Free and open source. The coding agent it drives runs on your own account and has its own cost.</p></div>
+    </div>
+  </div>
+  <p class="capture-label">A drawing in the shape of the app: a goal, what it needs, and its tasks. The real thing is below.</p>
+</section>
+<section class="reading wide">
+  <div class="window"><img src="../../website/static/wave-surface.png" width="2880" height="1800" alt="Loopflow for Mac showing a goal, its key results, and ten tasks with their status"></div>
+  <ul class="plain">
+    <li><b>It is yours</b> Your code stays in your GitHub and on your Mac. Nothing is hosted, so there is nothing to move off later.</li>
+    <li><b>Change whatever you want</b> Skills are Markdown and Flows are YAML. Edit them or use the built-ins. MIT licensed.</li>
+    <li><b>Underneath, it is all <code>lf</code></b> The Mac app includes the command line tool, and every pane is a terminal that runs it.</li>
+  </ul>
+  <p class="more"><a href="/cli">The CLI ↗</a><a href="/docs/waves">Tasks and Waves ↗</a></p>
+</section>
+</main>      <footer>
+<span>Loopflow · An open-source software instrument.</span>        <div>
+<a href="/studio">Loopflow Studio</a><a href="/docs/getting-started">Get started ↗</a><a href="https://github.com/loopflowstudio/loopflow">Source ↗</a>        </div>
+      </footer>
+<script>
+document.querySelectorAll('[data-copy]').forEach(function (button) {
+  var label = button.textContent;
+  button.addEventListener('click', function () {
+    navigator.clipboard.writeText(button.dataset.copy).then(function () {
+      button.textContent = 'Copied';
+      setTimeout(function () { button.textContent = label; }, 1600);
+    });
+  });
+});
+</script>    </div>
+  </body>
+</html>

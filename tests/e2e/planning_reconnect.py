@@ -1,6 +1,7 @@
 """Public work-watch and Flow reconnect against a disposable Linear HTTPS peer."""
 
 import copy
+import hashlib
 import json
 import os
 import queue
@@ -76,9 +77,18 @@ class Handler(BaseHTTPRequestHandler):
         elif "query ListInitiatives" in query:
             data = {
                 "initiatives": _page(
-                    [{"id": "initiative-task-pr-tests", "name": "Task PR Tests", "description": ""}]
+                    [
+                        {
+                            "id": "initiative-task-pr-tests",
+                            "name": state["initiative_name"],
+                            "description": "",
+                        }
+                    ]
                 )
             }
+        elif "mutation UpdateInitiative" in query:
+            state["initiative_name"] = variables["name"]
+            data = {"initiativeUpdate": {"initiative": {"id": variables["id"]}}}
         elif "query ListInitiativeProjects" in query:
             data = {"initiative": {"projects": _page([project])}}
         elif "query ListProjectIssues" in query:
@@ -98,6 +108,8 @@ class Handler(BaseHTTPRequestHandler):
                     ),
                 }
             }
+        elif "query IssueTeam" in query:
+            data = {"issue": {"team": issue["team"]}}
         elif "query WorkflowStates" in query:
             data = {"workflowStates": _page([{"id": variables["type"], "position": 0}])}
         elif "mutation SetIssueState" in query:
@@ -123,7 +135,7 @@ class Handler(BaseHTTPRequestHandler):
             }
         else:
             state["unexpected"].append(query)
-            return {"errors": [{"message": "unexpected fixture operation"}]}
+            return {"errors": [{"message": f"unexpected fixture operation: {query}"}]}
         return {"data": data}
 
 
@@ -218,6 +230,31 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
             watch = Watch(fixture, env)
             watch.scope(str(repo))  # No Task or Wave selected.
         else:
+            # Flow admission requires a managed login, even with a contained provider.
+            profile = root / "accounts/claude/reconnect"
+            profile.mkdir(parents=True)
+            credential = json.dumps(
+                {"claudeAiOauth": {"accessToken": "fixture-reconnect", "expiresAt": 4102444800000}}
+            )
+            (profile / ".credentials.json").write_text(credential)
+            now = int(time.time())
+            db.execute(
+                "INSERT INTO provider_accounts(provider,account_id,home,login_email,"
+                "credential_state,routing_state,created_at,updated_at,observed_email,"
+                "observed_subject,observed_credential_digest) "
+                "VALUES('claude',?,?,?,'connected','automatic',?,?,?,?,?)",
+                (
+                    "reconnect",
+                    str(profile),
+                    "reconnect@example.com",
+                    now,
+                    now,
+                    "reconnect@example.com",
+                    "reconnect",
+                    hashlib.sha256(credential.encode()).hexdigest(),
+                ),
+            )
+            db.commit()
             (repo / ".lf/flows").mkdir(exist_ok=True)
             (repo / ".lf/skills").mkdir(exist_ok=True)
             (repo / ".lf/flows/reconnect.yaml").write_text("- reconnect-proof\n")
@@ -464,6 +501,7 @@ printf '%s\\n' '{"type":"result","subtype":"success","result":"Done"}'
         server.tls = tls
         server.lock = threading.Lock()
         server.state = dict(
+            initiative_name="Task PR Tests",
             project=project,
             issues=[issue, other, remote],
             comments=[],

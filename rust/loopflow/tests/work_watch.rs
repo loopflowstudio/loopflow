@@ -816,7 +816,7 @@ fn offline_cli_completion_and_reopening_reach_desktop_without_refresh() {
     std::fs::create_dir_all(&config).unwrap();
     std::fs::write(
         config.join("config.yaml"),
-        "pm:\n  linear_team: fixture-team\n",
+        "pm:\n  linear_team: team-product\n",
     )
     .unwrap();
     home.plan(1);
@@ -826,11 +826,18 @@ fn offline_cli_completion_and_reopening_reach_desktop_without_refresh() {
     watch.request(scope.clone());
     let await_state = |watch: &Watch, expected| {
         let deadline = Instant::now() + Duration::from_secs(10);
+        let mut last = None;
         loop {
             let frame = watch
                 .next(deadline.saturating_duration_since(Instant::now()))
-                .expect("saved decision did not reach Desktop");
+                .unwrap_or_else(|| {
+                    panic!("saved decision did not reach Desktop; last planning: {last:?}")
+                });
+            if let Some(error) = &frame.unavailable {
+                last = Some(error.clone());
+            }
             if let WorkContent::Planning(Some(part)) = frame.content {
+                last = Some(format!("{part:?}"));
                 for wave in part.roadmap.waves {
                     if let Evidence::Ok { items, .. } = wave.tasks {
                         for task in items {
@@ -909,7 +916,7 @@ fn an_offline_cli_comment_reaches_the_open_desktop_thread() {
     std::fs::create_dir_all(&config).unwrap();
     std::fs::write(
         config.join("config.yaml"),
-        "pm:\n  linear_team: fixture-team\n",
+        "pm:\n  linear_team: team-product\n",
     )
     .unwrap();
     home.plan(1);

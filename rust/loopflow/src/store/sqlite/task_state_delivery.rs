@@ -205,18 +205,17 @@ impl SqliteStore {
         )? == 1)
     }
 
-    /// A late response can describe its effect, but cannot settle a newer decision.
-    pub(crate) fn settle_task_state(
+    /// Failed delivery retains its receipt; only provider observation settles state.
+    pub(crate) fn task_state_error(
         &self,
         delivery: &TaskStateDelivery,
-        error: Option<&str>,
+        error: &str,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "UPDATE task_state_deliveries SET settled=?2,error=?3
-             WHERE id=?1 AND settled=0 AND conflict_json IS NULL
-             AND (settled IS NOT ?2 OR error IS NOT ?3)",
-            params![delivery.id, error.is_none(), error],
+            "UPDATE task_state_deliveries SET error=?2
+             WHERE id=?1 AND settled=0 AND conflict_json IS NULL AND error IS NOT ?2",
+            params![delivery.id, error],
         )?;
         Ok(())
     }

@@ -1713,7 +1713,10 @@ mod tests {
                 .set_workflow_node(&task.id, "review", &driver, None)
                 .unwrap();
             let reopened = store.sqlite.workflow(&task.id).unwrap();
-            store.sqlite.settle_task_state(&completion, None).unwrap();
+            assert!(!store
+                .sqlite
+                .observe_task_state(&completion, &snapshot.snapshot.items[0])
+                .unwrap());
             snapshot.snapshot.items[0].revision = Some("2026-10-05T12:02:00Z".into());
             snapshot.snapshot.items[0].assignee = None;
             store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();

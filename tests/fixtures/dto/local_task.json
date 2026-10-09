@@ -75,7 +75,10 @@
       "name": "Retain quoted input",
       "rank": 0,
       "state": "unstarted",
-      "sync": null
+      "sync": {
+        "connected": false,
+        "changes": []
+      }
     },
     "workflow_name": null
   }

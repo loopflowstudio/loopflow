@@ -7,7 +7,7 @@ use axum::http::StatusCode;
 use serde_json::json;
 use tokio::sync::Barrier;
 
-use super::test_fixture::{now, token, Fixture};
+use super::test_fixture::{now, token, Fixture, PlanningEnvironment};
 use super::{
     linear_refresh_lock, pm_show_async, resolve_pm_token, PmRefresh, PmShowOptions, PmTestContext,
     PM_TEST_CONTEXT,
@@ -100,8 +100,12 @@ async fn forced_read(repo: &Path) -> OpsResult<super::PmShowResult> {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // Serialize process-wide Machine selection.
 async fn pm_read_linear_oauth_recovers() {
+    let _lock = crate::journal::test_env_lock();
+    let _restore = PlanningEnvironment::isolate();
     let fixture = Fixture::new().await;
+    std::env::set_var("LF_HOME", fixture.directory.path());
     let (repo, wave) = fixture.planning_repo().await;
     let stored_wave =
         serde_json::to_value(fixture.store.get_wave(wave.id()).await.unwrap()).unwrap();
@@ -226,9 +230,13 @@ async fn pm_read_linear_oauth_recovers() {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // Serialize process-wide Machine selection.
 async fn pm_read_linear_oauth_invalid_grant() {
     for cached in [true, false] {
+        let _lock = crate::journal::test_env_lock();
+        let _restore = PlanningEnvironment::isolate();
         let fixture = Fixture::new().await;
+        std::env::set_var("LF_HOME", fixture.directory.path());
         let (repo, wave) = fixture.planning_repo().await;
         let previous = if cached {
             Some(fixture.seed_snapshot(&wave).await)
@@ -547,8 +555,12 @@ async fn linear_oauth_transport_failure_preserves_grant() {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // Serialize process-wide Machine selection.
 async fn pm_read_linear_oauth_sqlite_contention_has_bounded_failure_and_recovers() {
+    let _lock = crate::journal::test_env_lock();
+    let _restore = PlanningEnvironment::isolate();
     let fixture = Fixture::new().await;
+    std::env::set_var("LF_HOME", fixture.directory.path());
     let (repo, wave) = fixture.planning_repo().await;
     let previous = fixture.seed_snapshot(&wave).await;
     let original = fixture.seed(now() - 1).await;

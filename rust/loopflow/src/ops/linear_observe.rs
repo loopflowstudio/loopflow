@@ -347,14 +347,14 @@ pub(crate) async fn sync_task_state(store: &Store, task: &Task) -> OpsResult<()>
     let result = tokio::time::timeout(std::time::Duration::from_secs(5), attempt).await;
     let error = match result {
         Ok(Ok(())) => return Ok(()),
-        Ok(Err(error)) => Some(error.to_string()),
-        Err(_) => Some(
-            "Task state delivery timed out; saved decision and delivery identity retained".into(),
-        ),
+        Ok(Err(error)) => error.to_string(),
+        Err(_) => {
+            "Task state delivery timed out; saved decision and delivery identity retained".into()
+        }
     };
     store
         .sqlite
-        .settle_task_state(&delivery, error.as_deref())
+        .task_state_error(&delivery, &error)
         .map_err(|e| message(&e))
 }
 

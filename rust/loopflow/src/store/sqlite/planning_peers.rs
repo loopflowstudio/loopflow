@@ -18,6 +18,8 @@ use crate::store::{PeerPlanningStatus, PeerProjectionConflict, StoreError, Store
 use super::planning_changes::PlanningChanges;
 use super::SqliteStore;
 
+const SHARING_PROJECTION_PENDING: &str = "peer projection skipped by sharing hold; import required";
+
 // Projection and delivery share the same field-keyed winners, including the
 // mutation identity and provenance. Retries never rebuild a value-only index.
 type WinningFields<'a> = BTreeMap<&'a str, (&'a str, &'a PlanningMutation)>;
@@ -30,6 +32,28 @@ struct ObjectChanges<'a> {
     observations: Vec<&'a LinearObservation>,
     creation: Vec<&'a Value>,
     deletions: BTreeMap<&'a str, Vec<&'a Value>>,
+}
+
+/// Rejected projections can retain effects only in the peer journal. Never
+/// acquire a new effect from an incomplete local projection. The caller holds
+/// the same write transaction through recording its attempt; acquisition and
+/// local saves do not consult this check.
+pub(super) fn require_projected_effects(
+    conn: &Connection,
+    owner: PlanningChanges<'_>,
+) -> StoreResult<()> {
+    let (kind, id) = owner.owner();
+    let conflict: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM planning_peer_conflicts WHERE kind=?1 AND object_id=?2 AND active=1)",
+        params![kind, id],
+        |row| row.get(0),
+    )?;
+    if conflict {
+        return Err(invalid(
+            "Planning effects deferred: retained peer projection conflict; no new mutation issued",
+        ));
+    }
+    Ok(())
 }
 
 fn changes_by_object(snapshot: &PlanningSnapshot) -> BTreeMap<&PlanningObject, ObjectChanges<'_>> {
@@ -293,10 +317,16 @@ impl SqliteStore {
                         Some(digest) => digest != planning_digest(&snapshot)?,
                         None => !snapshot.changes.is_empty(),
                     });
-                    status.conflicts.extend(
-                        held.into_iter()
-                            .map(|(object, reason)| PeerProjectionConflict { object, reason }),
-                    );
+                    status.conflicts.retain(|conflict| {
+                        conflict.reason != SHARING_PROJECTION_PENDING
+                            || !held.contains_key(&conflict.object)
+                    });
+                    for (object, reason) in held {
+                        let conflict = PeerProjectionConflict { object, reason };
+                        if !status.conflicts.contains(&conflict) {
+                            status.conflicts.push(conflict);
+                        }
+                    }
                 }
                 // A damaged journal is destination-local evidence, not a reason
                 // to hide the other plans or claim no local changes. SQL failures
@@ -643,6 +673,13 @@ impl SqliteStore {
                 Err(error) => return Err(error),
             }
         }
+        // A skipped projection may retain new effects only in the journal.
+        // Selection can later release a sharing hold without importing again;
+        // keep the projection conflict until those receipts actually project.
+        conflicts.extend(
+            held.into_keys()
+                .map(|object| (object, SHARING_PROJECTION_PENDING.into())),
+        );
         reconcile_conflicts(&tx, repo, destination, &conflicts)?;
         tx.execute("UPDATE planning_peer_context SET importing=0", [])?;
         tx.execute(
@@ -1807,6 +1844,111 @@ mod tests {
     }
 
     #[test]
+    fn peer_rejected_frontier_defers_new_effects_without_blocking_acquisition() {
+        use super::super::planning_changes::PlanningChanges;
+        let (_source_home, source) = store();
+        let (_target_home, target) = store();
+        let (wave, row, task) = linear_seed(&source);
+        import(&target, "/target", "base", &export(&source, "/source"));
+        preserve_execution(&target, &wave, &task);
+        let execution = execution_rows(&target);
+        let checkout = target.task(&task).unwrap().unwrap().worktree;
+        // Model a retained provider frontier not yet captured by a planning
+        // projection (migration/alternate acquisition). Use its acquisition owner.
+        let mut record = crate::store::PmTaskRecord {
+            item: row.snapshot.items[0].clone(),
+            project: Some(row.snapshot.projects[0].clone()),
+            observed_at: 60,
+        };
+        record.item.revision = Some("2026-10-08T12:00:00Z".into());
+        super::super::planning::put_item(
+            &target.conn.lock().unwrap(),
+            "/target",
+            "linear",
+            60,
+            &record.item,
+        )
+        .unwrap();
+        source.delete_task(&task).unwrap();
+        let uncertain = deletion_change(&source, &task);
+        assert!(source
+            .attempt_planning_field(
+                PlanningChanges::Task(&task),
+                &uncertain,
+                row.snapshot.items[0].revision.as_deref(),
+            )
+            .unwrap());
+        source
+            .planning_field_error(PlanningChanges::Task(&task), &uncertain, "lost reply")
+            .unwrap();
+        // This separate local save is not attempted; the only contrary effect
+        // is about to arrive in a rejected object's journal.
+        target.delete_task(&task).unwrap();
+        let local = deletion_change(&target, &task);
+        let incoming = export(&source, "/source");
+        import(&target, "/target", "stale-with-effect", &incoming);
+        assert!(target
+            .peer_projection_conflicts("/target")
+            .unwrap()
+            .iter()
+            .any(|c| c.object.id == task.as_str() && c.reason.contains("older than retained")));
+        assert!(export(&target, "/target")
+            .changes
+            .iter()
+            .any(|(id, mutation)| incoming.changes.get(id) == Some(mutation)
+                && mutation.deletion_receipt() == Some(uncertain.id.as_str())
+                && mutation.value["attempted"] == true));
+        assert_eq!(deletion_receipt(&target, &local.id)["attempted"], 0);
+        assert!(target
+            .attempt_planning_field(
+                PlanningChanges::Task(&task),
+                &local,
+                record.item.revision.as_deref(),
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("retained peer projection conflict"));
+        // A public delivery readback can acquire while the conflict remains.
+        target
+            .put_pm_task("/target", "linear", &record, Some((&wave, "initiative")))
+            .unwrap();
+        assert_eq!(
+            target
+                .planning_task(&task)
+                .unwrap()
+                .record
+                .unwrap()
+                .observed_at,
+            60
+        );
+        assert!(target
+            .attempt_planning_field(
+                PlanningChanges::Task(&task),
+                &local,
+                record.item.revision.as_deref(),
+            )
+            .is_err());
+        assert_eq!(deletion_receipt(&target, &local.id)["attempted"], 0);
+        // Only successful projection releases the conflict, after importing the
+        // retained attempt into the common receipt owner. It still cannot replay.
+        import(&target, "/target", "projected", &incoming);
+        assert!(target
+            .peer_projection_conflicts("/target")
+            .unwrap()
+            .is_empty());
+        assert_eq!(deletion_receipt(&target, &uncertain.id)["attempted"], 1);
+        assert!(!target
+            .attempt_planning_field(
+                PlanningChanges::Task(&task),
+                &local,
+                record.item.revision.as_deref(),
+            )
+            .unwrap());
+        assert_eq!(execution_rows(&target), execution);
+        assert_eq!(target.task(&task).unwrap().unwrap().worktree, checkout);
+    }
+
+    #[test]
     fn peer_deletion_retains_attempt_until_positive_acknowledgement_without_execution() {
         use super::super::planning_changes::PlanningChanges;
         let (_source_home, source) = store();
@@ -2689,6 +2831,17 @@ mod tests {
                 .unwrap(),
             creation
         );
+        assert_eq!(
+            target.planning_export_attempts(owner).unwrap(),
+            (true, false)
+        );
+        // The rejected snapshot carries competing attachment identity. The
+        // local unattempted link is not permission to send a second attachment.
+        assert!(target
+            .attempt_planning_export(owner, &creation.input, true)
+            .unwrap_err()
+            .to_string()
+            .contains("retained peer projection conflict"));
         assert_eq!(
             target.planning_export_attempts(owner).unwrap(),
             (true, false)
@@ -4485,6 +4638,21 @@ mod tests {
             .unwrap()
             .iter()
             .any(|c| c.field == "project_id"));
+        let held_move = left
+            .pending_task_changes(&task)
+            .unwrap()
+            .into_iter()
+            .find(|c| c.field == "project_id")
+            .unwrap();
+        assert!(left
+            .attempt_planning_field(
+                super::super::planning_changes::PlanningChanges::Task(&task),
+                &held_move,
+                None,
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("retained peer projection conflict"));
         // Returning to the shared parent does not leak the losing private reference.
         left.refile_unplaced_task(&task, &private_project, &original.project_id)
             .unwrap();
@@ -4501,6 +4669,17 @@ mod tests {
         .unwrap();
         let released = export(&left, "/source");
         assert!(released.objects().iter().any(|o| o.id == task.as_str()));
+        // Selection releases publication, not a previously skipped projection.
+        assert!(left
+            .attempt_planning_field(
+                super::super::planning_changes::PlanningChanges::Task(&task),
+                &held_move,
+                None,
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("retained peer projection conflict"));
+        import(&left, "/source", "released", &received);
         assert!(left
             .peer_projection_conflicts("/source")
             .unwrap()

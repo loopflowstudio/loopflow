@@ -49,6 +49,7 @@ impl SqliteStore {
     ) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        super::planning_peers::require_projected_effects(&tx, owner)?;
         let observation = owner.observation(&tx)?;
         if observation
             .as_ref()

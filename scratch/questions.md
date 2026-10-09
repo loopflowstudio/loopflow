@@ -167,17 +167,16 @@ remain separate. No new product decision is selected.
   foreground creation is covered by the current cut below; independent relationship
   ordering and mixed-provider activation remain unfinished. No new product policy is selected.
 
-- October 9 receipt transport exposed an ownership error: importing Project export
-  columns through `project_transitions` would fabricate a local rotation or its
-  settlement. Move those creation/link columns to the existing Project row in the
-  peer draft and delete their transition copies; the common `planning_export.rs`
-  writer/readback remains the sole protocol owner. Import no transition at all.
-  Capture stable change IDs rather than machine-local sequence positions. Competing
-  effect snapshots stay journal conflicts, not clock-selected retry authority.
-  Review removed per-object journal rescans and corrected imported Task receipts
-  to retain the captured parent after a later move. Their immutable delivery
-  snapshot is not the current Task membership. Source authoring inputs remain
-  unchanged; foreground preparation now discovers unprepared local-born plans.
+- October 9 effect-eligibility choice: a rejected or sharing-held peer object
+  cannot authorize a new common field/deletion, creation/link, state or ordering
+  effect from its incomplete local receipts. Check existing conflict receipts,
+  including skipped imports, inside the attempt transaction without blocking saves
+  or acquisition. No new effect queue or automatic retry is introduced. A newer
+  acquisition cannot erase the conflict; successful import must incorporate the
+  retained attempts first. This conservative object-level deferral is an internal
+  composition choice, not a new product policy. Mixed-provider exchange remains
+  disabled. Creation-column ownership rationale remains at
+  `cdec83fe8:scratch/questions.md`, October 9 receipt transport, and in the design.
 
 - October 9 foreground/deletion choices are implemented, not new product policy:
   one common export view exposes unprepared plans and explicit acknowledgement;
@@ -187,5 +186,5 @@ remain separate. No new product decision is selected.
   selection. Unordered active/trash evidence isolates projection; no inferred
   deletion settlement. Full rationale and prior checks:
   `225b8c95f:scratch/questions.md`, final two entries. The current design owns
-  remaining effect-eligibility, ordering, alternate-acquisition and presentation
-  work; mixed-provider exchange remains disabled.
+  remaining ordering, alternate-acquisition and presentation work;
+  mixed-provider exchange remains disabled.

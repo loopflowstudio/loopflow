@@ -14,6 +14,11 @@ fn public_watch_exports_peer_born_plans_and_recovers_mapped_receipts() {
 }
 
 #[test]
+fn public_delivery_defers_rejected_peer_effects_while_acquisition_continues() {
+    planning_reconnect_fixture("effects");
+}
+
+#[test]
 fn work_watch_reconnects_repository_planning() {
     planning_reconnect_fixture("watch");
 }
@@ -61,6 +66,10 @@ fn planning_reconnect_fixture(mode: &str) {
     });
     if mode == "exports" {
         fixture["peer"] = import_unprepared_plans(repo.path(), home.path());
+    }
+    if mode == "effects" {
+        fixture["effects"] =
+            import_rejected_deletion(repo.path(), home.path(), &registered.task.id);
     }
     let input = home.path().join("fixture.json");
     std::fs::write(&input, serde_json::to_vec(&fixture).unwrap()).unwrap();
@@ -169,4 +178,108 @@ fn import_unprepared_plans(repo: &std::path::Path, home: &std::path::Path) -> se
         0
     );
     serde_json::json!({"task":task,"project":saved.project_id.as_str(),"wave":saved.wave_id.as_str()})
+}
+
+// Seed an independently retained cache frontier, then use the actual peer
+// importer. The public foreground must not mistake the rolled-back receipt for
+// permission to send another deletion. No mixed-provider transport is enabled.
+fn import_rejected_deletion(
+    repo: &std::path::Path,
+    home: &std::path::Path,
+    task: &loopflow::durable::TaskId,
+) -> serde_json::Value {
+    use loopflow::engine::planning_git::PlanningDestination;
+    use loopflow::store::sqlite::SqliteStore;
+    use rusqlite::params;
+
+    let target = SqliteStore::new(&home.join("loopflow.db")).unwrap();
+    let source_home = tempfile::tempdir().unwrap();
+    tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(loopflow::store::open_ephemeral_store(
+            &loopflow::store::StorageConfig::sqlite(source_home.path().join("loopflow.db")),
+        ))
+        .unwrap();
+    let source = SqliteStore::new(&source_home.path().join("loopflow.db")).unwrap();
+    let repo = repo.to_str().unwrap();
+    let wave = target.task(task).unwrap().unwrap().wave_id;
+    let binding = PlanningDestination::new(
+        "/synthetic/unavailable",
+        "refs/loopflow/planning/shared/effects",
+    )
+    .unwrap();
+    target.bind_peer_planning(repo, &binding).unwrap();
+    target
+        .select_peer_waves(repo, &binding.id(), std::slice::from_ref(&wave))
+        .unwrap();
+    source.bind_peer_planning("/source", &binding).unwrap();
+    source
+        .import_peer_planning(
+            "/source",
+            &binding.id(),
+            "base",
+            &target.export_peer_planning(repo, &binding.id()).unwrap(),
+        )
+        .unwrap();
+    let mut record = source.planning_task(task).unwrap().record.unwrap();
+    record.item.revision = Some("2026-10-08T10:00:00Z".into());
+    record.item.state = Some("unstarted".into());
+    record.item.url = None;
+    source
+        .put_pm_task(
+            "/source",
+            "linear",
+            &record,
+            Some((&wave, "initiative-task-pr-tests")),
+        )
+        .unwrap();
+    source.delete_task(task).unwrap();
+    let db = rusqlite::Connection::open(source_home.path().join("loopflow.db")).unwrap();
+    db.execute("UPDATE task_changes SET attempted=1,error='lost reply' WHERE task_id=?1 AND field='deleted'", [task.as_str()]).unwrap();
+    let receipt: String = db
+        .query_row(
+            "SELECT id FROM task_changes WHERE task_id=?1 AND field='deleted'",
+            [task.as_str()],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let incoming = source
+        .export_peer_planning("/source", &binding.id())
+        .unwrap();
+    let db = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
+    record.item.revision = Some("2026-10-08T12:00:00Z".into());
+    // Cache-only setup models a retained migration/alternate acquisition frontier.
+    db.execute(
+        "UPDATE pm_items SET body=?2 WHERE id=?1",
+        params![record.item.id, serde_json::to_string(&record.item).unwrap()],
+    )
+    .unwrap();
+    target
+        .import_peer_planning(repo, &binding.id(), "stale-with-effect", &incoming)
+        .unwrap();
+    assert!(target
+        .peer_planning_status(repo)
+        .unwrap()
+        .into_iter()
+        .flat_map(|status| status.conflicts)
+        .any(|c| c.object.id == task.as_str() && c.reason.contains("older than retained")));
+    assert_eq!(
+        db.query_row(
+            "SELECT count(*) FROM task_changes WHERE id=?1",
+            [&receipt],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        0
+    );
+    db.execute("INSERT INTO processes(lfid,trace_id,started_at) VALUES('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000002',1)", []).unwrap();
+    db.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id) VALUES('retained','Retained','human',1,0,?1,?2,?3)", params![repo,task.as_str(),wave.as_str()]).unwrap();
+    let graph = serde_json::json!({"name":"review","nodes":[{"name":"review","skill":"review","description":null}],"edges":[]});
+    db.execute(
+        "INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,?2,'review',1)",
+        params![task.as_str(), graph.to_string()],
+    )
+    .unwrap();
+    db.execute("INSERT INTO task_workflow_moves(task_id,workflow,kind,from_node,to_node,at) VALUES(?1,?2,'set','start','review',1)", params![task.as_str(),graph.to_string()]).unwrap();
+    serde_json::json!({"receipt":receipt})
 }

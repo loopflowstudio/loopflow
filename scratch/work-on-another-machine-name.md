@@ -163,6 +163,9 @@ this heading. Keep these replacements deleted:
 - Transition/intent-only export discovery, mapping-only completion shortcuts and
   duplicate status eligibility filters. One `planning_exports` view reads common
   receipt acknowledgement; preparation alone creates missing Task receipts.
+- Local-receipt-only attempt eligibility after rejected peer projection. The
+  common attempts consult retained projection conflicts, including skipped holds,
+  in their write transaction; pending/readback and saves remain independent.
 - Sequence-selected deletion delivery and scalar-clock visibility over a retained
   removal receipt: neither imported arrival nor that clock orders provider evidence.
   Common pending/attempt/status readers retain every unresolved
@@ -228,13 +231,10 @@ plus the retained checkout. They do not prove running-provider controls or publi
 mixed-provider lifetime behavior. This is one internal cut, not completed ordering
 or alternate-provider composition; mixed-provider exchange remains disabled.
 
-The latest conflict-free sync adds issue-scoped comment fixtures and an
-installation-test child-readiness repair; it is not the earlier dependency-only
-sync at `eeb98aa89`. TESTING.md now requires comment acquisition in a different
-order from Task creation, preventing a fixture from silently reassigning comments.
-Gate's combined candidate includes that regression, Task admission, cold-worker
-behavior and connected-provider recovery. Prior passes are not an identical-tree
-gate result. No parent sync completes peer composition.
+The latest sync includes issue-scoped comments and child-readiness repair.
+TESTING.md requires comment acquisition in a different order from Task creation.
+Gate still owns the combined admission, cold-worker and provider-recovery candidate;
+parent integration does not establish peer composition.
 Destination-scoped status/conflicts (`de9470d5a`), common comment acquisition and
 receipts (`7e56c01fd`), and semantic Project content (`a518b985b`) are integrated.
 Their owners and preservation boundaries are described under **Delete — do not
@@ -276,18 +276,26 @@ Executable feedback exposed two distinct presentation/execution boundaries:
 
 Remaining composition, reconciled October 9 against `225b8c95f`:
 
-1. **Retained effects must constrain delivery even when projection fails.**
-   `insert_and_project` imports creation/deletion receipts inside the object's
-   savepoint, before `acquire_linear_frontier`. Rejection of an older entity
-   frontier rolls back those receipts too; the journal and conflict still commit.
-   `planning_field_owners`, `pending` and `attempt_planning_field` read local receipts,
-   not that retained peer conflict. Thus retention alone cannot prevent a second
-   effect after an imported uncertain attempt was isolated. Common acquisition and
-   delivery eligibility must compose before activation. Acceptance includes a
-   rejected stale entity carrying an independent uncertain deletion, a subsequent
-   public delivery attempt that issues no duplicate mutation, continued independent
-   acquisition, and unchanged populated execution. This is an implementation gap,
-   not an observed production duplicate or a reason to discard rejected evidence.
+1. **Retained-effect eligibility is implemented at common attempt boundaries.**
+   Rejected projection still retains the whole journal/conflict without promoting
+   its stale entity or fabricating local receipts. Field/deletion, creation/link,
+   state and ordering attempts now check that object's active projection conflicts
+   in the same immediate transaction as their attempt receipt.
+   No second effect queue or provider frontier is added. Pending readers and
+   acquisition stay independent; a fresh observation alone cannot erase the conflict.
+   Successful later import must project the retained receipts before releasing it.
+   Held private references remain private; attempts do not rescan journals.
+   Review caught selection releasing a hold before skipped receipts projected:
+   import now retains that skipped projection as an existing conflict until a
+   successful import, even after explicit selection releases publication.
+   The focused storage regression seeds a cache-only newer frontier, rejects a
+   stale peer carrying an uncertain deletion, permits acquisition, and then imports
+   the attempt on recovery without issuing another effect. It compares seven
+   execution tables and the checkout. The public work-watch regression uses that
+   real importer before `task delete`, requires the delivery error, independent
+   title/comment acquisition and no deletion mutation, preserving populated local
+   execution rows. Its synthetic provider/cache setup is not mixed-provider
+   transport, running-control or installed acceptance. Current checks are below.
 2. **Ordering still lacks receipt transport.** The peer field catalog and draft
    capture `planning_rank`, not Project `task_order` or `order_effects_json`.
    Replicating ranks cannot preserve one move's baseline, before/after lists,
@@ -625,11 +633,8 @@ without recursive JSON searching or guessing whether stdout contains JSON.
 Earlier fixture evidence: `a002e4060:scratch/work-on-another-machine-name.md`,
 **Acceptance for review**.
 
-Compression review repaired fixture setup, not production guards: Session insertion
-already records Started, so fixtures no longer overwrite it; absence uses the optional
-Task reader, and seeded Projects retain their required timestamp. Shared execution
-setup keeps the Session, Process, Workflow and checkout assertions intact. Prior
-focused Project-content and public work-watch evidence remains at
+Fixture repairs remain at `cdec83fe8:scratch/work-on-another-machine-name.md`,
+this heading; earlier Project-content/public work-watch evidence remains at
 `b0f2a00702ccdbe1b11c22fa55f472cc649bf8d1:scratch/work-on-another-machine-name.md`,
 this heading. Public status/DTO, cold-worker and provider-lifetime execution remain
 with gate, alongside Desktop and mixed-provider acceptance.
@@ -650,7 +655,7 @@ Deletion-cut check evidence at `97bba1869`, this heading: focused compile,
 network-isolated peer-storage (55), all-target Clippy and fmt passed. The subsequent
 ancestry-only merge preserves that tested tree, not public/combined acceptance.
 
-Check (October 9 realign): `git diff --check` and `lf context --skill realign` pass; prose-only reconciliation, with public/combined/Desktop checks deferred to gate.
+Check (October 9): isolated Linux `cargo test` (3 receipt/hold regressions + public retained-effect delivery), all-target Clippy, fmt, Ruff and `git diff --check` pass; context fits. Combined/Desktop acceptance: gate.
 
 Earlier SQL proofs, macOS startup limitations and the retained historical Flow
 without a recorded exit remain at

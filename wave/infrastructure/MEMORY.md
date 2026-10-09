@@ -632,11 +632,11 @@ evidence retains losing removals. Local sequence cannot order imported effects.
 Creation status awaits gate; its proof excludes populated Processes. Deletion
 compares seven execution tables including Processes, not live controls.
 
-**Retained uncertainty must constrain effects, not only status.** Object rollback
-keeps the peer journal/conflict but can discard imported uncertain receipts.
-Delivery ignores that conflict. Mixed activation requires composition preventing
-new effects here; retained history grants no retry authority. This source gap is
-not an observed duplicate write.
+**Retained uncertainty constrains effects.** Rejected projection rolls back
+receipts, not journals. Attempted effects consult conflicts and sharing holds
+transactionally. Saves/acquisition stay independent; only successful import releases skipped projection, even after
+selection. Storage/public fixtures preserve execution; mixed activation remains
+unproved.
 
 Provider age survives; entity revisions never order relationships. Missing inventory
 proves neither negative membership nor deletion. Archive and membership/Initiative

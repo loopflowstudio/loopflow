@@ -244,13 +244,20 @@ impl SqliteStore {
     /// Acquire the effect only while the captured decision is still current.
     /// A canceled request remains attempted, so a later read must resolve it.
     pub(crate) fn attempt_task_state(&self, delivery: &TaskStateDelivery) -> StoreResult<bool> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.execute(
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        super::planning_peers::require_projected_effects(
+            &tx,
+            super::planning_changes::PlanningChanges::Task(&delivery.task_id),
+        )?;
+        let attempted = tx.execute(
             "UPDATE task_state_deliveries SET attempted=1
              WHERE id=?1 AND attempted=0 AND settled=0 AND conflict_json IS NULL
              AND seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=?2)",
             params![delivery.id, delivery.task_id.as_str()],
-        )? == 1)
+        )? == 1;
+        tx.commit()?;
+        Ok(attempted)
     }
 
     /// Failed delivery retains its receipt; only provider observation settles state.

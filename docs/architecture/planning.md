@@ -115,6 +115,15 @@ unchanged baselines without acknowledging them. Attempts recheck the stored prov
 revision and local deletion. Lost replies retain attempt/error evidence and use
 observation before any further effect; an unresolved attempt is never blindly replayed.
 
+Peer imports can retain uncertain effects in their journal while rejecting the
+object's projection. Common field/deletion, creation/attachment, state and order
+attempts therefore check retained projection conflicts in the same SQLite
+transaction that acquires the effect. Import records skipped sharing-held objects
+as conflicts too; selecting their history permits exchange, not new effects. Local receipt absence cannot
+authorize another write. Pending reads, local saves and provider acquisition remain
+independent; successful peer projection incorporates retained receipts before
+releasing the conflict. Local sharing selection alone never acquires an effect.
+
 `ops/planning_delivery.rs` consumes mapped Task titles, descriptions, nullable
 assignees and membership, and Project names, summaries, statuses and structured
 content. Content patches retain unrelated provider prose. The foreground lifetime

@@ -189,7 +189,9 @@ impl SqliteStore {
         input: &Value,
         link: bool,
     ) -> StoreResult<bool> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        super::planning_peers::require_projected_effects(&tx, owner)?;
         let (table, key) = owner.receipt();
         let column = if link {
             "export_link_attempted"
@@ -203,8 +205,10 @@ impl SqliteStore {
         } else {
             ""
         };
-        Ok(conn.execute(&format!("UPDATE {table} SET {column}=1,export_error=NULL,export_json=CASE WHEN ?3 THEN export_json ELSE json_set(export_json,'$.input',json(?2)) END
-            WHERE {key}=?1 AND {column}=0 AND export_json IS NOT NULL AND export_acknowledged=0 {deleted}"), params![owner.owner().1,input.to_string(),link])? == 1)
+        let attempted = tx.execute(&format!("UPDATE {table} SET {column}=1,export_error=NULL,export_json=CASE WHEN ?3 THEN export_json ELSE json_set(export_json,'$.input',json(?2)) END
+            WHERE {key}=?1 AND {column}=0 AND export_json IS NOT NULL AND export_acknowledged=0 {deleted}"), params![owner.owner().1,input.to_string(),link])? == 1;
+        tx.commit()?;
+        Ok(attempted)
     }
 
     pub(crate) fn planning_export_error(

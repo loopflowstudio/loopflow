@@ -181,6 +181,11 @@ class Handler(BaseHTTPRequestHandler):
             data = {"project": project}
         elif "query FindProject" in query:
             data = {"projects": _page([project])}
+        elif "query IssueTrash" in query:
+            data = {"issue": {**issue, "trashed": False}}
+        elif "mutation DeliverTaskDeletion" in query:
+            state["delete_writes"] += 1
+            data = {"issueDelete": {"success": True}}
         elif "query IssueOwnership" in query:
             data = {"issue": issue}
         elif "query IssueObservation" in query or "query IssueComments" in query:
@@ -634,6 +639,104 @@ def _exercise_exports(fixture: dict, env: dict, server: ThreadingHTTPServer) -> 
         db.close()
 
 
+def _exercise_effects(fixture: dict, env: dict, server: ThreadingHTTPServer) -> None:
+    db = sqlite3.connect(Path(fixture["home"]) / "loopflow.db", timeout=5)
+
+    def execution() -> list:
+        # Compare all existing execution rows, allowing the CLI to record its
+        # own inspection Processes. The retained Process has no fabricated exit.
+        return [
+            db.execute(f"SELECT * FROM {table} ORDER BY rowid").fetchall()
+            for table in [
+                "agent_sessions",
+                "task_workflows",
+                "task_workflow_moves",
+                "task_prs",
+                "work_placements",
+                "project_transitions",
+            ]
+        ] + [
+            db.execute(
+                "SELECT * FROM processes WHERE lfid=?", ("00000000-0000-4000-8000-000000000001",)
+            ).fetchall()
+        ]
+
+    before = execution()
+    checkout = db.execute("SELECT worktree FROM tasks WHERE id=?", (fixture["task"],)).fetchone()
+    saved = subprocess.run(
+        [fixture["lf"], "task", "delete", fixture["task"]],
+        cwd=fixture["repo"],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert saved.returncode == 0, saved.stderr
+    watch = Watch(fixture, env)
+    try:
+        watch.scope(fixture["repo"])
+        _await(
+            lambda: (
+                db.execute(
+                    "SELECT count(*) FROM task_changes WHERE task_id=? AND field='deleted' "
+                    "AND attempted=0 AND error LIKE '%retained peer projection conflict%'",
+                    (fixture["task"],),
+                ).fetchone()
+                == (1,)
+            ),
+            "public delivery did not reach the retained-effect boundary",
+        )
+        # Mutate an unrelated provider record after observing the deferred write.
+        # Ongoing acquisition must still bring in its new body and a new comment.
+        with server.lock:
+            other = server.state["issues"][1]
+            other["title"] = "Independent acquisition continues"
+            other["updatedAt"] = "2026-10-08T13:00:00Z"
+            comment = _comment("While deletion is held", other["id"])
+            server.state["comments"].append(comment)
+        _await(
+            lambda: (
+                db.execute(
+                    "SELECT count(*) FROM tasks WHERE external_issue_id=? AND issue_title=?",
+                    (other["id"], other["title"]),
+                ).fetchone()
+                == (1,)
+            ),
+            "retained effect blocked independent acquisition",
+        )
+        _await(
+            lambda: (
+                db.execute(
+                    "SELECT count(*) FROM task_comments WHERE id=?",
+                    (comment["id"],),
+                ).fetchone()
+                == (1,)
+            ),
+            "retained effect blocked comment acquisition",
+        )
+        assert db.execute(
+            "SELECT count(*) FROM task_changes WHERE id=?", (fixture["effects"]["receipt"],)
+        ).fetchone() == (0,)
+        assert (
+            db.execute(
+                "SELECT count(*) FROM planning_peer_conflicts WHERE object_id=? AND active=1",
+                (fixture["task"],),
+            ).fetchone()[0]
+            > 0
+        )
+        assert execution() == before
+        assert (
+            db.execute("SELECT worktree FROM tasks WHERE id=?", (fixture["task"],)).fetchone()
+            == checkout
+        )
+        with server.lock:
+            assert server.state["delete_writes"] == 0
+            assert not server.state["unexpected"], server.state["unexpected"]
+    finally:
+        watch.close()
+        db.close()
+
+
 def main() -> None:
     fixture = json.loads(Path(sys.argv[1]).read_text())
     root, repo = Path(fixture["home"]), Path(fixture["repo"])
@@ -721,6 +824,7 @@ printf '%s\\n' '{"type":"result","subtype":"success","result":"Done"}'
             comments=[],
             offline=False,
             state_writes=0,
+            delete_writes=0,
             unexpected=[],
         )
         env["HTTPS_PROXY"] = f"http://127.0.0.1:{server.server_port}"
@@ -729,6 +833,8 @@ printf '%s\\n' '{"type":"result","subtype":"success","result":"Done"}'
         try:
             if sys.argv[2] == "exports":
                 _exercise_exports(fixture, env, server)
+            elif sys.argv[2] == "effects":
+                _exercise_effects(fixture, env, server)
             else:
                 _exercise(fixture, env, server, sys.argv[2])
         finally:

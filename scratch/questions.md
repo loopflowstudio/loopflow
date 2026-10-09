@@ -110,12 +110,11 @@ retains bounded Process pages and their exact cursors, while `history show`,
 second history store is introduced. `history list` is a reversible spelling
 for the required command-page behavior, not a new product decision.
 
-Scratch conflict text is reconciled; its unmerged index remains. `lf sync
---continue` previously reported no sync in progress; a selected scratch checkpoint
-also failed during compress. Before edits, scratch was copied to
-`/tmp/loo427-compress-msMFvo/`; the later Q3 decision is preserved in its
-`current-scratch/` snapshot. Code checkpoints exclude scratch and the untracked
-walkthrough. No index repair or unrelated contribution is included.
+October 9 recovery: the notes were reconciled but the unmerged index stopped
+pursuit at sync. Ordinary `lf commit` resolved it; selected-path commits had
+excluded scratch. Current notes and all three conflict versions were preserved in
+`/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo427-sync-recovery-rfx89hv3/`.
+`git ls-files -u` and status are empty; this prose-only recovery needs no build.
 
 ## Reversible exact-input choices — October 8
 

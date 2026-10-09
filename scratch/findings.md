@@ -187,22 +187,22 @@ Prior cross-Wave/dependency inspection and pre-edit evidence:
 Delegation exchange, exclusive admission and remote/native composition remain;
 Jack Heart's inheritance choice is unresolved and cursor insertion is settled.
 
-Compression repaired restored-alias A→B→A rollback (`28fc5274a`), but realignment
-found ordinary opens still fenced only their input path. A delayed open through a
-symlinked parent rolled the selected plan and input token back after another locator
-completed association. Cold opens also missed the new scene when only its newer
-reading retained the old locator. Opening/restoration now share the observation
-check, match either reading’s retained locators, and deliver through the same scene. The first fixture used
-a leaf symlink that RepoScanner does not recognize as a directory and was stopped;
-a parent-symlink fixture reproduced identity/token rollback and cold-open divergence.
-The failed cold case was stopped with delivery pending; a required scene assertion
-now ends that failure. Registration receipts also needed the fixture’s request IDs.
-This is headless router evidence, not native acceptance.
+`f898be5a8` repairs cross-locator opening rollback after `28fc5274a` repaired
+restoration. Opening/restoration share an observation fence and retained-locator
+matching. Parent-symlink regressions reproduce identity/token rollback and cold-open
+divergence; corrected request IDs pass. Failed leaf-symlink and pending-delivery
+attempts: `15663bd45`, this heading. Headless router proof is not native acceptance.
 
-LOO-412 through `de3c84b08` was inspected, not merged. Its explicit correspondence
-and full-ID lookup advance the dependency beyond the integrated `19e31f64d`, but
-cross-origin causal/relationship projection and origin settlement remain held.
-The plan records composition and corrected checks still deferred by that owner.
-Product has no child Markdown/memories in this checkout. Main remains `3e1e6245c`.
-The generated Work seed exceeds its independent 16,000-token limit; authored-note
-curation cannot shrink it.
+Merge `66dd3c44f` composes LOO-412 through `de3c84b08`, retaining the common
+resolver, receipt and migration owners. Only scratch conflicted; this Task’s
+questions survived and dependency notes remain in dependency history. Earlier
+inspection account: `15663bd45`, this heading. Correspondence and receipt tests
+now pass locally, including repository-scoped CLI selection and foreign-repo edit
+refusal. The imported CLI fixture is explicitly Store-seeded, not Git acquisition.
+Joint causal/relationship projection and origin settlement remain held; mixed
+exchange and first-start refusals are unchanged.
+
+Review confirmed local-only request idempotence and retained effects/execution.
+`cli_catalog` regenerated the command reference after invalid help/list attempts;
+`list` refused production storage. No installed runtime or production plan changed.
+Generated Work-seed overflow remains; no limit was raised.

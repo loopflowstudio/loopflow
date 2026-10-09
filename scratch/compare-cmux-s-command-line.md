@@ -8,10 +8,10 @@ fixed-buffer reader with exact pane/surface validation; native proof remains.
 Focused local Rust and model evidence establish neither native acceptance nor delivery.
 
 LOO-406 is integrated through main’s `d20c56daf` (#1503). LOO-412 through
-`19e31f64d` is composed locally: common receipts, unplaced-Wave reads and
+`de3c84b08` is composed locally: common receipts, unplaced-Wave reads and
 destination-level Desktop status survive. Established repository roots can now be
-explicitly associated. Newer LOO-412 correspondence APIs are not yet composed;
-joint provider projection remains unfinished there too.
+explicitly associated. Explicit provider correspondence/full-ID lookup is composed;
+joint provider projection remains unfinished.
 Mixed Linear/Git stays disabled pending the remaining composition.
 Local Task/Session-plus-Changes opening follows request-scoped readiness; native proof remains.
 Remaining implementation: broader explanation, delegation
@@ -247,6 +247,10 @@ resolution: repository IDs (including historical locators) resolve to a path bef
 Task aliases/prefixes. The post-routing identity comparison is deleted; scope does
 not depend on globally unique aliases. Unknown Tasks retain ordinary acquisition.
 
+Receipt import no longer synthesizes `task_creation_intents`; only local creation
+requests own idempotence. Full-ID correspondence extends the existing resolver,
+not a second Work registry or execution alias.
+
 Peer import no longer mutates its prepared object index in the retry loop or
 maintains a second receipt-exclusion list for scalar writes. Index construction
 validates complete records and selects provider frontiers once; scalar projection
@@ -269,7 +273,7 @@ Read-only previews expose initial Flow input only; native/remote acceptance rema
 ### 2. Shared Work identity, delegation and routing
 
 **Locally composed, incomplete.** LOO-406's common writer and LOO-412 through
-`19e31f64d` supply exchange, foreground sync and repository Work-stream receipts.
+`de3c84b08` supply exchange, foreground sync and repository Work-stream receipts.
 Peers use Machine/repository keys. `repo identity --bind ID` associates established
 roots, preserving prior local locators, Work, mappings, effects and execution;
 it selects/publishes nothing. Imported Waves remain unplaced. Independent-root
@@ -293,8 +297,8 @@ Delegation inheritance remains proposed, not accepted from source code alone.
 select one repository ID, retain old locators and resolve Task prefixes within that
 repository. They do not associate two Task/Project IDs for the same Linear object.
 The provider fixture preserves one mapping and attempted edit, not divergent-Work
-recovery. LOO-412 now has explicit correspondence/full-ID lookup; its joint
-projection and recovery remain unfinished, and this branch has not consumed it.
+recovery. LOO-412’s explicit correspondence/full-ID lookup is composed; joint projection
+and recovery remain unfinished.
 
 **Remaining identity/routing composition (October 9).**
 `PlanningKind::fields()` carries neither RepositoryId nor authored delegation.
@@ -376,15 +380,17 @@ counterexamples: `28fc5274a:scratch/findings.md`, **Shared planning composition*
 Main's `3e1e6245c` is integrated: live connect hands off; dead-driver resume starts
 an engine on native history. Import must never trigger that legitimate local action.
 
-**New committed dependency, inspected October 9; not integrated:** LOO-412 through
-`de3c84b08` includes `5e5786bff` (provider receipt import no longer manufactures
-local Task-creation requests), `b414e8cce` (explicit provider correspondence/full-ID
-lookup) and `381c88fec` (one skipped-projection hold). Composition belongs in the
-common receipt, resolver and migration owners, without restoring TaskSource.
-The new lookup rechecks repository/provider mappings and preserves physical IDs,
-execution and private selection; it does not resolve joint projection or effects.
-Its CLI fixture seeds import through Store APIs, not Git acquisition. Corrected
-CLI/Store checks remain deferred in the dependency's plan.
+**Composed October 9 through `de3c84b08` (`66dd3c44f`):** common receipts no
+longer manufacture local Task-creation requests. `planning associate` records exact
+provider correspondence; full-ID lookup rechecks repository and mapping. Physical
+IDs, private selection, captured effects and local execution stay intact. Shared
+entry dispatch consumes the same scoped lookup; a foreign-repository edit refuses
+before mutation. TaskSource remains deleted. Dependency scratch stays in its history.
+
+Focused Store/CLI fixtures cover correspondence, repeated/reordered receipts,
+original creation inputs, no synthesized execution and the populated migration.
+The CLI fixture seeds import through Store APIs; it is not Git acquisition or
+configured-provider proof. Joint projection/effects remain visibly held.
 
 LOO-412's remaining recovery must resolve cross-origin causal parents/capture,
 project Task membership, comments and order through local planning owners, and
@@ -537,4 +543,4 @@ identity/delegation, open them, add shell/Files panes, retain an unfinished draf
 change focus, target a harmless command, read output, hide/restore, and verify the
 original input target and draft survive. Demo owns native usability; preserve comparison evidence and use no real accounts or live user terminals.
 
-Check: `scripts/test_desktop.sh -Xswiftc -gnone --filter 'WorkDestinationTests/(delayedLocatorOpen|restoredAlias|repositoryAssociation|associationBefore|obsoleteRepository|obsoleteScene|plainRepository)'` PASS (7 tests; new regression failed before repair); `git diff --check` PASS; prior Rust checks: `28fc5274a`; full suites: gate; native usability: demo.
+Check: network-isolated `loopflow` tests `explicit_correspondence_*`, `peer_creation_*`, `peer_migration_preserves_*` PASS (7), `planning_setup_tests public_association_*` PASS (1); fmt/Clippy PASS; prior Desktop proof: `15663bd45`; full suites: gate; native usability: demo.

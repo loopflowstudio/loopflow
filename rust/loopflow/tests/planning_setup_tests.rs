@@ -303,6 +303,7 @@ fn public_association_preserves_ids_and_reports_unfinished_projection() {
     use loopflow::store::sqlite::SqliteStore;
 
     let repo = TestRepo::new();
+    let other = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let source_home = tempfile::tempdir().unwrap();
     let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -357,6 +358,7 @@ fn public_association_preserves_ids_and_reports_unfinished_projection() {
     let journal = source
         .export_peer_planning(scope, &destination.id())
         .unwrap();
+    // Store-seeded correspondence evidence, not public Git acquisition.
     target
         .import_peer_planning(scope, &destination.id(), "fixture", &journal)
         .unwrap();
@@ -397,7 +399,14 @@ fn public_association_preserves_ids_and_reports_unfinished_projection() {
     let reply = invoke_lf(
         repo.path(),
         home.path(),
-        &["task", "status", incoming.id.as_str(), "--json"],
+        &[
+            "--repo",
+            scope,
+            "task",
+            "status",
+            incoming.id.as_str(),
+            "--json",
+        ],
     );
     assert!(
         reply.status.success(),
@@ -406,6 +415,39 @@ fn public_association_preserves_ids_and_reports_unfinished_projection() {
     );
     let status: Value = serde_json::from_slice(&reply.stdout).unwrap();
     assert_eq!(status["execution"]["task_id"], local.id.as_str());
+    // Entry dispatch must apply the same repository-scoped correspondence before
+    // preparing a mutation. A known peer ID cannot be acquired in another repo.
+    let before = target.planning_task(&local.id).unwrap();
+    let refused = invoke_lf(
+        repo.path(),
+        home.path(),
+        &[
+            "--repo",
+            other.path().to_str().unwrap(),
+            "task",
+            "edit",
+            incoming.id.as_str(),
+            "--title",
+            "Wrong repository",
+        ],
+    );
+    assert!(!refused.status.success());
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains("does not belong to selected repository")
+    );
+    assert_eq!(target.planning_task(&local.id).unwrap(), before);
+    let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    for table in [
+        "task_creation_intents",
+        "agent_sessions",
+        "task_workflows",
+        "task_prs",
+    ] {
+        let count: i64 = conn
+            .query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 0, "lookup/association must not create {table}");
+    }
     assert!(target.task(&incoming.id).unwrap().is_none());
     assert!(target.project(&incoming.project_id).unwrap().is_none());
     assert_eq!(

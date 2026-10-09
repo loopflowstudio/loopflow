@@ -667,6 +667,81 @@ Establish or print this repository's selected planning identity
 
 | Argument | What it does |
 |---|---|
+| `--bind` | Associate this checkout with a repository identity, retaining prior IDs |
+| `--json` | json Default: false. |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf repo planning
+
+Configure Git planning synchronization without publishing existing work
+
+| Argument | What it does |
+|---|---|
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf repo planning key
+
+Show, explicitly create, or recover the same planning user key on another machine
+
+| Argument | What it does |
+|---|---|
+| `--new` | new Default: false. |
+| `--recover` | recover |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf repo planning connect
+
+Pin a remote and user-keyed ref; joining selects no existing work
+
+| Argument | What it does |
+|---|---|
+| `--remote` | remote |
+| `--shared` | Explicitly join a shared ref instead of the saved user's ref |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf repo planning use
+
+Route future root Waves to a destination, or use 'local' for no sharing
+
+| Argument | What it does |
+|---|---|
+| `<destination>` | destination |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf repo planning select
+
+Include existing Waves and their descendants in a destination
+
+| Argument | What it does |
+|---|---|
+| `<destination>` | destination |
+| `--wave` | Exact Wave IDs; this may make retained history eligible for sharing |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf repo planning associate
+
+Associate an incoming full Work ID with existing local Work; never merge execution or share it
+
+| Argument | What it does |
+|---|---|
+| `<incoming>` | incoming |
+| `--with` | local |
+| `--linear` | linear |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf repo planning status
+
+Show selection, retained imports and held records without contacting Git
+
+| Argument | What it does |
+|---|---|
 | `--json` | json Default: false. |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |

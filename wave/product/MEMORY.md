@@ -101,12 +101,12 @@ and restoration must share the observation fence. Headless fixtures retain
 drafts/views and reject stale reads, not native usability.
 
 **Unmapping is not association:** it can make legacy Work eligible for duplicate
-creation. `d378f31ae` composes LOO-412 through `19e31f64d`. Newer `de3c84b08`
-(inspected, not integrated) adds provider correspondence/full-ID lookup, not joint
-projection. Grouping winners cannot establish cross-origin causality; parent capture,
-relationships and exact-origin settlement remain, preserving private selection and
-execution. Store-seeded lookup proves no Git acquisition. Mixed exchange stays
-disabled; TaskSource stays deleted. Remote/native and exclusive-start proof remain.
+creation. `66dd3c44f` composes LOO-412 through `de3c84b08`: provider correspondence/
+full-ID lookup retains physical IDs, private selection, effects and execution.
+Receipt import creates no local Task-creation requests. Store/CLI and migration checks pass; foreign-repo edits refuse.
+Store-seeded lookup proves no Git acquisition. Joint causal/relationship projection and exact-
+origin settlement remain held. Mixed exchange stays disabled; TaskSource stays
+deleted. Remote/native and exclusive-start proof remain.
 
 #1512 (`3e1e6245c`): live connect hands off; dead-driver resume starts an engine
 on native history. Local resume is not import-triggered launch; native proof remains.

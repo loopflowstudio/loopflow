@@ -346,9 +346,11 @@ lf task complete EXP-12
 After verified merge, file accepted remaining obligations as linked follow-up
 Tasks, or record `lf task follow-up EXP-12 --none 'No accepted work remains'`.
 Use `--existing ISSUE` to link work already filed and `--wave WAVE` to choose its
-owner. Repeat filings before `--finish`; retries retain the original child
-identity and Project even after chapter rotation. Inspect receipts and retry
-identical input after an uncertain response. The source completes after filing,
+owner. Give each additional obligation a distinct `--key` before `--finish`;
+reusing a key (default: `follow-up`) retries the original filing, even if its
+title changes. Retries retain the child identity and Project after chapter
+rotation. Inspect receipts and retry identical input after an uncertain response.
+The source completes after filing,
 without waiting for those children to finish. Preserve accepted later checks in
 PR copy before landing clears scratch.
 

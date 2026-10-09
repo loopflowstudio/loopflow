@@ -255,19 +255,16 @@ Session explanation reuses selection, action and client-observation owners witho
 preparation or takeover. Removed remote workspace branches and unused Machine
 parameters remain at `7d12ab10a`, this heading; `workspace::associate` owns location.
 
-Removed: copied inheritance; duplicate window/opening paths; unqualified terminal
-keys; duplicate visibility/pruning/insertion paths; root `run` and `open`;
-`MonitorCommand::{List,Show,Usage,Activity}` and root Replay; `DesktopCommand::Inspect`;
-`run::split_skill_args`; unused fresh `ProcessPromptInput.cwd`/`max_turns` overrides.
-History owns recorded reads/replay/usage, Desktop owns open/list, and Task edges
-retain explicit skill/Flow dispatch. Historical captures retain their data and
-normalization. `output::print_process` remains shared with live Monitor.
-Earlier Monitor failure: `e844d1458:scratch/compare-cmux-s-command-line.md`.
+Earlier command, inherited-placement, Process-prompt and read-only lookup cuts:
+`8558e3177:scratch/compare-cmux-s-command-line.md`, **Delete — do not maintain**.
+History, Desktop, shared prompt owners and Task skill/Flow dispatch remain; legacy
+captures stay readable. Explicit `repo identity` alone owns registration.
 
-Destination lookup and scope checks use the existing read-only SQLite owner.
-Missing registries stay absent; unreadable registries remain errors. Explicit
-`repo identity` owns registration, not peer admission. Earlier removed wrappers
-and initialization paths: `f5770094d:scratch/compare-cmux-s-command-line.md`, this heading.
+Peer import no longer mutates its prepared object index in the retry loop or
+maintains a second receipt-exclusion list for scalar writes. Index construction
+validates complete records and selects provider frontiers once; scalar projection
+uses `PlanningKind::fields()`. Independent evidence retains field-level savepoints
+before object projection. Shared-start refusal and mixed-provider restrictions remain.
 
 Input reuses `insertTerminalText` and the pane event. Registry, multiplexer and
 surface owners remain authoritative: Close/Undo renews content tokens; filtered
@@ -545,4 +542,4 @@ identity/delegation, open them, add shell/Files panes, retain an unfinished draf
 change focus, target a harmless command, read output, hide/restore, and verify the
 original input target and draft survive. Demo owns native usability; preserve comparison evidence and use no real accounts or live user terminals.
 
-Check (October 9 composition): Rust build/fmt and `cargo clippy --all-targets -- -D warnings` PASS; network-isolated identity CLI, independent-peer/admission and unplaced-import tests PASS (3). `scripts/test_desktop.sh -Xswiftc -gnone --no-parallel --filter WorkModelStreamTests` PASS (6). Affected suites: gate; native I/O: demo. Prior reader proof: `7d12ab10a`.
+Check (October 9 compression): `cargo build -p loopflow --bin lf`, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` PASS; `scripts/test_network.py` with 10 focused peer-import regressions PASS (independent stores, identity collisions, rollback, provider conflicts/frontiers, creation/deletion/order/content). Earlier composition checks: `8558e3177`, this file. Full affected suites: gate; native I/O: demo.

@@ -31,11 +31,9 @@ Gate owns installed migration and full Session-lifecycle proof.
 
 ## Integration boundary — October 8
 
-No dirty dependency code or owner checkout was changed. LOO-406 through
-`cbf0a174a` is integrated; LOO-412 exchange, delegation composition and peer start
-admission remain. Seeded IDs prove routing, not exchange or exclusive first start.
-Earlier stalled checks and the `b6f34a6f8` integration account:
-`f48d84511:scratch/findings.md`, this heading. Updated dependency evidence follows.
+Composition uses committed dependency APIs; no dirty dependency checkout was
+changed. Earlier integration limits and stalled checks:
+`8558e3177:scratch/findings.md`, this heading. Current composition is recorded below.
 
 ### Integrated writer evidence — October 9
 
@@ -200,3 +198,10 @@ execution is retained separately from first-start authority. Review also found i
 admission. The shared admission owner now refuses first start for shared Tasks
 without retained checkouts; it leaves saves and acquisition alone. Mixed Linear/Git,
 delegation exchange, exclusive admission and remote/native composition remain.
+
+Compression review keeps object preparation immutable and scalar selection on the
+portable schema. Per-field savepoint handling stays inline: extracting it under the
+outer conflict handler could soften a commit/release failure into a projection hold.
+Retained mutation identity checks precede completeness validation. Creation readback
+still reconciles both pre-existing and newly projected delivery receipts; neither
+call is redundant. Focused checks do not authorize mixed-provider activation.

@@ -88,10 +88,10 @@ LOO-427 now composes LOO-412's `7260e4602` journals, common receipts, unplaced-W
 reads and destination-level Desktop Work stream. Mixed Linear/Git stays disabled.
 **Retained uncertainty constrains effects, not saves/acquisition.** Save clocks
 order intentions; unresolved losers hold delivery. Complete lists alone settle
-order; primary-only moves retain input. Independent provider facts keep separate
-savepoints, ages/baselines and causal frontiers. Entity revisions cannot order
-relationships; scalar/list replay cannot clear freshness or unseen notices.
-Prior evidence: `7d12ab10a`, this heading.
+order; primary-only moves retain input. Provider facts retain separate savepoints,
+ages/baselines and causal frontiers. Import reuses portable fields.
+Entity revisions cannot order relationships; scalar/list replay cannot clear
+freshness or unseen notices. Prior evidence: `7d12ab10a`, this heading.
 
 `repo identity --bind` associates an unbound checkout without selecting/publishing; divergent roots retain their identities. Shared first starts refuse pending exclusive admission. Delegation exchange,
 legacy association and remote/native composition remain. Desktop peer readings use Machine/repository keys.
@@ -107,8 +107,8 @@ import-triggered launch; installed/native acceptance remains.
 
 October 9 (`e3ca861b1`): MultiplexerStore observes visibility before Session readings;
 a callback had masked closure. Receipts expose pre-registration failures; plain Task
-links await mounted content. Request IDs fence registration, never URLs or later
-arrivals. Headless callbacks prove neither compositor usability nor native readiness.
+links await mounted content. IDs, not URLs, fence registration—not later arrivals.
+Headless callbacks prove no native/compositor usability.
 
 October 9 planning reads use read-only storage and skip Process admission;
 missing-registry/checkpointed-WAL tests exposed fallback writes. Resolve chapters

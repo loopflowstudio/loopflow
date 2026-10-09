@@ -145,7 +145,29 @@ fn changes_by_object(
     }
     // Retain decoded evidence outside dependency retries. Removal ages
     // select the first known timestamp, never random mutation-ID traversal order.
-    for changes in objects.values_mut() {
+    for (object, changes) in &mut objects {
+        // Validated mutations have known fields and one winner per field.
+        if !object
+            .kind
+            .fields()
+            .iter()
+            .all(|field| changes.winners.contains_key(field))
+        {
+            return Err(invalid(format!("incomplete planning record {}", object.id)));
+        }
+        match object.kind {
+            PlanningKind::Wave => {
+                crate::id::WaveId::parse(&object.id).map_err(invalid)?;
+            }
+            PlanningKind::Project => {
+                crate::durable::ProjectId::parse(&object.id).map_err(invalid)?;
+            }
+            PlanningKind::Task => {
+                crate::durable::TaskId::parse(&object.id).map_err(invalid)?;
+            }
+            PlanningKind::Comment => {}
+        }
+        changes.observations = latest_observations(changes.observations.iter().copied())?;
         if let Some(history) = changes.evidence.get_mut("provider_removal") {
             history.values.sort_by_key(|fact| match fact {
                 ProviderEvidence::IssueChange { observed_at, .. } => *observed_at,
@@ -627,41 +649,15 @@ impl SqliteStore {
         let saved = export_in(&tx, repo, destination)?;
         let merged = saved.merge(incoming).map_err(invalid)?;
         reserve_incoming(&tx, repo, destination, incoming)?;
-        let mut objects = changes_by_object(&merged)?;
         let held = selection_conflicts(&tx, repo, destination, &merged)?;
         retain_mutations(&tx, &saved, incoming)?;
+        let objects = changes_by_object(&merged)?;
         tx.execute("UPDATE planning_peer_context SET importing=1", [])?;
-        for (object, changes) in &objects {
-            // Validated mutations have known fields and one winner per field.
-            if !object
-                .kind
-                .fields()
-                .iter()
-                .all(|field| changes.winners.contains_key(field))
-            {
-                return Err(invalid(format!("incomplete planning record {}", object.id)));
-            }
-            match object.kind {
-                PlanningKind::Wave => {
-                    crate::id::WaveId::parse(&object.id).map_err(invalid)?;
-                }
-                PlanningKind::Project => {
-                    crate::durable::ProjectId::parse(&object.id).map_err(invalid)?;
-                }
-                PlanningKind::Task => {
-                    crate::durable::TaskId::parse(&object.id).map_err(invalid)?;
-                }
-                PlanningKind::Comment => {}
-            }
-        }
         let mut pending = objects
-            .iter_mut()
+            .iter()
             .filter(|(object, _)| !held.contains_key(*object))
-            .map(|(&object, changes)| {
-                changes.observations = latest_observations(changes.observations.iter().copied())?;
-                Ok((object, &*changes))
-            })
-            .collect::<StoreResult<Vec<_>>>()?;
+            .map(|(&object, changes)| (object, changes))
+            .collect::<Vec<_>>();
         let mut conflicts = loop {
             let count = pending.len();
             let mut retry = Vec::new();
@@ -1244,21 +1240,21 @@ fn insert_and_project(
     project_fields(
         conn,
         object,
-        winners
-            .values()
-            .filter(|(_, change)| {
-                !(change.field == "creation"
-                    || change.deletion_receipt().is_some()
-                    || change.order_receipt().is_some()
-                    || change.provider_evidence()
-                    || change.field == "planning_teams"
-                        && changes.evidence.contains_key("provider_teams")
-                    || pending_order && change.field == "planning_rank"
-                    || deletion_receipts && change.field == "planning_deleted_at"
-                    || object.kind == PlanningKind::Wave && change.field == "current_project_id"
-                    || object.kind == PlanningKind::Project && content_field(&change.field))
+        // The portable field schema excludes receipts and provider evidence;
+        // only fields with a dedicated projection owner need filtering here.
+        object
+            .kind
+            .fields()
+            .iter()
+            .copied()
+            .filter(|field| match *field {
+                "planning_teams" => !changes.evidence.contains_key("provider_teams"),
+                "planning_rank" => !pending_order,
+                "planning_deleted_at" => !deletion_receipts,
+                "current_project_id" => object.kind != PlanningKind::Wave,
+                _ => !(object.kind == PlanningKind::Project && content_field(field)),
             })
-            .map(|(_, change)| (change.field.as_str(), &change.value)),
+            .map(|field| (field, &winners[field].1.value)),
     )?;
     if object.kind == PlanningKind::Project {
         let content = serde_json::from_value(serde_json::json!({
@@ -1269,6 +1265,8 @@ fn insert_and_project(
         super::project_content::save_content(conn, &ProjectId::from_raw(&object.id), &content)?;
     }
     project_delivery_fields(conn, object, winners, snapshot, &previous)?;
+    // Projection can add baseline-free deliveries after frontier acquisition.
+    // Reconcile those too against the same accepted creation readback.
     if let Some(observation) = changes.observations.last() {
         if matches!(object.kind, PlanningKind::Task | PlanningKind::Project) {
             super::planning_export::attach_in(
@@ -1707,11 +1705,7 @@ fn acquire_linear_frontier(
     // A mapping is not a creation acknowledgement. Only an accepted provider
     // body can reconcile the original attempt, including after a peer supplied
     // the mapping first. Keep this inside the object's projection savepoint.
-    if let Some(observation) = changes
-        .observations
-        .last()
-        .filter(|_| matches!(object.kind, PlanningKind::Task | PlanningKind::Project))
-    {
+    if let Some(observation) = changes.observations.last() {
         super::planning_export::attach_in(
             conn,
             repo,

@@ -107,10 +107,10 @@ These are reversible lookup choices, not shared Work identity or publication.
 Primary and stack-parent Task selectors now carry repository-scoped full IDs through
 dispatch; an unscoped ambiguous prefix still fails.
 
-October 9 `lf context --skill implement --json`: generated goal 31,454/16,000
- tokens (15,454 over before note edits). The complete launch source contains Task
- direction and the generated changed-file inventory; authored-note curation cannot
- remove that payload. This remains a context-producer gap; no limit was raised.
+October 9 initial compression report: the generated goal includes Task direction and
+changed-file inventory; its 31,449 tokens exceed the 16,000-token limit by 15,449.
+The complete launch source was inspected. Authored-note curation cannot remove
+that generated payload; this remains a context-producer gap. No limit was raised.
 
 ## Explicit repository association — October 9
 

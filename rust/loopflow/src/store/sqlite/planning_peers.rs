@@ -238,7 +238,7 @@ impl SqliteStore {
                         id: row.get(0)?,
                         reference: row.get(1)?,
                         active: row.get(2)?,
-                        selected_records: row.get(3)?,
+                        selected_records: row.get::<_, i64>(3)? as u64,
                         imported_revision: row.get(4)?,
                         fetched_revision: row.get(5)?,
                         acquisition_error: row.get(6)?,
@@ -992,7 +992,9 @@ fn insert_and_project(
                 )?;
             }
             PlanningKind::Task => {
-                conn.execute("INSERT INTO tasks(id,project_id,issue_identifier,created_at) VALUES(?1,?2,?3,unixepoch())",
+                // New planning records have no placement. Initialize local required
+                // fields just as the common writer does; never import these values.
+                conn.execute("INSERT INTO tasks(id,project_id,issue_identifier,created_at,updated_at,workspace_slug) VALUES(?1,?2,?3,unixepoch(),unixepoch(),'')",
                     params![object.id,required("project_id")?,required("issue_identifier")?])?;
             }
             PlanningKind::Comment => unreachable!("comments use the common thread writer"),
@@ -1585,8 +1587,8 @@ mod tests {
         let conn = store.conn.lock().unwrap();
         conn.execute("INSERT INTO projects(id,wave_id,created_at,project_slug,project_name,project_prompt_context)
             VALUES(?1,?2,1,'chapter','Chapter','')", params![project.as_str(),wave.id()]).unwrap();
-        conn.execute("INSERT INTO tasks(id,project_id,issue_identifier,issue_title,issue_description,created_at)
-            VALUES(?1,?2,'FIX-1','Original','Brief',1)",params![task.as_str(),project.as_str()]).unwrap();
+        conn.execute("INSERT INTO tasks(id,project_id,issue_identifier,issue_title,issue_description,created_at,updated_at,workspace_slug)
+            VALUES(?1,?2,'FIX-1','Original','Brief',1,1,'')",params![task.as_str(),project.as_str()]).unwrap();
         super::super::project_content::capture_content(&conn, &project).unwrap();
         drop(conn);
         store
@@ -2271,6 +2273,10 @@ mod tests {
         target
             .import_peer_planning("/target", &destination(), "provider", &incoming)
             .unwrap();
+        let imported = target.task(&task).unwrap().unwrap();
+        assert!(imported.worktree.is_none());
+        assert!(imported.workspace_slug.is_empty());
+        assert!(target.workflow(&task).unwrap().is_none());
         assert_eq!(
             target.task_comments(&task).unwrap().comments,
             vec![TaskComment::from(&comment), TaskComment::from(&independent)]
@@ -2794,12 +2800,12 @@ mod tests {
             .unwrap()
             .execute(
                 "UPDATE tasks SET worktree='/retained/work',started_at=7 WHERE id=?1",
-                [&task],
+                [task.as_str()],
             )
             .unwrap();
         target.conn.lock().unwrap().execute(
             "INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id)
-             VALUES('retained','Retained','human',1,0,'/retained/work',?1,?2)", params![task,wave],
+             VALUES('retained','Retained','human',1,0,'/retained/work',?1,?2)", params![task.as_str(),wave],
         ).unwrap();
         edit_title(&target, &task, "Uncertain local title");
         let receipt = target
@@ -2976,12 +2982,12 @@ mod tests {
             let conn = target.conn.lock().unwrap();
             conn.execute(
                 "UPDATE task_changes SET attempted=1,error='lost response' WHERE task_id=?1",
-                [&task],
+                [task.as_str()],
             )
             .unwrap();
             conn.execute(
                 "UPDATE project_changes SET attempted=1,error='lost response' WHERE project_id=?1",
-                [&project],
+                [project.as_str()],
             )
             .unwrap();
         }
@@ -3330,7 +3336,7 @@ mod tests {
                     .unwrap()
                     .execute(
                         "UPDATE projects SET planning_teams='[\"other-team\"]' WHERE id=?1",
-                        [&project],
+                        [project.as_str()],
                     )
                     .unwrap();
             }
@@ -3397,11 +3403,11 @@ mod tests {
             let conn = store.conn.lock().unwrap();
             conn.execute(
                 "UPDATE tasks SET worktree='/retained/work',started_at=7 WHERE id=?1",
-                [task],
+                [task.as_str()],
             )
             .unwrap();
             conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id)
-                VALUES('retained','Retained','human',1,0,'/retained/work',?1,?2)", params![task,wave]).unwrap();
+                VALUES('retained','Retained','human',1,0,'/retained/work',?1,?2)", params![task.as_str(),wave]).unwrap();
             conn.execute(
                 "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,?2,1)",
                 params![driver, TraceId::new()],
@@ -3669,8 +3675,8 @@ mod tests {
         let original = left.task(&task).unwrap().unwrap();
         let sibling = TaskId::new();
         left.conn.lock().unwrap().execute(
-            "INSERT INTO tasks(id,project_id,issue_identifier,issue_title,created_at) VALUES(?1,?2,'FIX-2','Sibling',1)",
-            params![sibling, original.project_id],
+            "INSERT INTO tasks(id,project_id,issue_identifier,issue_title,created_at,updated_at,workspace_slug,issue_description) VALUES(?1,?2,'FIX-2','Sibling',1,1,'','')",
+            params![sibling.as_str(), original.project_id.as_str()],
         ).unwrap();
         let base = left
             .export_peer_planning("/source", &destination())
@@ -3684,24 +3690,24 @@ mod tests {
         {
             let conn = left.conn.lock().unwrap();
             conn.execute(
-                "INSERT INTO projects(id,wave_id,created_at,status) VALUES(?1,?2,1,'started')",
-                params![private_project, private.id()],
+                "INSERT INTO projects(id,wave_id,created_at,status,project_slug,project_name,project_prompt_context) VALUES(?1,?2,1,'started','fixture','Fixture','')",
+                params![private_project.as_str(), private.id()],
             )
             .unwrap();
             super::super::project_content::capture_content(&conn, &private_project).unwrap();
             conn.execute(
                 "UPDATE waves SET current_project_id=?2 WHERE id=?1",
-                params![private.id(), private_project],
+                params![private.id(), private_project.as_str()],
             )
             .unwrap();
             conn.execute(
                 "UPDATE projects SET status='started' WHERE id=?1",
-                [&original.project_id],
+                [original.project_id.as_str()],
             )
             .unwrap();
             conn.execute(
                 "UPDATE waves SET current_project_id=?2 WHERE id=?1",
-                params![original.wave_id, original.project_id],
+                params![original.wave_id, original.project_id.as_str()],
             )
             .unwrap();
         }
@@ -3829,7 +3835,7 @@ mod tests {
             .unwrap()
             .execute(
                 "UPDATE waves SET parent_wave_id=?2,current_project_id=?3 WHERE id=?1",
-                params![saved.wave_id, private.id(), saved.project_id],
+                params![saved.wave_id, private.id(), saved.project_id.as_str()],
             )
             .unwrap();
         let held = store.peer_projection_conflicts("/source").unwrap();
@@ -3913,19 +3919,19 @@ mod tests {
         project.name = "Private project".into();
         {
             let conn = store.conn.lock().unwrap();
-            conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,?3,1)", params![private_id,private_wave.id(),project.id]).unwrap();
+            conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at,project_slug,project_name,project_prompt_context) VALUES(?1,?2,?3,1,'fixture','Fixture','')", params![private_id.as_str(),private_wave.id(),project.id]).unwrap();
             super::super::project_content::capture_content(&conn, &private_id).unwrap();
             conn.execute(
                 "UPDATE projects SET wave_id=?2 WHERE id=?1",
-                params![private_id, wave.id()],
+                params![private_id.as_str(), wave.id()],
             )
             .unwrap();
             conn.execute(
                 "UPDATE tasks SET worktree='/retained/work',started_at=1 WHERE id=?1",
-                [&task.id],
+                [task.id.as_str()],
             )
             .unwrap();
-            conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id) VALUES('session-retained','Retained','human',1,0,'/retained/work',?1,?2)", params![task.id,wave.id()]).unwrap();
+            conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id) VALUES('session-retained','Retained','human',1,0,'/retained/work',?1,?2)", params![task.id.as_str(),wave.id()]).unwrap();
         }
         let driver = ProcessLfid::new();
         store.conn.lock().unwrap().execute(
@@ -3995,9 +4001,11 @@ mod tests {
         assert_eq!(store.workflow(&task.id).unwrap(), workflow);
         let conn = store.conn.lock().unwrap();
         assert_eq!(
-            conn.query_row("SELECT worktree FROM tasks WHERE id=?1", [&task.id], |r| {
-                r.get::<_, String>(0)
-            })
+            conn.query_row(
+                "SELECT worktree FROM tasks WHERE id=?1",
+                [task.id.as_str()],
+                |r| { r.get::<_, String>(0) }
+            )
             .unwrap(),
             "/retained/work"
         );
@@ -4010,7 +4018,7 @@ mod tests {
             .unwrap(),
             task.id.as_str()
         );
-        assert!(conn.query_row("SELECT EXISTS(SELECT 1 FROM planning_peer_changes WHERE kind='task' AND object_id=?1 AND field='project_id' AND linear IS NOT NULL AND json_extract(value,'$')=?2)", params![task.id,private_id], |r| r.get::<_,bool>(0)).unwrap());
+        assert!(conn.query_row("SELECT EXISTS(SELECT 1 FROM planning_peer_changes WHERE kind='task' AND object_id=?1 AND field='project_id' AND linear IS NOT NULL AND json_extract(value,'$')=?2)", params![task.id.as_str(),private_id.as_str()], |r| r.get::<_,bool>(0)).unwrap());
     }
 
     #[test]
@@ -4084,12 +4092,12 @@ mod tests {
         {
             let conn = right.conn.lock().unwrap();
             conn.execute(
-                "INSERT INTO projects(id,wave_id,created_at) VALUES(?1,?2,1)",
-                params![private_project, private.id()],
+                "INSERT INTO projects(id,wave_id,created_at,project_slug,project_name,project_prompt_context) VALUES(?1,?2,1,'fixture','Fixture','')",
+                params![private_project.as_str(), private.id()],
             )
             .unwrap();
             super::super::project_content::capture_content(&conn, &private_project).unwrap();
-            conn.execute("INSERT INTO tasks(id,project_id,issue_identifier,issue_title,created_at,worktree) VALUES(?1,?2,'PRIVATE-1','Private draft',1,'/retained/private')", params![private_task,private_project]).unwrap();
+            conn.execute("INSERT INTO tasks(id,project_id,issue_identifier,issue_title,created_at,worktree,updated_at,workspace_slug,issue_description) VALUES(?1,?2,'PRIVATE-1','Private draft',1,'/retained/private',1,'','')", params![private_task.as_str(),private_project.as_str()]).unwrap();
         }
         right.bind_peer_planning("/target", &destination).unwrap();
         assert!(right
@@ -4125,15 +4133,15 @@ mod tests {
         {
             let conn = right.conn.lock().unwrap();
             conn.execute(
-                "INSERT INTO projects(id,wave_id,created_at) VALUES(?1,?2,1)",
-                params![project, shared.id()],
+                "INSERT INTO projects(id,wave_id,created_at,project_slug,project_name,project_prompt_context) VALUES(?1,?2,1,'fixture','Fixture','')",
+                params![project.as_str(), shared.id()],
             )
             .unwrap();
             super::super::project_content::capture_content(&conn, &project).unwrap();
-            conn.execute("INSERT INTO tasks(id,project_id,issue_identifier,issue_title,created_at) VALUES(?1,?2,'SHARED-1','Shared work',1)", params![task,project]).unwrap();
+            conn.execute("INSERT INTO tasks(id,project_id,issue_identifier,issue_title,created_at,updated_at,workspace_slug,issue_description) VALUES(?1,?2,'SHARED-1','Shared work',1,1,'','')", params![task.as_str(),project.as_str()]).unwrap();
             conn.execute(
                 "UPDATE tasks SET issue_title='Still private' WHERE id=?1",
-                [&private_task],
+                [private_task.as_str()],
             )
             .unwrap();
         }
@@ -4180,7 +4188,7 @@ mod tests {
                 .unwrap()
                 .query_row(
                     "SELECT worktree FROM tasks WHERE id=?1",
-                    [&private_task],
+                    [private_task.as_str()],
                     |r| r.get::<_, String>(0)
                 )
                 .unwrap(),
@@ -4748,7 +4756,7 @@ mod tests {
                 [task.as_str()],
             )
             .unwrap();
-            conn.execute("INSERT INTO tasks(id,project_id,issue_identifier,issue_title,created_at) VALUES(?1,?2,'FIX-2','Independent',1)", params![independent, project]).unwrap();
+            conn.execute("INSERT INTO tasks(id,project_id,issue_identifier,issue_title,created_at,updated_at,workspace_slug,issue_description) VALUES(?1,?2,'FIX-2','Independent',1,1,'','')", params![independent.as_str(), project.as_str()]).unwrap();
         }
         left.append_task_comment(
             &task,
@@ -4777,9 +4785,8 @@ mod tests {
             .import_peer_planning("/target", &destination(), "parents", &parents)
             .unwrap();
         right.conn.lock().unwrap().execute(
-            "INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,issue_title,created_at,worktree)
-             VALUES(?1,?2,'provider-1','FIX-1','Legacy identity',1,'/legacy/checkout')",
-            params![legacy, project],
+            "INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,issue_title,created_at,worktree,updated_at,workspace_slug,issue_description) VALUES(?1,?2,'provider-1','FIX-1','Legacy identity',1,'/legacy/checkout',1,'','')",
+            params![legacy.as_str(), project.as_str()],
         ).unwrap();
         let expected = right
             .export_peer_planning("/target", &destination())
@@ -4892,7 +4899,7 @@ mod tests {
         right.conn.lock().unwrap().execute(
             "INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id)
              VALUES('session-retained','Retained','human',1,0,'/target/task',?1,?2)",
-            params![task, wave],
+            params![task.as_str(), wave],
         ).unwrap();
         let moved_wave = Wave::new(WaveId::new(), "destination".into(), "/source".into());
         left.create_wave(&moved_wave).unwrap();
@@ -4907,17 +4914,17 @@ mod tests {
         {
             let conn = left.conn.lock().unwrap();
             conn.execute(
-                "INSERT INTO projects(id,wave_id,created_at) VALUES(?1,?2,1)",
-                params![moved_project, moved_wave.id()],
+                "INSERT INTO projects(id,wave_id,created_at,project_slug,project_name,project_prompt_context) VALUES(?1,?2,1,'fixture','Fixture','')",
+                params![moved_project.as_str(), moved_wave.id()],
             )
             .unwrap();
             super::super::project_content::capture_content(&conn, &moved_project).unwrap();
             conn.execute(
                 "UPDATE tasks SET project_id=?2 WHERE id=?1",
-                params![task, moved_project],
+                params![task.as_str(), moved_project.as_str()],
             )
             .unwrap();
-            conn.execute("INSERT INTO tasks(id,project_id,issue_identifier,issue_title,created_at) VALUES(?1,?2,'FIX-2','Still progresses',1)", params![independent,project]).unwrap();
+            conn.execute("INSERT INTO tasks(id,project_id,issue_identifier,issue_title,created_at,updated_at,workspace_slug,issue_description) VALUES(?1,?2,'FIX-2','Still progresses',1,1,'','')", params![independent.as_str(),project.as_str()]).unwrap();
         }
         let incoming = left
             .export_peer_planning("/source", &destination())
@@ -4982,7 +4989,7 @@ mod tests {
             .unwrap()
             .execute(
                 "UPDATE waves SET current_project_id=?2 WHERE id=?1",
-                params![wave, project],
+                params![wave, project.as_str()],
             )
             .unwrap();
         let incoming = left

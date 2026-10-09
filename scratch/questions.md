@@ -30,7 +30,7 @@ at `b040c7c8d:scratch/questions.md`.
   failures still roll back the import. Legacy-provider association remains unfinished;
   conflicts preserve both IDs rather than guessing which execution history to use.
 
-Peer source is committed through `de9470d5a`; this integrated cut remains unpublished. Current verification and
+Peer source before this repair is committed through `85ced1512`; the integrated cut remains unpublished. Current verification and
 remaining integration are in the existing design; previous adoption-only evidence
 is retained at `5d336868f:scratch/questions.md`.
 

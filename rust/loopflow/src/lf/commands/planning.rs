@@ -8,7 +8,7 @@ use anyhow::{anyhow, Result};
 use crate::engine::planning_git::PlanningDestination;
 use crate::id::WaveId;
 use crate::lf::PlanningCommand;
-use crate::store::Store;
+use crate::store::{RegistryUnavailable, Store};
 
 pub fn run(cmd: &PlanningCommand) -> Result<()> {
     let repo = crate::engine::worktrees::main_repo_root(&super::util::find_repo_root()?)?;
@@ -17,7 +17,21 @@ pub fn run(cmd: &PlanningCommand) -> Result<()> {
 }
 
 async fn run_async(repo: &Path, cmd: &PlanningCommand) -> Result<()> {
-    let store = crate::store::open_registry_for_authority().await?;
+    let store = crate::store::open_registry_for_authority()
+        .await
+        .map_err(|error| match error {
+            RegistryUnavailable::MissingFile { path } => anyhow!(
+                "Machine registry is missing at {}; initialize or restore it before planning setup",
+                path.display()
+            ),
+            RegistryUnavailable::Unresolved { error } => {
+                anyhow!("Machine registry path cannot be resolved: {error}")
+            }
+            RegistryUnavailable::Incompatible { path, error } => anyhow!(
+                "Machine registry at {} is incompatible: {error}; run `lf doctor`",
+                path.display()
+            ),
+        })?;
     let repo_key = repo.to_string_lossy();
     match cmd {
         PlanningCommand::Key { new, recover } => {

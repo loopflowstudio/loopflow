@@ -208,10 +208,20 @@ uncertain attempts and Linear losers. Rust tests are authored for two-store
 independent edits, same-field losers, receipt retention, provider winners,
 malformed-input rollback, failed capture and populated migration; not executed.
 
-The next bounded implementation is creation/link receipt composition through
-`planning_export.rs`, retaining imported identities and uncertain attempts without
-minting replacements or acknowledging identity alone. This is implementation
-order, not new product scope or completed acceptance.
+Executable feedback took priority over creation/link composition on October 8.
+The isolated Linux build exposed invalid registry-error conversion and SQLite
+integer/ID bindings. The focused comment test then found imported Tasks missing
+required local `workspace_slug` and `updated_at` initialization. New peer Tasks
+now use the common writer's empty placement and local timestamps; existing
+execution remains untouched. Fixtures retain those same valid local defaults.
+Review kept the strict reader and portable-field exclusion rather than adding
+fallback values or exporting placement. Prior global Rust-unavailability claims
+are superseded by the focused results below, not by full composed acceptance.
+
+Creation/link receipt composition through `planning_export.rs` remains next:
+retain imported identities and uncertain attempts without minting replacements
+or acknowledging identity alone. No creation/link implementation was added in
+this repair; the remaining integration and review boundary are unchanged.
 
 Creation/link, order and deletion receipts, alternate acquisition paths, legacy
 association and Desktop presentation still follow. Comments and Task disposition
@@ -497,13 +507,14 @@ Infrastructure child memory exists in this checkout.
 7. Replace PR copy and create a walkthrough of final behavior and evidence;
    publish #1491 for Jack Heart's review and stop without landing.
 
-Check (October 8 compression): `cargo fmt --all --check` and `git diff --check` pass; `lf context --skill compress` fits. Build, focused `cargo test -p loopflow --lib peer_comments_acquired_without_local_delivery_never_echo` (broader peer suites at gate) and `cargo clippy --all-targets -- -D warnings` remain with capable isolated gate/CI; unchanged build-script startup stalls were not reprobed. Prior SQL/capture evidence is retained at `a518b985b` in this section.
+Check (October 8 executable repair): disposable Linux `cargo test --offline -p loopflow --lib peer_comments_acquired_without_local_delivery_never_echo`, library cases `peer_import_keeps_identity_execution_and_concurrent_local_saves`, `joining_a_plan_keeps_unrelated_local_work_out_of_its_publication`, `protected_session_ancestry_does_not_block_independent_planning`, and `cargo test --offline -p loopflow --test planning_setup_tests public_setup_recovers_user_identity_and_selects_without_publishing` pass; `cargo clippy --offline --all-targets -- -D warnings`, local `cargo fmt --all --check`, `git diff --check` and `lf context --skill implement` pass. Gate retains the broader/materialized, public reconnect and Desktop checks; review retains the walkthrough. No publication, installation or landing.
 
-Prior fmt and source-extracted SQL passes, focused-test/Clippy timeouts and their
-startup samples are preserved at `e77d2d1c8:scratch/work-on-another-machine-name.md`.
-They locate the stall before build-script entry, not its cause or a Rust failure.
-The locally available upstream `04a4a296b` records the same startup boundary in
-unrelated installer verification; it supplies no repair or passing peer result.
+Prior SQL proofs and macOS startup samples remain at
+`e77d2d1c8:scratch/work-on-another-machine-name.md`. A fresh bounded attempt
+again stopped at `_dyld_start` before the build script, with a valid signature;
+this is not a diagnosed cause or a Rust failure. Disposable Linux compilation
+bypassed that environment boundary and exposed the defects repaired above.
+No installed binary, security setting, credential or host store changed.
 Historical Flow `93d4d4f6-4723-4027-951b-b3aee2e696a2` still retains realign
 step `e94edd38-2a26-4047-9650-41a65ab814f7` without a recorded exit, confirmed
 by `lf flow show --processes` on October 8. No exit or replacement authority is

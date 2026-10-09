@@ -629,21 +629,21 @@ Entity revisions cannot order relationships.
 `a388ed425` shares disposition receipts without Workflow moves: a selected Linear
 winner retires losing intention; ordinary unchanged acquisition preserves it.
 
-Comments retain common owners/authorship without steer/echo. `a518b985b`
-journals semantic Project workflow/KR/target fields through common content and
-receipt owners, not raw Markdown. Imports group borrowed history/winners once;
-retries retain immutable evidence. Rust/composed acceptance is unproved. Creation/link,
-order, deletion, alternate acquisition, legacy association and Desktop remain.
-Design: `scratch/work-on-another-machine-name.md`; prior proofs: `ae6f392c2` in
-this section. Checkpoint CI skips product suites with scratch.
+Comments preserve authorship without steer/echo; `a518b985b` journals semantic
+workflow/KR/target fields through common owners, not raw Markdown.
+Imports group immutable history/winners once. Linux build/Clippy and focused
+comment/import/setup checks pass after typed SQL and new-Task local-default repairs.
+Creation/link, order, deletion, alternate acquisition, legacy association and Desktop
+remain. Design: `scratch/work-on-another-machine-name.md`; prior proofs: `ae6f392c2`.
+Checkpoint CI skips product suites with scratch.
 
-Parent `ffe986160` settles state from observations, not synthetic success.
+`ffe986160` settles state from observations, not synthetic success.
 Joining publishes nothing; mixed Linear awaits composition, not policy.
 Fetch/import/publication stay separate; readback covers the attempted save.
 Workers retain effect locks through cancellation without blocking saves/acquisition.
 `de9470d5a` scopes conflict display and settlement to one destination. Damaged
 journals retain unknown pending state, receipts/conflicts and independent visibility.
-Rust/composed/installed acceptance remains unproved.
+Broader/composed/installed acceptance remains unproved.
 
 Move counterexample `a43f3e2ea`, repairs `b5dafd918`/`7395cf3bb`: holds omit private
 history/dependents, including retained Git documents, until explicit selection.

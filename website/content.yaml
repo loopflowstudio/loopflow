@@ -115,36 +115,36 @@ cli:
       $ lf land                                # merge when checks pass
     items:
     - name: Launcher
-      text: Start any coding agent the same way. One command launches Claude Code, Codex, or
-        OpenCode, on the model you pick.
+      text: At its most basic, `lf` is an agent launcher and session manager. Use it anywhere you
+        would launch Claude Code, Codex, or OpenCode, so every agent starts the same way.
     - name: Skills
-      text: Stop retyping prompts. A Skill is a prompt you keep as a Markdown file and run by name.
+      text: A Skill is a prompt saved as a Markdown file, so you stop retyping it. `lf skill NAME`
+        runs one.
     - name: Flows
-      text: Turn a habit into a process. A Flow runs Skills in order, and can loop until the work
-        is ready.
+      text: '`lf` runs Flows. A Flow is a (looping) sequence of Skills: a habit turned into a
+        process you can run again.'
     - name: Built-ins
-      text: Start from Flows that already do software engineering. Copy one into your repository
-        and make it yours. They are files, so you share them the way you share code.
+      text: '`lf` provides lots of reasonable built-in Flows for software engineering, but you are
+        encouraged to build your own and share them with others. They are files in your repository.'
     - name: Interactive or headless
-      text: Sit in the conversation or let it run. The same Flow works both ways, and each step can
-        use a different agent or model.
+      text: Run any Skill or Flow as a conversation or headless. Each step can use a different
+        agent or model.
     - name: Sessions
-      text: Never lose a conversation. `lf` keeps every one it starts, whichever agent ran it, and
-        you can pick any of them back up.
-    - name: Accounts
-      text: Use more than one account. Connect your personal and work logins, set the order a
-        repository tries them in, and move to the next when one runs out.
-    - name: Usage
-      text: See what the work cost, by conversation, by Task, or by Wave.
+      text: '`lf` keeps every conversation it starts, whichever agent ran it, so you never lose one
+        and can always pick it back up.'
+    - name: Accounts and usage
+      text: '`lf` manages your logins, so you can use more than one account and move to the next
+        when one runs out. It also shows what the work cost, by Task or by Wave.'
     - name: Waves and Tasks
-      text: Organize agents around the work. Waves are long-lived streams, Tasks are concrete
-        outcomes (i.e. PRs), and every conversation is filed under the one it belongs to.
+      text: '`lf` is also a project manager. It organizes your work into Waves (long-lived streams)
+        and Tasks (concrete outcomes, i.e. PRs), and files each conversation under the one it
+        belongs to.'
     - name: Task = worktree = branch
-      text: Run many agents without collisions. Each Task has its own working copy, its own
-        branch, and one pull request.
+      text: Each Task gets its own working copy, its own branch, and one pull request, so many
+        agents can work without colliding.
     - name: Workflows
-      text: Decide where you step in. A Task moves through stages to a shipped and validated PR,
-        and you choose, project by project, which ones need you.
+      text: '`lf` encodes the stages a Task goes through to become a shipped and validated PR, and
+        lets you customize, project by project, how and when you get involved.'
     links:
     - label: Skills and Flows ↗
       href: /docs/authoring#flows
@@ -159,10 +159,10 @@ cli:
       text: '`lf` is free, open-source, and can be used inside any terminal, or alongside tools like
         cmux and herdr.'
     - name: Use as much as you want
-      text: Take the launcher and nothing else, or Flows without Tasks, or all of it. No part
-        requires the rest.
+      text: Use what you like and skip what you don't. The launcher needs no Task and no Linear.
+        Flows run without Tasks, and a Task can run any Flow.
     - name: Change whatever you want
-      text: Every Skill and Flow is a file you can read and edit. MIT licensed.
+      text: Skills are Markdown and Flows are YAML. Edit them or use the built-ins. MIT licensed.
     - name: Linear
       text: Your Tasks are Linear issues, so the plan your agents work from is the one your team
         already reads.

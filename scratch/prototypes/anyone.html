@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Loopflow: anyone</title>
+<link rel="icon" href="../../website/static/logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@latest/css/pico.min.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&amp;family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<link rel="stylesheet" href="../../website/static/style.css">
+<style>
+/* Prototype "anyone" only. Everything else comes from style.css under .home-page.
+   The shape is /cli's: one headline, one concrete thing, plain lists, install last.
+   The lists are set in the sans face at reading size, for people who do not live in a terminal. */
+:root { --pico-font-size: 100%; }
+
+.home-page .any-hero { padding: 84px 0 8px; max-width: 900px; }
+.home-page .any-hero .kicker { color: var(--burgundy); margin-bottom: 22px; }
+.home-page .any-hero .actions { margin-bottom: 14px; }
+.home-page .any-hero .actions a:not(.button) { font-size: 13px; text-decoration: underline; text-underline-offset: 4px; }
+.home-page .any-cost { font: 12px/1.7 var(--font-mono); color: var(--text-secondary); max-width: 680px; margin: 0; }
+
+/* The app, shown in full. This is where the video goes. */
+.home-page .any-app { padding-top: 44px; }
+.home-page .any-slot { display: flex; justify-content: space-between; gap: 6px 24px; flex-wrap: wrap; padding: 11px 16px; font: 500 11px/1.6 var(--font-mono); text-transform: uppercase; letter-spacing: .1em; color: var(--burgundy); background: #f4f0ea; border: 1px solid #d9d4cc; border-bottom: 0; border-radius: 10px 10px 0 0; }
+.home-page .any-slot span + span { color: var(--text-secondary); }
+.home-page .any-app .window { border-radius: 0 0 10px 10px; }
+.home-page .any-beats { list-style: none; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 34px; margin: 34px 0 0; padding: 0; }
+.home-page .any-beats li { list-style: none; margin: 0; padding: 18px 0 0; border-top: 2px solid var(--border); }
+.home-page .any-beats li.shown { border-top-color: var(--burgundy); }
+.home-page .any-beats .n { font: 500 11px/1.6 var(--font-mono); text-transform: uppercase; letter-spacing: .1em; color: var(--text-secondary); margin: 0 0 10px; }
+.home-page .any-beats li.shown .n { color: var(--burgundy); }
+.home-page .any-beats h3 { font: 400 26px/1.15 var(--font-serif); letter-spacing: -.01em; margin: 0 0 10px; }
+.home-page .any-beats p { font-size: 15.5px; line-height: 1.6; color: #333; margin: 0 0 8px; }
+
+/* Reading column, as on /cli. */
+.home-page .any-read { max-width: 900px; padding-top: 84px; }
+.home-page .any-read h2 { font-size: clamp(30px, 3.2vw, 42px); margin: 0 0 14px; }
+.home-page .any-read .lede { font-size: 18px; line-height: 1.6; color: #333; max-width: 700px; margin: 0; }
+.home-page .any-read .after { font-size: 15px; line-height: 1.65; color: #333; max-width: 700px; margin: 18px 0 0; }
+.home-page .any-read a { text-decoration: underline; text-underline-offset: 4px; }
+
+/* How one piece of work goes: who acts, then what happens. */
+.home-page .any-steps { list-style: none; margin: 28px 0 0; padding: 0; border-top: 1px solid var(--border); }
+.home-page .any-steps li { list-style: none; display: grid; grid-template-columns: 34px 96px minmax(0, 1fr); gap: 0 14px; align-items: baseline; margin: 0; padding: 18px 0; border-bottom: 1px solid var(--border); }
+.home-page .any-steps .n { font: 12px/1.6 var(--font-mono); color: var(--text-secondary); }
+.home-page .any-steps .who { justify-self: start; font: 500 11px/1 var(--font-mono); text-transform: uppercase; letter-spacing: .08em; padding: 6px 8px; border: 1px solid #d5d0c8; border-radius: 4px; color: var(--text-secondary); }
+.home-page .any-steps li.you .who { background: var(--wine); border-color: var(--wine); color: #fff; }
+.home-page .any-steps h3 { font: 600 17px/1.4 var(--font-sans); color: var(--text); margin: 0 0 4px; }
+.home-page .any-steps p { font-size: 15.5px; line-height: 1.6; color: #333; margin: 0; max-width: 620px; }
+
+/* The plain list, - Name: detail, in the reading face. */
+.home-page .any-list { list-style: none; margin: 24px 0 0; padding: 20px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.home-page .any-list li { list-style: none; position: relative; margin: 0 0 12px; padding-left: 20px; font-size: 16px; line-height: 1.6; color: #333; max-width: 760px; }
+.home-page .any-list li:last-child { margin-bottom: 0; }
+.home-page .any-list li::before { content: "-"; position: absolute; left: 0; color: var(--text-secondary); font-family: var(--font-mono); }
+.home-page .any-list b { color: var(--text); font-weight: 600; }
+.home-page .any-list b::after { content: ":"; }
+
+/* Questions */
+.home-page .any-faq { margin: 24px 0 0; border-top: 1px solid var(--border); }
+.home-page .any-faq > div { padding: 20px 0; border-bottom: 1px solid var(--border); }
+.home-page .any-faq dt { font: 600 17px/1.4 var(--font-sans); margin: 0 0 6px; color: var(--text); }
+.home-page .any-faq dd { margin: 0; font-size: 15.5px; line-height: 1.65; color: #333; max-width: 700px; }
+
+/* Install, last */
+.home-page .any-end { max-width: 900px; padding: 84px 0 80px; }
+.home-page .any-end .eyebrow { color: var(--burgundy); margin-bottom: 14px; }
+.home-page .any-end h2 { font-size: clamp(44px, 5.4vw, 80px); line-height: 1.02; letter-spacing: -.04em; margin: 0 0 28px; }
+.home-page .any-end .actions { margin-bottom: 14px; }
+.home-page .any-end .install-links { margin-top: 22px; }
+
+@media (max-width: 860px) {
+    .home-page .any-hero { padding: 44px 0 4px; }
+    .home-page .any-hero .needs-label, .home-page .any-hero .needs-list li, .home-page .any-hero .intro { font-size: 18px; }
+    .home-page .any-app { padding-top: 32px; }
+    .home-page .any-slot { font-size: 10px; padding: 10px 12px; }
+    .home-page .any-beats { grid-template-columns: minmax(0, 1fr); gap: 26px; margin-top: 26px; }
+    .home-page .any-read { padding-top: 56px; }
+    .home-page .any-steps li { grid-template-columns: 26px minmax(0, 1fr); gap: 8px 10px; padding: 16px 0; }
+    .home-page .any-steps li > div { grid-column: 1 / -1; }
+    .home-page .any-end { padding: 56px 0 48px; }
+}
+</style>
+</head>
+<body>
+<a href="#main-content" class="skip-link">Skip to main content</a>
+<div class="home-page">
+  <header>
+    <a href="http://localhost:5001/" class="brand"><img src="../../website/static/logo.svg" alt="">loopflow</a>
+    <nav aria-label="Main navigation">
+      <a href="#mac" class="optional">For you</a>
+      <a href="http://localhost:5001/cli">CLI</a>
+      <a href="http://localhost:5001/docs">Docs</a>
+      <details>
+        <summary>Company</summary>
+        <div class="menu">
+          <a href="http://localhost:5001/studio">Loopflow Studio</a>
+          <a href="http://localhost:5001/etude">Etude</a>
+          <a href="http://localhost:5001/fantasia">Fantasia</a>
+          <a href="http://localhost:5001/about">About</a>
+        </div>
+      </details>
+      <a href="https://github.com/loopflowstudio/loopflow" class="optional">GitHub ↗</a>
+      <a href="#start" class="button solid">Install</a>
+    </nav>
+  </header>
+
+  <main id="main-content" class="home">
+
+    <section class="home-hero any-hero">
+      <p class="eyebrow kicker">Loopflow for Mac</p>
+      <h1>Loopflow lets anyone craft software.</h1>
+      <p class="needs-label">You need:</p>
+      <ul class="needs-list">
+        <li>A coding agent (Claude Code, Codex, or OpenCode)</li>
+        <li>A GitHub account</li>
+      </ul>
+      <p class="intro">We’ll get you building whatever software you want, the way a software engineer does. Loopflow guides you through workflows that get the most out of you and keep the software high quality, not slop.</p>
+      <div class="actions">
+        <a href="https://downloads.loopflow.studio/Loopflow-latest.dmg" class="button solid">Download for Mac</a>
+        <a href="#need">Everything it needs ↓</a>
+      </div>
+      <p class="any-cost">Free and open source. No account with us. The coding agent runs on your own account and has its own cost.</p>
+    </section>
+
+    <section id="mac" class="any-app" aria-label="The app">
+      <div class="any-slot">
+        <span>A still for now · the video is not recorded yet</span>
+        <span>Actual capture of the app, unedited</span>
+      </div>
+      <div class="window">
+        <img src="../../website/static/wave-surface.png" alt="Loopflow for Mac. A sidebar lists four goals with the tasks under each. The main area shows one goal, two results to reach, and ten tasks, four of them completed." width="2880" height="1800">
+      </div>
+      <ol class="any-beats">
+        <li>
+          <p class="n">1 · In the video</p>
+          <h3>Start with one conversation.</h3>
+          <p>Open your project in Loopflow and start a session. A session is a conversation with your coding agent, inside the app. Pick a way to start from the list, then say what you want.</p>
+        </li>
+        <li class="shown">
+          <p class="n">2 · Shown above</p>
+          <h3>Sort the work as it grows.</h3>
+          <p>A Wave is a goal you keep coming back to. A Task is one piece of work toward it. The sidebar lists each Wave, its Tasks, and the conversations under them.</p>
+          <p>Above: one Wave, the results it is aiming for, and its ten Tasks, four of them done.</p>
+        </li>
+        <li>
+          <p class="n">3 · In the video</p>
+          <h3>Run several at once.</h3>
+          <p>Split the window to keep more than one Task in view. Above each Task’s conversation, a small diagram shows which step it is on.</p>
+        </li>
+      </ol>
+    </section>
+
+    <section id="quality" class="any-read">
+      <h2>How one piece of work goes.</h2>
+      <p class="lede">“Not slop” means two plain things here. Nothing gets built before there is a plan you agreed to. Nothing ships before it has been checked and you have tried it.</p>
+      <ol class="any-steps">
+        <li class="you">
+          <span class="n">1</span><span class="who">You</span>
+          <div>
+            <h3>Say what you want.</h3>
+            <p>One outcome, in your own words. That is a Task.</p>
+          </div>
+        </li>
+        <li>
+          <span class="n">2</span><span class="who">Loopflow</span>
+          <div>
+            <h3>It writes a plan.</h3>
+            <p>Your agent reads the project and writes down what it will build and how you will know it is done.</p>
+          </div>
+        </li>
+        <li class="you">
+          <span class="n">3</span><span class="who">You</span>
+          <div>
+            <h3>You talk the plan over.</h3>
+            <p>In ordinary conversation. The agent walks you through the choices that matter and rewrites the plan as you decide. Not there yet? Send it back for another draft.</p>
+          </div>
+        </li>
+        <li>
+          <span class="n">4</span><span class="who">Loopflow</span>
+          <div>
+            <h3>It builds, off to the side.</h3>
+            <p>Each Task is built in its own copy of your project, so the version you rely on stays as it was. Each Task ends up as one pull request: the proposed change, written up on GitHub.</p>
+          </div>
+        </li>
+        <li>
+          <span class="n">5</span><span class="who">Loopflow</span>
+          <div>
+            <h3>It goes back over its own work.</h3>
+            <p>It simplifies what it wrote and keeps working until the plan’s “done” list holds.</p>
+          </div>
+        </li>
+        <li class="you">
+          <span class="n">6</span><span class="who">You</span>
+          <div>
+            <h3>You see it working.</h3>
+            <p>The agent guides you through trying the change yourself. Say what is wrong and it goes back for another pass. Closing the window never counts as a yes.</p>
+          </div>
+        </li>
+        <li>
+          <span class="n">7</span><span class="who">Loopflow</span>
+          <div>
+            <h3>It ships.</h3>
+            <p>When you say so. It runs the tests and checks, brings the docs up to date, and the change joins your project once the checks pass. A failed check can start a repair in the same Task.</p>
+          </div>
+        </li>
+      </ol>
+      <p class="after">That is the built-in route with a plan review. Another skips the plan review and stops only for the demo. You choose which one a project uses.</p>
+    </section>
+
+    <section id="get" class="any-read">
+      <h2>What you get.</h2>
+      <ul class="any-list">
+        <li><b>Your attention where it is needed</b> The conversations waiting on you are listed first. Everything else can keep going without you watching it.</li>
+        <li><b>Work that cannot collide</b> Each Task has its own copy of the project and its own pull request, so two Tasks never write over each other.</li>
+        <li><b>Nothing lost</b> Every conversation is filed under the Task it belongs to. Come back later and the work is where you left it.</li>
+        <li><b>A project that remembers</b> Each Wave keeps notes of decisions and lessons. They are files you can read and edit, and later conversations start from them.</li>
+        <li><b>One view of everything</b> A roadmap lists every Task and marks it waiting, blocked, or clear.</li>
+        <li><b>What changed</b> For each Task, the files it touched and what changed in each. You do not have to read them. They are there when you are curious.</li>
+        <li><b>What it cost</b> The app shows what the work cost you with your coding agent.</li>
+        <li><b>Your say, where you want it</b> Stay in one conversation and steer as you go, step in at the plan and the demo, or let it run.</li>
+      </ul>
+      <p class="after">The organizing part is not special. A goal, the work under it, and the conversations under that. It is as simple as we could make it, and you can use as little of it as you like.</p>
+    </section>
+
+    <section id="need" class="any-read">
+      <h2>What it needs.</h2>
+      <p class="lede">The whole list. Nothing here is ours to sell you.</p>
+      <ul class="any-list">
+        <li><b>A Mac</b> macOS 15 or later.</li>
+        <li><b>A coding agent</b> Claude Code, Codex, or OpenCode, installed and signed in. This is the part that costs money. You pay its maker, not us.</li>
+        <li><b>A GitHub account</b> Your project and its pull requests live there. You also need git and GitHub’s own command line tool, signed in. <a href="http://localhost:5001/docs/getting-started">Getting started ↗</a> lists the setup.</li>
+        <li><b>A Linear workspace, once you want Tasks</b> Tasks and Waves are kept in Linear, a planning tool. A single conversation does not need it.</li>
+        <li><b>Nothing from us</b> No account to register and no server to run. Loopflow runs on your computer. It is free and open source, MIT licensed.</li>
+      </ul>
+    </section>
+
+    <section id="faq" class="any-read">
+      <h2>Questions.</h2>
+      <dl class="any-faq">
+        <div>
+          <dt>Do I have to read code?</dt>
+          <dd>No. You judge the plan before the work and the working result after it. Loopflow cannot promise the software is right. It makes sure there was a plan, a check, and a demo before anything shipped.</dd>
+        </div>
+        <div>
+          <dt>Do I need to know git?</dt>
+          <dd>Loopflow makes the separate copy, the pull request, and the merge for each Task. Your project does need to be kept in git, on GitHub.</dd>
+        </div>
+        <div>
+          <dt>Can it make a mess I cannot fix?</dt>
+          <dd>Work happens in a Task’s own copy, away from the version you rely on. Nothing joins your project until that Task’s pull request is merged, and each Task is one pull request, so every change is a single named thing.</dd>
+        </div>
+        <div>
+          <dt>What do I actually do?</dt>
+          <dd>The three steps marked “You” above: say what you want, talk over the plan, try the result. In between, the agent works and you can be in another Task.</dd>
+        </div>
+        <div>
+          <dt>What does it cost?</dt>
+          <dd>Loopflow is free. Your coding agent is not: Claude Code, Codex, and OpenCode have their own cost, on your own account with them.</dd>
+        </div>
+      </dl>
+    </section>
+
+    <section id="start" class="any-end">
+      <p class="eyebrow">Install</p>
+      <h2>Start playing.</h2>
+      <div class="actions">
+        <a href="https://downloads.loopflow.studio/Loopflow-latest.dmg" class="button solid">Download for Mac</a>
+      </div>
+      <p class="any-cost">Free and open source. No account with us. The coding agent runs on your own account and has its own cost.</p>
+      <p class="capture-label install-links">
+        <a href="http://localhost:5001/docs/getting-started">Getting started ↗</a>
+        <a href="https://github.com/loopflowstudio/loopflow">Source ↗</a>
+        <a href="http://localhost:5001/cli">Already use a terminal? The command line tool ↗</a>
+      </p>
+    </section>
+  </main>
+
+  <footer>
+    <span>Loopflow · An open-source software instrument.</span>
+    <div>
+      <a href="http://localhost:5001/studio">Loopflow Studio</a><a href="http://localhost:5001/docs/getting-started">Get started ↗</a><a href="https://github.com/loopflowstudio/loopflow">Source ↗</a>
+    </div>
+  </footer>
+</div>
+</body>
+</html>

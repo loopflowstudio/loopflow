@@ -634,11 +634,12 @@ clock/ID; losers survive. Checkpoints acknowledge retention, not convergence.
 Release's entry-point lesson requires separate fetch/import/publication outcomes.
 Peer projection still bypasses Linear receipts; legacy association remains unfinished.
 
-Public `repo planning key/connect/use/select/status` now consumes pinned bindings
-and explicit selection. Joining is empty. Key creation/recovery retains user identity. `use` routes future root Waves only; children inherit their parent's
-selection, and existing work never changes destination implicitly. Status shows
-imports/holds without endpoint credentials. No foreground exchange caller exists.
-SQL routing/status checks pass; Rust/public execution remains unproved.
+`repo planning key/connect/use/select/status` pins bindings and explicit selection.
+Joining is empty; key recovery preserves identity. `use` routes future roots only;
+children inherit selection. Status omits endpoint credentials. No foreground exchange
+caller exists. SQL routing/status passes; Rust/public execution remains unproved.
+Active import errors come from the final dependency pass; checkpoint tests use
+production status. The cycle regression is unexecuted.
 
 Move counterexample: `a43f3e2ea`; repairs: `b5dafd918`/`7395cf3bb`. Holds retain
 accepted moves/private journals and dependents. Moving back cannot release history;

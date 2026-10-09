@@ -241,20 +241,21 @@ impl SqliteStore {
                 PlanningKind::Comment => {}
             }
         }
-        let mut conflicts = BTreeSet::new();
         let mut pending: Vec<_> = objects
             .iter()
             .filter(|(object, _)| !held.contains_key(*object))
             .collect();
-        loop {
+        let mut conflicts = loop {
             let count = pending.len();
             let mut retry = Vec::new();
+            // Only the final attempt describes a current conflict. A parent
+            // projected in this pass may replace an earlier missing-parent error.
+            let mut conflicts = BTreeSet::new();
             for (object, fields) in pending {
                 tx.execute_batch("SAVEPOINT peer_projection")?;
                 match insert_and_project(&tx, object, fields, repo) {
                     Ok(()) => {
                         tx.execute_batch("RELEASE peer_projection")?;
-                        conflicts.retain(|(candidate, _)| candidate != object);
                     }
                     Err(error) if projection_conflict(&error) => {
                         tx.execute_batch("ROLLBACK TO peer_projection; RELEASE peer_projection")?;
@@ -267,10 +268,10 @@ impl SqliteStore {
             // Parent ordering may need another pass, but a conflict never blocks
             // an independent object or causes an unbounded retry.
             if retry.len() == count || retry.is_empty() {
-                break;
+                break conflicts;
             }
             pending = retry;
-        }
+        };
         // Wave selection points back at Projects. Set it only after identity and
         // ownership projection, rather than deferring all foreign-key checks.
         for (object, fields) in &objects {
@@ -329,21 +330,6 @@ impl SqliteStore {
         }
         tx.commit()?;
         Ok(conflicts)
-    }
-
-    pub fn peer_import_revision(
-        &self,
-        repo: &str,
-        destination: &str,
-    ) -> StoreResult<Option<String>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.query_row(
-            "SELECT revision FROM planning_peer_imports WHERE repo=?1 AND destination=?2",
-            params![repo, destination],
-            |r| r.get(0),
-        )
-        .optional()
-        .map_err(Into::into)
     }
 }
 
@@ -910,6 +896,16 @@ mod tests {
         (home, store)
     }
 
+    fn import_revision(store: &SqliteStore, repo: &str, destination: &str) -> Option<String> {
+        store
+            .peer_planning_status(repo)
+            .unwrap()
+            .into_iter()
+            .find(|status| status.id == destination)
+            .unwrap()
+            .imported_revision
+    }
+
     fn seed(store: &SqliteStore) -> TaskId {
         let wave = Wave::new(WaveId::new(), "planning".into(), "/source".into());
         store.create_wave(&wave).unwrap();
@@ -938,12 +934,7 @@ mod tests {
             .import_peer_planning("/target", &destination(), "foreign", &before)
             .unwrap_err();
         assert!(error.to_string().contains("another repository"), "{error}");
-        assert_eq!(
-            store
-                .peer_import_revision("/target", &destination())
-                .unwrap(),
-            None
-        );
+        assert_eq!(import_revision(&store, "/target", &destination()), None);
         assert_eq!(
             store
                 .export_peer_planning("/source", &destination())
@@ -1055,9 +1046,7 @@ mod tests {
             "Independent remote edit"
         );
         assert_eq!(
-            left.peer_import_revision("/source", &destination())
-                .unwrap()
-                .as_deref(),
+            import_revision(&left, "/source", &destination()).as_deref(),
             Some("remote")
         );
         assert_eq!(left.peer_projection_conflicts("/source").unwrap(), held);
@@ -1495,7 +1484,7 @@ mod tests {
             .unwrap()
             .changes
             .is_empty());
-        assert_eq!(store.peer_import_revision("/source", &id).unwrap(), None);
+        assert_eq!(import_revision(&store, "/source", &id), None);
         let mut referencing = original.clone();
         referencing
             .changes
@@ -1564,12 +1553,7 @@ mod tests {
         assert!(target
             .import_peer_planning("/target", &destination(), "retained-collision", &incoming)
             .is_err());
-        assert_eq!(
-            target
-                .peer_import_revision("/target", &destination())
-                .unwrap(),
-            None
-        );
+        assert_eq!(import_revision(&target, "/target", &destination()), None);
     }
 
     #[test]
@@ -1889,10 +1873,7 @@ mod tests {
         );
         assert_eq!(right.revisions().unwrap(), revisions);
         assert_eq!(
-            right
-                .peer_import_revision("/target", &destination())
-                .unwrap()
-                .as_deref(),
+            import_revision(&right, "/target", &destination()).as_deref(),
             Some("second")
         );
         let record = right.planning_task(&task).unwrap().record.unwrap();
@@ -2312,6 +2293,75 @@ mod tests {
     }
 
     #[test]
+    fn projection_retry_reports_only_the_current_conflict() {
+        let (_left_home, left) = store();
+        let (_right_home, right) = store();
+        // The root sorts before its child, so its new parent is unavailable on
+        // the first pass. Once the child projects, the actual conflict is a cycle.
+        let root = Wave::new(
+            WaveId::parse("00000000-0000-4000-8000-000000000001").unwrap(),
+            "root".into(),
+            "/source".into(),
+        );
+        left.create_wave(&root).unwrap();
+        left.select_peer_waves("/source", &destination(), std::slice::from_ref(root.id()))
+            .unwrap();
+        let base = left
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        right
+            .import_peer_planning("/target", &destination(), "base", &base)
+            .unwrap();
+        let child = Wave::new(
+            WaveId::parse("00000000-0000-4000-8000-000000000002").unwrap(),
+            "child".into(),
+            "/source".into(),
+        )
+        .with_parent(root.id().clone());
+        left.create_wave(&child).unwrap();
+        let mut incoming = left
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        let (id, previous) = incoming
+            .changes
+            .iter()
+            .find(|(_, change)| {
+                change.object.id == root.id().as_str() && change.field == "parent_wave_id"
+            })
+            .unwrap();
+        let mut parent = previous.clone();
+        parent.parents = [id.clone()].into();
+        parent.clock += 1;
+        parent.value = json!(child.id());
+        incoming.changes.insert("cyclic-parent".into(), parent);
+
+        right
+            .import_peer_planning("/target", &destination(), "cycle", &incoming)
+            .unwrap();
+        let conflicts = right.peer_projection_conflicts("/target").unwrap();
+        assert_eq!(conflicts.len(), 1);
+        assert_eq!(conflicts[0].object.id, root.id().as_str());
+        assert!(conflicts[0].reason.contains("cycle"));
+        assert_eq!(
+            right
+                .export_peer_planning("/target", &destination())
+                .unwrap(),
+            incoming
+        );
+        // Repeating the same acquisition cannot churn status by retiring an
+        // obsolete first-pass error that should never have been published.
+        let revisions = right.revisions().unwrap();
+        right
+            .import_peer_planning("/target", &destination(), "cycle", &incoming)
+            .unwrap();
+        assert_eq!(right.revisions().unwrap(), revisions);
+        assert_eq!(
+            right.peer_projection_conflicts("/target").unwrap(),
+            conflicts
+        );
+    }
+
+    #[test]
     fn failed_projection_rolls_back_import_receipts_and_allows_exact_retry() {
         let (_left_home, left) = store();
         let (_right_home, right) = store();
@@ -2328,10 +2378,7 @@ mod tests {
             .unwrap()
             .changes
             .is_empty());
-        assert!(right
-            .peer_import_revision("/target", &destination())
-            .unwrap()
-            .is_none());
+        assert!(import_revision(&right, "/target", &destination()).is_none());
         right
             .conn
             .lock()
@@ -2353,10 +2400,7 @@ mod tests {
             .import_peer_planning("/target", &destination(), "invalid", &conflicting)
             .is_err());
         assert_eq!(
-            right
-                .peer_import_revision("/target", &destination())
-                .unwrap()
-                .as_deref(),
+            import_revision(&right, "/target", &destination()).as_deref(),
             Some("candidate")
         );
         assert_eq!(
@@ -2401,10 +2445,7 @@ mod tests {
             .unwrap()
             .changes
             .is_empty());
-        assert!(store
-            .peer_import_revision("/other", &destination())
-            .unwrap()
-            .is_none());
+        assert!(import_revision(&store, "/other", &destination()).is_none());
     }
 
     #[test]

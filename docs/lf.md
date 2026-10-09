@@ -99,16 +99,9 @@ changes are reported without changing them. Repeated launches reuse the checkout
 a target behind the required commit needs `lf sync` there. Existing IDs and local
 execution history remain unchanged.
 
-Custom-ref planning synchronization is under implementation. The common store now
-retains peer mutation identities and imports planning atomically without moving
-Workflows. Saved destinations pin an endpoint/ref and export only explicitly selected
-records; joining does not select existing local plans. Moving selected work under
-an unselected parent keeps the local move but holds that record's history and comments
-out of exchange. Other records continue; peers retain their last shared values.
-Returning to the original parent does not share private history automatically.
-Destination setup, hold/recovery presentation and automatic exchange are not yet
-exposed; an absent remote Task reports that planning must synchronize instead of
-bootstrapping a copy.
+[Git planning setup](#select-git-planning) is available, but automatic exchange is
+not connected yet. An absent remote Task reports that planning must synchronize
+instead of bootstrapping a copy. Imported planning never moves local Workflows.
 
 `--task` and `--wt` select a location. `--wave` supplies context and identity;
 it cannot override a Task's owning Wave. `task run` places the Task's

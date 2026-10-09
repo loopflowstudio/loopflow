@@ -107,7 +107,7 @@ async fn resolve_task_source(selector: Option<&str>) -> anyhow::Result<Option<Ta
     let Some(store) = crate::store::open_existing_store().await else {
         return Ok(None);
     };
-    Ok(TaskSource::resolve(&std::sync::Arc::new(store), selector).await?)
+    Ok(TaskSource::resolve(&store, selector).await?)
 }
 
 fn parse_remote_command(lf_args: &[String]) -> anyhow::Result<Cli> {

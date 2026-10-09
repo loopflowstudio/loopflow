@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::engine::git::{is_ancestor, is_clean, ref_exists, rev_parse};
 use crate::ops::{OpsError, OpsResult};
-use crate::store::SharedStore;
+use crate::store::Store;
 use crate::work::task::Task;
 
 use super::{fetch_task_refs, task_error};
@@ -20,7 +20,7 @@ pub(crate) struct TaskSource {
 }
 
 impl TaskSource {
-    pub async fn resolve(store: &SharedStore, selector: &str) -> OpsResult<Option<Self>> {
+    pub async fn resolve(store: &Store, selector: &str) -> OpsResult<Option<Self>> {
         let Some(task) = store
             .get_task_by_issue(selector)
             .await

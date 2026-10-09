@@ -156,15 +156,9 @@ impl SqliteStore {
             })?
             .collect::<Result<Vec<_>, _>>()?;
         drop(query);
-        let mut retained = BTreeMap::<String, Vec<PeerProjectionConflict>>::new();
-        for conflict in projection_conflicts_in(&tx, repo)? {
-            if let Some(destination) = member_destination(&tx, repo, &conflict.object)? {
-                retained.entry(destination).or_default().push(conflict);
-            }
-        }
         let mut statuses = Vec::new();
         for (mut status, digest) in rows {
-            status.conflicts = retained.remove(&status.id).unwrap_or_default();
+            status.conflicts = projection_conflicts_in(&tx, repo, &status.id)?;
             match export_selected(&tx, repo, &status.id) {
                 Ok((snapshot, held)) => {
                     status.pending_local = Some(match digest {
@@ -331,7 +325,12 @@ impl SqliteStore {
     // A broken destination must not prevent attempts against independent plans.
     pub(crate) fn peer_planning_destination_ids(&self, repo: &str) -> StoreResult<Vec<String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        destination_ids(&conn, repo)
+        let mut query =
+            conn.prepare("SELECT id FROM planning_destinations WHERE repo=?1 ORDER BY id")?;
+        let ids = query
+            .query_map([repo], |row| row.get(0))?
+            .collect::<Result<_, _>>()?;
+        Ok(ids)
     }
 
     pub(crate) fn peer_planning_destination(
@@ -530,15 +529,6 @@ impl SqliteStore {
             .flat_map(|status| status.conflicts)
             .collect())
     }
-}
-
-fn destination_ids(conn: &Connection, repo: &str) -> StoreResult<Vec<String>> {
-    let mut query =
-        conn.prepare("SELECT id FROM planning_destinations WHERE repo=?1 ORDER BY id")?;
-    let ids = query
-        .query_map([repo], |row| row.get(0))?
-        .collect::<Result<_, _>>()?;
-    Ok(ids)
 }
 
 fn planning_digest(snapshot: &PlanningSnapshot) -> StoreResult<String> {
@@ -1301,12 +1291,15 @@ fn projection_conflict(error: &StoreError) -> bool {
 fn projection_conflicts_in(
     conn: &Connection,
     repo: &str,
+    destination: &str,
 ) -> StoreResult<Vec<PeerProjectionConflict>> {
     let mut query = conn.prepare(
-        "SELECT kind,object_id,reason FROM planning_peer_conflicts
-         WHERE repo=?1 AND active=1 ORDER BY kind,object_id,reason",
+        "SELECT c.kind,c.object_id,c.reason FROM planning_peer_conflicts c
+         JOIN planning_members m ON m.kind=c.kind AND m.object_id=c.object_id AND m.repo=c.repo
+         WHERE c.repo=?1 AND m.destination=?2 AND c.active=1
+         ORDER BY c.kind,c.object_id,c.reason",
     )?;
-    let mut rows = query.query([repo])?;
+    let mut rows = query.query(params![repo, destination])?;
     let mut conflicts = Vec::new();
     while let Some(row) = rows.next()? {
         conflicts.push(PeerProjectionConflict {
@@ -1326,10 +1319,9 @@ fn reconcile_conflicts(
     destination: &str,
     conflicts: &BTreeSet<(PlanningObject, String)>,
 ) -> StoreResult<()> {
-    for PeerProjectionConflict { object, reason } in projection_conflicts_in(conn, repo)? {
-        if member_destination(conn, repo, &object)?.as_deref() != Some(destination) {
-            continue;
-        }
+    for PeerProjectionConflict { object, reason } in
+        projection_conflicts_in(conn, repo, destination)?
+    {
         if !conflicts.contains(&(object.clone(), reason.clone())) {
             conn.execute(
                 "UPDATE planning_peer_conflicts SET active=0 WHERE kind=?1 AND object_id=?2 AND reason=?3",
@@ -3828,7 +3820,7 @@ mod tests {
     #[test]
     fn importing_one_destination_does_not_clear_another_destinations_conflicts() {
         let (_first_home, first) = store();
-        seed(&first);
+        let task = seed(&first);
         let (_second_home, second) = store();
         seed(&second);
         let (_target_home, target) = store();
@@ -3874,6 +3866,37 @@ mod tests {
             .import_peer_planning("/target", &destination(), "retry", &Default::default())
             .unwrap();
         assert_eq!(target.peer_projection_conflicts("/target").unwrap(), both);
+
+        let conflicts_for = |id: &str| {
+            target
+                .peer_planning_status("/target")
+                .unwrap()
+                .into_iter()
+                .find(|status| status.id == id)
+                .unwrap()
+                .conflicts
+        };
+        let second_conflicts = conflicts_for(&other_id);
+        let wave_id = first.task(&task).unwrap().unwrap().wave_id;
+        first
+            .conn
+            .lock()
+            .unwrap()
+            .execute("UPDATE waves SET name='resolved' WHERE id=?1", [&wave_id])
+            .unwrap();
+        target
+            .import_peer_planning(
+                "/target",
+                &destination(),
+                "resolved",
+                &first
+                    .export_peer_planning("/source", &destination())
+                    .unwrap(),
+            )
+            .unwrap();
+        assert!(conflicts_for(&destination()).is_empty());
+        assert_eq!(conflicts_for(&other_id), second_conflicts);
+        assert!(target.task(&task).unwrap().is_some());
     }
 
     #[test]

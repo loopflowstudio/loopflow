@@ -307,3 +307,65 @@ fn cross_origin_observation_retains_portable_causality_without_redirecting_ident
     missing.changes.remove("peer");
     assert!(missing.to_bytes().is_err());
 }
+
+#[test]
+fn peer_authored_predecessors_require_one_matching_provider_mapping() {
+    let mut snapshot = PlanningSnapshot::default();
+    write(
+        &mut snapshot,
+        "peer-mapping",
+        "external_issue_id",
+        "provider",
+        1,
+        false,
+    );
+    snapshot.changes.get_mut("peer-mapping").unwrap().object.id = "task-peer".into();
+    write(
+        &mut snapshot,
+        "local-mapping",
+        "external_issue_id",
+        "provider",
+        2,
+        false,
+    );
+    write(
+        &mut snapshot,
+        "peer-edit",
+        "issue_title",
+        "Peer input",
+        3,
+        false,
+    );
+    snapshot.changes.get_mut("peer-edit").unwrap().object.id = "task-peer".into();
+    write(
+        &mut snapshot,
+        "local-edit",
+        "issue_title",
+        "Continued locally",
+        4,
+        false,
+    );
+    snapshot
+        .changes
+        .get_mut("local-edit")
+        .unwrap()
+        .parents
+        .insert("peer-edit".into());
+    let decoded = PlanningSnapshot::from_bytes(&snapshot.to_bytes().unwrap()).unwrap();
+    assert_eq!(decoded, snapshot);
+    assert!(decoded.heads().any(|(id, _)| id == "peer-edit"));
+
+    let mut contradictory = snapshot.clone();
+    write(
+        &mut contradictory,
+        "another-mapping",
+        "external_issue_id",
+        "different-provider",
+        5,
+        false,
+    );
+    assert!(contradictory.to_bytes().is_err());
+    let mut unknown = snapshot;
+    unknown.changes.remove("peer-mapping");
+    assert!(unknown.to_bytes().is_err());
+}

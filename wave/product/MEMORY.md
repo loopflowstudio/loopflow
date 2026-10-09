@@ -105,13 +105,12 @@ Store/CLI/migration checks pass, not Git acquisition.
 `2afcfba1a`: lookup, mapping and record reads share one snapshot;
 subsequent calls recheck. Observation reserves nothing.
 
-`3c67b29b1` retains creation origins, exact-fact predecessors and private dependencies.
-**Retention is not observation:** `44d73dbcd` composes `dac02060a`/`ccdd273d0`;
-shared decoding (`d62003e0f`) grants no authority. Projection records evaluated heads,
-including losers; rejected heads stay recoverable, not save parents. Four fixtures
-pass (`29fa9a90e`: counterexample). Winners remain origin-grouped;
-both associated origins stay held. Joint projection,
-mixed exchange, first-start and native proof remain unfinished.
+`3c67b29b1`: retained origins and private dependencies.
+**Retention is not observation:** `44d73dbcd`/`d62003e0f` separate accepted
+frontiers from rejected heads (counterexample: `29fa9a90e`). October 9 (`96f714bd6`): associated origins share one selected
+projection; later saves follow accepted peer heads. Common writers resolve relationships; journals and receipt inputs stay original. Private
+counterparts hold both origins. Store fixtures are not Git acquisition. Mixed
+exchange, delegation, exclusive first start and remote/native proof remain.
 
 #1512 (`3e1e6245c`): live connect hands off; dead-driver resume starts an engine
 on native history. Local resume is not import-triggered launch; native proof remains.

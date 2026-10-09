@@ -375,6 +375,11 @@ impl<'a> PlanningChanges<'a> {
                 if let Some(id) = id {
                     return Ok(Value::String(id));
                 }
+                return super::planning_peers::local_reference(
+                    conn,
+                    crate::engine::planning_exchange::PlanningKind::Project,
+                    &value,
+                );
             }
         }
         Ok(value)

@@ -184,8 +184,8 @@ pub struct PlanningSnapshot {
 }
 
 impl PlanningMutation {
-    /// Only an exact provider fact can bridge two retained Work identities.
-    /// Association is machine-local; equal values, clocks or names are no proof.
+    /// An exact provider fact can bridge retained identities before joint projection.
+    /// Equal values, clocks or names alone are no proof.
     fn observes_same_fact(&self, previous: &Self) -> bool {
         self.object.kind == previous.object.kind
             && matches!(self.object.kind, PlanningKind::Task | PlanningKind::Project)
@@ -284,10 +284,32 @@ impl PlanningSnapshot {
     /// Keep winner identity and origin available to delivery projection. Values
     /// alone cannot distinguish a local intention from an observed Linear fact.
     pub fn winners(&self) -> impl Iterator<Item = (&str, &PlanningMutation)> {
-        winning_heads(self.heads())
+        winning_heads(self.heads(), |change| {
+            (&change.object, change.field.as_str())
+        })
     }
 
     pub fn validate(&self) -> Result<(), PlanningExchangeError> {
+        // Portable links carry evidence, never local correspondence. Only an
+        // explicit receiver association combines origins for projection.
+        let mut claims: BTreeMap<_, BTreeSet<_>> = BTreeMap::new();
+        for change in self.changes.values() {
+            if matches!(
+                (change.object.kind, change.field.as_str()),
+                (PlanningKind::Task, "external_issue_id")
+                    | (PlanningKind::Project, "external_project_id")
+            ) {
+                if let Some(id) = change.value.as_str() {
+                    claims.entry(&change.object).or_default().insert(id);
+                }
+            }
+        }
+        let same_provider_work = |left: &PlanningObject, right: &PlanningObject| {
+            left.kind == right.kind
+                && claims
+                    .get(left)
+                    .is_some_and(|ids| ids.len() == 1 && Some(ids) == claims.get(right))
+        };
         for (id, change) in &self.changes {
             if id.is_empty()
                 || change.object.id.is_empty()
@@ -336,7 +358,9 @@ impl PlanningSnapshot {
                     .ok_or(PlanningExchangeError::Invalid(
                         "missing planning predecessor",
                     ))?;
-                if (previous.object != change.object && !change.observes_same_fact(previous))
+                if (previous.object != change.object
+                    && !change.observes_same_fact(previous)
+                    && !same_provider_work(&change.object, &previous.object))
                     || previous.field != change.field
                     || previous.clock >= change.clock
                 {
@@ -350,8 +374,9 @@ impl PlanningSnapshot {
 
 /// Select within an already evaluated frontier. Import and accepted local
 /// observations share this policy without reconstructing a partial journal.
-pub(crate) fn winning_heads<'a>(
+pub(crate) fn winning_heads<'a, K: Ord>(
     heads: impl IntoIterator<Item = (&'a str, &'a PlanningMutation)>,
+    mut key: impl FnMut(&'a PlanningMutation) -> K,
 ) -> impl Iterator<Item = (&'a str, &'a PlanningMutation)> {
     let mut fields = BTreeMap::new();
     for (id, change) in heads {
@@ -365,7 +390,7 @@ pub(crate) fn winning_heads<'a>(
             id,
         );
         let winner = fields
-            .entry((&change.object, change.field.as_str()))
+            .entry(key(change))
             .or_insert((priority, (id, change)));
         if priority > winner.0 {
             *winner = (priority, (id, change));

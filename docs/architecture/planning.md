@@ -123,8 +123,8 @@ all mutations for reconciliation. `planning_peer_observed` retains source mutati
 IDs only after scalar/content projection succeeds in its savepoint; import creates
 no echo edit. Local capture consumes and advances that accepted frontier, so a
 rejected or held import cannot become the next save's causal parent. Receipt-owned
-ordering, deletion and provider evidence keep their separate protocols. This does
-not release association holds or implement joint cross-origin projection.
+ordering, deletion and provider evidence keep their separate protocols. Associated
+origins share this accepted frontier only after joint projection succeeds.
 
 Peer imports can retain uncertain effects in their journal while rejecting the
 object's projection. Common field/deletion, creation/attachment, state and order
@@ -143,36 +143,44 @@ provider evidence. Initial attachment is allowed; ordinary peer edits cannot
 replace or clear an existing Task/Project mapping. Contradictions retain the
 journal and isolate that object while independent plans advance. Clearing a legacy
 mapping is not identity association: it makes the retained Work a provider-creation
-candidate and leaves its old selectors and effect receipts behind. Explicit legacy
-association recovery remains unfinished. `planning associate` records exact local
+candidate and leaves its old selectors and effect receipts behind. `planning associate` records exact local
 correspondence and enables full-ID lookup without merging IDs or execution histories.
 The incoming scalar journal must retain one provider mapping matching the existing
 local Work. Names, titles and attempted creation inputs do not establish it.
 Physical rows remain their own owners; lookup rechecks the local mapping,
 repository and contradictory incoming scalar mappings.
-Association changes no sharing membership and leaves joint projection/effects held.
+Association changes no sharing membership. Import projects the associated origins
+together only when every origin and dependency is explicitly selected for the same
+destination. Private counterparts hold both histories and their dependents.
 Replacing a rejected mapping with null cannot hide its earlier claim against
 another local owner. Creation receipts also retain their original Work-derived
 provider UUID and captured model identity: a lookup alias cannot rekey them.
 Common `planning_creations` separates the original Work ID from its local
 Task/Project projection, retaining each origin's input and uncertain attempts.
 After correspondence, ordinary import retains creation receipts on that local
-owner even while joint projection is held. It preserves captured inputs, merges
+owner even while sharing holds projection. It preserves captured inputs, merges
 attempts per origin and creates no new journal edits or sharing membership.
 Contradictory receipts stay held with their original journal values. Common
 acquisition can settle the exact origin without releasing new effects; it never
-replaces an existing different provider mapping. Cross-origin field projection
-and relationship recovery remain unfinished.
-Correspondence alone is not causal acknowledgement. Common scalar/content
-acquisition can link an exact Linear fact across associated origins in the existing
-journal. Validation requires the same kind, field, value and provider body, not
-merely equal text or a local alias. Later saves retain that observed predecessor;
-delivery baselines traverse it. Heads remain per-origin, so a foreign child cannot
-erase another origin's complete record. Export validates causal dependency closure
-but holds unselected origins and dependents without sharing their history.
-Joint winner projection must still account for those links; peer-authored winners,
-relationships and non-creation receipts remain unfinished. Retaining the journal
-does not release projection or effect holds.
+replaces an existing different provider mapping.
+Correspondence alone is not causal acknowledgement. Import evaluates one frontier
+per associated local owner, retaining original mutation IDs, values and provider
+facts. Successful scalar/content and receipt projection records the evaluated heads;
+later saves can name accepted peer-authored predecessors. Failed projection cannot
+supply save parents. Portable validation permits same-field links between origins
+with one matching provider mapping; only explicit local correspondence lets those
+links retire foreign heads during projection. Per-origin journal heads remain intact
+so each origin still carries a complete record. Acquisition can also link an exact
+provider fact without claiming a rejected peer edit was displayed.
+
+Task membership, comment ownership and Wave chapter selection resolve correspondence
+at the common writers, without rewriting portable values. Order receipts preserve
+captured before/after lists and provider inputs in their original namespace; display,
+delivery and readback resolve those lists against current correspondence. Creation
+receipts retain separate origins; deletion and order receipts retain their original
+mutation identity. Contradictory histories remain recoverable and hold effects.
+Mixed Linear/Git foreground exchange and shared first-start admission remain disabled;
+storage projection alone does not establish their complete-path safety.
 
 `ops/planning_delivery.rs` consumes mapped Task titles, descriptions, nullable
 assignees and membership, and Project names, summaries, statuses and structured

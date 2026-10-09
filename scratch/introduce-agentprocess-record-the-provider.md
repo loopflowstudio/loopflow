@@ -102,6 +102,9 @@ attribution survive.
   `read_process_snapshot` transaction wrapper are removed. One unfinished-row
   query now serves Task membership and activity; receipts establish identity,
   not inventory membership.
+- Process-group signal-0 existence checks are removed. The shared OS inventory
+  records group membership and distinguishes live descendants from unreaped zombies;
+  failed observation never proves group death.
 - Top’s private OS sampler/elapsed parser and receipt-only birth comparison are
   removed. `journal::OsProcess` owns single-PID and inventory observation, including
   zombie rejection. Malformed samples fail observation rather than inventing absence.
@@ -221,6 +224,18 @@ The composed fixture covers launch, takeover during history acquisition and
 A → B → A before launch. It uses a stand-in native client and local history
 server, not a configured Codex conversation or complete relay roundtrip.
 
+**Scheduled entry (2026-10-09):** the public `task reconcile` fixture exposed
+silent PID-observation failure and a non-parent reaper reporting its killed provider
+as still alive. The operation now retains the shared OS reader's error with LFID
+and returns failure without changing the record, attachment or history. Group
+termination replaces `kill(-pgid, 0)` with the shared inventory's group/state
+observation: zombies are dead even before their parent waits; sampling failure
+remains failure and live descendants still prevent settlement. The CLI fixture
+passes failed observation, recovery, detached settlement and activity removal using
+a throwaway server-shaped shell. It proves neither configured providers nor an
+installed scheduled firing. Review retained group-wide observation rather than
+checking only the leader, which would lose surviving descendants.
+
 ## Remaining implementation
 
 1. **Raw headless starts.** `run_agent` and native helpers enter the invocation
@@ -246,11 +261,12 @@ server, not a configured Codex conversation or complete relay roundtrip.
    foreground and other-provider cleanup remain in this lifecycle cut.
    Source resume proofs do not establish configured-provider acceptance.
    No configured orphan was signaled; OS death supplies no successful outcome.
-4. Complete public Task-status and scheduled-entry agreement, caller-lineage
-   exclusion, native-history coverage and two-second removal. The inventory repair
-   above supplies source evidence, not those entry-point proofs. Prune still stops
-   before reaping on failed OS sampling; failure must remain visible, not success.
-   Earlier visibility counterexamples: `48aaf72a1`, this plan.
+4. Complete public Task-status agreement, caller-lineage exclusion, native-history
+   coverage and two-second removal. The scheduled-entry regression exercises failed
+   observation, retained history, detached settlement and activity removal through
+   `task reconcile`; it proves no installed firing or configured-provider behavior.
+   Prune still stops before reaping on failed OS sampling. Earlier visibility
+   counterexamples: `48aaf72a1`, this plan.
 5. LOO-441's LfProcess/LfSession rename is integrated from #1516. Update the final
    model/API docs and all wire fixtures after the generation cut. The common
    LfProcess projection still carries both kinds during this draft cutover.
@@ -289,8 +305,7 @@ Realignment at `726806476` identified the composed relay mismatch and token loss
 this slice removes that lookup and supplies the frozen capability end to end.
 Review also found generic connection completion could close the provider after
 client exit. Connection cleanup now records only its attachment outcome, including
-failure rather than reporting all exits completed. Release's child memory was
-read in full; its operation-entry lesson informs the composed fixture. Configured
+failure rather than reporting all exits completed. Release's operation-entry lesson informs the composed fixture. Configured
 acceptance, all remaining lifecycle cuts above and the full gate remain open.
 Native fixtures now pin invocation and capture to the same ledger, including
 blocking workers, and supply required startup evidence. The planning
@@ -302,8 +317,6 @@ unknown attached lf invocation dead. Capture admission and storage use the
 attachment name throughout; historical payloads and the Flow driver remain
 unchanged. No installed store was opened and no configured orphan was signaled.
 
-Check: LF_*-cleared `cargo test -p loopflow --lib` with native-util, composed-connection and planning-reconnect filters passes after fixture repairs; `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` pass; full Rust/Swift/DTO/materialized and Linux verification remains gate/CI-owned.
-
 **Sync with main `f4356029d` (#1517, 2026-10-09):** AgentSessionId now
 flows through native admission, invocation retry, connection inspection and
 correlated history. Attachment tokens, request-time attribution and the deleted
@@ -311,8 +324,8 @@ engine-orphan path remain intact; no generation cut or installed-store migration
 is implied. Review retained the AgentProcess endpoint owner separately from the
 LfSession's selected AgentSession. Branch-only fixtures use the typed identity.
 
-Sync check: LF_*-cleared `cargo test -p loopflow --lib harness::codex_history::tests::delayed_start_keeps_request_capture_across_a_b_a_takeover -- --exact` passes (1 test), after repairing merged fixture type errors; broader verification remains gate/CI-owned.
 
-Earlier native-util/planning-reconnect results remain at `82b5d90d5`, this plan.
+Earlier native-util/planning-reconnect, 16-test isolated lifecycle and typed-identity
+sync checks are retained at `e87e9d643`, this plan.
 
-Check: `cargo test -p loopflow --lib --no-run` and `scripts/test_network.py target/debug/deps/loopflow-0b179d3755b15c2d harness::agent_process::tests session_record::runtime::tests native_capture_replacement_retains_each_spawn_and_rejects_late_exit codex_connection_launch_preserves_provider_and_rejects_replaced_attachment interrupted_capture_resumes_with_a_new_process_and_fences_old_snapshots --test-threads=1` pass (16 tests); fmt, all-target Clippy and diff checks pass; full Rust/Swift/DTO/materialized and Linux verification remains gate/CI-owned.
+Check: `cargo test -p loopflow --test process_ownership_tests --lib --no-run` passes; network-isolated test binaries pass `scheduled_agent_settlement_reports_failed_observation_and_recovers_without_losing_history`, `journal::os_process::tests`, `terminating_a_group_reaches_a_grandchild_that_outlived_its_leader` and `detached_agent_is_reaped_but_duplicate_historical_identity_is_not_signal_authority` (6 tests); fmt, all-target Clippy and diff checks pass; full Rust/Swift/DTO/materialized/Linux verification remains gate/CI-owned.

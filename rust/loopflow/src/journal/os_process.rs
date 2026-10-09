@@ -9,6 +9,7 @@ use super::ProcessIdentityEvidence;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct OsProcess {
     pub(crate) pid: u32,
+    pub(crate) pgid: u32,
     pub(crate) started_at: i64,
     pub(crate) kernel_state: String,
 }
@@ -41,12 +42,20 @@ impl OsProcess {
     pub(crate) fn matches_start(&self, pid: u32, started_at: i64) -> bool {
         self.pid == pid && self.evidence(started_at) == ProcessIdentityEvidence::Live
     }
+
+    pub(crate) fn group_is_alive(pgid: u32) -> io::Result<bool> {
+        Ok(
+            Self::sample(time::OffsetDateTime::now_utc().unix_timestamp())?
+                .iter()
+                .any(|process| process.pgid == pgid && !process.kernel_state.starts_with('Z')),
+        )
+    }
 }
 
 fn query(selection: &[&str], now: i64) -> io::Result<Vec<OsProcess>> {
     let output = Command::new("ps")
         .args(selection)
-        .args(["-o", "pid=,state=,etime="])
+        .args(["-o", "pid=,pgid=,state=,etime="])
         .output()?;
     if !output.status.success() {
         if output.status.code() == Some(1) && output.stdout.is_empty() && output.stderr.is_empty() {
@@ -70,6 +79,7 @@ fn query(selection: &[&str], now: i64) -> io::Result<Vec<OsProcess>> {
 fn parse(line: &str, now: i64) -> Option<OsProcess> {
     let mut fields = line.split_whitespace();
     let pid = fields.next()?.parse().ok()?;
+    let pgid = fields.next()?.parse().ok()?;
     let kernel_state = fields.next()?.to_owned();
     let elapsed = i64::try_from(elapsed_seconds(fields.next()?)?).ok()?;
     if fields.next().is_some() {
@@ -77,6 +87,7 @@ fn parse(line: &str, now: i64) -> Option<OsProcess> {
     }
     Some(OsProcess {
         pid,
+        pgid,
         started_at: now.checked_sub(elapsed)?,
         kernel_state,
     })
@@ -105,17 +116,19 @@ pub(crate) fn elapsed_seconds(value: &str) -> Option<u64> {
 
 #[cfg(test)]
 mod tests {
+    use std::os::unix::process::CommandExt;
+
     use super::{parse, OsProcess};
     use crate::journal::ProcessIdentityEvidence;
 
     #[test]
     fn activity_and_control_share_identity_and_zombie_evidence() {
         for (line, start, evidence) in [
-            ("10 S 01:00", 99_940, ProcessIdentityEvidence::Live),
-            ("10 R 02:00:00", 92_800, ProcessIdentityEvidence::Live),
-            ("10 Z 1-00:00:00", 13_600, ProcessIdentityEvidence::Dead),
-            ("10 S 2-01:02:03", -76_523, ProcessIdentityEvidence::Live),
-            ("10 S 01:00", 99_930, ProcessIdentityEvidence::Dead),
+            ("10 10 S 01:00", 99_940, ProcessIdentityEvidence::Live),
+            ("10 10 R 02:00:00", 92_800, ProcessIdentityEvidence::Live),
+            ("10 10 Z 1-00:00:00", 13_600, ProcessIdentityEvidence::Dead),
+            ("10 10 S 2-01:02:03", -76_523, ProcessIdentityEvidence::Live),
+            ("10 10 S 01:00", 99_930, ProcessIdentityEvidence::Dead),
         ] {
             let process = parse(line, 100_000).unwrap();
             assert_eq!(process.evidence(start), evidence);
@@ -126,11 +139,12 @@ mod tests {
             assert!(!process.matches_start(11, start));
         }
         for line in [
-            "10 S ?",
-            "10 S 00:bad:01",
-            "10 S 18446744073709551615-00:00",
-            "bad S 00:00",
-            "10 S 00:00 extra",
+            "10 10 S ?",
+            "10 10 S 00:bad:01",
+            "10 10 S 18446744073709551615-00:00",
+            "bad 10 S 00:00",
+            "10 bad S 00:00",
+            "10 10 S 00:00 extra",
         ] {
             assert!(parse(line, 100_000).is_none(), "{line}");
         }
@@ -165,6 +179,7 @@ mod tests {
         child.kill().unwrap();
         child.wait().unwrap();
         assert!(sample.matches_start(observed.pid, observed.started_at));
+        assert_eq!(sample.pgid, observed.pgid);
         assert_eq!(evidence, ProcessIdentityEvidence::Live);
         assert_eq!(
             crate::journal::process_identity_evidence(child.id(), observed.started_at),
@@ -178,6 +193,7 @@ mod tests {
             std::process::Command::new("/bin/sh")
                 .env_clear()
                 .args(["-c", "exit 0"])
+                .process_group(0)
                 .spawn()
                 .unwrap(),
         );
@@ -196,6 +212,8 @@ mod tests {
         assert_eq!(result, 0, "{}", std::io::Error::last_os_error());
         let observed = OsProcess::read(child.id()).unwrap().unwrap();
         assert!(observed.kernel_state.starts_with('Z'));
+        assert_eq!(observed.pgid, child.id());
+        assert!(!OsProcess::group_is_alive(observed.pgid).unwrap());
         assert_eq!(
             crate::journal::process_identity_evidence(child.id(), observed.started_at),
             ProcessIdentityEvidence::Dead

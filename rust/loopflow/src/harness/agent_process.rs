@@ -2,7 +2,8 @@
 //! Unknown identity, duplicate PID/birth and unknown attachment life grant no signal authority.
 use crate::engine::process::terminate_process_group;
 use crate::journal::{
-    process_evidence, process_identity_evidence, process_started_at, ProcessIdentityEvidence,
+    process_evidence, process_identity_evidence, process_started_at, OsProcess,
+    ProcessIdentityEvidence,
 };
 use crate::process::SessionAttachment;
 use crate::store::sqlite::SqliteStore;
@@ -157,7 +158,17 @@ fn reap_in(store: &SqliteStore, dry_run: bool) -> StoreResult<AgentProcessReapRe
         let Some((pid, start)) = agent.process.pid.zip(agent.process.os_started_at) else {
             continue;
         };
-        let evidence = process_identity_evidence(pid, start);
+        let evidence = match OsProcess::read(pid) {
+            Ok(Some(process)) => process.evidence(start),
+            Ok(None) => ProcessIdentityEvidence::Dead,
+            Err(error) => {
+                report.errors.push(format!(
+                    "AgentProcess {}: cannot observe PID {pid}: {error}",
+                    agent.process.lfid
+                ));
+                continue;
+            }
+        };
         let dead = evidence == ProcessIdentityEvidence::Dead;
         let orphaned = evidence == ProcessIdentityEvidence::Live
             && counts[&(pid, start)] == 1

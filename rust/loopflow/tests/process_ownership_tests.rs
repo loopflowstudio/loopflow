@@ -14,6 +14,169 @@ use loopflow::store::{open_ephemeral_store, StorageConfig};
 use loopflow_test_support::TestRepo;
 
 #[tokio::test]
+async fn scheduled_agent_settlement_reports_failed_observation_and_recovers_without_losing_history()
+{
+    use std::os::unix::process::CommandExt;
+
+    use loopflow::lf::commands::top::{ActivityNodeKind, ActivitySnapshot};
+
+    struct Agent(Child);
+    impl Drop for Agent {
+        fn drop(&mut self) {
+            if matches!(self.0.try_wait(), Ok(None)) {
+                // SAFETY: this unreaped fixture child created its own process
+                // group; only that owned group is signaled during cleanup.
+                unsafe { libc::kill(-(self.0.id() as i32), libc::SIGKILL) };
+            }
+            let _ = self.0.wait();
+        }
+    }
+
+    let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    let database = home.path().join("loopflow.db");
+    let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
+        .await
+        .unwrap();
+    let store = SqliteStore::new(&database).unwrap();
+    reserve_session(&store, "orphan", repo.path());
+    let sql = rusqlite::Connection::open(&database).unwrap();
+    sql.execute(
+        "UPDATE agent_sessions SET interactive=0 WHERE id='orphan'",
+        [],
+    )
+    .unwrap();
+    let parent = ProcessLfid::new();
+    let attachment = store
+        .claim_session_attachment("orphan", None, &parent, true)
+        .unwrap();
+    // Only this throwaway group can be signaled. The shell supplies the server
+    // argv shape, not a configured provider, account or conversation.
+    let started = time::OffsetDateTime::now_utc().unix_timestamp();
+    let mut agent = Agent(
+        Command::new("/bin/sh")
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .args([
+                "-c",
+                "sleep 60 & wait; :",
+                "codex",
+                "app-server",
+                "--listen",
+                "fixture",
+            ])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .process_group(0)
+            .spawn()
+            .unwrap(),
+    );
+    sql.execute(
+        "UPDATE processes SET pid=?2,os_started_at=?3,spawn_state='spawn_requested' WHERE lfid=?1",
+        rusqlite::params![attachment.agent_process_lfid, agent.0.id(), started],
+    )
+    .unwrap();
+    let detached = store
+        .release_session_attachment("orphan", &attachment)
+        .unwrap();
+    let before = store
+        .process(&attachment.agent_process_lfid)
+        .unwrap()
+        .unwrap();
+    let history = store.session_history("orphan", 0, 0).unwrap();
+    let snapshot = || {
+        let output = command(home.path(), repo.path(), &["monitor", "ps", "--json"])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        serde_json::from_slice::<ActivitySnapshot>(&output.stdout).unwrap()
+    };
+    let id = format!("process:{}", attachment.agent_process_lfid);
+    let live = snapshot();
+    let row = live.nodes.iter().find(|row| row.id == id).unwrap();
+    assert_eq!(row.kind, ActivityNodeKind::AgentProcess);
+    assert_eq!(row.pid, Some(agent.0.id()));
+
+    let bin = home.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let ps = bin.join("ps");
+    std::fs::write(
+        &ps,
+        "#!/bin/sh\nprintf 'fixture sampling unavailable' >&2\nexit 2\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&ps, std::fs::Permissions::from_mode(0o755)).unwrap();
+    for args in [
+        ["task", "reconcile", "--json"],
+        ["monitor", "prune", "--json"],
+    ] {
+        let output = command(home.path(), repo.path(), &args)
+            .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+            .output()
+            .unwrap();
+        assert!(
+            !output.status.success(),
+            "failed observation was reported successful: {output:?}"
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("fixture sampling unavailable"),
+            "{output:?}"
+        );
+        if args[0] == "task" {
+            let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert!(
+                result["errors"].as_array().unwrap().iter().any(|error| {
+                    error
+                        .as_str()
+                        .unwrap()
+                        .contains(attachment.agent_process_lfid.as_str())
+                }),
+                "{result}"
+            );
+        }
+        assert!(agent.0.try_wait().unwrap().is_none());
+        assert_eq!(
+            store.process(&attachment.agent_process_lfid).unwrap(),
+            Some(before.clone())
+        );
+        assert_eq!(
+            store.session_attachment("orphan").unwrap(),
+            Some(detached.clone())
+        );
+        assert_eq!(store.session_history("orphan", 0, 0).unwrap(), history);
+    }
+
+    // This is the same operation the schedule invokes, not evidence of an
+    // installed schedule firing. It must settle a detached row without receipts.
+    let output = command(home.path(), repo.path(), &["task", "reconcile", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["errors"], serde_json::json!([]));
+    assert!(!agent
+        .0
+        .try_wait()
+        .unwrap()
+        .expect("reconciled provider exited")
+        .success());
+    assert!(snapshot().nodes.iter().all(|row| row.id != id));
+    let ended = store
+        .process(&attachment.agent_process_lfid)
+        .unwrap()
+        .unwrap();
+    assert!(ended.completed_at.is_some());
+    assert!(
+        ended.outcome.is_none(),
+        "observed death is not successful work"
+    );
+    assert_eq!(ended.pid, before.pid);
+    assert_eq!(ended.parent_process_lfid, Some(parent));
+    assert_eq!(store.session_history("orphan", 0, 0).unwrap(), history);
+}
+
+#[tokio::test]
 async fn activity_lists_unresolved_records_without_receipts_or_os_sampling() {
     use loopflow::lf::commands::top::{ActivitySnapshot, ActivityState};
 

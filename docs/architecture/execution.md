@@ -126,7 +126,10 @@ Scheduled settlement reads unfinished AgentProcess rows, but live-orphan
 termination currently recognizes only noninteractive Codex app-server and
 OpenCode serve groups. Claude and native foreground coverage remain unfinished;
 recording them alone does not establish orphan cleanup. Unknown identities and
-duplicate PID/birth records remain non-signallable.
+duplicate PID/birth records remain non-signallable. Failed OS observation makes
+scheduled reconciliation fail with the affected LFID, without settling that row.
+Group termination observes all members through the shared OS inventory: unreaped
+zombies are dead, but any live descendant still prevents settlement.
 
 Prepared rows without publication are recoverable preparation failures. Missing
 spawn evidence is uncertainty, not permission to duplicate a possibly live AgentProcess.

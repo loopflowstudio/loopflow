@@ -222,19 +222,19 @@ unpublished code retained, without deletion or delivery authorization.
 ## AgentProcess (LOO-443, 2026-10-09)
 
 Jack Heart requested one inventory; #1512/#1516 integrated. Unknown stays visible;
-retry preserves history; remote clients cannot settle providers.
+retry retains history. `c1c09fb6c` fences resume; `9255e9b03` shares native admission.
+`82b5d90d5` separates frozen attachment/provenance and relay/upstream. Stand-ins
+prove launch and takeover rejection, including A → B → A; configured relay is
+unproved. Client exit never settles its provider; provider death never settles
+an unknown attachment.
 
-`c1c09fb6c` fences resume close/claim; `9255e9b03` shares native admission.
-`82b5d90d5` carries frozen native attachment separately from provenance and
-relay separately from upstream. Stand-ins prove launch, pre-launch takeover and
-A → B → A rejection; configured connection/full relay remain unproved.
-Client exit records attachment outcome, not provider death. Provider death alone
-never settles an unknown attachment. Release's entry-point lesson exposed
-admission and generic-cleanup authority gaps.
+Release's entry-point lesson exposed scheduled settlement's silent observation
+failure and zombie-as-live group probe. Preserve OS errors with LFIDs; group death
+requires no live member, not PID disappearance. Installed acceptance is unproved.
 
-Headless optional admission, generations, foreground cleanup, takeover death
-orders, public/scheduled agreement, two-second removal and installed settlement
-remain open. FIFO is Codex-only; reaping is noninteractive Codex/OpenCode.
+Optional headless admission, generations, foreground cleanup, takeover death
+orders, public Task agreement, two-second removal and installed settlement remain
+open. FIFO is Codex-only; reaping is noninteractive Codex/OpenCode.
 
 ## Execution ownership names (LOO-441, 2026-10-09)
 

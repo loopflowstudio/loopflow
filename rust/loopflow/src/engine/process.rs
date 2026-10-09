@@ -87,7 +87,8 @@ pub(crate) fn kill_process_group(pid: u32) {
 const TERMINATE_GRACE: Duration = Duration::from_secs(2);
 
 /// SIGTERM a process group, wait, then SIGKILL the stragglers. Returns true
-/// when no member remains. The caller proves the group is one Loopflow made.
+/// when no live member remains. Zombies await their own parent's wait; they
+/// cannot keep an AgentProcess alive. The caller proves this is an owned group.
 #[cfg(unix)]
 pub(crate) fn terminate_process_group(pgid: u32) -> bool {
     if pgid <= 1 || current_process_group_id() == Some(pgid) {
@@ -108,11 +109,13 @@ pub(crate) fn terminate_process_group(pgid: u32) -> bool {
             unsafe {
                 libc::waitpid(group, std::ptr::null_mut(), libc::WNOHANG);
             }
-            // SAFETY: signal 0 probes the group and delivers nothing.
-            if unsafe { libc::kill(-group, 0) } != 0
-                && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
-            {
-                return true;
+            match crate::journal::OsProcess::group_is_alive(pgid) {
+                Ok(false) => return true,
+                Ok(true) => {}
+                Err(error) => {
+                    tracing::warn!(pgid, %error, "cannot observe process group after signal");
+                    return false;
+                }
             }
             std::thread::sleep(Duration::from_millis(25));
         }

@@ -1,22 +1,27 @@
 //! OpenCode user messages correlate requests; assistant steps remain subordinate.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 
 use anyhow::Result;
 use serde_json::{json, Value};
 
 use crate::chat::types::{ConversationEvent, Lifecycle};
 use crate::process::SessionAttachment;
-use crate::session::SessionEventKind;
+use crate::session::{SessionEventKind, SessionTurnOrigin};
 use crate::store::sqlite::SqliteStore;
 
 #[derive(Debug, Default)]
 pub(super) struct History {
     pub(super) owner: Option<(SqliteStore, String, SessionAttachment)>,
-    requests: BTreeMap<String, Option<crate::session::SessionTurnOrigin>>,
-    started: HashSet<String>,
-    completed: HashSet<String>,
+    requests: BTreeMap<String, Request>,
     attention: super::attention::Attention,
+}
+
+#[derive(Debug, Default)]
+struct Request {
+    origin: Option<SessionTurnOrigin>,
+    started: bool,
+    completed: bool,
 }
 
 impl History {
@@ -45,7 +50,13 @@ impl History {
             .as_ref()
             .map(|(store, session, attachment)| store.session_turn_origin(session, attachment))
             .transpose()?;
-        self.requests.insert(id.clone(), origin);
+        self.requests.insert(
+            id.clone(),
+            Request {
+                origin,
+                ..Request::default()
+            },
+        );
         Ok(id)
     }
 
@@ -57,13 +68,11 @@ impl History {
         let mut events = Vec::new();
         let receipts = native_receipts(thread, messages);
         for (request, receipt) in receipts {
-            if self.requests.contains_key(&request) && !self.started.contains(&request) {
-                if let (Some((store, _, _)), Some(Some(origin))) =
-                    (&self.owner, self.requests.get(&request))
-                {
+            let submitted = self.requests.get_mut(&request);
+            if let Some(submitted) = submitted.as_ref().filter(|submitted| !submitted.started) {
+                if let (Some((store, _, _)), Some(origin)) = (&self.owner, &submitted.origin) {
                     store.record_session_turn_origin(thread, &request, origin)?;
                 }
-                self.started.insert(request.clone());
                 events.push(ConversationEvent::TurnStarted {
                     turn_id: request.clone(),
                 });
@@ -71,10 +80,10 @@ impl History {
             if let Some((store, session, _)) = &self.owner {
                 record_receipts(store, session, thread, &request, &receipt)?;
             }
-            if self.requests.contains_key(&request)
-                && !receipt.completion.is_null()
-                && self.completed.insert(request.clone())
-            {
+            let Some(submitted) = submitted else { continue };
+            submitted.started = true;
+            if !receipt.completion.is_null() && !submitted.completed {
+                submitted.completed = true;
                 let status = match receipt.completion["status"].as_str() {
                     Some("completed") => Lifecycle::Completed,
                     Some("interrupted") => Lifecycle::Interrupted,
@@ -102,7 +111,9 @@ impl History {
     }
 
     pub(super) fn admitted(&self, request: &str) -> bool {
-        self.requests.contains_key(request) && self.started.contains(request)
+        self.requests
+            .get(request)
+            .is_some_and(|request| request.started)
     }
 }
 
@@ -272,7 +283,7 @@ pub(super) async fn post(
 
 #[cfg(test)]
 mod tests {
-    use super::{native_receipts, record_receipts, History};
+    use super::History;
 
     use crate::id::ProcessLfid;
     use crate::session::SessionEventKind;
@@ -320,10 +331,22 @@ mod tests {
         store
             .claim_session_attachment("session", Some(&driver), &second, true)
             .unwrap();
-        for input in [20, 40, 30] {
+        assert!(!history.admitted(&request));
+        for (index, input) in [20, 40, 30].into_iter().enumerate() {
             let events = history
                 .observe("thread", &[message("assistant-a", input, "tool-calls")])
                 .unwrap();
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|event| matches!(
+                        event,
+                        crate::chat::types::ConversationEvent::TurnStarted { .. }
+                    ))
+                    .count(),
+                usize::from(index == 0)
+            );
+            assert!(history.admitted(&request));
             assert!(!events.iter().any(|event| matches!(
                 event,
                 crate::chat::types::ConversationEvent::TurnCompleted { .. }
@@ -333,11 +356,20 @@ mod tests {
             message("assistant-a", 30, "tool-calls"),
             message("assistant-b", 10, "stop"),
         ];
-        for _ in 0..2 {
-            for (request, receipt) in native_receipts("thread", &messages) {
-                record_receipts(&store, "session", "thread", &request, &receipt).unwrap();
-            }
+        for index in 0..2 {
+            let events = history.observe("thread", &messages).unwrap();
+            assert_eq!(events.len(), usize::from(index == 0));
+            assert!(events.iter().all(|event| matches!(
+                event,
+                crate::chat::types::ConversationEvent::TurnCompleted { .. }
+            )));
+            assert!(history.admitted(&request));
         }
+        // A reconnect can recover history without claiming these requests or
+        // emitting a new local turn boundary.
+        let mut reconnected = History::new(history.owner.clone());
+        assert!(reconnected.observe("thread", &messages).unwrap().is_empty());
+        assert!(!reconnected.admitted(&request));
         let recovered = store.input_history(input.as_str()).unwrap();
         assert_eq!(recovered.usage.input_tokens, Some(50));
         assert_eq!(recovered.usage.output_tokens, Some(10));

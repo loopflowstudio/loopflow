@@ -1,7 +1,7 @@
 //! Provider observations survive the client that happened to receive them.
 //! These receipts confer no conversational or Flow mutation authority.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use serde_json::{json, Value};
 
@@ -16,13 +16,33 @@ use crate::store::StoreResult;
 #[derive(Debug, Default)]
 pub(super) struct History {
     sequence: u64,
-    final_answers: HashMap<String, String>,
-    known: HashMap<String, u64>,
+    turns: HashMap<String, Turn>,
     requests: HashMap<String, (u64, Option<SessionTurnOrigin>)>,
-    started: HashSet<String>,
-    replies: HashMap<String, SessionTurnOrigin>,
-    attributed: HashSet<String>,
     attention: super::attention::Attention,
+}
+
+/// All connection-local evidence for one native turn. Seeing a turn before
+/// submitting a request prevents that request from claiming its origin.
+#[derive(Debug, Default)]
+struct Turn {
+    first_seen: u64,
+    started: bool,
+    origin: Option<SessionTurnOrigin>,
+    attributed: bool,
+    final_answer: Option<String>,
+}
+
+impl Turn {
+    fn correlate(&mut self, store: &SqliteStore, thread: &str, turn: &str) -> StoreResult<()> {
+        if self.started && !self.attributed {
+            if let Some(origin) = &self.origin {
+                store.record_session_turn_origin(thread, turn, origin)?;
+                self.attributed = true;
+                self.origin = None;
+            }
+        }
+        Ok(())
+    }
 }
 
 impl History {
@@ -43,8 +63,11 @@ impl History {
         Ok(())
     }
 
-    fn observe(&mut self, turn: &str) {
-        self.known.entry(turn.to_owned()).or_insert(self.sequence);
+    fn observe(&mut self, turn: &str) -> &mut Turn {
+        self.turns.entry(turn.to_owned()).or_insert_with(|| Turn {
+            first_seen: self.sequence,
+            ..Turn::default()
+        })
     }
 
     pub(super) fn record(
@@ -97,10 +120,10 @@ impl History {
         }
         let turn = super::codex_mapping::extract_turn_id(params);
         if let Some(turn) = turn {
-            self.observe(&turn);
+            let observed = self.observe(&turn);
             match method {
                 "turn/started" => {
-                    self.started.insert(turn.clone());
+                    observed.started = true;
                     store.record_session_event(
                         session,
                         thread,
@@ -123,12 +146,12 @@ impl History {
                 }
                 "item/completed" => {
                     if let Some(text) = final_text(&params["item"]) {
-                        self.final_answers.insert(turn, text.to_owned());
+                        observed.final_answer = Some(text.to_owned());
                     }
                 }
                 "turn/completed" => {
                     completion(store, session, thread, &params["turn"])?;
-                    if let Some(text) = self.final_answers.remove(&turn) {
+                    if let Some(text) = observed.final_answer.take() {
                         store.record_session_event(
                             session,
                             thread,
@@ -140,26 +163,16 @@ impl History {
                 }
                 _ => {}
             }
+            observed.correlate(store, thread, &turn)?;
         }
         if let (Some(turn), Some((request, Some(origin)))) =
             (result["turn"]["id"].as_str(), request)
         {
-            let existing = self.known.get(turn).is_some_and(|seen| *seen < request);
-            self.observe(turn);
-            if !existing && !self.attributed.contains(turn) {
-                self.replies.entry(turn.to_owned()).or_insert(origin);
+            let observed = self.observe(turn);
+            if observed.first_seen >= request && !observed.attributed {
+                observed.origin.get_or_insert(origin);
             }
-        }
-        let correlated: Vec<_> = self
-            .started
-            .iter()
-            .filter(|turn| self.replies.contains_key(*turn) && !self.attributed.contains(*turn))
-            .cloned()
-            .collect();
-        for turn in correlated {
-            store.record_session_turn_origin(thread, &turn, &self.replies[&turn])?;
-            self.attributed.insert(turn.clone());
-            self.replies.remove(&turn);
+            observed.correlate(store, thread, turn)?;
         }
         if let Some(turns) = result["thread"]["turns"]
             .as_array()
@@ -255,6 +268,14 @@ mod tests {
                 .unwrap();
             assert_ne!(first.token, current.token);
             assert!(store.session_turn_origin(&original.id, &first).is_err());
+            // Both requests predate the start notification. A second reply for
+            // the same turn must not replace the first correlated origin.
+            history
+                .request(
+                    &json!({"id":2,"method":"turn/start"}),
+                    Some((&store, &original.id, &current)),
+                )
+                .unwrap();
             let reply = json!({"id":1,"result":{"turn":{"id":"late"}}});
             let start = json!({"method":"turn/started","params":{"threadId":"thread","turn":{"id":"late"}}});
             let messages = if reply_first {
@@ -268,6 +289,19 @@ mod tests {
                     .unwrap();
                 assert_eq!(sql.query_row("SELECT count(*) FROM session_events WHERE kind='started' AND captured_event=?1", [next.captured], |row| row.get::<_,i64>(0)).unwrap(),0);
             }
+            let before = store.session_history(&original.id, 0, 0).unwrap();
+            for message in [&json!({"id":2,"result":{"turn":{"id":"late"}}}), &start] {
+                history
+                    .record(
+                        &store,
+                        &original.id,
+                        Some(&current),
+                        Some("thread"),
+                        message,
+                    )
+                    .unwrap();
+            }
+            assert_eq!(store.session_history(&original.id, 0, 0).unwrap(), before);
             history.record(&store,&original.id,Some(&first),Some("thread"),
                 &json!({"method":"thread/tokenUsage/updated","params":{"threadId":"thread","turnId":"late","tokenUsage":{"total":{"inputTokens":12},"last":{"inputTokens":12}}}})).unwrap();
             history.record(&store,&original.id,Some(&first),Some("thread"),
@@ -370,7 +404,10 @@ mod tests {
             current.record(&store,"conversation",Some(&replacement),Some("thread"),
                 &json!({"result":{"thread":{"id":"thread","turns":[{"id":turn,"status":"inProgress"}]}}})).unwrap();
             current
-                .request(&json!({"id":2,"method":"turn/start"}), None)
+                .request(
+                    &json!({"id":2,"method":"turn/start"}),
+                    Some((&store, "conversation", &original)),
+                )
                 .unwrap();
             current
                 .record(
@@ -389,7 +426,10 @@ mod tests {
         current.record(&store,"conversation",Some(&replacement),Some("thread"),
             &json!({"method":"turn/started","params":{"threadId":"thread","turn":{"id":"unknown"}}})).unwrap();
         current
-            .request(&json!({"id":3,"method":"turn/start"}), None)
+            .request(
+                &json!({"id":3,"method":"turn/start"}),
+                Some((&store, "conversation", &original)),
+            )
             .unwrap();
         current
             .record(

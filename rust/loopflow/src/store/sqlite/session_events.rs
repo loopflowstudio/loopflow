@@ -201,43 +201,40 @@ impl SqliteStore {
             SessionEventKind::Started,
             &serde_json::json!({}),
         )?;
-        let saved: Option<crate::session::SessionTurnOrigin> = tx
+        // An uncorrelated observation can acquire its origin once. Repeated
+        // evidence must match every field, including an explicitly absent bind.
+        let values = params![
+            seq,
+            origin.process_lfid,
+            origin.provider_generation,
+            origin.task_id,
+            origin.wave_id,
+            origin.captured_event
+        ];
+        let matches: Option<bool> = tx
             .query_row(
-                "SELECT session_id,process_lfid,provider_generation,task_id,wave_id,captured_event
+                "SELECT process_lfid IS ?2 AND provider_generation IS ?3
+                AND task_id IS ?4 AND wave_id IS ?5 AND captured_event IS ?6
              FROM session_events WHERE seq=?1 AND process_lfid IS NOT NULL",
-                [seq],
-                |row| {
-                    Ok(crate::session::SessionTurnOrigin {
-                        session_id: row.get(0)?,
-                        process_lfid: row.get(1)?,
-                        provider_generation: row.get(2)?,
-                        task_id: row.get(3)?,
-                        wave_id: row.get(4)?,
-                        captured_event: row.get(5)?,
-                    })
-                },
+                values,
+                |row| row.get(0),
             )
             .optional()?;
-        if let Some(saved) = saved {
-            if saved != *origin {
+        match matches {
+            Some(true) => return Ok(seq),
+            Some(false) => {
                 return Err(StoreError::InvalidData(
                     "Native turn has different initiating evidence".into(),
-                ));
+                ))
             }
-            return Ok(seq);
+            None => {
+                tx.execute(
+                    "UPDATE session_events SET process_lfid=?2,provider_generation=?3,
+                        task_id=?4,wave_id=?5,captured_event=?6 WHERE seq=?1",
+                    values,
+                )?;
+            }
         }
-        tx.execute(
-            "UPDATE session_events SET process_lfid=?2,provider_generation=?3,
-                task_id=?4,wave_id=?5,captured_event=?6 WHERE seq=?1",
-            params![
-                seq,
-                origin.process_lfid,
-                origin.provider_generation,
-                origin.task_id,
-                origin.wave_id,
-                origin.captured_event
-            ],
-        )?;
         tx.commit()?;
         Ok(seq)
     }
@@ -496,12 +493,14 @@ mod tests {
         let seq = store
             .record_session_turn_origin("thread", "late", &before)
             .unwrap();
+        let revisions = store.revisions().unwrap();
         assert_eq!(
             store
                 .record_session_turn_origin("thread", "late", &before)
                 .unwrap(),
             seq
         );
+        assert_eq!(store.revisions().unwrap(), revisions);
         assert!(store
             .record_session_turn_origin("thread", "late", &after)
             .is_err());

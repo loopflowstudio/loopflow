@@ -160,42 +160,24 @@ lifeline writer or hold provider stdout/stderr open.
 
 ## Implementation review
 
-The October 9 capture audit found the design's counterexample in the old
-reader: a first delayed Started observation selected the current capture/Work.
-An AgentProcess launch snapshot would still be wrong after live takeover or
-another turn on the same provider. Attribution therefore belongs to the native
-request correlation, not the process lifecycle. History is retained without
-current authority; dispatch and attention still require the current claim.
-Codex fixtures exercise A → B → A before both start/reply orders and retain late
-usage/completion on the original input. Claude and OpenCode delay their first
-start until after input replacement. Binding has its own before/after request
-fixture; repeat observations cannot reassign its earlier Work.
+Native request attribution survives the AgentProcess cut: neither a delayed
+Started observation nor the process's launch capture identifies later requests.
+Codex now keeps each turn's observations together instead of joining five maps
+and sets and scanning every started turn on each message. OpenCode keeps start
+and completion flags beside each submitted request, deleting its separate sets.
+These are connection-local correlation facts, not durable process owners.
+Known-turn rejection tests now submit actual origin evidence; an unowned request
+could not exercise that rejection. Repeated starts and overlapping request replies
+must retain the first origin; repeated OpenCode snapshots emit boundaries once.
 
+SQLite compares repeated origin evidence without reconstructing another Rust
+snapshot. Matching repeats do not write or advance observation revisions;
+conflicting repeats preserve all original fields, including an absent Work bind.
 
-The attachment slice replaces arithmetic exit lookup with an exact event-sequence
-reference, leaving old event keys and payloads unchanged. Claim clears the current
-exit reference; finish saves the insert's returned primary key with revocation,
-without reconstructing and querying the receipt key again. One history-query CTE
-recognizes retained old receipts and new attachment exits for captured and native
-turns. Plain observation lookup replaces `session_driver_exit`'s now-unused outcome
-expression index. Attachment exit still does not invent provider completion.
-Passive Program Status retains its provider-generation fence and cannot claim
-attachment. Reconciliation corrected the architecture reference's obsolete ban
-on AgentProcess and its removed driver-generation description. History retention
-is explicitly distinct from current attachment mutation; no runtime change was
-needed for that documentation repair. No Rust/Swift wire field changed; the
-AgentProcess DTO cut remains open.
+The remaining deletion list above is unchanged: no predecessor orphan, registry,
+or ownership reader was extended. Full record/DTO cutover is still required.
+Earlier attachment-exit, migration and pre-exec review details and check evidence:
+`207773ca3:scratch/introduce-agentprocess-record-the-provider.md`, “Implementation
+review.” They establish no top, Task-status, scheduled-check or installed result.
 
-Review found that CLOEXEC alone leaves the launching child holding its own
-lifeline until provider exec. The pre-exec hook now closes that inherited writer
-before starting the watchdog; the before-exec SIGKILL test proves this boundary.
-Closed caller stdio could also alias lifeline descriptors when Command installs
-native stdio; descriptors now remain above 2, with a throwaway regression test.
-The shared spawn operation now consumes the command, removing the caller-owned
-prepare/spawn/retain protocol and preventing command reuse with stale descriptors.
-Readiness descriptors use owned handles rather than repeated error-path closes.
-These are launch proofs, not process-record or installed acceptance. Release's
-child memory reinforces operation-entry verification: helper success cannot
-establish top, Task status or scheduled orphan settlement.
-
-Check: `cargo fmt --all` and `cargo clippy --all-targets -- -D warnings` passed; `uv run python scripts/test_network.py cargo test -p loopflow --lib -- harness::codex_history::tests harness::claude_history::tests harness::opencode_history::tests harness::conformance_tests store::sqlite::session_events::tests harness::claude::tests::sequential_managed_sessions_retain_their_exact_claude_engines harness::claude::tests::send_input_spawn_failure_releases_turn_guard harness::claude::tests::interrupt_without_turn_is_noop --test-threads=1` passed 32; `git diff --check` passed. Full Rust/Swift/DTO and Linux lifeline checks remain gate/CI-owned; installed acceptance remains open.
+Check: `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` passed; `uv run python scripts/test_network.py cargo test -p loopflow --lib -- harness::codex_history::tests harness::opencode_history::tests harness::conformance_tests store::sqlite::session_events::tests --test-threads=1` passed 28. Full Rust/Swift/DTO and Linux lifeline checks remain gate/CI-owned; installed acceptance remains open.

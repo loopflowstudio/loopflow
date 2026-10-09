@@ -223,7 +223,7 @@ unpublished code retained, without deletion or delivery authorization.
 
 Jack Heart requested one process inventory, deleting Session columns and duplicate
 owners. #1512 is `3e1e6245c`. Jack authorized parallel LOO-441 work and rename
-integration before publication. Records/installed acceptance remain unproved.
+integration before publication. AgentProcess records remain absent.
 Pre-exec lifeline and attachment proofs: `6f96a964c`, this heading.
 
 Fresh tokens fence A → B → A; takeover retains provider identity/parent and

@@ -132,10 +132,14 @@ this heading. Keep these replacements deleted:
   origins, exact inputs, causal baselines, uncertain losers and private holds survive.
   Do not restore sequence-ranked order/deletion delivery, raw-ID comparisons,
   scalar visibility over removal receipts, or duplicate receipt writes.
-- Connected-provider refusal in `ops/planning_peer.rs`,
-  `ASSOCIATION_PROJECTION_PENDING` and its `hold_associations` selector argument:
-  replace together with public composition, preserving selection and projection
-  conflicts. No second transport/effect owner or enablement flag.
+- `81df09092` deletes the connected-provider refusal, blanket association hold
+  and selector flag together. Selected Git/HTTPS round-trip and private-origin
+  proofs pass; creation/link-origin and combined lifetime acceptance remain.
+- Repeated JSON receipt decoding/creation validation inside dependency retries is
+  removed. `ObjectChanges` prepares typed creation, deletion and order histories;
+  the common receipt writers still own merges and conflicts. Snapshot validation
+  rejects malformed input before retention. Scalar ranking excludes receipts and
+  independent provider evidence; their separate protocols and origins survive.
 - Common reconciliation's equal-desired exception after a changed provider baseline:
   adopt the observed value without acknowledging an unattempted local effect.
 - Project operations' physical-ID-only scan: full IDs now use the common
@@ -412,24 +416,19 @@ round-trip and private-origin proofs pass; broader invalidation and lifetimes re
    presentation now exists in the common status view.
    No automatic turn/Flow retry exists.
 
-3. Complete public transport/readback for the implemented provider associations,
-   without renumbering stored Work. **October 9 counterexample:** clearing the legacy
-   mapping is not association. `planning_exports` then treats that retained Task
-   or Project as a new provider creation; the old issue identifier also remains
-   in selector lookup. Pending effects still belong to the legacy ID. The old
-   duplicate-mapping test's raw SQL shortcut established projection only, not
-   safe recovery, and is removed. An explicit association must preserve both IDs,
-   local execution lookup, common effect ownership, uncertain receipts and private
-   selection. Neither transferring a mapping nor merging execution is an accepted
-   implementation. The common receipt-origin cut below resolves storage multiplicity.
-   Correspondence, joint projection and receipt composition have focused storage
-   proof; public Git/HTTPS recovery remains unfinished.
-   Mapping validation precedes scalar and independent-evidence acquisition.
-   Common effect attempts consult cross-ID conflicts against retained provider
-   claims, including losing mappings and creation inputs; nulling a mapping
-   cannot release them. Saves/acquisition remain independent. These implemented
-   refusals are not association recovery; exact history:
-   `f2a5c94e8:scratch/work-on-another-machine-name.md`, item 3.
+3. Finish public creation/link-origin HTTPS recovery and combined negative-evidence/
+   ordering composition. `81df09092` proves scalar association through ordinary
+   Git exchange, HTTPS readback and subsequent local-save exchange, including
+   reversed/repeated imports, populated execution and private-origin holds.
+   Gate owns combined lifetimes; review owns recovery UX.
+
+   Clearing a legacy mapping remains forbidden: it makes retained Work eligible
+   for a new provider creation while old selectors and effects still belong to
+   its original ID. Correspondence resolves full IDs without renumbering Work or
+   moving execution. Mapping checks precede scalar and independent-evidence
+   acquisition; losing mapping/creation claims retain effect holds. Saves and
+   acquisition stay independent. Counterexample and earlier refusal-only proofs:
+   `81df09092:scratch/work-on-another-machine-name.md`, item 3.
 
    **Receipt-origin cut — October 9, not a new product decision.**
    `planning_creations` separates each original creation/attachment identity from
@@ -483,12 +482,11 @@ round-trip and private-origin proofs pass; broader invalidation and lifetimes re
    snapshot union), and alias-aware delivery/readback. Captured inputs survive;
    unknown correspondence defers readback rather than discarding a member.
 
-   Ordinary-import fixtures cover reversed/repeated association and import,
-   partial-progress readback, later-save rebasing, return import and populated
-   execution. Detail acquisition alone cannot settle order. Equal issue revisions
-   with different list ranks require retaining the complete provider body.
-   Deletion readback retains origins and private uncertainty. Return imports use
-   retained journals, not public exchange; Git/HTTPS acceptance remains unproved.
+   Ordinary-import fixtures cover partial-progress order readback, later-save
+   rebasing and populated execution. Detail cannot settle order; equal issue
+   revisions with different ranks require the complete provider body. Deletion
+   retains origins and private uncertainty. Combined public ordering/removal
+   acceptance remains distinct from the scalar Git/HTTPS proofs.
 
    **October 9 state/comment/Wave composition (`8a6f8f807`), implemented.**
    State/comment/Wave composition now has ordinary association/import fixtures,
@@ -689,7 +687,9 @@ State/comment/Wave and completion checks remain at `8a6f8f807`, this heading;
 creation-payload compression checks remain at `1012a6cad`, this heading. Both
 precede the #1511 merge; neither proves the combined native launch path.
 
-Check: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, Rust test builds and Ruff pass; isolated Linux `public_git_linear_association*` (2), `associated_*` (6), explicit correspondence/private recovery (2), baseline/older-attempt/exact-creation (3) pass; `test_loopflow_skill_alignment.py` (4) and `git diff --check` pass. Gate owns combined lifetimes, materialized schema and remaining public creation/link/negative-evidence coverage; review owns recovery UX.
+Earlier Git/HTTPS and focused proofs: `81df09092:scratch/work-on-another-machine-name.md`, **Acceptance for review**.
+
+Check: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, Rust lib test build and `uv run python scripts/test_network.py target/debug/deps/loopflow-0b179d3755b15c2d store::sqlite::planning_peers::tests:: --test-threads=4` pass (77 tests); `git diff --check` passes. Gate owns materialized schema, public creation/link/negative-evidence and combined lifetimes; review owns recovery UX.
 
 SQL/macOS and unresolved Flow-exit evidence: `eeb98aa89`, this file's
 **Acceptance for review**. No provider death, replacement authority or installed

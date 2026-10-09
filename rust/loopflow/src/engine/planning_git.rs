@@ -36,7 +36,7 @@ pub enum PlanningPublication {
     /// The remote contains this revision, possibly followed by newer changes.
     Confirmed,
     /// Fresh remote evidence does not contain this revision. Reconcile before retry.
-    Pending { remote: Option<PlanningDocument> },
+    Pending,
     /// Remote readback failed; the push may already have succeeded.
     Unconfirmed,
 }
@@ -334,7 +334,7 @@ impl PlanningGit {
                 return Ok(PlanningPublication::Confirmed);
             }
         }
-        Ok(PlanningPublication::Pending { remote })
+        Ok(PlanningPublication::Pending)
     }
 
     pub fn is_ancestor(

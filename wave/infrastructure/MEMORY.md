@@ -625,20 +625,19 @@ Jack Heart selected custom-ref sync: LOO-412 owns transport/machines, LOO-406
 storage/Linear. Plan ownership above governs sharing and execution exclusion.
 Review-only publication; no landing or public-remote planning export.
 
-Causal ordering retains losers. The origin-only boolean is replaced in source by
-provider identity/revision/body and acquisition age. Capture and validation share
-one field map; pending local values never acquire Linear priority. Equal-value
-acquisitions retain frontiers. Peer projection reuses common provider acquisition;
+Causal ordering retains losers. Provider identity/body/revision/age replaces the origin boolean.
+Capture/validation share a field map; pending local values gain no Linear priority.
+Equal-value acquisitions retain frontiers. Peer projection reuses common acquisition;
 scalar receipt baselines retain provider revision. Task/Project stale/equal-read,
 uncertain-receipt and no-echo regressions are authored, not executed. Grouped
 receipts, other provider paths and legacy association remain. This does not solve
 LOO-406's unseen-write race or order Project relationships by entity revision.
 
 Joining publishes nothing. Taskless/reconnect and post-save exchange are authored;
-Mixed Linear exchange remains disabled pending composition, not a product limit.
-Fetch/import/publication stay separate; readback settles only the attempted save.
-Effect locks survive cancellation without blocking acquisition/saves. Damaged
-journals break status, not exchange. CLI holds exist; Desktop remains.
+mixed Linear exchange remains disabled pending composition, not a product limit.
+Import retains facts; export alone selects publishable history. Fetch/import/publication
+stay separate; readback settles only the attempted save. Effect locks survive
+cancellation without blocking acquisition/saves. Damaged journals break status, not exchange. CLI holds exist; Desktop remains.
 Rust execution, native reconnect and installed acceptance remain unproved.
 
 Move counterexample: `a43f3e2ea`; repairs: `b5dafd918`/`7395cf3bb`.

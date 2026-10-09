@@ -91,12 +91,12 @@ fn concurrent_publication_preserves_both_revisions_and_all_source_bytes() {
         laptop.publish(&left.revision).unwrap(),
         PlanningPublication::Confirmed
     );
-    let PlanningPublication::Pending {
-        remote: Some(observed),
-    } = worker.publish(&right.revision).unwrap()
-    else {
-        panic!("a stale push must preserve the remote's concurrent update");
-    };
+    assert_eq!(
+        worker.publish(&right.revision).unwrap(),
+        PlanningPublication::Pending
+    );
+    // As in foreground exchange, acquire fresh evidence before reconciliation.
+    let observed = worker.fetch().unwrap().unwrap();
     assert_eq!(observed, left);
     assert_eq!(worker.local().unwrap(), Some(right.clone()));
     // Reconciliation is supplied by the exchange layer, never inferred by transport.

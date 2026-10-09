@@ -364,28 +364,23 @@ impl SqliteStore {
     }
 
     /// A revision acknowledges the retained journal, allowed projections and
-    /// explicit conflicts, not complete projection. The returned snapshot omits
-    /// held history just like export. No execution writer is called.
+    /// explicit conflicts, not complete projection. Export remains a separate
+    /// read of eligible history. No execution writer is called.
     pub fn import_peer_planning(
         &self,
         repo: &str,
         destination: &str,
         revision: &str,
         incoming: &PlanningSnapshot,
-    ) -> StoreResult<PlanningSnapshot> {
+    ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let saved = export_in(&tx, repo, destination)?;
         let merged = saved.merge(incoming).map_err(invalid)?;
         reserve_incoming(&tx, repo, destination, incoming)?;
-        let mut objects: BTreeMap<_, BTreeMap<&str, &Value>> = BTreeMap::new();
-        let mut winners: BTreeMap<_, Vec<_>> = BTreeMap::new();
+        let mut objects: BTreeMap<_, Vec<_>> = BTreeMap::new();
         for (id, change) in merged.winners() {
             objects
-                .entry(change.object.clone())
-                .or_default()
-                .insert(change.field.as_str(), &change.value);
-            winners
                 .entry(change.object.clone())
                 .or_default()
                 .push((id, change));
@@ -393,8 +388,11 @@ impl SqliteStore {
         let held = selection_conflicts(&tx, repo, destination, &merged)?;
         retain_mutations(&tx, &saved, incoming)?;
         tx.execute("UPDATE planning_peer_context SET importing=1", [])?;
-        for (object, fields) in &objects {
-            require_complete(object, fields)?;
+        for (object, winners) in &objects {
+            // Validated mutations have known fields and one winner per field.
+            if winners.len() != object.kind.fields().len() {
+                return Err(invalid(format!("incomplete planning record {}", object.id)));
+            }
             match object.kind {
                 PlanningKind::Wave => {
                     crate::id::WaveId::parse(&object.id).map_err(invalid)?;
@@ -418,16 +416,16 @@ impl SqliteStore {
             // Only the final attempt describes a current conflict. A parent
             // projected in this pass may replace an earlier missing-parent error.
             let mut conflicts = BTreeSet::new();
-            for (object, fields) in pending {
+            for (object, winners) in pending {
                 tx.execute_batch("SAVEPOINT peer_projection")?;
-                match insert_and_project(&tx, object, fields, repo, &winners[object], &merged) {
+                match insert_and_project(&tx, object, repo, winners, &merged) {
                     Ok(()) => {
                         tx.execute_batch("RELEASE peer_projection")?;
                     }
                     Err(error) if projection_conflict(&error) => {
                         tx.execute_batch("ROLLBACK TO peer_projection; RELEASE peer_projection")?;
                         conflicts.insert((object.clone(), error.to_string()));
-                        retry.push((object, fields));
+                        retry.push((object, winners));
                     }
                     Err(error) => return Err(error),
                 }
@@ -441,7 +439,7 @@ impl SqliteStore {
         };
         // Wave selection points back at Projects. Set it only after identity and
         // ownership projection, rather than deferring all foreign-key checks.
-        for (object, fields) in &objects {
+        for (object, winners) in &objects {
             if object.kind != PlanningKind::Wave
                 || held.contains_key(object)
                 || !exists(&tx, object)?
@@ -451,7 +449,10 @@ impl SqliteStore {
             match project_fields(
                 &tx,
                 object,
-                std::iter::once(("current_project_id", fields["current_project_id"])),
+                winners.iter().filter_map(|(_, change)| {
+                    (change.field == "current_project_id")
+                        .then_some((change.field.as_str(), &change.value))
+                }),
             ) {
                 Ok(()) => {}
                 Err(error) if projection_conflict(&error) => {
@@ -468,10 +469,8 @@ impl SqliteStore {
             WHERE planning_peer_imports.revision IS NOT excluded.revision",
             params![repo, destination, revision],
         )?;
-        let mut portable = merged;
-        omit_held(&mut portable, &held);
         tx.commit()?;
-        Ok(portable)
+        Ok(())
     }
 
     pub fn peer_projection_conflicts(
@@ -796,18 +795,6 @@ fn table(kind: PlanningKind) -> &'static str {
     }
 }
 
-fn require_complete(object: &PlanningObject, fields: &BTreeMap<&str, &Value>) -> StoreResult<()> {
-    if object
-        .kind
-        .fields()
-        .iter()
-        .any(|field| !fields.contains_key(*field))
-    {
-        return Err(invalid(format!("incomplete planning record {}", object.id)));
-    }
-    Ok(())
-}
-
 fn require_repository(conn: &Connection, object: &PlanningObject, repo: &str) -> StoreResult<()> {
     if belongs_elsewhere(conn, object, repo)? {
         return Err(invalid(format!(
@@ -851,11 +838,14 @@ fn exists(conn: &Connection, object: &PlanningObject) -> StoreResult<bool> {
 fn insert_and_project(
     conn: &Connection,
     object: &PlanningObject,
-    fields: &BTreeMap<&str, &Value>,
     repo: &str,
     winners: &[(&str, &PlanningMutation)],
     snapshot: &PlanningSnapshot,
 ) -> StoreResult<()> {
+    let fields: BTreeMap<_, _> = winners
+        .iter()
+        .map(|(_, change)| (change.field.as_str(), &change.value))
+        .collect();
     if !exists(conn, object)? {
         let required = |key: &str| {
             fields
@@ -888,7 +878,7 @@ fn insert_and_project(
         }
     }
     if object.kind == PlanningKind::Wave {
-        validate_wave(conn, object, fields, repo)?;
+        validate_wave(conn, object, &fields, repo)?;
     }
     let previous = delivery_fields(conn, object)?;
     project_fields(
@@ -901,7 +891,7 @@ fn insert_and_project(
             })
             .map(|(&field, &value)| (field, value)),
     )?;
-    acquire_linear_frontier(conn, object, fields, repo, snapshot)?;
+    acquire_linear_frontier(conn, object, &fields, repo, snapshot)?;
     project_delivery_fields(conn, object, winners, snapshot, &previous)?;
     require_repository(conn, object, repo)
 }
@@ -1950,8 +1940,10 @@ mod tests {
         let received = right
             .export_peer_planning("/target", &destination())
             .unwrap();
+        left.import_peer_planning("/source", &destination(), "remote", &received)
+            .unwrap();
         let portable = left
-            .import_peer_planning("/source", &destination(), "remote", &received)
+            .export_peer_planning("/source", &destination())
             .unwrap();
         assert!(!portable.objects().iter().any(|o| o.id == task.as_str()));
         assert_eq!(
@@ -2778,13 +2770,19 @@ mod tests {
         let incoming = left
             .export_peer_planning("/source", &destination())
             .unwrap();
-        let merged = right
+        right
             .import_peer_planning("/target", &destination(), "second", &incoming)
             .unwrap();
+        let merged = right
+            .export_peer_planning("/target", &destination())
+            .unwrap();
         let revisions = right.revisions().unwrap();
+        right
+            .import_peer_planning("/target", &destination(), "second", &incoming)
+            .unwrap();
         assert_eq!(
             right
-                .import_peer_planning("/target", &destination(), "second", &incoming)
+                .export_peer_planning("/target", &destination())
                 .unwrap(),
             merged
         );
@@ -2877,7 +2875,12 @@ mod tests {
              VALUES(?1,?2,'provider-1','FIX-1','Legacy identity',1,'/legacy/checkout')",
             params![legacy, project],
         ).unwrap();
-        let merged = right
+        let expected = right
+            .export_peer_planning("/target", &destination())
+            .unwrap()
+            .merge(&incoming)
+            .unwrap();
+        right
             .import_peer_planning("/target", &destination(), "conflict", &incoming)
             .unwrap();
         assert!(right.planning_task(&task).unwrap().record.is_none());
@@ -2907,12 +2910,10 @@ mod tests {
             .iter()
             .any(|c| c.object.id == task.as_str() && c.reason.contains("external_issue_id")));
         assert!(conflicts.iter().any(|c| c.object.id == "pending-comment"));
-        assert_eq!(
-            right
-                .export_peer_planning("/target", &destination())
-                .unwrap(),
-            merged
-        );
+        let exported = right
+            .export_peer_planning("/target", &destination())
+            .unwrap();
+        assert_eq!(exported, expected);
         let revisions = right.revisions().unwrap();
         right
             .import_peer_planning("/target", &destination(), "conflict", &incoming)
@@ -3014,7 +3015,12 @@ mod tests {
         let incoming = left
             .export_peer_planning("/source", &destination())
             .unwrap();
-        let merged = right
+        let expected = right
+            .export_peer_planning("/target", &destination())
+            .unwrap()
+            .merge(&incoming)
+            .unwrap();
+        right
             .import_peer_planning("/target", &destination(), "move", &incoming)
             .unwrap();
         assert_eq!(
@@ -3030,12 +3036,10 @@ mod tests {
         let conflicts = right.peer_projection_conflicts("/target").unwrap();
         assert_eq!(conflicts.len(), 1);
         assert!(conflicts[0].reason.contains("AgentSession ancestry"));
-        assert_eq!(
-            right
-                .export_peer_planning("/target", &destination())
-                .unwrap(),
-            merged
-        );
+        let exported = right
+            .export_peer_planning("/target", &destination())
+            .unwrap();
+        assert_eq!(exported, expected);
         let conn = right.conn.lock().unwrap();
         assert_eq!(
             conn.query_row(
@@ -3172,7 +3176,12 @@ mod tests {
         parent.clock += 1;
         parent.value = json!(WaveId::new().as_str());
         incoming.changes.insert("missing-parent".into(), parent);
-        let merged = right
+        let expected = right
+            .export_peer_planning("/target", &destination())
+            .unwrap()
+            .merge(&incoming)
+            .unwrap();
+        right
             .import_peer_planning("/target", &destination(), "missing-parent", &incoming)
             .unwrap();
         assert_eq!(
@@ -3188,12 +3197,10 @@ mod tests {
         let conflicts = right.peer_projection_conflicts("/target").unwrap();
         assert_eq!(conflicts.len(), 1);
         assert!(conflicts[0].reason.contains("parent is unavailable"));
-        assert_eq!(
-            right
-                .export_peer_planning("/target", &destination())
-                .unwrap(),
-            merged
-        );
+        let exported = right
+            .export_peer_planning("/target", &destination())
+            .unwrap();
+        assert_eq!(exported, expected);
         assert_eq!(
             right
                 .conn
@@ -3286,6 +3293,21 @@ mod tests {
         let base = left
             .export_peer_planning("/source", &destination())
             .unwrap();
+        // Completeness is checked against the same winners used for projection.
+        let mut incomplete = base.clone();
+        incomplete
+            .changes
+            .retain(|_, change| change.field != "issue_title");
+        let error = right
+            .import_peer_planning("/target", &destination(), "incomplete", &incomplete)
+            .unwrap_err();
+        assert!(error.to_string().contains("incomplete planning record"));
+        assert!(right
+            .export_peer_planning("/target", &destination())
+            .unwrap()
+            .changes
+            .is_empty());
+        assert!(import_revision(&right, "/target", &destination()).is_none());
         right.conn.lock().unwrap().execute_batch("CREATE TEMP TRIGGER interrupt_peer BEFORE INSERT ON tasks BEGIN SELECT RAISE(ABORT,'simulated interruption'); END;").unwrap();
         assert!(right
             .import_peer_planning("/target", &destination(), "candidate", &base)

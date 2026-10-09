@@ -186,7 +186,7 @@ fn publish_destination(
         .map_err(message)?;
     let state = match git.publish(&saved.revision).map_err(message)? {
         PlanningPublication::Confirmed => "confirmed",
-        PlanningPublication::Pending { .. } => "pending",
+        PlanningPublication::Pending => "pending",
         PlanningPublication::Unconfirmed => "unconfirmed",
     };
     store
@@ -250,8 +250,8 @@ mod tests {
             crate::engine::planning_exchange::PlanningSnapshot::from_bytes(&published.bytes)
                 .unwrap(),
             store
+                .sqlite
                 .export_peer_planning(key, &plans[1].0.id())
-                .await
                 .unwrap()
         );
         let error: String = conn

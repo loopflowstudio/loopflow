@@ -1,4 +1,4 @@
-use crate::engine::planning_exchange::{PlanningObject, PlanningSnapshot};
+use crate::engine::planning_exchange::PlanningObject;
 
 use crate::engine::planning_git::PlanningDestination;
 use crate::id::WaveId;
@@ -108,36 +108,6 @@ impl Store {
         let repo = repo.to_string();
         run_sqlite(&self.sqlite, move |sqlite| {
             sqlite.peer_projection_conflicts(&repo)
-        })
-        .await
-    }
-
-    pub async fn export_peer_planning(
-        &self,
-        repo: &str,
-        destination: &str,
-    ) -> StoreResult<PlanningSnapshot> {
-        let repo = repo.to_string();
-        let destination = destination.to_string();
-        run_sqlite(&self.sqlite, move |sqlite| {
-            sqlite.export_peer_planning(&repo, &destination)
-        })
-        .await
-    }
-
-    pub async fn import_peer_planning(
-        &self,
-        repo: &str,
-        destination: &str,
-        revision: &str,
-        incoming: &PlanningSnapshot,
-    ) -> StoreResult<PlanningSnapshot> {
-        let repo = repo.to_string();
-        let destination = destination.to_string();
-        let revision = revision.to_string();
-        let incoming = incoming.clone();
-        run_sqlite(&self.sqlite, move |sqlite| {
-            sqlite.import_peer_planning(&repo, &destination, &revision, &incoming)
         })
         .await
     }

@@ -42,9 +42,10 @@ failed on an unbound Initiative.
   comments supersede their briefs' earlier options.
 
 [LOO-427's comparison](../../docs/reviews/terminal-command-comparison.md) records
-command dispositions. Jack corrected scope: identity, repository-window control
-and terminal I/O belong in one LOO-427 diff, with internal slices; premature
-LOO-430/431/432 are folded back. Jack approved the design and implementation through demo review October 8. Owned cmux probe: arrangement, output, retained draft; cleaned up. No Desktop proof.
+command dispositions. Jack folded LOO-430/431/432 into LOO-427: identity, window
+control and terminal I/O in one diff. October 8: design approved; implementation
+authorized through demo review. Owned cmux arrangement/output/draft probe cleaned
+up; no Desktop proof.
 
 October 8: LOO-427 leaves unknown checkout location unavailable. `92cafe61d`
 removes copied placements, preserves legacy overrides and routes known Tasks
@@ -57,13 +58,13 @@ stay separate; saved/failed reads grant none. Session time is unknown. Move reta
 leaves/commands/surfaces; Undo renews closed tokens. Zoom grants no focus.
 Insertion publishes command/focus/Undo together; companions preserve selection.
 Lost replies grant no replay; view tokens grant no input. Machine-qualified
-terminals/readings preserve same-ID peers. `c502cad37` batches membership pruning
-without releasing surfaces; filtered absence proves no deletion. Inspection uses
-ProgramStatusSurface's lifetime without allocation/cleanup.
-`3321ff419` bounds extraction: Linux formatter tests and embedded C compilation
-pass, not native surface reads. Framework unbuilt/unpublished; Desktop still pins
-lf2. Swift truncation cannot bound C allocation; empty differs from unavailable.
-Text I/O, peer composition and packaged/native proof remain.
+terminals/readings preserve same-ID peers. Membership pruning releases no surfaces; filtered absence proves no deletion.
+ProgramStatusSurface owns the observed lifetime.
+`5f4440e52` has exact-target reads and shared terminal/event resolution. Passive
+window/content/surface validation under lf2 returns unavailable, not empty. Linux
+bounded-text tests and embedded C compilation/export pass, not native extraction.
+Independent pre-main C stalling does not explain the cause. No symbol import,
+unbounded fallback or publication; native composition/input/peer work remain.
 
 Jack selected local planning/Git sync: 406 owns writes/Linear, 412 exchange.
 Imported completion cannot move Workflow or clean execution. Preserve pending
@@ -72,16 +73,18 @@ edits, semi-live comments/completion, causal reopening and mutation IDs.
 
 Jack selected user-keyed Git plans by default, explicit shared opt-in, Linear wins;
 otherwise host preference then last-write-wins with recoverable edits. Code remotes
-grant neither identity nor publication permission. LOO-412 at `270019c8d` remains
-unintegrated: joins select/publish nothing; Wave selection inherits to descendants.
+grant neither identity nor publication permission. LOO-412 is unintegrated:
+joins select/publish nothing; Wave selection inherits to descendants.
 Multiple destinations must not split the repository window.
 Private-ancestry holds retain journals/dependents and local moves;
 peers keep old values, so omission is not convergence.
 
-Mixed Linear/Git stays disabled pending composition. `270019c8d` acquires before
+Mixed Linear/Git stays disabled. `270019c8d` acquires before
 projection, rolls rejected objects back and retains typed conflicts independently;
-malformed imports abort. Regressions remain unexecuted. Grouped receipts, alternate
-acquisition and Desktop remain; precedence solves neither Linear's race nor start admission.
+malformed imports abort. `a388ed425` uses common receipts for peer Task decisions,
+retaining uncertain attempts with stable IDs/causal baselines and no Workflow move.
+SQL checks pass, not Rust execution. Other grouped receipts, alternate acquisition
+and Desktop remain; precedence solves neither Linear's race nor start admission.
 
 ## Terminal-host adoption (2026-10-07)
 

@@ -1,14 +1,14 @@
 # Desktop control on shared Work — LOO-427
 
-**Status (October 8, 2026):** Jack Heart authorized implementation through demo
+**Status (reconciled October 9, 2026):** Jack Heart authorized implementation through demo
 review, in one PR. Recorded checkout location, prototype delegation/routing,
 repository-keyed windows, exact retained-pane arrangement and text/key input are
 implemented locally. Passive reads validate exact pane/surface identity but pinned
 lf2 cannot extract bounded text; the verified native artifact remains required.
 Source and focused compile/model evidence establish neither native acceptance nor delivery.
 
-LOO-406 through `b6f34a6f8` is integrated; LOO-412 through `a388ed425` was inspected,
-not integrated. Mixed Linear/Git remains disabled pending acquisition/receipt
+LOO-406's committed lineage through `cbf0a174a` is integrated; LOO-412 through
+`a388ed425` was inspected, not integrated. Mixed Linear/Git remains disabled pending acquisition/receipt
 composition, not by product policy. Shared exchange, peer first-start admission,
 remote Desktop opening and complete-path proof remain. Implementation details and
 contrary evidence follow below and in [findings](findings.md); [questions](questions.md)
@@ -176,27 +176,17 @@ no registration, missing/non-Git paths and another Task's ID refusing edit,
 checkout and launch.
 ### Cutover and acceptance
 
-Proposed structures: `RepositorySelection` (cwd/name/path), one resolved invocation
-carrying Work/Machine and intended effect, and `InvocationExplanation` with sources,
-unavailable facts and effects. Reuse `WorkSelection`, `ContextFact`, existing
-prompt assembly and Clap navigation; no parallel resolver or execution planner.
-Proposed functions `resolve_repository(selection, machine)` and
-`explain_invocation(resolved)` are read paths; context preview consumes the same
-prompt builder as launch. Names are draft, not promises of new public Rust APIs.
+Invocation preview reuses WorkSelection, ContextFact, prompt assembly and Clap
+navigation, not a second resolver. A resolved invocation must carry repository-
+scoped Task identity through all consumers; previews and broader explanation
+remain unimplemented.
 
-Remaining public removals: `Commands::Project`, `Roadmap`,
-and `Context { explain }` dispatch in `lf/mod.rs`
-and `bin/lf.rs`. History now owns the former recorded Monitor commands and Replay. Preserve implementation owners,
-DTO evidence, history, native retention and supported published contracts.
-Discord stays unchanged.
-
-Headless gate: `documented_commands`, CLI routing and DTO fixtures must prove
-canonical/short forms agree, ambiguity has no effects, previews start no providers
-or mutating operations, repository roots resolve on the selected Machine, and
-unknown facts remain explicit. Preview input matches launch assembly for the same
-snapshot. Desktop list/open retain the existing exact-target and readiness tests.
-This API cut is accepted within the one-PR design; native-reader work is independent.
-Unresolved choices remain in questions.md.
+Headless gate separates command discovery (`documented_commands`), wire shape
+(`dto_fixtures`) and behavioral routing/preview tests. The latter must establish
+no provider or Work effects, selected-Machine repository lookup, explicit unknowns
+and preview/launch input parity for the same snapshot. Existing exact-target
+fixtures do not prove composed opening or rendered readiness; those tests remain.
+The accepted one-PR scope includes this API cut and native-reader composition.
 
 ## Architecture and ownership
 
@@ -369,10 +359,16 @@ Git unavailability does not make ordinary planning writes depend on a laptop:
 local saves succeed with pending sync, rather than unconfirmed host callbacks.
 Pending data is not remotely durable until published. Existing execution keeps
 its own lifecycle; no automatic turn/Flow retry is introduced. Online comments
-and completion propagate semi-live through the active sync owner. LOO-406 now keeps
-Desktop foreground Linear sync scoped to the repository (`29777b8cb`), independent
-of selected Task/Wave; switching selection must not stop propagation. Git exchange
-is still unintegrated and cannot claim this coverage. LOO-412's newer source has
+and completion propagate semi-live through the active sync owner. LOO-406 keeps
+Desktop foreground Linear sync scoped to the repository
+(`29777b8cb`), independent of selected Task/Wave. Its integrated lineage now
+includes reconnect/adoption fixture repairs and observed-reopening regressions.
+Infrastructure records Linux migration/Flow/work-watch reconnect passes at
+`078a6642e` and a 54-test planning run including reopening at `2bab3fbd5`; these are dependency evidence,
+not LOO-427 mixed-exchange or Desktop-selection proof. Linear updates remain
+unconditional: observed reopening preserves both values, but an unseen reopen
+between acquisition and delivery can be overwritten. Readback does not prove
+atomicity. Git exchange remains unintegrated. LOO-412's newer source has
 taskless foreground/post-save exchange, but refuses Git exchange in connected
 Linear repositories. The newer `270019c8d` cut acquires provider evidence before
 projecting fields,
@@ -556,10 +552,11 @@ Use `scripts/test_desktop.sh -Xswiftc -gnone --no-parallel` for headless Desktop
 build/tests. Include the full `session_lifecycle_tests` suite and the disposable installation
 migration harness for the changed association/schema. Materialized migration and
 Desktop checks remain with gate; empty filters are not proof. Checks use the
-isolation in TESTING.md. LOO-406's `planning_reconnect_tests` now owns Linux
-work-watch/Flow reconnect fixtures; those remain unexecuted evidence, reusable
-for the common writer rather than a second reconnect harness. LOO-427 still
-needs mixed Git-exchange and Desktop-selection coverage.
+isolation in TESTING.md. LOO-406's `planning_reconnect_tests` owns Linux
+work-watch/Flow reconnect
+fixtures, with dependency evidence in slice 2. LOO-427 still
+needs mixed Git-exchange and Desktop-selection coverage, including selection
+changes during foreground sync; no second reconnect harness is needed.
 
 Demo: one repository window shows two Tasks on different Machines. Explain their
 identity/delegation, open them, add shell/Files panes, retain an unfinished draft,
@@ -570,7 +567,6 @@ provider accounts or live user terminals.
 
 Prior failed attempts, Swift compile/model evidence and Linux extraction checks
 remain in [findings](findings.md), Git blob `6046145dcdd3d334bb2ad3560130de60dce82ca5`
-and `/tmp/loo427-compress-msMFvo/current-scratch/`. No native surface proof or
-artifact publication follows from these checks.
+and `/tmp/loo427-compress-msMFvo/current-scratch/`.
 
-Check (October 9 sync): network-isolated `cargo test --offline -p loopflow --test global_commands repo_selection_uses_machine_root_or_explicit_checkout_without_registration -- --exact` PASS (1); merged `cbf0a174a` via owned continuation, retaining `try_exists()` error propagation. Earlier formatting/Clippy/routing checks and repair logs: `2e03f0b76:scratch/compare-cmux-s-command-line.md`. Full gate/CI and native/composed demo remain.
+Check (October 9 realign): `git diff --check` PASS; prose-only, no test rerun. Focused post-sync repository lookup PASS retained at `26d8ce4e3:scratch/compare-cmux-s-command-line.md`; affected suites remain with gate/CI, native/composed usability with demo.

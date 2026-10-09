@@ -65,17 +65,27 @@ LOO-406 `b3cd894f3` and LOO-412 `2bb5ce5c4`. No dirty dependency code was copied
 or owner checkout changed. The separate Linear reopening race is not itself a
 prerequisite for Git transport.
 
-LOO-406 through `b6f34a6f8` is now integrated. The local branch has removed copied
+LOO-406 through `b6f34a6f8` was integrated at this boundary. The local branch has removed copied
 placements and the single pending URL/unrelated-window fallback. LOO-412 exchange,
 shared repository identity/delegation composition and peer start admission remain;
 the plan owns that remaining work. Do not restore a split writer or build another
 Git engine. These local cuts establish no native or cross-machine acceptance.
 
 Prior integration checks (`16fe238b3`, `50cd28f10`) stalled in build helpers;
-no documented-command or DTO tests ran. LOO-406 repository-scoped foreground
-sync and its Linux reconnect fixtures remain unexecuted here. Seeded shared IDs
+no documented-command or DTO tests ran. The October 8 local attempts did not execute LOO-406's foreground-sync/reconnect
+fixtures; subsequent dependency evidence below supersedes that evidence gap. Seeded shared IDs
 prove routing, not exchange or exclusive first start. Full dated evidence is
 preserved in `/tmp/loo427-input-skDK4w/scratch/findings.md`.
+
+### Integrated writer evidence — October 9
+
+`cbf0a174a` is integrated, including `078a6642e`'s fixture repairs and
+`2bab3fbd5`'s observed/unseen reopening regressions. Infrastructure memory records
+Linux migration/Flow/work-watch reconnect and a 54-test planning pass including reopening; no
+LOO-427 mixed Git/Desktop proof follows. `docs/architecture/planning.md` retains
+the unconditional Linear-write race: acquisition/readback cannot exclude an
+unseen concurrent reopen. The accepted causal-reopening outcome is unchanged.
+Product has no child Wave memories. Related review covered Infrastructure planning only.
 
 ### Committed exchange update — October 8
 

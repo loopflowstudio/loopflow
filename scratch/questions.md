@@ -115,7 +115,7 @@ These are reversible lookup choices, not shared Work identity or publication.
 Global Task lookup can still reject an abbreviated ID that is unique only within
 the selected repository; propagating its scoped identity remains implementation work.
 
-The October 9 context query measured 23205/16000 generated goal tokens (7205 over).
+The October 9 realign query measured 22684/16000 generated goal tokens (6684 over).
 The complete source contains repeated provider definition steers plus generated
 file inventory. Local note curation cannot reduce that source without changing
 recorded direction or its producer; neither was edited and no limit was raised.

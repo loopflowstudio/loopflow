@@ -5,9 +5,8 @@ iOS, agent and worker surfaces. “Concerto” meant Mac.
 
 ## Current direction after the October 7 Tasks
 
-LOO-387–430 briefs and available LOO-427 non-progress comments supersede older
-designs and installed 0.13.9 help. LOO-389's brief was read; its comment read
-failed on an unbound Initiative.
+LOO-387–430 briefs and LOO-427 non-progress comments supersede older designs/help.
+LOO-389's brief was read; comments failed on an unbound Initiative.
 
 - **Machine replaces Home** (LOO-394); one OS user and data directory.
   `LF_HOME`, provider homes and stored opaque IDs keep their meanings. LOO-411
@@ -44,8 +43,7 @@ failed on an unbound Initiative.
 [LOO-427's comparison](../../docs/reviews/terminal-command-comparison.md) records
 command dispositions. Jack folded LOO-430/431/432 into LOO-427: identity, window
 control and terminal I/O in one diff. October 8: design approved; implementation
-authorized through demo review. Owned cmux arrangement/output/draft probe cleaned
-up; no Desktop proof.
+authorized through demo review. Owned cmux probe cleaned up; no Desktop proof.
 
 October 8: LOO-427 leaves unknown checkout location unavailable. `92cafe61d`
 removes copied placements, preserves legacy overrides and routes known Tasks
@@ -53,13 +51,11 @@ without rewriting Machine defaults. Inheritance is unapproved; Rust unverified.
 Neither negative peer observation nor local SQLite reserves first start; runtime
 must not synchronize. Seeded IDs prove routing, not exchange/admission.
 
-LOO-427's local window, exact-pane arrangement, Machine-qualified terminal and
-bounded-read work retains partial proof in `scratch/findings.md`; native artifact,
-peer composition and packaged acceptance remain unfinished. Exact `desktop text/key`
-now reuse the pane event and live-surface owner, not focus or a new input service.
-Jack selected insertion into the existing draft; Enter is separate. It rejects
-control text and requires finishing active IME composition;
-these are reversible restrictions, not new product decisions. Native draft/cursor
+LOO-427's local window, exact-pane arrangement and Machine-qualified I/O have
+partial proof in `scratch/findings.md`; native artifact, peer composition and
+packaged acceptance remain. `desktop text/key` reuse the pane/surface owners.
+Jack selected insertion into the existing draft; Enter is separate. Control-text
+rejection and finishing IME first are reversible restrictions. Native draft/cursor
 and replacement fixtures remain unexecuted. Read grants no input authority.
 
 Jack's October 8 API: `--context` previews input without launch; `--explain`
@@ -76,7 +72,10 @@ Read-only routing never initializes SQLite; unreadable is not absent.
 Jack selected local planning/Git sync: 406 owns writes/Linear, 412 exchange.
 Imported completion cannot move Workflow or clean execution. Preserve pending
 edits, semi-live comments/completion, causal reopening and mutation IDs.
-`29777b8cb` scopes Desktop Linear sync to repository, not selected Task. Composed reconnect remains unproved.
+`29777b8cb` scopes Desktop sync to repository, not selected Task. Integrated
+`cbf0a174a` includes Linux reconnect and observed-reopening regression evidence
+(Infra memory); composed Git/Desktop proof remains. Linear's unconditional writes
+can overwrite unseen reopening: readback proves observed state, not atomicity.
 
 Jack selected user-keyed Git plans by default, explicit shared opt-in, Linear wins;
 otherwise host preference then last-write-wins with recoverable edits. Code remotes

@@ -3,6 +3,7 @@
 //! This module handles building commands and spawning subprocesses for each
 //! supported coding agent. Output can be captured or streamed.
 
+use crate::id::AgentSessionId;
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
@@ -106,7 +107,7 @@ pub struct AgentProcessResult {
     pub stdout: String,
     pub stderr: String,
     /// Opaque provider continuation token observed during this Process.
-    pub provider_session_id: Option<String>,
+    pub agent_session: Option<AgentSessionId>,
     /// Typed provider failure when the process output identifies one.
     pub failure: Option<AgentFailure>,
 }
@@ -179,7 +180,7 @@ pub struct AgentConfig {
     /// Max turn budget when supported by the harness.
     pub max_turns: Option<u32>,
     /// Opaque provider continuation token for this launch.
-    pub resume_token: Option<String>,
+    pub resume_token: Option<AgentSessionId>,
     /// Stable managed account identity selected before durable capture.
     pub provider_account_id: Option<ProviderAccountId>,
     /// Machine whose deterministic account directory resolves a recorded account.
@@ -671,7 +672,7 @@ pub struct ClaudeArgs {
     /// Enable Chrome integration.
     pub chrome: bool,
     /// Resume an existing Claude Code session.
-    pub resume_id: Option<String>,
+    pub resume_id: Option<AgentSessionId>,
 }
 
 impl ClaudeArgs {
@@ -754,7 +755,7 @@ impl ClaudeArgs {
 
         if let Some(ref id) = self.resume_id {
             args.push("--resume".to_string());
-            args.push(id.clone());
+            args.push(id.to_string());
         }
 
         args
@@ -764,7 +765,7 @@ impl ClaudeArgs {
 /// Args for the persistent stream-json driver; turn content arrives on stdin.
 pub fn build_claude_stream_session_args(
     config: &AgentConfig,
-    resume_id: Option<&str>,
+    resume_id: Option<&AgentSessionId>,
     context_file: Option<&Path>,
 ) -> Vec<String> {
     let mut args = vec![
@@ -791,7 +792,7 @@ pub fn build_claude_stream_session_args(
             max_turns: config.max_turns,
             stream: true,
             chrome: false,
-            resume_id: resume_id.map(str::to_string),
+            resume_id: resume_id.cloned(),
         }
         .to_args(),
     );
@@ -1046,7 +1047,7 @@ pub fn build_codex_command(
 
     if process.auto {
         if let Some(resume_token) = &launch.resume_token {
-            cmd.push(resume_token.clone());
+            cmd.push(resume_token.to_string());
         }
     }
 
@@ -1526,8 +1527,8 @@ fn _classify_subscription_limit(text: &str) -> Option<()> {
     .then_some(())
 }
 
-fn _provider_resume_token(result: &AgentProcessResult) -> Option<String> {
-    result.provider_session_id.clone().or_else(|| {
+fn _provider_resume_token(result: &AgentProcessResult) -> Option<AgentSessionId> {
+    result.agent_session.clone().or_else(|| {
         result.stdout.lines().find_map(|line| {
             let value: serde_json::Value = serde_json::from_str(line).ok()?;
             let session_id = [
@@ -1540,7 +1541,7 @@ fn _provider_resume_token(result: &AgentProcessResult) -> Option<String> {
             .into_iter()
             .flatten()
             .find_map(|value| value.as_str().filter(|value| !value.is_empty()))
-            .map(str::to_string);
+            .map(AgentSessionId::from);
             session_id
         })
     })
@@ -1669,7 +1670,7 @@ fn _run_harness_once(
                 .as_ref()
                 .map(|route| route.account_id().clone()),
         );
-        harness.set_provider_session_id(launch.resume_token.clone());
+        harness.set_agent_session(launch.resume_token.clone());
         if capture.is_some() {
             harness.set_raw_provider_sender(Some(raw_tx));
         }
@@ -1677,9 +1678,9 @@ fn _run_harness_once(
             .start(&config)
             .await
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
-        let provider_session_id = harness.provider_session_id();
+        let agent_session = harness.agent_session();
         if let Some(capture) = capture {
-            capture.observe_provider(provider_session_id.clone(), harness.provider_account_id());
+            capture.observe_provider(agent_session.clone(), harness.provider_account_id());
         }
         let can_failover = account_route.is_some()
             && launch.provider_account_authority_home.is_none();
@@ -1726,7 +1727,7 @@ fn _run_harness_once(
                             continue;
                         };
                         if let Some(capture) = capture {
-                            capture.observe_provider(harness.provider_session_id(), harness.provider_account_id());
+                            capture.observe_provider(harness.agent_session(), harness.provider_account_id());
                             capture.record_conversation(event.clone());
                         }
                         match event {
@@ -1775,7 +1776,7 @@ fn _run_harness_once(
                 exit_code: exit_code.expect("event loop stops with an exit code"),
                 stdout,
                 stderr,
-                provider_session_id,
+                agent_session,
                 failure: None,
             })
         };
@@ -1803,7 +1804,7 @@ fn _run_harness_once(
                 .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
         } else {
             route
-                .record_process_blocking(result.provider_session_id.clone(), None)
+                .record_process_blocking(result.agent_session.clone(), None)
                 .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
         }
     }
@@ -2126,7 +2127,7 @@ fn run_batch(
         exit_code: status.code().unwrap_or(1),
         stdout: String::from_utf8_lossy(&stdout_bytes).to_string(),
         stderr: String::from_utf8_lossy(&stderr_bytes).to_string(),
-        provider_session_id: None,
+        agent_session: None,
         failure: None,
     })
 }
@@ -2164,7 +2165,7 @@ fn run_interactive(
         exit_code: status.code().unwrap_or(1),
         stdout: String::new(),
         stderr: String::new(),
-        provider_session_id: None,
+        agent_session: None,
         failure: None,
     })
 }
@@ -2321,7 +2322,7 @@ fn run_streaming(
         exit_code: status.code().unwrap_or(1),
         stdout: stdout_content,
         stderr: stderr_content,
-        provider_session_id: None,
+        agent_session: None,
         failure: None,
     })
 }
@@ -2964,7 +2965,7 @@ trust_level = "trusted"
             max_turns: Some(10),
             stream: true,
             chrome: true,
-            resume_id: Some("sess_abc".to_string()),
+            resume_id: Some("sess_abc".into()),
         }
         .to_args();
         assert!(args.contains(&"--chrome".to_string()));
@@ -3085,7 +3086,7 @@ trust_level = "trusted"
         let path = write_system_prompt_file(&config, "session")
             .unwrap()
             .unwrap();
-        let args = build_claude_stream_session_args(&config, Some("sess_abc"), Some(&path));
+        let args = build_claude_stream_session_args(&config, Some(&"sess_abc".into()), Some(&path));
         assert!(args.iter().all(|arg| arg.len() < 122_880));
         for (flag, value) in [
             ("--append-system-prompt-file", path.to_str().unwrap()),
@@ -3165,7 +3166,7 @@ trust_level = "trusted"
                 )
                 .to_string(),
                 stderr: String::new(),
-                provider_session_id: None,
+                agent_session: None,
                 failure: None,
             },
             AgentProcessResult {
@@ -3197,7 +3198,10 @@ trust_level = "trusted"
         assert_eq!(attempts[0].task_prompt, "compress the branch");
         assert_eq!(attempts[0].resume_token, None);
         assert_eq!(attempts[1].task_prompt, RETRY_PROMPT);
-        assert_eq!(attempts[1].resume_token.as_deref(), Some("thread-123"));
+        assert_eq!(
+            attempts[1].resume_token.as_ref(),
+            Some(&"thread-123".into())
+        );
         assert_eq!(waits, vec![Duration::ZERO]);
     }
 
@@ -3218,7 +3222,7 @@ trust_level = "trusted"
             )
             .to_string(),
             stderr: String::new(),
-            provider_session_id: None,
+            agent_session: None,
             failure: None,
         };
         assert!(matches!(
@@ -3463,7 +3467,7 @@ trust_level = "trusted"
     fn resumed_commands_preserve_provider_session() {
         let launch = AgentConfig {
             agent: Some("codex".to_string()),
-            resume_token: Some("thread-123".to_string()),
+            resume_token: Some("thread-123".into()),
             ..default_launch()
         };
         let codex = build_codex_command(&launch, &auto_process(), None);
@@ -3472,7 +3476,7 @@ trust_level = "trusted"
 
         let launch = AgentConfig {
             agent: Some("claude:opus".to_string()),
-            resume_token: Some("session-123".to_string()),
+            resume_token: Some("session-123".into()),
             ..default_launch()
         };
         let claude = build_claude_command(

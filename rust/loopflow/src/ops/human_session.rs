@@ -728,7 +728,7 @@ async fn connect_live_codex(
         }
         Err(error) => return Err(error.into()),
     }
-    if thread != provider.provider_session_id {
+    if thread != provider.agent_session {
         bail!("Recorded conversation differs from the live provider thread");
     }
     let process = crate::journal::current_process_lfid()
@@ -1860,7 +1860,8 @@ mod tests {
         let dir = capture.artifact_dir();
         let manifest = crate::session_record::read_manifest(&dir).unwrap();
         assert!(!session_is_resumable(&dir, &manifest).unwrap());
-        crate::session_record::write_provider_session(&dir, "provider-session", None).unwrap();
+        crate::session_record::write_provider_session(&dir, &"provider-session".into(), None)
+            .unwrap();
         assert!(!session_is_resumable(&dir, &manifest).unwrap());
         let mut client = std::process::Command::new("/bin/sleep")
             .arg("60")

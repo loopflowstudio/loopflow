@@ -8,7 +8,7 @@ use rusqlite::types::Value;
 use rusqlite::{params, params_from_iter, OptionalExtension, TransactionBehavior};
 use sha2::{Digest, Sha256};
 
-use crate::id::ProcessLfid;
+use crate::id::{AgentSessionId, ProcessLfid};
 use crate::process::{
     AgentCaller, LfProcess, LfProcessCursor, LfProcessFilter, LfProcessOutcomeFilter,
     LfProcessPage, LfProcessWorkFilter, SessionDriver,
@@ -377,7 +377,10 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn session_connection(&self, session: &str) -> StoreResult<Option<(String, String)>> {
+    pub fn session_connection(
+        &self,
+        session: &str,
+    ) -> StoreResult<Option<(String, AgentSessionId)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn.query_row(
             "SELECT provider_endpoint,provider_thread FROM agent_sessions WHERE id=?1 AND provider_endpoint IS NOT NULL AND provider_thread IS NOT NULL",
@@ -385,7 +388,7 @@ impl SqliteStore {
         ).optional()?)
     }
 
-    pub(crate) fn session_thread(&self, session: &str) -> StoreResult<Option<String>> {
+    pub(crate) fn session_thread(&self, session: &str) -> StoreResult<Option<AgentSessionId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
@@ -489,7 +492,7 @@ impl SqliteStore {
         session: &str,
         expected: &SessionDriver,
         endpoint: &str,
-        thread: &str,
+        thread: &AgentSessionId,
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;

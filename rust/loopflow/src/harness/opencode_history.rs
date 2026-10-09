@@ -1,5 +1,6 @@
 //! OpenCode user messages correlate requests; assistant steps remain subordinate.
 
+use crate::id::AgentSessionId;
 use std::collections::{BTreeMap, HashSet};
 
 use anyhow::{Context, Result};
@@ -27,13 +28,13 @@ impl History {
         }
     }
     /// One server event of conversation `thread`, read for attention only.
-    pub(super) fn attend(&mut self, thread: &str, event: &Value) {
+    pub(super) fn attend(&mut self, thread: &AgentSessionId, event: &Value) {
         if let Some((store, session, driver)) = &self.owner {
             self.attention.record(
                 store,
                 session,
                 driver,
-                super::attention::opencode(event, thread),
+                super::attention::opencode(event, thread.as_str()),
             );
         }
     }
@@ -46,7 +47,7 @@ impl History {
 
     pub(super) fn observe(
         &mut self,
-        thread: &str,
+        thread: &AgentSessionId,
         messages: &[Value],
     ) -> Result<Vec<ConversationEvent>> {
         let mut events = Vec::new();
@@ -116,11 +117,11 @@ struct Receipt {
     output: Option<Value>,
 }
 
-fn native_receipts(thread: &str, messages: &[Value]) -> BTreeMap<String, Receipt> {
+fn native_receipts(thread: &AgentSessionId, messages: &[Value]) -> BTreeMap<String, Receipt> {
     let mut receipts = BTreeMap::<String, Receipt>::new();
     for message in messages {
         let info = &message["info"];
-        if info["sessionID"] != thread || info["role"] != "assistant" {
+        if info["sessionID"] != thread.as_str() || info["role"] != "assistant" {
             continue;
         }
         let Some(parent) = info["parentID"].as_str() else {
@@ -195,7 +196,7 @@ fn native_receipts(thread: &str, messages: &[Value]) -> BTreeMap<String, Receipt
 fn record_receipts(
     store: &SqliteStore,
     session: &str,
-    thread: &str,
+    thread: &AgentSessionId,
     request: &str,
     receipt: &Receipt,
 ) -> Result<()> {
@@ -229,7 +230,7 @@ fn record_receipts(
 pub(super) async fn read_messages(
     client: &reqwest::Client,
     endpoint: &str,
-    thread: &str,
+    thread: &AgentSessionId,
 ) -> Result<Vec<Value>> {
     Ok(client
         .get(format!("{endpoint}/session/{thread}/message"))
@@ -310,7 +311,10 @@ mod tests {
         };
         for input in [20, 40, 30] {
             let events = history
-                .observe("thread", &[message("assistant-a", input, "tool-calls")])
+                .observe(
+                    &"thread".into(),
+                    &[message("assistant-a", input, "tool-calls")],
+                )
                 .unwrap();
             assert!(!events.iter().any(|event| matches!(
                 event,
@@ -337,8 +341,8 @@ mod tests {
             message("assistant-b", 10, "stop"),
         ];
         for _ in 0..2 {
-            for (request, receipt) in native_receipts("thread", &messages) {
-                record_receipts(&store, "session", "thread", &request, &receipt).unwrap();
+            for (request, receipt) in native_receipts(&"thread".into(), &messages) {
+                record_receipts(&store, "session", &"thread".into(), &request, &receipt).unwrap();
             }
         }
         let recovered = store.input_history(input.as_str()).unwrap();

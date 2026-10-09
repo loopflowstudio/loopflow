@@ -473,9 +473,9 @@ limits remain at `53be55c70:wave/product/MEMORY.md`, “CI watcher decisions.”
 
 October 8, LOO-418: Jack confirmed self-contained CI repair with Desktop closed
 and requested explicit `land --wait-and-fix` naming. Default waiting was not accepted.
-Repeated land succeeds after merge, preserving finishing work. A busy checkout
-must not poison another waiter's delivery. Recorded waiting controllers permit
-their child's repair; unrelated work and unresolved provider turns still block.
+Repeated land preserves merged work. Busy checkouts cannot poison another waiter.
+After sync with #1512, caller ancestry exempts waiting; live or unresolved
+Processes still block. Unanswered turns alone are history, not execution.
 
 Finite landing (#1382) provided continuation after caller exit; #1384 moved
 repair to the watcher. #1287 fixed repair permissions and locks retained across

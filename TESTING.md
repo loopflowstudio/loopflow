@@ -662,6 +662,11 @@ cargo build -p loopflow --bin lf
 LOOPFLOW_TEST_LF="$PWD/target/debug/lf" uv run pytest python/tests/test_checkout_refresh.py
 ```
 
+Checkout pruning also reads OS-account installation authority. `LF_HOME` alone
+does not isolate that read: an unreleased CLI can reject the installed Home's
+older schema. Run these proofs in a disposable OS account or leave them to the
+Rust CI job; never migrate the installed Home to make a fixture pass.
+
 The background-push regression holds Git until the CLI exits, then verifies
 upstream tracking and a subsequent sync. Immediate local pushes can hide
 broken pipes that interrupt Git after the remote ref moves; background children
@@ -855,7 +860,7 @@ Task adoption uses an explicit experimental Machine. No host Machine, credential
 is mounted. Default executable routing uses two real source CLI processes and
 a simulated installed executable. It runs in this disposable account because
 `HOME` and `LF_HOME` cannot isolate installation records. The ordinary
-`pr_tests` suite covers Task continuation's auto-merge revocation and review
+`pr_tests` suite covers changed-head auto-merge revocation and review
 continuity in an explicit experimental Machine.
 
 The separate planning CLI proof (`cargo test -p loopflow --test planning_lookup_tests`) runs planning-only `task status` by identifier and UUID against

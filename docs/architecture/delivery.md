@@ -122,8 +122,8 @@ Repeating `land` on a clean, already armed exact head resumes the
 existing request, including standalone PRs. It preserves the commit, merge
 queue position, and CI. Explicit standalone title/body edits update only those
 fields; omitted copy is preserved. Dirty source or a new local commit still
-prepares and publishes a replacement head. Task requests must also match the
-requested completion/continuation disposition.
+prepares and publishes a replacement head. Task completion remains separate:
+verified merge and a recorded follow-through disposition are required.
 
 `lf pr open` is the presenting verb; it opens the review surface after
 publishing. Headless Task flows use publish or land.
@@ -208,8 +208,8 @@ read required checks on H1 once
 ```
 
 The next repository tick or `lf pr reconcile` repeats this from fresh evidence.
-Those checks record a failure and return. Only `lf ci watch` and a release's own
-landing start a repair, through this same check.
+Those checks record a failure and return. `lf land --wait-and-fix`, `lf ci watch`
+and a release's own landing can start a repair through this same check.
 
 ### CI watcher
 
@@ -301,9 +301,9 @@ landing pending and the next check retries it.
 After verified merge the Task shows **Merged · Follow-through pending**.
 `ship` runs gate, `land --wait-and-fix`, then follow-through. Waited landing uses the
 existing observation and CI repair path every 15 seconds for at most 30 minutes,
-releasing its lock between reads. Repair admission exempts only the calling
-command and its recorded Flow drivers and Task carrier, which wait for it;
-unrelated live Processes and unresolved provider turns still prevent editing.
+releasing its lock between reads. Repair admission exempts the calling command
+and its recorded ancestors, which wait for it; unrelated live or unresolved
+Processes still prevent editing. Unanswered turns alone are history, not execution.
 The same incident reservation deduplicates a concurrent watcher. Timeout
 retains intent and returns held (exit 3), propagated through the Flow without
 automatic retry;

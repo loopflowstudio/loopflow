@@ -227,10 +227,12 @@ fn personal_task_launch_resume_and_skill_workflow_keep_native_identity() {
     let terminal = r#"#!/bin/sh
 case "$*" in
   --version) exit 0 ;;
+  '--dangerously-bypass-hook-trust --model')
+    echo "a value is required for '--model <MODEL>'" >&2; exit 2 ;;
   *app-server*) ;;
   *resume*)
     case "$*" in *terminal-fixture*) exit 0 ;; *) exit 91 ;; esac ;;
-  *SessionStart*)
+  *--profile*)
     printf '%s\n' "$LF_CAPTURE_KEY" >> "$LF_HOME/launched"
     printf '%s\n' '{"session_id":"terminal-fixture"}' | "$LF_BIN" __provider-session
     exit $? ;;
@@ -268,7 +270,7 @@ esac
     let worktree = Path::new(placed["worktree"].as_str().unwrap());
     let launch = fixture
         .command(&[
-            "--tui",
+            "-i",
             "--task",
             task_id,
             "--agent",
@@ -1267,6 +1269,13 @@ fn declared_agent_can_start_another_tasks_flow() {
     // Y needs a harness that supports the checkout boundary. Its mechanical
     // Flow never starts a provider; X's interactive OpenCode only issues the command.
     store.set_task_agent(&target.task.id, "claude").unwrap();
+    store
+        .select_project_workflow(
+            &target.task.project_id,
+            "switch-proof",
+            &std::fs::read_to_string(y.join(".lf/workflows/switch-proof.yaml")).unwrap(),
+        )
+        .unwrap();
     let bin = fixture.home.path().join("bin");
     std::fs::remove_file(bin.join("lf")).unwrap();
     std::fs::write(

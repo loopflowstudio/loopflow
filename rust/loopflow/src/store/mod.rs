@@ -600,10 +600,12 @@ impl Store {
     pub(crate) async fn wave_retirement_blockers(
         &self,
         wave_id: &WaveId,
+        replacement: &WaveId,
     ) -> StoreResult<Vec<String>> {
         let wave_id = wave_id.clone();
+        let replacement = replacement.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.wave_retirement_blockers(&wave_id)
+            store.wave_retirement_blockers(&wave_id, &replacement)
         })
         .await
     }
@@ -1646,7 +1648,7 @@ mod tests {
             }];
             let item = &mut snapshot.snapshot.items[0];
             item.state = Some("unstarted".into());
-            item.rank = 7;
+            item.rank = 0;
             item.url = Some("https://linear.app/issue/INF-123".into());
             item.branch_name = Some("suggested-branch".into());
             item.assignee = Some("owner".into());
@@ -1745,7 +1747,7 @@ mod tests {
             assert!(!record.item.completed);
             assert_eq!(record.item.completed_at, None);
             assert_eq!(record.item.assignee, None);
-            assert_eq!(record.item.rank, 7);
+            assert_eq!(record.item.rank, 0);
             assert_eq!(record.observed_at, 17);
             assert_eq!(store.sqlite.workflow(&task.id).unwrap(), reopened);
             let wave_plan = store.sqlite.planning_wave(wave.id()).unwrap();
@@ -2584,10 +2586,12 @@ mod tests {
         assert_eq!(accepted.snapshot.projects, vec![confirmed.clone()]);
         let durable = store.get_project(&project.id).await.unwrap().unwrap();
         assert_eq!(durable.plan.pm_snapshot_synced_at, Some(10));
-        assert!(durable
-            .plan
-            .prompt_context
-            .starts_with("Project metric targets:"));
+        assert_eq!(
+            crate::pm::parse_project_content(&durable.plan.prompt_context)
+                .unwrap()
+                .metric_targets,
+            confirmed.metric_targets
+        );
         assert!(!durable.plan.prompt_context.contains("flow:"));
         assert!(durable.plan.prompt_context.contains(&confirmed.krs[0].text));
         let other = Wave::new(WaveId::new(), "other".into(), wave.repo().into());
@@ -2907,6 +2911,7 @@ mod tests {
 
     #[tokio::test]
     async fn live_steers_inject_new_comments_and_defer_when_not_steerable() {
+        let _machine = crate::journal::TestLedgerGuard::new();
         let directory = tempfile::tempdir().unwrap();
         let store = std::sync::Arc::new(
             crate::store::open_ephemeral_store(&StorageConfig::sqlite(
@@ -3226,6 +3231,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
+        plan.revision += 1;
         assert_eq!(by_stable_id.plan, plan);
         let mut expected = persisted;
         expected.plan = plan;
@@ -3723,7 +3729,7 @@ mod tests {
             .await
             .unwrap();
         let retained = store.get_task(&task.id).await.unwrap().unwrap();
-        refreshed_plan.revision += 1;
+        refreshed_plan.revision += 2; // Provider title change, then local completion.
         assert_eq!(retained.plan, refreshed_plan);
         let stored = store.task_prs(&task.id).await.unwrap();
         assert_eq!(stored.len(), 1);

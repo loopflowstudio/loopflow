@@ -74,10 +74,14 @@ pub async fn update_plan(
     content: ProjectContent,
 ) -> OpsResult<ProjectPlanning> {
     let store = super::pm::pm_store().await?;
-    let wave =
-        crate::work::wave::context::resolve_managed_wave(Some(&store), Some(repo), wave, None)
-            .await
-            .map_err(project_error)?;
+    let wave = crate::work::wave::context::resolve_managed_wave(
+        Some(&store),
+        Some(repo),
+        wave,
+        std::env::var("LF_WAVE_ID").ok().as_deref(),
+    )
+    .await
+    .map_err(project_error)?;
     let _acquisition = super::pm::lock_wave_planning(&wave).await?;
     let selected = current_project(&store, &wave)?;
     let project = resolve_project(&store, repo, &selected.id).await?;

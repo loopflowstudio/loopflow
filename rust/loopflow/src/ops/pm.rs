@@ -2305,9 +2305,12 @@ pub(crate) async fn pm_rename(
 pub fn list_local_waves(repo: &Path) -> OpsResult<Vec<String>> {
     let canonical = crate::repository::CanonicalRepo::discover(repo)
         .map_err(|error| OpsError::Message(error.to_string()))?;
-    let store =
-        crate::store::sqlite::SqliteStore::open_read_only(&crate::store::database_path_from_env()?)
-            .map_err(|error| OpsError::Message(error.to_string()))?;
+    let database = crate::store::database_path_from_env()?;
+    if !database.exists() {
+        return Ok(Vec::new());
+    }
+    let store = crate::store::sqlite::SqliteStore::open_read_only(&database)
+        .map_err(|error| OpsError::Message(error.to_string()))?;
     Ok(store
         .list_waves(Some(&canonical.to_string()))
         .map_err(|error| OpsError::Message(error.to_string()))?

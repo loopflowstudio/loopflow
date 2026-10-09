@@ -258,17 +258,13 @@ fn repository_team_matrix() {
     );
     drop(store);
 
-    // Recursive discovery and durable ancestry make nested titles legible.
+    let old_home = std::env::var_os("LF_HOME");
+    std::env::set_var("LF_HOME", &home);
+    // Stored discovery and durable ancestry make nested titles legible.
     assert_eq!(
         list_local_waves(&repo).unwrap(),
         ["intelligence", "survival", "survival/infrastructure"]
     );
-    let old_home = std::env::var_os("LF_HOME");
-    // SAFETY: this integration binary contains one test; no sibling thread can
-    // observe the temporary storage selection.
-    unsafe {
-        std::env::set_var("LF_HOME", &home);
-    }
     assert_eq!(
         canonical_wave_title_path(&repo, "survival/infrastructure").unwrap(),
         "Survival / Infrastructure"
@@ -294,7 +290,7 @@ fn repository_team_matrix() {
         let error = String::from_utf8_lossy(&checkout.stderr);
         assert!(!checkout.status.success());
         assert!(
-            error.contains("terminal and cannot start execution"),
+            error.contains("terminal planning state"),
             "unexpected task result: {error}"
         );
     }
@@ -362,8 +358,8 @@ fn repository_team_matrix() {
         .join("fixture.a-real-task-reaches-done")
         .exists());
 
-    // The capable PR leaves a legacy repository readable but blocks mutations
-    // with the PRD-44 handoff before any provider call.
+    // Legacy provider configuration cannot prevent a local save. Delivery
+    // remains pending until the connection is repaired.
     let legacy_repo = fixture.path().join("legacy");
     std::fs::create_dir_all(legacy_repo.join(".lf")).unwrap();
     std::fs::write(
@@ -430,15 +426,23 @@ fn repository_team_matrix() {
         ),
         "legacy cached read",
     );
-    let blocked = run_lf(
+    let saved = run_lf(
         &home,
         &legacy_repo,
-        &["task", "create", "--wave", "product", "--title", "Blocked"],
+        &[
+            "task",
+            "create",
+            "--wave",
+            "product",
+            "--title",
+            "Retain offline work",
+            "--json",
+        ],
     );
-    let error = String::from_utf8_lossy(&blocked.stderr);
-    assert!(!blocked.status.success());
-    assert!(error.contains("lf repo reteam --apply"), "{error}");
-    assert!(error.contains("PRD-44"), "{error}");
+    let item: serde_json::Value =
+        serde_json::from_str(&assert_success(&saved, "save local Task")).unwrap();
+    assert_eq!(item["name"], "Retain offline work");
+    assert!(String::from_utf8_lossy(&saved.stderr).contains("pending Linear sync"));
 
     // PRD-44 leaves the repository Team as the sole PM authority after the
     // provider migration verifies successfully.

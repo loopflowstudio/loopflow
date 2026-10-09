@@ -1,4 +1,4 @@
-mod planning;
+pub mod planning;
 
 use std::env;
 use std::ffi::OsString;
@@ -444,6 +444,23 @@ fn register_task_fixture(
             )
             .await
             .expect("create test Task");
+        if worktree.exists()
+            && loopflow::engine::git::rev_parse(worktree, &format!("refs/heads/{}", pr.branch))
+                .is_ok()
+        {
+            store
+                .append_task_event(
+                    &task.id,
+                    &loopflow::work::task::TaskEventKind::PrStarted {
+                        pr_id: pr.id.clone(),
+                        sequence: pr.sequence,
+                        branch: pr.branch.clone(),
+                        base_commit: pr.base_commit.clone(),
+                    },
+                )
+                .await
+                .expect("fixture checkout already exists");
+        }
     });
     RegisteredTask {
         store,
@@ -495,6 +512,21 @@ pub fn register_sibling_task(
             None,
         ))
         .expect("create sibling Task");
+    if worktree.exists()
+        && loopflow::engine::git::rev_parse(worktree, &format!("refs/heads/{}", pr.branch)).is_ok()
+    {
+        runtime
+            .block_on(registered.store.append_task_event(
+                &task.id,
+                &loopflow::work::task::TaskEventKind::PrStarted {
+                    pr_id: pr.id.clone(),
+                    sequence: pr.sequence,
+                    branch: pr.branch.clone(),
+                    base_commit: pr.base_commit.clone(),
+                },
+            ))
+            .expect("fixture sibling checkout already exists");
+    }
     task
 }
 

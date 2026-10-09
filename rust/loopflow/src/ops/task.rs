@@ -859,6 +859,10 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskProcessOptions) -> OpsRes
                 wave.slug()
             )));
         }
+        store
+            .sqlite
+            .validate_task_planning(&task)
+            .map_err(task_error)?;
         match task_work_status(&store, &task).await? {
             WorkStatus::Done => {
                 return Err(task_error(format!(
@@ -1313,7 +1317,7 @@ pub fn task_create(
             Some(&store),
             Some(&main),
             wave,
-            None,
+            std::env::var("LF_WAVE_ID").ok().as_deref(),
         )
         .await
         {

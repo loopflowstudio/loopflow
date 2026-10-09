@@ -12,9 +12,15 @@ pub(crate) fn read_wave_document(
     name: &str,
     document: &str,
 ) -> std::io::Result<String> {
-    let store =
-        crate::store::sqlite::SqliteStore::open_read_only(&crate::store::database_path_from_env()?)
-            .map_err(std::io::Error::other)?;
+    let database = crate::store::database_path_from_env()?;
+    if !database.exists() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "Wave not found",
+        ));
+    }
+    let store = crate::store::sqlite::SqliteStore::open_read_only(&database)
+        .map_err(std::io::Error::other)?;
     let locator = super::WaveLocator::discover(repo, name).map_err(std::io::Error::other)?;
     let wave = store
         .get_wave_at(&locator)
@@ -191,8 +197,11 @@ pub(crate) fn try_read_wave_chat_config(
 /// `## Objective`, falling back to the first prose paragraph when that section
 /// is absent.
 pub fn read_wave_summary(repo: &Path, name: &str) -> std::io::Result<String> {
-    let content = read_wave_document(repo, name, "GOAL.md")?;
-    Ok(wave_summary(&content))
+    match read_wave_document(repo, name, "GOAL.md") {
+        Ok(content) => Ok(wave_summary(&content)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(error) => Err(error),
+    }
 }
 
 pub(crate) fn wave_summary(content: &str) -> String {

@@ -174,7 +174,7 @@ borrowed field-keyed winner index across completeness, projection and delivery.
 The typed provider-conflict repair remains at `270019c8d`. These source cuts do
 not establish executable acceptance: the authored regressions remain unexecuted.
 
-October 8 comment composition replaces direct peer row writes with the common
+October 8 comment composition (`7e56c01fd`) replaces direct peer row writes with the common
 comment acquisition and authored-delivery owners. Raw provider observations and
 original acquisition times travel in the journal; imported authorship creates no
 local steer. Authored regressions cover lost replies, later edits, conflicts,
@@ -455,7 +455,7 @@ Infrastructure child memory exists in this checkout.
 7. Replace PR copy and create a walkthrough of final behavior and evidence;
    publish #1491 for Jack Heart's review and stop without landing.
 
-Check (October 8 comment implementation): `cargo fmt --all -- --check`, `git diff --check` and production comment SQL on released migrations plus drafts pass; focused `cargo test -p loopflow --lib peer_comments --no-run` and `cargo clippy --all-targets -- -D warnings` time out after 120 seconds during build-script startup, before Rust compilation. Capable gate/CI owns executable checks and composed acceptance; checkpoint CI skips the matrix while scratch remains.
+Check (October 8 comment implementation): `cargo fmt --all -- --check`, `git diff --check` and production comment SQL on released migrations plus drafts pass; focused `cargo test -p loopflow --lib peer_comments --no-run` and `cargo clippy --all-targets -- -D warnings` time out after 120 seconds without reaching test or lint results; the prior startup diagnosis is retained below. Capable gate/CI owns executable checks and composed acceptance; checkpoint CI skips the matrix while scratch remains.
 
 The timeout investigation found Cargo waiting on its build-script child, not
 compiling Rust or waiting for a Cargo lock. Both children had 96 KiB footprints

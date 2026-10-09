@@ -634,7 +634,7 @@ echo. Acquired migration rows await real observation before export, never inferr
 authorship. SQL passes; Rust/composed/installed acceptance remains unproved.
 Creation, structured Project/order, deletion, alternate acquisition, legacy
 association and Desktop remain. Design: `scratch/work-on-another-machine-name.md`.
-Earlier frontier/conflict proofs: `ae6f392c2:wave/infrastructure/MEMORY.md`, this heading.
+Prior proofs: `ae6f392c2:wave/infrastructure/MEMORY.md`, this heading.
 
 Parent `ffe986160` replaces synthetic state settlement with observations/errors;
 unintegrated here, publication unchecked. Peer fixtures must follow that owner.
@@ -645,8 +645,7 @@ saves/acquisition. Damaged journals break status, not independent exchange.
 
 Move counterexample `a43f3e2ea`, repairs `b5dafd918`/`7395cf3bb`: holds omit private
 history/dependents, including retained Git documents, until explicit selection.
-Omission is not convergence. CLI holds exist; recovery UX needs review. Earlier
-detail: `4aca376dd:wave/infrastructure/MEMORY.md`, this heading.
+Omission is not convergence. CLI holds exist; recovery UX needs review.
 
 ## Synced planning integration (LOO-334)
 

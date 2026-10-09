@@ -94,11 +94,11 @@ Entity revisions cannot order relationships; scalar/list replay cannot clear
 freshness or unseen notices. Prior evidence: `7d12ab10a`, this heading.
 
 October 9: `d4fbca0ae` associates established roots; `a73198197` scopes Task
-lookup through retained repository locators. Work, mappings, effects and execution
-survive. Both fixture roots own Work before binding. Binding publishes nothing. Journals exclude RepositoryId/delegation.
-Imports allocate identity. October 9 opening/restoration now consumes atomic local
-locator readings, retaining scene/queue/native owners while renewing input targets.
-Headless proof retains drafts and views, not native usability.
+lookup through retained repository locators. Binding retains existing Work, mappings, effects and execution, publishing nothing.
+Journals exclude RepositoryId/delegation; imports allocate identity. Desktop consumes
+atomic locator readings, retaining native owners and renewing input targets. Scene equality cannot fence observations: A→B→A is still a newer
+binding. Headless fixtures retain drafts/views and reject delayed alias rollback,
+not native usability.
 
 Repository association does not associate divergent Task/Project provider IDs.
 **Unmapping is not association.** `d378f31ae` composes LOO-412's cross-ID provider

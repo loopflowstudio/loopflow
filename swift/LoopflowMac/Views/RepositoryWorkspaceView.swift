@@ -2,17 +2,6 @@ import Foundation
 import Loopflow
 import SwiftUI
 
-extension RepositoryWorkspace {
-    static func resolve(path: String, query: RegistryQuery) async throws -> (workspace: Self, identity: RepositoryIdentity) {
-        let localPath = await Task.detached {
-            RepoScanner().mainRepository(URL(fileURLWithPath: path))?.normalizedFilePath
-        }.value
-        guard let localPath else { throw RegistryQueryError("\(path) is not an available local Git repository.") }
-        let identity = try await query.repositoryIdentity(cwd: localPath)
-        return (Self(id: identity.id, path: localPath), identity)
-    }
-}
-
 struct TaskWindowChoice: Identifiable {
     let path: String
     let url: URL

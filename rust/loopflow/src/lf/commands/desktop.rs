@@ -508,37 +508,15 @@ pub fn run(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<
             if !(1..=1_048_576).contains(max_bytes) {
                 bail!("Text byte limit must be between 1 and 1048576");
             }
-            let request = DesktopTextRequest {
-                target: parse_target(target)?,
-                surface: surface.clone(),
-                region: *region,
-                max_bytes: *max_bytes,
-            };
-            let encoded = serde_json::to_string(&request)?;
-            let output = contact(Some(&encoded), true)?;
-            let reading: DesktopTextReading = serde_json::from_slice(&output)
-                .context("Desktop returned an invalid terminal text reading")?;
-            if reading.request != request {
-                bail!("Desktop returned text for a different request");
-            }
-            if matches!(&reading.result, DesktopTextResult::Available { text, .. } if text.len() > request.max_bytes)
-            {
-                bail!("Desktop returned text exceeding the requested byte limit");
-            }
-            if *json {
-                println!("{}", serde_json::to_string_pretty(&reading)?);
-            } else {
-                match &reading.result {
-                    DesktopTextResult::Available { text, truncated } => {
-                        print!("{text}");
-                        if *truncated {
-                            eprintln!("\n[Desktop text truncated]");
-                        }
-                    }
-                    DesktopTextResult::Unavailable { reason } => bail!("{}", reason.message()),
-                }
-            }
-            return Ok(());
+            return read_text(
+                DesktopTextRequest {
+                    target: parse_target(target)?,
+                    surface: surface.clone(),
+                    region: *region,
+                    max_bytes: *max_bytes,
+                },
+                *json,
+            );
         }
         DesktopCommand::Hide { target, json } => (target, DesktopPaneAction::Hide, json),
         DesktopCommand::Restore { target, json } => (target, DesktopPaneAction::Restore, json),
@@ -597,6 +575,36 @@ pub fn run(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<
         action,
     })?;
     invoke(Some(&request), *json)
+}
+
+/// Decode only a bounded reply for this exact request; never follow focus or
+/// fall back to an unbounded clipboard read.
+fn read_text(request: DesktopTextRequest, json: bool) -> Result<()> {
+    let encoded = serde_json::to_string(&request)?;
+    let output = contact(Some(&encoded), true)?;
+    let reading: DesktopTextReading = serde_json::from_slice(&output)
+        .context("Desktop returned an invalid terminal text reading")?;
+    if reading.request != request {
+        bail!("Desktop returned text for a different request");
+    }
+    if matches!(&reading.result, DesktopTextResult::Available { text, .. } if text.len() > request.max_bytes)
+    {
+        bail!("Desktop returned text exceeding the requested byte limit");
+    }
+    if json {
+        println!("{}", serde_json::to_string_pretty(&reading)?);
+    } else {
+        match &reading.result {
+            DesktopTextResult::Available { text, truncated } => {
+                print!("{text}");
+                if *truncated {
+                    eprintln!("\n[Desktop text truncated]");
+                }
+            }
+            DesktopTextResult::Unavailable { reason } => bail!("{}", reason.message()),
+        }
+    }
+    Ok(())
 }
 
 fn validate_literal_text(text: &str) -> Result<()> {

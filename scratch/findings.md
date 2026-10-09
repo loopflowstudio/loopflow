@@ -185,13 +185,15 @@ owner keeps immutable import preparation and per-field savepoints. Dependency
 scratch remains in its commit, not ambient here. Origin preservation is not legacy
 correspondence; mixed-provider exchange and peer-first-start refusals remain.
 
-Filesystem inspection again found no Product child directories/memories. Relevant
-Infrastructure peer/recovery/planning and Intelligence check/context/memory sections
-were read, plus LOO-412's committed plan and peer memory at `19e31f64d`; unrelated
-sibling history was not re-audited. Local main remains `3e1e6245c`; no fetch was made.
-Delegation exchange, exclusive first-start admission and remote/native composition
-remain. Jack Heart's inheritance choice is unresolved; cursor insertion is settled.
-Earlier pre-edit evidence: `/tmp/loo427-realign-YhViGf/`. Window implementation
-preserved its starting notes at `/tmp/loo427-before-window-scratch/` and reconciled
-them in `3a96bdc76`. The generated Work seed still exceeds its 16,000-token limit;
-authored scratch/memory fit. No budget was raised.
+Prior cross-Wave/dependency inspection and pre-edit evidence:
+`b83d3e2a9:scratch/findings.md`, this heading. Product still has no child memories.
+Delegation exchange, exclusive admission and remote/native composition remain;
+Jack Heart's inheritance choice is unresolved and cursor insertion is settled.
+
+Compression exposed a second stale-observation case: the router compared selected
+plans with scene equality. A restored alias could roll back A→B→A because the final
+ID looked unchanged. Router-owned readings now retain observation identity, separate
+from the scene key; opening/restoration share retention. The headless regression
+covers both reserved and registered scenes. Earlier failed builds and fixture URL
+errors remain above; this establishes no native usability. The generated Work seed
+still exceeds its independent 16,000-token limit; authored notes cannot shrink it.

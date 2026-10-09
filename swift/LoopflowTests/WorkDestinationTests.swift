@@ -1066,6 +1066,38 @@ struct WorkDestinationTests {
         #expect(router.inspect().windows.map(\.window) == [window.uuidString])
     }
 
+    @Test(arguments: [false, true])
+    func restoredAliasCannotUndoBindingBackToTheSamePlan(registered: Bool) async throws {
+        let router = WorkLinkRouter(), barrier = LinkedDestinationBarrier()
+        let path = repositoryFixturePath()
+        let before = RegistryQuery { _, _ in #"{"id":"old-plan","locators":["old-plan","plan"]}"# }
+        let after = RegistryQuery { _, _ in #"{"id":"plan","locators":["old-plan","plan"]}"# }
+        let scene = try await router.openRepository(path: path, link: nil, query: before) { _ in }
+        let window = UUID()
+        if registered {
+            router.register(window, repository: scene.id, focus: {}, inspect: windowInspection,
+                controlPane: { _ in }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+        }
+        let validation = Task {
+            try await router.resolveWorkspace(RepositoryWorkspace(id: "plan", path: path), query: RegistryQuery { _, _ in
+                await barrier.wait("restore")
+                return #"{"id":"plan","locators":["old-plan","plan"]}"#
+            })
+        }
+        while !(await barrier.contains("restore")) { await Task.yield() }
+        _ = try await router.openRepository(path: path, link: nil, query: after) { _ in }
+        _ = try await router.openRepository(path: path, link: nil, query: before) { _ in }
+        let reboundWindow = router.inspect().windows.first?.window
+        await barrier.release("restore")
+        #expect(try await validation.value == scene)
+        if !registered {
+            router.register(window, repository: scene.id, focus: {}, inspect: windowInspection,
+                controlPane: { _ in }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+        }
+        #expect(router.inspect().windows.map(\.repository) == ["old-plan"])
+        #expect(router.inspect().windows.first?.window == (reboundWindow ?? window.uuidString))
+    }
+
     private func repositoryFixturePath() -> String {
         URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().path
     }

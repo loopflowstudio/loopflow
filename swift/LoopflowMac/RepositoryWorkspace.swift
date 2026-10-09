@@ -39,7 +39,14 @@ final class WorkLinkRouter {
     // Scene reservations survive registration and reassociation. Only an lf
     // identity reading can change their selected plan. Queues and native owners
     // keep the original scene key, so an in-flight delivery is never replayed.
-    private var workspaces: [String: RepositoryWorkspace] = [:]
+    private struct RepositoryReading: Equatable {
+        // A completed lookup is an observation, even when binding back to the
+        // same plan. Scene equality deliberately ignores that distinction.
+        let observation = UUID()
+        let identity: RepositoryIdentity
+        let path: String
+    }
+    private var workspaces: [String: RepositoryReading] = [:]
     private var targets: [String: Target] = [:]
     private var pending: [String: [URL]] = [:]
     private struct Delivery {
@@ -78,17 +85,17 @@ final class WorkLinkRouter {
         repositoryOpenings[path] = RepositoryOpening(id: id, repository: nil,
             receipt: DesktopOpening(url: url.absoluteString, status: .opening, reason: nil))
         do {
-            let resolved = try await RepositoryWorkspace.resolve(path: path, query: query)
+            let resolved = try await Self.readRepository(path: path, query: query)
             try Task.checkCancellation()
             guard repositoryOpenings[path]?.id == id else { throw CancellationError() }
-            let workspace = retainScene(resolved.workspace, identity: resolved.identity)
+            let workspace = retainScene(resolved)
             var destination = link
             if let link {
                 let target = try TaskLink(url: link)
                 destination = TaskLink(issue: target.issue, repo: workspace.path, session: target.session, diff: target.diff).url
             }
             repositoryOpenings[path]?.repository = workspace.id
-            if deliver(destination, repository: resolved.workspace.id) {
+            if deliver(destination, repository: resolved.identity.id) {
                 finishRepositoryOpening(path, id: id, status: .usable)
             } else {
                 openWindow(workspace)
@@ -123,7 +130,7 @@ final class WorkLinkRouter {
         let requests = workspaceRequests(workspace.id)
         let observed = workspaces
         do {
-            let resolved = try await RepositoryWorkspace.resolve(path: workspace.path, query: query)
+            let resolved = try await Self.readRepository(path: workspace.path, query: query)
             try Task.checkCancellation()
             guard resolved.identity.locators.contains(workspace.id) else {
                 throw RegistryQueryError("This location no longer retains this repository identity. The restored workspace was not changed.")
@@ -133,15 +140,13 @@ final class WorkLinkRouter {
             }
             // A second restored locator can resolve while the first scene is
             // still mounting. Reserve its existing scene before either registers.
-            let existing = workspaces.keys.first { resolved.identity.locators.contains($0) }
-            let scene = existing ?? workspace.id
+            let scene = scene(for: resolved.identity) ?? workspace.id
             if workspaces[scene] != observed[scene], let current = workspaces[scene] {
                 // Another locator completed a newer opening while this restored
                 // shell was reading. Use that observation; never roll it back.
                 return RepositoryWorkspace(id: scene, path: current.path)
             }
-            updateIdentity(resolved.workspace, scene: scene)
-            return RepositoryWorkspace(id: scene, path: resolved.workspace.path)
+            return retainScene(resolved, scene: scene)
         } catch {
             guard workspaceRequests(workspace.id) == requests else { throw CancellationError() }
             for (path, request) in repositoryOpenings where requests.contains(request.id) {
@@ -152,24 +157,32 @@ final class WorkLinkRouter {
         }
     }
 
-    /// The common store proves association; paths, clone names and remotes do not.
-    private func retainScene(_ workspace: RepositoryWorkspace, identity: RepositoryIdentity) -> RepositoryWorkspace {
-        let scene = workspaces.keys.first { identity.locators.contains($0) } ?? workspace.id
-        updateIdentity(workspace, scene: scene)
-        return RepositoryWorkspace(id: scene, path: workspace.path)
+    private static func readRepository(path: String, query: RegistryQuery) async throws -> RepositoryReading {
+        let localPath = await Task.detached {
+            RepoScanner().mainRepository(URL(fileURLWithPath: path))?.normalizedFilePath
+        }.value
+        guard let localPath else { throw RegistryQueryError("\(path) is not an available local Git repository.") }
+        return try await RepositoryReading(identity: query.repositoryIdentity(cwd: localPath), path: localPath)
     }
 
-    private func updateIdentity(_ workspace: RepositoryWorkspace, scene: String) {
-        if let previous = workspaces[scene], previous.id != workspace.id {
+    /// The common store proves association; paths, clone names and remotes do not.
+    private func scene(for identity: RepositoryIdentity) -> String? {
+        workspaces.keys.first { identity.locators.contains($0) }
+    }
+
+    private func retainScene(_ reading: RepositoryReading, scene: String? = nil) -> RepositoryWorkspace {
+        let scene = scene ?? self.scene(for: reading.identity) ?? reading.identity.id
+        if let previous = workspaces[scene], previous.identity.id != reading.identity.id {
             // Renew only the targeting capability, not the native receiver or its
             // delivery lifetime. Even binding back cannot revive an old target.
             targets[scene]?.incarnation = UUID()
         }
-        workspaces[scene] = workspace
+        workspaces[scene] = reading
+        return RepositoryWorkspace(id: scene, path: reading.path)
     }
 
     private func scene(for repository: String) -> String? {
-        if let scene = workspaces.first(where: { $0.value.id == repository })?.key { return scene }
+        if let scene = workspaces.first(where: { $0.value.identity.id == repository })?.key { return scene }
         // Directly registered receivers have no pending scene reservation.
         return workspaces[repository] == nil && targets[repository] != nil ? repository : nil
     }
@@ -183,7 +196,7 @@ final class WorkLinkRouter {
     /// No focus change, reads, surface allocation, or provider launch.
     func inspect() -> DesktopInspection {
         DesktopInspection(observedAt: Int64(Date().timeIntervalSince1970), windows: targets.sorted { $0.key < $1.key }.map { scene, target in
-            target.inspect(workspaces[scene]?.id ?? scene, target.incarnation)
+            target.inspect(workspaces[scene]?.identity.id ?? scene, target.incarnation)
         }, openings: repositoryOpenings.sorted { $0.key < $1.key }.compactMap { _, request in
             // Task outcome ownership transfers to the receiving WorkModel.
             if request.receipt.status == .usable, URL(string: request.receipt.url)?.host == "task" { return nil }

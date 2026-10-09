@@ -232,9 +232,13 @@ no preparation, Process writes or excerpt persistence. Session explanation reads
 recorded endpoints without probing a live driver's protocol. No removed launch,
 Project/roadmap or callback path is retained beside those owners.
 
-The former scalar identity JSON and restored-ID mismatch refusal are replaced by
-the common selected-ID/locator reading. Scene identity no longer doubles as current
-planning identity or input capability; no replacement layout or native owner is added.
+The scalar identity JSON and restored-ID mismatch refusal are replaced by the
+common selected-ID/locator reading. `RepositoryWorkspace` now identifies scenes
+only; the router owns fresh readings and one retention path for opening/restoration.
+Scene equality cannot fence delayed reads: binding A→B→A must still supersede an
+older observation. Receiver/delivery lifetimes and native owners remain separate.
+Bounded CLI reply handling lives outside pane-command dispatch, with unchanged
+exact-request and UTF-8 byte-limit checks.
 
 Repository association replaces the blanket different-ID refusal with one selected
 identity plus retained local IDs in `repository_plans`; no second alias registry.
@@ -259,13 +263,11 @@ native/artifact evidence and the plan below retains incomplete composition.
 
 ### Completed local command/opening slices — October 9
 
-Wave planning, Task-run/Session/Desktop explanation, remote preview and local
-Session-plus-Changes opening are implemented through shared owners. Detailed
-mechanisms, failures and limits: `3f143cd65:scratch/compare-cmux-s-command-line.md`,
-this heading. Preview remains read-only; only initial Flow inputs are available.
-Opening generations fence exact Session/Files readiness, failure and cancellation.
-Two-CLI simulated SSH and model callbacks prove neither configured transport,
-exclusive first start, native/compositor usability nor provider continuation.
+Local opening and preview mechanisms, failed attempts and limits:
+`3f143cd65:scratch/compare-cmux-s-command-line.md`, this heading. Only initial Flow
+input is available; previews remain read-only. Request-scoped readiness, simulated
+SSH and model callbacks prove neither exclusive start, configured transport nor
+native usability/provider continuation.
 
 ### 2. Shared Work identity, delegation and routing
 
@@ -544,4 +546,4 @@ identity/delegation, open them, add shell/Files panes, retain an unfinished draf
 change focus, target a harmless command, read output, hide/restore, and verify the
 original input target and draft survive. Demo owns native usability; preserve comparison evidence and use no real accounts or live user terminals.
 
-Check: Rust build/fmt/Clippy PASS; network-isolated repository_identity_binding + repository_identity DTO PASS (2); headless Swift identity/opening checks PASS (8, then 3 after review); composed peer filters duplicate_provider_/peer_creation_identity_/peer_mapping_replacement_/creation_origins/independent_peer_tasks PASS (6); affected suites/installation: gate; native usability: demo.
+Check: `cargo fmt --check`/Clippy PASS; network-isolated `cargo test -p loopflow --lib lf::commands::desktop::tests` PASS (2); `scripts/test_desktop.sh` repository/association/restoration filters build/PASS (12); prior slice checks: `b83d3e2a9`, this line; affected suites: gate; native usability: demo.

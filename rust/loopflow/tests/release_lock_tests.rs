@@ -971,25 +971,39 @@ fn surviving_release_notes_provider_retains_target_checkout_and_context() {
             }
         }
         assert!(!parent.child.wait().unwrap().success());
-        let contender = release_tag(repo.path(), "0.9.2", None);
-        let removal = worktree_remove(repo.path(), &checkout);
-        fs::write(state.path().join("allow"), "").unwrap();
-        assert!(
-            matches!(contender, Err(OpsError::ReleaseDeferred { .. })),
-            "{contender:?}"
-        );
-        assert!(
-            removal.is_err(),
-            "removed surviving notes provider checkout"
-        );
-        wait_for(&state.path().join("completed"));
-        let context: Value =
-            serde_json::from_slice(&fs::read(state.path().join("context.json")).unwrap()).unwrap();
-        assert_eq!(context["version"], "0.9.1");
-        wait_until_released(|| release_tag(repo.path(), "0.9.2", None).map(|_| ()));
-        assert!(fs::read_to_string(checkout.join("RELEASE_NOTES.md"))
-            .unwrap()
-            .contains("Notes from the surviving provider."));
+        // The 0.9.2 release may already have replaced an abandoned checkout.
+        let notes = || fs::read_to_string(checkout.join("RELEASE_NOTES.md")).unwrap_or_default();
+        if kill_controller {
+            // A provider cannot outlive the CLI that drove it: it is ended with
+            // that CLI, writes nothing more, and stops holding the release.
+            wait_until_released(|| release_tag(repo.path(), "0.9.2", None).map(|_| ()));
+            fs::write(state.path().join("allow"), "").unwrap();
+            thread::sleep(Duration::from_millis(500));
+            assert!(
+                !state.path().join("completed").exists(),
+                "provider outlived its killed CLI"
+            );
+            assert!(!notes().contains("Notes from the surviving provider."));
+        } else {
+            let contender = release_tag(repo.path(), "0.9.2", None);
+            let removal = worktree_remove(repo.path(), &checkout);
+            fs::write(state.path().join("allow"), "").unwrap();
+            assert!(
+                matches!(contender, Err(OpsError::ReleaseDeferred { .. })),
+                "{contender:?}"
+            );
+            assert!(
+                removal.is_err(),
+                "removed surviving notes provider checkout"
+            );
+            wait_for(&state.path().join("completed"));
+            let context: Value =
+                serde_json::from_slice(&fs::read(state.path().join("context.json")).unwrap())
+                    .unwrap();
+            assert_eq!(context["version"], "0.9.1");
+            wait_until_released(|| release_tag(repo.path(), "0.9.2", None).map(|_| ()));
+            assert!(notes().contains("Notes from the surviving provider."));
+        }
         assert_eq!(git(&["rev-parse", "HEAD"]), head);
         assert_eq!(git(&["branch", "--show-current"]), branch);
         assert_eq!(fs::read(repo.path().join(".git/index")).unwrap(), index);

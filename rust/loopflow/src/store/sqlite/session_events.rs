@@ -698,6 +698,34 @@ mod tests {
         assert!(store
             .input_history("run_0000000000000000000000000000000a")
             .is_err());
+        // A turn left open by a driver that has exited is over: it stops
+        // holding a place in the recent list.
+        let driver = crate::id::ProcessLfid::new();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+                [driver.as_str()],
+            )
+            .unwrap();
+        let claim = store
+            .claim_session_driver("conversation-1", None, &driver, true)
+            .unwrap();
+        store
+            .finish_session_driver("conversation-1", &claim, "interrupted", || Ok(false))
+            .unwrap();
+        assert_eq!(
+            store
+                .recent_conversation_history(None, None, None, 0, 5)
+                .unwrap()
+                .0
+                .iter()
+                .map(|row| row.observed_at)
+                .collect::<Vec<_>>(),
+            [60, 59, 58, 57, 1]
+        );
         assert!(store
             .conversation_history(
                 None,

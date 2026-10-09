@@ -242,12 +242,21 @@ fn admit_ci_fix(
             return Ok(());
         }
         if let Some(session) = &reservation.session {
-            if store
+            // A bound driver's engine is judged by its own OS identity.
+            let bound = store
                 .sqlite
                 .session_driver(session)
                 .map_err(repair_error)?
-                .is_some()
-                && super::task_automation::session_engine_unresolved(&store.sqlite, session)?
+                .is_some();
+            let engine = store
+                .sqlite
+                .session_provider_process(session)
+                .map_err(repair_error)?;
+            if bound
+                && engine.is_some_and(|(pid, started)| {
+                    crate::journal::process_identity_evidence(pid, started)
+                        != crate::journal::ProcessIdentityEvidence::Dead
+                })
             {
                 return Err(OpsError::Message(format!(
                     "repair Session {session} has a live or unresolved provider"
@@ -280,42 +289,18 @@ fn admit_ci_fix(
                     placement.machine_id
                 )));
             }
-            if let Some(reason) = super::task_automation::admission_blocker(
-                &store.sqlite,
-                &task.id,
-                reservation.session.as_deref(),
-            )? {
+            if let Some(reason) =
+                super::task_automation::task_execution_blockers(&store.sqlite, &task.id)?
+                    .into_iter()
+                    .next()
+            {
                 return Err(repair_error(reason));
             }
-        } else {
-            for session in store
-                .sqlite
-                .sessions(&crate::session::SessionFilter {
-                    interactive: None,
-                    limit: 0,
-                    ..Default::default()
-                })
-                .map_err(repair_error)?
-            {
-                if Some(&session.id) != reservation.session.as_ref()
-                    && session.cwd == landing.worktree
-                    && session.completed_at.is_none()
-                    && store
-                        .sqlite
-                        .session_has_pending_turn(&session.id)
-                        .map_err(repair_error)?
-                {
-                    return Err(repair_error(format!(
-                        "Session {} has unresolved work",
-                        session.id
-                    )));
-                }
-            }
-            if let Some(process) = live_checkout_process(&store, &landing.worktree)? {
-                return Err(repair_error(format!(
-                    "Process {process} is live or unresolved"
-                )));
-            }
+        } else if let Some(reason) = checkout_execution_blockers(&store, &landing.worktree)?
+            .into_iter()
+            .next()
+        {
+            return Err(repair_error(reason));
         }
         let config = load_config_or_default(Some(&landing.worktree));
         let retry = reservation.process.is_some();
@@ -475,24 +460,16 @@ fn ci_timeout_failure(head_sha: &str) -> LandingObservation {
     }
 }
 
-/// Another live or unresolved Process in this checkout, besides the caller.
-fn live_checkout_process(
-    store: &SharedStore,
-    worktree: &Path,
-) -> OpsResult<Option<crate::id::ProcessLfid>> {
-    let caller = crate::journal::current_process_lfid();
-    Ok(store
+/// A taskless checkout's work is the Processes started in it.
+fn checkout_execution_blockers(store: &SharedStore, worktree: &Path) -> OpsResult<Vec<String>> {
+    let processes: Vec<_> = store
         .sqlite
         .processes_since(0)
         .map_err(repair_error)?
         .into_iter()
-        .find(|process| {
-            process.cwd.as_deref() == worktree.to_str()
-                && Some(&process.lfid) != caller.as_ref()
-                && crate::journal::process_evidence(&store.sqlite, &process.lfid)
-                    != crate::journal::ProcessIdentityEvidence::Dead
-        })
-        .map(|process| process.lfid))
+        .filter(|process| process.cwd.as_deref() == worktree.to_str())
+        .collect();
+    super::task_automation::execution_blockers(&store.sqlite, &processes)
 }
 
 pub fn run_repair(identity: &str, launcher: &str) -> OpsResult<()> {
@@ -1323,20 +1300,14 @@ async fn cleanup_landed_pr(store: &SharedStore, landing: &PrLanding) -> OpsResul
         .sqlite
         .lock_checkout(&landing.worktree)
         .map_err(repair_error)?;
-    let sessions = store
-        .sqlite
-        .sessions(&crate::session::SessionFilter {
-            interactive: None,
-            limit: 0,
-            ..Default::default()
-        })
-        .map_err(repair_error)?;
-    let has_conversation = sessions
-        .iter()
-        .any(|session| session.cwd == landing.worktree && session.completed_at.is_none());
-    let has_execution = live_checkout_process(store, &landing.worktree)?.is_some();
-    if has_conversation || has_execution {
-        eprintln!("PR merged; retained its checkout for associated work. Use lf wt delete after that work finishes.");
+    // A conversation is history; only a running Process holds the checkout.
+    if let Some(reason) = checkout_execution_blockers(store, &landing.worktree)?
+        .into_iter()
+        .next()
+    {
+        eprintln!(
+            "PR merged; retained its checkout: {reason}. Use lf wt delete after it finishes."
+        );
         return Ok(());
     }
     let repo = crate::engine::worktrees::main_repo_root(&landing.worktree)?;

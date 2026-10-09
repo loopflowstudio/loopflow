@@ -2,10 +2,77 @@
 
 use serde::{Deserialize, Serialize};
 
+/// A pending field edit and its provider baseline, independent of connection state.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlanningChange {
+    pub id: String,
+    pub field: String,
+    pub value: serde_json::Value,
+    pub base: Option<serde_json::Value>,
+}
+
+/// Read-only delivery evidence. These rows never confer execution authority.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlanningSyncStatus {
+    pub connected: bool,
+    pub changes: Vec<PlanningSyncChange>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlanningSyncChange {
+    pub id: String,
+    pub field: String,
+    pub state: PlanningSyncState,
+    pub local_value: serde_json::Value,
+    pub linear_value: Option<serde_json::Value>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum PlanningSyncState {
+    Pending,
+    Uncertain,
+    AdoptedLinear,
+}
+
+impl PlanningSyncStatus {
+    pub fn lines(&self) -> Vec<String> {
+        self.changes
+            .iter()
+            .map(|change| {
+                let label = match change.state {
+                    PlanningSyncState::Pending => "Saved locally; pending Linear sync",
+                    PlanningSyncState::Uncertain => "Awaiting Linear confirmation",
+                    PlanningSyncState::AdoptedLinear => "Adopted Linear change",
+                };
+                let mut line = format!("{label} · {}", change.field);
+                if change.state == PlanningSyncState::AdoptedLinear {
+                    let value = change
+                        .linear_value
+                        .as_ref()
+                        .unwrap_or(&serde_json::Value::Null);
+                    line.push_str(&format!(
+                        " · saved: {} · Linear: {value}",
+                        change.local_value
+                    ));
+                }
+                if let Some(error) = &change.error {
+                    line.push_str(&format!(" · {error}"));
+                }
+                line
+            })
+            .collect()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PlanningError {
     #[error("invalid Linear id: {0}")]
     InvalidId(String),
+    #[error("planning record has no Linear mapping")]
+    NoLinearMapping,
 }
 
 macro_rules! validated_string_id {
@@ -42,21 +109,51 @@ validated_string_id!(LinearProjectId, "Linear project id");
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectPlan {
-    pub id: LinearProjectId,
+    pub summary: String,
+    /// Optional provider mapping; the owning Project carries durable identity.
+    pub linear_id: Option<LinearProjectId>,
     pub slug: String,
     pub name: String,
     /// Definition and proof-shaped KRs from the latest PM snapshot.
     pub prompt_context: String,
-    pub pm_snapshot_synced_at: i64,
+    pub pm_snapshot_synced_at: Option<i64>,
     pub workflow: String,
     pub status: crate::pm::ProjectStatus,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskPlan {
-    pub id: LinearIssueId,
+    /// Local optimistic-write revision, independent of provider observation age.
+    pub revision: u64,
+    /// Optional provider mapping; the owning Task carries durable identity.
+    pub linear_id: Option<LinearIssueId>,
     pub identifier: String,
     pub title: String,
     pub description: String,
-    pub pm_snapshot_synced_at: i64,
+    pub pm_snapshot_synced_at: Option<i64>,
+}
+
+impl TaskPlan {
+    pub fn linear_id(&self) -> Result<&LinearIssueId, PlanningError> {
+        self.linear_id
+            .as_ref()
+            .ok_or(PlanningError::NoLinearMapping)
+    }
+}
+
+impl ProjectPlan {
+    pub fn linear_id(&self) -> Result<&LinearProjectId, PlanningError> {
+        self.linear_id
+            .as_ref()
+            .ok_or(PlanningError::NoLinearMapping)
+    }
+}
+
+/// The caller retains this identity across a retry; a separate create mints another.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewTask {
+    pub id: crate::durable::TaskId,
+    pub project_id: crate::durable::ProjectId,
+    pub title: String,
+    pub description: String,
 }

@@ -113,7 +113,7 @@ lf doctor          # check installation, Process integrity and scheduled receipt
 Use `lf ps --json` when another tool or agent needs one stable, parseable frame.
 Both contain only OS-live process trees; completed calls disappear. Run
 `lf mon prune --dry-run` before cleanup. Plain `lf mon prune` removes stale Process
-receipts and registered orphan OpenCode groups, never unclaimed provider PIDs.
+receipts and engines whose driver is provably dead, never unclaimed provider PIDs.
 `lf ci` reads the local ledger, not GitHub: it reports how
 much of CI repair happened without a person.
 
@@ -122,7 +122,7 @@ much of CI repair happened without a person.
 Reading is half; the system stays steerable while it runs.
 
 ```bash
-lf --wave <wave> wave/operate "ship the parser fix first"
+lf --wave <wave> wave-operate "ship the parser fix first"
 lf session ensure -w <wave>                # the Wave's ongoing conversation and operator
 lf --wave <wave> : "Review this plan"          # start a conversation
 lf comment INF-123 "smaller PR"            # post a Linear comment; deliver to its running Flow

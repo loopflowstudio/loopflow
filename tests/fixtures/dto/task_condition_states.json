@@ -9,7 +9,8 @@
       "completed": false,
       "assignee": null,
       "state": "unstarted",
-      "completed_at": null
+      "completed_at": null,
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -63,7 +64,8 @@
       "completed": true,
       "assignee": null,
       "state": "completed",
-      "completed_at": null
+      "completed_at": null,
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -379,7 +381,8 @@
       "completed": false,
       "assignee": null,
       "state": "unstarted",
-      "completed_at": null
+      "completed_at": null,
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -743,7 +746,8 @@
       "completed": false,
       "assignee": null,
       "state": "unstarted",
-      "completed_at": null
+      "completed_at": null,
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -810,7 +814,8 @@
       "completed": false,
       "assignee": null,
       "state": "unstarted",
-      "completed_at": null
+      "completed_at": null,
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -1175,7 +1180,8 @@
       "completed": false,
       "assignee": null,
       "state": "unstarted",
-      "completed_at": null
+      "completed_at": null,
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -1242,7 +1248,8 @@
       "completed": false,
       "assignee": null,
       "state": "unstarted",
-      "completed_at": null
+      "completed_at": null,
+      "sync": null
     },
     "reference": {
       "issue_url": null,

@@ -48,7 +48,7 @@ subprocess edge to one concept.
 | provider streams | [`harness/`](../../rust/loopflow/src/harness/) | normalized conversation and usage |
 | Session capture evidence | [`session_record.rs`](../../rust/loopflow/src/session_record.rs) | manifest, append events, terminal receipt |
 | shared Work types | [`durable.rs`](../../rust/loopflow/src/durable.rs) and [`work/`](../../rust/loopflow/src/work/) | `WorkRef`, status, inputs, placement, Wave/Task facts |
-| Project operation | [`ops/project.rs`](../../rust/loopflow/src/ops/project.rs) | finite attributed `wave/operate` conversation |
+| Project operation | [`ops/project.rs`](../../rust/loopflow/src/ops/project.rs) | finite attributed `wave-operate` conversation |
 | Flow driver | [`lf/commands/flow.rs`](../../rust/loopflow/src/lf/commands/flow.rs) | one lf process holding the graph and cursor, starting each step as a child Process |
 | Wave facts and authored context | [`work/wave/`](../../rust/loopflow/src/work/wave/) | identity, config, memory, repository scope |
 | Wave facts | [`work/wave/`](../../rust/loopflow/src/work/wave/) | goals, metrics, memory, relocation |

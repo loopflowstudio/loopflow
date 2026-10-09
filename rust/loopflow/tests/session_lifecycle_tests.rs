@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
+use base64::Engine;
 use loopflow_test_support::TestRepo;
 use serde_json::Value;
 
@@ -57,7 +58,8 @@ impl Fixture {
         let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
         for (key, _) in std::env::vars_os() {
             let key = key.to_string_lossy().into_owned();
-            if key.starts_with("LF_") || key.starts_with("LOOPFLOW_") {
+            if key.starts_with("LF_") || key.starts_with("LOOPFLOW_") || key.starts_with("LINEAR_")
+            {
                 command.env_remove(key);
             }
         }
@@ -216,6 +218,206 @@ Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
 const PATIENCE: Duration = Duration::from_secs(180);
 
 const LAUNCH: [&str; 5] = ["-i", "--agent", "opencode", ":", "Review the parser"];
+
+#[test]
+fn personal_task_launch_resume_and_skill_workflow_keep_native_identity() {
+    let fixture = Fixture::new(false);
+    let codex = fixture.home.path().join("bin/codex");
+    let script = support::codex_app_server_script("Parser inspected.", "");
+    let terminal = r#"#!/bin/sh
+case "$*" in
+  --version) exit 0 ;;
+  '--dangerously-bypass-hook-trust --model')
+    echo "a value is required for '--model <MODEL>'" >&2; exit 2 ;;
+  *app-server*) ;;
+  *resume*)
+    case "$*" in *terminal-fixture*) exit 0 ;; *) exit 91 ;; esac ;;
+  *--profile*)
+    printf '%s\n' "$LF_CAPTURE_KEY" >> "$LF_HOME/launched"
+    printf '%s\n' '{"session_id":"terminal-fixture"}' | "$LF_BIN" __provider-session
+    exit $? ;;
+  *) echo 'unexpected native provider command' >&2; exit 92 ;;
+esac
+"#;
+    std::fs::write(
+        &codex,
+        terminal.to_owned() + script.strip_prefix("#!/bin/sh\n").unwrap(),
+    )
+    .unwrap();
+    std::fs::set_permissions(&codex, std::fs::Permissions::from_mode(0o755)).unwrap();
+    fixture
+        .repo
+        .create_file(".lf/skills/inspect-parser.md", "Inspect the parser.");
+    fixture
+        .repo
+        .create_file(".lf/flows/proof.yaml", "- inspect-parser\n");
+    fixture.repo.create_file(
+        ".lf/workflows/proof.yaml",
+        "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, flow: proof}\n  - {from: review, to: end}\n",
+    );
+    fixture.repo.stage_all();
+    fixture.repo.commit("Native lifecycle fixture");
+    assert!(Command::new("git")
+        .current_dir(fixture.repo.path())
+        .args(["remote", "remove", "origin"])
+        .status()
+        .unwrap()
+        .success());
+    let task = fixture.json(&["task", "create", "--title", "Native local work", "--json"]);
+    let task_id = task["id"].as_str().unwrap();
+    assert_eq!(fixture.count("agent_sessions"), 0);
+    let placed = fixture.json(&["task", "checkout", task_id, "--json"]);
+    let worktree = Path::new(placed["worktree"].as_str().unwrap());
+    let launch = fixture
+        .command(&[
+            "-i",
+            "--task",
+            task_id,
+            "--agent",
+            "codex",
+            ":",
+            "Inspect parser",
+        ])
+        .current_dir(worktree)
+        .output()
+        .unwrap();
+    assert!(launch.status.success(), "{launch:?}");
+    let capture = fixture.launches()[0].clone();
+    let (session, ..) = fixture.session_row(&capture);
+    let native: String = fixture
+        .db()
+        .query_row(
+            "SELECT json_extract(payload,'$.evidence.provider_session_id') FROM session_events WHERE session_id=?1 AND json_extract(payload,'$.evidence.provider_session_id') IS NOT NULL ORDER BY seq DESC LIMIT 1",
+            [&session],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let resumed = fixture
+        .command(&["session", "resume", &session])
+        .current_dir(worktree)
+        .output()
+        .unwrap();
+    assert!(resumed.status.success(), "{resumed:?}");
+    assert_eq!(fixture.count("agent_sessions"), 1);
+    assert_eq!(
+        fixture
+            .db()
+            .query_row(
+                "SELECT json_extract(payload,'$.evidence.provider_session_id') FROM session_events WHERE session_id=?1 AND json_extract(payload,'$.evidence.provider_session_id') IS NOT NULL ORDER BY seq DESC LIMIT 1",
+                [&session],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap(),
+        native
+    );
+    let status = fixture.json(&["task", "status", task_id, "--json"]);
+    let project = status["planning"]["project"]["id"].as_str().unwrap();
+    let selected = fixture.run(&["project", "workflow", "set", project, "proof"]);
+    assert!(selected.status.success(), "{selected:?}");
+    // Managed skill execution needs an agent account, independently of planning.
+    let account_home = fixture.home.path().join("fixture-codex");
+    std::fs::create_dir(&account_home).unwrap();
+    let claims = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .encode(r#"{"email":"fixture@example.com","sub":"fixture"}"#);
+    std::fs::write(
+        account_home.join("auth.json"),
+        serde_json::json!({"tokens":{"access_token":"fixture","id_token":format!("h.{claims}.s")}})
+            .to_string(),
+    )
+    .unwrap();
+    let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
+        .unwrap();
+    let account_id = loopflow::store::ProviderAccountId::parse("fixture").unwrap();
+    store
+        .upsert_provider_account(&loopflow::store::ProviderAccount {
+            provider: "codex".into(),
+            account_id: account_id.clone(),
+            home: Some(account_home),
+            login_email: Some(
+                loopflow::profile::EmailAddress::parse("fixture@example.com").unwrap(),
+            ),
+            observed_email: None,
+            observed_subject: None,
+            observed_credential_digest: None,
+            observed_plan: None,
+            credential_state: loopflow::store::CredentialState::Connected,
+            routing_state: loopflow::store::RoutingState::Automatic,
+            plan: None,
+            paid_through: None,
+            utilization_percent: None,
+            cooldown_until: None,
+            cooldown_reason: None,
+            last_selected_at: None,
+            created_at: 1,
+            updated_at: 1,
+        })
+        .unwrap();
+    store
+        .set_provider_route(&loopflow::profile::ProviderRoute {
+            scope: loopflow::profile::RouteScope::Default,
+            provider: loopflow::provider_auth::Provider::Codex,
+            accounts: vec![account_id],
+            created_at: 1,
+            updated_at: 1,
+        })
+        .unwrap();
+    let run = fixture
+        .command(&["-b", "--agent", "codex", "task", "run", task_id])
+        .env("LF_ACCOUNT_ISOLATION", "isolated")
+        .output()
+        .unwrap();
+    assert!(run.status.success(), "{run:?}");
+    let final_status = fixture.json(&["task", "status", task_id, "--json"]);
+    assert_eq!(final_status["execution"]["status"], "active");
+    assert_eq!(fixture.count("agent_sessions"), 2);
+    let flows = support::recorded_flows(fixture.home.path());
+    assert_eq!(flows.len(), 1);
+    assert_eq!(flows[0].0.as_deref(), Some("succeeded"));
+    assert_eq!(flows[0].1.len(), 1);
+    // Provider deletion remains a refusal at native resume; it grants no provider launch.
+    // Change only planning ownership in this disposable fixture, retaining the Session.
+    fixture
+        .db()
+        .execute(
+            "UPDATE tasks SET external_issue_id='fixture-deleted' WHERE id=?1",
+            [task_id],
+        )
+        .unwrap();
+    fixture.db().execute("INSERT INTO task_deletions(wave_id,issue_id,identifier,confirmed_at) SELECT p.wave_id,'fixture-deleted','FIX-1',1 FROM projects p JOIN tasks t ON t.project_id=p.id WHERE t.id=?1", [task_id]).unwrap();
+    let refused = fixture
+        .command(&["session", "resume", &session])
+        .current_dir(worktree)
+        .output()
+        .unwrap();
+    assert!(!refused.status.success());
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains("deleted"),
+        "{refused:?}"
+    );
+    assert_eq!(fixture.count("agent_sessions"), 2);
+    fixture.json(&["task", "abandon", task_id, "--json"]);
+    let terminal = fixture.run(&["-b", "--agent", "codex", "task", "run", task_id]);
+    assert!(!terminal.status.success());
+    assert_eq!(fixture.count("agent_sessions"), 2);
+    let removed = fixture.run(&["task", "delete", task_id]);
+    assert!(removed.status.success(), "{removed:?}");
+    let history = fixture.json(&["task", "status", task_id, "--json"]);
+    assert_eq!(history["planning_state"], "removed");
+    assert_eq!(
+        history["execution"]["actions"]["reason"],
+        "Task was deleted; retained history is read-only"
+    );
+    let refused = fixture
+        .command(&["session", "resume", &session])
+        .current_dir(fixture.repo.path())
+        .output()
+        .unwrap();
+    assert!(!refused.status.success());
+    assert_eq!(fixture.count("agent_sessions"), 2);
+    if worktree.exists() {
+        std::fs::remove_dir_all(worktree).unwrap();
+    }
+}
 
 #[test]
 fn task_conversation_reopens_after_terminal_startup_failure() {
@@ -863,7 +1065,7 @@ fn a_task_primary_is_one_of_its_own_conversations() {
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .unwrap();
-    assert_eq!(skill, "task/session");
+    assert_eq!(skill, "task-session");
     assert_eq!(
         Path::new(&cwd).canonicalize().unwrap(),
         empty_path.canonicalize().unwrap()
@@ -1067,6 +1269,13 @@ fn declared_agent_can_start_another_tasks_flow() {
     // Y needs a harness that supports the checkout boundary. Its mechanical
     // Flow never starts a provider; X's interactive OpenCode only issues the command.
     store.set_task_agent(&target.task.id, "claude").unwrap();
+    store
+        .select_project_workflow(
+            &target.task.project_id,
+            "switch-proof",
+            &std::fs::read_to_string(y.join(".lf/workflows/switch-proof.yaml")).unwrap(),
+        )
+        .unwrap();
     let bin = fixture.home.path().join("bin");
     std::fs::remove_file(bin.join("lf")).unwrap();
     std::fs::write(

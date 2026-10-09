@@ -75,6 +75,12 @@ struct TaskReadings<Value> {
         return generation
     }
 
+    fileprivate mutating func receive(_ value: Value, for taskId: String) {
+        generations[taskId] = (generations[taskId] ?? 0) &+ 1
+        inFlight.remove(taskId)
+        values[taskId] = .available(value)
+    }
+
     /// Whether `generation` is still the newest read for its Task.
     fileprivate mutating func finish(_ taskId: String, generation: Int) -> Bool {
         guard generations[taskId] == generation else { return false }
@@ -318,8 +324,10 @@ final class WorkModel {
         flowCatalogReadings[repoPath ?? ""] ?? .loading
     }
     private var workflowCatalogReadings: [String: WorkReading<[WorkflowCatalogEntry]>] = [:]
+    private var workflowProject: String? { breadcrumb?.wave?.roadmap.projects.currentProject?.id }
+    private var workflowCatalogKey: String { "\(repoPath ?? "")|\(workflowProject ?? "")" }
     var workflowCatalog: WorkReading<[WorkflowCatalogEntry]> {
-        workflowCatalogReadings[repoPath ?? ""] ?? .loading
+        workflowCatalogReadings[workflowCatalogKey] ?? .loading
     }
     /// Comment threads, read on demand for the shown Task.
     private(set) var comments = TaskReadings<TaskComments>()
@@ -706,6 +714,7 @@ final class WorkModel {
                 break
             }
             guard body.task == task.task.identifier else { return }
+            comments.receive(body.comments, for: task.id)
             let next = WorkReading.available(body.work)
             if taskWork[task.id] != next { taskWork.values[task.id] = next }
             let runs = Dictionary(body.flowProcesses.map { ($0.entry.id, $0) }) { _, newer in newer }
@@ -1098,7 +1107,7 @@ final class WorkModel {
     /// from an editor, read the catalogue this window already shows again, so
     /// a saved mistake shows as invalid.
     func rereadDefinitions() async {
-        guard flowCatalogReadings[repoPath ?? ""] != nil || workflowCatalogReadings[repoPath ?? ""] != nil else { return }
+        guard flowCatalogReadings[repoPath ?? ""] != nil || workflowCatalogReadings[workflowCatalogKey] != nil else { return }
         await loadFlowCatalog(force: true)
         await loadWorkflowCatalog(force: true)
     }
@@ -1116,13 +1125,29 @@ final class WorkModel {
     }
 
     func loadWorkflowCatalog(force: Bool = false) async {
-        let key = repoPath ?? ""
+        let key = workflowCatalogKey
         if !force, workflowCatalogReadings[key]?.value != nil { return }
         let previous = workflowCatalogReadings[key]?.value
         let result: Result<[WorkflowCatalogEntry], Error>
-        do { result = .success(try await query.workflowCatalog(cwd: repoPath)) }
+        do { result = .success(try await query.workflowCatalog(cwd: repoPath, project: workflowProject)) }
         catch { result = .failure(error) }
         workflowCatalogReadings[key] = reading(from: result, lastGood: previous)
+    }
+
+    func workflowSource(_ name: String, wave: WaveSnapshot) async throws -> String {
+        guard let project = visibleRoadmaps.first(where: { $0.wave.id == wave.id })?.projects.currentProject else {
+            throw RegistryQueryError("Current Project is unavailable")
+        }
+        return try await query.workflowSource(name, project: project.id, cwd: WaveOrigin.resolve(wave.repo))
+    }
+
+    func saveWorkflow(_ name: String, content: String, wave: WaveSnapshot) async throws {
+        guard let project = visibleRoadmaps.first(where: { $0.wave.id == wave.id })?.projects.currentProject else {
+            throw RegistryQueryError("Current Project is unavailable")
+        }
+        try await query.saveWorkflow(name, content: content, project: project.id, cwd: WaveOrigin.resolve(wave.repo))
+        await refresh()
+        await loadWorkflowCatalog(force: true)
     }
 
     /// Why a Wave's last workflow or source change was refused, by Wave.
@@ -1144,25 +1169,6 @@ final class WorkModel {
         let path = try await query.customizeFlow(entry.name, cwd: repoPath)
         await loadFlowCatalog(force: true)
         return URL(fileURLWithPath: path)
-    }
-
-    func definitionSource(_ entry: WorkflowCatalogEntry) async throws -> URL {
-        let path = try await query.customizeWorkflow(entry.name, cwd: repoPath)
-        await loadWorkflowCatalog(force: true)
-        return URL(fileURLWithPath: path)
-    }
-
-    /// The repository file to edit for a Flow or workflow. A builtin gets its
-    /// `.lf/` file here; the catalog is reread so the entry names it.
-    func definitionSource(_ entry: WorkflowCatalogEntry, wave: WaveSnapshot) async -> URL? {
-        do {
-            let url = try await definitionSource(entry)
-            workflowErrors[wave.id] = nil
-            return url
-        } catch {
-            workflowErrors[wave.id] = error.localizedDescription
-            return nil
-        }
     }
 
     /// Launch a fresh Flow for the Task, then refresh the shared reading.

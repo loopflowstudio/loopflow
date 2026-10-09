@@ -346,7 +346,7 @@ private final class ScriptedReader {
         }
         send("planning", answers: id, body: planning)
         send("sessions", answers: id, body: ["repo": repo, "includes_headless": false, "entries": sessions])
-        if let task { send("task", answers: id, body: ["task": task, "work": work, "flow_processes": runs]) }
+        if let task { send("task", answers: id, body: ["task": task, "work": work, "flow_processes": runs, "comments": ["identifier": task, "comments": [], "pending_sync": [], "conflicts": [String: String](), "refresh_error": NSNull()]]) }
     }
 
     private func send(_ part: String, answers: Int, body: [String: Any]) {

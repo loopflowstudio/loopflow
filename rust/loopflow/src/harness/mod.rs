@@ -13,6 +13,7 @@ mod conformance_tests;
 mod dispatch;
 #[cfg(all(test, unix))]
 mod dispatch_tests;
+pub mod engine_orphans;
 mod lf_tag;
 pub(crate) mod native_titles;
 pub mod opencode;

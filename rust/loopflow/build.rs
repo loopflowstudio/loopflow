@@ -1,6 +1,12 @@
 //! Scans the builtins directory and generates registration code so that
 //! adding a new .md or .yaml file is all you need — no manual HashMap insert.
 
+// Build registration only uses the portable projection.
+#[allow(dead_code)]
+#[path = "src/engine/definition_name.rs"]
+mod definition_name;
+use definition_name::portable_name;
+
 use std::env;
 use std::fmt::Write as _;
 use std::fs;
@@ -20,19 +26,19 @@ mod migration_catalog;
 mod migration_schema;
 
 /// Category directories whose skill/flow names are registered flat (no prefix).
-/// Everything else is a namespaced category: names are stored as `<cat>/<name>`.
+/// Everything else is a namespaced category: public names carry a `<cat>-` prefix.
 /// Core categories share one flat namespace and must not collide with each other.
 /// Within a filename, `_` encodes a namespace separator (`wave_clarify.md`
-/// registers as `wave/clarify`); `-` remains a word separator.
+/// registers as `wave-clarify`); `-` remains a word separator.
 const CORE_CATEGORIES: &[&str] = &["task", "project", "wave", "ops"];
 
 /// Each ongoing conversation carries its scope's operating procedure inline:
 /// the registered session skill is its own file followed by the body of its
 /// operate skill. The operate skill stays registered on its own.
 const SESSION_OPERATE_PAIRS: &[(&str, &str)] = &[
-    ("repo/session", "repo/operate"),
-    ("wave/session", "wave/operate"),
-    ("task/session", "task/operate"),
+    ("repo-session", "repo-operate"),
+    ("wave-session", "wave-operate"),
+    ("task-session", "task-operate"),
 ];
 
 fn main() {
@@ -43,39 +49,9 @@ fn main() {
     emit_schema_references(&manifest_dir, &out_dir);
     let builtins_dir = manifest_dir.join("src/engine/builtins");
 
-    // Builtins live at `<cat>/<kind>/*.ext`. Skills and flows from CORE_CATEGORIES
-    // are registered flat; skills and flows from other categories are registered
-    // as `<cat>/<name>` and are also reachable by bare name when unambiguous.
-    generate_kind_map(
-        &builtins_dir,
-        "skill",
-        "md",
-        "BUILTIN_SKILLS",
-        &out_dir.join("builtin_skills.rs"),
-    );
-
-    generate_kind_map(
-        &builtins_dir,
-        "flow",
-        "yaml",
-        "BUILTIN_FLOWS",
-        &out_dir.join("builtin_flows.rs"),
-    );
-
-    generate_category_map(
-        &builtins_dir,
-        "flow",
-        "yaml",
-        "BUILTIN_FLOW_CATEGORIES",
-        &out_dir.join("builtin_flow_categories.rs"),
-    );
-    generate_category_map(
-        &builtins_dir,
-        "skill",
-        "md",
-        "BUILTIN_SKILL_CATEGORIES",
-        &out_dir.join("builtin_skill_categories.rs"),
-    );
+    for (kind, extension) in [("skill", "md"), ("flow", "yaml")] {
+        generate_builtins(&builtins_dir, &out_dir, kind, extension);
+    }
 
     // Re-run if any file in the builtins tree changes
     println!("cargo:rerun-if-changed={}", builtins_dir.display());
@@ -294,19 +270,10 @@ fn emit_migration_draft_manifest(manifest_dir: &Path, out_dir: &Path) {
         .expect("write embedded migration draft manifest");
 }
 
-/// Collect files of the given extension from `<builtins_dir>/<cat>/<kind>/`
-/// for each top-level category directory. Core categories
-/// (task/project/wave/ops) share one flat namespace — duplicate stems across
-/// cores panic. Non-core categories get their name as a prefix:
-/// `vendor/review`.
-fn generate_kind_map(
-    builtins_dir: &Path,
-    kind: &str,
-    extension: &str,
-    map_name: &str,
-    out_path: &Path,
-) {
-    let mut entries: Vec<(String, PathBuf)> = Vec::new();
+/// Collect each kind once so registration, shortcuts and categories share names.
+fn generate_builtins(builtins_dir: &Path, out_dir: &Path, kind: &str, extension: &str) {
+    let mut entries = Vec::new();
+    let mut categories = std::collections::BTreeMap::<String, Vec<String>>::new();
     if let Ok(cats) = fs::read_dir(builtins_dir) {
         for cat in cats.flatten() {
             let cat_path = cat.path();
@@ -323,22 +290,33 @@ fn generate_kind_map(
             let mut files: Vec<(String, PathBuf)> = Vec::new();
             collect_files(&kind_dir, extension, &mut files);
             for (stem, path) in files {
-                let name = canonical_builtin_name(&stem);
-                if is_core {
-                    entries.push((name, path));
+                let stem = stem.replace('_', "/");
+                let name = if is_core {
+                    stem
                 } else {
-                    entries.push((format!("{cat_name}/{name}"), path));
-                }
+                    format!("{cat_name}/{stem}")
+                };
+                categories
+                    .entry(title_case(&cat_name))
+                    .or_default()
+                    .push(portable_name(&name));
+                entries.push((name, path));
             }
         }
     }
     if kind == "skill" {
-        compose_sessions(
-            &mut entries,
-            out_path.parent().expect("generated map has a directory"),
-        );
+        compose_sessions(&mut entries, out_dir);
     }
-    emit_map(&mut entries, map_name, out_path);
+    emit_map(
+        &mut entries,
+        &format!("BUILTIN_{}S", kind.to_uppercase()),
+        &out_dir.join(format!("builtin_{kind}s.rs")),
+    );
+    emit_category_map(
+        categories,
+        &format!("BUILTIN_{}_CATEGORIES", kind.to_uppercase()),
+        &out_dir.join(format!("builtin_{kind}_categories.rs")),
+    );
 }
 
 fn compose_sessions(entries: &mut [(String, PathBuf)], out_dir: &Path) {
@@ -348,7 +326,7 @@ fn compose_sessions(entries: &mut [(String, PathBuf)], out_dir: &Path) {
         let index = |name: &str| {
             entries
                 .iter()
-                .position(|(entry, _)| entry == name)
+                .position(|(entry, _)| portable_name(entry) == name)
                 .unwrap_or_else(|| panic!("builtin skill `{name}` is missing"))
         };
         let read = |path: &Path| {
@@ -360,7 +338,7 @@ fn compose_sessions(entries: &mut [(String, PathBuf)], out_dir: &Path) {
             read(&entries[session_index].1),
             skill_body(&read(&entries[index(operate)].1))
         );
-        let path = composed_dir.join(format!("{}.md", session.replace('/', "_")));
+        let path = composed_dir.join(format!("{session}.md"));
         fs::write(&path, composed).unwrap_or_else(|e| panic!("write {}: {e}", path.display()));
         entries[session_index].1 = path;
     }
@@ -377,6 +355,18 @@ fn skill_body(content: &str) -> &str {
 }
 
 fn emit_map(entries: &mut [(String, PathBuf)], map_name: &str, out_path: &Path) {
+    let mut shortcuts = std::collections::BTreeMap::<String, Vec<String>>::new();
+    for (name, _) in entries.iter() {
+        if let Some((_, bare)) = name.rsplit_once('/') {
+            shortcuts
+                .entry(bare.into())
+                .or_default()
+                .push(portable_name(name));
+        }
+    }
+    for (name, _) in entries.iter_mut() {
+        *name = portable_name(name);
+    }
     entries.sort_by(|a, b| a.0.cmp(&b.0));
 
     for pair in entries.windows(2) {
@@ -390,115 +380,41 @@ fn emit_map(entries: &mut [(String, PathBuf)], map_name: &str, out_path: &Path) 
         }
     }
 
-    if entries.is_empty() {
-        fs::write(
-            out_path,
-            format!(
-                "static {map_name}: std::sync::LazyLock<std::collections::HashMap<&'static str, &'static str>> = std::sync::LazyLock::new(std::collections::HashMap::new);\n"
-            ),
-        )
-        .unwrap_or_else(|e| panic!("write {}: {e}", out_path.display()));
-        return;
-    }
-
     let mut code = String::new();
     writeln!(
         code,
-        "static {map_name}: std::sync::LazyLock<std::collections::HashMap<&'static str, &'static str>> = std::sync::LazyLock::new(|| {{"
+        "static {map_name}: std::sync::LazyLock<std::collections::HashMap<&'static str, &'static str>> = std::sync::LazyLock::new(|| std::collections::HashMap::from(["
     )
     .expect("write to String");
-    writeln!(code, "    let mut m = std::collections::HashMap::new();").expect("write to String");
 
     for (name, path) in entries.iter() {
         let abs = path
             .canonicalize()
             .unwrap_or_else(|e| panic!("canonicalize {}: {e}", path.display()));
         let abs_str = abs.to_string_lossy().replace('\\', "/");
-        writeln!(
-            code,
-            "    m.insert(\"{name}\", include_str!(\"{abs_str}\"));"
-        )
-        .expect("write to String");
+        writeln!(code, "    ({name:?}, include_str!({abs_str:?})),").expect("write to String");
     }
 
-    writeln!(code, "    m").expect("write to String");
-    writeln!(code, "}});").expect("write to String");
+    writeln!(code, "]));").expect("write to String");
 
+    writeln!(code, "static {map_name}_SHORTCUTS: &[(&str, &str)] = &[").expect("write shortcuts");
+    for (bare, names) in shortcuts {
+        if names.len() == 1 {
+            writeln!(code, "({bare:?}, {:?}),", names[0]).expect("write shortcut");
+        }
+    }
+    code.push_str("];\n");
     fs::write(out_path, code).unwrap_or_else(|e| panic!("write {}: {e}", out_path.display()));
 }
 
-/// Generate a `<MAP_NAME>: &[(category, &[name])]` constant from
-/// `<builtins_dir>/<cat>/<kind>/*.<ext>`. Categories are title-cased. Names
-/// for core categories stay bare; names for non-core categories get the
-/// `<cat>/` prefix so they match the keys in BUILTIN_SKILLS / BUILTIN_FLOWS.
-fn generate_category_map(
-    builtins_dir: &Path,
-    kind: &str,
-    extension: &str,
+fn emit_category_map(
+    mut categories: std::collections::BTreeMap<String, Vec<String>>,
     map_name: &str,
     out_path: &Path,
 ) {
-    let mut categories: std::collections::BTreeMap<String, Vec<String>> =
-        std::collections::BTreeMap::new();
-
-    let Ok(entries) = fs::read_dir(builtins_dir) else {
-        fs::write(
-            out_path,
-            format!("pub const {map_name}: &[(&str, &[&str])] = &[];\n"),
-        )
-        .expect("write empty category map");
-        return;
-    };
-
-    for entry in entries.flatten() {
-        let cat_path = entry.path();
-        if !cat_path.is_dir() {
-            continue;
-        }
-        let kind_dir = cat_path.join(kind);
-        if !kind_dir.is_dir() {
-            continue;
-        }
-        let cat_name = cat_path
-            .file_name()
-            .expect("dir has no name")
-            .to_string_lossy()
-            .to_string();
-        let is_core = CORE_CATEGORIES.contains(&cat_name.as_str());
-        let category = title_case(&cat_name);
-
-        let mut names = Vec::new();
-        if let Ok(files) = fs::read_dir(&kind_dir) {
-            for file in files.flatten() {
-                let file_path = file.path();
-                let matches_ext = match extension {
-                    "yaml" => file_path
-                        .extension()
-                        .is_some_and(|e| e == "yaml" || e == "yml"),
-                    other => file_path.extension().is_some_and(|e| e == other),
-                };
-                if matches_ext {
-                    let stem = file_path
-                        .file_stem()
-                        .expect("file has no stem")
-                        .to_string_lossy()
-                        .to_string();
-                    let stem = canonical_builtin_name(&stem);
-                    let name = if is_core {
-                        stem
-                    } else {
-                        format!("{cat_name}/{stem}")
-                    };
-                    names.push(name);
-                }
-            }
-        }
+    for names in categories.values_mut() {
         names.sort();
-        if !names.is_empty() {
-            categories.insert(category, names);
-        }
     }
-
     let mut code = String::new();
     writeln!(code, "pub const {map_name}: &[(&str, &[&str])] = &[").expect("write to String");
     for (category, names) in &categories {
@@ -519,11 +435,7 @@ fn title_case(s: &str) -> String {
     }
 }
 
-fn canonical_builtin_name(stem: &str) -> String {
-    stem.replace('_', "/")
-}
-
-/// Recursively collect files with the given extension. The key is the file stem.
+/// Recursively collect source names, preserving folder hierarchy for shortcuts.
 fn collect_files(dir: &Path, extension: &str, entries: &mut Vec<(String, PathBuf)>) {
     let Ok(read_dir) = fs::read_dir(dir) else {
         return;
@@ -532,8 +444,21 @@ fn collect_files(dir: &Path, extension: &str, entries: &mut Vec<(String, PathBuf
         let Ok(entry) = entry else { continue };
         let path = entry.path();
         if path.is_dir() {
-            collect_files(&path, extension, entries);
-        } else if path.extension().is_some_and(|e| e == extension) {
+            let mut children = Vec::new();
+            collect_files(&path, extension, &mut children);
+            let folder = path
+                .file_name()
+                .expect("directory has a name")
+                .to_string_lossy();
+            entries.extend(
+                children
+                    .into_iter()
+                    .map(|(name, source)| (format!("{folder}/{name}"), source)),
+            );
+        } else if path
+            .extension()
+            .is_some_and(|e| e == extension || (extension == "yaml" && e == "yml"))
+        {
             let name = path
                 .file_stem()
                 .expect("file has no stem")

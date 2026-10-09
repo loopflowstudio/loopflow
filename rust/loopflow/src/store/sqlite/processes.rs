@@ -243,18 +243,6 @@ impl SqliteStore {
         Ok(records)
     }
 
-    /// Resolve retained identity without loading plans, captures or launch eligibility.
-    pub(crate) fn resolve_task_id(
-        &self,
-        selector: &str,
-        repo: Option<&str>,
-    ) -> StoreResult<Option<crate::durable::TaskId>> {
-        self.resolve_work_id("SELECT t.id FROM tasks t JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id
-            WHERE t.id=?1 OR ((t.issue_identifier=?1 OR t.external_issue_id=?1) AND (?2 IS NULL OR w.repo=?2))
-            ORDER BY (t.id=?1) DESC,t.id LIMIT 2", selector, repo)
-            .map(|id| id.map(crate::durable::TaskId::from_raw))
-    }
-
     pub(crate) fn resolve_wave_id(
         &self,
         selector: &str,
@@ -472,114 +460,6 @@ impl SqliteStore {
         )?;
         tx.commit()?;
         Ok(())
-    }
-
-    pub(crate) fn native_provider_exited(&self, session: &str) -> StoreResult<bool> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM session_events e WHERE e.session_id=s.id
-                AND e.receipt_key='provider:' || s.provider_generation || ':exited')
-             FROM agent_sessions s WHERE id=?1",
-            [session],
-            |row| row.get(0),
-        )?)
-    }
-
-    pub(crate) fn session_provider_unstarted(&self, session: &str) -> StoreResult<bool> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.query_row(
-            "SELECT provider_pid IS NULL AND provider_endpoint IS NULL
-             AND EXISTS(SELECT 1 FROM session_events e WHERE e.session_id=s.id
-                AND e.receipt_key='provider:' || s.provider_generation || ':reserved')
-             AND (NOT EXISTS(SELECT 1 FROM session_events e WHERE e.session_id=s.id
-                AND e.receipt_key='provider:' || s.provider_generation || ':spawn_requested')
-              OR EXISTS(SELECT 1 FROM session_events e WHERE e.session_id=s.id
-                AND e.receipt_key='provider:' || s.provider_generation || ':spawn_failed'))
-             FROM agent_sessions s WHERE id=?1",
-            [session],
-            |row| row.get(0),
-        )?)
-    }
-
-    /// Retain a boot witness for this released driver, without settling its
-    /// unknown provider outcome. A later boot on the same host excludes all
-    /// processes that could have survived that witness, including descendants.
-    pub(crate) fn observe_session_recovery_boot(
-        &self,
-        session: &str,
-        expected: &SessionDriver,
-        boot: &crate::session_record::recovery::HostBoot,
-    ) -> StoreResult<bool> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if driver_in(&tx, session)?.as_ref() != Some(expected) || expected.process_lfid.is_some() {
-            return Err(StoreError::InvalidAuthority(
-                "Session driver changed".into(),
-            ));
-        }
-        let unidentified: bool = tx.query_row(
-            "SELECT provider_pid IS NULL AND provider_endpoint IS NULL FROM agent_sessions WHERE id=?1",
-            [session], |row| row.get(0),
-        )?;
-        if !unidentified {
-            return Ok(false);
-        }
-        // A copied Machine cannot witness the death of a provider on its origin
-        // host. Establish locality from the provider Process's retained capture,
-        // then bind the witness to the machine's OS identity across restarts.
-        let local: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM session_events c JOIN session_events m ON m.captured_event=c.seq
-             WHERE c.session_id=?1 AND c.kind='captured' AND c.process_lfid=?2
-             AND m.session_id=c.session_id AND m.kind='observed'
-             AND m.receipt_key=c.receipt_key || ':manifest.json'
-             AND json_extract(m.payload,'$.input_id')=c.receipt_key
-             AND json_extract(m.payload,'$.source')='manifest.json'
-             AND json_extract(m.payload,'$.evidence.schema_version')=1
-             AND json_extract(m.payload,'$.evidence.artifact_key')=c.receipt_key
-             AND json_extract(m.payload,'$.evidence.host')=?3)",
-            params![session, expected.provider_process_lfid, boot.host], |row| row.get(0),
-        )?;
-        if !local {
-            return Ok(false);
-        }
-        let key = format!("driver:{}:recovery_boot", expected.generation);
-        let previous: Option<String> = tx
-            .query_row(
-                "SELECT payload FROM session_events WHERE session_id=?1 AND receipt_key=?2",
-                params![session, key],
-                |row| row.get(0),
-            )
-            .optional()?;
-        let previous = previous
-            .map(|payload| serde_json::from_str::<serde_json::Value>(&payload))
-            .transpose()?;
-        // Boot witnesses are append-only history; keep the released JSON encoding.
-        let recovered = previous.as_ref().is_some_and(|payload| {
-            payload["provider_generation"].as_i64() == Some(expected.provider_generation)
-                && payload["provider_exec_id"].as_str()
-                    == Some(expected.provider_process_lfid.as_str())
-                && payload["host"]["machine"].as_str() == Some(boot.machine.as_str())
-                && payload["host"]["boot"]
-                    .as_str()
-                    .is_some_and(|old| old != boot.boot)
-        });
-        let phase = if recovered {
-            "recovered_after_restart"
-        } else {
-            "recovery_boot"
-        };
-        tx.execute(
-            "INSERT OR IGNORE INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
-             SELECT id,'observed',?2,?3,?4,current_capture FROM agent_sessions WHERE id=?1",
-            params![session, format!("driver:{}:{phase}", expected.generation),
-                time::OffsetDateTime::now_utc().unix_timestamp(),
-                serde_json::json!({"type":phase, "host":boot,
-                    "provider_generation":expected.provider_generation,
-                    "provider_exec_id":expected.provider_process_lfid,
-                    "previous":if recovered { previous } else { None }}).to_string()],
-        )?;
-        tx.commit()?;
-        Ok(recovered)
     }
 
     pub(crate) fn record_session_provider_process(

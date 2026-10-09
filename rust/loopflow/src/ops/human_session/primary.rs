@@ -179,7 +179,7 @@ fn wave_session(binding: &crate::ops::WorkBinding) -> AgentSession {
         ..conversation(
             &binding.cwd,
             binding.agent.as_deref(),
-            "wave/session",
+            "wave-session",
             binding.wave_name.clone(),
         )
     }
@@ -207,7 +207,7 @@ fn task_session(
         ..conversation(
             &binding.cwd,
             binding.agent.as_deref(),
-            "task/session",
+            "task-session",
             title,
         )
     })
@@ -221,7 +221,7 @@ fn repository_session(repo: &crate::repository::CanonicalRepo) -> AgentSession {
         .unwrap_or_else(|| repo.to_string());
     AgentSession {
         repo: Some(repo.to_string()),
-        ..conversation(repo.as_path(), None, "repo/session", title)
+        ..conversation(repo.as_path(), None, "repo-session", title)
     }
 }
 
@@ -367,7 +367,7 @@ mod tests {
                 .contains(&conversation_background_name(&first.id)));
             let session = store.session(&first.id).await.unwrap().unwrap();
             assert!(session.interactive && session.input_published);
-            assert_eq!(session.skill.as_deref(), Some("wave/session"));
+            assert_eq!(session.skill.as_deref(), Some("wave-session"));
             assert_eq!(session.wave_id.as_ref(), Some(wave.id()));
             assert_eq!(session.task_id, None);
         });
@@ -457,7 +457,7 @@ mod tests {
 
             assert_eq!(first.id, second.id);
             let session = store.session(&first.id).await.unwrap().unwrap();
-            assert_eq!(session.skill.as_deref(), Some("repo/session"));
+            assert_eq!(session.skill.as_deref(), Some("repo-session"));
             assert_eq!((session.wave_id, session.task_id), (None, None));
 
             // A Wave's conversation in the same repository is a separate scope.

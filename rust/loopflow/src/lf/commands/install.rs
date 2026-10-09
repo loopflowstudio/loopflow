@@ -2629,7 +2629,7 @@ fn promote_published_from_installation(
         store_path.display()
     );
     if sync_skills {
-        if let Err(error) = crate::lf::commands::ops::run_sync_skills(true, false) {
+        if let Err(error) = crate::lf::commands::ops::run_sync_skills(true, false, false) {
             eprintln!(
                 "warning: skill sync failed ({error:#}); binaries installed, skills unchanged"
             );
@@ -2711,6 +2711,7 @@ mod artifact_tests {
         ActiveInstall, ArtifactIdentity, ArtifactRole, ArtifactSet, InstallSelection, InstallSource,
     };
     use std::fs;
+    use std::io::{BufRead, BufReader};
     use std::os::unix::fs::PermissionsExt;
     use std::path::Path;
 
@@ -2758,11 +2759,20 @@ mod artifact_tests {
         let (selected_app, selected_helper) = bundle("published", '5');
         let (superseded_app, _) = bundle("development", '6');
         let running = bin.join(format!("lf-{}", "7".repeat(64)));
-        fs::copy("/bin/sleep", &running).unwrap();
+        fs::copy("/bin/sh", &running).unwrap();
         let mut process = std::process::Command::new(&running)
-            .arg("60")
+            .args(["-c", "printf 'ready\\n'; read -r stop"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
             .spawn()
             .unwrap();
+        // Spawn acceptance alone does not prove the child is observable at its
+        // new executable. Keep that exact executable running before pruning.
+        let mut ready = String::new();
+        BufReader::new(process.stdout.take().unwrap())
+            .read_line(&mut ready)
+            .unwrap();
+        assert_eq!(ready, "ready\n");
         let by_hand = bin.join("hotfix-61609c56");
         fs::write(&by_hand, "hotfix").unwrap();
         let unfinished = artifacts.join("published-partial");

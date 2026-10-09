@@ -6,7 +6,8 @@ use serde_json::{json, Value};
 use tokio::sync::Mutex;
 
 use super::{classify_task, TaskDisposition, TaskStartEvidence};
-use crate::ops::pm::{pm_sync, PmSyncOptions, PmTestContext, PM_TEST_CONTEXT};
+use crate::ops::pm::test_fixture::PlanningEnvironment;
+use crate::ops::pm::{pm_sync, resolve_context, PmSyncOptions, PmTestContext, PM_TEST_CONTEXT};
 use crate::ops::NullProgress;
 use crate::planning::{LinearIssueId, TaskPlan};
 use crate::pm::{PmItem, PmProject, ProjectStatus};
@@ -46,7 +47,7 @@ fn task(state: &str) -> PmItem {
         state: Some(state.into()),
         project_id: Some("old".into()),
         project: Some("old".into()),
-        team_id: "team-1".into(),
+        team_id: Some("team-1".into()),
         assignee: None,
     }
 }
@@ -128,11 +129,6 @@ struct Provider {
     revision: i64,
     interrupt_after: Option<usize>,
     unavailable: bool,
-    interrupt_after_transfer_readback: bool,
-    status_after_transfer: Option<(String, String)>,
-    binding_collision: Option<std::path::PathBuf>,
-    binding_replacement: Option<(std::path::PathBuf, String)>,
-    inventory_pause: Option<(Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>,
 }
 
 fn page(nodes: Vec<Value>) -> Value {
@@ -146,13 +142,6 @@ async fn graphql(
     let query = request["query"].as_str().unwrap();
     let vars = &request["variables"];
     let id = vars["id"].as_str().unwrap_or("");
-    if query.contains("query FindProject") {
-        let pause = state.lock().await.inventory_pause.take();
-        if let Some((entered, release)) = pause {
-            entered.notify_one();
-            release.notified().await;
-        }
-    }
     let mut provider = state.lock().await;
     if provider.unavailable {
         return Json(json!({"errors":[{"message":"fixture interrupted connection"}]}));
@@ -173,7 +162,6 @@ async fn graphql(
         issue["branchName"] = Value::Null;
     }
     let prior_projects = provider.projects.clone();
-    let prior_issues = provider.issues.clone();
     let data = if query.contains("query ListTeams") {
         json!({"teams":page(vec![json!({"id":"team-1", "name":"Fixture", "key":"FIX", "description":"<!-- loopflow-repository: loopflowstudio/fixture -->"})])})
     } else if query.contains("query ProjectInitiative") {
@@ -196,44 +184,10 @@ async fn graphql(
     } else if query.contains("query IssueOwnership") {
         let mut issue = provider.issues[id].clone();
         issue["project"] = provider.projects[issue["project"]["id"].as_str().unwrap()].clone();
-        if provider.interrupt_after_transfer_readback
-            && id == "a-started"
-            && issue["project"]["id"] != "00000000-0000-4000-8000-000000000001"
-        {
-            provider.interrupt_after_transfer_readback = false;
-            provider.unavailable = true;
-        }
-        if id == "a-started" && issue["project"]["id"] != old_id("a") {
-            if let Some((project, status)) = provider.status_after_transfer.take() {
-                provider.revision += 1;
-                let revision = fixture_revision(provider.revision);
-                let project = provider.projects.get_mut(&project).unwrap();
-                project["status"]["type"] = json!(status);
-                project["updatedAt"] = revision;
-            }
-        }
         json!({"issue":issue})
-    } else if query.contains("query IssueTeam") {
-        json!({"issue":{"team":{"id":"team-1"}}})
     } else if query.contains("query ProjectStatuses") {
         json!({"projectStatuses":page(["planned", "started", "completed"].into_iter().map(|kind|
             json!({"id":kind,"type":kind,"teamId":null,"position":0.0})).collect())})
-    } else if query.contains("query CanceledWorkflowStates") {
-        json!({"workflowStates":{"nodes":[{"id":"cancel-state","position":0.0}]}})
-    } else if query.contains("mutation CreateProject") {
-        let supplied = uuid::Uuid::parse_str(id).unwrap();
-        if supplied.get_version_num() != 4 || supplied.get_variant() != uuid::Variant::RFC4122 {
-            return Json(json!({"errors":[{"message":"supplied Project id must be UUID v4"}]}));
-        }
-        provider.projects.insert(id.into(), json!({"id":id,"name":vars["name"],"description":"", "archivedAt":null,
-            "content":vars["content"],"status":{"type":vars["statusId"]},"teams":{"nodes":[{"id":"team-1"}]},"initiatives":{"nodes":[]}}));
-        json!({"projectCreate":{"project":{"id":id}}})
-    } else if query.contains("mutation AttachProject") {
-        provider
-            .projects
-            .get_mut(vars["projectId"].as_str().unwrap())
-            .unwrap()["initiatives"]["nodes"] = json!([{"id":vars["initiativeId"]}]);
-        json!({"initiativeToProjectCreate":{"initiativeToProject":{"id":"link"}}})
     } else if query.contains("mutation AdoptProject") {
         let project = provider.projects.get_mut(id).unwrap();
         project["content"] = vars["input"]["content"].clone();
@@ -241,46 +195,9 @@ async fn graphql(
             project["status"]["type"] = status.clone();
         }
         json!({"projectUpdate":{"success":true}})
-    } else if query.contains("mutation RenameProject") {
-        provider.projects.get_mut(id).unwrap()["name"] = vars["name"].clone();
-        json!({"projectUpdate":{"success":true}})
-    } else if query.contains("mutation ApplyProjectPlan") {
-        provider.projects.get_mut(id).unwrap()["content"] = vars["content"].clone();
-        json!({"projectUpdate":{"success":true}})
-    } else if query.contains("mutation UpdateProject") {
-        let project = provider.projects.get_mut(id).unwrap();
-        for field in ["name", "description", "content"] {
-            project[field] = vars[field].clone();
-        }
-        json!({"projectUpdate":{"success":true}})
-    } else if query.contains("mutation SetProjectStatus") {
-        provider.projects.get_mut(id).unwrap()["status"]["type"] = vars["statusId"].clone();
-        json!({"projectUpdate":{"success":true}})
-    } else if query.contains("mutation MoveIssueToProject") {
-        let target = vars["projectId"].as_str().unwrap();
-        let name = provider.projects[target]["name"].clone();
-        provider.issues.get_mut(id).unwrap()["project"] = json!({"id":target,"name":name});
-        json!({"issueUpdate":{"issue":{"id":id}}})
-    } else if query.contains("mutation SetIssueState") {
-        provider.issues.get_mut(id).unwrap()["state"]["type"] = json!("canceled");
-        json!({"issueUpdate":{"issue":{"id":id}}})
     } else {
         panic!("unexpected fixture operation: {query}")
     };
-    if query.contains("mutation SetProjectStatus") && vars["statusId"] == "started" {
-        if let Some(path) = provider.binding_collision.take() {
-            rusqlite::Connection::open(path).unwrap().execute_batch(
-                "CREATE TRIGGER fail_selection BEFORE UPDATE OF current_project_id ON waves
-                 WHEN NEW.current_project_id IS NOT NULL BEGIN SELECT RAISE(ABORT,'fixture selection failure'); END;"
-            ).unwrap();
-        }
-    }
-    if query.contains("mutation SetProjectStatus") && vars["statusId"] == "completed" {
-        if let Some((path, project)) = provider.binding_replacement.take() {
-            rusqlite::Connection::open(path).unwrap().execute(
-                "UPDATE waves SET current_project_id=(SELECT id FROM projects WHERE external_project_id=?1 AND wave_id=waves.id) WHERE id=(SELECT wave_id FROM projects WHERE external_project_id=?1)", [&project]).unwrap();
-        }
-    }
     if query.starts_with("mutation") {
         provider.mutations += 1;
         provider.revision += 1;
@@ -288,11 +205,6 @@ async fn graphql(
         for (id, project) in &mut provider.projects {
             if prior_projects.get(id) != Some(project) {
                 project["updatedAt"] = revision.clone();
-            }
-        }
-        for (id, issue) in &mut provider.issues {
-            if prior_issues.get(id) != Some(issue) {
-                issue["updatedAt"] = revision.clone();
             }
         }
         if provider.interrupt_after == Some(provider.mutations) {
@@ -333,9 +245,12 @@ fn provider_fixture() -> Provider {
     provider
 }
 
-async fn context(path: &std::path::Path, repo: &std::path::Path, url: &str) -> PmTestContext {
+async fn context(home: &std::path::Path, repo: &std::path::Path, url: &str) -> PmTestContext {
+    std::fs::create_dir_all(home).unwrap();
+    std::env::set_var("LF_HOME", home);
+    let path = home.join("loopflow.db");
     let store = Arc::new(
-        open_ephemeral_store(&StorageConfig::sqlite(path.into()))
+        open_ephemeral_store(&StorageConfig::sqlite(path.clone()))
             .await
             .unwrap(),
     );
@@ -356,7 +271,7 @@ async fn context(path: &std::path::Path, repo: &std::path::Path, url: &str) -> P
         .await
         .unwrap();
     PmTestContext {
-        path: path.into(),
+        path,
         store,
         graphql_url: url.into(),
     }
@@ -375,11 +290,16 @@ async fn seed_project(
         id: crate::work::project::ProjectId::new(),
         wave_id: wave.id().clone(),
         plan: crate::planning::ProjectPlan {
-            id: crate::planning::LinearProjectId::new(plan.id.clone()).unwrap(),
+            summary: String::new(),
+            linear_id: Some(crate::planning::LinearProjectId::new(plan.id.clone()).unwrap()),
             slug: plan.slug.clone(),
             name: plan.name.clone(),
-            prompt_context: plan.prompt_context(),
-            pm_snapshot_synced_at: now.unix_timestamp(),
+            prompt_context: crate::pm::render_project_content(&crate::pm::ProjectContent {
+                workflow: plan.workflow.clone(),
+                krs: plan.krs.clone(),
+                metric_targets: plan.metric_targets.clone(),
+            }),
+            pm_snapshot_synced_at: Some(now.unix_timestamp()),
             workflow: plan.workflow.clone(),
             status: plan.status,
         },
@@ -416,16 +336,17 @@ async fn local_task(
     let task = Task {
         id: TaskId::new(),
         plan: TaskPlan {
-            id: LinearIssueId::new(issue).unwrap(),
+            revision: 0,
+            linear_id: Some(LinearIssueId::new(issue).unwrap()),
             identifier: format!("FIX-{issue}"),
             title: "Retain execution".into(),
             description: String::new(),
-            pm_snapshot_synced_at: now.unix_timestamp(),
+            pm_snapshot_synced_at: Some(now.unix_timestamp()),
         },
         pm_writeback: PmWritebackState::Current,
         wave_id: wave.id().clone(),
         project_id: parent.id,
-        worktree: worktree.into(),
+        worktree: Some(worktree.into()),
         workspace_slug: issue.into(),
         agent: None,
         abandon_intent: None,
@@ -465,7 +386,7 @@ async fn local_task(
         &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
     )
     .unwrap();
-    context.store.create_task(&task, &pr, None).await.unwrap();
+    context.store.seed_task(&task, &pr).await.unwrap();
     (task, pr)
 }
 
@@ -497,17 +418,6 @@ async fn local_started_task(
     // Compare persisted values: SQLite stores timestamps at second precision.
     let task = context.store.get_task(&task.id).await.unwrap().unwrap();
     (task, pr, flows)
-}
-
-fn task_started_at(path: &std::path::Path, task: &TaskId) -> i64 {
-    rusqlite::Connection::open(path)
-        .unwrap()
-        .query_row(
-            "SELECT started_at FROM tasks WHERE id=?1",
-            [task.as_str()],
-            |row| row.get(0),
-        )
-        .expect("reserved Task work has a non-null Started timestamp")
 }
 
 fn clean_checkout(checkout: &std::path::Path) -> String {
@@ -598,7 +508,11 @@ async fn serve_fixture(provider: Arc<Mutex<Provider>>) -> (String, tokio::task::
 }
 
 #[tokio::test]
+// Each test has its own runtime; serialize process-global environment for its full lifetime.
+#[allow(clippy::await_holding_lock)]
 async fn explicit_sync_converts_legacy_flow_without_renaming_or_losing_content() {
+    let _lock = crate::journal::test_env_lock();
+    let _restore = PlanningEnvironment::isolate();
     let directory = tempfile::tempdir().unwrap();
     let repo = fixture_repo(directory.path());
     let original = "Keep this prose.\n\n## Flows\nrecommended: custom\n\n## KRs\n- [ ] Keep this KR\n\n## Notes\nRetain this closing note.\n";
@@ -616,7 +530,7 @@ async fn explicit_sync_converts_legacy_flow_without_renaming_or_losing_content()
     expected["status"]["type"] = json!("started");
     let provider = Arc::new(Mutex::new(state));
     let (url, server) = serve_fixture(provider.clone()).await;
-    let home = context(&directory.path().join("sync.db"), &repo, &url).await;
+    let home = context(&directory.path().join("sync"), &repo, &url).await;
     let (task, pr, flow) = local_started_task(&home, &repo).await;
     rusqlite::Connection::open(&home.path)
         .unwrap()
@@ -666,7 +580,11 @@ async fn explicit_sync_converts_legacy_flow_without_renaming_or_losing_content()
 }
 
 #[tokio::test]
+// Each test has its own runtime; serialize process-global environment for its full lifetime.
+#[allow(clippy::await_holding_lock)]
 async fn archived_predecessor_is_history_even_when_linear_still_says_started() {
+    let _lock = crate::journal::test_env_lock();
+    let _restore = PlanningEnvironment::isolate();
     let directory = tempfile::tempdir().unwrap();
     let repo = fixture_repo(directory.path());
     let provider = Arc::new(Mutex::new(provider_fixture()));
@@ -682,11 +600,11 @@ async fn archived_predecessor_is_history_even_when_linear_still_says_started() {
             .unwrap()["archivedAt"] = json!("2026-09-01T00:00:00Z");
     }
     let (url, server) = serve_fixture(provider.clone()).await;
-    let home = context(&directory.path().join("archive.db"), &repo, &url).await;
+    let home = context(&directory.path().join("archive"), &repo, &url).await;
     let (task, pr, flow) = local_started_task(&home, &repo).await;
     PM_TEST_CONTEXT
         .scope(home, async {
-            let ctx = super::resolve_context(&repo, "a").await.unwrap();
+            let ctx = resolve_context(&repo, "a").await.unwrap();
             let snapshot = crate::ops::pm::refresh_pm_snapshot(&repo, "a", &ctx)
                 .await
                 .unwrap();
@@ -709,7 +627,7 @@ async fn archived_predecessor_is_history_even_when_linear_still_says_started() {
             assert_eq!(retained.id, task.id);
             assert_eq!(retained.project_id, task.project_id);
             assert_eq!(retained.worktree, task.worktree);
-            assert_eq!(retained.plan.id, task.plan.id);
+            assert_eq!(retained.plan.linear_id, task.plan.linear_id);
             assert_eq!(retained.plan.title, "a-started");
             assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
             assert_eq!(store.sqlite.task_flows(&task.id).unwrap(), flow);
@@ -741,14 +659,18 @@ async fn legacy_home(path: &std::path::Path, repo: &std::path::Path, url: &str) 
         .await;
     }
     // These are the migration's retained receipt identities, not provider status.
-    let conn = rusqlite::Connection::open(path).unwrap();
+    let conn = rusqlite::Connection::open(&home.path).unwrap();
     conn.execute("UPDATE projects SET legacy_current=CASE external_project_id WHEN '00000000-0000-4000-8000-000000000001' THEN 1 ELSE 0 END WHERE wave_id=?1",
         [wave.id().as_str()]).unwrap();
     home
 }
 
 #[tokio::test]
+// Each test has its own runtime; serialize process-global environment for its full lifetime.
+#[allow(clippy::await_holding_lock)]
 async fn legacy_project_adoption_preserves_plans_across_lost_responses() {
+    let _lock = crate::journal::test_env_lock();
+    let _restore = PlanningEnvironment::isolate();
     let directory = tempfile::tempdir().unwrap();
     let repo = fixture_repo(directory.path());
     let provider = Arc::new(Mutex::new(provider_fixture()));
@@ -795,7 +717,7 @@ async fn legacy_project_adoption_preserves_plans_across_lost_responses() {
                 let first = legacy_home(
                     &directory
                         .path()
-                        .join(format!("legacy-{status}-{stop}-{second_home}.db")),
+                        .join(format!("legacy-{status}-{stop}-{second_home}")),
                     &repo,
                     &url,
                 )
@@ -808,7 +730,7 @@ async fn legacy_project_adoption_preserves_plans_across_lost_responses() {
                             graphql_url: first.graphql_url.clone(),
                         },
                         async {
-                            let ctx = super::resolve_context(&repo, "a").await.unwrap();
+                            let ctx = resolve_context(&repo, "a").await.unwrap();
                             let plans = crate::ops::pm::checked_projects(&repo, &ctx, "a")
                                 .await
                                 .unwrap();
@@ -848,7 +770,7 @@ async fn legacy_project_adoption_preserves_plans_across_lost_responses() {
                 }
                 let resumed = if second_home {
                     legacy_home(
-                        &directory.path().join(format!("resume-{status}-{stop}.db")),
+                        &directory.path().join(format!("resume-{status}-{stop}")),
                         &repo,
                         &url,
                     )
@@ -862,7 +784,7 @@ async fn legacy_project_adoption_preserves_plans_across_lost_responses() {
                         let task = store.get_task_by_issue("a-started").await.unwrap().unwrap();
                         let prs = store.task_prs(&task.id).await.unwrap();
                         let flow = store.sqlite.task_flows(&task.id).unwrap();
-                        let ctx = super::resolve_context(&repo, "a").await.unwrap();
+                        let ctx = resolve_context(&repo, "a").await.unwrap();
                         super::adopt_legacy_projects(&repo, &store, "a", &ctx, true)
                             .await
                             .unwrap();
@@ -911,7 +833,11 @@ async fn legacy_project_adoption_preserves_plans_across_lost_responses() {
 }
 
 #[tokio::test]
+// Each test has its own runtime; serialize process-global environment for its full lifetime.
+#[allow(clippy::await_holding_lock)]
 async fn legacy_adoption_leaves_foreign_team_projects_and_receipts_untouched() {
+    let _lock = crate::journal::test_env_lock();
+    let _restore = PlanningEnvironment::isolate();
     let directory = tempfile::tempdir().unwrap();
     let repo = fixture_repo(directory.path());
     let provider = Arc::new(Mutex::new(provider_fixture()));
@@ -935,11 +861,11 @@ async fn legacy_adoption_leaves_foreign_team_projects_and_receipts_untouched() {
         }
     }
     let (url, server) = serve_fixture(provider.clone()).await;
-    let home = legacy_home(&directory.path().join("foreign.db"), &repo, &url).await;
+    let home = legacy_home(&directory.path().join("foreign"), &repo, &url).await;
     PM_TEST_CONTEXT
         .scope(home, async {
             let store = super::pm_store().await.unwrap();
-            let ctx = super::resolve_context(&repo, "a").await.unwrap();
+            let ctx = resolve_context(&repo, "a").await.unwrap();
             let plans = crate::ops::pm::checked_projects(&repo, &ctx, "a")
                 .await
                 .unwrap();
@@ -982,7 +908,11 @@ async fn legacy_adoption_leaves_foreign_team_projects_and_receipts_untouched() {
 }
 
 #[tokio::test]
+// Each test has its own runtime; serialize process-global environment for its full lifetime.
+#[allow(clippy::await_holding_lock)]
 async fn legacy_adoption_without_a_receipt_never_guesses_between_plans() {
+    let _lock = crate::journal::test_env_lock();
+    let _restore = PlanningEnvironment::isolate();
     let directory = tempfile::tempdir().unwrap();
     let repo = fixture_repo(directory.path());
     let provider = Arc::new(Mutex::new(provider_fixture()));
@@ -998,7 +928,7 @@ async fn legacy_adoption_without_a_receipt_never_guesses_between_plans() {
             .unwrap()["content"] = json!("## Flows\nrecommended: custom");
     }
     let (url, server) = serve_fixture(provider.clone()).await;
-    let home = context(&directory.path().join("unrecorded.db"), &repo, &url).await;
+    let home = context(&directory.path().join("unrecorded"), &repo, &url).await;
     local_started_task(&home, &repo).await;
     rusqlite::Connection::open(&home.path)
         .unwrap()
@@ -1010,7 +940,7 @@ async fn legacy_adoption_without_a_receipt_never_guesses_between_plans() {
     PM_TEST_CONTEXT
         .scope(home, async {
             let store = super::pm_store().await.unwrap();
-            let ctx = super::resolve_context(&repo, "a").await.unwrap();
+            let ctx = resolve_context(&repo, "a").await.unwrap();
             let projects = super::adopt_legacy_projects(&repo, &store, "a", &ctx, false)
                 .await
                 .unwrap();
@@ -1046,334 +976,6 @@ async fn legacy_adoption_without_a_receipt_never_guesses_between_plans() {
     server.abort();
 }
 
-#[tokio::test]
-async fn project_ensure_retries_each_uncertain_mutation_with_one_identity() {
-    for interrupted in 1..=3 {
-        let directory = tempfile::tempdir().unwrap();
-        let repo = fixture_repo(directory.path());
-        let provider = Arc::new(Mutex::new(Provider {
-            interrupt_after: Some(interrupted),
-            ..Provider::default()
-        }));
-        let (url, server) = serve_fixture(provider.clone()).await;
-        let context = context(&directory.path().join("registry.db"), &repo, &url).await;
-        let store = context.store.clone();
-        PM_TEST_CONTEXT
-            .scope(context, async {
-                let wave = store
-                    .get_wave_at(&WaveLocator::discover(&repo, "a").unwrap())
-                    .await
-                    .unwrap()
-                    .unwrap();
-                assert!(crate::ops::project::ensure(&repo, "a").await.is_err());
-                let pending = store
-                    .pending_project_transition(wave.id())
-                    .await
-                    .unwrap()
-                    .unwrap();
-                assert_eq!(provider.lock().await.projects.len(), 1);
-                assert!(provider
-                    .lock()
-                    .await
-                    .projects
-                    .contains_key(&pending.successor_id));
-                provider.lock().await.unavailable = false;
-                let project = crate::ops::project::ensure(&repo, "a").await.unwrap();
-                let repeated = crate::ops::project::ensure(&repo, "a").await.unwrap();
-                assert_eq!(project, repeated);
-                assert_eq!(project.id, pending.successor_id);
-                assert_eq!(project.status, ProjectStatus::Started);
-                assert!(project.workflow.is_empty());
-                assert!(project.krs.is_empty());
-                assert_eq!(provider.lock().await.projects.len(), 1);
-                assert_eq!(provider.lock().await.mutations, 3);
-                assert!(store
-                    .pending_project_transition(wave.id())
-                    .await
-                    .unwrap()
-                    .is_none());
-                assert_eq!(
-                    crate::store::sqlite::project_selection::read_project_binding(
-                        &store.sqlite,
-                        wave.id()
-                    )
-                    .unwrap()
-                    .as_deref(),
-                    Some(project.id.as_str())
-                );
-            })
-            .await;
-        server.abort();
-    }
-}
-
-#[tokio::test]
-async fn project_ensure_concurrent_callers_share_one_project() {
-    let directory = tempfile::tempdir().unwrap();
-    let repo = fixture_repo(directory.path());
-    let provider = Arc::new(Mutex::new(Provider::default()));
-    let (url, server) = serve_fixture(provider.clone()).await;
-    let context = context(&directory.path().join("registry.db"), &repo, &url).await;
-    PM_TEST_CONTEXT
-        .scope(context, async {
-            let (first, second) = tokio::join!(
-                crate::ops::project::ensure(&repo, "a"),
-                crate::ops::project::ensure(&repo, "a"),
-            );
-            assert_eq!(first.unwrap(), second.unwrap());
-            assert_eq!(provider.lock().await.projects.len(), 1);
-            assert_eq!(provider.lock().await.mutations, 3);
-        })
-        .await;
-    server.abort();
-}
-
-#[tokio::test]
-async fn project_ensure_activates_exact_backlog_without_changing_content_or_tasks() {
-    let directory = tempfile::tempdir().unwrap();
-    let repo = fixture_repo(directory.path());
-    let mut fixture = provider_fixture();
-    let id = "999bdbdd-c045-41a6-8ffc-a97c4a40b0b3";
-    let mut project = fixture
-        .projects
-        .remove("00000000-0000-4000-8000-000000000001")
-        .unwrap();
-    project["id"] = json!(id);
-    project["name"] = json!("Summer work — customer requests");
-    project["status"]["type"] = json!("backlog");
-    let content = "# Authored plan\n\n## KRs\n- [ ] Preserve work\n";
-    project["content"] = json!(content);
-    fixture.projects.insert(id.into(), project);
-    for issue in fixture.issues.values_mut() {
-        if issue["project"]["id"] == "00000000-0000-4000-8000-000000000001" {
-            issue["project"]["id"] = json!(id);
-        }
-        issue["branchName"] = Value::Null;
-        issue["updatedAt"] = json!("1970-01-01T00:00:00Z");
-    }
-    // Unrelated current Projects cannot override explicit selection.
-    let mut competing = fixture.projects[id].clone();
-    competing["id"] = json!("competing");
-    competing["status"]["type"] = json!("started");
-    fixture.projects.insert("competing".into(), competing);
-    let issues = fixture.issues.clone();
-    let provider = Arc::new(Mutex::new(fixture));
-    let (url, server) = serve_fixture(provider.clone()).await;
-    let context = context(&directory.path().join("registry.db"), &repo, &url).await;
-    let store = context.store.clone();
-    let wave = store
-        .get_wave_at(&WaveLocator::discover(&repo, "a").unwrap())
-        .await
-        .unwrap()
-        .unwrap();
-    let config = directory
-        .path()
-        .join("waves")
-        .join(wave.id().as_str())
-        .join("config.yaml");
-    std::fs::create_dir_all(config.parent().unwrap()).unwrap();
-    let original =
-        format!("# historical binding\npm:\n  linear_project: {id}\nowner: 'keep bytes'\n");
-    std::fs::write(&config, &original).unwrap();
-    PM_TEST_CONTEXT
-        .scope(context, async {
-            std::fs::write(&config, "pm: [").unwrap();
-            assert!(crate::ops::project::ensure(&repo, "a").await.is_err());
-            assert!(!store.sqlite.project_binding_imported(wave.id()).unwrap());
-            assert_eq!(provider.lock().await.mutations, 0);
-            std::fs::write(&config, &original).unwrap();
-            provider.lock().await.unavailable = true;
-            assert!(crate::ops::project::ensure(&repo, "a").await.is_err());
-            assert!(!store.sqlite.project_binding_imported(wave.id()).unwrap());
-            assert_eq!(provider.lock().await.mutations, 0);
-            provider.lock().await.unavailable = false;
-            let first = crate::ops::project::ensure(&repo, "a").await.unwrap();
-            assert_eq!(
-                first,
-                crate::ops::project::ensure(&repo, "a").await.unwrap()
-            );
-            assert_eq!(first.id, id);
-            assert_eq!(std::fs::read_to_string(&config).unwrap(), original);
-            // The old file is inert after import, including when unreadable.
-            std::fs::write(&config, "malformed: [").unwrap();
-            assert_eq!(
-                crate::ops::project::ensure(&repo, "a").await.unwrap().id,
-                id
-            );
-            let readiness = store.sqlite.project_readiness(wave.id()).unwrap();
-            assert_eq!(
-                readiness.state,
-                crate::store::sqlite::ProjectReadinessState::Ready
-            );
-            assert!(readiness.observed_at.is_some());
-            assert_eq!(first.name, "Summer work — customer requests");
-            assert_eq!(first.status, ProjectStatus::Started);
-            assert!(first.workflow.is_empty());
-            assert_eq!(first.krs.len(), 1);
-            let state = provider.lock().await;
-            assert_eq!(state.projects[id]["content"], content);
-            assert_eq!(state.issues, issues);
-            assert_eq!(state.projects.len(), 3);
-            assert_eq!(state.mutations, 1);
-        })
-        .await;
-    server.abort();
-}
-
-#[tokio::test]
-async fn project_ensure_preserves_archived_pending_identity_and_failed_reads() {
-    let directory = tempfile::tempdir().unwrap();
-    let repo = fixture_repo(directory.path());
-    let provider = Arc::new(Mutex::new(Provider {
-        unavailable: true,
-        ..Provider::default()
-    }));
-    let (url, server) = serve_fixture(provider.clone()).await;
-    let context = context(&directory.path().join("registry.db"), &repo, &url).await;
-    let store = context.store.clone();
-    PM_TEST_CONTEXT
-        .scope(context, async {
-            let wave = store
-                .get_wave_at(&WaveLocator::discover(&repo, "a").unwrap())
-                .await
-                .unwrap()
-                .unwrap();
-            assert!(crate::ops::project::ensure(&repo, "a").await.is_err());
-            assert!(store
-                .pending_project_transition(wave.id())
-                .await
-                .unwrap()
-                .is_none());
-            assert_eq!(provider.lock().await.mutations, 0);
-            {
-                let mut state = provider.lock().await;
-                state.unavailable = false;
-                state.interrupt_after = Some(1);
-            }
-            assert!(crate::ops::project::ensure(&repo, "a").await.is_err());
-            let pending = store
-                .pending_project_transition(wave.id())
-                .await
-                .unwrap()
-                .unwrap();
-            {
-                let mut state = provider.lock().await;
-                state.unavailable = false;
-                state.projects.get_mut(&pending.successor_id).unwrap()["archivedAt"] =
-                    json!("2026-10-05T00:00:00Z");
-            }
-            let error = crate::ops::project::ensure(&repo, "a").await.unwrap_err();
-            assert!(error.to_string().contains("archived"), "{error}");
-            assert_eq!(
-                store.pending_project_transition(wave.id()).await.unwrap(),
-                Some(pending)
-            );
-            assert_eq!(provider.lock().await.projects.len(), 1);
-            assert_eq!(provider.lock().await.mutations, 1);
-        })
-        .await;
-    server.abort();
-}
-
-#[tokio::test]
-async fn project_ensure_recovers_failed_binding_and_post_binding_interruption() {
-    for already_bound in [false, true] {
-        let directory = tempfile::tempdir().unwrap();
-        let repo = fixture_repo(directory.path());
-        let provider = Arc::new(Mutex::new(Provider::default()));
-        let (url, server) = serve_fixture(provider.clone()).await;
-        let context = context(&directory.path().join("registry.db"), &repo, &url).await;
-        let store = context.store.clone();
-        PM_TEST_CONTEXT
-            .scope(context, async {
-                let wave = store
-                    .get_wave_at(&WaveLocator::discover(&repo, "a").unwrap())
-                    .await
-                    .unwrap()
-                    .unwrap();
-                provider.lock().await.binding_collision = Some(store.sqlite.home_dir().unwrap().join("registry.db"));
-                assert!(crate::ops::project::ensure(&repo, "a").await.is_err());
-                let pending = store
-                    .pending_project_transition(wave.id())
-                    .await
-                    .unwrap()
-                    .unwrap();
-                assert_eq!(
-                    provider.lock().await.projects[&pending.successor_id]["status"]["type"],
-                    "started"
-                );
-                let conn = rusqlite::Connection::open(directory.path().join("registry.db")).unwrap();
-                conn.execute_batch("DROP TRIGGER fail_selection").unwrap();
-                // Model a committed selection whose settlement was interrupted.
-                if already_bound {
-                    conn.execute("UPDATE waves SET current_project_id=(SELECT id FROM projects WHERE external_project_id=?2) WHERE id=?1", rusqlite::params![wave.id(), pending.successor_id]).unwrap();
-                }
-                let project = crate::ops::project::ensure(&repo, "a").await.unwrap();
-                assert_eq!(project.id, pending.successor_id);
-                assert_eq!(provider.lock().await.mutations, 3);
-                assert_eq!(provider.lock().await.projects.len(), 1);
-                assert!(store
-                    .pending_project_transition(wave.id())
-                    .await
-                    .unwrap()
-                    .is_none());
-
-            })
-            .await;
-        server.abort();
-    }
-}
-
-#[tokio::test]
-async fn project_ensure_does_not_reopen_newer_completed_history() {
-    let directory = tempfile::tempdir().unwrap();
-    let repo = fixture_repo(directory.path());
-    let provider = Arc::new(Mutex::new(Provider::default()));
-    let (url, server) = serve_fixture(provider.clone()).await;
-    let context = context(&directory.path().join("registry.db"), &repo, &url).await;
-    let store = context.store.clone();
-    PM_TEST_CONTEXT
-        .scope(context, async {
-            let wave = store
-                .get_wave_at(&WaveLocator::discover(&repo, "a").unwrap())
-                .await
-                .unwrap()
-                .unwrap();
-            let mut completed = crate::ops::project::ensure(&repo, "a").await.unwrap();
-            let id = completed.id.clone();
-            completed.status = ProjectStatus::Completed;
-            completed.revision = Some("2026-10-05T00:00:00Z".into());
-            store
-                .put_pm_project(
-                    wave.id(),
-                    "linear",
-                    "initiative-a",
-                    completed.clone(),
-                    1791158400,
-                    None,
-                )
-                .await
-                .unwrap();
-            provider.lock().await.projects.get_mut(&id).unwrap()["status"]["type"] =
-                json!("backlog");
-            let error = crate::ops::project::ensure(&repo, "a").await.unwrap_err();
-            assert!(error.to_string().contains("completed"), "{error}");
-            assert_eq!(provider.lock().await.mutations, 3);
-            assert_eq!(
-                store
-                    .get_project_by_project(&id)
-                    .await
-                    .unwrap()
-                    .unwrap()
-                    .plan
-                    .status,
-                ProjectStatus::Completed
-            );
-        })
-        .await;
-    server.abort();
-}
-
 fn old_id(wave: &str) -> &'static str {
     match wave {
         "a" => "00000000-0000-4000-8000-000000000001",
@@ -1381,6 +983,3 @@ fn old_id(wave: &str) -> &'static str {
         _ => panic!("fixture Wave"),
     }
 }
-
-#[path = "chapter_rotation_tests.rs"]
-mod rotation;

@@ -1,5 +1,7 @@
 //! `lf task comment ISSUE` against an isolated Linear GraphQL fixture.
 
+use clap::Parser;
+use std::os::unix::fs::PermissionsExt;
 use std::sync::Arc;
 
 use axum::{extract::State, routing::post, Json, Router};
@@ -21,6 +23,7 @@ struct Provider {
     thread: Thread,
     queries: Vec<String>,
     posted: Vec<Value>,
+    lose_reply: bool,
 }
 
 fn comment(id: &str, created: Option<&str>, body: Option<&str>, user: Value) -> Value {
@@ -50,6 +53,9 @@ async fn graphql(
     let data = if query.contains("query ListTeams") {
         json!({"teams": {"nodes": [{"id":"team-1","name":"Fixture","key":"FIX",
             "description":"<!-- loopflow-repository: loopflowstudio/fixture -->"}]}})
+    } else if query.contains("query ListInitiativeProjects") {
+        // Comment delivery remains independent of unavailable repository inventory.
+        return Json(json!({"errors":[{"message":"inventory unavailable"}]}));
     } else if query.contains("query IssueOwnership") {
         json!({"issue": {"id":"issue-uuid","identifier":"FIX-7","url":null,"title":"Comments",
             "description":"","completedAt": null, "prioritySortOrder":0.0,"sortOrder":0.0, "updatedAt":"2026-09-29T12:00:00.123Z","assignee":null,
@@ -57,15 +63,36 @@ async fn graphql(
             "project":{"id":"project-1","name":"Chapter","description":"","content":"workflow: feature",
                 "status":{"type":"started"},
                 "initiatives":{"nodes":[{"id":"initiative-1"}]},"teams":{"nodes":[{"id":"team-1"}]}}}})
-    } else if query.contains("mutation CreateComment") {
-        let node = comment(
-            "posted-1",
+    } else if query.contains("mutation SyncComment") {
+        if thread == Thread::Failing {
+            return Json(json!({"errors":[{"message":"offline"}]}));
+        }
+        let id = vars["id"].as_str().unwrap();
+        if provider.posted.iter().any(|comment| comment["id"] == id) {
+            return Json(json!({"errors":[{"message":"ID already exists"}]}));
+        }
+        provider.posted.push(comment(
+            id,
             Some("2026-09-27T00:00:00Z"),
             vars["body"].as_str(),
             Value::Null,
-        );
-        provider.posted.push(node);
-        json!({"commentCreate":{"comment":{"id":"posted-1"}}})
+        ));
+        if provider.lose_reply {
+            provider.lose_reply = false;
+            return Json(json!({"errors":[{"message":"lost reply after commit"}]}));
+        }
+        json!({"commentCreate":{"comment":{"id":id}}})
+    } else if query.contains("query CommentDelivery") {
+        let mut comment = provider
+            .posted
+            .iter()
+            .find(|c| c["id"] == vars["id"])
+            .cloned()
+            .unwrap_or(Value::Null);
+        if !comment.is_null() {
+            comment["issue"] = json!({"id":"issue-uuid"});
+        }
+        json!({"comment":comment})
     } else if query.contains("query IssueObservation") {
         assert_eq!(
             vars["id"], "issue-uuid",
@@ -130,6 +157,7 @@ async fn task_comments_read_and_publish_without_starting_work() {
     let _lock = crate::journal::test_env_lock();
     let _ambient = crate::test_ambient::EnvGuard::new();
     let directory = tempfile::tempdir().unwrap();
+    std::env::set_var("LF_HOME", directory.path());
     let repo = directory.path().join("repo");
     std::fs::create_dir_all(repo.join(".lf")).unwrap();
     std::fs::create_dir_all(repo.join("wave/product")).unwrap();
@@ -163,7 +191,7 @@ async fn task_comments_read_and_publish_without_starting_work() {
         .unwrap();
     }
     let repo = std::fs::canonicalize(repo).unwrap();
-    let database = directory.path().join("registry.db");
+    let database = directory.path().join("loopflow.db");
     let store = Arc::new(
         open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
             .await
@@ -196,6 +224,7 @@ async fn task_comments_read_and_publish_without_starting_work() {
         thread: Thread::Paged,
         queries: Vec::new(),
         posted: Vec::new(),
+        lose_reply: true,
     }));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
@@ -249,67 +278,173 @@ async fn task_comments_read_and_publish_without_starting_work() {
             );
 
             let wrong_wave = task_comment_async(&repo, Some("other"), "FIX-7", None, false)
-                .await
-                .unwrap_err();
-            assert!(wrong_wave.to_string().contains("belongs to wave/product"));
-
-            provider.lock().await.thread = Thread::Empty;
-            let empty = task_comment_async(&repo, Some("product"), "FIX-7", None, false)
-                .await
-                .unwrap();
-            assert!(empty.comments.is_empty());
+                .await.unwrap_err();
+            assert!(wrong_wave.to_string().contains("belongs to product"));
 
             provider.lock().await.thread = Thread::MissingCursor;
-            let truncated = task_comment_async(&repo, Some("product"), "FIX-7", None, false)
-                .await
-                .unwrap_err();
-            assert!(truncated.to_string().contains("continuation cursor"));
+            let truncated = task_comment_async(&repo, None, "FIX-7", None, false).await.unwrap();
+            assert!(truncated.refresh_error.unwrap().contains("continuation cursor"));
+            assert_eq!(truncated.comments, read.comments);
 
+            let task = store.get_task_by_issue("FIX-7").await.unwrap().unwrap();
+            rusqlite::Connection::open(directory.path().join("loopflow.db")).unwrap()
+                .execute("INSERT INTO task_state_deliveries(id,task_id,target,error,base_state,base_revision,attempted)
+                    VALUES('pending-completion',?1,'completed','unrelated completion remains pending','unstarted','2026-09-29T12:00:00.123Z',1)",
+                    [task.id.as_str()]).unwrap();
             provider.lock().await.thread = Thread::Failing;
-            let failed = task_comment_async(&repo, Some("product"), "FIX-7", None, false)
-                .await
-                .unwrap_err();
-            assert!(failed.to_string().contains("rate limited"));
-            assert!(provider.lock().await.queries.iter().all(|query| !query.trim_start().starts_with("mutation")), "reading the thread cannot publish anything");
+            let saved = task_comment_async(&repo, None, "FIX-7", Some("Keep the public name"), true)
+                .await.unwrap();
+            assert_eq!(saved.comments.len(), 5);
+            assert_eq!(saved.pending_sync.len(), 1);
+            let id = saved.pending_sync[0].clone();
+            assert!(provider.lock().await.posted.is_empty());
+            assert!(!store.task_started(&task.id).await.unwrap());
+            crate::ops::linear_observe::sync_task_comments(&store, &task).await.unwrap();
+            assert_eq!(store.sqlite.pending_task_comments(&task.id).unwrap().len(), 1);
+            let saved_steers = store.task_steers(&task.id).await.unwrap();
 
             provider.lock().await.thread = Thread::Empty;
-            let published = task_comment_async(&repo, None, "FIX-7", Some("Keep the public name"), false).await.unwrap();
-            assert_eq!(published.comments.len(), 1);
-            assert!(published.comments[0].body.starts_with("Keep the public name"));
-            assert!(published.comments[0].body.contains("<!-- loopflow-steer:"));
-            let readback = task_comment_async(&repo, None, "FIX-7", None, false).await.unwrap();
-            assert_eq!(published, readback);
+            // The provider commits but loses its first reply. Concurrent catch-up
+            // keeps the same UUID and confirms the exact issue and body.
+            let (one, two) = tokio::join!(
+                crate::ops::linear_observe::sync_task_comments(&store, &task),
+                crate::ops::linear_observe::sync_task_comments(&store, &task),
+            );
+            one.unwrap(); two.unwrap();
             assert_eq!(provider.lock().await.posted.len(), 1);
-            provider.lock().await.thread = Thread::Failing;
-            let failed_read = task_comment_async(&repo, None, "FIX-7", Some("A second instruction"), false).await.unwrap_err().to_string();
-            assert!(failed_read.contains("Posted Linear comment posted-1"), "{failed_read}");
-            assert!(failed_read.contains("do not post it again"), "{failed_read}");
-            provider.lock().await.thread = Thread::Empty;
-            let confirmed = task_comment_async(&repo, None, "FIX-7", None, false).await.unwrap();
-            assert_eq!(confirmed.comments.len(), 2);
-            assert_eq!(provider.lock().await.posted.len(), 2);
+            assert_eq!(provider.lock().await.posted[0]["id"], id);
+            assert!(store.sqlite.pending_task_comments(&task.id).unwrap().is_empty());
+            crate::ops::linear_observe::refresh_task_comments(&store, &task).await.unwrap();
+            crate::ops::linear_observe::refresh_task_comments(&store, &task).await.unwrap();
+            assert_eq!(store.task_steers(&task.id).await.unwrap(), saved_steers);
+            assert_eq!(store.sqlite.task_comments(&task.id).unwrap().comments.len(), 5);
+
+            provider.lock().await.posted.push(comment("incoming-after-reconnect",
+                Some("2026-09-27T00:00:01Z"), Some("Keep inbound independent"),
+                json!({"id":"person-1","displayName":"Maya","name":null})));
+            // Exercise the ordinary runner, including the native branch and
+            // Claude's batch subprocess branch. The stub never consumes stdin.
+            let _homes = crate::test_ambient::EnvGuard::clear(&["HOME", "LF_HOME", "LF_BIN", "PATH", "CODEX_HOME", "CLAUDE_CONFIG_DIR"]);
             let home = directory.path().join("home");
-            let _capture_home = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
+            std::fs::create_dir_all(&home).unwrap();
+            std::env::set_var("HOME", &home);
             std::env::set_var("LF_HOME", &home);
-            let capture = crate::session_record::CaptureHandle::begin_at(
-                &home,
-                crate::session_record::SessionCaptureSpec {
-                    harness: "fixture".into(), model: None, surface: "headless".into(),
-                    cwd: repo.clone(), repo: Some(repo.clone()), worktree: Some(repo.clone()),
-                    skill: None, subjects: vec![],
-                    flow: crate::session_record::SessionFlowMembership::Independent, work: None,
-                },
-            ).unwrap();
-            std::env::set_var(crate::session_record::CAPTURE_KEY_ENV, capture.artifact_key());
-            let progress = task_comment_async(&repo, None, "FIX-7", Some("Focused checks passed"), false).await.unwrap();
-            let body = &progress.comments.last().unwrap().body;
-            assert!(body.contains("<!-- loopflow-progress:"));
-            assert!(!crate::ops::linear_observe::is_direction_comment(body, Some("same-account")));
-            let direction = task_comment_async(&repo, None, "FIX-7", Some("Preserve the requested API"), true).await.unwrap();
-            let body = &direction.comments.last().unwrap().body;
-            assert!(body.contains("<!-- loopflow-steer:"));
-            assert!(crate::ops::linear_observe::is_direction_comment(body, Some("same-account")));
-            assert!(store.list_tasks(None).await.unwrap().is_empty());
+            let bin = directory.path().join("bin");
+            std::fs::create_dir(&bin).unwrap();
+            std::env::set_var("PATH", format!("{}:/usr/bin:/bin", bin.display()));
+            std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
+            let script = r#"#!/bin/sh
+: > "$FIXTURE_STARTED"
+i=0
+while [ ! -e "$FIXTURE_STOP" ] && [ "$i" -lt 100 ]; do
+    /bin/sleep 0.1
+    i=$((i+1))
+done
+exit 0
+"#;
+            for name in ["claude", "codex"] {
+                let executable = bin.join(name);
+                std::fs::write(&executable, script).unwrap();
+                std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
+            for (agent, auto) in [("codex", false), ("claude", false), ("claude", true)] {
+                let marker = format!("{agent}-{auto}");
+                let incoming = format!("incoming-{marker}");
+                provider.lock().await.posted.push(comment(&incoming,
+                    Some("2026-09-27T00:00:02Z"), Some(&marker),
+                    json!({"id":"person-1","displayName":"Maya","name":null})));
+                let started = home.join(format!("{marker}.started"));
+                let stop = home.join(format!("{marker}.stop"));
+                let seed = crate::ops::task_input::TaskSeed {
+                    task: task.clone(), message: String::new(), steers: Vec::new(),
+                    steer: 0, interrupt: 0,
+                };
+                let process = crate::engine::agent::ProcessConfig {
+                    auto,
+                    task_input: Some(crate::ops::task_input::TaskInput::new(store.clone(), seed)),
+                    ..Default::default()
+                };
+                let launch = crate::engine::agent::AgentConfig {
+                    agent: Some(agent.into()), cwd: Some(repo.clone()),
+                    env: std::collections::BTreeMap::from([
+                        ("PATH".into(), format!("{}:/usr/bin:/bin", bin.display())),
+                        ("FIXTURE_STARTED".into(), started.display().to_string()),
+                        ("FIXTURE_STOP".into(), stop.display().to_string()),
+                    ]),
+                    ..Default::default()
+                };
+                let context = PM_TEST_CONTEXT.with(Clone::clone);
+                let running = tokio::task::spawn_blocking(move || {
+                    PM_TEST_CONTEXT.sync_scope(context, || crate::engine::agent::run_agent(
+                        &launch, &process, &crate::engine::agent::AgentCapabilities::default()))
+                });
+                let running_check = tokio::time::timeout(std::time::Duration::from_secs(7), async {
+                    loop {
+                        if started.exists() { break; }
+                        if running.is_finished() { return false; }
+                        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                    }
+                    let saved = task_comment_async(&repo, None, "FIX-7", Some(&marker), true).await.unwrap();
+                    assert_eq!(saved.pending_sync.len(), 1);
+                    loop {
+                        if store.sqlite.pending_task_comments(&task.id).unwrap().is_empty()
+                            && store.sqlite.task_comments(&task.id).unwrap().comments.iter()
+                                .any(|c| c.id == incoming) { return true; }
+                        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                    }
+                }).await;
+                std::fs::write(&stop, "stop").unwrap();
+                let result = running.await.unwrap().unwrap();
+                assert_eq!(result.exit_code, 0);
+                assert!(running_check.unwrap(), "{marker} exited before synchronization");
+            }
+            let saved = task_comment_async(&repo, None, "FIX-7", Some("Local value survives"), true)
+                .await.unwrap();
+            let collision = saved.pending_sync[0].clone();
+            provider.lock().await.posted.push(comment(&collision,
+                Some("2026-09-27T00:00:03Z"), Some("Provider value survives"),
+                json!({"id":"person-1","displayName":"Maya","name":null})));
+            crate::ops::linear_observe::refresh_task_comments(&store, &task).await.unwrap();
+            crate::ops::linear_observe::sync_task_comments(&store, &task).await.unwrap();
+            let conflict = store.sqlite.task_comments(&task.id).unwrap();
+            assert!(conflict.conflicts[&collision].starts_with("Local value survives"));
+            assert!(conflict.comments.iter().find(|c| c.id == collision).unwrap().body == "Provider value survives");
+            assert!(!conflict.pending_sync.contains(&collision));
+            // A late acknowledgement records delivery, not authority to discard
+            // the newer remote value acquired while the create was in flight.
+            store.sqlite.record_comment_delivery(&collision, None).unwrap();
+            crate::ops::linear_observe::refresh_task_comments(&store, &task).await.unwrap();
+            assert_eq!(store.sqlite.task_comments(&task.id).unwrap().conflicts, conflict.conflicts);
+
+            // An acknowledged create with a retained collision must not hide
+            // newer provider direction as an echo of the saved local body.
+            {
+                let mut remote = provider.lock().await;
+                let amended = remote.posted.iter_mut().find(|c| c["id"] == collision).unwrap();
+                amended["body"] = json!("Provider correction survives");
+                amended["updatedAt"] = json!("2026-09-25T09:00:01Z");
+            }
+            crate::ops::linear_observe::refresh_task_comments(&store, &task).await.unwrap();
+            assert_eq!(store.sqlite.task_comments(&task.id).unwrap().comments.iter().find(|c| c.id == collision).unwrap().body, "Provider correction survives");
+            assert!(store.task_steers(&task.id).await.unwrap().iter().any(|steer| steer.text.contains("Provider correction survives")));
+
+            let before_retry = store.task_steers(&task.id).await.unwrap();
+            let posted_before = provider.lock().await.posted.len();
+            crate::ops::linear_observe::sync_task_comments(&store, &task).await.unwrap();
+            crate::ops::linear_observe::refresh_task_comments(&store, &task).await.unwrap();
+            assert!(store.sqlite.pending_task_comments(&task.id).unwrap().is_empty());
+            assert_eq!(provider.lock().await.posted.len(), posted_before);
+            assert_eq!(store.task_steers(&task.id).await.unwrap(), before_retry);
+            assert!(crate::lf::Cli::try_parse_from(["lf", "task", "sync", "FIX-7", "--resolve", "local"]).is_err());
+
+            let delivered = store.task_steers(&task.id).await.unwrap();
+            assert_eq!(delivered.iter().filter(|steer| steer.text.contains("incoming-after-reconnect")).count(), 1);
+            assert!(matches!(store.get_task(&task.id).await.unwrap().unwrap().pm_writeback,
+                crate::work::task::PmWritebackState::Pending {
+                    operation: crate::work::task::PmWritebackOperation::CompleteTask, ..
+                }));
+            assert!(!store.task_started(&task.id).await.unwrap());
+
         })
         .await;
     server.abort();

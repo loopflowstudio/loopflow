@@ -5,15 +5,9 @@ use serde_json::{json, Value};
 use tokio::time::sleep;
 use tracing::warn;
 
-#[cfg(test)]
-mod deletion_tests;
-
-#[cfg(test)]
-use crate::pm::PmKr;
 use crate::pm::{
-    parse_project_content, project_slug, render_project_content, IssueComment, IssueObservation,
-    PmError, PmItem, PmItemCreate, PmItemUpdate, PmProject, PmResult, PmWave, ProjectContent,
-    TeamBinding, RATE_LIMIT_RETRIES,
+    parse_project_content, project_slug, IssueComment, IssueObservation, PmError, PmItem,
+    PmProject, PmResult, PmWave, TeamBinding, RATE_LIMIT_RETRIES,
 };
 
 const LINEAR_BASE_URL: &str = "https://api.linear.app/graphql";
@@ -109,22 +103,6 @@ const LIST_INITIATIVE_PROJECTS_QUERY: &str = r#"query ListInitiativeProjects($in
   }
 }"#;
 
-const CREATE_PROJECT_MUTATION: &str = r#"mutation CreateProject($id: String, $name: String!, $description: String!, $content: String!, $teamId: String!, $statusId: String!) {
-  projectCreate(input: { id: $id, name: $name, description: $description, content: $content, teamIds: [$teamId], statusId: $statusId }) {
-    project {
-      id
-    }
-  }
-}"#;
-
-const UPDATE_PROJECT_MUTATION: &str = r#"mutation UpdateProject($id: String!, $name: String!, $description: String!, $content: String!) {
-  projectUpdate(id: $id, input: { name: $name, description: $description, content: $content }) {
-    project {
-      id
-    }
-  }
-}"#;
-
 const SET_PROJECT_TEAMS_MUTATION: &str = r#"mutation SetProjectTeams($id: String!, $teamIds: [String!]!) {
   projectUpdate(id: $id, input: { teamIds: $teamIds }) {
     project {
@@ -133,38 +111,10 @@ const SET_PROJECT_TEAMS_MUTATION: &str = r#"mutation SetProjectTeams($id: String
   }
 }"#;
 
-const ARCHIVE_PROJECT_MUTATION: &str = r#"mutation ArchiveProject($id: String!) {
-  projectArchive(id: $id) {
-    success
-  }
-}"#;
-
-const PROJECT_LIFECYCLE_QUERY: &str = r#"query ProjectLifecycle($id: String!) {
-  project(id: $id) {
-    archivedAt
-    status { id type teamId }
-  }
-}"#;
-
 const PROJECT_STATUSES_QUERY: &str = r#"query ProjectStatuses($after: String, $first: Int!) {
   projectStatuses(after: $after, first: $first) {
     nodes { id type teamId position }
     pageInfo { hasNextPage endCursor }
-  }
-}"#;
-
-const COMPLETE_PROJECT_MUTATION: &str = r#"mutation CompleteProject($id: String!, $statusId: String!) {
-  projectUpdate(id: $id, input: { statusId: $statusId }) {
-    success
-    project { status { id type teamId } }
-  }
-}"#;
-
-const ATTACH_PROJECT_MUTATION: &str = r#"mutation AttachProject($initiativeId: String!, $projectId: String!) {
-  initiativeToProjectCreate(input: { initiativeId: $initiativeId, projectId: $projectId }) {
-    initiativeToProject {
-      id
-    }
   }
 }"#;
 
@@ -246,30 +196,6 @@ const PROJECT_OWNERSHIP_QUERY: &str = r#"query ProjectOwnership($id: String!) {
   }
 }"#;
 
-const CREATE_ITEM_MUTATION: &str = r#"mutation CreateIssue($teamId: String!, $projectId: String!, $title: String!, $description: String!, $stateId: String) {
-  issueCreate(input: { teamId: $teamId, projectId: $projectId, title: $title, description: $description, stateId: $stateId }) {
-    issue {
-      id
-    }
-  }
-}"#;
-
-const UPDATE_ITEM_MUTATION: &str = r#"mutation UpdateIssue($id: String!, $input: IssueUpdateInput!) {
-  issueUpdate(id: $id, input: $input) {
-    issue {
-      id
-    }
-  }
-}"#;
-
-const MOVE_ITEM_MUTATION: &str = r#"mutation MoveIssueToProject($id: String!, $projectId: String!) {
-  issueUpdate(id: $id, input: { projectId: $projectId }) {
-    issue {
-      id
-    }
-  }
-}"#;
-
 const SET_ITEM_STATE_MUTATION: &str = r#"mutation SetIssueState($id: String!, $stateId: String!) {
   issueUpdate(id: $id, input: { stateId: $stateId }) {
     issue {
@@ -289,28 +215,8 @@ const MOVE_ITEM_TO_TEAM_MUTATION: &str = r#"mutation MoveIssueToTeam($id: String
   }
 }"#;
 
-const LIST_COMPLETED_WORKFLOW_STATES_QUERY: &str = r#"query CompletedWorkflowStates($teamId: ID!) {
-  workflowStates(filter: { team: { id: { eq: $teamId } }, type: { eq: "completed" } }) {
-    nodes {
-      id
-    }
-  }
-}"#;
-
-const ISSUE_DELETION_QUERY: &str = r#"query IssueDeletion($id: String!) {
-  issue(id: $id) {
-    trashed
-  }
-}"#;
-
-const DELETE_ITEM_MUTATION: &str = r#"mutation DeleteIssue($id: String!) {
-  issueDelete(id: $id) {
-    success
-  }
-}"#;
-
-const LIST_UNSTARTED_WORKFLOW_STATES_QUERY: &str = r#"query UnstartedWorkflowStates($teamId: ID!) {
-  workflowStates(filter: { team: { id: { eq: $teamId } }, type: { eq: "unstarted" } }) {
+const LIST_WORKFLOW_STATES_QUERY: &str = r#"query WorkflowStates($teamId: ID!, $type: String!) {
+  workflowStates(filter: { team: { id: { eq: $teamId } }, type: { eq: $type } }) {
     nodes {
       id
       position
@@ -326,16 +232,11 @@ const CREATE_COMMENT_MUTATION: &str = r#"mutation CreateComment($issueId: String
   }
 }"#;
 
-// Loopflow's own OAuth user. Its id lets the observer distinguish a participant's edit or
-// comment from Loopflow's own writeback, so ingestion never feeds itself.
 const VIEWER_QUERY: &str = r#"query Viewer {
   viewer {
     id
   }
 }"#;
-
-// Register the webhook that streams issue/comment changes for this repository's
-// one Team. The caller owns the signing secret and public URL.
 
 const UPDATE_COMMENT_MUTATION: &str = r#"mutation UpdateComment($id: String!, $body: String!) {
   commentUpdate(id: $id, input: { body: $body }) {
@@ -439,25 +340,6 @@ pub struct LinearClient {
     token: String,
     team_id: Option<String>,
     base_url: String,
-}
-
-fn replace_project_plan(original: &str, content: &ProjectContent) -> String {
-    let mut retained = String::new();
-    let mut managed_section = false;
-    for line in original.split_inclusive('\n') {
-        let trimmed = line.trim();
-        if trimmed.starts_with('#') {
-            managed_section = matches!(trimmed, "## KRs" | "## Metric targets");
-        }
-        if !managed_section && !trimmed.starts_with("flow:") {
-            retained.push_str(line);
-        }
-    }
-    if !retained.is_empty() && !retained.ends_with('\n') {
-        retained.push('\n');
-    }
-    retained.push_str(&render_project_content(content));
-    retained
 }
 
 impl LinearClient {
@@ -698,44 +580,33 @@ impl LinearClient {
             .ok_or_else(|| PmError::Message(format!("no Linear issue with id {item_id}")))
     }
 
-    async fn completed_state_id(&self, team_id: &str) -> PmResult<String> {
+    /// Resolve before reserving a write: failed reads leave delivery retryable.
+    pub(crate) async fn item_state_id(&self, item_id: &str, target: &str) -> PmResult<String> {
+        if !matches!(target, "completed" | "unstarted" | "canceled") {
+            return Err(PmError::Message(format!("unsupported Task state {target}")));
+        }
+        let team_id = self.item_team_id(item_id).await?;
+        self.team_state_id(&team_id, target).await
+    }
+
+    pub(crate) async fn team_state_id(&self, team_id: &str, target: &str) -> PmResult<String> {
         let response: WorkflowStatesData = self
             .graphql(
-                LIST_COMPLETED_WORKFLOW_STATES_QUERY,
-                json!({ "teamId": team_id }),
+                LIST_WORKFLOW_STATES_QUERY,
+                json!({ "teamId": team_id, "type": target }),
             )
             .await?;
-
         response
             .workflow_states
             .nodes
             .into_iter()
-            .next()
+            .min_by(|left, right| left.position.total_cmp(&right.position))
             .map(|state| state.id)
             .ok_or_else(|| {
                 PmError::Message(format!(
-                    "no completed Linear workflow state found for team {team_id}"
+                    "no {target} Linear workflow state found for team {team_id}"
                 ))
             })
-    }
-
-    /// Resolve the team's default active state (`type == "unstarted"`, e.g. Todo),
-    /// preferring the lowest-position state. Returns `None` when the team has no
-    /// unstarted state so the caller can fall back to Linear's own default.
-    async fn unstarted_state_id(&self, team_id: &str) -> PmResult<Option<String>> {
-        let response: WorkflowStatesData = self
-            .graphql(
-                LIST_UNSTARTED_WORKFLOW_STATES_QUERY,
-                json!({ "teamId": team_id }),
-            )
-            .await?;
-
-        Ok(response
-            .workflow_states
-            .nodes
-            .into_iter()
-            .min_by(|left, right| left.position.total_cmp(&right.position))
-            .map(|state| state.id))
     }
 
     pub async fn create_wave(&self, name: &str, summary: &str) -> PmResult<String> {
@@ -815,203 +686,6 @@ impl LinearClient {
             })
     }
 
-    pub async fn set_project_status(
-        &self,
-        project_id: &str,
-        status: crate::pm::ProjectStatus,
-    ) -> PmResult<()> {
-        let status_id = self.project_status_id(status).await?;
-        let response: Value = self
-            .graphql(
-                r#"mutation SetProjectStatus($id: String!, $statusId: String!) {
-                projectUpdate(id: $id, input: { statusId: $statusId }) { success }
-            }"#,
-                json!({ "id": project_id, "statusId": status_id }),
-            )
-            .await?;
-        if response["projectUpdate"]["success"] != true {
-            return Err(PmError::Message(
-                "Linear did not confirm Project status update".into(),
-            ));
-        }
-        Ok(())
-    }
-
-    pub async fn create_project(
-        &self,
-        initiative_id: &str,
-        name: &str,
-        content: &ProjectContent,
-        id: Option<&str>,
-    ) -> PmResult<String> {
-        content.validate()?;
-        let team_id = self.require_team_id()?;
-        let status_id = self
-            .project_status_id(crate::pm::ProjectStatus::Planned)
-            .await?;
-        let response: ProjectCreateData = self
-            .graphql(
-                CREATE_PROJECT_MUTATION,
-                json!({
-                    "id": id,
-                    "name": name,
-                    "description": project_description(content),
-                    "content": render_project_content(content),
-                    "teamId": team_id,
-                    "statusId": status_id,
-                }),
-            )
-            .await?;
-        let project_id = response.project_create.project.id;
-        self.attach_project(initiative_id, &project_id).await?;
-        Ok(project_id)
-    }
-
-    /// Check the exact destination before reserving or creating an ordinary Project.
-    pub(crate) async fn require_initiative(&self, initiative_id: &str) -> PmResult<()> {
-        let response: Value = self
-            .graphql(
-                "query ProjectInitiative($id: String!) { initiative(id: $id) { id } }",
-                json!({"id": initiative_id}),
-            )
-            .await?;
-        if response["initiative"]["id"].as_str() != Some(initiative_id) {
-            return Err(PmError::Message(format!(
-                "Initiative {initiative_id} is unavailable"
-            )));
-        }
-        Ok(())
-    }
-
-    pub async fn attach_project(&self, initiative_id: &str, project_id: &str) -> PmResult<()> {
-        let _: Value = self
-            .graphql(
-                ATTACH_PROJECT_MUTATION,
-                json!({
-                    "initiativeId": initiative_id,
-                    "projectId": project_id,
-                }),
-            )
-            .await?;
-        Ok(())
-    }
-
-    pub async fn update_project(
-        &self,
-        project_id: &str,
-        name: &str,
-        content: &ProjectContent,
-    ) -> PmResult<()> {
-        let _: Value = self
-            .graphql(
-                UPDATE_PROJECT_MUTATION,
-                json!({
-                    "id": project_id,
-                    "name": name,
-                    "description": project_description(content),
-                    "content": render_project_content(content),
-                }),
-            )
-            .await?;
-        Ok(())
-    }
-
-    /// Replace authored planning fields while retaining the Project's other text and name.
-    pub(crate) async fn apply_project_plan(
-        &self,
-        project_id: &str,
-        content: &ProjectContent,
-    ) -> PmResult<()> {
-        content.validate()?;
-        let node = self.project_node(project_id).await?;
-        let original = node.content.as_deref().unwrap_or("");
-        if crate::pm::parse_project_content(original)? == *content {
-            return Ok(());
-        }
-        let updated = replace_project_plan(original, content);
-        let response: Value = self
-            .graphql(
-                r#"mutation ApplyProjectPlan($id: String!, $content: String!) {
-                projectUpdate(id: $id, input: { content: $content }) { success }
-            }"#,
-                json!({"id":project_id,"content":updated}),
-            )
-            .await?;
-        if response["projectUpdate"]["success"] != true {
-            return Err(PmError::Message(
-                "Linear did not confirm Project plan update".into(),
-            ));
-        }
-        Ok(())
-    }
-
-    pub async fn complete_and_archive_project(&self, project_id: &str) -> PmResult<()> {
-        let response: ProjectLifecycleData = self
-            .graphql(PROJECT_LIFECYCLE_QUERY, json!({ "id": project_id }))
-            .await?;
-        let project = response.project.ok_or_else(|| {
-            PmError::Message(format!("Linear Project {project_id} is unavailable"))
-        })?;
-        if project.status.r#type != COMPLETED_STATE_TYPE {
-            let status = self.completed_project_status(&project.status).await?;
-            let response: ProjectCompleteData = self
-                .graphql(
-                    COMPLETE_PROJECT_MUTATION,
-                    json!({ "id": project_id, "statusId": status }),
-                )
-                .await?;
-            if !response.project_update.success
-                || !response
-                    .project_update
-                    .project
-                    .is_some_and(|project| project.status.r#type == COMPLETED_STATE_TYPE)
-            {
-                return Err(PmError::Message(format!(
-                    "Linear did not complete Project {project_id}"
-                )));
-            }
-        }
-        if project.archived_at.is_some() {
-            return Ok(());
-        }
-        let response: ProjectArchiveData = self
-            .graphql(
-                ARCHIVE_PROJECT_MUTATION,
-                json!({
-                    "id": project_id,
-                }),
-            )
-            .await?;
-        if !response.project_archive.success {
-            return Err(PmError::Message(format!(
-                "Linear did not archive Project {project_id}"
-            )));
-        }
-        Ok(())
-    }
-
-    async fn completed_project_status(&self, current: &ProjectStatusRef) -> PmResult<String> {
-        self.project_statuses()
-            .await?
-            .into_iter()
-            .filter(|status| {
-                status.type_ == crate::pm::ProjectStatus::Completed
-                    && status.team_id == current.team_id
-            })
-            .min_by(|left, right| {
-                left.position
-                    .total_cmp(&right.position)
-                    .then_with(|| left.id.cmp(&right.id))
-            })
-            .map(|status| status.id)
-            .ok_or_else(|| {
-                PmError::Message(format!(
-                    "Linear has no completed Project status in the scope of status {}",
-                    current.id
-                ))
-            })
-    }
-
     async fn project_statuses(&self) -> PmResult<Vec<ProjectStatusChoice>> {
         let mut after = None;
         let mut statuses = Vec::new();
@@ -1077,6 +751,23 @@ impl LinearClient {
         }
     }
 
+    pub(crate) async fn ordered_items(&self, project: &str) -> PmResult<Vec<OrderedIssue>> {
+        self.list_issue_nodes(project, false)
+            .await?
+            .into_iter()
+            .enumerate()
+            .map(|(rank, issue)| {
+                let priority_sort_order = issue.fields.priority_sort_order;
+                let sort_order = issue.fields.sort_order;
+                Ok(OrderedIssue {
+                    item: issue.into_pm_item(rank as u32)?,
+                    priority_sort_order,
+                    sort_order,
+                })
+            })
+            .collect()
+    }
+
     pub async fn list_items(&self, project_id: &str) -> PmResult<Vec<PmItem>> {
         self.list_items_including_archived(project_id, false).await
     }
@@ -1132,62 +823,6 @@ impl LinearClient {
         }
     }
 
-    pub async fn create_item(&self, project_id: &str, item: &PmItemCreate) -> PmResult<String> {
-        let team_id = self.require_team_id()?;
-        let state_id = self.unstarted_state_id(&team_id).await?;
-        let response: IssueCreateData = self
-            .graphql(
-                CREATE_ITEM_MUTATION,
-                json!({
-                    "teamId": team_id,
-                    "projectId": project_id,
-                    "title": item.name,
-                    "description": item.description,
-                    "stateId": state_id,
-                }),
-            )
-            .await?;
-
-        Ok(response.issue_create.issue.id)
-    }
-
-    pub async fn update_item(&self, item_id: &str, update: &PmItemUpdate) -> PmResult<()> {
-        let Some(update) = update.text_update() else {
-            return Ok(());
-        };
-        let mut input = serde_json::Map::new();
-        if let Some(name) = update.name {
-            input.insert("title".to_string(), json!(name));
-        }
-        if let Some(description) = update.description {
-            input.insert("description".to_string(), json!(description));
-        }
-
-        let _: Value = self
-            .graphql(
-                UPDATE_ITEM_MUTATION,
-                json!({
-                    "id": item_id,
-                    "input": input,
-                }),
-            )
-            .await?;
-        Ok(())
-    }
-
-    pub async fn move_item_to_project(&self, item_id: &str, project_id: &str) -> PmResult<()> {
-        let _: Value = self
-            .graphql(
-                MOVE_ITEM_MUTATION,
-                json!({
-                    "id": item_id,
-                    "projectId": project_id,
-                }),
-            )
-            .await?;
-        Ok(())
-    }
-
     /// Move an issue into another team and return its **new** identifier. The
     /// issue UUID is preserved (Task/PR/comment ownership survives); only the
     /// number changes, and Linear assigns it at move time, so we read it back.
@@ -1227,6 +862,66 @@ impl LinearClient {
         response.issue.map(IssueNode::into_ownership).transpose()
     }
 
+    pub(crate) async fn issue_trash(&self, id: &str) -> PmResult<Option<(bool, String)>> {
+        #[derive(Deserialize)]
+        struct Data {
+            #[serde(deserialize_with = "Option::deserialize")]
+            issue: Option<Issue>,
+        }
+        #[derive(Deserialize)]
+        struct Issue {
+            id: String,
+            #[serde(rename = "updatedAt")]
+            revision: String,
+            #[serde(deserialize_with = "Option::deserialize")]
+            trashed: Option<bool>,
+        }
+        let data: Data = self
+            .graphql(
+                r#"query IssueTrash($id: String!) {
+                issue(id: $id) { id updatedAt trashed }
+            }"#,
+                json!({"id":id}),
+            )
+            .await?;
+        data.issue
+            .map(|issue| {
+                if issue.id != id {
+                    return Err(PmError::Message(
+                        "Linear trash observation returned a different issue".into(),
+                    ));
+                }
+                Ok((issue.trashed == Some(true), issue.revision))
+            })
+            .transpose()
+    }
+
+    pub(crate) async fn delete_issue(&self, id: &str) -> PmResult<()> {
+        #[derive(Deserialize)]
+        struct Data {
+            #[serde(rename = "issueDelete")]
+            deletion: Payload,
+        }
+        #[derive(Deserialize)]
+        struct Payload {
+            success: bool,
+        }
+        let data: Data = self
+            .graphql(
+                r#"mutation DeliverTaskDeletion($id: String!) {
+                issueDelete(id: $id) { success }
+            }"#,
+                json!({"id":id}),
+            )
+            .await?;
+        if !data.deletion.success {
+            return Err(PmError::Message(
+                "Linear deletion was not acknowledged; receipt retained".into(),
+            ));
+        }
+        Ok(())
+    }
+
     pub async fn find_project(&self, project_id: &str) -> PmResult<Option<PmProject>> {
         // A filtered collection has an explicit empty result. The singular Project
         // endpoint can return NOT_FOUND as a GraphQL error, indistinguishable from
@@ -1263,6 +958,147 @@ impl LinearClient {
 
     pub async fn project_ownership(&self, project_id: &str) -> PmResult<PmProject> {
         self.project_node(project_id).await?.into_pm_project()
+    }
+
+    pub(crate) async fn project_content_observation(
+        &self,
+        id: &str,
+    ) -> PmResult<(PmProject, String)> {
+        let node = self.project_node(id).await?;
+        let content = node.content.clone().unwrap_or_default();
+        Ok((node.into_pm_project()?, content))
+    }
+
+    pub(crate) async fn project_field_input(
+        &self,
+        field: &str,
+        value: &Value,
+        content: &str,
+    ) -> PmResult<Value> {
+        match field {
+            "name" => Ok(json!({"name": value})),
+            "summary" => Ok(json!({"description": value})),
+            "status" => {
+                let status = serde_json::from_value(value.clone())
+                    .map_err(|e| PmError::Message(format!("invalid Project status: {e}")))?;
+                Ok(json!({"statusId": self.project_status_id(status).await?}))
+            }
+            "workflow" | "krs" | "metric_targets" => {
+                Ok(json!({"content": patch_project_field(content, field, value)?}))
+            }
+            _ => Err(PmError::Message(format!(
+                "unsupported Project field {field}"
+            ))),
+        }
+    }
+
+    pub(crate) async fn find_export_issue(
+        &self,
+        id: &str,
+    ) -> PmResult<Option<(PmItem, Option<PmProject>)>> {
+        let response: Value = self
+            .graphql(
+                r#"query FindExportIssue($id: ID!) {
+            issues(filter: { id: { eq: $id } }, first: 2, includeArchived: true) { nodes { id } }
+        }"#,
+                json!({"id":id}),
+            )
+            .await?;
+        let nodes = response["issues"]["nodes"]
+            .as_array()
+            .ok_or_else(|| PmError::Message("Issue lookup is incomplete".into()))?;
+        if nodes.is_empty() {
+            return Ok(None);
+        }
+        if nodes.len() != 1 || nodes[0]["id"] != id {
+            return Err(PmError::Message(
+                "Issue lookup returned a different identity".into(),
+            ));
+        }
+        self.issue_ownership(id).await
+    }
+
+    pub(crate) async fn deliver_planning_creation(
+        &self,
+        project: bool,
+        input: Value,
+    ) -> PmResult<()> {
+        let (query, result) = if project {
+            (
+                r#"mutation DeliverProjectCreation($input: ProjectCreateInput!) {
+                projectCreate(input: $input) { success project { id } }
+            }"#,
+                "projectCreate",
+            )
+        } else {
+            (
+                r#"mutation DeliverTaskCreation($input: IssueCreateInput!) {
+                issueCreate(input: $input) { success issue { id } }
+            }"#,
+                "issueCreate",
+            )
+        };
+        let response: Value = self.graphql(query, json!({"input":input})).await?;
+        let object = if project { "project" } else { "issue" };
+        if response[result]["success"] != true || response[result][object]["id"] != input["id"] {
+            return Err(PmError::Message(
+                "Creation lacks an exact acknowledgement; receipt retained".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn deliver_project_attachment(
+        &self,
+        id: &str,
+        project: &str,
+        initiative: &str,
+    ) -> PmResult<()> {
+        let response: Value = self
+            .graphql(
+                r#"mutation DeliverProjectAttachment($input: InitiativeToProjectCreateInput!) {
+            initiativeToProjectCreate(input: $input) { success }
+        }"#,
+                json!({"input":{"id":id,"projectId":project,"initiativeId":initiative}}),
+            )
+            .await?;
+        if response["initiativeToProjectCreate"]["success"] != true {
+            return Err(PmError::Message(
+                "Project attachment was not confirmed; receipt retained".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// The caller persists its receipt before starting this one provider effect.
+    pub(crate) async fn deliver_planning_field(
+        &self,
+        id: &str,
+        project: bool,
+        input: Value,
+    ) -> PmResult<()> {
+        let (query, result) = if project {
+            (
+                r#"mutation DeliverProjectField($id: String!, $input: ProjectUpdateInput!) {
+                projectUpdate(id: $id, input: $input) { success }
+            }"#,
+                "projectUpdate",
+            )
+        } else {
+            (
+                r#"mutation DeliverTaskField($id: String!, $input: IssueUpdateInput!) {
+                issueUpdate(id: $id, input: $input) { success }
+            }"#,
+                "issueUpdate",
+            )
+        };
+        let response: Value = self.graphql(query, json!({"id":id,"input":input})).await?;
+        if response[result]["success"] != true {
+            return Err(PmError::Message(
+                "Linear did not confirm the field write; receipt retained".into(),
+            ));
+        }
+        Ok(())
     }
 
     // Only migration-marked Projects reach this path. Ordinary parsing reads
@@ -1336,135 +1172,11 @@ impl LinearClient {
             .ok_or_else(|| PmError::Message(format!("no Linear Project with id {project_id}")))
     }
 
-    /// Only an explicit trash flag confirms deletion. Inaccessible or missing
-    /// issues are unresolved, including after a lost mutation response.
-    pub async fn item_is_deleted(&self, item_id: &str) -> PmResult<bool> {
-        let response: IssueDeletionData = self
-            .graphql(ISSUE_DELETION_QUERY, json!({ "id": item_id }))
-            .await
-            .map_err(|cause| {
-                PmError::Message(format!(
-                    "cannot read deletion state for Linear issue {item_id}: {cause}"
-                ))
-            })?;
-        let issue = response.issue.ok_or_else(|| {
-            PmError::Message(format!(
-                "Linear issue {item_id} is unavailable; absence does not confirm deletion"
-            ))
-        })?;
-        Ok(issue.trashed == Some(true))
-    }
-
-    /// Trash with Linear's ordinary retention, preserving workflow outcome.
-    pub async fn delete_item(&self, item_id: &str) -> PmResult<()> {
-        if matches!(self.item_is_deleted(item_id).await, Ok(true)) {
-            return Ok(());
-        }
-        let result: PmResult<DeleteItemData> = self
-            .graphql(DELETE_ITEM_MUTATION, json!({ "id": item_id }))
-            .await;
-        let cause = match result {
-            Ok(response) if response.issue_delete.success => return Ok(()),
-            Ok(_) => "Linear returned issueDelete.success=false".to_string(),
-            Err(cause) => cause.to_string(),
-        };
-        let confirmation = match self.item_is_deleted(item_id).await {
-            Ok(true) => return Ok(()),
-            Ok(false) => "the issue is not confirmed in trash".to_string(),
-            Err(cause) => cause.to_string(),
-        };
-        Err(PmError::Message(format!(
-            "Linear deletion of {item_id} is unconfirmed: {cause}; readback: {confirmation}"
-        )))
-    }
-
-    pub async fn complete_item(&self, item_id: &str) -> PmResult<()> {
-        let team_id = self.item_team_id(item_id).await?;
-        let state_id = self.completed_state_id(&team_id).await?;
+    pub(crate) async fn set_item_state(&self, item_id: &str, state_id: &str) -> PmResult<()> {
         let _: Value = self
             .graphql(
                 SET_ITEM_STATE_MUTATION,
-                json!({
-                    "id": item_id,
-                    "stateId": state_id,
-                }),
-            )
-            .await?;
-        Ok(())
-    }
-
-    /// Preserve the issue and its history while recording a canceled outcome.
-    pub async fn cancel_item(&self, item_id: &str) -> PmResult<()> {
-        let (item, _) = self
-            .issue_ownership(item_id)
-            .await?
-            .ok_or_else(|| PmError::Message(format!("Linear issue {item_id} is unavailable")))?;
-        match item.state.as_deref() {
-            Some("canceled") => return Ok(()),
-            Some("completed" | "duplicate") => {
-                return Err(PmError::Message(format!(
-                    "{} is already terminal; cancellation would replace its outcome",
-                    item.identifier
-                )));
-            }
-            None => {
-                return Err(PmError::Message(format!(
-                    "{} has no observed workflow state",
-                    item.identifier
-                )))
-            }
-            Some(_) => {}
-        }
-        let response: WorkflowStatesData = self
-            .graphql(
-                r#"query CanceledWorkflowStates($teamId: ID!) {
-              workflowStates(filter: { team: { id: { eq: $teamId } }, type: { eq: "canceled" } }) {
-                nodes { id position }
-              }
-            }"#,
-                json!({ "teamId": item.team_id }),
-            )
-            .await?;
-        let state = response
-            .workflow_states
-            .nodes
-            .into_iter()
-            .min_by(|left, right| left.position.total_cmp(&right.position))
-            .ok_or_else(|| PmError::Message("no canceled Linear workflow state found".into()))?;
-        let result: PmResult<Value> = self
-            .graphql(
-                SET_ITEM_STATE_MUTATION,
-                json!({ "id": item.id, "stateId": state.id }),
-            )
-            .await;
-        // Read back even after an uncertain mutation response. HTTP success alone
-        // is not evidence that Linear accepted the state transition.
-        match self.issue_ownership(&item.id).await {
-            Ok(Some((confirmed, _))) if confirmed.state.as_deref() == Some("canceled") => Ok(()),
-            confirmation => Err(PmError::Message(format!("cancellation of {} is unconfirmed (mutation: {}; readback: {}); retry task abandon", item.identifier,
-                result.err().map_or_else(|| "acknowledged".into(), |error| error.to_string()),
-                confirmation.err().map_or_else(|| "issue is not canceled".into(), |error| error.to_string())))),
-        }
-    }
-
-    /// Reopen a completed issue by moving it back to the team's default active
-    /// (`unstarted`) workflow state. Mirrors [`complete_item`]; the repair path
-    /// uses it when a Task was prematurely completed while its gates were open.
-    /// Errors when the team has no unstarted state to return to.
-    pub async fn reopen_item(&self, item_id: &str) -> PmResult<()> {
-        let team_id = self.item_team_id(item_id).await?;
-        let Some(state_id) = self.unstarted_state_id(&team_id).await? else {
-            return Err(PmError::Message(format!(
-                "no active Linear workflow state found to reopen issue {item_id}"
-            )));
-        };
-        let _: Value = self
-            .graphql(
-                SET_ITEM_STATE_MUTATION,
-                json!({
-                    "id": item_id,
-                    "stateId": state_id,
-                }),
+                json!({ "id": item_id, "stateId": state_id }),
             )
             .await?;
         Ok(())
@@ -1485,48 +1197,41 @@ impl LinearClient {
         Ok(response.comment_create.comment.id)
     }
 
-    /// Find a previously-created comment by its stable body marker.
-    ///
-    /// Comment publication records an attempt before calling Linear. If that call
-    /// succeeds but the local process dies before recording the returned id, a
-    /// retry scans the issue's comments and adopts the existing one rather than
-    /// creating a duplicate.
-    pub async fn find_comment_with_marker(
-        &self,
-        issue_id: &str,
-        marker: &str,
-    ) -> PmResult<Option<String>> {
-        let mut after = None;
-        loop {
-            let response: IssueCommentsData = self
-                .graphql(
-                    ISSUE_COMMENTS_QUERY,
-                    json!({
-                        "id": issue_id,
-                        "comments": OBSERVATION_COMMENT_PAGE,
-                        "after": after,
-                    }),
-                )
-                .await?;
-            let issue = response
-                .issue
-                .ok_or_else(|| PmError::Message(format!("linear issue {issue_id} not found")))?;
-            if let Some(comment) = issue
-                .comments
-                .nodes
-                .into_iter()
-                .find(|comment| comment.body.contains(marker))
-            {
-                return Ok(Some(comment.id));
-            }
-            if !issue.comments.page_info.has_next_page {
-                return Ok(None);
-            }
-            after = issue.comments.page_info.end_cursor;
-            if after.is_none() {
-                return Err(PmError::Message(format!(
-                    "Linear comments for issue {issue_id} have another page without a cursor"
-                )));
+    /// Deliver the caller's UUID. An uncertain reply is resolved by exact identity.
+    pub async fn sync_comment(&self, id: &str, issue: &str, body: &str) -> PmResult<()> {
+        uuid::Uuid::parse_str(id).map_err(|error| PmError::Message(error.to_string()))?;
+        let response: PmResult<CommentData> = self
+            .graphql(
+                r#"mutation SyncComment($id: String!, $issueId: String!, $body: String!) {
+                commentCreate(input: { id: $id, issueId: $issueId, body: $body }) {
+                    comment { id }
+                }
+            }"#,
+                json!({"id": id, "issueId": issue, "body": body}),
+            )
+            .await;
+        match response {
+            Ok(response) if response.comment_create.comment.id == id => Ok(()),
+            result => {
+                let read: Value = self
+                    .graphql(
+                        r#"query CommentDelivery($id: String!) {
+                        comment(id: $id) { id body issue { id } }
+                    }"#,
+                        json!({"id": id}),
+                    )
+                    .await?;
+                let comment = &read["comment"];
+                if comment["id"].as_str() == Some(id)
+                    && comment["body"].as_str() == Some(body)
+                    && comment["issue"]["id"].as_str() == Some(issue)
+                {
+                    return Ok(());
+                }
+                Err(PmError::Message(match result {
+                    Err(error) => format!("Comment {id} is pending sync: {error}"),
+                    Ok(_) => format!("Comment {id} was not confirmed with its saved identity"),
+                }))
             }
         }
     }
@@ -1638,7 +1343,7 @@ impl LinearClient {
         Ok(())
     }
 
-    /// Loopflow's own Linear user id, used to skip its own comments and edits.
+    /// Identify the authenticated Linear user for machine login transfers.
     pub async fn viewer_id(&self) -> PmResult<String> {
         let response: ViewerData = self.graphql(VIEWER_QUERY, json!({})).await?;
         Ok(response.viewer.id)
@@ -1746,32 +1451,9 @@ struct GraphqlErrorExtensions {
 }
 
 #[derive(Deserialize)]
-struct ProjectCreateData {
-    #[serde(rename = "projectCreate")]
-    project_create: ProjectPayload,
-}
-
-#[derive(Deserialize)]
-struct ProjectArchiveData {
-    #[serde(rename = "projectArchive")]
-    project_archive: SuccessPayload,
-}
-
-#[derive(Deserialize)]
-struct SuccessPayload {
-    success: bool,
-}
-
-#[derive(Deserialize)]
 struct InitiativeCreateData {
     #[serde(rename = "initiativeCreate")]
     initiative_create: InitiativePayload,
-}
-
-#[derive(Deserialize)]
-struct IssueCreateData {
-    #[serde(rename = "issueCreate")]
-    issue_create: IssuePayload,
 }
 
 #[derive(Deserialize)]
@@ -1791,18 +1473,8 @@ struct IssueIdentifierNode {
 }
 
 #[derive(Deserialize)]
-struct ProjectPayload {
-    project: IdNode,
-}
-
-#[derive(Deserialize)]
 struct InitiativePayload {
     initiative: IdNode,
-}
-
-#[derive(Deserialize)]
-struct IssuePayload {
-    issue: IdNode,
 }
 
 #[derive(Deserialize)]
@@ -1835,22 +1507,6 @@ struct IdNode {
 #[derive(Deserialize)]
 struct ViewerData {
     viewer: IdNode,
-}
-
-#[derive(Deserialize)]
-struct IssueDeletionData {
-    issue: Option<IssueDeletionNode>,
-}
-
-#[derive(Deserialize)]
-struct IssueDeletionNode {
-    trashed: Option<bool>,
-}
-
-#[derive(Deserialize)]
-struct DeleteItemData {
-    #[serde(rename = "issueDelete")]
-    issue_delete: SuccessPayload,
 }
 
 #[derive(Deserialize)]
@@ -1928,6 +1584,13 @@ struct IssueNode<P = ProjectRef> {
 
 // List and detail observations require the same complete issue fields.
 // Nullable fields must be present; omission is not a value to store.
+#[derive(Debug)]
+pub(crate) struct OrderedIssue {
+    pub item: PmItem,
+    pub priority_sort_order: f64,
+    pub sort_order: f64,
+}
+
 #[derive(Deserialize)]
 struct IssueFields {
     #[serde(rename = "completedAt", deserialize_with = "Option::deserialize")]
@@ -2004,7 +1667,7 @@ impl IssueFields {
             state: self.state.map(|state| state.r#type),
             project_id,
             project,
-            team_id: team.id,
+            team_id: Some(team.id),
             assignee: self.assignee.map(|assignee| assignee.id),
         })
     }
@@ -2082,7 +1745,6 @@ struct WorkflowStatesConnection {
 #[derive(Deserialize)]
 struct WorkflowStateNode {
     id: String,
-    #[serde(default)]
     position: f64,
 }
 
@@ -2162,6 +1824,62 @@ struct ProjectNode {
     teams: IdConnection,
 }
 
+// Replace only the selected planning field, retaining unrelated provider prose.
+fn patch_project_field(content: &str, field: &str, value: &Value) -> PmResult<String> {
+    let mut parsed = serde_json::to_value(parse_project_content(content)?)
+        .map_err(|e| PmError::Message(e.to_string()))?;
+    parsed[field] = value.clone();
+    let parsed: crate::pm::ProjectContent =
+        serde_json::from_value(parsed).map_err(|e| PmError::Message(e.to_string()))?;
+    parsed.validate()?;
+    let (header, replacement) = match field {
+        "workflow" => (None, format!("workflow: {}\n", parsed.workflow)),
+        "krs" => (Some("## KRs"), format!("{}\n", super::render_krs(&parsed))),
+        "metric_targets" => (
+            Some("## Metric targets"),
+            format!("{}\n", super::render_metric_targets(&parsed)),
+        ),
+        _ => {
+            return Err(PmError::Message(format!(
+                "unsupported content field {field}"
+            )))
+        }
+    };
+    let mut result = String::new();
+    let mut section = false;
+    let mut replaced = false;
+    for line in content.split_inclusive('\n') {
+        let trimmed = line.trim();
+        let workflow = trimmed.starts_with("workflow:") || trimmed.starts_with("flow:");
+        if header.is_none() && workflow {
+            if !replaced {
+                result.push_str(&replacement);
+                replaced = true;
+            }
+            continue;
+        }
+        if trimmed.starts_with('#') {
+            section = header == Some(trimmed);
+            if section {
+                if !replaced {
+                    result.push_str(&replacement);
+                    replaced = true;
+                }
+                continue;
+            }
+        }
+        // Workflow lines are parsed independently of their Markdown section.
+        if !section || workflow {
+            result.push_str(line);
+        }
+    }
+    if !replaced {
+        result.push_str("\n\n");
+        result.push_str(&replacement);
+    }
+    Ok(result)
+}
+
 fn convert_legacy_project_content(content: &str) -> PmResult<String> {
     let current = parse_project_content(content)?.workflow;
     let mut section = false;
@@ -2191,45 +1909,6 @@ fn convert_legacy_project_content(content: &str) -> PmResult<String> {
         }
     }
     Ok(converted)
-}
-
-#[derive(Deserialize)]
-struct ProjectLifecycleData {
-    #[serde(deserialize_with = "Option::deserialize")]
-    project: Option<ProjectLifecycle>,
-}
-
-#[derive(Deserialize)]
-struct ProjectLifecycle {
-    #[serde(rename = "archivedAt", deserialize_with = "Option::deserialize")]
-    archived_at: Option<String>,
-    status: ProjectStatusRef,
-}
-
-#[derive(Deserialize)]
-struct ProjectStatusRef {
-    id: String,
-    r#type: String,
-    #[serde(rename = "teamId", deserialize_with = "Option::deserialize")]
-    team_id: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct ProjectCompleteData {
-    #[serde(rename = "projectUpdate")]
-    project_update: ProjectCompletePayload,
-}
-
-#[derive(Deserialize)]
-struct ProjectCompletePayload {
-    success: bool,
-    #[serde(deserialize_with = "Option::deserialize")]
-    project: Option<ProjectWithStatus>,
-}
-
-#[derive(Deserialize)]
-struct ProjectWithStatus {
-    status: ProjectStatusRef,
 }
 
 impl ProjectNode {
@@ -2410,17 +2089,6 @@ fn linear_description(description: &str) -> String {
     summary.chars().take(MAX_DESCRIPTION_LEN).collect()
 }
 
-fn project_description(content: &ProjectContent) -> String {
-    linear_description(
-        &content
-            .krs
-            .iter()
-            .map(|kr| kr.text.as_str())
-            .collect::<Vec<_>>()
-            .join("; "),
-    )
-}
-
 fn first_meaningful_paragraph(description: &str) -> String {
     let mut lines = description.lines().peekable();
     while let Some(line) = lines.next() {
@@ -2504,15 +2172,9 @@ mod tests {
 
     #[test]
     fn issue_mutations_use_linear_string_ids() {
-        for query in [
-            UPDATE_ITEM_MUTATION,
-            MOVE_ITEM_MUTATION,
-            SET_ITEM_STATE_MUTATION,
-            CREATE_COMMENT_MUTATION,
-        ] {
+        for query in [SET_ITEM_STATE_MUTATION, CREATE_COMMENT_MUTATION] {
             assert!(!query.contains(": ID!"));
         }
-        assert!(MOVE_ITEM_MUTATION.contains("$projectId: String!"));
         assert!(SET_ITEM_STATE_MUTATION.contains("$stateId: String!"));
         assert!(CREATE_COMMENT_MUTATION.contains("$issueId: String!"));
     }
@@ -2531,13 +2193,6 @@ mod tests {
             UPDATE_ATTACHMENT_MUTATION.contains("subtitle: $subtitle"),
             "attachmentUpdate carries PR state as its input subtitle"
         );
-    }
-
-    #[test]
-    fn workflow_state_filters_use_linear_team_id() {
-        assert!(CREATE_ITEM_MUTATION.contains("$teamId: String!"));
-        assert!(LIST_COMPLETED_WORKFLOW_STATES_QUERY.contains("$teamId: ID!"));
-        assert!(LIST_UNSTARTED_WORKFLOW_STATES_QUERY.contains("$teamId: ID!"));
     }
 
     #[test]
@@ -2572,21 +2227,6 @@ mod tests {
             Some("Linear Task is duplicate")
         );
         assert_eq!(crate::pm::terminal_reason(Some("unknown"), false), None);
-    }
-
-    #[tokio::test]
-    async fn viewer_id_reads_loopflows_own_user() {
-        let (base_url, _requests) = test_server::spawn(vec![json_response(
-            StatusCode::OK,
-            json!({ "data": { "viewer": { "id": "user-loopflow" } } }),
-        )])
-        .await;
-        let client = LinearClient::with_base_url("linear-secret".to_string(), None, base_url);
-
-        assert_eq!(
-            client.viewer_id().await.expect("viewer id"),
-            "user-loopflow"
-        );
     }
 
     #[tokio::test]
@@ -2843,101 +2483,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_project_without_flow_retains_krs_and_attaches_to_initiative() {
-        let (base_url, requests) = test_server::spawn(vec![
-            json_response(StatusCode::OK, json!({"data":{"projectStatuses":{
-                "nodes":[{"id":"planned","type":"planned","position":0.0,"teamId":null}],
-                "pageInfo":{"hasNextPage":false,"endCursor":null}
-            }}})),
-            json_response(
-                StatusCode::OK,
-                json!({ "data": { "projectCreate": { "project": { "id": "project-1" } } } }),
-            ),
-            json_response(
-                StatusCode::OK,
-                json!({ "data": { "initiativeToProjectCreate": { "initiativeToProject": { "id": "link-1" } } } }),
-            ),
-        ])
-        .await;
-        let client = LinearClient::with_base_url(
-            "linear-secret".to_string(),
-            Some("team-9".to_string()),
-            base_url,
-        );
-
-        let project_id = client
-            .create_project(
-                "initiative-1",
-                "Wave Chat",
-                &ProjectContent {
-                    metric_targets: Vec::new(),
-                    workflow: String::new(),
-                    krs: vec![PmKr {
-                        text: "Replies stream".to_string(),
-                        holds: false,
-                    }],
-                },
-                None,
-            )
-            .await
-            .expect("create project");
-
-        assert_eq!(project_id, "project-1");
-        let requests = requests.lock().await;
-        let create: Value = serde_json::from_str(&requests[1].body).expect("create json");
-        assert_eq!(create["variables"]["name"], "Wave Chat");
-        let content = create["variables"]["content"].as_str().unwrap();
-        assert!(content.contains("- [ ] Replies stream"));
-        assert!(!content.contains("flow:"));
-        let attach: Value = serde_json::from_str(&requests[2].body).expect("attach json");
-        assert_eq!(attach["variables"]["initiativeId"], "initiative-1");
-        assert_eq!(attach["variables"]["projectId"], "project-1");
-    }
-
-    #[tokio::test]
-    async fn update_project_replaces_definition_and_krs() {
-        let (base_url, requests) = test_server::spawn(vec![json_response(
-            StatusCode::OK,
-            json!({ "data": { "projectUpdate": { "project": { "id": "project-1" } } } }),
-        )])
-        .await;
-        let client = LinearClient::with_base_url(
-            "linear-secret".to_string(),
-            Some("team-9".to_string()),
-            base_url,
-        );
-
-        client
-            .update_project(
-                "project-1",
-                "Wave Chat",
-                &ProjectContent {
-                    metric_targets: Vec::new(),
-                    workflow: "task-design".to_string(),
-                    krs: vec![PmKr {
-                        text: "Replies survive every restart boundary".to_string(),
-                        holds: false,
-                    }],
-                },
-            )
-            .await
-            .expect("update project");
-
-        let requests = requests.lock().await;
-        let update: Value = serde_json::from_str(&requests[0].body).expect("update json");
-        assert_eq!(update["variables"]["id"], "project-1");
-        assert!(update["variables"]["content"]
-            .as_str()
-            .expect("content")
-            .contains("Replies survive every restart boundary"));
-        assert!(update["variables"]["content"]
-            .as_str()
-            .expect("content")
-            .contains("workflow: task-design"));
-    }
-
-    #[tokio::test]
-    async fn project_status_selection_preserves_team_preference_and_completion_scope() {
+    async fn project_status_selection_prefers_team_then_position_and_id() {
         let pages = [
             json!({"data":{"projectStatuses":{"nodes":[
                 {"id":"workspace", "type":"completed", "teamId":null, "position":0.0},
@@ -2950,16 +2496,9 @@ mod tests {
                 {"id":"started", "type":"started", "teamId":"selected", "position":0.0}
             ], "pageInfo":{"hasNextPage":false, "endCursor":null}}}}),
         ];
-        for (team, preferred, scope, expected) in [
-            ("selected", "a-tie", Some("selected"), Some("a-tie")),
-            ("selected", "a-tie", Some("current"), Some("current-done")),
-            ("selected", "a-tie", None, Some("workspace")),
-            ("missing", "workspace", Some("missing"), None),
-        ] {
+        for (team, preferred) in [("selected", "a-tie"), ("missing", "workspace")] {
             let responses = pages
                 .iter()
-                .cycle()
-                .take(4)
                 .map(|page| json_response(StatusCode::OK, page.clone()))
                 .collect();
             let (base_url, _) = test_server::spawn(responses).await;
@@ -2971,20 +2510,6 @@ mod tests {
                     .unwrap(),
                 preferred
             );
-            let completion = client
-                .completed_project_status(&ProjectStatusRef {
-                    id: "current-status".into(),
-                    r#type: "started".into(),
-                    team_id: scope.map(str::to_string),
-                })
-                .await;
-            match expected {
-                Some(id) => assert_eq!(completion.unwrap(), id),
-                None => assert!(completion
-                    .unwrap_err()
-                    .to_string()
-                    .contains("no completed Project status in the scope of status current-status")),
-            }
         }
     }
 
@@ -3009,70 +2534,6 @@ mod tests {
                 .await
                 .unwrap_err();
             assert!(error.to_string().contains("cursor"));
-        }
-    }
-
-    #[tokio::test]
-    async fn complete_and_archive_project_reports_provider_refusal() {
-        let (base_url, _requests) = test_server::spawn(vec![
-            json_response(
-                StatusCode::OK,
-                json!({ "data": { "project": { "archivedAt": null,
-                    "status": { "id": "done", "type": "completed", "teamId": null } } } }),
-            ),
-            json_response(
-                StatusCode::OK,
-                json!({ "data": { "projectArchive": { "success": false } } }),
-            ),
-        ])
-        .await;
-        let client = LinearClient::with_base_url(
-            "linear-secret".to_string(),
-            Some("team-9".to_string()),
-            base_url,
-        );
-
-        let error = client
-            .complete_and_archive_project("project-1")
-            .await
-            .expect_err("provider refused archive");
-        assert!(error
-            .to_string()
-            .contains("Linear did not archive Project project-1"));
-    }
-
-    #[tokio::test]
-    async fn complete_and_archive_project_requires_confirmed_completion() {
-        for project in [
-            Value::Null,
-            json!({"status":{"id":"started", "type":"started", "teamId":null}}),
-        ] {
-            let (base_url, _) = test_server::spawn(vec![
-                json_response(
-                    StatusCode::OK,
-                    json!({"data":{"project":{"archivedAt":null,
-                        "status":{"id":"started", "type":"started", "teamId":null}}}}),
-                ),
-                json_response(
-                    StatusCode::OK,
-                    json!({"data":{"projectStatuses":{"nodes":[
-                        {"id":"done", "type":"completed", "teamId":null, "position":0.0}
-                    ], "pageInfo":{"hasNextPage":false, "endCursor":null}}}}),
-                ),
-                json_response(
-                    StatusCode::OK,
-                    json!({"data":{"projectUpdate":{"success":true, "project":project}}}),
-                ),
-            ])
-            .await;
-            let client = LinearClient::with_base_url("fixture".into(), None, base_url);
-            let error = client
-                .complete_and_archive_project("project-1")
-                .await
-                .unwrap_err();
-            assert!(error
-                .to_string()
-                .contains("did not complete Project project-1"));
         }
     }
 
@@ -3103,95 +2564,6 @@ mod tests {
             .contains("issueUpdate"));
         assert_eq!(body["variables"]["id"], "issue-9");
         assert_eq!(body["variables"]["teamId"], "team-prd");
-    }
-
-    #[tokio::test]
-    async fn create_update_and_comment_map_to_linear_mutations() {
-        let (base_url, requests) = test_server::spawn(vec![
-            json_response(
-                StatusCode::OK,
-                json!({
-                    "data": {
-                        "workflowStates": {
-                            "nodes": [
-                                { "id": "state-in-progress", "position": 2.0 },
-                                { "id": "state-todo", "position": 1.0 }
-                            ]
-                        }
-                    }
-                }),
-            ),
-            json_response(
-                StatusCode::OK,
-                json!({ "data": { "issueCreate": { "issue": { "id": "issue-123" } } } }),
-            ),
-            json_response(
-                StatusCode::OK,
-                json!({ "data": { "issueUpdate": { "issue": { "id": "issue-123" } } } }),
-            ),
-            json_response(
-                StatusCode::OK,
-                json!({ "data": { "commentCreate": { "comment": { "id": "comment-1" } } } }),
-            ),
-        ])
-        .await;
-        let client = LinearClient::with_base_url(
-            "linear-secret".to_string(),
-            Some("team-9".to_string()),
-            base_url,
-        );
-
-        let item_id = client
-            .create_item(
-                "project-123",
-                &PmItemCreate {
-                    name: "Implement client".to_string(),
-                    description: "Build the GraphQL adapter".to_string(),
-                },
-            )
-            .await
-            .expect("create item succeeds");
-        client
-            .update_item(
-                &item_id,
-                &PmItemUpdate {
-                    name: Some("Implement Linear client".to_string()),
-                    description: Some("Build the GraphQL adapter and tests".to_string()),
-                },
-            )
-            .await
-            .expect("update item succeeds");
-        client
-            .comment(&item_id, "Shipped in v0.9.9")
-            .await
-            .expect("comment succeeds");
-
-        assert_eq!(item_id, "issue-123");
-        let requests = requests.lock().await;
-        assert_eq!(requests.len(), 4);
-
-        // create_item first resolves the team's active (unstarted) state, then
-        // sends that lowest-position state id as stateId on issueCreate so new
-        // issues land in Todo rather than the hidden Backlog.
-        let states_body: Value =
-            serde_json::from_str(&requests[0].body).expect("states body is json");
-        assert!(states_body["query"]
-            .as_str()
-            .expect("query present")
-            .contains("UnstartedWorkflowStates"));
-
-        let create_body: Value =
-            serde_json::from_str(&requests[1].body).expect("create body is json");
-        assert_eq!(create_body["variables"]["stateId"], json!("state-todo"));
-        let update_body: Value =
-            serde_json::from_str(&requests[2].body).expect("update body is json");
-        assert_eq!(
-            update_body["variables"]["input"],
-            json!({
-                "title": "Implement Linear client",
-                "description": "Build the GraphQL adapter and tests",
-            })
-        );
     }
 
     #[tokio::test]
@@ -3260,72 +2632,6 @@ mod tests {
             .expect("query present")
             .contains("commentUpdate"));
         assert_eq!(comment["variables"]["id"], json!("comment-1"));
-    }
-
-    #[tokio::test]
-    async fn update_item_omits_absent_text_fields() {
-        let (base_url, requests) = test_server::spawn(vec![json_response(
-            StatusCode::OK,
-            json!({ "data": { "issueUpdate": { "issue": { "id": "issue-123" } } } }),
-        )])
-        .await;
-        let client = LinearClient::with_base_url("linear-secret".to_string(), None, base_url);
-
-        client
-            .update_item(
-                "issue-123",
-                &PmItemUpdate {
-                    name: None,
-                    description: Some("Only the description changes".to_string()),
-                },
-            )
-            .await
-            .expect("description-only update succeeds");
-
-        let requests = requests.lock().await;
-        let update_body: Value =
-            serde_json::from_str(&requests[0].body).expect("update body is json");
-        assert_eq!(
-            update_body["variables"]["input"],
-            json!({ "description": "Only the description changes" })
-        );
-        assert!(update_body["variables"]["input"].get("title").is_none());
-    }
-
-    #[tokio::test]
-    async fn create_item_omits_state_when_team_has_no_unstarted_state() {
-        let (base_url, requests) = test_server::spawn(vec![
-            json_response(
-                StatusCode::OK,
-                json!({ "data": { "workflowStates": { "nodes": [] } } }),
-            ),
-            json_response(
-                StatusCode::OK,
-                json!({ "data": { "issueCreate": { "issue": { "id": "issue-123" } } } }),
-            ),
-        ])
-        .await;
-        let client = LinearClient::with_base_url(
-            "linear-secret".to_string(),
-            Some("team-9".to_string()),
-            base_url,
-        );
-
-        client
-            .create_item(
-                "project-123",
-                &PmItemCreate {
-                    name: "Implement client".to_string(),
-                    description: "Build the GraphQL adapter".to_string(),
-                },
-            )
-            .await
-            .expect("create item succeeds");
-
-        let requests = requests.lock().await;
-        let create_body: Value =
-            serde_json::from_str(&requests[1].body).expect("create body is json");
-        assert_eq!(create_body["variables"]["stateId"], Value::Null);
     }
 
     #[tokio::test]
@@ -3558,91 +2864,54 @@ mod tests {
         let (item, project) = client.issue_ownership("LOO-42").await.unwrap().unwrap();
         let project = project.unwrap();
         assert_eq!(item.project_id.as_deref(), Some("project-api"));
-        assert_eq!(item.team_id, "team-loo");
+        assert_eq!(item.team_id.as_deref(), Some("team-loo"));
         assert_eq!(project.initiative_ids, ["initiative-product"]);
         assert_eq!(project.team_ids, ["team-loo"]);
     }
 
     #[tokio::test]
-    async fn complete_item_resolves_state_from_the_issue_team_not_the_wave_team() {
-        // The client is bound to the repository Team, but this fixture puts the
-        // issue in a different Team. The completed state must be
-        // resolved from the issue's own team or Linear rejects the transition.
-        let (base_url, requests) = test_server::spawn(vec![
-            json_response(
-                StatusCode::OK,
-                json!({ "data": { "issue": { "team": { "id": "team-eng" } } } }),
-            ),
-            json_response(
-                StatusCode::OK,
-                json!({ "data": { "workflowStates": { "nodes": [{ "id": "state-done" }] } } }),
-            ),
-            json_response(
-                StatusCode::OK,
-                json!({ "data": { "issueUpdate": { "issue": { "id": "ENG-7" } } } }),
-            ),
-        ])
-        .await;
-        let client = LinearClient::with_base_url(
-            "linear-secret".to_string(),
-            Some("team-wave".to_string()),
-            base_url,
-        );
+    async fn item_state_uses_the_issue_team_and_lowest_position_for_each_outcome() {
+        for target in ["completed", "unstarted", "canceled"] {
+            let (base_url, requests) = test_server::spawn(vec![
+                json_response(
+                    StatusCode::OK,
+                    json!({ "data": { "issue": { "team": { "id": "team-eng" } } } }),
+                ),
+                json_response(
+                    StatusCode::OK,
+                    json!({ "data": { "workflowStates": { "nodes": [
+                        { "id": "state-secondary", "position": 2.0 },
+                        { "id": "state-default", "position": 1.0 }
+                    ] } } }),
+                ),
+                json_response(
+                    StatusCode::OK,
+                    json!({ "data": { "issueUpdate": { "issue": { "id": "ENG-7" } } } }),
+                ),
+            ])
+            .await;
+            // The issue belongs to a different Team from the repository binding.
+            let client = LinearClient::with_base_url(
+                "linear-secret".to_string(),
+                Some("team-wave".to_string()),
+                base_url,
+            );
+            let state = client.item_state_id("ENG-7", target).await.unwrap();
+            assert_eq!(state, "state-default");
+            client.set_item_state("ENG-7", &state).await.unwrap();
 
-        client.complete_item("ENG-7").await.expect("complete item");
-
-        let requests = requests.lock().await;
-        assert_eq!(requests.len(), 3);
-
-        let team_body: Value = serde_json::from_str(&requests[0].body).expect("team body is json");
-        assert!(team_body["query"]
-            .as_str()
-            .expect("query present")
-            .contains("IssueTeam"));
-        assert_eq!(team_body["variables"]["id"], json!("ENG-7"));
-
-        // The state lookup carries the issue's team, never the wave-bound team.
-        // Sabotage the fix (resolve from `team_id`) and this assertion goes red.
-        let states_body: Value =
-            serde_json::from_str(&requests[1].body).expect("states body is json");
-        assert_eq!(states_body["variables"]["teamId"], json!("team-eng"));
-
-        let set_body: Value = serde_json::from_str(&requests[2].body).expect("set body is json");
-        assert_eq!(set_body["variables"]["stateId"], json!("state-done"));
-        assert_eq!(set_body["variables"]["id"], json!("ENG-7"));
-    }
-
-    #[tokio::test]
-    async fn reopen_item_resolves_state_from_the_issue_team_not_the_wave_team() {
-        let (base_url, requests) = test_server::spawn(vec![
-            json_response(
-                StatusCode::OK,
-                json!({ "data": { "issue": { "team": { "id": "team-eng" } } } }),
-            ),
-            json_response(
-                StatusCode::OK,
-                json!({ "data": { "workflowStates": { "nodes": [
-                    { "id": "state-todo", "position": 1.0 }
-                ] } } }),
-            ),
-            json_response(
-                StatusCode::OK,
-                json!({ "data": { "issueUpdate": { "issue": { "id": "ENG-7" } } } }),
-            ),
-        ])
-        .await;
-        let client = LinearClient::with_base_url(
-            "linear-secret".to_string(),
-            Some("team-wave".to_string()),
-            base_url,
-        );
-
-        client.reopen_item("ENG-7").await.expect("reopen item");
-
-        let requests = requests.lock().await;
-        let states_body: Value =
-            serde_json::from_str(&requests[1].body).expect("states body is json");
-        assert_eq!(states_body["variables"]["teamId"], json!("team-eng"));
+            let requests = requests.lock().await;
+            let lookup: Value = serde_json::from_str(&requests[1].body).unwrap();
+            assert_eq!(
+                lookup["variables"],
+                json!({"teamId":"team-eng", "type":target})
+            );
+            let update: Value = serde_json::from_str(&requests[2].body).unwrap();
+            assert_eq!(
+                update["variables"],
+                json!({"id":"ENG-7", "stateId":"state-default"})
+            );
+        }
     }
 
     #[test]

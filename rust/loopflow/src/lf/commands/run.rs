@@ -312,7 +312,7 @@ fn build_prompt_at(
     let task_input = prepare_task_input(cli)?;
     let task_checkout = match &task_input {
         Some((_, seed)) => {
-            std::fs::canonicalize(&seed.task.worktree)? == std::fs::canonicalize(&repo_root)?
+            std::fs::canonicalize(seed.task.worktree()?)? == std::fs::canonicalize(&repo_root)?
         }
         None => false,
     };
@@ -1541,6 +1541,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
 
     #[test]
     fn worktree_harness_preloads_committed_and_untracked_scratch_with_provenance() {
+        let _machine = crate::journal::TestLedgerGuard::new();
         let repo = loopflow_test_support::TestRepo::new();
         repo.create_file(".lf/skills/proof.md", "inspect the complete basis");
         repo.create_file("scratch/a-committed.md", "committed evidence bytes");
@@ -1781,6 +1782,10 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         let goal =
             "## Objective\nShip a reliable release.\n\n## Bounds\nKeep rollback available.\n";
         repo.create_file("wave/release/GOAL.md", goal);
+        crate::store::sqlite::SqliteStore::new(&home.path().join(".lf/loopflow.db"))
+            .unwrap()
+            .ensure_wave(repo.path().to_str().unwrap(), "release")
+            .unwrap();
         let cli = Cli::parse_from(["lf", "-i", "--wave", "release", "design"]);
         let built = build_prompt_at(
             Some("design"),

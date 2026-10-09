@@ -2,11 +2,17 @@
 requires: PR or branch diff, source code, and available design context
 produces: self-contained HTML walkthrough of user behavior, key data models, and APIs
 ---
-Create a minimalist HTML walkthrough centered on user behaviors, data structures, and APIs, with fewer, larger code excerpts.
+Create a minimalist HTML walkthrough of what changes for users and how the key data models and APIs produce that change, with fewer, larger code excerpts.
 
 Assume the reader helped design the change and knows its goals, but does not
-know the implementation. Show the user's actions, the few concepts representing
-them, and the APIs that change their state. Treat implementation as evidence,
+know the implementation. Lead with what changes for users: what they can do,
+what they see, and how failure or recovery differs. Then center the few models
+and APIs that explain that behavior and matter to their judgment. Show what
+changes from the base: fields, relationships, ownership,
+callers, state transitions and return contracts. An unchanged type can acquire
+a different role when its readers, writers or relationships change. Explain
+existing behavior only where needed to understand that shift; do not give a
+tour of the current system. Treat implementation as evidence,
 not a commitment: expose where the code fits the intended experience and where
 a product choice remains. Let real snippets carry the review; use prose to
 connect them and explain consequential choices. Spend the page on a few useful
@@ -22,34 +28,39 @@ code examples, with restrained typography, generous whitespace, and little decor
    source or context instead of inventing it. Prior design context is useful,
    not required.
 
-2. **Map the experience to the code.** Open with a short goal and delivered
-   scope, then a short map written for someone who does not know the code:
+2. **Choose the review's center and shape.** Ask what this particular reader
+   needs to see to decide whether the change is done right or wrong. Open with
+   that consequential user-visible shift and its delivered scope, then show
+   the model and API changes that cause it. Be creative about the
+   structure: a before/after model comparison, a changed relationship diagram,
+   an API contract trace, or a failure-and-recovery story may carry different
+   changes best. Choose deliberately for this diff and reader; do not reuse a
+   fixed report outline or force novelty where it does not help judgment.
 
-   | When you… | What happens | Where the code controls this |
-   | --- | --- | --- |
-   | Reopen a saved draft | The last saved text appears so editing can continue. | `open_draft` loads the saved record and returns its text to the editor. |
+   Select the few key models and APIs, not an inventory. For each, identify
+   what is added, removed, directly mutated, or related to differently. Trace
+   how API inputs, outputs, effects and failure behavior shift with the model.
+   An unchanged signature may now save locally instead of calling a provider;
+   that is an API change worth showing. Distinguish preserved behavior from
+   changes introduced here and future proposals.
 
-   Use concrete actions and complete explanations of their visible results.
-   Explain what each named type or API controls; a symbol alone is not an
-   explanation. Avoid compressed labels such as “Resume → recorded mode,”
-   unexplained field names, or headings such as “owners” that require knowing
-   the implementation. Keep the map short by choosing fewer rows, not by
-   removing the words that explain the behavior. Link each row to its excerpts.
-
-   Choose the few data structures and APIs that explain the product contract;
-   omit incidental helpers and exhaustive file inventories. Show what owns state, what is derived,
-   and which distinctions the caller must understand. Make changes from the
-   base explicit. Existing mechanisms can supply context without being claimed
-   as this PR's work.
+   Use a short map only when it helps orientation. Write concrete actions and
+   visible consequences, with links to the excerpts that explain the changes.
+   A symbol alone is not an explanation. Omit incidental helpers, repeated
+   background and familiar goals that do not help assess the diff.
 
 3. **Choose fewer, larger snippets.** Organize a few stops around the user
    behaviors and the data structures and APIs that produce them. Each stop connects:
 
-   - **Behavior:** a concrete action and its result, stated in plain language.
-   - **Data structure:** a real type, schema, or declaration showing the relevant
-     fields, relationships, or states.
-   - **API:** the public signature and decisive implementation branch showing
-     how that state changes and what the caller receives.
+   - **Behavior first:** a concrete action and how its visible result changes
+     from the base, including consequential failure or recovery differences.
+   - **Data structure:** real before/after types, schema or declarations showing
+     the changed fields, relationships or ownership. If the type is unchanged,
+     show the changed relationship or use rather than repeating its definition.
+   - **API:** the old and new contract, with public signatures and decisive
+     implementation branches showing changed inputs, effects, results or
+     failure behavior. Include the old path or its deletion when that explains
+     the change better than the new implementation alone.
    - **Review note:** a brief annotation for ownership, a surprising tradeoff,
      a mismatch, or a product decision that the snippets do not explain alone.
 
@@ -66,8 +77,14 @@ code examples, with restrained typography, generous whitespace, and little decor
    These are reading priorities, not four required panels. Adapt to the change.
    Show a shared data structure once and link back to it;
    do not force a new type or a finding into every stop. For prose or config
-   changes, show the instructions or declarations that control behavior. Prefer
-   before/after snippets when they reveal a changed contract more clearly.
+   changes, show the instructions or declarations that control behavior. Default
+   to inline unified diffs for changed contracts: removed lines in red, added
+   lines in green, with visible −/+ markers so color is not the only signal.
+   Keep enough unchanged context to follow the type or decisive branch. Prefer
+   one diff over separate before/after blocks that make the reader compare from
+   memory. Use plain excerpts for unchanged context; label wholly new code.
+   Generate diffs from the pinned source revisions, preserve source text, and
+   caption both sides with their revision and line range.
 
    Prefer one or two substantial excerpts per stop: a complete relevant type,
    function, or coherent branch with enough surrounding code to explain it.
@@ -119,8 +136,9 @@ code examples, with restrained typography, generous whitespace, and little decor
 
    Default to one wide reading column so larger excerpts remain readable. Use
    side-by-side excerpts only when direct comparison helps and neither becomes
-   cramped; stack them on narrow screens. Let the opening map stack into labeled rows on narrow
-   screens rather than squeezing explanations into tiny columns. Keep central
+   cramped; stack them on narrow screens. If using an opening map, let it stack
+   into labeled rows on narrow screens rather than squeezing explanations into
+   tiny columns. Keep central
    code out of disclosure controls and use disclosures for secondary
    implementation and evidence. Support keyboard navigation and printing.
    A diagram earns space only when it clarifies state
@@ -131,10 +149,12 @@ code examples, with restrained typography, generous whitespace, and little decor
    overflow, and disclosures. Fix defects before delivery. If rendering is
    unavailable, state the limit. Recheck excerpts against the named revisions.
 
-   Read the opening map without following links or knowing any symbols: is it
-   clear what the caller does, what happens, and what the named code controls?
-   Then read only the behavior labels, models, and API snippets: can the
-   collaborator explain the normal path, failure, and recovery? Read the annotations:
+   Read the opening without following links: does it put this reader's most
+   consequential judgment first? Then read only the models and API snippets:
+   can the collaborator explain what changed from the base, including changed
+   relationships, and the normal path, failure and recovery? Would the page
+   still read the same without this diff? If so, replace the inventory with
+   evidence of the actual change. Read the annotations:
    does each add a connection, constraint, evidence limit, or decision the code
    cannot communicate alone? Remove the rest. Finally, can adjacent snippets be
    combined, or a visual element removed, without losing meaning? Prefer the

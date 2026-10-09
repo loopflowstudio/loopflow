@@ -405,6 +405,7 @@ Test skill body.
 
     #[test]
     fn large_task_launch_stays_within_context_budget_and_preserves_sources() {
+        let _home = crate::journal::TestLedgerGuard::new();
         use crate::engine::context_budget::BudgetKey;
         let goal_tokens = BudgetKey::GoalTokens.default_limit();
         let input_bytes = BudgetKey::InputBytes.default_limit();
@@ -434,6 +435,18 @@ Test skill body.
                 .collect::<String>()
         );
         assert!(message.len() > 1_048_576);
+        let store = crate::store::sqlite::SqliteStore::new(
+            &crate::store::database_path_from_env().unwrap(),
+        )
+        .unwrap();
+        store
+            .ensure_wave(
+                &crate::repository::CanonicalRepo::discover(tmp.path())
+                    .unwrap()
+                    .to_string(),
+                "infrastructure/release",
+            )
+            .unwrap();
         let prepared = prepare_process_prompt(
             &default_test_config(),
             ProcessPromptInput {
@@ -511,6 +524,7 @@ Test skill body.
 
     #[test]
     fn repository_ancestor_and_selected_wave_memory_share_one_budget() {
+        let _home = crate::journal::TestLedgerGuard::new();
         let tmp = create_repo_fixture();
         let inherited = "Parent decisions and observations.\n".repeat(8_000);
         let own = "Release decisions and observations.\n".repeat(2_000);
@@ -540,6 +554,18 @@ Test skill body.
             .into(),
             ..default_test_config()
         };
+        let store = crate::store::sqlite::SqliteStore::new(
+            &crate::store::database_path_from_env().unwrap(),
+        )
+        .unwrap();
+        store
+            .ensure_wave(
+                &crate::repository::CanonicalRepo::discover(tmp.path())
+                    .unwrap()
+                    .to_string(),
+                "infrastructure/delivery/release",
+            )
+            .unwrap();
         let prepared = prepare_process_prompt(
             &config,
             ProcessPromptInput {
@@ -664,6 +690,7 @@ Test skill body.
 
     #[test]
     fn implement_launch_treats_kickoff_plan_and_intent_as_references() {
+        let _home = crate::journal::TestLedgerGuard::new();
         let tmp = create_repo_fixture();
         fs::create_dir_all(tmp.path().join("scratch/nested")).unwrap();
         let plan = "Jack Heart accepted the design on 2026-09-30. Build Unit 1 first.";
@@ -676,6 +703,18 @@ Test skill body.
             "Jack previously invoked $kickoff.",
         )
         .unwrap();
+        let store = crate::store::sqlite::SqliteStore::new(
+            &crate::store::database_path_from_env().unwrap(),
+        )
+        .unwrap();
+        store
+            .ensure_wave(
+                &crate::repository::CanonicalRepo::discover(tmp.path())
+                    .unwrap()
+                    .to_string(),
+                "product",
+            )
+            .unwrap();
         let prepared = prepare_process_prompt(
             &default_test_config(),
             ProcessPromptInput {

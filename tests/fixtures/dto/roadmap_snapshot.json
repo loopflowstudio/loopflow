@@ -71,7 +71,8 @@
               "completed": false,
               "assignee": null,
               "state": "unstarted",
-              "completed_at": null
+              "completed_at": null,
+              "sync": null
             },
             "reference": {
               "issue_url": "https://linear.app/loopflow/issue/W2-144/make-lf-roadmap-the-machine-wide-view",
@@ -435,7 +436,8 @@
               "completed": false,
               "assignee": null,
               "state": "unstarted",
-              "completed_at": null
+              "completed_at": null,
+              "sync": null
             },
             "reference": {
               "issue_url": "https://linear.app/loopflow/issue/W2-131/show-the-all-wave-roadmap",
@@ -830,7 +832,8 @@
               "completed": false,
               "assignee": null,
               "state": "unstarted",
-              "completed_at": null
+              "completed_at": null,
+              "sync": null
             },
             "reference": {
               "issue_url": null,
@@ -878,13 +881,14 @@
             "task": {
               "id": "issue-later",
               "identifier": "W2-141",
-              "name": "Now + Available work views \u2014 research",
+              "name": "Now + Available work views — research",
               "description": "Research delivered in merged PR.",
               "rank": 0,
               "completed": true,
               "assignee": null,
               "state": "completed",
-              "completed_at": null
+              "completed_at": null,
+              "sync": null
             },
             "reference": {
               "issue_url": "https://linear.app/loopflow/issue/W2-141/now-available-work-views-research",
@@ -981,7 +985,8 @@
                 "text": "A parallel concept anywhere is a failure event",
                 "holds": false
               }
-            ]
+            ],
+            "sync": null
           }
         ],
         "truncated": false

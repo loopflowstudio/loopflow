@@ -1185,6 +1185,18 @@ Manage Wave identity, placement and planning
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
+## lf wave edit
+
+Replace stored Wave documents without modifying repository files
+
+| Argument | What it does |
+|---|---|
+| `<wave>` | wave |
+| `--goal` | goal |
+| `--memory` | memory |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
 ## lf wave new-chapter
 
 Rotate this Wave using its exact destination in a retained chapter plan
@@ -1410,6 +1422,18 @@ Project-owned planning configuration
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
+## lf project edit
+
+Update a Project's name or summary
+
+| Argument | What it does |
+|---|---|
+| `<project>` | project |
+| `--name` | name |
+| `--summary` | summary |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
 ## lf project workflow
 
 Select and inspect reusable Workflows
@@ -1419,12 +1443,24 @@ Select and inspect reusable Workflows
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
+## lf project workflow source
+
+Read the authored definition without creating a repository file
+
+| Argument | What it does |
+|---|---|
+| `<project>` | project |
+| `<name>` | name |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
 ## lf project workflow list
 
 List Workflow definitions, including unavailable local files
 
 | Argument | What it does |
 |---|---|
+| `--project` | Include this Project's stored Wave definitions |
 | `--json` | json Default: false. |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
@@ -1448,16 +1484,7 @@ Select the Workflow future Tasks take up; captured Tasks stay unchanged
 |---|---|
 | `<project>` | project |
 | `<name>` | name |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
-| `--help / -h` | Print help |
-
-## lf project workflow customize
-
-Copy a builtin Workflow when needed and print its local path
-
-| Argument | What it does |
-|---|---|
-| `<name>` | name |
+| `--file` | Store this definition in the Wave |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
@@ -1467,6 +1494,16 @@ Concrete work and Task lifecycle
 
 | Argument | What it does |
 |---|---|
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf task sync
+
+Synchronize a Task; observed planning conflicts adopt Linear
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
@@ -1603,7 +1640,7 @@ Put a Task at a node of its workflow without running anything; `end` completes i
 
 ## lf task create
 
-File a Task in the current chapter
+Create a planning Task without allocating a checkout or starting work
 
 | Argument | What it does |
 |---|---|
@@ -1722,6 +1759,9 @@ Edit a Task's title or notes, before or after placement
 | `<issue>` | issue |
 | `--title` | title |
 | `--notes` | notes |
+| `--rank` | Zero-based position in the Project's Task order |
+| `--assignee` | Assignee identity; provider user ID in connected plans |
+| `--unassign` | unassign Default: false. |
 | `--wave / -w` | wave |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |

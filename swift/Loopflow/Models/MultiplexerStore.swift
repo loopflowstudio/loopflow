@@ -65,11 +65,9 @@ public final class MultiplexerStore {
 
     public func reveal(sessionId: String) {
         if let pane = pane(forSessionId: sessionId) {
-            setCollapsed(paneId: pane.id, collapsed: false)
             setFocusedPane(pane.id)
         } else if focusedPane.content == .empty {
             load(sessionId: sessionId)
-            setCollapsed(paneId: focusedPaneId, collapsed: false)
         } else {
             _ = _split(focusedPaneId, axis: .vertical, content: .session(id: sessionId))
         }
@@ -171,7 +169,6 @@ public final class MultiplexerStore {
                 _notify()
                 return
             }
-            setCollapsed(paneId: openPane.id, collapsed: false)
             setFocusedPane(openPane.id)
             return
         }
@@ -212,7 +209,6 @@ public final class MultiplexerStore {
     /// never replacing them.
     public func show(_ content: PaneContent) {
         if let pane = layout.allPanes.first(where: { $0.content == content }) {
-            setCollapsed(paneId: pane.id, collapsed: false)
             setFocusedPane(pane.id)
         } else if focusedPane.content == .empty {
             layout = layout.replacingContent(of: focusedPaneId, with: content)

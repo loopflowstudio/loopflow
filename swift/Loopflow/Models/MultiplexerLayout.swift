@@ -45,11 +45,21 @@ public indirect enum LayoutNode: Codable, Sendable, Equatable {
     }
 
     public func visible(excluding collapsed: Set<String>) -> LayoutNode? {
+        _filterPanes { !collapsed.contains($0.id) }
+    }
+
+    /// Removes a leaf and collapses its parent. Removing the final leaf returns nil.
+    public func removing(_ paneId: String) -> LayoutNode? {
+        _filterPanes { $0.id != paneId }
+    }
+
+    /// Both visibility and removal preserve surviving leaves and divider ratios.
+    private func _filterPanes(_ include: (PaneState) -> Bool) -> LayoutNode? {
         switch self {
-        case .leaf(let pane): return collapsed.contains(pane.id) ? nil : self
+        case .leaf(let pane): return include(pane) ? self : nil
         case .split(let axis, let first, let second, let ratio):
-            let left = first.visible(excluding: collapsed)
-            let right = second.visible(excluding: collapsed)
+            let left = first._filterPanes(include)
+            let right = second._filterPanes(include)
             switch (left, right) {
             case let (left?, right?): return .split(axis, first: left, second: right, ratio: ratio)
             case let (left?, nil): return left
@@ -99,24 +109,6 @@ public indirect enum LayoutNode: Codable, Sendable, Equatable {
                 second: .leaf(newPane),
                 ratio: ratio.clampedSplitRatio
             )
-        }
-    }
-
-    /// Removes a leaf and collapses its parent. Removing the final leaf returns nil.
-    public func removing(_ paneId: String) -> LayoutNode? {
-        switch self {
-        case .leaf(let pane):
-            return pane.id == paneId ? nil : self
-        case .split(let axis, let first, let second, let ratio):
-            if first.pane(for: paneId) != nil {
-                guard let updated = first.removing(paneId) else { return second }
-                return .split(axis, first: updated, second: second, ratio: ratio)
-            }
-            if second.pane(for: paneId) != nil {
-                guard let updated = second.removing(paneId) else { return first }
-                return .split(axis, first: first, second: updated, ratio: ratio)
-            }
-            return self
         }
     }
 

@@ -47,6 +47,32 @@ struct MultiplexerLayoutTests {
         #expect(LayoutNode.leaf(a).removing(a.id) == nil)
     }
 
+    @Test("Pruning nested panes retains surviving occurrences, axes and ratios")
+    func pruningRetainsSurvivingSplits() {
+        let a = PaneState(content: .session(id: "draft"))
+        let b = PaneState(content: .shell)
+        let c = PaneState(content: .files(taskId: "task"))
+        let left = LayoutNode.split(.horizontal, first: .leaf(a), second: .leaf(b), ratio: 0.3)
+        let tree = LayoutNode.split(.vertical, first: left, second: .leaf(c), ratio: 0.7)
+        let cases: [(Set<String>, LayoutNode?)] = [
+            ([], tree),
+            (["absent"], tree),
+            ([a.id], .split(.vertical, first: .leaf(b), second: .leaf(c), ratio: 0.7)),
+            ([b.id], .split(.vertical, first: .leaf(a), second: .leaf(c), ratio: 0.7)),
+            ([c.id], left),
+            ([a.id, b.id], .leaf(c)),
+            ([a.id, c.id], .leaf(b)),
+            ([b.id, c.id], .leaf(a)),
+            ([a.id, b.id, c.id], nil),
+        ]
+        for (hidden, expected) in cases {
+            #expect(tree.visible(excluding: hidden) == expected)
+            if hidden.count == 1, let id = hidden.first {
+                #expect(tree.removing(id) == expected)
+            }
+        }
+    }
+
     @Test("replacing pane content preserves identity and tree shape")
     func replacePreservesShape() {
         let a = PaneState(content: .empty)

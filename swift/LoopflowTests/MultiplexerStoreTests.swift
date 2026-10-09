@@ -4,6 +4,22 @@ import Testing
 @Suite("Multiplexer store")
 @MainActor
 struct MultiplexerStoreTests {
+    @Test("Reopening a hidden companion reveals its retained occurrence", arguments: [
+        PaneContent.files(taskId: "task"), .flowLog(taskId: "task"),
+    ])
+    func reopeningHiddenCompanion(content: PaneContent) {
+        let store = MultiplexerStore()
+        store.show(content)
+        let pane = store.focusedPane
+        store.setCollapsed(paneId: pane.id, collapsed: true)
+        #expect(store.visibleLayout == nil)
+        store.show(content)
+        #expect(store.visibleLayout == .leaf(pane))
+        #expect(store.focusedPane == pane)
+        store.show(content)
+        #expect(store.layout == .leaf(pane))
+    }
+
     @Test("Explicit zoom preserves selection; focus reveals that same selected pane")
     func explicitZoomPreservesSelection() {
         let store = MultiplexerStore()

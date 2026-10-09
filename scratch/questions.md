@@ -18,10 +18,13 @@ original capture—retains this snapshot across live takeover and multiple turns
 Crash-lost correlation remains unknown; this introduces no recovery replay or
 new execution owner.
 
-2026-10-09 record-cut finding: Claude interrupt/respawn reuses a cloned attachment
-inside one capture. Each spawn needs a fresh AgentProcess, with explicit handoff
-of the new attachment to the existing capture owner and harness. A mutable shared
-snapshot must not revive stale operations. The current identity writer refuses
-PID replacement; that protects history but is not accepted interrupt/resume
-behavior. Further launch work stops at this ownership correction. No new product
-decision or additional lifecycle owner is proposed.
+2026-10-09 implementation choice: Claude replacement is owned by the existing
+capture, with an exact expected snapshot. A reserved record is usable; only
+observed exit/spawn failure permits a fresh identity. Capture settlement and the
+next spawn advance together; pending dispatch/history never consult the mutable
+owner. Current source implements this for captured Claude; tests are unrun.
+Captured native launch now follows the same replacement rule, retaining an exact
+wait snapshot and pre-exec recording without headless process-group setup. Native
+foreground orphan cleanup, other providers and optional launches remain open.
+The native PTY fixture covers inherited descriptors/group, not configured terminal
+interaction; all new runtime proofs remain unrun.

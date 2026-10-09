@@ -14,8 +14,8 @@ Task completion remains independent of Workflow position and Process liveness.
 Focused Docker evidence covers that recovery and its resolved-disposition guards;
 the combined Rust gate and populated upgrades now pass. Swift remains with capable
 CI; configured stacked/due-return proof and Jack's complete demo remain. Jack Heart accepted usable local Tasks with historical export pending; unseen
-Linear concurrency remains a documented best-effort limit. Landing and
-Task completion are unauthorized.
+Linear concurrency remains a documented best-effort limit. Jack Heart authorized shipping on October 9 after accepting the HTML review;
+configured native acceptance and Swift evidence remain distinct.
 
 ## Decision and intended experience
 
@@ -33,7 +33,7 @@ liveness are independent facts. `task complete` is a distinct operation again.
 Linear completion changes Task status without moving the Workflow or inventing
 Process exits. Jack requested updating this design and continuing implementation.
 This supersedes October 7's alias decision and the corresponding implementation
-at `5876a8692`. The full change remains on PR #1499; landing is unauthorized.
+at `5876a8692`. The full change remains on PR #1499; Jack authorized landing on October 9.
 
 The experience: a Task has one outcome, an optional PR link, and one Workflow
 position, independent of its completion status. After normal delivery, its page says either **Done · Follow-up LOO-…**, or
@@ -553,7 +553,7 @@ race test matches Jack's existing policy and retains the overwrite counterexampl
 additional reads do not guarantee atomic writes. Historical export stays pending
 without blocking the local Task. No-PR research retains drafts and findings;
 merged Tasks need their filing disposition. The defaults below remain implementation
-choices, not separate decisions attributed to Jack. Native acceptance is unproven; landing is unauthorized.
+choices, not separate decisions attributed to Jack. Native acceptance is unproven; Jack authorized landing on October 9.
 
 1. **Truthful Flow launch.**
    `task_flow_launch_tests` holds a real mechanical Flow in a disposable Home:

@@ -1,5 +1,10 @@
 # LOO-418 implementation assumptions
 
+Delivery authorization (2026-10-09): Jack Heart accepted the HTML code walkthrough
+(“lg2m”), then explicitly requested “ship it.” This authorizes publication and
+landing; it does not claim a configured native demo or Swift pass. Installed
+0.13.10 ship is gate → land; the new waited/follow-through Flow ships in this PR.
+
 Jack Heart reaffirmed the existing Linear policy in the ongoing conversation:
 no further race-policy decision is needed. Observed Linear conflicts win; unseen
 concurrency is best effort. Gate now removes the agent-added zero-overwrite requirement and asserts the
@@ -35,8 +40,7 @@ in the design. The composed simulated-provider lifecycle has CLI/monitor wire pr
 Swift fixtures still need capable-CI execution. The local filing/completion and held-Flow composition now pass in Docker.
 Completion-before-filing recovery is implemented, including the operator’s finishing
 Flow and retained checkout. Historical remote-export uncertainty, Swift
-verification and the complete configured demo remain. No landing or installed-Home
-migration is authorized.
+verification and the complete configured demo remain. Jack authorized landing on October 9; installed-Home migration remains unauthorized.
 
 Implementation choice: `task follow-up --key` identifies an obligation across retries; the default is `follow-up`, and additional obligations use distinct keys. New local receipts pin child ID, Project, content and date; provider Team/state
 are resolved by common export, not pinned at filing. Historical receipts retain
@@ -66,7 +70,7 @@ October 8 integration: Jack Heart authorized stacking on committed LOO-406
 retaining independent completion and durable end requests. Jack retained Linear-wins
 for observed conflicts and best effort for unseen edits. The enabled counterexample
 records an overwritten unseen reopening without claiming an atomic write. Foreground export now owns provider relation delivery. Atomic filing/recovery and independent local reopening are implemented. Historical
-remote-creation uncertainty and remaining configured acceptance stay explicit in the design. Neither permits restoring Workflow/status coupling or a parallel provider writer. No landing is authorized.
+remote-creation uncertainty and remaining configured acceptance stay explicit in the design. Neither permits restoring Workflow/status coupling or a parallel provider writer. Jack authorized landing on October 9.
 
 October 8 implementation review: a locally filed child could export without its
 relation, and displayed links kept their old local name/date. Foreground export

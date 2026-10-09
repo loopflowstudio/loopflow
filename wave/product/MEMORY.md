@@ -15,8 +15,8 @@ Jack authorized stacking on LOO-406 `558a39232`: local planning, optional
 placement, independent completion. Jack retained best-effort unseen concurrency:
 observed Linear conflicts win; the enabled counterexample documents an overwritten
 unseen reopening despite matching readback, not an atomic-write guarantee.
-LOO-385 overlaps without closure authority. Full #1499 lifecycle proof precedes
-Jack’s demo; landing remains unauthorized.
+LOO-385 overlaps without closure authority. October 9: Jack approved the HTML
+walkthrough and requested shipping #1499; native-demo acceptance remains unproven.
 
 Placement, PR history and unresolved scope survive.
 Jack accepted normal delivery or the next Task/Wave pass finishing follow-through,

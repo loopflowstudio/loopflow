@@ -18,6 +18,10 @@ use crate::store::{PeerPlanningStatus, PeerProjectionConflict, StoreError, Store
 use super::planning_changes::PlanningChanges;
 use super::SqliteStore;
 
+// Projection and delivery share the same field-keyed winners, including the
+// mutation identity and provenance. Retries never rebuild a value-only index.
+type WinningFields<'a> = BTreeMap<&'a str, (&'a str, &'a PlanningMutation)>;
+
 fn invalid(error: impl std::fmt::Display) -> StoreError {
     StoreError::InvalidData(error.to_string())
 }
@@ -378,12 +382,12 @@ impl SqliteStore {
         let saved = export_in(&tx, repo, destination)?;
         let merged = saved.merge(incoming).map_err(invalid)?;
         reserve_incoming(&tx, repo, destination, incoming)?;
-        let mut objects: BTreeMap<_, Vec<_>> = BTreeMap::new();
+        let mut objects: BTreeMap<_, WinningFields<'_>> = BTreeMap::new();
         for (id, change) in merged.winners() {
             objects
                 .entry(change.object.clone())
                 .or_default()
-                .push((id, change));
+                .insert(change.field.as_str(), (id, change));
         }
         let held = selection_conflicts(&tx, repo, destination, &merged)?;
         retain_mutations(&tx, &saved, incoming)?;
@@ -457,10 +461,7 @@ impl SqliteStore {
             match project_fields(
                 &tx,
                 object,
-                winners.iter().filter_map(|(_, change)| {
-                    (change.field == "current_project_id")
-                        .then_some((change.field.as_str(), &change.value))
-                }),
+                std::iter::once(("current_project_id", &winners["current_project_id"].1.value)),
             ) {
                 Ok(()) => {}
                 Err(error) if projection_conflict(&error) => {
@@ -846,25 +847,21 @@ fn insert_and_project(
     conn: &Connection,
     object: &PlanningObject,
     repo: &str,
-    winners: &[(&str, &PlanningMutation)],
+    winners: &WinningFields<'_>,
     snapshot: &PlanningSnapshot,
 ) -> StoreResult<()> {
-    let fields: BTreeMap<_, _> = winners
-        .iter()
-        .map(|(_, change)| (change.field.as_str(), &change.value))
-        .collect();
     if !exists(conn, object)? {
         let required = |key: &str| {
-            fields
+            winners
                 .get(key)
-                .and_then(|value| value.as_str())
+                .and_then(|(_, change)| change.value.as_str())
                 .ok_or_else(|| invalid(format!("missing {key} for {}", object.id)))
         };
         match object.kind {
             PlanningKind::Wave => {
                 conn.execute(
                     "INSERT INTO waves(id,name,repo,created_at,parent_wave_id) VALUES(?1,?2,?3,unixepoch(),?4)",
-                    params![object.id, required("name")?, repo, fields["parent_wave_id"].as_str()],
+                    params![object.id, required("name")?, repo, winners["parent_wave_id"].1.value.as_str()],
                 )?;
             }
             PlanningKind::Project => {
@@ -878,26 +875,26 @@ fn insert_and_project(
                     params![object.id,required("project_id")?,required("issue_identifier")?])?;
             }
             PlanningKind::Comment => {
-                let content = fields["content"];
+                let content = &winners["content"].1.value;
                 conn.execute("INSERT INTO task_comments(id,task_id,body,author,created_at) VALUES(?1,?2,?3,?4,?5)",
                     params![object.id,required("task_id")?,content["body"].as_str(),content["author"].as_str(),content["created_at"].as_str()])?;
             }
         }
     }
     if object.kind == PlanningKind::Wave {
-        validate_wave(conn, object, &fields, repo)?;
+        validate_wave(conn, object, winners, repo)?;
     }
     let previous = delivery_fields(conn, object)?;
-    acquire_linear_frontier(conn, object, &fields, repo, snapshot)?;
+    acquire_linear_frontier(conn, object, winners, repo, snapshot)?;
     project_fields(
         conn,
         object,
-        fields
-            .iter()
-            .filter(|(field, _)| {
-                object.kind != PlanningKind::Wave || **field != "current_project_id"
+        winners
+            .values()
+            .filter(|(_, change)| {
+                object.kind != PlanningKind::Wave || change.field != "current_project_id"
             })
-            .map(|(&field, &value)| (field, value)),
+            .map(|(_, change)| (change.field.as_str(), &change.value)),
     )?;
     project_delivery_fields(conn, object, winners, snapshot, &previous)?;
     require_repository(conn, object, repo)
@@ -909,7 +906,7 @@ fn insert_and_project(
 fn acquire_linear_frontier(
     conn: &Connection,
     object: &PlanningObject,
-    fields: &BTreeMap<&str, &Value>,
+    winners: &WinningFields<'_>,
     repo: &str,
     snapshot: &PlanningSnapshot,
 ) -> StoreResult<()> {
@@ -918,7 +915,7 @@ fn acquire_linear_frontier(
         PlanningKind::Project => ("pm_projects", "external_project_id"),
         _ => return Ok(()),
     };
-    let Some(provider_id) = fields[mapping].as_str() else {
+    let Some(provider_id) = winners[mapping].1.value.as_str() else {
         return Ok(());
     };
     let mut observations = snapshot
@@ -1008,12 +1005,16 @@ fn acquire_linear_frontier(
                 let mut project: crate::pm::PmProject = serde_json::from_str(&body)?;
                 // Never promote the entity revision into relationship authority.
                 project.initiative_ids = serde_json::from_str(
-                    fields["planning_initiatives"]
+                    winners["planning_initiatives"]
+                        .1
+                        .value
                         .as_str()
                         .expect("validated relationship JSON"),
                 )?;
                 project.team_ids = serde_json::from_str(
-                    fields["planning_teams"]
+                    winners["planning_teams"]
+                        .1
+                        .value
                         .as_str()
                         .expect("validated relationship JSON"),
                 )?;
@@ -1090,7 +1091,7 @@ fn delivery_fields(
 fn project_delivery_fields(
     conn: &Connection,
     object: &PlanningObject,
-    winners: &[(&str, &PlanningMutation)],
+    winners: &WinningFields<'_>,
     snapshot: &PlanningSnapshot,
     previous: &BTreeMap<String, Value>,
 ) -> StoreResult<()> {
@@ -1101,7 +1102,7 @@ fn project_delivery_fields(
         PlanningKind::Project => PlanningChanges::Project(&project),
         _ => return Ok(()),
     };
-    for &(id, change) in winners {
+    for &(id, change) in winners.values() {
         if object.kind == PlanningKind::Task && change.field == "disposition" {
             if let Some(observation) = &change.linear {
                 super::task_state_delivery::adopt_peer_in(
@@ -1258,14 +1259,18 @@ fn reconcile_conflicts(
 fn validate_wave(
     conn: &Connection,
     object: &PlanningObject,
-    fields: &BTreeMap<&str, &Value>,
+    winners: &WinningFields<'_>,
     repo: &str,
 ) -> StoreResult<()> {
     let id = crate::id::WaveId::parse(&object.id).map_err(invalid)?;
-    let name = fields["name"]
+    let name = winners["name"]
+        .1
+        .value
         .as_str()
         .ok_or_else(|| invalid("Wave name must be text"))?;
-    let parent = fields["parent_wave_id"]
+    let parent = winners["parent_wave_id"]
+        .1
+        .value
         .as_str()
         .map(crate::id::WaveId::parse)
         .transpose()

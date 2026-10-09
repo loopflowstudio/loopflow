@@ -631,9 +631,10 @@ retains typed membership disputes after object rollback. Entity revisions cannot
 order relationships. `9355170fd` keeps scoped savepoints and borrowed heads.
 SQL passes; Rust/CLI/Desktop/installed acceptance is unproved.
 `270019c8d` isolates typed provider contradictions; malformed input aborts import.
-Task/Project regressions remain unexecuted. Grouped receipts, alternate acquisition,
-legacy association and Desktop remain. Parent `b6f34a6f8` supplies ordering,
-common status and repository sync. Design: `scratch/work-on-another-machine-name.md`.
+Grouped receipts, alternate acquisition, legacy association and Desktop remain.
+Local disposition helpers mint time/identity; peer import must retain both.
+Parent `b6f34a6f8` supplies ordering/status/repository sync.
+Design: `scratch/work-on-another-machine-name.md`.
 
 Joining publishes nothing. Mixed Linear exchange stays disabled pending composition,
 not by product policy. Fetch/import/publication stay separate; readback settles

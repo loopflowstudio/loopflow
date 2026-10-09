@@ -202,20 +202,20 @@ Earlier cut details: `e62431d0d:scratch/work-on-another-machine-name.md`.
 
 ## Remaining integration — October 8
 
-Reconciled against `270019c8d` and the October 8 compression.
-Acquisition precedes projection, membership evidence survives rollback, and valid
-contradictory provider facts now stay inside object isolation. Their Rust
-regressions remain unexecuted, so this establishes source agreement only.
-The remaining critical path is item 4's receipt/provider composition, then legacy
-association and Desktop presentation; mixed-provider exchange stays disabled.
+Reconciled against `7262b6b20` on October 8. The previous feedback's
+same-revision classification repair exists at `270019c8d`: Task/Project provider
+contradictions use `ProviderObservationConflict`, survive object rollback and
+retain independent imports. Malformed observations still abort import. The authored
+regressions check receipt flags/errors as well as pending values; they remain
+unexecuted. `7262b6b20` reduces winner selection and shares receipt baseline
+normalization without extending provider composition.
 
-October 8: provider identity/revision is implemented at `e608b0d2d`;
-`a30e831f4` removes duplicate projection and unused exchange APIs. `c6f55719d`
-repairs the two acquisition boundaries identified at `ce740b028`:
-rejected provider frontiers cannot project, and membership conflicts survive the
-object rollback. New regressions are authored, not executed. Item 4's grouped
-receipts and alternate acquisition paths remain, followed by legacy association
-and Desktop presentation before publication. No new decision from Jack Heart is required.
+The next implementation is item 4's grouped receipts and alternate acquisition
+paths, followed by legacy association and Desktop presentation. Mixed-provider
+exchange remains disabled. No new decision from Jack Heart is required. The
+locally available upstream history contains no newer changes to the common
+planning acquisition, scalar receipt or foreground lifetime owners; the committed
+parent boundary below still applies. This is source inspection, not a remote refresh.
 
 Source reconciliation at `4e3cb2160` supersedes the earlier no-production-caller
 finding: `6c0f2256f` connects exchange and `4e3cb2160` isolates destination attempts.
@@ -358,10 +358,28 @@ provenance gap; revise it with the completed composition, not as a product limit
    composed behavior.
 
    Complete grouped receipts through their existing common owners, not the scalar
-   field loop: creation/link attempts; Project structured content and complete-list
-   ordering; comment acquisition/delivery; disposition/cancellation and deletion.
-   Cover each accepted provider writer as well as peer import, including lost
-   replies and later local saves. Then finish legacy association and Desktop
+   field loop. Source inspection identifies the remaining seams:
+   - `planning_export.rs` owns creation/link attempts; imported identity alone
+     does not attach or settle them.
+   - `task_comments.rs::ingest_task_comment` owns provider revision checks and
+     delivery settlement, while authored comments also save `task_comment_deliveries`.
+     Peer projection currently writes the comment row directly and supplies neither
+     path. Preserve observed comments without echo and give peer-authored comments
+     stable delivery identity, including lost replies and later provider edits.
+   - `task_state_delivery.rs::queue_in` stamps the current time, mints a receipt UUID
+     and captures a local Workflow move. It cannot be called unchanged for imported
+     disposition: retain the peer's saved completion time and mutation identity,
+     reconcile existing uncertain receipts, and create no Workflow movement or
+     invented execution attribution. Reuse the receipt owner, not a lifecycle command.
+   - `planning_order.rs::observe_in` requires complete-list evidence; Task entity
+     revisions and scalar peer fields cannot settle a captured move. Project
+     structured content and `planning_changes.rs` deletion also retain their own
+     grouped baselines and attempts.
+
+   Cover alternate accepted provider writers, including reteam, archive/removal,
+   complete-list order and comment ingestion, not only Task/Project detail reads.
+   Existing local writers are evidence for reuse, not proof of peer composition.
+   Then finish legacy association and Desktop
    status before enabling mixed-provider foreground exchange and replacing its
    temporary diagnostic. This cut cannot repair LOO-406's unseen provider-write
    race or supply Linear compare-and-swap semantics.
@@ -436,4 +454,4 @@ Infrastructure child memory exists in this checkout.
 7. Replace PR copy and create a walkthrough of final behavior and evidence;
    publish #1491 for Jack Heart's review and stop without landing.
 
-Check (October 8 compress): `cargo fmt --all -- --check` and `git diff --check` pass; build, `cargo test -p loopflow --test planning_exchange_tests`, `cargo test -p loopflow --lib store::sqlite::planning_peers::tests -- --test-threads=1` and `cargo clippy --all-targets -- -D warnings` remain deferred to capable gate/CI after the recorded compilation timeouts, without repeating them. No Rust execution or composed acceptance is claimed.
+Check (October 8 realign, prose only): `git diff --check` passes; prior `cargo fmt --all -- --check` is unchanged; build, exchange/peer Rust tests and Clippy remain deferred to capable gate/CI without repeating compilation timeouts. Checkpoint CI skips the matrix while scratch remains (TESTING.md); republishing alone cannot supply this proof.

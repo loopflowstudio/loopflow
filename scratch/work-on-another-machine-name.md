@@ -66,7 +66,7 @@ that cannot enter the local tables, independently of field winner selection.
 
 The common SQLite writers retain peer ordering, stable mutation identities and
 an atomic import checkpoint. The move-after-join repair is committed at `b5dafd918`;
-`7395cf3bb` removes its selection coupling and repeated dependency scans. Public setup and the local-only foreground exchange now consume these store primitives; Rust execution remains unproved.
+`7395cf3bb` removes its selection coupling and repeated dependency scans. Public setup and local-only foreground exchange consume these primitives; focused executable evidence is below.
 Export reads existing identities rather than minting edits. Import and projection
 commit together; fetched Git history is not an import acknowledgement. Crashes before commit leave import retryable.
 CLI status separates fetched revisions, retained imports, current eligible-export
@@ -114,7 +114,7 @@ refuse overlap with unselected live records or retained journals. Incoming refer
 attach selected work to an unselected parent. Conflict settlement is destination
 scoped. An explicit canonical user UUID can be provisioned once or recovered on
 another store; connecting never invents a per-machine user. Public setup now consumes
-these APIs; Rust execution remains unproved. The common writer retains moves without changing
+these APIs; focused setup evidence is retained below. The common writer retains moves without changing
 sharing selection. Exchange now holds affected history instead of refusing the
 whole destination; the boundary and remaining proof are below.
 
@@ -139,6 +139,11 @@ preparation and mutation-decoder cuts remain at
 checkpoint fixtures remain at `fea5156eb`.
 
 Keep these replacements deleted:
+
+- Task creation receipt bypass after mapping-only import, missing-list readiness
+  rejection and required ancestor execution placement on first local use. Accepted
+  provider observations reconcile existing Task creation receipts; local placement
+  stays with its existing owner.
 
 - Copied planning, issue-derived identity, callbacks and their adoption fixtures.
   Placement consumes common planning after acquisition; the cold-worker fixture
@@ -186,9 +191,9 @@ Existing move/receipt/import fixtures retain local/provider moves, comments,
 independent exchange, losing values and execution. Rust execution remains unproved;
 omission is not convergence. Remaining grouped owners and acceptance are below.
 
-## Remaining integration — October 8
+## Remaining integration — October 9
 
-Current implementation: `3bebc219d`, retaining parent `ffe986160`.
+Starting checkpoint: `a6cb48664`, retaining parent `7c626ca23` (LOO-406).
 Destination-scoped status/conflicts (`de9470d5a`), common comment acquisition and
 receipts (`7e56c01fd`), and semantic Project content (`a518b985b`) are integrated.
 Their owners and preservation boundaries are described under **Delete — do not
@@ -206,16 +211,32 @@ Review kept the strict reader and portable-field exclusion rather than adding
 fallback values or exporting placement. Prior global Rust-unavailability claims
 are superseded by the focused results below, not by full composed acceptance.
 
-Creation/link receipt composition through `planning_export.rs` remains next:
-retain imported identities and uncertain attempts without minting replacements
-or acknowledging identity alone. No creation/link implementation was added in
-this repair; the remaining integration and review boundary are unchanged.
+October 9 implements Task creation **readback**, not Project/link or attempt transport.
+Accepted peer provider bodies now reconcile the original `planning_export.rs` receipt even when
+an earlier mapping-only import already attached the identity. Mapping alone retains
+uncertainty; the captured save boundary limits acknowledgement. Later losing saves,
+creation attempts and their identities survive. Review rejected an added check
+freezing Project membership to its creation snapshot: a later accepted move must
+remain possible. Project/link readback retains its existing owner until full receipt
+composition supplies explicit settlement. The focused regression covers mapping-only
+import, lost creation reply, later save, selected Linear winner and idempotent readback.
 
-Creation/link, order and deletion receipts, alternate acquisition paths, legacy
-association and Desktop presentation still follow. Comments and Task disposition
-have source composition, not composed acceptance. Mixed-provider exchange remains
-disabled until these owners compose; the existing common writer is available and
-is not a dependency blocker.
+Executable foreground feedback exposed missing acquisition ages and a readiness
+check that equated absent list inventory with invalid membership. Import retains
+the accepted provider age, without synthesizing membership-list evidence. Positive
+archive, membership and configured-Initiative contradictions still block readiness.
+Imported planning remains unplaced; a later common placement operation selects the
+local machine only when neither this Work nor its parent has a placement. Existing
+placements survive. The public work-watch regression now covers cold creation on
+both stores, offline comments/edits/completion, reconnect and retained execution
+including Machine placement. It uses synthetic provider facts without a connected
+Linear service; it does not establish mixed-provider delivery or real SSH.
+
+Creation/link **attempt transport**, order and deletion receipts, alternate
+acquisition paths, independent relationship ordering, legacy association and Desktop
+presentation remain. Mixed-provider exchange stays disabled until those owners
+compose; the parent writer is available, not a dependency blocker. No second planner,
+new schema, publication or landing belongs to this repair.
 
 The owned October 8 sync integrates pinned parent `ffe986160`, including
 `078a6642e`'s gate fixture/DTO repairs and reported Linux migration, native/public
@@ -245,7 +266,8 @@ export with remote history, and never republishes private held edits from a reta
 local Git document. An unchanged remote covering the export settles by readback
 without another commit. Uncertainty is saved before push; later local edits are
 compared with the attempted snapshot digest. Fetched, imported and publication
-revisions remain separate. SQL prepares/runs; composed Rust behavior is unexecuted.
+revisions remain separate. The public work-watch case passes in isolated Linux;
+other composed cases remain gate acceptance.
 Linear-connected repositories still do not exchange: grouped receipt and provider-path
 composition remain unfinished. The safety boundary's diagnostic still names the
 provenance gap; revise it with the completed composition, not as a product limitation.
@@ -255,9 +277,9 @@ provenance gap; revise it with the completed composition, not as a product limit
    `use` routes only future root Waves; descendants inherit saved membership. Joining
    and switching never enroll existing work. Root routing and imported-root isolation
    live in the existing peer draft. Status omits credential-bearing endpoints.
-   Public command regressions and Store tests are authored; Rust execution is unproved.
+   Focused setup and public creation/edit checks pass in isolated Linux.
    Setup never contacts the remote. Background exchange consumes the selection;
-   public creation/edit acceptance and final presentation remain unproved.
+   full acceptance and final presentation remain.
    Holds now have CLI presentation. Selecting referenced Waves explicitly may release
    retained private history; returning to a selected parent cannot. Recovery/losing-edit
    UX still needs review, not a new membership model.
@@ -271,8 +293,8 @@ provenance gap; revise it with the completed composition, not as a product limit
    A separate two-store test runs taskless terminal/headless stand-in providers,
    requiring reconnect convergence without another turn or work-watch connection
    and exactly one provider launch per Session. It selects destinations after
-   launch, so startup cannot freeze an empty selection. These tests are authored,
-   not run.
+   launch, so startup cannot freeze an empty selection. The work-watch test passes
+   in isolated Linux; the provider-lifetime test remains unexecuted.
    Native reconnect uses the same new lifetime, but has no composed peer regression
    yet. The taskless test forces `-i` with null stdin and a stand-in provider: it
    proves neither a native PTY nor reconnect, even when it passes. Short commands await one bounded transport attempt after
@@ -372,8 +394,9 @@ provenance gap; revise it with the completed composition, not as a product limit
 
    Complete grouped receipts through their existing common owners, not the scalar
    field loop. Source inspection identifies the remaining seams:
-   - `planning_export.rs` owns creation/link attempts; imported identity alone
-     does not attach or settle them.
+   - `planning_export.rs` owns creation/link attempts. Accepted peer Task observations
+     reconcile original receipts after a mapping-only import, without acknowledging
+     later saves. Portable creation/link attempt capture and recovery remain.
    - Peer comments now reuse `task_comments.rs::ingest_task_comment` and
      `insert_authored_comment`. Comment ID remains delivery identity; reimport
      retains errors/acknowledgement/conflicts, and acquired comments create no
@@ -438,10 +461,11 @@ provenance gap; revise it with the completed composition, not as a product limit
    a green check. Headless Desktop tests remain distinct from review judgment.
    No publication, landing or installation has occurred in this implementation pass.
 
-## Committed integration boundary — 2026-10-08
+## Committed integration boundary — 2026-10-09
 
-Jack Heart requested stacking on LOO-406 and continuing pursue. Parent PR #1503's
-published base `b6f34a6f8b811d95f9fc843ac6592cc2262f2e26` is integrated,
+Jack Heart requested stacking on LOO-406 and continuing pursue. Current HEAD
+`a6cb48664` integrates parent `7c626ca23`, preserving the restored scratch checkpoint
+`1ad5e1267` and retained stash. Earlier parent PR #1503's published base `b6f34a6f8b811d95f9fc843ac6592cc2262f2e26` is integrated,
 including `e68f2a423`'s creation receipts, `b1f175bbf`'s ordering,
 `6bb8b935a`/`086d3560c`'s common sync view and `29777b8cb`'s repository-scoped
 foreground lifetime. Reuse those owners; the earlier `e68f2a423` integration
@@ -503,7 +527,7 @@ and selection survive. No duplicate YAML parser was added. Earlier passing
 comment/import/setup proofs remain at
 `3bebc219d:scratch/work-on-another-machine-name.md`, this heading.
 
-Check (October 8 compression): `cargo fmt --all --check`, `git diff --check` and `lf context --skill compress` pass; isolated Linux `cargo test --offline -p loopflow --lib store::sqlite::project_content::tests` compiled and reported one pass/one stale fixture failure (repaired above); recheck, `planning_foreground_tests public_work_connections_exchange_offline_edits_without_replaying_execution` and `cargo clippy --offline --all-targets -- -D warnings` deferred to capable gate after the shared build-cache lock stayed held for 60 seconds. Local Clippy stopped after 180 seconds with the owned build script sampled at `_dyld_start`; no compiler verdict. No publication, installation or landing.
+Check (October 9): isolated/network-denied Linux `cargo test --offline -p loopflow --lib store::sqlite::project_content::tests` (2), `--lib peer_creation_readback_reconciles_attempt_after_mapping_only_import` (1), and `--test planning_foreground_tests public_work_connections_exchange_offline_edits_without_replaying_execution` (1) pass; `cargo clippy --offline --all-targets -- -D warnings`, fmt, diff and context checks pass. Gate owns remaining acceptance; no publication, installation or landing.
 
 Prior SQL proofs and macOS startup samples remain at
 `e77d2d1c8:scratch/work-on-another-machine-name.md`. A fresh bounded attempt
@@ -516,4 +540,4 @@ step `e94edd38-2a26-4047-9650-41a65ab814f7` without a recorded exit, confirmed
 by `lf flow show --processes` on October 8. No exit or replacement authority is
 inferred. Its reconciliation checkpoint `e8ff4c7f6` remains preserved.
 
-Sync check (October 8, parent `4350a50d0`): `cargo test --offline -p loopflow --lib task_completion_preserves_linear_reopening_during_delivery` timed out after 60 seconds during compilation, before test output; executable verification remains with capable gate/CI. Memory retains LOO-406's newer landing authorization without extending LOO-412's review-only boundary.
+Parent-sync timeout evidence remains at `a6cb48664:scratch/work-on-another-machine-name.md`; it supplies no test verdict. LOO-406's landing authorization does not extend LOO-412's review-only boundary.

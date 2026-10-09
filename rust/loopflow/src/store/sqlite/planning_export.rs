@@ -205,10 +205,11 @@ pub(super) fn attach_in(
         .query_row(
             &format!(
                 "SELECT o.id,c.export_json FROM {kind}s o
-        {join} JOIN {table} c ON c.{key}=o.id WHERE w.repo=?1 AND o.{mapping} IS NULL
+        {join} JOIN {table} c ON c.{key}=o.id WHERE w.repo=?1
+        AND (o.{mapping} IS NULL OR (NOT ?3 AND o.{mapping}=?2))
         AND c.export_attempted=1 AND json_extract(c.export_json,'$.id')=?2"
             ),
-            params![repo, observed["id"].as_str()],
+            params![repo, observed["id"].as_str(), project],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()?;
@@ -239,7 +240,7 @@ pub(super) fn attach_in(
         if observed.get(field).is_some_and(|remote| {
             owner.normalize(conn, field, remote.clone()).ok().as_ref() == Some(&value)
         }) {
-            conn.execute(&format!("UPDATE {kind}_changes SET acknowledged=1,acknowledged_revision=?4,error=NULL WHERE {kind}_id=?1 AND field=?2 AND seq<=?3 AND value_json=?5 AND conflict_json IS NULL"),
+            conn.execute(&format!("UPDATE {kind}_changes SET acknowledged=1,acknowledged_revision=?4,error=NULL WHERE {kind}_id=?1 AND field=?2 AND seq<=?3 AND value_json=?5 AND acknowledged=0 AND conflict_json IS NULL"),
                 params![id,field,export.through,observed["revision"].as_str(),value.to_string()])?;
         }
     }
@@ -250,11 +251,13 @@ pub(super) fn attach_in(
             params![id,json!({"revision":observed["revision"],"value":false}).to_string()])?;
     }
     conn.execute(
-        &format!("UPDATE {kind}s SET {mapping}=?2 WHERE id=?1"),
+        &format!("UPDATE {kind}s SET {mapping}=?2 WHERE id=?1 AND {mapping} IS NOT ?2"),
         params![id, export.id],
     )?;
     conn.execute(
-        &format!("UPDATE {table} SET export_error=NULL WHERE {key}=?1"),
+        &format!(
+            "UPDATE {table} SET export_error=NULL WHERE {key}=?1 AND export_error IS NOT NULL"
+        ),
         [id],
     )?;
     Ok(())

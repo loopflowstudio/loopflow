@@ -121,6 +121,7 @@ fn execution(conn: &Connection, task: &str) -> Vec<Vec<Vec<rusqlite::types::Valu
         "task_workflows",
         "task_workflow_moves",
         "task_prs",
+        "work_placements",
     ]
     .into_iter()
     .map(|table| {
@@ -216,6 +217,15 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
         &["task", "comment", &first, "--json"],
     );
     assert!(serde_json::from_str::<serde_json::Value>(&cold).is_ok());
+    assert_eq!(
+        Connection::open(right.path().join("loopflow.db"))
+            .unwrap()
+            .query_row("SELECT count(*) FROM work_placements", [], |row| row
+                .get::<_, i64>(0))
+            .unwrap(),
+        0,
+        "cold planning acquisition must not allocate execution placement"
+    );
     let third = create(&target, right.path(), "task-pr-tests");
     assert_ne!(first, third);
     assert_ne!(second, third);

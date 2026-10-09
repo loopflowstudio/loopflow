@@ -145,3 +145,18 @@ is retained at `5d336868f:scratch/questions.md`.
   an observed concurrent Linear winner must preserve a losing local field; the
   selected winner retires its intention and retains the losing receipt. Independent
   edits without a competing observation remain covered. Rust tests are unexecuted.
+
+- October 9 executable feedback exposed two missing common-writer boundaries:
+  accepted peer provider facts lacked their original acquisition age on local rows,
+  and readiness treated missing list inventory as negative membership evidence.
+  Import now retains the accepted age; readiness still rejects explicit archive,
+  unresolved membership and configured-Initiative contradictions, not missing lists.
+  Imported planning remains unplaced. A later local placement operation uses the
+  local machine when its parent is unplaced and preserves existing placements.
+  Task creation readback uses the original common receipt even if a peer mapping arrived
+  first; mapping alone neither acknowledges nor clears uncertainty. Review rejected
+  freezing Project membership to its creation snapshot: later accepted moves must
+  remain possible. Project/link readback therefore stays with its existing
+  owner pending full receipt composition. Creation/link attempt transport, independent
+  relationship ordering and mixed-provider activation remain unfinished; this cut
+  selects no new product policy.

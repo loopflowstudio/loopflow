@@ -1127,6 +1127,7 @@ fn acquire_linear_frontier(
             .filter_map(|change| change.linear.as_ref())
             .filter(|observation| observation.body["id"].as_str() == Some(provider_id)),
     )?;
+    let readback = observations.last().copied();
     let mut accepted = true;
     for observation in observations {
         let retained: Option<(String, i64)> = conn.query_row(
@@ -1215,11 +1216,19 @@ fn acquire_linear_frontier(
             "peer provider frontier is older than retained evidence",
         ));
     }
+    // A mapping is not a creation acknowledgement. Only an accepted provider
+    // body can reconcile the original attempt, including after a peer supplied
+    // the mapping first. Keep this inside the object's projection savepoint.
+    if let Some(observation) = readback.filter(|_| object.kind == PlanningKind::Task) {
+        super::planning_export::attach_in(conn, repo, false, &observation.body)?;
+    }
     conn.execute(
         &format!(
-            "UPDATE {} SET planning_provider_revision=(SELECT json_extract(body,'$.revision')
+            "UPDATE {} SET (planning_provider_revision,pm_snapshot_synced_at)=(
+        SELECT json_extract(body,'$.revision'),observed_at
         FROM {provider_table} WHERE repo=?2 AND provider='linear' AND id=?3)
-        WHERE id=?1 AND planning_provider_revision IS NOT (SELECT json_extract(body,'$.revision')
+        WHERE id=?1 AND (planning_provider_revision,pm_snapshot_synced_at) IS NOT (
+        SELECT json_extract(body,'$.revision'),observed_at
         FROM {provider_table} WHERE repo=?2 AND provider='linear' AND id=?3)",
             table(object.kind)
         ),
@@ -1667,6 +1676,179 @@ mod tests {
             "SELECT comment_json,acknowledged,error,conflicting_comment_json FROM task_comment_deliveries WHERE comment_id=?1",
             [id], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?)),
         ).unwrap()
+    }
+
+    #[test]
+    fn peer_creation_readback_reconciles_attempt_after_mapping_only_import() {
+        use super::super::planning_changes::PlanningChanges;
+
+        let (_source_home, source) = store();
+        let (_target_home, target) = store();
+        let (wave, mut row, existing) = linear_seed(&source);
+        let project = source.task(&existing).unwrap().unwrap().project_id;
+        source
+            .bind_project(&wave, row.snapshot.items[0].project_id.as_deref().unwrap())
+            .unwrap();
+        let task = TaskId::new();
+        source
+            .create_task(&crate::planning::NewTask {
+                id: task.clone(),
+                project_id: project.clone(),
+                title: "Initial".into(),
+                description: "Brief".into(),
+            })
+            .unwrap();
+        edit_title(&source, &task, "Captured title");
+        let owner = PlanningChanges::Task(&task);
+        let export = source
+            .prepare_planning_export(owner, "team", "initiative")
+            .unwrap();
+        assert!(source
+            .attempt_planning_export(owner, &export.input, false)
+            .unwrap());
+        source.planning_export_error(owner, "lost reply").unwrap();
+        let captured = source.pending_task_changes(&task).unwrap();
+        let captured = captured.iter().find(|c| c.field == "name").unwrap();
+        target
+            .import_peer_planning(
+                "/target",
+                &destination(),
+                "created",
+                &source
+                    .export_peer_planning("/source", &destination())
+                    .unwrap(),
+            )
+            .unwrap();
+        // Entity provenance is usable without fabricating complete-list evidence
+        // or Machine placement. Positive contrary membership still blocks reads.
+        assert!(target.selected_planning_project(&wave).unwrap().is_some());
+        assert_eq!(
+            target.project_readiness(&wave).unwrap().observed_at,
+            Some(row.synced_at)
+        );
+        {
+            let conn = target.conn.lock().unwrap();
+            for table in ["pm_wave_projects", "work_placements"] {
+                assert_eq!(
+                    conn.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r
+                        .get::<_, i64>(0))
+                        .unwrap(),
+                    0
+                );
+            }
+            conn.execute("UPDATE pm_projects SET membership_unresolved=1", [])
+                .unwrap();
+        }
+        assert!(target.selected_planning_project(&wave).is_err());
+        target
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE pm_projects SET membership_unresolved=0,archived=1",
+                [],
+            )
+            .unwrap();
+        assert!(target.selected_planning_project(&wave).is_err());
+        target
+            .conn
+            .lock()
+            .unwrap()
+            .execute("UPDATE pm_projects SET archived=0", [])
+            .unwrap();
+        edit_title(&source, &task, "Later save");
+        let later = source.pending_task_changes(&task).unwrap();
+        let later = later.iter().find(|c| c.field == "name").unwrap();
+        let workflow = source.workflow(&task).unwrap();
+        let state = source.task_state(&task).unwrap();
+        let events = source.recent_task_events(&task, 100).unwrap();
+
+        // A peer association without a provider body carries identity, not an
+        // acknowledgement of the originating machine's creation attempt.
+        target
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET external_issue_id=?2 WHERE id=?1",
+                params![task.as_str(), export.id],
+            )
+            .unwrap();
+        source
+            .import_peer_planning(
+                "/source",
+                &destination(),
+                "mapping",
+                &target
+                    .export_peer_planning("/target", &destination())
+                    .unwrap(),
+            )
+            .unwrap();
+        let receipt = || {
+            source.conn.lock().unwrap().query_row(
+                "SELECT export_json,export_attempted,export_error FROM task_creation_intents WHERE task_id=?1",
+                [task.as_str()], |r| Ok((r.get::<_,String>(0)?,r.get::<_,bool>(1)?,r.get::<_,Option<String>>(2)?)),
+            ).unwrap()
+        };
+        let uncertain = receipt();
+        assert!(uncertain.1);
+        assert_eq!(uncertain.2.as_deref(), Some("lost reply"));
+        assert_eq!(
+            source.task(&task).unwrap().unwrap().plan.title,
+            "Later save"
+        );
+
+        let mut item = row.snapshot.items[0].clone();
+        item.id.clone_from(&export.id);
+        item.identifier = "NEW-1".into();
+        item.name = "Captured title".into();
+        item.description = "Brief".into();
+        item.revision = Some("2026-10-08T11:00:00Z".into());
+        row.snapshot.items = vec![item];
+        row.synced_at += 1;
+        target.put_pm_snapshot(&row).unwrap();
+        let observed = target
+            .export_peer_planning("/target", &destination())
+            .unwrap();
+        source
+            .import_peer_planning("/source", &destination(), "observed", &observed)
+            .unwrap();
+        assert_eq!(receipt(), (uncertain.0, true, None));
+        let conn = source.conn.lock().unwrap();
+        let acknowledged: bool = conn
+            .query_row(
+                "SELECT acknowledged FROM task_changes WHERE id=?1",
+                [&captured.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(acknowledged);
+        let retained: (bool, String, String) = conn
+            .query_row(
+                "SELECT acknowledged,value_json,conflict_json FROM task_changes WHERE id=?1",
+                [&later.id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert!(!retained.0);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&retained.1).unwrap(),
+            "Later save"
+        );
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&retained.2).unwrap()["value"],
+            "Captured title"
+        );
+        drop(conn);
+        assert_eq!(source.task_by_issue("NEW-1").unwrap().unwrap().id, task);
+        assert_eq!(source.workflow(&task).unwrap(), workflow);
+        assert_eq!(source.task_state(&task).unwrap(), state);
+        assert_eq!(source.recent_task_events(&task, 100).unwrap(), events);
+        let revisions = source.revisions().unwrap();
+        source
+            .import_peer_planning("/source", &destination(), "observed", &observed)
+            .unwrap();
+        assert_eq!(source.revisions().unwrap(), revisions);
     }
 
     #[test]

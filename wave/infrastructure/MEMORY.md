@@ -619,36 +619,34 @@ execution and retains conservative cleanup. Proofs and unresolved Desktop
 acceptance remain at
 `e50dbd749e3207599f9937ce45653f4c6f33a5cd:wave/infrastructure/MEMORY.md`.
 
-## Tasks across machines (LOO-412, 2026-10-08)
+## Tasks across machines (LOO-412, 2026-10-09)
 
-Jack Heart selected custom-ref sync under Plan ownership above.
-Review-only publication; no landing or public-remote planning export.
+Jack Heart selected custom-ref sync under Plan ownership. Review-only; no landing or real public-remote planning export. Joining publishes nothing.
+Malformed input aborts import; contradictions isolate objects. Entity revisions
+never order relationships. Execution stays local.
 
-Malformed input aborts import; valid contradictions isolate objects.
-Entity revisions cannot order relationships.
-`a388ed425` shares disposition receipts without Workflow moves: a selected Linear
-winner retires losing intention; ordinary unchanged acquisition preserves it.
+Common owners retain disposition, comments/authorship without steer/echo and semantic
+Project content. Selected Linear winners retire losers; unchanged acquisition preserves
+saves. Lookup and launch freshness stay separate. October 9 Task creation readback
+settles captured saves after mapping-only import, retaining later saves and uncertain
+attempts. Creation/link attempt transport remains unfinished.
 
-Comments preserve authorship without steer/echo; `a518b985b` journals semantic
-workflow/KR/target fields through common owners, not raw Markdown.
-History/winners group once. `3bebc219d` passed Linux build/Clippy and focused
-comment/import/setup. Cold lookup shares acquisition only on a miss; launch
-freshness stays separate.
-Creation/link, order, deletion, alternate acquisition, legacy association and Desktop
-remain. Design: `scratch/work-on-another-machine-name.md`; prior proofs: `ae6f392c2`.
-Checkpoint CI skips product suites with scratch.
+Peer acquisition retains original provider age. Missing list inventory is not negative
+membership evidence; explicit archive, unresolved membership and configured-Initiative
+contradictions still block. Import allocates no Machine placement; later local placement
+uses this machine for an unplaced parent, preserving existing placements.
+Linux public work-watch passes cold creation, offline comments/edits/completion and
+reconnect with execution retained, not connected-Linear or SSH acceptance. Checkpoint
+CI skips product suites with scratch.
 
-`ffe986160` settles state from observations, not synthetic success.
-Joining publishes nothing; mixed Linear awaits composition, not policy.
-Fetch/import/publication stay separate; readback covers the attempted save.
-Workers retain effect locks through cancellation without blocking saves/acquisition.
-`de9470d5a` scopes conflict display and settlement to one destination. Damaged
-journals retain unknown pending state, receipts/conflicts and independent visibility.
-Broader/composed/installed acceptance remains unproved.
-
-Move counterexample `a43f3e2ea`, repairs `b5dafd918`/`7395cf3bb`: holds omit private
-history/dependents, including retained Git documents, until explicit selection.
-Omission is not convergence. CLI holds exist; recovery UX needs review.
+Fetch/import/publication stay separate; worker-held effect locks block neither saves
+nor acquisition. Damaged journals retain unknown pending state and receipts/conflicts
+without hiding independent plans.
+Private moves hold whole histories/dependents, including retained Git documents, until
+explicit selection; omission is not convergence. Recovery/losing-edit UX needs review.
+Order/deletion receipts, alternate paths, relationship ordering, legacy association and
+Desktop remain before enabling mixed-provider exchange. Installed acceptance is unproved. Earlier evidence: `a6cb48664:wave/infrastructure/MEMORY.md`, this heading.
+Design: `scratch/work-on-another-machine-name.md`.
 
 ## Synced planning integration (LOO-334)
 

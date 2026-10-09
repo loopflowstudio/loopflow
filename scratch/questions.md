@@ -27,8 +27,8 @@ at `b040c7c8d:scratch/questions.md`.
   expected constraint failures and their mutations while independent objects commit.
   Wave selection follows Project projection to break their reference cycle. Invalid
   documents, reused mutation IDs, foreign repository ownership and unexpected SQL
-  failures still roll back the import. Legacy-provider association remains unfinished;
-  conflicts preserve both IDs rather than guessing which execution history to use.
+  failures still roll back the import. Association storage is implemented; public Git/HTTPS composition remains.
+  Conflicts preserve both IDs and their execution histories.
 
 The cut remains unpublished. The design owns remaining integration and acceptance;
 earlier adoption and pre-cut storage evidence, with their limitations, remain at
@@ -108,11 +108,9 @@ earlier adoption and pre-cut storage evidence, with their limitations, remain at
   Independent negative facts, original ages, unknown placement and last-good scoped
   readings remain required; none enables mixed-provider exchange.
 
-- October 9 association finding and representation boundary are consolidated in
-  the design, **Remaining integration**, item 3. Original rationale and refusal
-  proofs: `63d292896:scratch/questions.md`, final entry. That refusal cut implemented no correspondence or new product decision. Compression shares retained
-  mapping/creation claims through a derived view; it neither rewrites attempts
-  nor changes private selection. Mixed-provider exchange remains disabled.
+- Association's refusal-only findings remain at
+  `90a37ab79:scratch/questions.md`, October 9 association finding. The design now
+  owns joint projection and receipt composition; exchange/effect holds remain.
 
 - October 9 correspondence choice: explicit local `planning associate <incoming-id>
   --with <local-id> --linear <provider-id>` uses retained scalar mapping evidence,
@@ -145,3 +143,11 @@ earlier adoption and pre-cut storage evidence, with their limitations, remain at
   choices, not new product policy. Private groups and association/mixed exchange
   remain held; order/deletion origins derive from the journal's unique receipt
   identity, not a second mutable column. The validator rejects cross-origin reuse.
+
+- October 9 recovery presentation choice: extend the existing destination status
+  with local per-origin journal values rather than add a restore command or store.
+  Follow associations, retained references and comments for inspection only; omit
+  unrelated private records. Show ranked candidates separately from retained
+  alternatives, without claiming successful projection. Preserve exact JSON and
+  comment authorship; scalar edit authors are unknown, not inferred from Machine
+  or observer. Restoring remains an ordinary edit. No mixed-provider activation.

@@ -71,7 +71,7 @@ Export reads existing identities rather than minting edits. Import and projectio
 commit together; fetched Git history is not an import acknowledgement. Crashes before commit leave import retryable.
 CLI status separates fetched revisions, retained imports, current eligible-export
 changes and pending/unconfirmed/confirmed publication. Linear delivery stays separate;
-Desktop streams destination status; per-Work presentation and full composition remain unfinished.
+Desktop streams destination and per-Work recovery status; public composition remains unfinished.
 
 `engine/planning_git.rs` resolves an explicitly chosen remote alias once into a
 pinned endpoint and user-keyed/shared ref under `refs/loopflow/planning/`. Separate
@@ -132,6 +132,13 @@ this heading. Keep these replacements deleted:
   origins, exact inputs, causal baselines, uncertain losers and private holds survive.
   Do not restore sequence-ranked order/deletion delivery, raw-ID comparisons,
   scalar visibility over removal receipts, or duplicate receipt writes.
+- Destination-only recovery presentation: CLI/Desktop now consume the same
+  journal-derived per-origin values and membership, not a second recovery store.
+  No effect writer, enrollment or candidate-as-confirmation path is introduced.
+- Duplicate recovery owner resolution and status journal reads: import/recovery
+  share `resolved_owners`; export status and recovery start from one validated
+  journal. Only recovery expands private dependencies. Its failure cannot obscure
+  readable export status; its values never become publication content.
 - Duplicate creation-payload renderers in `planning_export.rs` are replaced by
   `task_creation_input` and `project_creation_input`, shared by capture and peer
   validation. Complete model/input comparisons still reject unknown payload;
@@ -185,8 +192,8 @@ reductions remain at `96f714bd6:scratch/work-on-another-machine-name.md`,
 exact common acquisition and accepted field frontiers; do not recreate the
 removed writers or helper-only proofs.
 
-Delete origin-keyed scalar winner grouping during import and the capture restriction
-that only Linear facts can follow an accepted foreign source. One resolved-owner
+Origin-keyed scalar winner grouping and the Linear-only foreign-predecessor
+restriction are deleted. One resolved-owner
 frontier traverses causal ancestors before ranking; the existing observation table
 commits accepted source IDs. Per-origin journals/heads, losing edits, creation
 origins and raw delivery inputs survive. Scalar relationship values resolve only
@@ -204,17 +211,12 @@ receipt composition boundaries are unchanged.
 Receipt origins and full-ID correspondence exist. Ordinary import now projects
 associated creation receipts onto their local owner without releasing holds
 (`39dba32c1`).
-**Scalar and receipt composition now have focused storage proof, including
-state/comment/Wave readback (`8a6f8f807`).** Item 3 now owns per-Work private-group
-and losing-edit recovery presentation, followed by public Git/HTTPS composition
-before releasing exchange/effect holds. Private or failed groups never advance
+**Scalar and receipt composition have focused storage proof, including
+state/comment/Wave readback (`8a6f8f807`).** Per-Work recovery presentation now
+reads the retained journal through common status; item 3 still owns public
+Git/HTTPS composition before releasing exchange/effect holds. Private or failed groups never advance
 observations. The preceding state/comment/Wave direction is implemented, not a
 second implementation step.
-
-Destination-level Desktop status has focused headless proof; per-Work membership,
-authorship/assignees and losing-edit recovery remain unfinished. Public Git/Linear
-composition also remains. The temporary mixed-provider refusal in
-`ops/planning_peer.rs` stays enabled; retained receipts are not an end-to-end result.
 
 Deletion composition and its counterexamples remain at
 `506efbbfe:scratch/work-on-another-machine-name.md`, **Remaining integration**.
@@ -230,13 +232,11 @@ scope/Machine frames are fenced. One-shot transports share the reader. No setup
 action, new poller, schema or transport activation is added. Git publication and
 Linear delivery remain independent. Detailed proof: `c20e4ad13`.
 
-The latest sync includes issue-scoped comments and child-readiness repair.
-TESTING.md requires comment acquisition in a different order from Task creation.
-Gate still owns the combined admission, cold-worker and provider-recovery candidate;
-parent integration does not establish peer composition.
-Destination-scoped status/conflicts (`de9470d5a`), common comment acquisition and
-receipts (`7e56c01fd`), and semantic Project content (`a518b985b`) are integrated.
-Their boundaries are under **Delete — do not maintain** and item 4.
+Integrated common comment acquisition/receipts (`7e56c01fd`), scoped status
+(`de9470d5a`) and semantic content (`a518b985b`) retain their boundaries below.
+Gate owns combined admission, cold-worker and provider recovery, including comments
+acquired in a different order from Task creation; parent integration proves no
+peer composition.
 
 Creation/link discovery and receipts share `planning_export.rs` and
 `planning_exports`; mappings and imported transitions never acknowledge effects.
@@ -267,6 +267,18 @@ The detailed ordering, alternate-acquisition and invalidation proofs remain at
 `c6874c01b:scratch/work-on-another-machine-name.md`, **Remaining integration**.
 Keep their counterexamples and acceptance limits; no second implementation is needed:
 
+- **Recovery presentation (`d6049af97`, `af7730926`).** CLI status and Desktop's
+  Git planning disclosure expose per-origin membership, associated identity,
+  references, assignees and lossless alternatives. Comment authorship is captured;
+  scalar authors stay unknown. Candidates do not confirm projection or delivery.
+  The common reader expands private dependencies only for inspection; export
+  remains selection-scoped. Malformed private recovery history cannot hide readable
+  export status or receipts. Ordinary edits own restores, with no new writer.
+  The public setup fixture enters association/status after Store-seeded import,
+  retaining private comments/parents, planning revisions, pending receipts and an
+  empty remote ref. It does not exercise Git acquisition or populated live controls.
+  Separate storage fixtures cover populated execution; headless Desktop checks
+  assert displayed values. Combined transport and recovery UX judgment remain.
 - **Accepted import observation (`dac02060a`–`96f714bd6`).**
   Ordinary same-origin projection records accepted scalar/content source IDs in
   `planning_peer_observed` within its savepoint, without echo. Local capture uses
@@ -310,13 +322,13 @@ Keep their counterexamples and acceptance limits; no second implementation is ne
   destination-level Desktop status have focused headless proof. Public reads
   preserve retained Sessions, Processes, Workflow and placements; no live control,
   SSH or installed acceptance follows. Per-Work selection, authorship/assignees
-  and losing-edit recovery remain implementation work.
+  and losing-edit recovery now use the common journal-derived recovery view.
 
 `5bed3a211` integrated main `3a0aa5ca4` (#1510), after common writer `d20c56daf`;
 `ce1750393` integrated #1512. These add chat recipes/hierarchical names and driver
 recovery, not provider-frontier acceptance. Combined launch/Flow verification
 remains with gate. The single remaining-work list below owns association,
-presentation and public composition; retained conflicts are not convergence.
+public composition and recovery review; retained conflicts are not convergence.
 
 Mixed-provider exchange remains disabled until composition is complete. Local-only
 exchange and private-selection holds remain intact. Combined verification belongs
@@ -351,7 +363,7 @@ compared with the attempted snapshot digest. Fetched, imported and publication
 revisions remain separate. The public work-watch case passes in isolated Linux;
 other composed cases remain gate acceptance.
 Linear-connected repositories still do not exchange: the removal/archive/Team
-storage cut exists, but legacy association, presentation and combined public acceptance (including
+storage cut exists, but legacy association and combined public acceptance (including
 invalidation) remain. The diagnostic is temporary, not product policy.
 
 1. Public `lf planning key/connect/use/select/status` now provisions/recover keys,
@@ -361,10 +373,10 @@ invalidation) remain. The diagnostic is temporary, not product policy.
    live in the existing peer draft. Status omits credential-bearing endpoints.
    Focused setup and public creation/edit checks pass in isolated Linux.
    Setup never contacts the remote. Background exchange consumes the selection;
-   full acceptance and final presentation remain.
-   Holds now have CLI presentation. Selecting referenced Waves explicitly may release
-   retained private history; returning to a selected parent cannot. Recovery/losing-edit
-   UX still needs review, not a new membership model.
+   full acceptance and presentation review remain.
+   Holds and retained values have CLI/Desktop presentation. Selecting referenced Waves
+   explicitly may release private history; returning to a selected parent cannot.
+   Recovery UX judgment remains with review, not a new membership model.
 2. Execute the existing foreground composition regressions rather than rebuilding
    their callers. Public `planning_foreground_tests` now uses
    Task create/edit/comment/move commands on both stores rather than SQL mutations.
@@ -389,11 +401,12 @@ invalidation) remain. The diagnostic is temporary, not product policy.
    Invalid fetched documents must not advance import/publication. The existing
    recovery test covers lost-receipt readback without a new commit and import after
    fetch-only interruption. Public standalone Project/Wave lifecycle coverage and
-   Desktop per-Work selection, authorship and assignee presentation remain.
+   Desktop review judgment remain; per-Work selection, authorship and assignee
+   presentation now exists in the common status view.
    No automatic turn/Flow retry exists.
 
-3. Resolve divergent legacy IDs through explicit provider associations without
-   renumbering stored Work. **October 9 counterexample:** clearing the legacy
+3. Complete public transport/readback for the implemented provider associations,
+   without renumbering stored Work. **October 9 counterexample:** clearing the legacy
    mapping is not association. `planning_exports` then treats that retained Task
    or Project as a new provider creation; the old issue identifier also remains
    in selector lookup. Pending effects still belong to the legacy ID. The old
@@ -403,7 +416,7 @@ invalidation) remain. The diagnostic is temporary, not product policy.
    selection. Neither transferring a mapping nor merging execution is an accepted
    implementation. The common receipt-origin cut below resolves storage multiplicity.
    Correspondence, joint projection and receipt composition have focused storage
-   proof; public recovery remains unfinished.
+   proof; public Git/HTTPS recovery remains unfinished.
    Mapping validation precedes scalar and independent-evidence acquisition.
    Common effect attempts consult cross-ID conflicts against retained provider
    claims, including losing mappings and creation inputs; nulling a mapping
@@ -419,22 +432,13 @@ invalidation) remain. The diagnostic is temporary, not product policy.
    migrate directly into the final draft; obsolete per-kind columns/writers stay
    deleted. Detailed cut: `1cbbba625:scratch/work-on-another-machine-name.md`, item 3.
 
-   **October 9 receipt composition:** ordinary import consumes explicit
-   correspondence and projects each creation origin through the existing common
-   receipt writer, even when private selection holds scalar projection. Savepoints retain
-   contradictory operations without replacing receipts or stopping other objects.
-   Import suppression avoids echo; neither private selection nor execution moves.
-   No reassignment API is needed: correspondence already refuses physical incoming
-   rows. Lookup also rejects contradictory incoming scalar mappings.
-
-   The former direct-helper fixture is replaced by
-   `correspondence_import_retains_creation_origins_and_exact_readback`: both kinds,
-   reversed/repeated imports, retained uncertainty and captured inputs, private
-   membership, populated execution, and ordinary Store acquisition settling only
-   the exact origin. It also covers later contradictory mappings. The focused pass
-   below includes this fixture, not public Git/HTTPS acceptance.
-   Helper evidence: `de3c84b08`, this item. Readback of a
-   different created provider object cannot transfer mappings or settle receipts.
+   Creation-origin composition and its exact-readback fixture are retained at
+   `90a37ab79:scratch/work-on-another-machine-name.md`, item 3, **October 9 receipt
+   composition**. Ordinary import retains every origin and captured input under
+   its local owner, even when private selection holds scalar projection; no
+   identity, selection or execution is reassigned. Focused storage proof covers
+   reversed/repeated imports, uncertain origins, private membership and exact
+   acquisition. This is not public Git/HTTPS acceptance.
 
    `planning associate <incoming-id> --with <local-id> --linear <provider-id>`
    now records a machine-local correspondence using the incoming journal's
@@ -444,7 +448,7 @@ invalidation) remain. The diagnostic is temporary, not product policy.
    remain exact. Membership, captured effects and execution foreign keys do not
    change. Lookup rechecks mapping/repository. Selected origins can jointly
    project scalar fields; association/reimport retains exchange/effect holds pending
-   recovery presentation and public composition. Storage receipt composition is
+   public composition. Storage receipt composition is
    implemented; these holds are not Jack Heart's final product policy.
 
    The Store correspondence fixture imports older/newer snapshots in both orders,
@@ -515,17 +519,14 @@ invalidation) remain. The diagnostic is temporary, not product policy.
    migration is added. Return readback settles the peer without replaying a turn.
    These are storage proofs, not public Git/HTTPS or running-control acceptance.
 
-   **Remaining association work, in order:**
-   - Complete public recovery presentation for private groups. The existing
-     CLI/Desktop destination view lists held IDs and reasons; it does not expose
-     per-Work membership, authorship/assignees or recoverable losing values.
-     Associating private B with selected A cannot enroll B, its comments, losing
-     edits or private parent references. This presentation remains implementation
-     work, not only gate coverage; no new membership model is required.
-   - Complete public Git/HTTPS composition and exact-origin readback before
-     releasing association exchange/effect holds or the mixed-provider refusal.
-     Storage readback is not foreground acceptance. Gate owns the combined
-     command/lifetime checks; Jack Heart's review-only boundary is unchanged.
+   **Remaining association work:** complete public Git/HTTPS composition and
+   exact-origin readback. `ops/planning_peer.rs` still rejects connected Linear
+   repositories before fetch; `ASSOCIATION_PROJECTION_PENDING` independently holds
+   associated exchange/effects. Removing only one cannot establish convergence.
+   Their coordinated replacement and public regression are implementation work,
+   not a rerun of storage tests. Private/reference and failed-projection holds
+   remain required. Gate owns combined command/lifetime verification afterward;
+   Jack Heart's review-only boundary is unchanged.
 
    Acceptance must enter through that correspondence operation and ordinary peer
    import/lookup, not substitute helper calls for association. For both Tasks and
@@ -566,7 +567,7 @@ invalidation) remain. The diagnostic is temporary, not product policy.
    Removal/archive/reteam use common acquisition with the focused storage
    proof under **Implemented boundaries, not remaining implementation**. Gate still owns public alternate
    acquisition, complete-list ordering and comment composition, not only detail
-   reads. Legacy association, richer Desktop sharing/recovery UI and public invalidation verification remain
+   reads. Legacy association's public composition and public invalidation verification remain
    before mixed-provider exchange and removal of its temporary diagnostic. This
    cut cannot repair LOO-406's unseen provider-write race or supply Linear
    compare-and-swap semantics.
@@ -614,20 +615,12 @@ planning exchange during a live connection and explicit native resume, with no
 extra provider launch caused by exchange; legitimate local resume is not an
 imported execution mutation. No engine-lifecycle code is added to LOO-412.
 
-`2df907de7` integrates main `461577746` (#1516): Rust/Swift now name the
-Loopflow-owned records LfSession/LfProcess. Wire/storage bytes, ProcessLfid and
-product Session/Process remain unchanged. Recorded checks precede this merge;
-the combined candidate remains gate-owned.
-
-`6fdd7f09e` integrates main `e69d5103f` (#1511). Native Codex terminal
-launches now add `--no-daemon`; explicit account selection reconciles the shared
-Codex daemon with a five-minute turn grace period. Launch-time selection leaves
-that daemon alone. The flag was verified upstream with Codex 0.161.0; older
-unsupported binaries reject it. Native peer-lifetime acceptance must use this
-combined launch path, not the earlier 0.160.1 evidence. The existing Claude
-stand-in supplies no Codex account/reconnect proof. This merge changes neither
-planning authority nor the prohibition on automatic peer-triggered turn retries;
-no daemon/account implementation belongs in LOO-412.
+`2df907de7` integrates #1516's LfSession/LfProcess naming without wire/storage
+changes. `6fdd7f09e` integrates #1511's native Codex `--no-daemon` path and
+explicit-selection daemon reconciliation (five-minute turn grace). Gate's combined
+native peer-lifetime proof needs supported Codex 0.161.0, not earlier 0.160.1 or
+Claude stand-in evidence. Planning grants no account, daemon or retry authority.
+Full merge boundaries: `d6049af97:scratch/work-on-another-machine-name.md`, this heading.
 
 Readback of historical Flow `93d4d4f6-4723-4027-951b-b3aee2e696a2` still leaves
 step `e94edd38-2a26-4047-9650-41a65ab814f7` without completion or exit evidence.
@@ -701,7 +694,7 @@ State/comment/Wave and completion checks remain at `8a6f8f807`, this heading;
 creation-payload compression checks remain at `1012a6cad`, this heading. Both
 precede the #1511 merge; neither proves the combined native launch path.
 
-Check (realign): `git diff --check` passes; prose-only reconciliation, no product rerun. Gate owns combined launch, released-frontier, public Git/HTTPS and headless Desktop acceptance.
+Check: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and Rust test builds pass; `scripts/test_network.py` runs `planning_setup_tests` (4) and `associated_readback_captures_foreign_predecessor_without_sharing_private_history` / `associated_import_observes_joint_frontier_before_local_save_and_return_import` (2), all pass (preceding implementation evidence); `git diff --check` passes for prose-only realignment, without product reruns. Earlier headless Desktop/DTO checks remain applicable; gate owns combined launch, released-frontier and public Git/HTTPS acceptance.
 
 SQL/macOS and unresolved Flow-exit evidence: `eeb98aa89`, this file's
 **Acceptance for review**. No provider death, replacement authority or installed

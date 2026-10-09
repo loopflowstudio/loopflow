@@ -34,7 +34,7 @@ def test_cli_page_makes_the_case_for_engineers(page: Page, base_url: str) -> Non
     expect(page.locator("h1")).to_have_text("Loopflow is the CLI for software engineering.")
     assert page.locator("main > section[id]").evaluate_all(
         "sections => sections.map(section => section.id)"
-    ) == ["flows", "where", "start"]
+    ) == ["flows", "flow-files", "where", "start"]
     assert "loopflow.studio/install.sh" in page.locator(".home-hero .install-row pre").text_content()
     expect(page.locator(".home-hero").get_by_role("button", name="Copy", exact=True)).to_be_visible()
     expect(page.locator(".home-hero .eyebrow, #flows h2")).to_have_count(0)

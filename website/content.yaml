@@ -117,18 +117,34 @@ cli:
     - name: Workflows
       text: '`lf` encodes the stages a Task goes through to become a shipped and validated PR. You
         customize, project by project, how and when you get involved in the work.'
-    - name: Skills and Flows
-      text: A Skill is one instruction, written in Markdown. A Flow runs Skills in order, with a
-        commit between them. Both are files in your repository, so a team can share them.
-    - name: Desktop
-      text: '`lf` also provides a programmable desktop UX optimized around Waves and Tasks.'
     links:
     - label: Tasks and Waves ↗
       href: /docs/waves
-    - label: Skills and workflows ↗
-      href: /docs/authoring
     - label: Worktrees and delivery ↗
       href: /architecture/delivery
+  flows:
+    heading: Flows run the work between your turns.
+    commands: |-
+      # .lf/flows/ship-api.yaml
+      - implement
+      - compress
+      - gate
+
+      $ lf run ship-api                   # run it
+      $ lf flow list                      # the Flows you have
+    items:
+    - name: Skills
+      text: A Skill is one instruction, written in Markdown. `lf skill design` runs one in its
+        own session.
+    - name: Flows
+      text: A Flow is a YAML list of steps, each one a Skill or another Flow, with a commit between
+        them. One command runs the whole list.
+    - name: Shared
+      text: Skills and Flows are files in your repository, so a team reviews and shares how it
+        works with agents the way it shares code. Built-ins cover the common cases.
+    links:
+    - label: Skills and Flows ↗
+      href: /docs/authoring#flows
   where:
     heading: It works wherever you work.
     items:

@@ -193,24 +193,25 @@ pub(super) fn observe_in(
         }
         observed.push(id);
     }
-    let mut retained_lists = observed_order(conn, &project)?
-        .into_iter()
-        .collect::<Vec<_>>();
-    for delivery in deliveries(conn, &project)? {
-        retained_lists.extend(delivery.baseline);
+    let previous = observed_order(conn, &project)?;
+    let pending = deliveries(conn, &project)?;
+    let mut retained_lists = previous.iter().collect::<Vec<_>>();
+    for delivery in &pending {
+        retained_lists.extend(&delivery.baseline);
         if let Some(effect) = delivery.effects.last() {
-            retained_lists.push(effect.before.clone());
-            retained_lists.push(effect.after.clone());
+            retained_lists.extend([&effect.before, &effect.after]);
         }
     }
     // A cold peer may have captured attempts but no local list inventory. Their
     // known members still prevent an empty/partial read from settling the move.
+    let mut membership = conn.prepare("SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND project_id=?2 AND planning_deleted_at IS NULL)")?;
     for id in retained_lists
-        .iter()
+        .into_iter()
         .flatten()
         .filter(|id| !observed.contains(id))
     {
-        let retained: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND project_id=?2 AND planning_deleted_at IS NULL)", params![id,project.as_str()], |row| row.get(0))?;
+        let retained: bool =
+            membership.query_row(params![id, project.as_str()], |row| row.get(0))?;
         if retained {
             return Ok(false);
         }
@@ -220,7 +221,7 @@ pub(super) fn observe_in(
         params![repo, provider, external, serde_json::to_string(&observed)?],
     )?;
     let observation = json!({"value":observed}).to_string();
-    for mut delivery in deliveries(conn, &project)? {
+    for mut delivery in pending {
         if let Some(last) = delivery.effects.last_mut() {
             if !last.settled && same_order(&observed, &last.after) {
                 last.settled = true;

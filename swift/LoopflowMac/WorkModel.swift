@@ -674,8 +674,8 @@ final class WorkModel {
         if let value = roadmap.value { roadmap = .unavailable(lastGood: value, reason: reason) }
         if let value = waves.value { waves = .unavailable(lastGood: value, reason: reason) }
         if repoPath != nil, let value = sessions.value { sessions = .unavailable(lastGood: value, reason: reason) }
-        for (repo, reading) in peerPlanningReadings {
-            peerPlanningReadings[repo] = .unavailable(lastGood: reading.value, reason: reason)
+        peerPlanningReadings = peerPlanningReadings.mapValues {
+            .unavailable(lastGood: $0.value, reason: reason)
         }
         if repoPath != nil { peerPlanning = .unavailable(lastGood: peerPlanning.value, reason: reason) }
         if let value = processActivity.value { processActivity = .unavailable(lastGood: value, reason: reason) }
@@ -837,14 +837,11 @@ final class WorkModel {
         guard !usesFixedFixture, let repo = repoPath else { return }
         peerPlanningGeneration &+= 1
         let generation = peerPlanningGeneration
-        do {
-            let destinations = try await query.peerPlanningStatus(cwd: repo)
-            guard generation == peerPlanningGeneration, repo == repoPath else { return }
-            peerPlanning = .available(destinations)
-        } catch {
-            guard generation == peerPlanningGeneration, repo == repoPath else { return }
-            peerPlanning = .unavailable(lastGood: peerPlanning.value, reason: error.localizedDescription)
-        }
+        let result: Result<[PeerPlanningStatus], Error>
+        do { result = .success(try await query.peerPlanningStatus(cwd: repo)) }
+        catch { result = .failure(error) }
+        guard generation == peerPlanningGeneration, repo == repoPath else { return }
+        peerPlanning = reading(from: result, lastGood: peerPlanning.value)
     }
 
     func refreshPlanning() async {

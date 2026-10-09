@@ -621,8 +621,8 @@ acceptance remain at
 
 ## Tasks across machines (LOO-412, 2026-10-09)
 
-Jack Heart selected custom-ref sync: review-only, no landing/public export.
-Joining publishes nothing; execution stays local and imports unplaced.
+Jack Heart selected review-only custom-ref sync: no landing/public export.
+Joining publishes nothing; imports remain unplaced, execution local.
 Malformed input aborts import; contradictions isolate objects.
 
 Receipts retain saves, baselines, uncertainty and losers, not transitions.
@@ -630,8 +630,9 @@ Readback settles effects, not mappings/errors or removal via creation.
 Active evidence retains losing removals; no live-control proof.
 
 `08a285872` defers rejected/held effects until import, never saves/acquisition.
-Public `30b476328` awaits gate. `fcd64901f`/`357090d4b` retain primary-only moves;
+`30b476328` awaits gate. `fcd64901f`/`357090d4b` retain primary-only moves;
 only complete lists settle progress. Effect updates cannot promote losers.
+Reread delivery eligibility after settlement.
 
 **Independent facts need independent rollback.** Removal, archive and Teams use
 separate savepoints and prevalidated histories. Retain original ages/Team baselines;
@@ -646,10 +647,9 @@ acknowledgement requires its accepted frontier. Focused proof.
 Acquisition/saves bypass effect locks; unreadable journals mean unknown pending.
 Private histories/dependents stay held; omission is not convergence.
 Reads allocate no placement. Desktop streams scoped receipts/holds, retaining failed
-readings. Legacy association, authorship/recovery UI and composition remain.
-Mixed exchange is disabled.
-`scratch/work-on-another-machine-name.md`. Proofs:
-`7f206cd0e:wave/infrastructure/MEMORY.md`, this heading.
+readings. Legacy association, authorship/recovery UI and composition remain;
+mixed exchange stays disabled.
+`scratch/work-on-another-machine-name.md`; prior proofs: `7f206cd0e`, this heading.
 
 ## Synced planning integration (LOO-334)
 

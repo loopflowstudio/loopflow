@@ -27,8 +27,12 @@ installed help or reviewed Desktop code, not proof that no external tool exists.
 
 October 9 implementation cutover: `lf wave show [WAVE]` owns the plan reading;
 `wave workflow` and `wave edit-plan` replace public Project commands. Internal
-Project identity and historical planning remain. Earlier command names below
-are dated comparison evidence, not compatibility aliases.
+Project identity and historical planning remain. `575bde5bc`/`367ce31a9` implement
+this through the existing readers/writers; current/history text/JSON and
+checkpointed-store fixtures cover effect-free reads. Earlier delta entries saying
+Wave planning is incomplete describe their revisions, not the current checkout.
+Remote/Flow previews, peer composition and native bounded extraction remain.
+Earlier command names below are dated evidence, not compatibility aliases.
 
 ## Evidence and version boundary
 

@@ -232,10 +232,9 @@ mapping, placement and proofs:
 
 ## Provider conversations (LOO-442, 2026-10-09)
 
-Jack Heart requested AgentSession atop LOO-441; LOO-443 owns engine/driver changes.
-Opaque ids type resume, turn keys and accounts; no table.
-History retains ids/attribution. Keep SQL/JSON bytes and Swift
-rawValue row ids. Installation unproved.
+Jack selected AgentSessionId atop LOO-441; LOO-443 owns engine/driver.
+No table; retain history/attribution, SQL/JSON bytes and Swift rawValue ids.
+October 9: verify, publish on #1516; no merge. Installation unproved.
 
 ## Terminal conversation recovery (LOO-409, 2026-10-07)
 

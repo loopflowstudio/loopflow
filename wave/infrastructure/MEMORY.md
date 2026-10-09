@@ -221,19 +221,19 @@ unpublished code retained, without deletion or delivery authorization.
 
 ## AgentProcess (LOO-443, 2026-10-09)
 
-Jack Heart requested one process inventory for top/monitor, gates, resume and
-orphan settlement, deleting Session process columns/counters and duplicate owners.
-#1512 is main's `3e1e6245c`; Jack authorized parallel LOO-441 work, integrating
-its rename before publication. `cad03fe6d` is only a pre-exec lifeline slice;
-the record cutover and installed acceptance remain.
+Jack Heart requested one process inventory, deleting Session columns and duplicate
+owners. #1512 is `3e1e6245c`. Jack authorized parallel LOO-441 work and rename
+integration before publication. Records/installed acceptance remain unproved;
+`cad03fe6d` supplies pre-exec lifelines.
 
-Takeover preserves AgentProcess identity/parent but revokes old attachment
-control. The attachment slice uses a fresh opaque claim token for A → B → A,
-replacing the driver counter/type; it is not a new process or lifecycle owner.
-Provider records and both takeover death orders remain unfinished. FIFO holders survive
-transfer until OS exit; a lifeline is not current attachment authority. Close
-inherited writers before exec, preserve native terminals and dash-compatible
-signals, and signal throwaway children only.
+`0f1280b80` fences A → B → A with opaque attachment tokens, still Session-owned.
+Takeover preserves provider identity/parent. `69f88f30d` retains exact exit-event
+references without rewriting history. Late provider observations survive transfer;
+they grant no current control. Delayed-start capture attribution remains unaudited.
+FIFO holders survive transfer until OS exit, so both takeover death orders need
+record-based proof. Close inherited writers before exec; preserve native terminals,
+dash-compatible signals and throwaway-only signaling. Release's lesson applies:
+helper proofs establish neither top/Task agreement nor scheduled settlement.
 
 ## Process vocabulary (LOO-400, curated 2026-10-09)
 

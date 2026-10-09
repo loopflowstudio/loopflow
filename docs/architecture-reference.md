@@ -195,13 +195,16 @@ Persisted graphs and historical capture formats remain unchanged.
 
 Constructors and mutation APIs validate within the writing transaction. DTOs
 carry typed ancestry; CLI names and issue identifiers resolve at the boundary.
-There is no replacement Request, Execution, SkillInvocation, AgentProcess or generic
-attempt object. History entries have stable references, not independent lifecycles.
+There is no replacement Request, Execution, SkillInvocation or generic attempt
+object. History entries have stable references, not independent lifecycles.
+Jack Heart selected AgentProcess on October 9 for the actual provider OS process,
+not for an attempt. LOO-443 has not yet implemented that record; the table below
+describes the current storage, including its remaining Session-owned provider fields.
 
 | Owner | Authoritative fields and operations |
 | --- | --- |
 | `processes` | Durable `lfid`, nullable Unix `pid` (reusable, never identity), immutable `parent_process_lfid`, incoming direct/agent bit and calling AgentSession/provider generation when known; command, cwd, start/end and observed outcome/exit/signal; admit, finish, filter/page |
-| `agent_sessions` | Stable ID, purpose and independent interactive flag; title/provenance, request/feedback, typed Task/Wave ancestry, native identity, nullable driver Process and separate driver/provider generations; reserve, connect, bind and rename; historical feedback/completion retained |
+| `agent_sessions` | Stable ID, purpose and independent interactive flag; title/provenance, request/feedback, typed Task/Wave ancestry, native identity, nullable attached Process and opaque attachment token, provider generation and process evidence, exact attachment-exit event reference; reserve, connect, bind and rename; historical feedback/completion retained |
 | `tasks` | Project, issue, durable disposition, worktree/delivery facts and set-once `started_at` |
 | `projects` | Wave, stable Linear Project identity, status, shared chapter name, Flow and planning facts |
 | `waves`, `wave_documents` | Stable identity and repository address; stored objective, memory and instruments; repository files are explicit import sources |
@@ -249,9 +252,10 @@ An AgentSession can have many historical attached Processes and at most one curr
 attachment. Compare-and-set issues a fresh opaque token on every claim and release,
 including A → B → A. The token has no independent lifecycle. A continuing
 engine keeps its provider generation and origin through handoff and a driverless
-interval. Old clients may display events but cannot start/steer turns or write
-Session state. Passive connection acquires no claim. Dispatch fences include
-queued native RPCs and approval replies, not only database claim updates.
+interval. Old clients may retain provider history but cannot start/steer turns or
+change current attachment, connection, process evidence or stream attention.
+History retention grants no native-write or Flow authority. Passive connection
+acquires no claim. Dispatch fences include queued native RPCs and approval replies, not only database claim updates.
 
 Headless admission records a provider-generation reservation in Session history.
 A launch records its spawn request under the exact driver fence before starting

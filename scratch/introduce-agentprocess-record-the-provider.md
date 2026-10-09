@@ -11,8 +11,10 @@ partial publication or installed-store migration.
 Every provider OS process started by Loopflow has a durable AgentProcess record.
 Top, monitor, resume admission, Task blockers and orphan settlement use those
 records. A process disappears from live views on exact observed death, without
-erasing its history. A stale attached lf invocation cannot write or signal after
-a takeover. Session/native history, pending input and captured attribution survive.
+erasing its history. A stale attached lf invocation cannot send native writes,
+change current attachment state or signal after takeover; retaining provider
+history remains allowed. Session/native history, pending input and captured
+attribution survive.
 
 ## Inventory and draft choices (reconciled 2026-10-09)
 
@@ -35,7 +37,7 @@ a takeover. Session/native history, pending input and captured attribution survi
   AgentProcesses therefore serve one LfSession. Existing duplicate PID/birth
   observations must be retained as migration conflicts, never silently deduplicated
   into signal authority. No configured OpenCode data was queried.
-- `ProviderProcess`, `OwnedProviderProcess`, `LiveProviderProcess` in `top.rs`
+- `ProviderProcess`, `OwnedProviderProcess`, `LiveProviderProcess` in `lf/commands/top.rs`
   currently reconstruct provider attribution from process trees/receipts and the
   OpenCode JSON registry. `SessionProcessObservation`/`SessionProcessOwnership`
   add another SQL projection of the Session's loose process columns. Replace
@@ -75,13 +77,15 @@ a takeover. Session/native history, pending input and captured attribution survi
 
 `da98efe82` and `cad03fe6d` implement only the Codex/OpenCode pre-exec
 lifeline. `spawn_agent_process` is an OS-launch function, not a record writer.
+`0f1280b80` implements fresh attachment claims, including A → B → A;
+`69f88f30d` simplifies attachment exits around their exact event identity.
 `agent_process.sql` is the Task's single draft; it currently replaces attachment
 counters and preserves exit-event references, input/native history and matching
 Waiting evidence. It must be rewritten in place for the complete record cut,
 never followed by another draft. No AgentProcess record exists yet; provider
 columns, ownership projections, registry, gate and orphan reader remain.
-The local `origin/main` reference remains `3e1e6245c`; LOO-441's rename is not in
-this checkout. No remote synchronization was attempted during reconciliation.
+The source still declares `Process` and `AgentSession`; LOO-441 integration
+remains before publication. The integrated #1512 base is `3e1e6245c`.
 
 Two boundaries remain distinct from the launch proof:
 
@@ -98,9 +102,9 @@ Two boundaries remain distinct from the launch proof:
 
 1. Carry the implemented attachment token onto the AgentProcess row. Preserve
    AgentProcess identity and original parent across live takeover. The focused
-   regression covers A → B → A dispatch, stop/release and Waiting writes; raw
-   historical stream ingestion remains separate and needs its record-boundary
-   audit. Integrate LOO-441 before publication; no partial-slice publication.
+   regression covers A → B → A dispatch, stop/release and Waiting writes.
+   This fencing choice is implemented, not an outstanding design decision.
+   Integrate LOO-441 before publication; no partial-slice publication.
 2. Rewrite `agent_process.sql` in place to its final shape:
    backfill AgentProcesses before dropping Session columns. Preserve native
    history, original parent, current attachment, conflicts and unknown outcomes;
@@ -112,7 +116,14 @@ Two boundaries remain distinct from the launch proof:
    protection while eliminating the separate spawn-to-record uncertainty gap.
    Failed spawn is positive non-start evidence, not observed OS exit. Unknown
    spawn stays unknown. Historical duplicate PID/birth evidence stays recoverable
-   without granting signal authority.
+   without granting signal authority. Preserve history ingestion independently of
+   the attachment claim: `record_session_event` deliberately accepts observations
+   after transfer, and `record_session_turn_origin` retains correlated origin.
+   Its first Started receipt currently copies the Session's current capture/Work;
+   audit a delayed old start after a new capture so it cannot borrow the new
+   input's attribution. Prove late completion/usage retention alongside rejection
+   of stale native writes, attention updates and process publication. This
+   capture-order boundary is not covered by the A → B → A capability test.
 4. Move Task gates, active Sessions, top/monitor and scheduled orphan settlement
    to the same process inventory and delete the predecessors above. Prove both
    takeover death orders; no live current attachment means orphan settlement,
@@ -146,7 +157,11 @@ recognizes retained old receipts and new attachment exits for captured and nativ
 turns. Plain observation lookup replaces `session_driver_exit`'s now-unused outcome
 expression index. Attachment exit still does not invent provider completion.
 Passive Program Status retains its provider-generation fence and cannot claim
-attachment. No Rust/Swift wire field changed; the AgentProcess DTO cut remains open.
+attachment. Reconciliation corrected the architecture reference's obsolete ban
+on AgentProcess and its removed driver-generation description. History retention
+is explicitly distinct from current attachment mutation; no runtime change was
+needed for that documentation repair. No Rust/Swift wire field changed; the
+AgentProcess DTO cut remains open.
 
 Review found that CLOEXEC alone leaves the launching child holding its own
 lifeline until provider exec. The pre-exec hook now closes that inherited writer
@@ -160,4 +175,4 @@ These are launch proofs, not process-record or installed acceptance. Release's
 child memory reinforces operation-entry verification: helper success cannot
 establish top, Task status or scheduled orphan settlement.
 
-Check: `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` passed; `uv run python scripts/test_network.py cargo test -p loopflow --lib -- attachment_tests store::sqlite::program_status::tests store::sqlite::revisions::tests store::sqlite::session_events::tests --test-threads=1` passed 22; full Rust/Swift/DTO and Linux lifeline checks remain gate/CI-owned, installed acceptance remains open.
+Check: `git diff --check` passed; unchanged-source prior passes retained for `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`; `uv run python scripts/test_network.py cargo test -p loopflow --lib -- attachment_tests store::sqlite::program_status::tests store::sqlite::revisions::tests store::sqlite::session_events::tests --test-threads=1` passed 22; full Rust/Swift/DTO and Linux lifeline checks remain gate/CI-owned, installed acceptance remains open.

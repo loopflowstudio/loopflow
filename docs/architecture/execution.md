@@ -104,9 +104,10 @@ SQLite transaction over transport I/O. A send timeout
 has an unknown outcome and is not retried automatically.
 
 A passive viewer subscribes without claiming the Session. A former driver can
-keep receiving events after transfer but cannot start or steer a turn or mutate
-Session state. The continuing engine retains its provider generation while the
-new attachment receives a fresh opaque token, including reattachment of the same
+keep receiving and retaining provider history after transfer but cannot start or
+steer a turn or change current attachment, connection, process evidence or stream
+attention. Retaining history grants no native-write or Flow authority. The
+continuing engine retains its provider generation while the new attachment receives a fresh opaque token, including reattachment of the same
 lf Process. Release revokes that token as well. The token is a compare-and-swap
 witness, not another process identity or lifecycle owner. The AgentProcess
 record cutover remains unfinished; provider identity still uses its generation.

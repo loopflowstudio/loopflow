@@ -120,7 +120,8 @@ cli:
         copies one into your repository to change.'
     - name: Sessions
       text: At its most basic, `lf` is an agent launcher and session manager. Use it anywhere you
-        would launch an agent. For example, you can resume a Codex session in Claude.
+        would launch an agent. For example, `lf session resume` picks a Claude Code or Codex
+        conversation back up by its ID.
     - name: Waves and Tasks
       text: '`lf` is also a project manager. It organizes your work into Waves (long-lived streams)
         and Tasks (concrete outcomes, i.e. PRs).'

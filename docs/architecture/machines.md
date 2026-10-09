@@ -98,14 +98,18 @@ Machine is unavailable, never a local default.
 that ID to the Machine-local repository locator; it contains no copied Work or
 execution. Existing repository paths receive distinct opaque IDs; new Wave writes
 use the same binding, and `lf repo identity` covers repositories without Work.
-`lf repo identity --bind ID` explicitly binds an unbound checkout and refuses a
-different existing plan; it selects and publishes nothing. A shared code remote
+`lf repo identity --bind ID` explicitly associates even an established checkout.
+The same table retains prior IDs as local locators and exactly one selected ID
+per path; Work, provider mappings, pending effects and execution are untouched.
+An ID already bound to another local path is not reassigned. Binding selects no
+planning destination and publishes nothing. A shared code remote
 or equal clone name supplies no identity. `--repository ID` resolves at the target
 before Process admission, so SSH need not change the Machine's saved default.
 LOO-412 supplies user/shared destination selection and portable Work exchange.
 That journal does not carry RepositoryId or delegation: unbound import creates
-a local repository ID. Explicit association of existing divergent roots and
-delegation exchange remain unfinished; equal Work IDs alone do not converge windows.
+a local repository ID. Explicit association converges established roots on a
+selected ID without rewriting Work; delegation exchange and live-window
+reassociation remain unfinished.
 
 This is not complete distributed routing: a peer's absence of a checkout is not
 proof of an unstarted Task. Planning exchange excludes execution. An observed

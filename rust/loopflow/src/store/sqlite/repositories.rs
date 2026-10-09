@@ -10,7 +10,8 @@ use super::SqliteStore;
 
 pub(super) fn ensure_repository_in(conn: &Connection, repo: &str) -> StoreResult<RepositoryId> {
     conn.execute(
-        "INSERT INTO repository_plans(repo,id) VALUES(?1,?2) ON CONFLICT(repo) DO NOTHING",
+        "INSERT INTO repository_plans(repo,id,selected)
+         SELECT ?1,?2,1 WHERE NOT EXISTS(SELECT 1 FROM repository_plans WHERE repo=?1)",
         params![repo, RepositoryId::new().as_str()],
     )?;
     repository_id_in(conn, repo)?.ok_or(StoreError::NotFound)
@@ -19,7 +20,7 @@ pub(super) fn ensure_repository_in(conn: &Connection, repo: &str) -> StoreResult
 pub(super) fn repository_id_in(conn: &Connection, repo: &str) -> StoreResult<Option<RepositoryId>> {
     let id: Option<String> = conn
         .query_row(
-            "SELECT id FROM repository_plans WHERE repo=?1",
+            "SELECT id FROM repository_plans WHERE repo=?1 AND selected=1",
             [repo],
             |row| row.get(0),
         )
@@ -97,23 +98,35 @@ impl SqliteStore {
         .map_err(Into::into)
     }
 
-    /// Bind an explicitly selected peer plan before importing its Work. Never
-    /// replace an existing local plan implicitly or infer a match from Git.
+    /// Explicitly associate this checkout with a selected repository identity.
+    /// Retain prior IDs as local locators; Work, provider mappings, journals and
+    /// execution belong to the repository path and are never rewritten here.
     pub fn bind_repository(&self, repo: &str, id: &RepositoryId) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if let Some(existing) = repository_id_in(&tx, repo)? {
-            if existing != *id {
+        let bound: Option<String> = tx
+            .query_row(
+                "SELECT repo FROM repository_plans WHERE id=?1",
+                [id.as_str()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if let Some(other) = bound.as_deref() {
+            if other != repo {
                 return Err(StoreError::InvalidData(format!(
-                    "repository {repo} already selects plan {existing}; preserve it before selecting {id}"
+                    "repository identity {id} already locates {other}; cannot associate another local checkout {repo}"
                 )));
             }
-        } else {
-            tx.execute(
-                "INSERT INTO repository_plans(repo,id) VALUES(?1,?2)",
-                params![repo, id.as_str()],
-            )?;
         }
+        tx.execute(
+            "UPDATE repository_plans SET selected=0 WHERE repo=?1 AND selected=1 AND id!=?2",
+            params![repo, id.as_str()],
+        )?;
+        tx.execute(
+            "INSERT INTO repository_plans(repo,id,selected) VALUES(?1,?2,1)
+             ON CONFLICT(id) DO UPDATE SET selected=1 WHERE selected=0",
+            params![repo, id.as_str()],
+        )?;
         tx.commit()?;
         Ok(())
     }
@@ -197,18 +210,34 @@ mod tests {
         assert_eq!(first.ensure_repository("/src/same").unwrap(), id);
         let other = second.ensure_repository("/src/same").unwrap();
         assert_ne!(id, other);
-        assert!(second.bind_repository("/src/same", &id).is_err());
-        assert_eq!(second.repository_id("/src/same").unwrap(), Some(other));
-        second.bind_repository("/peer/selected", &id).unwrap();
+        second.bind_repository("/src/same", &id).unwrap();
+        assert_eq!(second.repository_id("/src/same").unwrap(), Some(id.clone()));
+        assert_eq!(
+            second.repository_path(&other).unwrap().as_deref(),
+            Some("/src/same")
+        );
+        assert_eq!(second.ensure_repository("/src/same").unwrap(), id);
+        second.bind_repository("/src/same", &id).unwrap();
         assert_eq!(
             second.repository_path(&id).unwrap().as_deref(),
-            Some("/peer/selected")
+            Some("/src/same")
         );
         assert_eq!(
             first.repository_path(&id).unwrap().as_deref(),
             Some("/src/same")
         );
+        let unrelated = second.ensure_repository("/another/clone").unwrap();
         assert!(second.bind_repository("/another/clone", &id).is_err());
+        assert_eq!(
+            second.repository_id("/another/clone").unwrap(),
+            Some(unrelated)
+        );
+        second.bind_repository("/src/same", &other).unwrap();
+        assert_eq!(second.repository_id("/src/same").unwrap(), Some(other));
+        assert_eq!(
+            second.repository_path(&id).unwrap().as_deref(),
+            Some("/src/same")
+        );
         assert!(first.repository_id("/unknown").unwrap().is_none());
     }
 }

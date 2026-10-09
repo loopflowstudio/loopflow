@@ -1743,15 +1743,66 @@ fn repository_identity_binding_is_explicit_and_does_not_select_planning() {
         .into_owned();
     assert!(store.peer_planning_status(&repo).unwrap().is_empty());
     assert!(store.list_waves(None).unwrap().is_empty());
+    let task: serde_json::Value = serde_json::from_str(&success(
+        command(
+            target_home.path(),
+            target.path(),
+            &[
+                "task",
+                "create",
+                "--title",
+                "Retain through association",
+                "--json",
+            ],
+        )
+        .output()
+        .unwrap(),
+    ))
+    .unwrap();
     let other = loopflow::durable::RepositoryId::new();
-    let rejected = command(
+    let rebound = command(
         target_home.path(),
         target.path(),
         &["repo", "identity", "--bind", other.as_str()],
     )
     .output()
     .unwrap();
-    assert!(!rejected.status.success());
-    assert!(String::from_utf8_lossy(&rejected.stderr).contains("already selects plan"));
-    assert_eq!(store.repository_id(&repo).unwrap().unwrap().as_str(), id);
+    assert_eq!(success(rebound).trim(), other.as_str());
+    assert_eq!(store.repository_id(&repo).unwrap(), Some(other));
+    let prior = loopflow::durable::RepositoryId::parse(&id).unwrap();
+    assert_eq!(store.repository_path(&prior).unwrap(), Some(repo.clone()));
+    let through_prior: String = serde_json::from_str(&success(
+        command(
+            target_home.path(),
+            target.path(),
+            &["--repository", &id, "repo", "identity", "--json"],
+        )
+        .output()
+        .unwrap(),
+    ))
+    .unwrap();
+    assert_eq!(
+        through_prior,
+        store.repository_id(&repo).unwrap().unwrap().as_str()
+    );
+    let explained = success(
+        command(
+            target_home.path(),
+            source.path(),
+            &[
+                "--repository",
+                &id,
+                "task",
+                "run",
+                task["id"].as_str().unwrap(),
+                "--explain",
+                "--json",
+            ],
+        )
+        .output()
+        .unwrap(),
+    );
+    assert!(explained.contains(task["id"].as_str().unwrap()));
+    assert!(explained.contains(&through_prior));
+    assert!(store.peer_planning_status(&repo).unwrap().is_empty());
 }

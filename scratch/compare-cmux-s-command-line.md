@@ -12,7 +12,7 @@ LOO-406 is integrated through main’s `d20c56daf` (#1503). LOO-412 through
 destination-level Desktop status survive. Legacy association remains.
 Mixed Linear/Git stays disabled pending the remaining composition.
 Local Task/Session-plus-Changes opening follows request-scoped readiness; native proof remains.
-Remaining implementation: broader explanation, divergent-root/delegation exchange,
+Remaining implementation: broader explanation, delegation exchange,
 first-start admission and remote opening. Native I/O and full-path proof remain.
 [Findings](findings.md), [questions](questions.md) and the
 [comparison](../docs/reviews/terminal-command-comparison.md) retain evidence and open choices.
@@ -230,6 +230,11 @@ no preparation, Process writes or excerpt persistence. Session explanation reads
 recorded endpoints without probing a live driver's protocol. No removed launch,
 Project/roadmap or callback path is retained beside those owners.
 
+Repository association replaces the blanket different-ID refusal with one selected
+identity plus retained local IDs in `repository_plans`; no second alias registry.
+The single Task draft changes in place. Routing compares resolved repository paths,
+not raw selected-ID equality, so historical IDs remain useful without cross-repo access.
+
 Peer import no longer mutates its prepared object index in the retry loop or
 maintains a second receipt-exclusion list for scalar writes. Index construction
 validates complete records and selects provider frontiers once; scalar projection
@@ -268,17 +273,19 @@ receipts. Wave commands retain their shared readers and separate writes. The
 Desktop peer cache reuses Machine/repository keys, not path-only readings. `repository_plans` supplies local plan
 identity even without Tasks; explicit binding can associate a peer path with that
 ID. Known started Tasks route via recorded checkout Machine; locally unstarted
-Tasks use effective delegation. Neither rewrites Machine defaults. Explicit `repo identity --bind ID` exposes the existing binding owner before
-creating/importing Work on a new peer checkout. Binding neither selects nor
-publishes a destination. Imported Waves establish a local repository identity when
-none exists, without allocating placement. The new peer fixture starts with
-independently created Tasks/Waves on both stores, exchanges their journals and
-checks stable identity, offline saves, completion and replay against retained local
-Workflow, checkout, Session and Process rows. Matching Task/Wave IDs are not seeded,
-but the fixture explicitly binds the repository ID **before** either side creates Work. It proves journal convergence
-under prior repository association, not association of independently established
-repository roots. Execution rows are populated retained fixtures, not live clients.
-This is storage composition, not configured transport or exclusive admission.
+Tasks use effective delegation. Neither rewrites Machine defaults. Explicit
+`repo identity --bind ID` uses the existing owner even after a peer creates Work.
+Binding neither selects nor publishes a destination. Imported Waves establish a
+local repository identity when none exists, without allocating placement.
+The peer fixture creates both roots' distinct repository identities and Tasks/Waves
+before explicit association. `bind_repository` selects the supplied ID in the existing
+`repository_plans` owner and retains prior IDs as local locators. It rewrites no
+Work, provider mapping, planning journal, selection or execution row. The fixture
+then exchanges common-writer journals and checks offline saves, completion and
+replay against retained local Workflow, checkout, Session and Process rows.
+A separate provider-backed fixture preserves issue lookup and attempted pending
+edits across association, without enabling mixed-provider exchange. These are
+storage proofs, not live clients, configured transport or exclusive admission.
 
 The merge exposed an incompatible source-side transfer path: LOO-412's
 `TaskSource` could carry a started Task's branch to another Machine and its binding
@@ -295,17 +302,14 @@ retained execution remain usable. Neither local absence, a negative peer reading
 nor a local SQLite transaction supplies a cross-Machine reservation.
 Delegation inheritance remains proposed, not accepted from source code alone.
 
-**Remaining identity/routing composition (source review October 9).**
+**Remaining identity/routing composition (October 9).**
 `PlanningKind::fields()` carries neither RepositoryId nor authored delegation.
-Import creates a fresh local repository ID when unbound; fetching the same journal
-alone therefore cannot converge window identity. The existing pre-bound fixture
-must not be treated as proof of that missing behavior.
+Unbound acquisition still allocates local identity; explicit association is required,
+not inferred from a ref, remote or clone name. Historical repository IDs remain
+Machine-local locators, not exported aliases. One selected ID serves every destination.
 
-- Associate independently established repository roots explicitly, preserving both
-  roots' Work, historical IDs, provider lookup and local execution. `bind_repository`
-  currently refuses a different existing ID. Reuse this owner with LOO-412's selection;
-  do not substitute destination/ref, clone name or code remote for repository identity.
-  One repository can select multiple destinations without splitting its window.
+- Reconcile already-open Desktop windows when an explicit association changes their
+  selected repository ID; the storage/CLI slice does not establish live-window convergence.
 - Exchange authored delegation through the common journal/Placement owners, retaining
   explicit/legacy provenance, conflicts and pending state. Nearest-ancestor inheritance
   is still proposed (Q2); the code cannot approve it.
@@ -519,4 +523,4 @@ identity/delegation, open them, add shell/Files panes, retain an unfinished draf
 change focus, target a harmless command, read output, hide/restore, and verify the
 original input target and draft survive. Demo owns native usability; preserve comparison evidence and use no real accounts or live user terminals.
 
-Check (October 9 realign): `git diff --check` PASS; prose-only, no test rerun. Build/Clippy and 10 focused peer-import passes: `97bf9dbcb`, this file's check line. Full affected suites: gate; native I/O: demo.
+Check (October 9 association): `cargo build -p loopflow --bin lf`, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and focused `cargo test -p loopflow` filters for association/provider effects, independent peer convergence, repositories, draft migration and CLI identity PASS (6 tests); affected suites/installation: gate; native I/O/window usability: demo.

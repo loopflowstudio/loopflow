@@ -107,20 +107,22 @@ These are reversible lookup choices, not shared Work identity or publication.
 Primary and stack-parent Task selectors now carry repository-scoped full IDs through
 dispatch; an unscoped ambiguous prefix still fails.
 
-October 9 context query: generated goal is 31,451 tokens against 16,000
-(15,451 over); the supplied launch source was read completely, including its file
+October 9 context query: generated goal remains about 31,400 tokens against 16,000
+(about 15,400 over); the supplied launch source was read completely, including its file
 inventory. This generated payload cannot be reduced by authored-note curation;
 the context-producer gap remains. No limit was raised.
 
 ## Explicit repository association — October 9
 
-`repo identity --bind ID` uses the existing owner only for an unbound checkout or
-an identical binding. It precedes independent local creation/import and does not
-select/publish planning. Existing different roots remain intact and unavailable
-for implicit merging. Their explicit association, delegation exchange and peer
-first-start admission remain required. Git-selected Tasks, including user-keyed
-refs, lack first-start admission without a retained checkout; import cannot supply
-a reservation.
+October 9 reversible choice: `repo identity --bind ID` explicitly selects the
+supplied repository identity even after local Work exists. Prior IDs remain local
+locators in the same `repository_plans` table; Work, provider mappings, uncertain
+effects, journals and execution stay unchanged. It selects/publishes no destination.
+An ID already locating another local checkout is not reassigned. This associates
+two Machines' established roots, not two same-Machine stores or duplicate Work.
+Live Desktop reassociation, delegation exchange and peer first-start admission
+remain. Neither binding nor a retained alias authorizes start; Git-selected Tasks
+without retained checkouts still refuse. Inheritance remains unresolved.
 LOO-412's started-Task source-transfer path conflicts with Jack Heart's retained-
 Machine decision and is excluded; dependent remote launch work stays unfinished.
 

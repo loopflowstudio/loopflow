@@ -93,12 +93,11 @@ ages/baselines and causal frontiers. Import reuses portable fields.
 Entity revisions cannot order relationships; scalar/list replay cannot clear
 freshness or unseen notices. Prior evidence: `7d12ab10a`, this heading.
 
-`repo identity --bind` associates unbound checkouts without selection/publication;
-divergent roots remain unresolved. The peer fixture pre-binds repository identity; journals carry neither
-RepositoryId nor delegation. Unbound
-import allocates local identity: Task convergence cannot prove window convergence.
-Git-selected Tasks without retained checkouts refuse first start, including
-user-keyed refs. Refusal proves no exclusive admission.
+October 9: `repo identity --bind` associates established roots. Prior IDs remain
+local locators; Work, mappings, effects and execution survive. Both fixture roots
+precede binding. No publication. Unbound import allocates local identity; journals
+exclude RepositoryId/delegation. Live-window reassociation remains. Git-selected
+Tasks without retained checkouts refuse first start; binding grants no admission.
 
 Composition excludes LOO-412's transfer/preparing resolver, preserving Jack Heart's
 recorded-Machine retention and effect-free selection. **Unmapping is not association:**

@@ -3951,15 +3951,63 @@ mod tests {
     }
 
     #[test]
+    fn repository_association_preserves_provider_lookup_and_uncertain_effects() {
+        use super::super::planning_changes::PlanningChanges;
+        let (_home, source) = store();
+        let (wave, row, task) = linear_seed(&source);
+        preserve_execution(&source, &wave, &task);
+        edit_title(&source, &task, "Uncertain title");
+        let change = source.pending_task_changes(&task).unwrap().remove(0);
+        assert!(source
+            .attempt_planning_field(
+                PlanningChanges::Task(&task),
+                &change,
+                row.snapshot.items[0].revision.as_deref()
+            )
+            .unwrap());
+        let retained = source.task(&task).unwrap();
+        let project = source
+            .project(&retained.as_ref().unwrap().project_id)
+            .unwrap();
+        let effects = source.pending_task_changes(&task).unwrap();
+        let journal = export(&source, "/source");
+        let execution = execution_rows(&source);
+        let original = source.repository_id("/source").unwrap().unwrap();
+        let selected = crate::durable::RepositoryId::new();
+        source.bind_repository("/source", &selected).unwrap();
+        assert_eq!(
+            source.task_by_issue(&row.snapshot.items[0].id).unwrap(),
+            retained
+        );
+        assert_eq!(
+            source
+                .project(&retained.as_ref().unwrap().project_id)
+                .unwrap(),
+            project
+        );
+        assert_eq!(source.pending_task_changes(&task).unwrap(), effects);
+        assert_eq!(export(&source, "/source"), journal);
+        assert_eq!(execution_rows(&source), execution);
+        assert_eq!(
+            source.repository_path(&original).unwrap().as_deref(),
+            Some("/source")
+        );
+        assert_eq!(
+            source.task_execution_route(&task).unwrap().repository_id,
+            selected
+        );
+    }
+
+    #[test]
     fn independent_peer_tasks_converge_without_transferring_execution() {
         let (_left_home, left) = store();
         let (_right_home, right) = store();
-        // Explicit repository association precedes sharing. No Task/Wave IDs are
-        // seeded on the other Machine, and the transport destination is not identity.
-        let repository = left.ensure_repository("/source").unwrap();
-        right.bind_repository("/target", &repository).unwrap();
+        // Both roots already own distinct identities and Work before association.
         let left_task = seed(&left);
         let right_task = seed_at(&right, "/target", "right", "RIGHT-1");
+        let repository = left.repository_id("/source").unwrap().unwrap();
+        let prior_repository = right.repository_id("/target").unwrap().unwrap();
+        assert_ne!(repository, prior_repository);
         assert_ne!(left_task, right_task);
         let left_wave = left.task(&left_task).unwrap().unwrap().wave_id;
         let right_wave = right.task(&right_task).unwrap().unwrap().wave_id;
@@ -3975,6 +4023,18 @@ mod tests {
         }
         let left_execution = execution_rows(&left);
         let right_execution = execution_rows(&right);
+        let before = export(&right, "/target");
+        let selected = right.peer_planning_status("/target").unwrap();
+        let retained = right.task(&right_task).unwrap();
+        right.bind_repository("/target", &repository).unwrap();
+        assert_eq!(export(&right, "/target"), before);
+        assert_eq!(right.peer_planning_status("/target").unwrap(), selected);
+        assert_eq!(right.task(&right_task).unwrap(), retained);
+        assert_eq!(execution_rows(&right), right_execution);
+        assert_eq!(
+            right.repository_path(&prior_repository).unwrap().as_deref(),
+            Some("/target")
+        );
         let left_route = left.task_execution_route(&left_task).unwrap();
         let right_route = right.task_execution_route(&right_task).unwrap();
         assert_ne!(left_route.machine_id, right_route.machine_id);

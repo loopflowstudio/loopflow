@@ -84,48 +84,14 @@ direct Swift/model checks passed, packaged execution stalled. Failed attempts:
 `0dba18b79:scratch/findings.md`, this heading. Native drafts/responders and
 cross-machine composition remain unproved.
 
-## Terminal identity and extraction boundary — October 8
+## Terminal identity and extraction boundary — October 8–9
 
-Terminal surface keys and callbacks now carry Machine identity, as do Session
-reading/cache-marker keys. Review found that path-key qualification alone left
-membership pruning able to remove another Machine's same-ID Session; pruning
-and move evidence now include Machine too. Fixtures exercise that collision, wrong-
-Machine close notifications, passive missing-surface inspection and delayed reads;
-they typecheck, while packaged execution remains unavailable.
-Inspection exposes `ProgramStatusSurface.incarnation` without allocation or
-child-exit cleanup. Released views cannot create another surface under that token.
-
-Bounded extraction and failed native builds: `565dc0fbb:scratch/findings.md`,
-**Terminal identity and extraction boundary**. Linux primitive/library checks pass;
-lf2 still lacks bounded extraction; that checkpoint had no lf3 framework or native
-composition proof. The later build below supersedes only framework availability.
-
-October 9: pinned Zig 0.16 runs again (default 0.15 failed). Reset now releases
-its command-block pin: 270 native tests pass, four skip; one failed before the fix.
-The ReleaseFast lf3 framework builds and exports the bounded reader on arm64/x86_64.
-Zip/checksum and build receipts in `result.json`; native-surface proof remains:
-`/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo427-native-build-pu4xqwri/`.
-The later October 9 composition published lf3 immutably to the authorized artifact
-bucket and verified its public download before selecting it in SwiftPM. Removed
-the placeholder read result and the native input fixture's full-buffer observer;
-that fixture now uses exact-target reads. Native fixtures remain unexecuted.
-
-### Exact-target read boundary — October 8
-
-`desktop read` now reaches passive surface validation through the existing Apple
-event, router, registry and surface pool. Arrangement and reads share window and
-pane validation. The pool bypasses allocating lookup and liveness cleanup;
-native extraction remains explicitly unavailable under lf2. Contract fixtures
-preserve empty versus missing, request identity and byte limits. A new real-surface
-fixture is display-gated after review caught that placing it in the ordinary pane
-suite would violate the headless check contract. It remains unexecuted. No
-artifact, installed app or user terminal was changed. This advances slice 4,
-not the single-PR acceptance boundary or Q2/Q3.
-
-`5f4440e52` shares pane-to-terminal mapping and Apple-event replies, retaining
-synchronous MainActor validation. It removes the fabricated-empty router fixture;
-empty-output coverage is DTO shape plus the Linux formatter, not native extraction.
-The missing-surface fixture covers each region without allocating a view. The related Infrastructure planning/peer sections were read, not its unrelated history.
+Detailed surface-key corrections, failed builds and lf3 publication receipts:
+`43cc417ca:scratch/findings.md`, this heading and **Exact-target read boundary**.
+The plan retains the current contract. Machine-qualified membership/callbacks,
+passive exact-target lookup and the published bounded reader are composed;
+native input/extraction fixtures remain unexecuted. Primitive formatter proof
+and DTO/headless checks are not mounted-surface or complete-path acceptance.
 
 ## Scoped dispatch and preview — October 9
 
@@ -216,3 +182,16 @@ mechanisms rather than counting refusal or pre-binding as distributed routing.
 Product still has no child directories/memories. Relevant Infrastructure planning,
 peer/recovery and Intelligence check/context sections were read; unrelated sibling
 history was not re-audited. Local main remains `3e1e6245c`; no remote fetch was made.
+
+October 9 association replaces pre-binding in the independent-root fixture: both
+roots own Work and different repository IDs before explicit selection. Retained
+IDs use the same table; no journal or provider field changes. Separate Linear
+storage evidence retains provider lookup and attempted effects without relaxing
+mixed-provider refusal. Review found raw-ID routing would reject historical IDs;
+routing now compares their resolved repository paths. Same-Machine locator
+collisions remain explicit errors, preserving both selections. Desktop windows
+already open under the former identity still need reconciliation.
+
+The first association fixture passed no expected provider revision to the attempt
+owner and correctly returned false. It now supplies the retained observation's
+revision rather than bypassing receipt admission; production behavior is unchanged.

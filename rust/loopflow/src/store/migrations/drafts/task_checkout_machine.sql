@@ -15,9 +15,11 @@ ALTER TABLE work_placements ADD COLUMN provenance TEXT NOT NULL DEFAULT 'legacy'
 -- The selected plan's repository identity is independent of its local locator.
 -- Peer adoption supplies the same id explicitly; a code remote implies nothing.
 CREATE TABLE repository_plans (
-    repo TEXT PRIMARY KEY NOT NULL,
-    id TEXT UNIQUE NOT NULL
+    id TEXT PRIMARY KEY NOT NULL,
+    repo TEXT NOT NULL,
+    selected INTEGER NOT NULL CHECK (selected IN (0, 1))
 );
-INSERT INTO repository_plans(repo,id)
-    SELECT repo, 'repo_' || lower(hex(randomblob(16))) FROM
+CREATE UNIQUE INDEX repository_selected_plan ON repository_plans(repo) WHERE selected=1;
+INSERT INTO repository_plans(repo,id,selected)
+    SELECT repo, 'repo_' || lower(hex(randomblob(16))), 1 FROM
         (SELECT DISTINCT repo FROM waves);

@@ -162,14 +162,12 @@ fn resolve_task(
         return Ok(None);
     };
     let route = store.task_execution_route(&task)?;
-    if cli
-        .repository
-        .as_ref()
-        .is_some_and(|id| id != &route.repository_id)
-    {
-        return Err(anyhow!(
-            "Task {selector} does not belong to the selected repository plan"
-        ));
+    if let Some(id) = &cli.repository {
+        if store.repository_path(id)? != store.repository_path(&route.repository_id)? {
+            return Err(anyhow!(
+                "Task {selector} does not belong to the selected repository plan"
+            ));
+        }
     }
     Ok(Some(route))
 }

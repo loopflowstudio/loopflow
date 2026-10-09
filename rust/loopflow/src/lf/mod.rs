@@ -1662,7 +1662,7 @@ pub enum PlanningCommand {
 pub enum RepoCommand {
     /// Establish or print this repository's selected planning identity
     Identity {
-        /// Associate an unbound checkout with an explicitly selected repository identity
+        /// Associate this checkout with a repository identity, retaining prior IDs
         #[arg(long)]
         bind: Option<crate::durable::RepositoryId>,
         #[arg(long)]

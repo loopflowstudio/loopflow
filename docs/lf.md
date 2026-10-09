@@ -96,11 +96,12 @@ can set `repo_root: ~/projects` instead of the default `~/src`. Absolute paths,
 keeps the current directory. Linked worktrees retain their checkout and share
 canonical repository identity. Missing/non-Git paths fail without creating work.
 Repository selection does not register a plan, join peers, or change saved defaults.
-For a new peer checkout, read `lf repo identity` on the source, then use
-`lf repo identity --bind repo_ID` on the peer before creating or importing Work.
-Binding selects identity only: it does not connect, select, fetch or publish planning.
-An existing different repository identity is retained and reported, never replaced;
-association of already divergent repository identities remains unavailable.
+Read `lf repo identity` on one Machine, then use
+`lf repo identity --bind repo_ID` on the peer, even when both already have Work.
+Binding selects the shared repository identity and retains prior IDs as local
+locators. Work IDs, provider lookup, pending edits and execution stay unchanged.
+It does not connect, select, fetch or publish planning. An ID already locating
+another checkout on the same Machine cannot be rebound to this one.
 An explicit Task from another repository is rejected rather than silently retargeted.
 
 [Select Git planning](#select-git-planning) to exchange planning. Import never

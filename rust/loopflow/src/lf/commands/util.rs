@@ -299,7 +299,7 @@ pub(crate) fn require_provider_session_process(dir: &Path) -> Result<()> {
 
 pub(crate) fn require_session_task(
     store: &SqliteStore,
-    session: &crate::session::AgentSession,
+    session: &crate::session::LfSession,
 ) -> Result<()> {
     let Some(task_id) = &session.task_id else {
         return Ok(());

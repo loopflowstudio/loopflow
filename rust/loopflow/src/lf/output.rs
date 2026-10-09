@@ -1,6 +1,6 @@
 use std::io::IsTerminal;
 
-pub(crate) fn print_process(process: &crate::process::Process) {
+pub(crate) fn print_process(process: &crate::process::LfProcess) {
     let command = process.command.as_deref().unwrap_or("unknown command");
     let display = serde_json::from_str::<Vec<String>>(command)
         .map(|argv| argv.join(" "))

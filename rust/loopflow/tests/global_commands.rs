@@ -1405,11 +1405,11 @@ fn task_run_explain_preserves_absent_and_unreadable_registries() {
     }
 }
 
-fn connection_session(home: &Path, cwd: &Path) -> loopflow::session::AgentSession {
+fn connection_session(home: &Path, cwd: &Path) -> loopflow::session::LfSession {
     let store = SqliteStore::new(&home.join(".lf/loopflow.db")).unwrap();
     store
         .create_session(
-            loopflow::session::AgentSession {
+            loopflow::session::LfSession {
                 captured: None,
                 caller_artifact_key: None,
                 task_id: None,
@@ -1440,7 +1440,7 @@ fn connection_session(home: &Path, cwd: &Path) -> loopflow::session::AgentSessio
         .unwrap()
 }
 
-fn connection_history(db: &rusqlite::Connection, session: &loopflow::session::AgentSession) {
+fn connection_history(db: &rusqlite::Connection, session: &loopflow::session::LfSession) {
     db.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES(?1,'observed',?2,1,?3)",
         rusqlite::params![session.id, format!("{}:provider-session:proof", session.artifact_key),
         serde_json::json!({"source":"provider-session:proof","evidence":{"schema_version":1,"provider_session_id":"native-proof","account_id":null}}).to_string()]).unwrap();

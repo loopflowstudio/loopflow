@@ -4,7 +4,7 @@ use anyhow::Context;
 use clap::Subcommand;
 
 use crate::lf::output::print_process;
-use crate::process::{ProcessCursor, ProcessFilter, ProcessOutcomeFilter, ProcessWorkFilter};
+use crate::process::{LfProcessCursor, LfProcessFilter, LfProcessOutcomeFilter, LfProcessWorkFilter};
 use crate::repository::CanonicalRepo;
 use crate::store::{open_store, storage_config_from_env};
 
@@ -43,11 +43,11 @@ pub enum HistoryCommand {
         limit: NonZeroU32,
         /// Continue with the previous page's next object, encoded as JSON
         #[arg(long, value_parser = parse_cursor)]
-        after: Option<ProcessCursor>,
+        after: Option<LfProcessCursor>,
         /// Direct children of an exact or unambiguous parent Process
         #[arg(long)]
         parent: Option<String>,
-        /// Commands issued by this AgentSession
+        /// Commands issued by this Session
         #[arg(long)]
         caller: Option<String>,
         /// Literal command text, ignoring ASCII case
@@ -117,7 +117,7 @@ pub enum HistoryCommand {
     },
 }
 
-fn parse_cursor(value: &str) -> Result<ProcessCursor, String> {
+fn parse_cursor(value: &str) -> Result<LfProcessCursor, String> {
     serde_json::from_str(value).map_err(|error| error.to_string())
 }
 
@@ -195,13 +195,13 @@ pub fn run(command: &HistoryCommand) -> anyhow::Result<()> {
                 CanonicalRepo::current()?.map(|repo| repo.to_string())
             };
             let performed_work = match (task, wave) {
-                (Some(task), _) => Some(ProcessWorkFilter::Task(
+                (Some(task), _) => Some(LfProcessWorkFilter::Task(
                     store
                         .sqlite
                         .resolve_task_id(task, repo.as_deref())?
                         .context("Task was not found")?,
                 )),
-                (_, Some(wave)) => Some(ProcessWorkFilter::Wave(
+                (_, Some(wave)) => Some(LfProcessWorkFilter::Wave(
                     store
                         .sqlite
                         .resolve_wave_id(wave, repo.as_deref())?
@@ -209,7 +209,7 @@ pub fn run(command: &HistoryCommand) -> anyhow::Result<()> {
                 )),
                 _ => None,
             };
-            let filter = ProcessFilter {
+            let filter = LfProcessFilter {
                 repo,
                 parent_process_lfid: match parent {
                     Some(parent) => Some(
@@ -224,10 +224,10 @@ pub fn run(command: &HistoryCommand) -> anyhow::Result<()> {
                 caller_session_id: caller.clone(),
                 command_contains: search.clone(),
                 outcome: outcome.as_deref().map(|value| match value {
-                    "succeeded" => ProcessOutcomeFilter::Succeeded,
-                    "failed" => ProcessOutcomeFilter::Failed,
-                    "interrupted" => ProcessOutcomeFilter::Interrupted,
-                    _ => ProcessOutcomeFilter::Unknown,
+                    "succeeded" => LfProcessOutcomeFilter::Succeeded,
+                    "failed" => LfProcessOutcomeFilter::Failed,
+                    "interrupted" => LfProcessOutcomeFilter::Interrupted,
+                    _ => LfProcessOutcomeFilter::Unknown,
                 }),
                 performed_work,
                 ..Default::default()

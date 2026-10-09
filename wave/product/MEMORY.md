@@ -52,8 +52,7 @@ Prototypes through `92cafe61d` remove copied placements, preserve legacy overrid
 and add plan identity plus known-Task SSH routing without rewriting Machine defaults.
 Inheritance remains unapproved; Rust compilation is unverified. Local absence or
 negative observation cannot reserve first start against a peer. One store's SQLite transaction cannot exclude peer allocation; never
-synchronize runtime to solve it. Peer exchange, observation/admission, complete
-routing, Desktop control and composed proof remain.
+synchronize runtime to solve it.
 
 LOO-427 keys windows/queues by plan, fencing cancellation. Task/Session actions
 stay separate; saved/failed reads grant none. Session time is unknown. Move retains
@@ -62,7 +61,7 @@ leaves/commands/surfaces; Undo renews closed tokens. Zoom grants no focus.
 Lost replies grant no replay; view tokens grant no input. Passive reads cannot
 allocate (`view(for:)`) or clean up (`hasSurface`); empty differs from unavailable.
 Machine-qualified bounded reads, peer composition and packaged/native proof remain.
-Seeded IDs prove routing, not exchange/start admission.
+Seeded IDs prove routing, not exchange/admission.
 
 Jack selected local operations and Git-ref Task sync: 406 owns writes/Linear,
 412 exchange. Imported completion cannot move local Workflow or clean execution.

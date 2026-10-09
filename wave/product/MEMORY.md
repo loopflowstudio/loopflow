@@ -56,7 +56,7 @@ must not synchronize. Seeded IDs prove routing, not exchange/admission.
 LOO-427 keys windows/queues by plan, fencing cancellation. Task/Session actions
 stay separate; saved/failed reads grant none. Session time is unknown. Move retains
 leaves/commands/surfaces; Undo renews closed tokens. Zoom grants no focus.
-`caa48b5c1` publishes insertion atomically; companions preserve selection.
+`caa48b5c1` publishes command/focus/Undo together; companions preserve selection.
 Lost replies grant no replay; view tokens grant no input. `13cf98bf5` qualifies
 terminals/readings by Machine; `6fec74d2d` prunes membership moves without releasing
 surfaces. Filtered absence proves no deletion; same-ID peers stay separate.
@@ -879,12 +879,8 @@ mechanics remain at `b1e3f623a:wave/product/MEMORY.md`, this heading.
 - **Backlogs are allowed.** Linear Tasks may exist without a Run; open Runs are
   not the Wave's roadmap.
 
-### Earlier runtime findings (July–August evidence)
-
-Resident-era incidents remain at `b908182f5:wave/product/MEMORY.md`.
-October 4 retires automatic recovery. Keep unknown liveness explicit; missing
-Flows must not silently retry. Durable Steers survive provider/app exit;
-mid-turn delivery is provider-dependent.
+July–August incidents: `b908182f5:wave/product/MEMORY.md`. October 4 retired
+automatic recovery; durable Steers survive exits, with provider-dependent delivery.
 
 ## Model (design invariants)
 

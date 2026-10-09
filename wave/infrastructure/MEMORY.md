@@ -63,7 +63,7 @@ Jack Heart authorized this regression repair. Tests distinguish observed reopeni
 reopening (unconditional writes can overwrite it). This supersedes frozen test
 disposition. Readback settles state, not atomicity; `7d2bc4279f`'s Linear schema
 has no expected-revision update. [Rationale](../../docs/architecture/planning.md).
-Materialized Linux: 54 planning tests, fmt/Clippy pass; full CI remains open.
+Linux: 54 tests, fmt/Clippy pass; CI remains open.
 
 Comments retain provider authorship and losing edits without echo. Cancellation
 resolves the Team's lowest-position state before attempting; failed discovery stays

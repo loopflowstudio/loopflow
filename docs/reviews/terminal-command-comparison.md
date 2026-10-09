@@ -42,7 +42,8 @@ Commands never run to manufacture input. Resolved skill identity handles aliases
 and captured operator steps without preparing checkouts. Local and two-CLI fixtures
 cover branches/loops, command-first Flows, native argument preservation and unchanged
 checkpointed stores. Configured SSH/native invocation remain unproved. Broader action
-explanation, peer composition/admission and native bounded extraction remain.
+explanation, peer composition/admission and native acceptance remain; bounded
+extraction is composed with lf3 as recorded below.
 Earlier command names below are dated evidence, not compatibility aliases.
 
 ## Evidence and version boundary
@@ -337,8 +338,9 @@ screen and command receipts do not meet the chapter's sustained-use KRs.
 
 LOO-427 delivers the identity → arrange → observe/input path in one PR;
 premature LOO-430/431/432 are folded back. Jack Heart authorized advancement
-through the demo review boundary. Transport, command spelling, subtree
-delegation details and draft-conflict UX remain in the working design at
+through the demo review boundary. Jack subsequently selected cursor insertion into
+existing drafts, with Enter separate. Delegation inheritance remains open; current
+transport, command spelling and implementation limits are in the working design at
 `scratch/compare-cmux-s-command-line.md`. Browser, cloud, checkpoint vault,
 custom sidebars and host terminal administration remain outside this diff.
 

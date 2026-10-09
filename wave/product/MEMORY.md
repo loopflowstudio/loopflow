@@ -85,21 +85,26 @@ Multiple destinations must not split the repository window.
 Private-ancestry holds retain journals/dependents and local moves;
 peers keep old values, so omission is not convergence.
 
-LOO-412 through `03742af66` is inspected, not integrated; mixed Linear/Git stays
-disabled. **Retained uncertainty constrains effects.** Journal conflicts defer
-attempts, never saves/acquisition; selection cannot release them (`08a285872`).
-Save clocks order intentions; unresolved losers hold delivery. Complete lists alone
-settle order progress; `357090d4b` preserves primary-only moves.
+LOO-412 through `7260e4602` is inspected, not integrated; mixed Linear/Git stays
+disabled. **Retained uncertainty constrains effects, not saves/acquisition.** Save
+clocks order intentions; unresolved losers hold delivery. Complete lists alone
+settle order progress; primary-only moves retain exact input. Selection cannot
+release projection conflicts. Independent provider facts retain separate savepoints,
+original ages/baselines and causal frontiers. Entity revisions cannot order
+relationships; scalar/list replay cannot clear freshness. Retain revision floors and
+unseen concurrent notices. Earlier mechanisms/proofs: `2c23acbb8`, this section.
 
-**Independent rollback:** removal/archive/Teams retain separate savepoints and
-original ages/baselines (`25cbc0a09`). Team contradictions cannot erase archives;
-entity revisions cannot order relationships.
+Unplaced-Wave reads and destination-level Desktop receipts/holds now exist in the
+dependency (`60d113a70`, `c20e4ad13`); reuse its repository Work stream, not another
+poller. Per-Work sharing/recovery and combined public/native acceptance remain.
+**Unmapping is not association:** clearing provider identity can create a duplicate
+while leaving selectors/effects behind. `7260e4602` protects mappings before scalar
+and evidence projection; legacy association must preserve IDs, lookup and execution.
+Partial-list/public composition and peer admission remain unproved.
 
-**Causal invalidation:** `6ccbbabe3` retires observed notices, never unseen ones,
-retaining revision floors. Freshness requires an accepted entity frontier, not
-scalar/list replay. Partial-list/public composition, legacy association,
-unplaced-Wave/Desktop, live controls and peer admission remain unproved.
-Imports stay unplaced; old evidence cannot clear membership uncertainty.
+Integrated #1512 (`3e1e6245c`): live connect hands off; dead-driver resume starts a
+fresh engine on native history. Peer proof must separate local resume from
+import-triggered launch; installed/native acceptance remains.
 
 October 9 (`e3ca861b1`): MultiplexerStore observes visibility before Session readings;
 a callback had masked closure. Receipts expose pre-registration failures; plain Task
@@ -998,22 +1003,16 @@ under this heading. Retain these independent constraints:
 - LOO-251/284/291 retain native, shared-action and planning proof obligations;
   the archived reconciliation establishes neither completion nor new follow-ups.
 
-### Task observation and Watch (2026-09-23)
+### Task observation and retired Watch
 
-The dated worker-evidence, FlowPosition and capture-binding notes are at
-`67cd68157:wave/product/MEMORY.md` under this heading; the October 5 cut
-replaces their mechanism with Exec evidence. What still holds:
+Desktop launched two LOO-293 helpers while its worker still produced output.
+Missing `lf ps` rows or a finished launcher do not prove idle execution.
 
-- **Incomplete observation caused duplicate implementation.** Desktop launched
-  two bound `implement` helpers into LOO-293 while its original worker was still
-  producing output. A completed launcher or a missing `lf ps` row cannot
-  establish idle execution. Unknown liveness is not idle.
-- **Watch belongs to Product / Desktop's existing LOO-293.** Keep one connected
-  stage diagram and labeled all-Run feed, stage/Run filters, Follow live, and
-  completed history together, including passive native interactive output.
-  Join history by exact step identity, never by skill name or current YAML.
-  LOO-293 retains native capture, bounded history and its configured demo;
-  nothing on this branch validates or settles it.
+LOO-293's bounded history, passive native output and configured proof remain;
+use current Task panes, not the deleted Watch/Monitor view. Join history by exact
+captured step, never skill name or current YAML. Earlier scope and retired
+FlowPosition mechanism: `2c23acbb8:wave/product/MEMORY.md`, **Task observation and
+Watch**. Primitive integration does not settle that Task.
 
 ### Terminal ownership and input (branch evidence, 2026-09-22)
 

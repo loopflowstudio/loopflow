@@ -111,7 +111,6 @@ cli:
       $ lf task create --wave exports --title "Add CSV export"
       $ lf task run EXP-12                     # its own worktree, then its Flow
       $ lf session ensure --task EXP-12        # that Task's conversation
-      $ lf session ensure -w exports           # or the Wave's
       $ lf usage --task EXP-12                 # what that Task cost
       $ lf land                                # merge when checks pass
     items:
@@ -131,15 +130,13 @@ cli:
         own agent and model.
     - name: Sessions
       text: Every conversation `lf` starts is recorded, whether in Claude Code, Codex, or OpenCode.
-        `lf resume` picks one back up. It also takes the ID of a Claude Code or Codex conversation
-        started without `lf`.
+        `lf resume` picks one back up.
     - name: Accounts and usage
       text: '`lf account` shows your logins and their capacity. `lf usage` shows tokens and cost,
         and can filter by Task or Wave.'
     - name: Waves and Tasks
       text: '`lf` is also a project manager. It organizes your work into Waves (long-lived streams)
-        and Tasks (concrete outcomes, i.e. PRs). Each has one ongoing conversation; `lf session
-        ensure` finds it or starts it.'
+        and Tasks (concrete outcomes, i.e. PRs). Each keeps its own ongoing conversation.'
     - name: Task = worktree = branch
       text: Each Task gets its own working copy, its own branch, and one pull request. Agents on
         different Tasks never share a checkout.

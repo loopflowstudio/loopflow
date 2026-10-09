@@ -67,6 +67,8 @@ installed help or reviewed Desktop code, not proof that no external tool exists.
   passed, but packaged test attempts timed out without results. The companion cut
   adds local Shell and Task Files/Flow-log through the same exact-target path,
   retaining selection and drafts and reusing existing Task companions.
+  `caa48b5c1` shares pane insertion and publishes command/focus/Undo together;
+  isolated production smoke passed, packaged execution still timed out.
   Bounded terminal reads/input, peer composition and native acceptance remain unfinished. The command tables still describe October 7's baseline.
   No cmux/herdr behavior was re-exercised for these deltas.
 - Public [cmux API](https://cmux.com/docs/api) and

@@ -59,9 +59,8 @@ removed; Task skill/Flow selection survives. History owns activity, Process page
 show/replay and usage; Desktop owns open/list. Bare `open` conflicts with PR opening;
 Sessions use `connect`. October 9 local Task/Session-plus-Changes opening bypasses
 execution routing and CLI preparation. Session/companion intent travels together; a partial Session inventory must not
-retire other panes. Opening generations now follow Session/Files/pane readiness and failures; repeated
-URLs are distinct requests. Native usability remains unproved. Wave planning, remote/Flow
-input and full action explanation remain. Discord is unchanged;
+retire other panes. Opening generations follow Session/Files/pane readiness and failures. Wave planning,
+remote/Flow input and full action explanation remain. Discord is unchanged;
 `--steers-after` filters nodes, not restarts.
 `repo_root` (default `~/src`) and paths resolve on the selected Machine, never as
 portable identity; remembered names remain open. Scoped IDs survive dispatch.
@@ -73,7 +72,7 @@ Jack selected local planning/Git sync: 406 owns writes/Linear, 412 exchange.
 Imported completion cannot move Workflow or clean execution. Preserve pending
 edits, semi-live comments/completion, causal reopening and mutation IDs.
 `29777b8cb` scopes Desktop sync to repository, not selected Task. Integrated
-`cbf0a174a` includes Linux reconnect and observed-reopening regression evidence
+LOO-406/#1503 includes Linux reconnect and observed-reopening regression evidence
 (Infra memory); composed Git/Desktop proof remains. Linear's unconditional writes
 can overwrite unseen reopening: readback proves observed state, not atomicity.
 
@@ -85,15 +84,16 @@ Multiple destinations must not split the repository window.
 Private-ancestry holds retain journals/dependents and local moves;
 peers keep old values, so omission is not convergence.
 
-Mixed Linear/Git stays disabled. Unintegrated LOO-412 through `a67c7f7cb`
-acquires before projection, rolls rejected objects back and retains typed conflicts;
-malformed imports abort. `88cd47572` transports prepared creation/link receipts,
-captured parents/save IDs and uncertain effects, without chapter transitions.
-Storage proof misses public recovery:
-unprepared peer creations lack export eligibility, and mapped-record filters hide
-uncertain receipts from acquisition/status. Mapping settles nothing; storage
-readback cannot prove foreground recovery. Ordering/deletion, alternate acquisition,
-relationship ordering, legacy association and Desktop remain.
+Mixed Linear/Git stays disabled. Unintegrated LOO-412 through `2657d594a` acquires
+before projection, retaining rejected objects/conflicts; malformed imports abort.
+`a002e4060` repairs foreground discovery of unprepared creations and mapped uncertainty
+through one acquisition/status view. Readback acknowledges captured effects; acquisition
+no longer assigns placement. Linux recovery uses unrun records and six tables, not
+populated Process/control proof; revised status assertions await gate. Ordering/deletion,
+alternate/relationship acquisition, legacy association and unplaced-Wave/Desktop remain.
+
+`e49e4ccf3`: a Session callback masked a pane-close gap; Observation replaces
+notification bridges. Generations, not URLs, fence outcomes. Native proof remains.
 
 ## Terminal-host adoption (2026-10-07)
 
@@ -119,11 +119,10 @@ adding outer Flow metadata that could obscure attention. Jack authorized landing
 the fix after these demos; remaining trials keep LOO-421 open. [Findings](../../docs/reviews/terminal-host-trial.md)
 preserve evidence and limits. No external-progress proof.
 
-## Live Home reconciliation (2026-10-05)
+## Live Home reconciliation
 
 LOO-367, Intelligence's backlog, test Waves and LOO-343 remain unverified.
-Jack Heart's LOO-380/#1439 receipts: `fc87e09c1:wave/product/MEMORY.md`, this
-heading; no rendered proof.
+LOO-380/#1439, no rendered proof: `fc87e09c1:wave/product/MEMORY.md`, this heading.
 
 ## Reactive workspace (2026-10-05)
 
@@ -588,9 +587,9 @@ issue read. No Task was filed or changed by these records.
 
 ## PR authorship and retired UX research (2026-09-25)
 
-PRs explain experienced change: Try it gives an action/result; Checks gives evidence.
-Failed chapter reads retain visibly stale content and history. Earlier decisions and
-research: `f48d84511:wave/product/MEMORY.md`, this heading.
+PRs explain experienced change: Try it gives action/result; Checks gives evidence.
+Failed chapter reads retain stale content/history. Archive:
+`f48d84511:wave/product/MEMORY.md`, this heading.
 
 ## Workspace redesign decisions (2026-09-26)
 

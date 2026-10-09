@@ -238,29 +238,25 @@ impl PlanningSnapshot {
     /// Keep winner identity and origin available to delivery projection. Values
     /// alone cannot distinguish a local intention from an observed Linear fact.
     pub fn winners(&self) -> impl Iterator<Item = (&str, &PlanningMutation)> {
-        let mut fields: BTreeMap<_, Vec<_>> = BTreeMap::new();
+        let mut fields = BTreeMap::new();
         for (id, change) in self.heads() {
-            fields
+            let priority = (
+                change.linear.is_some(),
+                change
+                    .linear
+                    .as_ref()
+                    .and_then(LinearObservation::revision_time),
+                change.clock,
+                id,
+            );
+            let winner = fields
                 .entry((&change.object, change.field.as_str()))
-                .or_default()
-                .push((id, change));
+                .or_insert((priority, (id, change)));
+            if priority > winner.0 {
+                *winner = (priority, (id, change));
+            }
         }
-        fields.into_values().map(|heads| {
-            heads
-                .into_iter()
-                .max_by_key(|(id, change)| {
-                    (
-                        change.linear.is_some(),
-                        change
-                            .linear
-                            .as_ref()
-                            .and_then(LinearObservation::revision_time),
-                        change.clock,
-                        *id,
-                    )
-                })
-                .expect("a field has at least one head")
-        })
+        fields.into_values().map(|(_, winner)| winner)
     }
 
     pub fn validate(&self) -> Result<(), PlanningExchangeError> {

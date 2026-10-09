@@ -300,17 +300,17 @@ impl<'a> PlanningChanges<'a> {
         // Preserve the causal predecessor's provider revision, not this
         // machine's potentially newer observation of a different value.
         let base = match baseline {
-            Some(base) => Some(serde_json::json!({
-                "revision": base["revision"], "value": self.normalize(conn, field, base["value"].clone())?
-            })),
+            Some(base) => Some((base["revision"].clone(), base["value"].clone())),
             None => self
                 .observation(conn)?
-                .map(|body| -> StoreResult<Value> {
-                    Ok(serde_json::json!({"revision":body["revision"],
-                    "value":self.normalize(conn, field, body[field].clone())?}))
-                })
-                .transpose()?,
-        };
+                .map(|body| (body["revision"].clone(), body[field].clone())),
+        }
+        .map(|(revision, value)| -> StoreResult<Value> {
+            Ok(serde_json::json!({
+                "revision":revision, "value":self.normalize(conn, field, value)?
+            }))
+        })
+        .transpose()?;
         conn.execute(
             &format!(
                 "INSERT INTO {owner}_changes(id,{owner}_id,field,value_json,base_json)

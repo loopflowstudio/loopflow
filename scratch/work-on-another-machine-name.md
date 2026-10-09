@@ -188,6 +188,12 @@ Removed duplicate ownership and projection paths:
   same ordered iterator. Projection uses rusqlite's scoped savepoint instead of
   hand-written SAVEPOINT/ROLLBACK/RELEASE; contrary membership evidence is still
   written only after rollback, within the outer import transaction.
+- Winner selection retains one borrowed candidate per field instead of building
+  head vectors and rescanning them. Priority remains Linear origin, provider revision,
+  clock, then mutation ID; causal retirement still precedes that comparison. Scalar
+  receipt baselines now share one normalization path after choosing causal or local
+  evidence. The single-use `omit_held` wrapper is removed; export still filters whole
+  histories using the existing selection-conflict map.
 
 Authored move/receipt/import fixtures retain local refiling, provider acquisition,
 comments, independent exchange, losing values, Session/Workflow/checkout state and
@@ -196,7 +202,7 @@ Earlier cut details: `e62431d0d:scratch/work-on-another-machine-name.md`.
 
 ## Remaining integration — October 8
 
-Reconciled against `9355170fd` plus the October 8 typed-observation repair.
+Reconciled against `270019c8d` and the October 8 compression.
 Acquisition precedes projection, membership evidence survives rollback, and valid
 contradictory provider facts now stay inside object isolation. Their Rust
 regressions remain unexecuted, so this establishes source agreement only.
@@ -430,4 +436,4 @@ Infrastructure child memory exists in this checkout.
 7. Replace PR copy and create a walkthrough of final behavior and evidence;
    publish #1491 for Jack Heart's review and stop without landing.
 
-Check (October 8 implement): `cargo fmt --all` and `git diff --check` pass; `cargo test -p loopflow --lib store::sqlite::planning_peers::tests -- --test-threads=1` and `cargo clippy --all-targets -- -D warnings` remain deferred to capable gate/CI after the recorded compilation timeouts, without another unchanged timeout attempt. No Rust execution or composed acceptance is claimed.
+Check (October 8 compress): `cargo fmt --all -- --check` and `git diff --check` pass; build, `cargo test -p loopflow --test planning_exchange_tests`, `cargo test -p loopflow --lib store::sqlite::planning_peers::tests -- --test-threads=1` and `cargo clippy --all-targets -- -D warnings` remain deferred to capable gate/CI after the recorded compilation timeouts, without repeating them. No Rust execution or composed acceptance is claimed.

@@ -680,12 +680,6 @@ fn selection_conflicts(
     Ok(held)
 }
 
-fn omit_held(snapshot: &mut PlanningSnapshot, held: &BTreeMap<PlanningObject, String>) {
-    snapshot
-        .changes
-        .retain(|_, change| !held.contains_key(&change.object));
-}
-
 fn retain_mutations(
     conn: &Connection,
     saved: &PlanningSnapshot,
@@ -743,7 +737,9 @@ fn export_selected(
 ) -> StoreResult<PlanningSnapshot> {
     let mut snapshot = export_in(conn, repo, destination)?;
     let held = selection_conflicts(conn, repo, destination, &snapshot)?;
-    omit_held(&mut snapshot, &held);
+    snapshot
+        .changes
+        .retain(|_, change| !held.contains_key(&change.object));
     Ok(snapshot)
 }
 

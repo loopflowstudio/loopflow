@@ -26,12 +26,12 @@ removal, without changing immutable filing input.
 
 Reservation and child commit together; older reservations recover in their
 pinned Project after rotation. Historical intents retain unknown creation in
-common export; absence cannot authorize another create. `task reopen` preserves
-execution/PR. Recovery: `7671f8e9f`; compression: `81055b278`.
+common export; absence cannot authorize another create. Reopening preserves
+execution/PR (`7671f8e9f`).
 
-Done does not resolve delivery. Unresolved merged Tasks permit filing and
-follow-through-only recovery without reopening; resolved disposition prevents
-new scope. Cleanup admits only merged, resolved delivery. Fixture proof only.
+Merged delivery can finish after Done without reopening (`1c4f10f96`). Resolved
+disposition blocks new scope; unresolved delivery retains its checkout (`0865e43a9`).
+Fixtures prove neither scheduled operation nor native acceptance.
 
 Failed promotion retains confirmed copy; handoffs preserve child edits.
 Performed location owns admission; Flow/Started commit atomically. Docker covers

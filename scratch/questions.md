@@ -86,10 +86,13 @@ resolved-disposition guards remain. The same check preserves cancellation,
 abandonment, deletion and planning-ownership refusals. This implements Jack's
 independent completion contract; it supplies no new execution or scope approval.
 
-Context limit (2026-10-08): the supplied launch inventory's omitted entries were
-read from `.lf/tmp/context/b018d3eca61fde43d0fba993cf1a183bb5c42c4b3aa2d1f97379a825311f3255.md`.
-`lf context --skill compress` reports generated Task/PR launch inventory over
-16,000 tokens, not excess authored scratch or memory; shortening those cannot
-fix it. No Task directive or limit was changed to hide the conflict. Product has
-no child memories here. The post-edit sample is 16,394/16,000 goal tokens
-(394 over); memory is 15,997/16,000 and scratch is within 12,000.
+Context limit (2026-10-08): the omitted launch inventory was read from
+`.lf/tmp/context/c7bbdff190d5c85ea8677e348a4af1eec82ac3ac21cfbb6ee62d18b14b277a6f.md`.
+`lf context --skill realign` reports generated Task/PR launch inventory over
+16,000 tokens; shrinking authored scratch or memory cannot fix that source.
+Its historical serial-PR boilerplate also conflicts with this branch's accepted
+contract. No Task directive, generated snapshot or limit was changed to hide
+either conflict. Product has no child memories here. The sampled launch is
+16,408/16,000 tokens (408 over); inventory hashes change that count between
+edits. The launch overage remains a context-assembly gap, not a reason to delete
+accepted decisions or weaken the Task brief.

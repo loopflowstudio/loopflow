@@ -1,16 +1,21 @@
 # One Task, up to one PR
 
-LOO-418 · integrated local planning; recovery at `7671f8e9f` · reconciled 2026-10-08
+LOO-418 · local planning and completed-delivery recovery · reconciled 2026-10-08
 
 Jack Heart authorized stacking on LOO-406 and continuing. The merge is recorded
 at `9f54c5b43`, with repairs at `07eeef61d` and focused Docker proof.
 Common local creation and state delivery replace the separate provider-first
 filing/completion writers; `1fe22f565` adds relation export and `314095b00`
-simplifies completion and shared reads.
+simplifies completion and shared reads. `1c4f10f96` repairs first filing and
+finishing-Flow admission after provider completion; `0865e43a9` simplifies cleanup
+without discarding unresolved delivery. The prior iteration's filing refusal is
+repaired, not remaining implementation.
 Task completion remains independent of Workflow position and Process liveness.
-The earlier evidence below describes pre-integration populations; it does not
-verify the combined branch. Full gate,
-stacked/due-return proof and Jack's demo remain. Landing and Task completion are unauthorized.
+Focused Docker evidence covers that recovery and its resolved-disposition guards;
+it does not verify the combined branch. Combined gate, populated upgrade,
+stacked/due-return proof and Jack's demo remain. Historical export recovery needs
+a decision; the enabled concurrent-reopening regression still fails. Landing and
+Task completion are unauthorized.
 
 ## Decision and intended experience
 
@@ -86,6 +91,12 @@ Integration update (2026-10-08):
   due-return acceptance remain with gate; Jack's complete demo remains separate.
 
 ### Completion before filing — repaired locally (2026-10-08)
+
+Source review at `0865e43a9` agrees with the recorded focused checks: admission,
+reservation and cleanup distinguish planning completion from delivery disposition.
+The public recovery fixture proves the operator's command, with agent judgment
+simulated. It does not exercise an actual scheduled Wave pass or establish
+configured-provider/native acceptance.
 
 The prior guard confused terminal planning with resolved delivery: first filing
 after observed Done failed despite an authoritative merge. Reservation now permits
@@ -532,8 +543,11 @@ The common planning integration and crash/local-reopening repairs exist;
 historical remote-creation uncertainty, combined acceptance and the complete
 demo remain within that same boundary.
 
-**Remaining work:** resolve the historical remote-export choice; run the unified lifecycle acceptance population
-below and Jack's complete demo. Completion and filing now
+**Remaining work:** resolve the historical remote-export choice and the concurrent-write
+preservation gap; run the unified lifecycle acceptance population below and Jack's
+complete demo. The enabled unseen-write regression remains a real failure: more
+readback is not a repair. Acceptance stays unchanged unless Jack explicitly revises
+that guarantee. Completion and filing now
 use local planning; the earlier evidence does not verify the combined source. The affected
 gate ran against the earlier model; its failures have passing focused repairs.
 Those results do not verify the newly accepted completion contract.
@@ -664,6 +678,12 @@ superseded alias model. Its notice now distinguishes the implemented trigger fro
 remaining integration; it is not a walkthrough of the current contract. A current
 walkthrough remains part of the complete demo preparation.
 
+Reconciliation (2026-10-08): the delivery guide still described Linear as the
+planning owner and prerequisite for checkout. It now matches the common local
+writer and saved-Task placement path. Infrastructure's LOO-406 memory retains
+the unseen-write counterexample; no newer accepted decision resolves it. Product
+has no child Wave Markdown in this checkout. No code or live planning changed.
+
 ## Composed headless lifecycle
 
 The pre-integration population and failed fixture attempts are retained at
@@ -699,4 +719,4 @@ stalled in `_dyld_start` before the build script ran and was stopped; disposable
 Docker supplied focused compilation and execution instead. Earlier focused
 evidence remains at `b92683789:scratch/make-a-task-up-to.md`.
 
-Check (2026-10-08): disposable Docker `cargo test -p loopflow --test task_flow_launch_tests provider_completed_delivery_can_file_and_finish_without_reopening -- --exact` (1), `cargo test -p loopflow --test task_flow_launch_tests provider_completion_without_merged_delivery_does_not_admit_first_filing -- --exact` (1), `cargo test -p loopflow --test task_abandonment` (1, after the pre-boot fixture repair), `cargo test -p loopflow --lib configured_project_admission` (2), and `cargo clippy --all-targets -- -D warnings` pass; native `cargo fmt --check` and `git diff --check` pass; unchanged implementation evidence for `task_follow_through_tests` (3) is reused. Combined gate/Swift/populated installation and Jack's demo remain; unseen-write preservation remains an enabled known failure.
+Check (2026-10-08): `git diff --check` passes; prose-only reconciliation reuses focused Docker/fmt/Clippy results at `0865e43a9:scratch/make-a-task-up-to.md`, final check line. Combined gate/Swift/populated installation and Jack's demo remain; unseen-write preservation remains an enabled failure.

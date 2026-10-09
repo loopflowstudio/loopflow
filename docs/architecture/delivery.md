@@ -19,7 +19,7 @@ lf task complete INF-123
 ## Delivery flow
 
 ```text
-Linear Issue
+Local Task plan (optional Linear sync)
     |
     v
 Task Work ----> managed worktree ----> commits
@@ -36,7 +36,7 @@ Task Work ----> managed worktree ----> commits
 
 | Object | Authority |
 | --- | --- |
-| Task directive and Project membership | Linear Issue |
+| Task directive and Project membership | Local planning; observed conflicts adopt Linear when connected |
 | managed checkout placement and optional PR state | Task delivery records plus resolved Git repository |
 | commits, branch ancestry, sync state | Git |
 | PR head, required checks, merge | GitHub |
@@ -49,9 +49,10 @@ The exact landing fence is modeled in
 
 ## Create or reuse the worktree
 
-`lf checkout` resolves one existing Linear Issue inside one Project and
-creates or reuses its managed worktree without creating a PR. It starts no
-execution. `lf task run ISSUE` uses the same substrate and additionally
+`lf checkout` resolves a saved Task inside one Project and
+creates or reuses its managed worktree without creating a PR. Saved planning
+works without Linear; an unknown provider alias needs initial acquisition.
+It starts no execution. `lf task run ISSUE` uses the same substrate and additionally
 runs a fresh Flow there. The repository identity—not the caller's
 current directory spelling—selects the Git directory and sibling worktree
 namespace.

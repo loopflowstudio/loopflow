@@ -9,6 +9,244 @@ ship-decomposed direction. Full synchronization remains unfinished. The older Ta
 brief's exclusion of export/sync and mandatory one-PR shape are superseded by the
 October 8 decisions below. LOO-412 owns transport, not a second planning owner.
 
+## Review approval — 2026-10-08
+
+Jack Heart approved the reviewed design and behavior in the Task conversation:
+“i think tis is approved from my perspective.” Product review is satisfied;
+required verification and repair remain. This does not waive the retained
+concurrent-write failure or authorize installation. Jack also described Asana's
+fractional ordering keys; replacing local integer positions is a consideration,
+not an accepted implementation change.
+
+Jack Heart requires `queue` before landing: `compress → refresh → gate`.
+The standalone gate pass does not substitute for that Flow.
+
+## Queue preparation — 2026-10-08
+
+Jack Heart selected `compress → refresh → gate`, not landing, installation or Task
+completion. Compression is committed at `ffe986160`; refresh reconciliation at
+`bc4c26fad` retains recorded base `04a4a296b`, already an ancestor. Gate reviewed
+the five changed Rust files and updated architecture/CLI docs against `078a6642e`.
+No further product edit was warranted. Earlier proofs retain their exact source
+boundary; they are not a new pass for the changed receipt path.
+
+Compression removed `settle_task_state(delivery, Option<error>)`: production only
+used its error branch, while tests could manufacture success with `None`.
+`task_state_error` cannot settle a receipt. Late-response fixtures now use provider
+observation, retaining adopted conflicts, newer decisions and superseded uncertainty.
+No provider-write policy or schema changed. Docs describe the surviving local
+rotation/foreground delivery rather than the removed provider-first path.
+
+The gate's disposable Linux runner could not acquire
+`/source/target/.installation-proof.lock` within its 15-second bound (exit 1,
+empty build log). Materialization, compilation, Clippy and focused receipt tests
+never started. Its container was removed; no foreign build was interrupted.
+This replaces the earlier 7m42s lock wait with bounded evidence, not a passing
+build. macOS startup checks were not repeated. Swift/app checks and the remaining
+matrix stay deferred to capable CI; checkpoint CI's classifier supplies no proof.
+
+The enabled unseen-reopening fixture is byte-identical. Source review confirms
+the intervening reopening occurs in state lookup after ownership acquisition;
+unconditional mutation overwrites it, then matching readback settles. The test
+also expects a still-pending loser, contrary to accepted observed-conflict
+retirement. Another read cannot provide atomic protection. Precedence needs no
+new decision; disposition of this stronger test expectation remains with review.
+No assertion change, waiver, ignored test or provider atomicity is claimed.
+
+The complete supplied Work seed and Release child GOAL/MEMORY were inspected.
+Release's operation-entry lesson applies: helper/classifier success cannot prove
+public or installed acceptance. No new whole-tree gate pass is claimed.
+
+Pre-gate scratch and separate index/working patches, SHA-256 manifest, runner,
+logs and context queries are retained at
+`/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo406-queue-gate-ib9gc30k/`.
+Separate review bytes and index remain unchanged. Earlier uncommitted notes survive
+there and in `/tmp/loo406-queue-compress-4IEJHX/` and
+`/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo406-realign-kce7_df9/`.
+Selected scratch-only commits exclude scratch; these archives, not a claimed
+scratch checkpoint, preserve that evidence.
+
+## Standalone gate evidence — 2026-10-08
+
+Gate began at `e58eab60f`; `078a6642e` repairs architecture ownership docs, explicit
+Wave ingestion/Machine isolation, stale DTOs, abandonment and adoption fixtures,
+and public reconnect's Initiative/Team/managed-account setup. It preserves ordinary
+admission rules, source isolation and the enabled unseen-write failure.
+
+Disposable Linux Rust 1.99.0 compiled the materialized draft. Migration preservation,
+local lifecycle/DTO/adoption, native-runner and public Flow/work-watch reconnect
+passed after focused repairs. The reconnect proofs cover independent inbound
+changes, offline saves, lost replies, selection changes and close/reopen. No host
+Machine was mounted; test execution had external networking disconnected.
+macOS Clippy, Swift and isolated Python stopped at bounded startup, with helpers
+sampled at `_dyld_start`; these are neither test passes nor a security diagnosis.
+Do not repeat unchanged startup attempts. Swift app/model/view, Xcode and the
+remaining full matrix need capable gate/CI. No installed acceptance is established.
+
+Commands, logs, samples, runner and the original notes/review preservation archive:
+`/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo406-gate-hh0jsek2/`.
+PR #1503's `b6f34a6f8` checkpoint run `37871563805` passed only the scratch classifier;
+product jobs were skipped. `ci.yml` provides materialized Linux and headless macOS
+coverage only on an eligible candidate. No publication, scratch cleanup or landing
+was performed by this gate. Release's operation-entry lesson still applies:
+helper proofs do not substitute for public reconnect or installed behavior.
+
+## Common delivery presentation — 2026-10-08
+
+`6bb8b935a` adds `PlanningSyncStatus`; `086d3560c` deletes pending-only edit
+projections. Task status, Wave/roadmap planning, Project results and Desktop read
+creation, field/order, state and comment receipts. Unmapped creation is pending
+when connected; attempted effects retain uncertainty/errors, and conflicts expose
+saved and observed values, including null. Comments have no attempted-write bit.
+Disconnection hides pending delivery, not losing edits. Project order is visible
+on the Project and its Tasks. Execution is unchanged.
+
+Creation receipts advance planning revision in the same migration draft. Fixtures
+cover unmapped creation, fields/order, errors, conflicts and settlement; the gate
+above supersedes the earlier Rust startup-only evidence, not missing Swift proof.
+Earlier source/log detail and separate review bytes remain in the pre-compression
+archive above and `/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo406-sync-2o44_e6l`.
+
+## Project ordering delivery — 2026-10-08 (`b1f175bbf`)
+
+The Project's existing `project_changes` receipt now owns `task_order`: the full
+saved list, provider baseline and each attempted move's input/before/after lists.
+Task edits save all changed ranks with that receipt in one transaction. The released
+frontier retains its previously observed relative order as the delivery baseline. Scalar
+Task rank receipts and their generic ingestion path are removed. The same migration
+draft adds the complete-list observation to `pm_projects` and captured move evidence
+to `project_changes`; no second outbox, schema draft or planning owner is introduced.
+
+Foreground field delivery reads all Project issues and retains Linear's lexicographic
+`prioritySortOrder`/`sortOrder` semantics. Moves use neighboring key intervals; equal
+keys use recorded intermediate moves without flattening primary groups. Complete-list
+ingestion recognizes these effects before reconciling later saves, so Loopflow's own
+partial reorder is not a conflict. Detail reads never set rank. Matching readback
+settles an attempt; an unchanged list remains uncertain without repeating the mutation.
+Observed competing order adopts Linear and retains the losing list. New members
+survive; omission alone defers delivery. Confirmed local deletion/refiling excludes a
+Task from the delivery target while the original saved list remains in the receipt.
+Scalar Project fields deliver before ordering so uncertainty cannot starve them.
+
+Source fixtures cover foreground outage/reconnect, partial delivery with a lost reply
+and store reopen, independent acquisition plus a later local save during a write,
+observed conflict adoption, no replay of uncertain effects, tied keys, new members,
+stale lists and removal. The existing public offline-edit fixture now checks one
+Project ordering receipt, unchanged Task identity and local rank projection. These
+prove operation behavior, not composed native/Flow/Desktop reconnect or installation.
+The pinned Linear schema exposes both sort keys; the documented unconditional-write
+race and enabled unseen-reopening regression remain unchanged. Nonrepresentable
+floating-point intervals retain an explicit pending error.
+
+Review repaired scalar delivery starvation and removal stranding. The prior export
+compression is checkpointed at `dcd015403`. Pre-edit source, notes, index and separate
+walkthrough artifacts remain with their SHA-256 manifest at
+`/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo406-order-snxljykd`.
+
+## Creation export — 2026-10-08 (`e68f2a423`)
+
+The independent foreground loop delivers saved Task/Project UUIDs from existing
+creation receipts. Project creation and Initiative attachment retain separate
+attempts; exact readback recovers lost responses without replay. Common ingestion
+attaches identity before inventory can duplicate it and preserves later local saves
+against the captured baseline. Removal after an uncertain create acquires its
+mapping before deletion. A Wave without an Initiative stays pending.
+Operation fixtures cover reconnect, lost replies and later saves; composed and
+installed acceptance remain unproved. Full protocol, review repairs and preservation
+paths remain at the pre-edit snapshot above and `e68f2a423:scratch/explore-loopflow-s-own-store.md`.
+
+## Deletion delivery — 2026-10-08
+
+`fc056bb6b` consumes deleted receipts, including removed mapped Tasks. Exact trash
+observation or captured mutation acknowledgement settles; absence and lost replies
+retain uncertainty. A newer explicitly active Linear revision retires removal and
+restores visibility with the losing receipt retained. Ordinary inventory proves neither
+trash nor restoration. Workflow, Process, Session, PR and checkout history survive.
+The foreground fixtures prove reconnect, lost replies, concurrent delivery and conflict
+adoption, not composed or installed acceptance. Detailed protocol, fixture repairs and
+preservation evidence remain at `fc056bb6b:scratch/explore-loopflow-s-own-store.md` and
+the pre-export snapshot above. The unconditional provider race remains documented.
+
+## Cancellation delivery — 2026-10-08
+
+Commit `67ee4024a` delivers mapped cancellation from the existing state receipt in
+the independent foreground loop. Completion, reopening and cancellation share one provider
+state resolver and mutation. Resolve the issue's own Team and desired state before
+marking the receipt attempted: failed reads or a missing state leave the same save
+retryable. Once a write is attempted, response loss retains uncertainty; exact state
+observation resolves it without blindly repeating the mutation. Observed conflicting
+Linear state retires the local intention, retaining both values and the local
+abandonment. No synchronization path acquires Workflow, Process or cleanup authority.
+
+The isolated operation fixture covers offline cancellation followed by foreground
+reconnect without another command/turn, lost mutation response, conflicting provider
+completion and recovery when the Team initially lacks a canceled state. It establishes
+this delivery lifetime, not public CLI/Desktop reconnect or installed acceptance.
+The known unseen-write regression remains enabled; provider writes remain unconditional.
+Complete pending-presentation acceptance and composed reconnect remain required. Cancellation is an internal implementation
+slice; the full connected ownership cut still lacks shippable acceptance.
+
+Pre-edit source, staged/index evidence, notes and review artifacts with SHA-256
+manifest: `/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo406-cancellation-o0hnn0py`.
+Prior compression is checkpointed as `22ee52c31`; the independent walkthrough edits
+remain separate. The design's stash conflict retained both evidence sections.
+
+The compression included in `fc056bb6b` shares the Workflow-state query across all
+three outcomes. It also fixes completion's missing `position` field: default zeros
+previously defeated lowest-position selection. The retained fixture covers the
+issue's own Team and minimum position for completion, reopening and cancellation.
+Obsolete provider-first fixture handlers are removed; adoption fixtures now share
+one disposable store for Wave definitions and PM operations. Their prior failures
+were isolation/setup faults, not evidence against the common planning writer.
+
+## Field delivery and creation review — 2026-10-08
+
+Jack Heart's comment `8821db44-0480-4493-8609-953207663f1d` rejects public
+creation tokens. `lf task create` now generates the durable Task ID, saves the Task
+and returns that ID. Separate invocations create separate Tasks, including identical
+titles. No caller token, copy-and-retry instruction or title deduplication remains.
+The store retains internal creation receipts and saved identities for automatic
+synchronization/export. Public fixtures create normally; prefix-collision fixtures
+seed deliberate IDs through the internal store.
+
+`ops/planning_delivery.rs` adds an independent foreground loop consuming common
+field receipts for mapped Tasks and Projects. Task title, description, nullable
+assignee and membership, plus Project name, summary, status, Workflow, KRs and
+metric targets use provider read/ingestion, captured receipt, attempted write and
+readback. Project content patches preserve unrelated prose. A changed provider
+baseline adopts Linear; attempts remain uncertain until observation resolves them.
+There is no blind replay after an uncertain write. The existing migration draft
+adds attempt/error evidence and acknowledged provider revisions to both receipt
+tables; no new owner or migration.
+
+A matching observation acknowledges only an attempted receipt. Before ingesting that
+observation, reconciliation advances the baseline of subsequent same-field saves
+that still share its prior value. The old response cannot acknowledge the newer
+receipt or make its local value look like a provider conflict. Effect locks exclude
+neither local saves nor inbound acquisition. Attempt capture rechecks the saved
+provider revision and local deletion, preserving newer facts and tombstones.
+Linear's unconditional mutation race remains; these checks provide no provider fence.
+
+The Project ordering cut above replaces scalar rank delivery. Pending-presentation acceptance and composed
+native/Flow/Desktop reconnect remain required. The foreground-lifetime fixture is
+source evidence, not a public CLI/Desktop reconnect or installed acceptance claim.
+
+## Core-model review — proposal, not accepted (2026-10-08)
+
+Jack Heart requested a walkthrough centered on Task, Wave and the other core models
+and invoked concept-review. Comment `34c1739a-8831-4578-96c9-797aeaa87743` records
+the proposal: Task could own the complete shared planning record while placement,
+captured Workflow, Session and Process remain machine-local records linked by Task ID.
+TaskPlan currently contains only some planning fields; Task mixes checkout/control,
+and PmItem supplies status/rank/assignee. Flattening TaskPlan alone would retain the
+split. Project/ProjectPlan/PmProject have an analogous split; Wave identity versus
+owned documents has a clearer purpose. No structural consolidation is authorized.
+
+Open product question: should a Task completed in Linear display Done with a
+still-running local Flow shown separately? No answer is inferred. This proposal
+changes neither ongoing authorized implementation nor the accepted creation-ID
+removal and Linear-wins policy. The ongoing review owns its walkthrough artifacts.
+
 ## Common ownership cut — 2026-10-08 (`84664e661`)
 
 All Waves now use ordinary hierarchical addresses and the existing durable rows.
@@ -35,7 +273,7 @@ both plan and history. Workflow, Session, Process, PR, checkout and completion
 records remain intact. The provider-first delete/trash/readback writer, authority
 selector and exclusive fixtures are deleted. Historical provider deletion tables
 and retained identity evidence survive. Connected deletion reports pending sync;
-provider deletion delivery remains unimplemented.
+mapped provider deletion now uses the foreground field-delivery loop described above.
 
 Paired public CLI fixtures cover connected/offline and unconnected definitions,
 source removal, ancestor context, stored Workflow source, relocation and deletion.
@@ -52,17 +290,17 @@ that stored a noncanonical repository path. The configured source remains canoni
 fixtures import definitions explicitly rather than restoring implicit file reads.
 
 Commit `84664e661` is the coherent source boundary for LOO-412 to review and consume.
-It is not an independently shippable connected product yet: export, field/deletion
-and cancellation delivery, pending presentation
+It is not an independently shippable connected product yet: pending presentation
 and composed reconnect remain. No feature flag, adapter or rejected ownership
 mode makes that missing behavior acceptable. Publication belongs to the authored
 pursuit boundary; this implementation step neither lands nor completes the Task.
 
-Reconciliation on October 8 inspected `dd91ddb83` plus the local compression diff.
-The merged LOO-436 startup changes do not implement planning synchronization.
-Compression is checkpointed at `05d36d79f`; `84664e661` remains the original
-consumable ownership boundary. The retained `pr-review.html` labels its older split implementation as
-superseded and is historical review evidence, not a walkthrough of this cut.
+Reconciliation on October 8 inspected `bbc6eb8d3`: `185de5fbf` implements the
+observed-conflict adoption requested by the earlier iteration feedback. Compression
+is committed in `05d36d79f`, `e7e3f45b7` and `bbc6eb8d3` before this field-delivery cut.
+`84664e661` remains the original consumable ownership boundary. The merged LOO-436
+startup changes add no planning synchronization. The ongoing review is recentering `pr-review.html` on core models; pinned excerpts
+and captures do not prove the current working content.
 
 ## Preserved common writers
 
@@ -122,7 +360,7 @@ Comment collisions adopt Linear's body, author and time, retaining the complete
 local comment and first conflicting observation. CLI/Desktop show the saved local
 body beside the current provider text; no replacement or repeated local direction.
 Manual winner selection, its command flags, replacement-comment schema and exclusive
-tests are deleted. Export and outbound field/cancellation/deletion delivery remain.
+tests are deleted. Ordering and export are implemented above.
 
 Jack invoked `ship-decomposed`: inspect existing seams and prepare independently
 shippable changes. This supersedes the mandatory one-PR delivery shape. No seam
@@ -204,8 +442,8 @@ are exposed, with no expected revision. This extends the unresolved concurrency
 boundary to Project edits; no provider contact or live mutation probe occurred.
 
 The same schema verifies UUID-v4 `id` inputs for `IssueCreateInput` and
-`ProjectCreateInput`. Creation can retain a caller-generated UUID through retries;
-exact readback and concurrent-create behavior still need implementation and proof.
+`ProjectCreateInput`. The creation-export cut above implements saved UUID delivery and exact readback;
+configured provider acceptance remains unproved.
 
 ## What to build
 
@@ -250,55 +488,68 @@ the saved values and pending sync. Restart the CLI and restore the provider whil
 the connection is active. Catch-up proceeds without a manual refresh or new agent
 turn. The existing Task maps to one Linear issue; pending work settles without
 losing later edits or duplicating comments. Complete and reopen from either side;
-the same stored Task and UI reflect accepted changes while delayed completion
-preserves newer reopening. This is fixture acceptance;
+the same stored Task and UI reflect accepted changes while an observed conflicting
+reopening retires delayed completion. The unseen intervening-write race remains
+the documented best-effort limit. This is fixture acceptance;
 configured Linear and installed acceptance remain separately identified evidence.
 
 ## Delete — do not maintain
 
-The ownership cut deletes personal namespaces/types/schema, authority dispatch,
-file-backed Wave reads/edits, Git relocation rewriting, provider-first Task deletion
-and their exclusive fixtures. Common content, comments, placement, selection,
-rotation and refiling writers remain. Historical deletion identities/confirmations,
-uncertain transitions, registered Wave IDs, source files and execution survive.
-Repository definitions are explicit ingestion sources; builtins remain available.
-No intermediate schema or compatibility writer is retained.
+Compression `086d3560c` removes the remaining pending-only presentation:
+`TaskEdit::{sync_enabled,pending_changes}`, `ProjectPlanning::{sync_enabled,pending_changes}`
+and `SqliteStore::project_with_changes`. Task edits and Project commands now use
+`PlanningSyncStatus`, including creation, ordering, uncertainty and losing values.
+Keep internal pending readers and captured baselines: delivery consumes them, and
+fixtures still prove receipt identity, unchanged saves and conflict retirement.
+Task status opens its store once for planning and sync; after the local-Task return,
+only the provider-only case remains. Delete its unreachable local fallback.
 
-The compression pass removes the unused `SqliteStore::import_wave_documents`
-entry and `engine::workflow::workflow_source` wrapper. Explicit ensure and migration
-retain the import transaction. Config parsing shares `parse_wave_config`; config
-and status read one document instead of materializing all Wave memory. Hierarchy
-imports reuse one repository Workflow read, and Project catalogs use the definitions
-already acquired. Prompt assembly resolves the repository once for ancestor reads.
-The existing minimal-schema observation fixture had five values for four columns;
-its corrected insert retains the same identity assertions. The Wave projection test
-now expects the owned empty plan without provider inventory and retains saved
-fields beside malformed provider evidence; metric evaluation still reports that
-evidence unavailable. These reductions change
-neither synchronization policy nor the known provider race. Planning documentation
-removes the obsolete split-writer claim; the conflict cut below implements observed
-Linear precedence while retaining the unseen-write limit.
+Completed cuts that must stay deleted:
 
-The conflict cut removes `PlanningChanges::retain`, `resolve_task_state`,
-`resolve_task_comment`, `--resolve`, `--comment` on Task sync, and the comment
-resolution/replacement columns from the existing draft. The common reconciliation
-paths replace their exclusive tests. The enabled unseen-write regression remains.
-Review exposed exact provider Project IDs losing to duplicate slugs; lookup now
-orders exact IDs first, covered by public refiling with the duplicate slug retained.
+- `SqliteStore::settle_task_state`'s synthetic success branch. Failure recording
+  uses `task_state_error`; late-response tests exercise actual observation. Keep
+  superseded attempted receipts uncertain and preserve the enabled race counterexample.
 
-Compression removes the uncalled Linear Project writers
-`set_project_status`, `create_project`, `attach_project`, `update_project` and
-`complete_and_archive_project`, their GraphQL payloads and exclusive tests.
-Their predecessor flow bypassed saved intentions; future delivery must consume
-common receipts and preserve exact creation identity. Live adoption/reteam readers
-and status selection remain. `PlanningChange` carries pending values and baselines;
-conflicts stay in retained receipts, rather than an always-null pending field.
-State reconciliation relies on its caller's immediate transaction for delivery
-identity, while retaining provider revision ordering. Project command resolution
-selects exact local/provider IDs before names, including colliding slugs. The public
-edit fixture retains the shadow Project unchanged. `start_planning_sync` names the
-foreground lifetime directly. CLI documentation now describes implemented observed
-conflict adoption and unfinished outbound delivery.
+- `tests/e2e/task_deletion.py`: its provider-first mutation handlers were obsolete;
+  its remaining local-abandonment proof now lives in portable `task_abandonment.rs`,
+  retaining Session/capture, unresolved Process, published PR and file assertions.
+  `planning_reconnect_tests.rs` owns only HTTPS reconnect; its handler no longer
+  inherits from another product fixture. Linux TLS isolation stays unchanged.
+
+- Task-required `PlanningSync` and work-watch Task lifetime selection; repository
+  ownership survives selection changes, and all repository consumers share it.
+
+- Per-Task rank receipts and detail-driven rank updates: one Project `task_order`
+  receipt owns delivery. Complete-list observation carries partial progress into
+  later saves; tied keys, omission, removals and uncertain moves retain evidence.
+- `TaskCommand::Create::creation_id`, public retry instructions and
+  `SqliteStore::task_creation_intent`: ordinary creation generates its own ID.
+  Keep internal transactional creation/export identity; no title deduplication.
+- Personal namespaces/types/schema, `PlanningAuthority`, `project_authority_on`,
+  file-backed Wave reads/edits, Git relocation rewriting and provider-first deletion.
+  Keep source bytes, common writers, identity, historical uncertainty and execution.
+- `SqliteStore::import_wave_documents` and `engine::workflow::workflow_source`
+  wrappers; explicit ensure/migration still import atomically. Stored Wave documents
+  and Workflow selection remain the reader source.
+- Manual conflict selectors (`resolve_task_state`, `resolve_task_comment`, `--resolve`,
+  `--comment` on Task sync), replacement-comment schema and exclusive fixtures.
+  Linear adoption retains both values and never replays a retired intention.
+- Uncalled provider-first Project writers (`set_project_status`, `create_project`,
+  `attach_project`, `update_project`, `complete_and_archive_project`), payloads and
+  exclusive tests. Common export owns captured creation and attachment effects.
+- Separate `complete_item`/`reopen_item` senders and state queries, unimplemented
+  cancellation refusal, obsolete creation/rotation/trash fixture handlers.
+  `item_state_id` resolves the issue's Team and minimum-position state before
+  attempting any of the three outcomes; failed discovery stays retryable.
+
+Repository lifetime is checkpointed at `29777b8cb`; fixture separation at
+`b6f34a6f8`. Detailed earlier reductions,
+fixture failures and evidence limits remain at
+`fc056bb6b:scratch/explore-loopflow-s-own-store.md`. The complete pre-compression
+notes and separate review artifacts are preserved with index/working/branch patches
+and SHA-256 manifest at
+`/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo406-compress-sync-1yw_g05j`.
+No schema, provider-write policy or execution authority changes in this reduction.
 
 ## Data and APIs
 
@@ -335,13 +586,14 @@ conflict adoption and unfinished outbound delivery.
 
 ## Synchronization and preservation counterexamples
 
-1. **Commit succeeds; reply is lost.** Retry the same creation identity, not a new
-   Task. Pending effects remain attached to the existing row across restart.
+1. **Commit succeeds; reply is lost.** The saved Task retains its generated ID.
+   Internal delivery retries reuse it across restart. Another explicit create is
+   another Task; users do not provide a recovery token.
 2. **Linear accepts; acknowledgement is lost.** Retain uncertain publication and
    the operation identity. Confirm by exact readback before another create.
    A description marker and two empty lookups alone do not prove duplicate safety.
-   Verify whether the Linear API supports caller-supplied IDs; otherwise retain
-   uncertainty instead of claiming success or blindly issuing another create.
+   The inspected schema supports saved UUIDs; export uses them for exact readback.
+   An absent readback after an attempt retains uncertainty without repeating creation.
 3. **A later local edit arrives while an earlier push is in flight.** Acknowledge
    only its captured revision. Do not clear newer pending fields or overwrite them
    with the first response. Preserve comment identity and ordering separately.
@@ -400,6 +652,41 @@ and the accepted conflict policy remain required. Inbound planning never moves
 Workflow, signals Processes or cleans checkouts; transport provides no Linear
 echo or duplicate-export guarantee. Publication here remains for review only.
 
+### Repository foreground lifetime — 2026-10-08
+
+The implementation removes `PlanningSync::start`'s Task argument and the watcher’s
+Task-selector key. The connection now owns one repository lifetime; Task and Wave
+selection change only projections. Changing or clearing the repository drops the
+old lifetime, and closing stdin ends it. Projection connections remain read-only;
+the separate sync connection opens only after the reader accepts the schema.
+No fabricated Task, resident, migration or execution authority is introduced.
+Task runners resolve their existing Wave's repository before starting the same owner.
+Export, fields and state/comments delivery consume that repository directly.
+
+Comment acquisition now covers mapped visible Tasks in every repository Wave,
+including unselected and newly acquired Tasks, with independent five-second bounds.
+A slow or failed Task/Wave does not postpone other comment requests. Review removed
+the old per-Task lifetime and repeated Task-to-Wave lookups, and caught the initial
+whole-loop timeout that could starve later Waves. Provider precedence and uncertain
+receipt semantics are unchanged; the unseen-write regression remains enabled.
+
+Authored checks: the existing public offline work-watch test now selects no Task
+and requires a delivery error, distinguishing actual foreground attempts from mere
+local projection. A focused repository-comment fixture asserts unselected acquisition
+without placement or Workflow change. Linux-only real-binary HTTPS fixtures exercise
+work-watch and `lf -b --task INF-123 run reconnect` with a contained Claude stub.
+They cover outage/restoration, unselected comments/completion/membership, local saves,
+lost state/comment replies, unrelated rejected title delivery, stable identities,
+selection changes, stdin close/reopen and repository deselection. Assertions retain
+Workflow, PR and checkout boundaries. TLS trust stays disposable; no production
+endpoint override was added. The standalone Linux gate above passed these public
+fixtures after repair, superseding their authored-only status at `9f78346aa`.
+That proof does not cover Swift or the subsequent `ffe986160` receipt changes.
+Earlier source/setup limits remain at
+`9f78346aa:scratch/explore-loopflow-s-own-store.md`; pre-edit notes and review bytes
+remain under `/tmp/loo406-scope-CG1Klo/`. The bounded startup observations prove
+neither a source failure nor a security cause.
+
 Current source boundaries (reconciled 2026-10-08):
 
 - `lf/commands/run.rs::prepare_task_input` refreshes comments before launch.
@@ -415,7 +702,7 @@ Current source boundaries (reconciled 2026-10-08):
   five-second deadline; Force refreshes immediately, Never reads retained facts.
   Existing explicit refresh and exact-issue acquisition paths remain relevant.
 - `lf/commands/work_watch.rs` projects through a read-only store, with a separate
-  writable connection for the selected Task's `PlanningSync`. Its five-minute
+  writable connection for the scoped repository's `PlanningSync`. Its five-minute
   planning clock covers Git/filesystem facts; `PlanningSync` separately acquires
   Linear inventory every 15 seconds.
   The source has comment-ingestion APIs and historical webhook schemas, but no
@@ -425,16 +712,15 @@ Current source boundaries (reconciled 2026-10-08):
 At `73059ecd1`, periodic refresh ran only in batch Codex/OpenCode. Current source
 starts `PlanningSync` at `run_agent`, covering native Codex, native Claude, Claude's
 batch subprocess and the existing batch harness without changing stdin or mode.
-Desktop's work watcher starts the same lifetime for its selected Task and stops it
-on scope change/connection exit. Inbound comment attempts remain independent of
-outbound delivery, every 15 seconds with a five-second request bound; pending
-comments and state decisions have separate one-second delivery loops. Repository
+Desktop's work watcher starts the same lifetime for its repository and stops it
+on repository change/connection exit. Inbound comment attempts remain independent of
+outbound delivery, every 15 seconds with a five-second per-Task request bound; pending
+comments, state decisions and fields have separate one-second delivery loops. Repository
 configuration enables these effects; retained mappings alone do not reconnect it.
 These are foreground-owned lifetimes, not a resident service or a turn/Flow retry.
-Comment acquisition follows the selected Task; repository-wide delivery currently
-selects mapped Tasks only. Unmapped records still need export and pending-state
-projection through the common writer. The existing mapped receipt projection must
-not become the definition of whether a connected repository has unsynced work.
+Comment acquisition covers visible mapped Tasks; repository-wide comment/state delivery
+selects mapped Tasks, and field delivery selects mapped Tasks and Projects.
+Unmapped records use the independent export loop above; the common receipt projection above includes them, with final acceptance still unproved. Mappings alone never define whether connected planning has unsynced work.
 
 The common comment transaction records the thread, its delivery UUID and local
 Steer. Provider acquisition enters that same thread and the existing Steer ledger.
@@ -446,8 +732,8 @@ becomes current automatically; the original local comment and first conflicting
 provider observation remain in the receipt. That intention leaves pending delivery.
 Later provider corrections advance normally; delayed acknowledgements cannot erase
 the retained values, republish the local body or manufacture another Steer.
-Task/Project creation accepts caller-supplied UUIDs in the inspected schema;
-their delivery and exact-readback contract remains unimplemented.
+Task/Project creation accepts supplied UUIDs; the export cut above implements
+delivery and exact readback on the same foreground lifetime.
 
 CLI and Desktop show pending comment IDs and retained losing local bodies. Partial/failed
 reads retain the saved thread and expose a refresh error. Desktop Task frames now
@@ -460,9 +746,10 @@ with isolated provider stubs covers incoming and outgoing comments for native Co
 native Claude and batch Claude while unrelated completion writeback stays pending.
 The public CLI/work-watch fixture proves an offline save reaches the open Desktop
 stream and survives closing/reopening that watcher without another refresh command.
-It does not restore Linear or prove pending effects drain after provider recovery.
-Headless app tests prove pending display, streamed thread updates and rejection
-of a late older read.
+That earlier offline-only proof did not restore Linear; the later Linux public
+reconnect gate above covers restoration. Authored headless app tests cover pending
+display, streamed thread updates and rejection of a late older read; current Swift
+execution remains unverified.
 One initial native fixture launched the real Codex executable because vendor setup
 rebuilds PATH; its disposable provider Home and external-network denial contained
 it, and it exited for non-terminal stdin. Corrected fixtures isolate parent PATH
@@ -484,24 +771,35 @@ operation-entry lesson remains applicable; its complete child goal/memory were r
 Accept unique prefixes of at least four case-insensitive UUID hex digits, bare or
 following `lf-`/`task_`. Display at least seven digits and lengthen when needed.
 Ambiguity returns matching full IDs; it never chooses a Task. Full IDs and exact
-Linear aliases keep working. Creation idempotency still requires a full identity;
-a selector is not an identity allocator. New branches retain the full UUID.
+Linear aliases keep working. Internal creation idempotency retains a full identity;
+ordinary creation generates that identity itself. New branches retain the full UUID.
 All CLI consumers share resolution, including file access, Session filtering and
 process inspection. No fixed-length per-command alternatives.
 
 ## Remaining implementation and delivery
 
-1. Implement Task/Project export and field, cancellation and deletion delivery
-   with stable mutation identities, exact lost-reply readback and pending/uncertain
-   outcomes. Include unmapped connected records. Retain the independent foreground
-   acquisition and delivery lifetimes; no resident or turn/Flow retry.
-2. Finish common CLI/Desktop pending/conflict presentation and composed active
-   native/Flow/Desktop reconnect checks. Prove incoming state, membership and
-   comments during unrelated pending delivery, and immediate local saves followed
-   by propagation without another turn or refresh. Execution stays local.
-3. Gate the complete content, identify honest independently shippable seams and
-   update PR #1503 through the authored publication boundary. The current ownership
-   source cut is available for review; missing connected delivery is not waived.
+The queue gate's bounded Linux attempt also stopped at the shared build lease,
+before materialization or compilation. Capable gate/CI still owes all-target
+Clippy and focused `--lib task_completion` plus
+`--lib saved_planning_retains_fields_and_decisions_independently_of_workflow`
+checks for `ffe986160`'s receipt changes. The former includes the enabled known
+failure; a partial green listing is not a passing suite. Earlier `078a6642e`
+evidence does not cover these changed files. Exact runner/logs are above.
+
+1. Headless Swift DTOs and `DesktopHeadlessTests.planningSync`, the full app/model/view
+   suite, Xcode fallback app/test-runner build and remaining E2E/full materialized
+   matrix still need capable verification. macOS startup did not reach these checks.
+   Linux Rust DTO/public-stream proofs do not substitute for Swift consumers.
+2. Preserve the enabled unseen-write failure and observed Linear-wins behavior.
+   No atomic provider fence or test waiver is claimed. Identify honest shippable
+   seams and publish only through the authored review boundary once its verification
+   condition is satisfied; no landing or installation.
+
+The `native_runner_reconnects_planning_without_another_turn` fixture passed in the
+isolated Linux gate: native Codex, native Claude and batch Claude stubs continue
+acquisition/delivery after outage without another turn, retaining identities and
+execution boundaries. This is contained runner evidence, not native UI or installed
+acceptance. Earlier dated authored-only notes retain their historical meaning.
 
 ## Done when
 
@@ -518,28 +816,17 @@ comments/completion propagate without a subsequent turn or manual refresh; delay
 observed conflicts adopt Linear while preserving local execution and losing edits. Provider and GitHub
 side effects stay contained; no source binary writes the installed store.
 
-The earlier gate at `dfe18ab60` covers the superseded split. General synchronization remains substantial implementation work. Delivery must retain the implemented observed-conflict policy and uncertain effects. No atomic cross-system guarantee is claimed. Decomposed shipping now
-owns the delivery plan; installation remains outside this work.
+The earlier gate at `dfe18ab60` covers the superseded split. The standalone Linux gate
+proves contained native-runner and public Flow/work-watch reconnect at its source
+boundary, not current Swift headless consumers or installed behavior. Delivery retains observed Linear precedence,
+uncertain effects and the failing unseen-write regression; no atomic cross-system
+guarantee is claimed. Decomposed shipping owns delivery; installation remains outside
+this work.
 
-Check (2026-10-08 conflict adoption): network-isolated Rust test binaries (completion/comments, abandonment, released-frontier pending decisions, five public local-planning cases) 25 PASS; `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` PASS; separately rerun unseen-write regression FAIL as recorded; gate owns full/materialized Rust, headless Desktop and Linux adoption.
 
-Review repaired Project ID precedence over duplicate slugs and retained delivery
-observations in the existing provider snapshot so later saves use the adopted
-baseline. State reconciliation parses provider revisions through the existing
-ordering function. The comment operation fixture now selects a disposable Home
-and one database throughout; its earlier production-store guard rejection wrote
-no production data. All source checks run with inherited LF/Linear authority
-cleared and external network denied. The full connected product remains unfinished.
+Earlier Project ID/baseline and fixture repairs, isolation incidents and pre-gate
+preservation paths remain at `e89738258:scratch/explore-loopflow-s-own-store.md`
+and in the pre-reconciliation scratch archive above. They establish no installed
+outcome; the standalone gate section owns the later source evidence.
 
-Preservation: the pre-realignment code, docs, scratch, separate GOAL edit and
-review artifacts, with SHA-256 manifest, are retained at
-`/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo406-realign-ck_545tb/`.
-That snapshot retains the earlier ownership/compression preservation references.
-The GOAL edit and historical review artifacts remain unchanged.
-
-Before conflict reconciliation, exact scratch and Wave memory bytes were preserved
-with a SHA-256 manifest at `/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo406-conflicts-w_8arsgw`.
-
-Compression preservation: scratch, review artifacts and Wave GOAL/memory bytes with SHA-256 manifest are retained at `/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo406-compress-qpevyw5s`.
-
-Check (2026-10-08 sync onto `24db5d4d6`): `documented_commands` test binary, built with `cargo test -p loopflow --test documented_commands --no-run` and run through `scripts/test_network.py`, 3 PASS; historical memory shortened to fit 16,000 tokens, with pre-curation bytes/SHA-256 at `/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo406-sync-memory-j5prjjde/`.
+Check (queue gate): `cargo fmt --all -- --check`, `git diff --check`, architecture and Swift-boundary scripts PASS; materialized Linux build/Clippy/focused receipt tests NOT RUN (15s build-lock refusal); enabled unseen-reopening failure retained unchanged; Swift/app/full matrix DEFERRED to capable CI, checkpoint jobs skipped; prior standalone commands/results remain in the named archive.

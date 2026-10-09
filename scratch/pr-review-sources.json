@@ -1,166 +1,259 @@
-[
-  {
-    "path": "rust/loopflow/src/planning.rs",
-    "symbol": "TaskPlan; NewTask",
-    "ranges": [
-      [
-        72,
-        82
+{
+  "base": "04a4a296bcb6999e2d15572b69b484d28c79217a",
+  "head": "b6f34a6f8b811d95f9fc843ac6592cc2262f2e26",
+  "scope": "Published PR head; later working changes excluded",
+  "excerpts": [
+    {
+      "path": "rust/loopflow/src/planning.rs",
+      "symbol": "TaskPlan",
+      "revision": "04a4a296bcb6999e2d15572b69b484d28c79217a",
+      "ranges": [
+        [
+          56,
+          62
+        ]
       ],
-      [
-        100,
-        107
-      ]
-    ],
-    "revision": "dfe18ab6060901992b55e64842e23c4295673b08",
-    "text": "#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]\npub struct TaskPlan {\n    /// Local optimistic-write revision, independent of provider observation age.\n    pub revision: u64,\n    /// Optional provider mapping; the owning Task carries durable identity.\n    pub linear_id: Option<LinearIssueId>,\n    pub identifier: String,\n    pub title: String,\n    pub description: String,\n    pub pm_snapshot_synced_at: Option<i64>,\n}\n\n// \u2026 intervening source omitted \u2026\n\n/// The caller retains this identity across a retry; a separate create mints another.\n#[derive(Debug, Clone, PartialEq, Eq)]\npub struct NewTask {\n    pub id: crate::durable::TaskId,\n    pub project_id: crate::durable::ProjectId,\n    pub title: String,\n    pub description: String,\n}"
-  },
-  {
-    "path": "rust/loopflow/src/bin/lf.rs",
-    "symbol": "TaskCommand::Create",
-    "ranges": [
-      [
-        978,
-        1004
-      ]
-    ],
-    "revision": "dfe18ab6060901992b55e64842e23c4295673b08",
-    "text": "        TaskCommand::Create {\n            wave,\n            title,\n            notes,\n            creation_id,\n            json,\n        } => {\n            let report = match notes {\n                Some(notes) => Some(notes.clone()),\n                None => piped_task_report()?,\n            };\n            let identity = creation_id.clone().unwrap_or_default();\n            eprintln!(\"Creation identity: {identity}; retain --creation-id {identity} when retrying this request\");\n            let issue = loopflow::ops::task::task_create(\n                repo,\n                wave.as_deref(),\n                title.clone(),\n                report,\n                identity,\n            )?;\n            if *json {\n                println!(\"{}\", serde_json::to_string_pretty(&issue)?);\n            } else {\n                println!(\"{} \u00b7 {}\", issue.identifier, issue.name);\n            }\n            Ok(())\n        }"
-  },
-  {
-    "path": "rust/loopflow/src/store/sqlite/children.rs",
-    "symbol": "SqliteStore::create_local_task",
-    "ranges": [
-      [
-        83,
-        158
-      ]
-    ],
-    "revision": "dfe18ab6060901992b55e64842e23c4295673b08",
-    "text": "    pub fn create_local_task(&self, input: &crate::planning::NewTask) -> StoreResult<Task> {\n        let mut conn = self.conn.lock().expect(\"store mutex poisoned\");\n        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;\n        let intent: Option<(String, String, String)> = tx\n            .query_row(\n                \"SELECT project_id,title,description FROM task_creation_intents WHERE task_id=?1\",\n                [input.id.as_str()],\n                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),\n            )\n            .optional()?;\n        if let Some((project, title, description)) = intent {\n            if project != input.project_id.as_str()\n                || title != input.title\n                || description != input.description\n            {\n                return Err(StoreError::InvalidData(\n                    \"creation identity already belongs to a different request\".into(),\n                ));\n            }\n            return task_on(&tx, &input.id)?.ok_or(StoreError::NotFound);\n        }\n        if input.title.trim().is_empty() {\n            return Err(StoreError::InvalidData(\"Task title cannot be empty\".into()));\n        }\n        let wave_id: WaveId = tx.query_row(\n            \"SELECT wave_id FROM projects WHERE id=?1\",\n            [input.project_id.as_str()],\n            |row| row.get(0),\n        )?;\n        if super::local_planning::project_authority_on(&tx, &input.project_id)?\n            != crate::planning::PlanningAuthority::Local\n        {\n            return Err(StoreError::InvalidAuthority(\n                \"this Project's planning is owned by Linear\".into(),\n            ));\n        }\n        super::durable::require_selected_project(&tx, &input.project_id)?;\n        let now = OffsetDateTime::now_utc();\n        let task = Task {\n            id: input.id.clone(),\n            plan: TaskPlan {\n                revision: 0,\n                linear_id: None,\n                identifier: format!(\"lf-{}\", input.id.as_str().trim_start_matches(\"task_\")),\n                title: input.title.clone(),\n                description: input.description.clone(),\n                pm_snapshot_synced_at: None,\n            },\n            pm_writeback: PmWritebackState::Current,\n            wave_id,\n            project_id: input.project_id.clone(),\n            worktree: None,\n            workspace_slug: String::new(),\n            agent: None,\n            abandon_intent: None,\n            created_at: now,\n            updated_at: now,\n            observation: crate::work::task::Observation::NotRequired,\n        };\n        validate_task(&task)?;\n        insert_task_row(&tx, &task)?;\n        tx.execute(\"UPDATE tasks SET planning_rank=COALESCE((SELECT max(planning_rank)+1 FROM tasks WHERE project_id=?2 AND id!=?1),0) WHERE id=?1\",params![task.id.as_str(),task.project_id.as_str()])?;\n        tx.execute(\n            \"INSERT INTO task_creation_intents(task_id, project_id, title, description)\n             VALUES(?1, ?2, ?3, ?4)\",\n            params![\n                input.id.as_str(),\n                input.project_id.as_str(),\n                input.title,\n                input.description\n            ],\n        )?;\n        let task = task_on(&tx, &input.id)?.ok_or(StoreError::NotFound)?;\n        tx.commit()?;\n        Ok(task)\n    }"
-  },
-  {
-    "path": "rust/loopflow/src/ops/task.rs",
-    "symbol": "task_create",
-    "ranges": [
-      [
-        1451,
-        1528
-      ]
-    ],
-    "revision": "dfe18ab6060901992b55e64842e23c4295673b08",
-    "text": "pub fn task_create(\n    repo: &Path,\n    wave: Option<&str>,\n    title: Option<String>,\n    report: Option<String>,\n    identity: crate::durable::TaskId,\n) -> OpsResult<crate::pm::PmItem> {\n    let input = resolve_task_create_input(title.as_deref(), report.as_deref())?;\n    let main = crate::engine::worktrees::main_repo_root(repo).map_err(task_error)?;\n    let personal = match wave {\n        Some(wave) if wave.starts_with(\"personal:\") => {\n            wave.strip_prefix(\"personal:\").map(str::to_string)\n        }\n        selected => {\n            match crate::work::wave::context::resolve_managed_wave_sync(Some(&main), selected) {\n                Ok(wave) => wave.slug().strip_prefix(\"personal:\").map(str::to_string),\n                Err(crate::work::wave::context::WaveResolveError::NoContext)\n                    if selected.is_none() =>\n                {\n                    Some(\"inbox\".into())\n                }\n                Err(error) => return Err(task_error(error)),\n            }\n        }\n    };\n    if let Some(name) = personal {\n        return block_on_task(async {\n            let store = super::pm::pm_store().await?;\n            let canonical =\n                crate::repository::CanonicalRepo::discover(&main).map_err(task_error)?;\n            let project = store\n                .sqlite\n                .ensure_personal_project(&canonical.to_string(), &name)\n                .map_err(task_error)?;\n            let wave = store\n                .get_wave(&project.wave_id)\n                .await\n                .map_err(task_error)?\n                .ok_or_else(|| task_error(\"personal Wave is missing\"))?;\n            let acquisition = super::pm::lock_wave_planning(&wave).await?;\n            let creation_project = match store\n                .sqlite\n                .local_task_creation_project(&identity)\n                .map_err(task_error)?\n            {\n                Some(id) => {\n                    let original = store\n                        .get_project(&id)\n                        .await\n                        .map_err(task_error)?\n                        .ok_or_else(|| task_error(\"creation Project is missing\"))?;\n                    if original.wave_id != project.wave_id {\n                        return Err(task_error(\"creation identity belongs to a different Wave\"));\n                    }\n                    id\n                }\n                None => crate::durable::ProjectId::parse(\n                    &super::project::current_project(&store, &wave)?.id,\n                )\n                .map_err(task_error)?,\n            };\n            let task = store\n                .create_local_task(\n                    &crate::planning::NewTask {\n                        id: identity,\n                        project_id: creation_project,\n                        title: input.title,\n                        description: input.report,\n                    },\n                    acquisition,\n                )\n                .await\n                .map_err(task_error)?;\n            local_task_item(&store, &task)\n        });\n    }\n    let project =\n        crate::ops::task_pm::resolve_current_project(&main, wave, crate::ops::pm::PmRefresh::Auto)?;"
-  },
-  {
-    "path": "rust/loopflow/src/store/migrations/drafts/local_planning.sql",
-    "symbol": "personal plan and definition tables",
-    "ranges": [
-      [
-        4,
-        20
-      ]
-    ],
-    "revision": "dfe18ab6060901992b55e64842e23c4295673b08",
-    "text": "CREATE TABLE personal_plans (\n    id TEXT PRIMARY KEY,\n    repo TEXT NOT NULL UNIQUE\n);\nALTER TABLE waves ADD COLUMN personal_plan_id TEXT REFERENCES personal_plans(id) ON DELETE RESTRICT;\nALTER TABLE project_transitions ADD COLUMN local_plan_json TEXT;\nCREATE TABLE personal_wave_definitions (\n    wave_id TEXT PRIMARY KEY REFERENCES waves(id) ON DELETE RESTRICT,\n    goal TEXT NOT NULL,\n    memory TEXT NOT NULL\n);\nCREATE TABLE personal_workflows (\n    wave_id TEXT NOT NULL REFERENCES personal_wave_definitions(wave_id) ON DELETE RESTRICT,\n    name TEXT NOT NULL,\n    content TEXT NOT NULL,\n    PRIMARY KEY(wave_id,name)\n);"
-  },
-  {
-    "path": "rust/loopflow/src/store/sqlite/local_planning.rs",
-    "symbol": "project_authority_on; update_local_project_content",
-    "ranges": [
-      [
-        14,
-        29
+      "text": "pub struct TaskPlan {\n    pub id: LinearIssueId,\n    pub identifier: String,\n    pub title: String,\n    pub description: String,\n    pub pm_snapshot_synced_at: i64,\n}",
+      "sha256": "6e592fe915936a6559b0a8dc3357cc825a4dd3151acf35a4ff5d50c7f6c15fe7",
+      "omission": "// \u2026 unrelated implementation omitted \u2026"
+    },
+    {
+      "path": "rust/loopflow/src/planning.rs",
+      "symbol": "TaskPlan",
+      "revision": "b6f34a6f8b811d95f9fc843ac6592cc2262f2e26",
+      "ranges": [
+        [
+          125,
+          134
+        ]
       ],
-      [
-        312,
-        354
-      ]
-    ],
-    "revision": "dfe18ab6060901992b55e64842e23c4295673b08",
-    "text": "pub(super) fn project_authority_on(\n    conn: &Connection,\n    project: &ProjectId,\n) -> StoreResult<PlanningAuthority> {\n    let personal: bool = conn.query_row(\n        \"SELECT w.personal_plan_id IS NOT NULL FROM projects p\n         JOIN waves w ON w.id=p.wave_id WHERE p.id=?1\",\n        [project.as_str()],\n        |row| row.get(0),\n    )?;\n    Ok(if personal {\n        PlanningAuthority::Local\n    } else {\n        PlanningAuthority::Linear\n    })\n}\n\n// \u2026 intervening source omitted \u2026\n\n    pub fn update_local_project_content(\n        &self,\n        project: &ProjectId,\n        content: &crate::pm::ProjectContent,\n        workflow_definition: Option<&str>,\n    ) -> StoreResult<()> {\n        content\n            .validate()\n            .map_err(|error| StoreError::InvalidData(error.to_string()))?;\n        let mut conn = self.conn.lock().expect(\"store mutex poisoned\");\n        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;\n        if project_authority_on(&tx, project)? != PlanningAuthority::Local {\n            return Err(StoreError::InvalidAuthority(\n                \"this Project's planning is owned by Linear\".into(),\n            ));\n        }\n        if let Some(definition) = workflow_definition {\n            let name = content\n                .workflow\n                .strip_prefix(\"personal:\")\n                .filter(|name| !name.is_empty())\n                .ok_or_else(|| {\n                    StoreError::InvalidData(\"a stored Workflow uses personal:<name>\".into())\n                })?;\n            tx.execute(\n                \"INSERT INTO personal_workflows(wave_id,name,content)\n                SELECT wave_id,?2,?3 FROM projects WHERE id=?1\n                ON CONFLICT(wave_id,name) DO UPDATE SET content=excluded.content\",\n                params![project.as_str(), name, definition],\n            )?;\n        }\n        tx.execute(\n            \"UPDATE projects SET project_prompt_context=?2,workflow=?3,updated_at=?4 WHERE id=?1\",\n            params![\n                project.as_str(),\n                crate::pm::render_project_content(content),\n                content.workflow,\n                now_unix()\n            ],\n        )?;\n        tx.commit()?;\n        Ok(())\n    }"
-  },
-  {
-    "path": "swift/LoopflowMac/Views/WorkSurfaceView.swift",
-    "symbol": "PersonalWorkflowEditor",
-    "ranges": [
-      [
-        799,
-        836
-      ]
-    ],
-    "revision": "dfe18ab6060901992b55e64842e23c4295673b08",
-    "text": "struct PersonalWorkflowEditor: View {\n    let model: WorkModel\n    let wave: WaveSnapshot\n    let name: String\n    @Environment(\\.dismiss) private var dismiss\n    @State private var content = \"\"\n    @State private var ready = false\n    @State private var saving = false\n    @State private var error: String?\n\n    var body: some View {\n        VStack(alignment: .leading, spacing: Spacing.md) {\n            Text(\"Edit \\(name)\").font(Typography.sectionTitle(22))\n            TextEditor(text: $content).font(.system(.body, design: .monospaced))\n                .disabled(!ready || saving)\n                .accessibilityIdentifier(\"personal-workflow-content\")\n            if let error { Text(error).foregroundStyle(Color.statusWarning) }\n            HStack {\n                Button(\"Cancel\") { dismiss() }.keyboardShortcut(.cancelAction)\n                Spacer()\n                Button(\"Save\") { Task {\n                    saving = true\n                    defer { saving = false }\n                    do {\n                        try await model.savePersonalWorkflow(name, content: content, wave: wave)\n                        dismiss()\n                    } catch { self.error = error.localizedDescription }\n                } }.disabled(!ready || saving).keyboardShortcut(.defaultAction)\n            }\n        }\n        .padding(24).frame(width: 640, height: 480)\n        .interactiveDismissDisabled(saving)\n        .task {\n            do { content = try await model.workflowSource(name, wave: wave); ready = true }\n            catch { self.error = error.localizedDescription }\n        }\n    }\n}"
-  },
-  {
-    "path": "rust/loopflow/src/store/sqlite/children.rs",
-    "symbol": "SqliteStore::place_task",
-    "ranges": [
-      [
-        32,
-        81
-      ]
-    ],
-    "revision": "dfe18ab6060901992b55e64842e23c4295673b08",
-    "text": "    pub fn place_task(\n        &self,\n        task_id: &TaskId,\n        worktree: &std::path::Path,\n        workspace_slug: &str,\n        pr: &TaskPr,\n    ) -> StoreResult<Task> {\n        let _admission = self.lock_checkout(worktree)?;\n        let mut conn = self.conn.lock().expect(\"store mutex poisoned\");\n        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;\n        let mut task = task_on(&tx, task_id)?.ok_or(StoreError::NotFound)?;\n        if task.worktree.is_some() {\n            return Ok(task);\n        }\n        if super::durable::task_state_in(&tx, task_id)?.is_terminal() {\n            return Err(StoreError::InvalidAuthority(\n                \"terminal Task cannot allocate a checkout\".into(),\n            ));\n        }\n        super::durable::require_selected_project(&tx, &task.project_id)?;\n        require_task_not_deleted(&tx, &task)?;\n        task.worktree = Some(worktree.to_path_buf());\n        task.workspace_slug = workspace_slug.to_string();\n        validate_initial_task_pr(&task, pr)?;\n        tx.execute(\n            \"UPDATE tasks SET worktree=?2,workspace_slug=?3,updated_at=?4 WHERE id=?1\",\n            params![\n                task_id.as_str(),\n                worktree.display().to_string(),\n                workspace_slug,\n                now_unix()\n            ],\n        )?;\n        inherit_task_placement(&tx, &task)?;\n        insert_task_pr(&tx, pr)?;\n        insert_task_event_in(\n            &tx,\n            task_id,\n            &TaskEventKind::WorktreeInitializing {\n                pr_id: pr.id.clone(),\n                sequence: pr.sequence,\n                branch: pr.branch.clone(),\n                path: worktree.display().to_string(),\n                base_commit: pr.base_commit.clone(),\n            },\n        )?;\n        let task = task_on(&tx, task_id)?.ok_or(StoreError::NotFound)?;\n        tx.commit()?;\n        Ok(task)\n    }"
-  },
-  {
-    "path": "rust/loopflow/src/ops/task.rs",
-    "symbol": "reach_end",
-    "ranges": [
-      [
-        4173,
-        4217
+      "text": "pub struct TaskPlan {\n    /// Local optimistic-write revision, independent of provider observation age.\n    pub revision: u64,\n    /// Optional provider mapping; the owning Task carries durable identity.\n    pub linear_id: Option<LinearIssueId>,\n    pub identifier: String,\n    pub title: String,\n    pub description: String,\n    pub pm_snapshot_synced_at: Option<i64>,\n}",
+      "sha256": "1e7d0a40bfc246dcdeeb3eea80bcdc53532bebe4e1f8d84a2a86634890957f53",
+      "omission": "// \u2026 unrelated implementation omitted \u2026"
+    },
+    {
+      "path": "rust/loopflow/src/ops/task.rs",
+      "symbol": "task_edit \u2014 provider-first return",
+      "revision": "04a4a296bcb6999e2d15572b69b484d28c79217a",
+      "ranges": [
+        [
+          4885,
+          4913
+        ]
       ],
-      [
-        4233,
-        4257
-      ]
-    ],
-    "revision": "dfe18ab6060901992b55e64842e23c4295673b08",
-    "text": "async fn reach_end(\n    store: &SharedStore,\n    task: &mut Task,\n    how: EndMove,\n    note: Option<&str>,\n    options: &EndOptions,\n) -> OpsResult<bool> {\n    match task_work_status(store, task).await? {\n        WorkStatus::Done => {\n            reconcile_task_completion(store, task).await?;\n            cleanup_completed_task(store, task).await?;\n            return Ok(true);\n        }\n        WorkStatus::Abandoned => {\n            return Err(task_error(format!(\n                \"Task {} is abandoned and cannot be completed\",\n                task.plan.identifier\n            )))\n        }\n        WorkStatus::Ready => {}\n    }\n    let conflict = planning_conflict(store, task).await?;\n    if let Some(conflict) = conflict.as_ref().filter(|_| !options.force) {\n        return Err(task_error(conflict));\n    }\n    reconcile_task_pr_observation(store, task, crate::ops::pr::PrReadFreshness::Cached).await?;\n    // An edge that runs nothing lands nothing: the Task ends as it stands and\n    // keeps its checkout, so what is uncommitted there is not at risk.\n    let keeps_checkout = matches!(how, EndMove::Choose { .. });\n    if !keeps_checkout\n        && task.worktree.is_some()\n        && !is_clean(task.worktree()?)\n            .map_err(|error| task_error(format!(\"failed to inspect Task worktree: {error}\")))?\n    {\n        return Err(task_error(\n            \"Task worktree has uncommitted changes; publish or explicitly abandon them first\",\n        ));\n    }\n    // The completion gate requires every active PR to be settled. Do not\n    // bypass that fact or infer merge from a green head.\n    let gate = task_completion_gate(store, task).await?;\n    if let Some(refusal) = gate.refusal(&task.plan.identifier) {\n        return Err(task_error(refusal));\n    }\n    reconcile_pm_writeback(store, task, None).await?;\n\n// \u2026 intervening source omitted \u2026\n\n    // Every other condition is now proven, so an empty unpublished PR is\n    // retired in the completion transaction. Retaining its branch identity\n    // lets cleanup retry after a crash without guessing what it may delete.\n    if !store\n        .complete_task(\n            task,\n            gate.discardable_successor.as_ref(),\n            how,\n            forced.as_deref().or(note),\n        )\n        .await\n        .map_err(|error| task_error(format!(\"failed to complete Task: {error}\")))?\n    {\n        return Ok(false);\n    }\n    if keeps_checkout {\n        eprintln!(\n            \"Task {} is complete; retained its checkout.\",\n            task.plan.identifier\n        );\n        return Ok(true);\n    }\n    cleanup_completed_task(store, task).await?;\n    Ok(true)\n}"
-  },
-  {
-    "path": "rust/loopflow/tests/local_planning.rs",
-    "symbol": "personal_task_publishes_and_completes_after_verified_merge",
-    "ranges": [
-      [
-        82,
-        113
-      ]
-    ],
-    "revision": "dfe18ab6060901992b55e64842e23c4295673b08",
-    "text": "    lf(\n        worktree,\n        home.path(),\n        &[\n            \"pr\",\n            \"publish\",\n            \"--title\",\n            \"Deliver locally owned work\",\n            \"--body\",\n            \"Local planning through delivery.\",\n        ],\n    );\n    let published = lf(repo.path(), home.path(), &[\"task\", \"status\", id, \"--json\"]);\n    assert_ne!(published[\"execution\"][\"status\"], \"done\");\n    lf(worktree, home.path(), &[\"land\", \"-c\"]);\n    let armed = lf(repo.path(), home.path(), &[\"task\", \"status\", id, \"--json\"]);\n    assert_ne!(armed[\"execution\"][\"status\"], \"done\");\n    assert!(home.path().join(\"gh-armed\").exists());\n    let head = std::fs::read_to_string(home.path().join(\"gh-head\")).unwrap();\n    assert!(Command::new(\"git\")\n        .arg(\"--git-dir\")\n        .arg(repo.bare_path())\n        .args([\"update-ref\", \"refs/heads/main\", head.trim()])\n        .status()\n        .unwrap()\n        .success());\n    std::fs::write(home.path().join(\"gh-merged\"), \"confirmed\").unwrap();\n    lf(repo.path(), home.path(), &[\"pr\", \"reconcile\"]);\n    let completed = lf(repo.path(), home.path(), &[\"task\", \"status\", id, \"--json\"]);\n    assert_eq!(completed[\"execution\"][\"status\"], \"done\");\n    assert_eq!(completed[\"execution\"][\"task_id\"], id);\n    assert!(completed[\"planning\"][\"item\"][\"completed_at\"].is_string());"
-  },
-  {
-    "path": "rust/loopflow/src/store/sqlite/local_planning.rs",
-    "symbol": "SqliteStore::rotate_local_projects",
-    "ranges": [
-      [
-        136,
-        176
+      "text": "pub fn task_edit(\n    repo: &Path,\n    issue: &str,\n    wave: Option<&str>,\n    title: Option<String>,\n    notes: Option<String>,\n) -> OpsResult<super::pm::PmUpdateResult> {\n    if title.is_none() && notes.is_none() {\n        return Err(task_error(\"task edit requires --title or --notes\"));\n    }\n    if title\n        .as_deref()\n        .is_some_and(|title| title.trim().is_empty())\n    {\n        return Err(task_error(\"Task title cannot be empty\"));\n    }\n    super::pm::pm_update(\n        repo,\n        &super::pm::PmUpdateOptions {\n            wave: wave.map(str::to_string),\n            id: issue.to_string(),\n            update: super::pm::PmTaskUpdate::Edit(crate::pm::PmItemUpdate {\n                name: title,\n                description: notes,\n            }),\n        },\n        &super::NullProgress,\n    )\n}",
+      "sha256": "3621891484d196b0db5c9d7f2df6217f550f36147f64dcfe5ec055ae9f4d272f",
+      "omission": "// \u2026 unrelated implementation omitted \u2026"
+    },
+    {
+      "path": "rust/loopflow/src/ops/task.rs",
+      "symbol": "TaskEdit and task_edit \u2014 local save plus delivery evidence",
+      "revision": "b6f34a6f8b811d95f9fc843ac6592cc2262f2e26",
+      "ranges": [
+        [
+          4759,
+          4800
+        ]
       ],
-      [
-        221,
-        269
-      ]
-    ],
-    "revision": "dfe18ab6060901992b55e64842e23c4295673b08",
-    "text": "    pub(crate) fn rotate_local_projects(\n        &self,\n        name: &str,\n        entries: &[(\n            crate::ops::chapter::WaveChapterPlan,\n            crate::ops::chapter::WaveRotation,\n        )],\n    ) -> StoreResult<()> {\n        if entries.is_empty() {\n            return Ok(());\n        }\n        let mut conn = self.conn.lock().expect(\"store mutex poisoned\");\n        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;\n        for (input, rotation) in entries {\n            let selected = super::project_selection::read_in(&tx, &input.wave_id)?;\n            let original = serde_json::to_string(input)?;\n            let settled: Option<(Option<String>, bool, Option<String>)> = tx\n                .query_row(\n                    \"SELECT reset_name, settled_at IS NOT NULL, local_plan_json\n                     FROM project_transitions WHERE wave_id=?1 AND successor_id=?2\",\n                    params![input.wave_id, input.successor_id],\n                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),\n                )\n                .optional()?;\n            if let Some((reset, true, intent)) = settled {\n                if reset.as_deref() != Some(name)\n                    || selected.as_deref() != Some(&input.successor_id)\n                    || intent.as_deref() != Some(&original)\n                {\n                    return Err(StoreError::InvalidAuthority(\n                        \"Project selection or original rotation request changed\".into(),\n                    ));\n                }\n                continue;\n            }\n            let predecessor = rotation.predecessor.as_ref().map(|p| p.id.as_str());\n            if selected.as_deref() != predecessor {\n                return Err(StoreError::InvalidAuthority(\n                    \"Project selection changed before rotation\".into(),\n                ));\n            }\n\n// \u2026 intervening source omitted \u2026\n\n            tx.execute(\n                \"INSERT INTO project_transitions(wave_id,successor_id,predecessor_id,reset_name,\n                     create_successor,created_at,settled_at,local_plan_json)\n                 VALUES(?1,?2,?3,?4,?5,?6,?6,?7)\",\n                params![\n                    input.wave_id,\n                    successor.as_str(),\n                    predecessor,\n                    name,\n                    input.create,\n                    now,\n                    original\n                ],\n            )?;\n            for task in rotation\n                .tasks\n                .iter()\n                .filter(|t| t.disposition == crate::ops::chapter::TaskDisposition::Move)\n            {\n                let changed = tx.execute(\n                    \"UPDATE tasks SET project_id=?2,planning_revision=planning_revision+1,updated_at=?3\n                     WHERE id=?1 AND project_id=?4\",\n                    params![task.task.id, successor.as_str(), now, predecessor],\n                )?;\n                if changed != 1 {\n                    return Err(StoreError::InvalidAuthority(\n                        \"Task membership changed before rotation\".into(),\n                    ));\n                }\n                tx.execute(\n                    \"INSERT INTO project_transition_items(wave_id,successor_id,issue_id)\n                     VALUES(?1,?2,?3)\",\n                    params![input.wave_id, successor.as_str(), task.task.id],\n                )?;\n            }\n            tx.execute(\n                \"UPDATE waves SET current_project_id=?2 WHERE id=?1\",\n                params![input.wave_id, successor.as_str()],\n            )?;\n            if let Some(predecessor) = predecessor {\n                tx.execute(\n                    \"UPDATE projects SET status='completed',updated_at=?2 WHERE id=?1\",\n                    params![predecessor, now],\n                )?;\n            }\n        }\n        tx.commit()?;\n        Ok(())\n    }"
-  },
-  {
-    "path": "rust/loopflow/src/ops/chapter.rs",
-    "symbol": "chapter apply: local commit, provider recovery",
-    "ranges": [
-      [
-        418,
-        421
+      "text": "#[derive(Debug)]\npub struct TaskEdit {\n    pub wave: String,\n    pub id: String,\n    pub sync: crate::planning::PlanningSyncStatus,\n}\n\npub fn task_edit(\n    repo: &Path,\n    issue: &str,\n    wave: Option<&str>,\n    update: crate::pm::PmItemUpdate,\n) -> OpsResult<TaskEdit> {\n    if update == crate::pm::PmItemUpdate::default() {\n        return Err(task_error(\n            \"task edit requires --title, --notes, --rank, --assignee or --unassign\",\n        ));\n    }\n    if update\n        .name\n        .as_deref()\n        .is_some_and(|title| title.trim().is_empty())\n    {\n        return Err(task_error(\"Task title cannot be empty\"));\n    }\n    block_on_task(async {\n        let (store, task) = super::pm::resolve_saved_task(repo, wave, issue).await?;\n        let edited = store\n            .edit_task(&task.id, task.plan.revision, &update)\n            .await\n            .map_err(task_error)?;\n        let owner = owning_wave(&store, &edited).await?;\n        Ok(TaskEdit {\n            wave: owner.slug().into(),\n            id: edited.id.to_string(),\n            sync: store\n                .sqlite\n                .task_planning_sync(&edited.id)\n                .map_err(task_error)?,\n        })\n    })\n}",
+      "sha256": "d8893d3cf4421355107d605d4e2c4dbbc3667cb3f1b6685ceeb78c23560b73ec",
+      "omission": "// \u2026 unrelated implementation omitted \u2026"
+    },
+    {
+      "path": "rust/loopflow/src/ops/task.rs",
+      "symbol": "task_create \u2014 Project selection, generated identity and saved result",
+      "revision": "b6f34a6f8b811d95f9fc843ac6592cc2262f2e26",
+      "ranges": [
+        [
+          1294,
+          1315
+        ]
       ],
-      [
-        453,
-        470
-      ]
-    ],
-    "revision": "dfe18ab6060901992b55e64842e23c4295673b08",
-    "text": "    store\n        .sqlite\n        .rotate_local_projects(&plan.name, &personal)\n        .map_err(error)?;\n\n// \u2026 intervening source omitted \u2026\n\n    drop(personal_guards);\n    // Every pair is reserved before the first provider mutation.\n    for entry in &prepared {\n        if !entry.reserved {\n            store\n                .reserve_project_transition(entry.transition.clone(), entry.acquisition.clone())\n                .await\n                .map_err(error)?;\n        }\n    }\n    for entry in &mut prepared {\n        apply_rotation(&store, entry).await.map_err(|cause| {\n            error(format!(\n                \"Wave {}: {cause}; retry with the same chapter plan\",\n                entry.wave.slug()\n            ))\n        })?;\n    }"
-  }
-]
+      "text": "        let acquisition = super::pm::lock_wave_planning(&wave).await?;\n        let creation_project = store\n            .get_project_by_project(&super::project::current_project(&store, &wave)?.id)\n            .await\n            .map_err(task_error)?\n            .ok_or_else(|| task_error(\"selected Project is missing\"))?\n            .id;\n        let task = store\n            .create_task(\n                &crate::planning::NewTask {\n                    id: crate::durable::TaskId::new(),\n                    project_id: creation_project,\n                    title: input.title,\n                    description: input.report,\n                },\n                acquisition,\n            )\n            .await\n            .map_err(task_error)?;\n        task_planning_item(&store, &task)\n    })\n}",
+      "sha256": "75bfd7c1191735326c30c249dfdfe42e8f56afe7369379159481a7db099c0a81",
+      "omission": "// \u2026 unrelated implementation omitted \u2026"
+    },
+    {
+      "path": "rust/loopflow/src/ops/planning_export.rs",
+      "symbol": "sync_export \u2014 observe first; do not repeat an uncertain create",
+      "revision": "b6f34a6f8b811d95f9fc843ac6592cc2262f2e26",
+      "ranges": [
+        [
+          79,
+          90
+        ]
+      ],
+      "text": "        if observe(store, repo, owner, &client, &export, &wave_id).await? {\n            return Ok(());\n        }\n        let (attempted, _) = store\n            .sqlite\n            .planning_export_attempts(owner)\n            .map_err(message)?;\n        if attempted {\n            return Err(message(\n                \"Creation remains uncertain; no repeated create issued\",\n            ));\n        }",
+      "sha256": "971f6c6ff01146d7779a09218d4c54070b6017b0138cd19e31aebcfdc8422c34",
+      "omission": "// \u2026 unrelated implementation omitted \u2026"
+    },
+    {
+      "path": "rust/loopflow/src/planning.rs",
+      "symbol": "ProjectPlan",
+      "revision": "04a4a296bcb6999e2d15572b69b484d28c79217a",
+      "ranges": [
+        [
+          44,
+          53
+        ]
+      ],
+      "text": "pub struct ProjectPlan {\n    pub id: LinearProjectId,\n    pub slug: String,\n    pub name: String,\n    /// Definition and proof-shaped KRs from the latest PM snapshot.\n    pub prompt_context: String,\n    pub pm_snapshot_synced_at: i64,\n    pub workflow: String,\n    pub status: crate::pm::ProjectStatus,\n}",
+      "sha256": "084a3c1e8f4316a2b5be242d1dc628a85691a52476234f33402ae74a0d2b8cac",
+      "omission": "// \u2026 unrelated implementation omitted \u2026"
+    },
+    {
+      "path": "rust/loopflow/src/planning.rs",
+      "symbol": "ProjectPlan",
+      "revision": "b6f34a6f8b811d95f9fc843ac6592cc2262f2e26",
+      "ranges": [
+        [
+          111,
+          122
+        ]
+      ],
+      "text": "pub struct ProjectPlan {\n    pub summary: String,\n    /// Optional provider mapping; the owning Project carries durable identity.\n    pub linear_id: Option<LinearProjectId>,\n    pub slug: String,\n    pub name: String,\n    /// Definition and proof-shaped KRs from the latest PM snapshot.\n    pub prompt_context: String,\n    pub pm_snapshot_synced_at: Option<i64>,\n    pub workflow: String,\n    pub status: crate::pm::ProjectStatus,\n}",
+      "sha256": "f98c02a4260fb96667c56fcbcaa300a4170e224bd51382819b9ef1d9e57344a6",
+      "omission": "// \u2026 unrelated implementation omitted \u2026"
+    },
+    {
+      "path": "rust/loopflow/src/ops/project.rs",
+      "symbol": "update_plan and write_plan \u2014 provider write and refresh",
+      "revision": "04a4a296bcb6999e2d15572b69b484d28c79217a",
+      "ranges": [
+        [
+          335,
+          363
+        ]
+      ],
+      "text": "pub fn update_plan(repo: &Path, wave: Option<&str>, content: ProjectContent) -> OpsResult<()> {\n    let wave = crate::work::wave::context::resolve_managed_wave_sync(Some(repo), wave)\n        .map_err(project_error)?;\n    tokio::runtime::Runtime::new()\n        .map_err(project_error)?\n        .block_on(write_plan(repo, &wave, content))\n}\n\npub(crate) async fn write_plan(repo: &Path, wave: &Wave, content: ProjectContent) -> OpsResult<()> {\n    let store = super::pm::pm_store().await?;\n    let acquisition = super::pm::lock_wave_planning(wave).await?;\n    let ctx = super::pm::resolve_context(repo, wave.slug()).await?;\n    let projects = super::pm::checked_projects_with_store(repo, &ctx, wave.slug(), &store).await?;\n    let project = select_project(&store, wave, &projects)?;\n    let provider = ctx\n        .client\n        .project_ownership(&project.id)\n        .await\n        .map_err(project_error)?;\n    content.validate().map_err(project_error)?;\n    super::metrics::validate_chapter_targets(wave, &content.metric_targets)\n        .map_err(project_error)?;\n    ctx.client\n        .update_project(&provider.id, &provider.name, &content)\n        .await\n        .map_err(project_error)?;\n    super::pm::refresh_pm_snapshot_locked(repo, wave, &ctx, &store, acquisition).await?;\n    Ok(())\n}",
+      "sha256": "1aad38e0483c43ea96b0d71e38dfb213b80bce541e21b38f1f1c4554c9ce1c32",
+      "omission": "// \u2026 unrelated implementation omitted \u2026"
+    },
+    {
+      "path": "rust/loopflow/src/ops/project.rs",
+      "symbol": "update_plan \u2014 common local writer",
+      "revision": "b6f34a6f8b811d95f9fc843ac6592cc2262f2e26",
+      "ranges": [
+        [
+          71,
+          91
+        ]
+      ],
+      "text": "pub async fn update_plan(\n    repo: &Path,\n    wave: Option<&str>,\n    content: ProjectContent,\n) -> OpsResult<ProjectPlanning> {\n    let store = super::pm::pm_store().await?;\n    let wave =\n        crate::work::wave::context::resolve_managed_wave(Some(&store), Some(repo), wave, None)\n            .await\n            .map_err(project_error)?;\n    let _acquisition = super::pm::lock_wave_planning(&wave).await?;\n    let selected = current_project(&store, &wave)?;\n    let project = resolve_project(&store, repo, &selected.id).await?;\n    super::metrics::validate_chapter_targets(&wave, &content.metric_targets)\n        .map_err(project_error)?;\n    store\n        .sqlite\n        .update_project_content(&project.id, &content)\n        .map_err(project_error)?;\n    planning(&store, &project)\n}",
+      "sha256": "7de6960ad99863549109870a2f4aa6aa96bd01e4f37da6601c810ab34a27ab76",
+      "omission": "// \u2026 unrelated implementation omitted \u2026"
+    },
+    {
+      "path": "rust/loopflow/src/ops/project.rs",
+      "symbol": "ProjectPlanning \u2014 new return contract",
+      "revision": "b6f34a6f8b811d95f9fc843ac6592cc2262f2e26",
+      "ranges": [
+        [
+          288,
+          292
+        ]
+      ],
+      "text": "pub struct ProjectPlanning {\n    pub sync: crate::planning::PlanningSyncStatus,\n    #[serde(flatten)]\n    pub project: PmProject,\n}",
+      "sha256": "9f203391bb23e32ba351f724a6583ef0235d61b6c51cb94f2023aa8d2ef482a9",
+      "omission": "// \u2026 unrelated implementation omitted \u2026"
+    },
+    {
+      "path": "rust/loopflow/src/work/wave/config.rs",
+      "symbol": "update_wave_goal_config \u2014 file write",
+      "revision": "04a4a296bcb6999e2d15572b69b484d28c79217a",
+      "ranges": [
+        [
+          278,
+          297
+        ]
+      ],
+      "text": "pub fn update_wave_goal_config(\n    repo: &Path,\n    name: &str,\n    update: impl FnOnce(&mut Mapping) -> Result<(), String>,\n) -> Result<(), String> {\n    let path = goal_path(repo, name);\n    if let Some(parent) = path.parent() {\n        std::fs::create_dir_all(parent)\n            .map_err(|err| format!(\"failed to create {}: {err}\", parent.display()))?;\n    }\n\n    let (mut value, body) = goal_value_from_content(&path, name)?;\n    let map = wave_config_map(&mut value, &path)?;\n    update(map)?;\n\n    let rendered = render_goal_md(&value, &body)?;\n    std::fs::write(&path, rendered)\n        .map_err(|err| format!(\"failed to write {}: {err}\", path.display()))?;\n    Ok(())\n}",
+      "sha256": "7e6bc1db3821d82a6c2e119795c0bdaccf06d5c36596cfe21f501c7e492323a4",
+      "omission": "// \u2026 unrelated implementation omitted \u2026"
+    },
+    {
+      "path": "rust/loopflow/src/work/wave/config.rs",
+      "symbol": "update_wave_goal_config \u2014 stored write",
+      "revision": "b6f34a6f8b811d95f9fc843ac6592cc2262f2e26",
+      "ranges": [
+        [
+          337,
+          351
+        ]
+      ],
+      "text": "pub fn update_wave_goal_config(\n    repo: &Path,\n    name: &str,\n    update: impl FnOnce(&mut Mapping) -> Result<(), String>,\n) -> Result<(), String> {\n    let path = goal_path(repo, name);\n    let (mut value, body) = goal_value_from_content(repo, name)?;\n    let map = wave_config_map(&mut value, &path)?;\n    update(map)?;\n\n    let rendered = render_goal_md(&value, &body)?;\n    write_wave_document(repo, name, \"GOAL.md\", &rendered)\n        .map_err(|err| format!(\"failed to write {}: {err}\", path.display()))?;\n    Ok(())\n}",
+      "sha256": "44e71b6fb9633f86615f31b7fb9842ced01828d9efc64086cc3236f62059f203",
+      "omission": "// \u2026 unrelated implementation omitted \u2026"
+    },
+    {
+      "path": "rust/loopflow/src/store/sqlite/wave_documents.rs",
+      "symbol": "save_imported_documents \u2014 insert-only import",
+      "revision": "b6f34a6f8b811d95f9fc843ac6592cc2262f2e26",
+      "ranges": [
+        [
+          145,
+          166
+        ]
+      ],
+      "text": "fn save_imported_documents(\n    conn: &rusqlite::Connection,\n    wave: &str,\n    documents: BTreeMap<String, String>,\n    workflows: &BTreeMap<String, String>,\n) -> StoreResult<()> {\n    for (name, content) in documents {\n        conn.execute(\n            \"INSERT INTO wave_documents(wave_id,name,content) VALUES(?1,?2,?3)\n            ON CONFLICT(wave_id,name) DO NOTHING\",\n            params![wave, name, content],\n        )?;\n    }\n    for (name, content) in workflows {\n        conn.execute(\n            \"INSERT INTO wave_workflows(wave_id,name,content) VALUES(?1,?2,?3)\n            ON CONFLICT(wave_id,name) DO NOTHING\",\n            params![wave, name, content],\n        )?;\n    }\n    Ok(())\n}",
+      "sha256": "e9766570f35787dae07ee0e65fdef0179e7d50c6f3f5553c27dafffdd6ac3833",
+      "omission": "// \u2026 unrelated implementation omitted \u2026"
+    },
+    {
+      "path": "rust/loopflow/src/lf/commands/work_watch.rs",
+      "symbol": "Reader::sync_planning \u2014 repository selects the lifetime",
+      "revision": "b6f34a6f8b811d95f9fc843ac6592cc2262f2e26",
+      "ranges": [
+        [
+          399,
+          421
+        ]
+      ],
+      "text": "    fn sync_planning(&mut self) {\n        if self.planning_sync.as_ref().map(|(repo, _)| repo) == self.scope.repo.as_ref() {\n            return;\n        }\n        self.planning_sync = None;\n        let Some(repo) = &self.scope.repo else {\n            return;\n        };\n        if self.store.is_none() {\n            return;\n        }\n        let result = self.runtime.block_on(async {\n            let store = Arc::new(\n                crate::store::open_store(&StorageConfig::sqlite(self.database.clone())).await?,\n            );\n            crate::ops::linear_observe::PlanningSync::start(store, repo.clone())\n                .map_err(anyhow::Error::from)\n        });\n        match result {\n            Ok(sync) => self.planning_sync = Some((repo.clone(), sync)),\n            Err(error) => tracing::warn!(%error, \"cannot start repository planning sync\"),\n        }\n    }",
+      "sha256": "1404579ffd95ebf2d7d79249536b59a9fe2bd9e273fbb80168eb4ef4f9336c07",
+      "omission": "// \u2026 unrelated implementation omitted \u2026"
+    },
+    {
+      "path": "rust/loopflow/src/ops/linear_observe.rs",
+      "symbol": "PlanningSync::start \u2014 one foreground owner, independent attempts",
+      "revision": "b6f34a6f8b811d95f9fc843ac6592cc2262f2e26",
+      "ranges": [
+        [
+          85,
+          130
+        ]
+      ],
+      "text": "    pub(crate) fn start(store: SharedStore, repo: String) -> std::io::Result<Self> {\n        let runtime = tokio::runtime::Builder::new_current_thread()\n            .enable_all()\n            .build()?;\n        let (stop, stopped) = tokio::sync::oneshot::channel();\n        #[cfg(test)]\n        let context = super::pm::PM_TEST_CONTEXT.try_with(Clone::clone).ok();\n        let thread = std::thread::Builder::new()\n            .name(\"planning-sync\".into())\n            .spawn(move || {\n                let drive = async {\n                    tokio::select! {\n                        _ = stopped => {},\n                        _ = repeat_sync(\"comment acquisition\", Duration::from_secs(15), || {\n                            refresh_repository_comments(&store, &repo)\n                        }) => {},\n                        _ = repeat_sync(\"planning acquisition\", Duration::from_secs(15), || async {\n                            tokio::time::timeout(Duration::from_secs(5), refresh_repository_planning(&store, &repo))\n                                .await.map_err(|error| OpsError::Message(error.to_string()))?\n                        }) => {},\n                        _ = repeat_sync(\"comment delivery\", Duration::from_secs(1), || {\n                            sync_repository_deliveries(&store, &repo, false)\n                        }) => {},\n                        _ = repeat_sync(\"planning export\", Duration::from_secs(1), || {\n                            super::planning_export::sync_repository_exports(&store, &repo)\n                        }) => {},\n                        _ = repeat_sync(\"field delivery\", Duration::from_secs(1), || {\n                            super::planning_delivery::sync_repository_fields(&store, &repo)\n                        }) => {},\n                        _ = repeat_sync(\"Task state delivery\", Duration::from_secs(1), || {\n                            sync_repository_deliveries(&store, &repo, true)\n                        }) => {},\n                    }\n                };\n                #[cfg(test)]\n                if let Some(context) = context {\n                    runtime.block_on(super::pm::PM_TEST_CONTEXT.scope(context, drive));\n                    return;\n                }\n                runtime.block_on(drive);\n            })?;\n        Ok(Self {\n            stop: Some(stop),\n            thread: Some(thread),\n        })\n    }",
+      "sha256": "be2879f709ff115bd5ea3b36bde5703dce3ba741a4d610f9fdf60489ba538b61",
+      "omission": "// \u2026 unrelated implementation omitted \u2026"
+    },
+    {
+      "path": "rust/loopflow/src/planning.rs",
+      "symbol": "PlanningSyncStatus, PlanningSyncChange and PlanningSyncState \u2014 new shared read contract",
+      "revision": "b6f34a6f8b811d95f9fc843ac6592cc2262f2e26",
+      "ranges": [
+        [
+          14,
+          38
+        ]
+      ],
+      "text": "/// Read-only delivery evidence. These rows never confer execution authority.\n#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]\npub struct PlanningSyncStatus {\n    pub connected: bool,\n    pub changes: Vec<PlanningSyncChange>,\n}\n\n#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]\npub struct PlanningSyncChange {\n    pub id: String,\n    pub field: String,\n    pub state: PlanningSyncState,\n    pub local_value: serde_json::Value,\n    pub linear_value: Option<serde_json::Value>,\n    pub error: Option<String>,\n}\n\n#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]\n#[serde(rename_all = \"snake_case\")]\n#[non_exhaustive]\npub enum PlanningSyncState {\n    Pending,\n    Uncertain,\n    AdoptedLinear,\n}",
+      "sha256": "c214293da930bf1025e85eb51530de5a04476df0bf76d33d716d5cd34bd2c4be",
+      "omission": "// \u2026 unrelated implementation omitted \u2026"
+    },
+    {
+      "path": "swift/LoopflowMac/Views/PlanningSyncView.swift",
+      "symbol": "PlanningSyncView",
+      "revision": "b6f34a6f8b811d95f9fc843ac6592cc2262f2e26",
+      "ranges": [
+        [
+          4,
+          19
+        ]
+      ],
+      "text": "struct PlanningSyncView: View {\n    let sync: PlanningSyncStatus\n\n    var body: some View {\n        VStack(alignment: .leading, spacing: Spacing.xs) {\n            ForEach(sync.changes) { change in\n                Text(change.text)\n                    .font(Typography.body(12))\n                    .foregroundStyle(.secondary)\n                    .textSelection(.enabled)\n                    .accessibilityIdentifier(\"planning-sync-\\(change.id)\")\n            }\n        }\n        .accessibilityIdentifier(\"planning-sync\")\n    }\n}",
+      "sha256": "a04f7905a1047bb2a2473d8913b7e3622e734d541053e0dc12c5e354805b922d",
+      "omission": "// \u2026 unrelated implementation omitted \u2026"
+    }
+  ]
+}

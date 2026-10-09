@@ -1,665 +1,193 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>PR 1503 · Planning without Linear</title><style>
-:root{color-scheme:light;--ink:#202a30;--muted:#52616a;--line:#d6dddf;--accent:#17605e;--paper:#fcfcfa;--code:#f0f3f2}*{box-sizing:border-box}html{scroll-behavior:auto;scroll-padding-top:24px}body{margin:0;background:var(--paper);color:var(--ink);font:17px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}main{max-width:1140px;margin:0 auto;padding:64px 42px 100px}a{color:var(--accent);text-underline-offset:3px}a:hover{text-decoration-thickness:2px}a:focus-visible,summary:focus-visible,button:focus-visible{outline:3px solid #ba710d;outline-offset:5px}h1{font-size:42px;line-height:1.14;font-weight:620;letter-spacing:-1.3px;margin:16px 0 22px}h2{font-size:28px;line-height:1.25;font-weight:600;letter-spacing:-.5px;margin:0 0 20px}h3{font-size:19px;margin:28px 0 12px}p{max-width:850px;margin:14px 0}small,.meta{font-size:13px;color:var(--muted)}.eyebrow{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}.lead{font-size:21px;line-height:1.5;max-width:820px}.scope{border-top:1px solid var(--line);padding-top:16px;margin-top:28px;overflow-wrap:anywhere}nav{margin:30px 0 50px}table{width:100%;border-collapse:collapse;text-align:left;font-size:15px}th{font-weight:600;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.04em}th,td{padding:16px 16px 16px 0;vertical-align:top;border-bottom:1px solid var(--line)}td:first-child{width:25%}td:nth-child(2){width:37%}section{border-top:1px solid var(--line);padding-top:42px;margin-top:64px;scroll-margin-top:24px}.number{display:block;color:var(--muted);font-size:13px;margin-bottom:10px}figure{margin:28px 0 36px}figcaption{font-size:12px;line-height:1.5;color:var(--muted);margin-bottom:10px;overflow-wrap:anywhere}figcaption span{display:block}pre{margin:0;padding:24px;background:var(--code);font:14px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere;tab-size:4}p code,td code,li code{font: .88em ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code);padding:2px 4px}details{border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:16px 0;margin:28px 0}summary{cursor:pointer;color:var(--accent);font-size:15px;font-weight:550}details p{font-size:15px}.note{border-left:3px solid #9eaa9f;padding-left:20px;max-width:890px}.terminal pre{background:#182c32;color:#e8f1ee;font-size:13px}.skip{position:absolute;top:-100px}.skip:focus{top:10px;background:white;padding:8px}footer{margin-top:64px;border-top:1px solid var(--line);padding-top:24px;font-size:13px;color:var(--muted)}button{font:inherit;font-size:13px;color:var(--accent);background:none;border:1px solid var(--line);padding:6px 10px;cursor:pointer}ul{padding-left:22px}li{margin:8px 0}@media(max-width:680px){main{padding:32px 20px 64px}h1{font-size:34px}h2{font-size:25px}.lead{font-size:19px}body{font-size:16px}table,tbody,tr,td{display:block;width:100%}thead{display:none}tr{padding:16px 0;border-bottom:1px solid var(--line)}td,td:first-child,td:nth-child(2){width:100%;border:0;padding:5px 0}td::before{content:attr(data-label);display:block;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}pre{padding:16px 12px;font-size:13px;line-height:1.55;white-space:pre;overflow-x:auto;overflow-wrap:normal}.terminal pre{font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere}section{margin-top:48px;padding-top:32px}}@media print{body{background:white;font-size:11pt}main{padding:0;max-width:none}button,.skip{display:none}a{color:inherit}pre{font-size:9pt;background:#f6f6f6}details>*{display:block!important}summary{font-weight:bold}h2,figcaption{break-after:avoid}.terminal pre{background:#f3f3f3;color:#111}section{margin-top:28px}}
-</style></head><body><a class="skip" href="#create">Skip to code</a><main><header><div class="eyebrow">Loopflow · PR 1503 · Review walkthrough</div><h1>Planning without Linear</h1><p class="note"><strong>Superseded by the October 8 review.</strong> Jack Heart selected one stored plan with repository-wide optional Linear sync and Git-like ID prefixes. The implementation is being revised. This walkthrough retains the previously published revision as review evidence.</p><p class="lead">Create a Task before it has a checkout, keep a personal plan in SQLite, and use the existing execution and delivery path.</p><p>Jack Heart selected the local lifecycle first, with Linear-shaped fields and APIs and particular attention to identity. This PR delivers that slice. Cross-machine agreement, a host callback, and exporting a personal plan to Linear remain future work.</p>
-<p class="scope meta"><a href="https://github.com/loopflowstudio/loopflow/pull/1503">PR #1503</a> · base <code>812d8cc55cf62f913219bb06de2d90e77addc925</code><br>Published head <code>dfe18ab6060901992b55e64842e23c4295673b08</code><br>Review generated 2026-10-08. Tracked source matches the published head; only local review artifacts were added.</p></header>
-<nav aria-label="Walkthrough"><table><thead><tr><th>When you…</th><th>What happens</th><th>Where the code controls this</th></tr></thead><tbody><tr><td data-label="When you…"><a href="#create">Create a Task, then retry</a></td><td data-label="What happens">A Task exists without Linear or a checkout. Repeating the original creation identity returns that same Task, including later edits.</td><td data-label="Where the code controls this">task_create selects the plan; create_local_task commits the Task and original request together.</td></tr><tr><td data-label="When you…"><a href="#private">Edit a personal plan</a></td><td data-label="What happens">Goals, memory and custom workflows stay in the store. Shared Waves continue to use Linear.</td><td data-label="Where the code controls this">project_authority_on chooses the writer; update_local_project_content saves the workflow and its selection atomically.</td></tr><tr><td data-label="When you…"><a href="#work">Start work and deliver it</a></td><td data-label="What happens">Checkout allocation retains the Task ID. Publishing or requesting a merge does not complete the Task.</td><td data-label="Where the code controls this">place_task records placement; reach_end requires settled PRs before the existing completion transaction.</td></tr><tr><td data-label="When you…"><a href="#rotate">Rotate a mixed chapter and retry</a></td><td data-label="What happens">Local Waves move in one transaction. If Linear then fails, the saved plan can be retried without replaying the local move.</td><td data-label="Where the code controls this">rotate_local_projects recognizes the settled request; chapter apply preserves provider recovery separately.</td></tr></tbody></table></nav>
-<section id="create"><span class="number">01 / Create and retry</span><h2>A Task exists before work starts</h2><p>The full durable ID is a UUID-backed <code>TaskId</code>. The visible <code>lf-</code> alias uses a unique prefix of at least 12 characters. Linear identity and checkout placement are independently optional; neither supplies the local Task’s identity.</p>
-<figure class="terminal"><figcaption>Captured CLI · dfe18ab60 · disposable store, no Linear connection · selected omissions marked</figcaption><pre>$ lf task create --wave personal:review \
-  --title &#x27;Fix the parser&#x27; --notes &#x27;Keep quoted input&#x27; \
-  --creation-id task_3e34a19a2658499eb5742ef623a22b2f --json
-Creation identity: task_3e34a19a2658499eb5742ef623a22b2f; retain --creation-id task_3e34a19a2658499eb5742ef623a22b2f when retrying this request
-{
-  &quot;revision&quot;: null,
-  &quot;id&quot;: &quot;task_3e34a19a2658499eb5742ef623a22b2f&quot;,
-  &quot;identifier&quot;: &quot;lf-3e34a19a2658&quot;,
-  &quot;branch_name&quot;: null,
-  &quot;url&quot;: null,
-  &quot;name&quot;: &quot;Fix the parser&quot;,
-  &quot;description&quot;: &quot;Keep quoted input&quot;,
-  &quot;rank&quot;: 0,
-  &quot;completed&quot;: false,
-  &quot;completed_at&quot;: null,
-  &quot;state&quot;: &quot;unstarted&quot;,
-  &quot;project_id&quot;: &quot;proj_8f1eab9d042c43abb5cd477201c6921d&quot;,
-  &quot;project&quot;: &quot;review&quot;,
-  &quot;team_id&quot;: null,
-  &quot;assignee&quot;: null
-}
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>PR 1503 · Save locally, synchronize independently</title><style>
+:root{--ink:#202a30;--muted:#52616a;--accent:#17605e;--line:#d7ddda;--paper:#fcfcfa;--code:#eef2f0;color-scheme:light}
+*{box-sizing:border-box}html{scroll-behavior:auto;scroll-padding-top:24px}body{margin:0;background:var(--paper);color:var(--ink);font:17px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:1160px;margin:auto;padding:56px 42px 90px}h1{font-size:42px;line-height:1.15;letter-spacing:-1px;font-weight:620;margin:14px 0 20px}h2{font-size:29px;line-height:1.25;letter-spacing:-.5px;font-weight:600;margin:0 0 18px}h3{font-size:19px;margin:28px 0 12px}
+p{max-width:880px;margin:14px 0}.lead{font-size:21px;line-height:1.5;max-width:890px}.meta,figcaption{font-size:12px;line-height:1.6;color:var(--muted);overflow-wrap:anywhere}.eyebrow,.number{font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}.number{display:block;margin-bottom:10px}
+a{color:var(--accent);text-underline-offset:3px}a:hover{text-decoration-thickness:2px}a:focus-visible,summary:focus-visible,pre:focus-visible{outline:3px solid #a86910;outline-offset:5px}.skip{position:absolute;top:-100px}.skip:focus{top:8px;background:white;padding:8px}
+.scope{border-top:1px solid var(--line);padding-top:18px;margin-top:25px}.note{border-left:3px solid #84988a;padding-left:20px;max-width:930px}.limit{color:#6b432d}
+nav{margin:35px 0 50px}table{width:100%;border-collapse:collapse;text-align:left;font-size:15px}th{color:var(--muted);font-size:12px;letter-spacing:.03em;font-weight:600;text-transform:uppercase}th,td{padding:15px 18px 15px 0;border-bottom:1px solid var(--line);vertical-align:top}td:first-child{width:23%}td:nth-child(2){width:35%}
+section{margin-top:64px;padding-top:38px;border-top:1px solid var(--line);scroll-margin-top:24px}figure{margin:25px 0 34px}figcaption{margin-bottom:9px}figcaption span{display:block}pre{margin:0;padding:22px;background:var(--code);font:14px/1.58 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre;overflow-x:auto;tab-size:4}pre code{font:inherit}.terminal pre{background:#1b3034;color:#edf4ef;white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px}p code,td code,li code{font:.88em ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code);padding:2px 4px}
+details{padding:16px 0;margin:26px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}summary{cursor:pointer;font-size:15px;font-weight:550;color:var(--accent)}details p,details li{font-size:15px}ul{padding-left:22px}li{margin:8px 0}footer{margin-top:60px;border-top:1px solid var(--line);padding-top:22px;font-size:13px;color:var(--muted)}
+@media(max-width:680px){main{padding:30px 20px 60px}body{font-size:16px}h1{font-size:33px}h2{font-size:25px}.lead{font-size:19px}table,tbody,tr,td{display:block;width:100%}thead{display:none}tr{padding:14px 0;border-bottom:1px solid var(--line)}td,td:first-child,td:nth-child(2){width:100%;border:0;padding:5px 0}td::before{content:attr(data-label);display:block;font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}pre{padding:16px 13px;font-size:13px}.terminal pre{font-size:12px}section{margin-top:46px;padding-top:28px}}
+@media print{body{background:white;font-size:11pt}main{padding:0;max-width:none}.skip{display:none}a{color:inherit}pre{font-size:8.5pt;white-space:pre-wrap;overflow-wrap:anywhere;background:#f5f5f5}details>*{display:block!important}summary{font-weight:bold}h2,figcaption{break-after:avoid}.terminal pre{color:#111;background:#f5f5f5}section{margin-top:25px}}
 
-$ lf task edit task_3e34a19a2658499eb5742ef623a22b2f --title &#x27;Preserve quoted input&#x27;
-personal:review: updated task task_3e34a19a2658499eb5742ef623a22b2f
+.route{display:flex;flex-wrap:wrap;gap:12px 25px;font-size:15px}.pair-label{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-top:30px}.verdict{border-left:3px solid #a77b44;padding-left:20px}header{margin-bottom:28px}.compact{font-size:15px}
+.unified-diff pre{padding:14px 0;background:#f4f6f5}.unified-diff code{display:block;min-width:max-content}.diff-line{display:block;padding:0 18px;min-height:1.58em}.diff-line.removed{background:#ffe7e7;color:#842525}.diff-line.added{background:#def4e3;color:#14552b}.unified-diff figcaption strong{color:var(--ink)}
+@media(max-width:680px){.diff-line{padding:0 10px}}
+@media print{.unified-diff code{min-width:0}.diff-line{white-space:pre-wrap;overflow-wrap:anywhere;print-color-adjust:exact;-webkit-print-color-adjust:exact}}
+</style></head><body><a class="skip" href="#task">Skip to changed contracts</a><main><header><div class="eyebrow">LOO-406 · PR #1503 · refreshed source review</div><h1>Save locally.<br>Synchronize independently.</h1><p class="lead">Create and edit work without waiting for Linear. Connected plans save first, then synchronize while a CLI or Desktop connection is active. The interface distinguishes pending changes, uncertain writes and edits superseded by Linear.</p><p class="verdict"><strong>The implementation has moved beyond the previous walkthrough.</strong> Export, field updates, ordering, cancellation, deletion and the shared sync display now exist. The consequential review question is whether the new public reconnect and display paths are verified: their final runtime checks remain unproved after build startup stalls.</p><p class="scope meta"><a href="https://github.com/loopflowstudio/loopflow/pull/1503">Published PR #1503</a> · reviewed October 8, 2026<br>Base: 04a4a296bcb6999e2d15572b69b484d28c79217a<br>Head: b6f34a6f8b811d95f9fc843ac6592cc2262f2e26<br>All code excerpts are pinned to these revisions. Newer local reconciliation notes and any concurrent edits are excluded. No product tests or installed-store commands are run for this review.</p></header><nav class="route" aria-label="Reading route"><a href="#task">Task: save before placement</a><a href="#project">Project: update and reorder</a><a href="#wave">Wave: stored definitions</a><a href="#sync">Reconnect and see delivery</a><a href="#proof">What remains unproved</a></nav><table><thead><tr><th>When you…</th><th>What changes</th><th>Code contract to judge</th></tr></thead><tbody>
+<tr><td data-label="When you…"><a href="#task">Create or edit a Task offline</a></td><td data-label="What changes">Creation assigns its own ID; edits save before provider access. A Task can exist without a checkout or Linear issue.</td><td data-label="Contract">TaskPlan makes Linear optional. task_edit returns local identity and sync evidence instead of a provider update result.</td></tr>
+<tr><td data-label="When you…"><a href="#project">Change a Project’s plan or Task order</a></td><td data-label="What changes">The local plan changes immediately. Ordering sends a saved list of moves rather than independent rank values.</td><td data-label="Contract">update_plan returns ProjectPlanning; one Project receipt owns ordering and its recovery.</td></tr>
+<tr><td data-label="When you…"><a href="#wave">Edit Wave context after import</a></td><td data-label="What changes">Stored definitions change; the original repository files remain intact and no longer supply subsequent reads.</td><td data-label="Contract">Wave’s type stays unchanged. update_wave_goal_config now writes through WaveId into SQLite.</td></tr>
+<tr><td data-label="When you…"><a href="#sync">Reconnect or browse another Task</a></td><td data-label="What changes">Repository synchronization continues without a selected Task. Pending and uncertain effects stay visible.</td><td data-label="Contract">PlanningSync owns the connection lifetime; PlanningSyncStatus is a read of existing receipts, shared by CLI and Desktop.</td></tr></tbody></table><section id="task"><span class="number">01 / Task</span><h2>A save succeeds before Linear answers</h2><figure class="terminal"><figcaption>Illustrative CLI transcript — expected from b6f34a6f8, not executed for this review.<span>Illustrative disposable repository: returned Task matches unique prefix 3e34; connected but offline, only this name edit pending. Bracketed creation output is explanatory, not literal output.</span></figcaption><pre tabindex="0">$ lf task create --wave review --title &#x27;Fix the parser&#x27;
+[returns a generated Task identifier; no creation token is required]
 
-$ lf task create --wave personal:review \
-  --title &#x27;Fix the parser&#x27; --notes &#x27;Keep quoted input&#x27; \
-  --creation-id task_3e34a19a2658499eb5742ef623a22b2f --json
-[stderr repeats the same creation identity; omitted]
-[stdout: selected fields; other fields omitted]
-{
-  &quot;id&quot;: &quot;task_3e34a19a2658499eb5742ef623a22b2f&quot;,
-  &quot;identifier&quot;: &quot;lf-3e34a19a2658&quot;,
-  &quot;name&quot;: &quot;Preserve quoted input&quot;
-}
+$ lf task edit 3e34 --title &#x27;&#x27;
+Error: Task title cannot be empty
 
-$ lf task create --wave personal:review \
-  --title &#x27;Different request&#x27; \
-  --creation-id task_3e34a19a2658499eb5742ef623a22b2f --json
-[stderr creation identity line omitted]
-Error: invalid data: creation identity already belongs to a different request
-[exit 1]</pre></figure><p class="note">Retry the original command with the same <code>--creation-id</code> and original input. A changed title in the stored Task does not invalidate that retry; changing the creation request does. Omitting the flag mints a new ID, even for the same title. The CLI prints the ID before attempting creation, so callers must retain it.</p>
-<figure id="source-1"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/dfe18ab6060901992b55e64842e23c4295673b08/rust/loopflow/src/planning.rs#L72-L107">rust/loopflow/src/planning.rs · TaskPlan; NewTask</a><span>dfe18ab60 · lines 72–82, 100–107</span></figcaption><pre tabindex="0" aria-label="Source excerpt; scroll horizontally on narrow screens"><code>#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TaskPlan {
-    /// Local optimistic-write revision, independent of provider observation age.
-    pub revision: u64,
-    /// Optional provider mapping; the owning Task carries durable identity.
-    pub linear_id: Option&lt;LinearIssueId&gt;,
-    pub identifier: String,
-    pub title: String,
-    pub description: String,
-    pub pm_snapshot_synced_at: Option&lt;i64&gt;,
-}
-
-// … intervening source omitted …
-
-/// The caller retains this identity across a retry; a separate create mints another.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NewTask {
-    pub id: crate::durable::TaskId,
-    pub project_id: crate::durable::ProjectId,
-    pub title: String,
-    pub description: String,
-}</code></pre></figure>
-<p>Compared with the base, <code>TaskPlan.id: LinearIssueId</code> becomes an optional mapping, and provider observation time becomes optional. The existing owning <code>Task.id</code> stays durable; <code>Task.worktree</code> is now optional too. UUIDv4 generation is reused, not introduced here.</p>
-<figure id="source-2"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/dfe18ab6060901992b55e64842e23c4295673b08/rust/loopflow/src/bin/lf.rs#L978-L1004">rust/loopflow/src/bin/lf.rs · TaskCommand::Create</a><span>dfe18ab60 · lines 978–1004</span></figcaption><pre tabindex="0" aria-label="Source excerpt; scroll horizontally on narrow screens"><code>        TaskCommand::Create {
-            wave,
-            title,
-            notes,
-            creation_id,
-            json,
-        } =&gt; {
-            let report = match notes {
-                Some(notes) =&gt; Some(notes.clone()),
-                None =&gt; piped_task_report()?,
-            };
-            let identity = creation_id.clone().unwrap_or_default();
-            eprintln!(&quot;Creation identity: {identity}; retain --creation-id {identity} when retrying this request&quot;);
-            let issue = loopflow::ops::task::task_create(
-                repo,
-                wave.as_deref(),
-                title.clone(),
-                report,
-                identity,
-            )?;
-            if *json {
-                println!(&quot;{}&quot;, serde_json::to_string_pretty(&amp;issue)?);
-            } else {
-                println!(&quot;{} · {}&quot;, issue.identifier, issue.name);
-            }
-            Ok(())
-        }</code></pre></figure>
-<figure id="source-3"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/dfe18ab6060901992b55e64842e23c4295673b08/rust/loopflow/src/store/sqlite/children.rs#L83-L158">rust/loopflow/src/store/sqlite/children.rs · SqliteStore::create_local_task</a><span>dfe18ab60 · lines 83–158</span></figcaption><pre tabindex="0" aria-label="Source excerpt; scroll horizontally on narrow screens"><code>    pub fn create_local_task(&amp;self, input: &amp;crate::planning::NewTask) -&gt; StoreResult&lt;Task&gt; {
-        let mut conn = self.conn.lock().expect(&quot;store mutex poisoned&quot;);
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let intent: Option&lt;(String, String, String)&gt; = tx
-            .query_row(
-                &quot;SELECT project_id,title,description FROM task_creation_intents WHERE task_id=?1&quot;,
-                [input.id.as_str()],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+$ lf task edit 3e34 --title &#x27;Preserve quoted input&#x27;
+review: updated task task_3e34a19a2658499eb5742ef623a22b2f
+Saved locally; pending Linear sync · name</pre></figure><figure class="unified-diff"><figcaption><strong>− Base</strong> <a href="https://github.com/loopflowstudio/loopflow/blob/04a4a296bcb6999e2d15572b69b484d28c79217a/rust/loopflow/src/planning.rs#L56-L62">rust/loopflow/src/planning.rs · TaskPlan</a><span>04a4a296b · lines 56–62</span><br><strong>+ Head</strong> <a href="https://github.com/loopflowstudio/loopflow/blob/b6f34a6f8b811d95f9fc843ac6592cc2262f2e26/rust/loopflow/src/planning.rs#L125-L134">rust/loopflow/src/planning.rs · TaskPlan</a><span>b6f34a6f8 · lines 125–134</span></figcaption><pre tabindex="0" aria-label="Unified diff; minus removed, plus added; horizontally scrollable"><code><span class="diff-line context"> pub struct TaskPlan {</span><span class="diff-line removed">-    pub id: LinearIssueId,</span><span class="diff-line added">+    /// Local optimistic-write revision, independent of provider observation age.</span><span class="diff-line added">+    pub revision: u64,</span><span class="diff-line added">+    /// Optional provider mapping; the owning Task carries durable identity.</span><span class="diff-line added">+    pub linear_id: Option&lt;LinearIssueId&gt;,</span><span class="diff-line context">     pub identifier: String,</span><span class="diff-line context">     pub title: String,</span><span class="diff-line context">     pub description: String,</span><span class="diff-line removed">-    pub pm_snapshot_synced_at: i64,</span><span class="diff-line added">+    pub pm_snapshot_synced_at: Option&lt;i64&gt;,</span><span class="diff-line context"> }</span></code></pre></figure><p>TaskId already existed. The changes are optional Linear mapping, a local write revision, optional observation age, and <a href="https://github.com/loopflowstudio/loopflow/blob/b6f34a6f8b811d95f9fc843ac6592cc2262f2e26/rust/loopflow/src/work/task/mod.rs#L614">Task.worktree: Option&lt;PathBuf&gt;</a>. TaskPlan remains a nested subset of Task: state, rank and assignee still appear through PmItem. No model consolidation is claimed.</p><figure class="unified-diff"><figcaption><strong>− Base</strong> <a href="https://github.com/loopflowstudio/loopflow/blob/04a4a296bcb6999e2d15572b69b484d28c79217a/rust/loopflow/src/ops/task.rs#L4885-L4913">rust/loopflow/src/ops/task.rs · task_edit — provider-first return</a><span>04a4a296b · lines 4885–4913</span><br><strong>+ Head</strong> <a href="https://github.com/loopflowstudio/loopflow/blob/b6f34a6f8b811d95f9fc843ac6592cc2262f2e26/rust/loopflow/src/ops/task.rs#L4759-L4800">rust/loopflow/src/ops/task.rs · TaskEdit and task_edit — local save plus delivery evidence</a><span>b6f34a6f8 · lines 4759–4800</span></figcaption><pre tabindex="0" aria-label="Unified diff; minus removed, plus added; horizontally scrollable"><code><span class="diff-line added">+#[derive(Debug)]</span><span class="diff-line added">+pub struct TaskEdit {</span><span class="diff-line added">+    pub wave: String,</span><span class="diff-line added">+    pub id: String,</span><span class="diff-line added">+    pub sync: crate::planning::PlanningSyncStatus,</span><span class="diff-line added">+}</span><span class="diff-line added">+</span><span class="diff-line context"> pub fn task_edit(</span><span class="diff-line context">     repo: &amp;Path,</span><span class="diff-line context">     issue: &amp;str,</span><span class="diff-line context">     wave: Option&lt;&amp;str&gt;,</span><span class="diff-line removed">-    title: Option&lt;String&gt;,</span><span class="diff-line removed">-    notes: Option&lt;String&gt;,</span><span class="diff-line removed">-) -&gt; OpsResult&lt;super::pm::PmUpdateResult&gt; {</span><span class="diff-line removed">-    if title.is_none() &amp;&amp; notes.is_none() {</span><span class="diff-line removed">-        return Err(task_error(&quot;task edit requires --title or --notes&quot;));</span><span class="diff-line added">+    update: crate::pm::PmItemUpdate,</span><span class="diff-line added">+) -&gt; OpsResult&lt;TaskEdit&gt; {</span><span class="diff-line added">+    if update == crate::pm::PmItemUpdate::default() {</span><span class="diff-line added">+        return Err(task_error(</span><span class="diff-line added">+            &quot;task edit requires --title, --notes, --rank, --assignee or --unassign&quot;,</span><span class="diff-line added">+        ));</span><span class="diff-line context">     }</span><span class="diff-line removed">-    if title</span><span class="diff-line added">+    if update</span><span class="diff-line added">+        .name</span><span class="diff-line context">         .as_deref()</span><span class="diff-line context">         .is_some_and(|title| title.trim().is_empty())</span><span class="diff-line context">     {</span><span class="diff-line context">         return Err(task_error(&quot;Task title cannot be empty&quot;));</span><span class="diff-line context">     }</span><span class="diff-line removed">-    super::pm::pm_update(</span><span class="diff-line removed">-        repo,</span><span class="diff-line removed">-        &amp;super::pm::PmUpdateOptions {</span><span class="diff-line removed">-            wave: wave.map(str::to_string),</span><span class="diff-line removed">-            id: issue.to_string(),</span><span class="diff-line removed">-            update: super::pm::PmTaskUpdate::Edit(crate::pm::PmItemUpdate {</span><span class="diff-line removed">-                name: title,</span><span class="diff-line removed">-                description: notes,</span><span class="diff-line removed">-            }),</span><span class="diff-line removed">-        },</span><span class="diff-line removed">-        &amp;super::NullProgress,</span><span class="diff-line removed">-    )</span><span class="diff-line added">+    block_on_task(async {</span><span class="diff-line added">+        let (store, task) = super::pm::resolve_saved_task(repo, wave, issue).await?;</span><span class="diff-line added">+        let edited = store</span><span class="diff-line added">+            .edit_task(&amp;task.id, task.plan.revision, &amp;update)</span><span class="diff-line added">+            .await</span><span class="diff-line added">+            .map_err(task_error)?;</span><span class="diff-line added">+        let owner = owning_wave(&amp;store, &amp;edited).await?;</span><span class="diff-line added">+        Ok(TaskEdit {</span><span class="diff-line added">+            wave: owner.slug().into(),</span><span class="diff-line added">+            id: edited.id.to_string(),</span><span class="diff-line added">+            sync: store</span><span class="diff-line added">+                .sqlite</span><span class="diff-line added">+                .task_planning_sync(&amp;edited.id)</span><span class="diff-line added">+                .map_err(task_error)?,</span><span class="diff-line added">+        })</span><span class="diff-line added">+    })</span><span class="diff-line context"> }</span></code></pre></figure><p class="note">The input now accepts rank and nullable assignee as well as title/notes. <a href="https://github.com/loopflowstudio/loopflow/blob/b6f34a6f8b811d95f9fc843ac6592cc2262f2e26/rust/loopflow/src/store/sqlite/task_content.rs#L89">The common store writer</a> checks the expected local revision and saves fields with their receipts in one transaction. An invalid title or stale revision leaves the prior value intact; re-reading and reapplying the edit uses the current revision. A successful return promises a local save, not a completed provider write.</p><details><summary>Creation identity is generated here; uncertainty stays with that identity</summary><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/b6f34a6f8b811d95f9fc843ac6592cc2262f2e26/rust/loopflow/src/ops/task.rs#L1294-L1315">rust/loopflow/src/ops/task.rs · task_create — Project selection, generated identity and saved result</a><span>b6f34a6f8 · lines 1294–1315</span></figcaption><pre tabindex="0" aria-label="Source excerpt; horizontally scrollable"><code>        let acquisition = super::pm::lock_wave_planning(&amp;wave).await?;
+        let creation_project = store
+            .get_project_by_project(&amp;super::project::current_project(&amp;store, &amp;wave)?.id)
+            .await
+            .map_err(task_error)?
+            .ok_or_else(|| task_error(&quot;selected Project is missing&quot;))?
+            .id;
+        let task = store
+            .create_task(
+                &amp;crate::planning::NewTask {
+                    id: crate::durable::TaskId::new(),
+                    project_id: creation_project,
+                    title: input.title,
+                    description: input.report,
+                },
+                acquisition,
             )
-            .optional()?;
-        if let Some((project, title, description)) = intent {
-            if project != input.project_id.as_str()
-                || title != input.title
-                || description != input.description
-            {
-                return Err(StoreError::InvalidData(
-                    &quot;creation identity already belongs to a different request&quot;.into(),
-                ));
-            }
-            return task_on(&amp;tx, &amp;input.id)?.ok_or(StoreError::NotFound);
-        }
-        if input.title.trim().is_empty() {
-            return Err(StoreError::InvalidData(&quot;Task title cannot be empty&quot;.into()));
-        }
-        let wave_id: WaveId = tx.query_row(
-            &quot;SELECT wave_id FROM projects WHERE id=?1&quot;,
-            [input.project_id.as_str()],
-            |row| row.get(0),
-        )?;
-        if super::local_planning::project_authority_on(&amp;tx, &amp;input.project_id)?
-            != crate::planning::PlanningAuthority::Local
-        {
-            return Err(StoreError::InvalidAuthority(
-                &quot;this Project&#x27;s planning is owned by Linear&quot;.into(),
-            ));
-        }
-        super::durable::require_selected_project(&amp;tx, &amp;input.project_id)?;
-        let now = OffsetDateTime::now_utc();
-        let task = Task {
-            id: input.id.clone(),
-            plan: TaskPlan {
-                revision: 0,
-                linear_id: None,
-                identifier: format!(&quot;lf-{}&quot;, input.id.as_str().trim_start_matches(&quot;task_&quot;)),
-                title: input.title.clone(),
-                description: input.description.clone(),
-                pm_snapshot_synced_at: None,
-            },
-            pm_writeback: PmWritebackState::Current,
-            wave_id,
-            project_id: input.project_id.clone(),
-            worktree: None,
-            workspace_slug: String::new(),
-            agent: None,
-            abandon_intent: None,
-            created_at: now,
-            updated_at: now,
-            observation: crate::work::task::Observation::NotRequired,
-        };
-        validate_task(&amp;task)?;
-        insert_task_row(&amp;tx, &amp;task)?;
-        tx.execute(&quot;UPDATE tasks SET planning_rank=COALESCE((SELECT max(planning_rank)+1 FROM tasks WHERE project_id=?2 AND id!=?1),0) WHERE id=?1&quot;,params![task.id.as_str(),task.project_id.as_str()])?;
-        tx.execute(
-            &quot;INSERT INTO task_creation_intents(task_id, project_id, title, description)
-             VALUES(?1, ?2, ?3, ?4)&quot;,
-            params![
-                input.id.as_str(),
-                input.project_id.as_str(),
-                input.title,
-                input.description
-            ],
-        )?;
-        let task = task_on(&amp;tx, &amp;input.id)?.ok_or(StoreError::NotFound)?;
-        tx.commit()?;
-        Ok(task)
-    }</code></pre></figure>
-<p>The transaction stores the original request separately from editable Task fields. It returns the current Task on replay; no second Task, checkout, or provider issue is allocated.</p>
-<details><summary>Between the CLI and SQLite: Wave selection and creation after rotation</summary><p>With no selected Wave, explicit creation chooses <code>personal:inbox</code>. An existing shared Wave continues down the Linear path. On retry after rotation, the saved creation Project supplies the original request comparison; it does not move the Task back.</p><figure id="source-4"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/dfe18ab6060901992b55e64842e23c4295673b08/rust/loopflow/src/ops/task.rs#L1451-L1528">rust/loopflow/src/ops/task.rs · task_create</a><span>dfe18ab60 · lines 1451–1528</span></figcaption><pre tabindex="0" aria-label="Source excerpt; scroll horizontally on narrow screens"><code>pub fn task_create(
-    repo: &amp;Path,
-    wave: Option&lt;&amp;str&gt;,
-    title: Option&lt;String&gt;,
-    report: Option&lt;String&gt;,
-    identity: crate::durable::TaskId,
-) -&gt; OpsResult&lt;crate::pm::PmItem&gt; {
-    let input = resolve_task_create_input(title.as_deref(), report.as_deref())?;
-    let main = crate::engine::worktrees::main_repo_root(repo).map_err(task_error)?;
-    let personal = match wave {
-        Some(wave) if wave.starts_with(&quot;personal:&quot;) =&gt; {
-            wave.strip_prefix(&quot;personal:&quot;).map(str::to_string)
-        }
-        selected =&gt; {
-            match crate::work::wave::context::resolve_managed_wave_sync(Some(&amp;main), selected) {
-                Ok(wave) =&gt; wave.slug().strip_prefix(&quot;personal:&quot;).map(str::to_string),
-                Err(crate::work::wave::context::WaveResolveError::NoContext)
-                    if selected.is_none() =&gt;
-                {
-                    Some(&quot;inbox&quot;.into())
-                }
-                Err(error) =&gt; return Err(task_error(error)),
-            }
-        }
-    };
-    if let Some(name) = personal {
-        return block_on_task(async {
-            let store = super::pm::pm_store().await?;
-            let canonical =
-                crate::repository::CanonicalRepo::discover(&amp;main).map_err(task_error)?;
-            let project = store
-                .sqlite
-                .ensure_personal_project(&amp;canonical.to_string(), &amp;name)
-                .map_err(task_error)?;
-            let wave = store
-                .get_wave(&amp;project.wave_id)
-                .await
-                .map_err(task_error)?
-                .ok_or_else(|| task_error(&quot;personal Wave is missing&quot;))?;
-            let acquisition = super::pm::lock_wave_planning(&amp;wave).await?;
-            let creation_project = match store
-                .sqlite
-                .local_task_creation_project(&amp;identity)
-                .map_err(task_error)?
-            {
-                Some(id) =&gt; {
-                    let original = store
-                        .get_project(&amp;id)
-                        .await
-                        .map_err(task_error)?
-                        .ok_or_else(|| task_error(&quot;creation Project is missing&quot;))?;
-                    if original.wave_id != project.wave_id {
-                        return Err(task_error(&quot;creation identity belongs to a different Wave&quot;));
-                    }
-                    id
-                }
-                None =&gt; crate::durable::ProjectId::parse(
-                    &amp;super::project::current_project(&amp;store, &amp;wave)?.id,
-                )
-                .map_err(task_error)?,
-            };
-            let task = store
-                .create_local_task(
-                    &amp;crate::planning::NewTask {
-                        id: identity,
-                        project_id: creation_project,
-                        title: input.title,
-                        description: input.report,
-                    },
-                    acquisition,
-                )
-                .await
-                .map_err(task_error)?;
-            local_task_item(&amp;store, &amp;task)
-        });
-    }
-    let project =
-        crate::ops::task_pm::resolve_current_project(&amp;main, wave, crate::ops::pm::PmRefresh::Auto)?;</code></pre></figure></details>
-<details><summary>Proof for identity and fields</summary><p>Newly observed above: create → edit → original retry; mismatched-request rejection; comment and status readback, all against a disposable store. <a href="https://github.com/loopflowstudio/loopflow/blob/dfe18ab6060901992b55e64842e23c4295673b08/rust/loopflow/tests/local_planning.rs#L136-L218">The concurrent-create and checkout-failure fixture</a> additionally launches three creates with one identity and retains one Task/PR through a failed first checkout. <a href="https://github.com/loopflowstudio/loopflow/blob/dfe18ab6060901992b55e64842e23c4295673b08/rust/loopflow/tests/local_planning.rs#L596-L821">The creation-reply-loss fixture</a> checks restart and distinct same-title Tasks. These latter proofs were inspected here; their passes belong to the recorded gate.</p></details>
-</section><section id="private"><span class="number">02 / Personal planning</span><h2>The store holds the private definitions</h2><p>A personal Wave’s goal, memory and custom workflow are rows, not new repository files. Its Project still uses the existing content shape for KRs, targets and workflow; Tasks expose the familiar title, notes, rank and assignee fields.</p>
-<figure id="source-5"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/dfe18ab6060901992b55e64842e23c4295673b08/rust/loopflow/src/store/migrations/drafts/local_planning.sql#L4-L20">rust/loopflow/src/store/migrations/drafts/local_planning.sql · personal plan and definition tables</a><span>dfe18ab60 · lines 4–20</span></figcaption><pre tabindex="0" aria-label="Source excerpt; scroll horizontally on narrow screens"><code>CREATE TABLE personal_plans (
-    id TEXT PRIMARY KEY,
-    repo TEXT NOT NULL UNIQUE
-);
-ALTER TABLE waves ADD COLUMN personal_plan_id TEXT REFERENCES personal_plans(id) ON DELETE RESTRICT;
-ALTER TABLE project_transitions ADD COLUMN local_plan_json TEXT;
-CREATE TABLE personal_wave_definitions (
-    wave_id TEXT PRIMARY KEY REFERENCES waves(id) ON DELETE RESTRICT,
-    goal TEXT NOT NULL,
-    memory TEXT NOT NULL
-);
-CREATE TABLE personal_workflows (
-    wave_id TEXT NOT NULL REFERENCES personal_wave_definitions(wave_id) ON DELETE RESTRICT,
-    name TEXT NOT NULL,
-    content TEXT NOT NULL,
-    PRIMARY KEY(wave_id,name)
-);</code></pre></figure>
-<figure id="source-6"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/dfe18ab6060901992b55e64842e23c4295673b08/rust/loopflow/src/store/sqlite/local_planning.rs#L14-L354">rust/loopflow/src/store/sqlite/local_planning.rs · project_authority_on; update_local_project_content</a><span>dfe18ab60 · lines 14–29, 312–354</span></figcaption><pre tabindex="0" aria-label="Source excerpt; scroll horizontally on narrow screens"><code>pub(super) fn project_authority_on(
-    conn: &amp;Connection,
-    project: &amp;ProjectId,
-) -&gt; StoreResult&lt;PlanningAuthority&gt; {
-    let personal: bool = conn.query_row(
-        &quot;SELECT w.personal_plan_id IS NOT NULL FROM projects p
-         JOIN waves w ON w.id=p.wave_id WHERE p.id=?1&quot;,
-        [project.as_str()],
-        |row| row.get(0),
-    )?;
-    Ok(if personal {
-        PlanningAuthority::Local
-    } else {
-        PlanningAuthority::Linear
+            .await
+            .map_err(task_error)?;
+        task_planning_item(&amp;store, &amp;task)
     })
-}
-
-// … intervening source omitted …
-
-    pub fn update_local_project_content(
-        &amp;self,
-        project: &amp;ProjectId,
-        content: &amp;crate::pm::ProjectContent,
-        workflow_definition: Option&lt;&amp;str&gt;,
-    ) -&gt; StoreResult&lt;()&gt; {
-        content
-            .validate()
-            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-        let mut conn = self.conn.lock().expect(&quot;store mutex poisoned&quot;);
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if project_authority_on(&amp;tx, project)? != PlanningAuthority::Local {
-            return Err(StoreError::InvalidAuthority(
-                &quot;this Project&#x27;s planning is owned by Linear&quot;.into(),
-            ));
-        }
-        if let Some(definition) = workflow_definition {
-            let name = content
-                .workflow
-                .strip_prefix(&quot;personal:&quot;)
-                .filter(|name| !name.is_empty())
-                .ok_or_else(|| {
-                    StoreError::InvalidData(&quot;a stored Workflow uses personal:&lt;name&gt;&quot;.into())
-                })?;
-            tx.execute(
-                &quot;INSERT INTO personal_workflows(wave_id,name,content)
-                SELECT wave_id,?2,?3 FROM projects WHERE id=?1
-                ON CONFLICT(wave_id,name) DO UPDATE SET content=excluded.content&quot;,
-                params![project.as_str(), name, definition],
-            )?;
-        }
-        tx.execute(
-            &quot;UPDATE projects SET project_prompt_context=?2,workflow=?3,updated_at=?4 WHERE id=?1&quot;,
-            params![
-                project.as_str(),
-                crate::pm::render_project_content(content),
-                content.workflow,
-                now_unix()
-            ],
-        )?;
-        tx.commit()?;
-        Ok(())
-    }</code></pre></figure>
-<p class="note">Planning authority belongs to the Wave’s personal-plan association, not to whether a Task happens to have a Linear ID. Adding an external mapping alone cannot silently change who owns edits. Personal storage is local to this machine; this PR supplies neither replication nor protection against losing its store.</p>
-<details><summary>Desktop edit: save succeeds before the sheet closes</summary><p>The editor holds unsaved text and errors. The model delegates persistence to the Rust project operation. A failed save keeps the editor open; the headless interaction test checks that invalid text does not replace the saved definition.</p><figure id="source-7"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/dfe18ab6060901992b55e64842e23c4295673b08/swift/LoopflowMac/Views/WorkSurfaceView.swift#L799-L836">swift/LoopflowMac/Views/WorkSurfaceView.swift · PersonalWorkflowEditor</a><span>dfe18ab60 · lines 799–836</span></figcaption><pre tabindex="0" aria-label="Source excerpt; scroll horizontally on narrow screens"><code>struct PersonalWorkflowEditor: View {
-    let model: WorkModel
-    let wave: WaveSnapshot
-    let name: String
-    @Environment(\.dismiss) private var dismiss
-    @State private var content = &quot;&quot;
-    @State private var ready = false
-    @State private var saving = false
-    @State private var error: String?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.md) {
-            Text(&quot;Edit \(name)&quot;).font(Typography.sectionTitle(22))
-            TextEditor(text: $content).font(.system(.body, design: .monospaced))
-                .disabled(!ready || saving)
-                .accessibilityIdentifier(&quot;personal-workflow-content&quot;)
-            if let error { Text(error).foregroundStyle(Color.statusWarning) }
-            HStack {
-                Button(&quot;Cancel&quot;) { dismiss() }.keyboardShortcut(.cancelAction)
-                Spacer()
-                Button(&quot;Save&quot;) { Task {
-                    saving = true
-                    defer { saving = false }
-                    do {
-                        try await model.savePersonalWorkflow(name, content: content, wave: wave)
-                        dismiss()
-                    } catch { self.error = error.localizedDescription }
-                } }.disabled(!ready || saving).keyboardShortcut(.defaultAction)
-            }
-        }
-        .padding(24).frame(width: 640, height: 480)
-        .interactiveDismissDisabled(saving)
-        .task {
-            do { content = try await model.workflowSource(name, wave: wave); ready = true }
-            catch { self.error = error.localizedDescription }
-        }
-    }
-}</code></pre></figure><p><a href="https://github.com/loopflowstudio/loopflow/blob/dfe18ab6060901992b55e64842e23c4295673b08/swift/LoopflowTests/DesktopHeadlessTests.swift#L41-L128">Headless workflow and comment interactions</a> use scripted queries and the shared DTO fixture. <a href="https://github.com/loopflowstudio/loopflow/blob/dfe18ab6060901992b55e64842e23c4295673b08/rust/loopflow/tests/local_planning.rs#L483-L592">The private-definition CLI fixture</a> checks that Wave and workflow repository files are not created. No rendered native-app acceptance is claimed.</p></details>
-</section><section id="work"><span class="number">03 / Work and delivery</span><h2>Placement changes; Task identity does not</h2><figure class="terminal"><figcaption>Illustrative command route from source and fixtures · not executed for this walkthrough</figcaption><pre>$ lf checkout lf-… --json
-# Returns the allocated checkout for this Task.
-# If first checkout creation fails, repeat the same command.
-
-$ lf task run lf-… code
-# In the Task checkout, after implementation and verification:
-$ lf pr publish --title "Preserve quoted input"
-$ lf land -c
-# After GitHub reports the merge:
-$ lf pr reconcile
-$ lf task status lf-… --json
-# Expected: the same task_id; status becomes done only after settlement.</pre></figure><p>The store commits the path, first PR and initialization event together before checkout setup finishes. A failed setup therefore leaves an allocation to repair. Local planning removes the Linear prerequisite; it retains the existing Workflow, Process and PR authorities.</p>
-<figure id="source-8"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/dfe18ab6060901992b55e64842e23c4295673b08/rust/loopflow/src/store/sqlite/children.rs#L32-L81">rust/loopflow/src/store/sqlite/children.rs · SqliteStore::place_task</a><span>dfe18ab60 · lines 32–81</span></figcaption><pre tabindex="0" aria-label="Source excerpt; scroll horizontally on narrow screens"><code>    pub fn place_task(
-        &amp;self,
-        task_id: &amp;TaskId,
-        worktree: &amp;std::path::Path,
-        workspace_slug: &amp;str,
-        pr: &amp;TaskPr,
-    ) -&gt; StoreResult&lt;Task&gt; {
-        let _admission = self.lock_checkout(worktree)?;
-        let mut conn = self.conn.lock().expect(&quot;store mutex poisoned&quot;);
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let mut task = task_on(&amp;tx, task_id)?.ok_or(StoreError::NotFound)?;
-        if task.worktree.is_some() {
-            return Ok(task);
-        }
-        if super::durable::task_state_in(&amp;tx, task_id)?.is_terminal() {
-            return Err(StoreError::InvalidAuthority(
-                &quot;terminal Task cannot allocate a checkout&quot;.into(),
-            ));
-        }
-        super::durable::require_selected_project(&amp;tx, &amp;task.project_id)?;
-        require_task_not_deleted(&amp;tx, &amp;task)?;
-        task.worktree = Some(worktree.to_path_buf());
-        task.workspace_slug = workspace_slug.to_string();
-        validate_initial_task_pr(&amp;task, pr)?;
-        tx.execute(
-            &quot;UPDATE tasks SET worktree=?2,workspace_slug=?3,updated_at=?4 WHERE id=?1&quot;,
-            params![
-                task_id.as_str(),
-                worktree.display().to_string(),
-                workspace_slug,
-                now_unix()
-            ],
-        )?;
-        inherit_task_placement(&amp;tx, &amp;task)?;
-        insert_task_pr(&amp;tx, pr)?;
-        insert_task_event_in(
-            &amp;tx,
-            task_id,
-            &amp;TaskEventKind::WorktreeInitializing {
-                pr_id: pr.id.clone(),
-                sequence: pr.sequence,
-                branch: pr.branch.clone(),
-                path: worktree.display().to_string(),
-                base_commit: pr.base_commit.clone(),
-            },
-        )?;
-        let task = task_on(&amp;tx, task_id)?.ok_or(StoreError::NotFound)?;
-        tx.commit()?;
-        Ok(task)
-    }</code></pre></figure>
-<figure id="source-9"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/dfe18ab6060901992b55e64842e23c4295673b08/rust/loopflow/src/ops/task.rs#L4173-L4257">rust/loopflow/src/ops/task.rs · reach_end</a><span>dfe18ab60 · lines 4173–4217, 4233–4257</span></figcaption><pre tabindex="0" aria-label="Source excerpt; scroll horizontally on narrow screens"><code>async fn reach_end(
-    store: &amp;SharedStore,
-    task: &amp;mut Task,
-    how: EndMove,
-    note: Option&lt;&amp;str&gt;,
-    options: &amp;EndOptions,
-) -&gt; OpsResult&lt;bool&gt; {
-    match task_work_status(store, task).await? {
-        WorkStatus::Done =&gt; {
-            reconcile_task_completion(store, task).await?;
-            cleanup_completed_task(store, task).await?;
-            return Ok(true);
-        }
-        WorkStatus::Abandoned =&gt; {
-            return Err(task_error(format!(
-                &quot;Task {} is abandoned and cannot be completed&quot;,
-                task.plan.identifier
-            )))
-        }
-        WorkStatus::Ready =&gt; {}
-    }
-    let conflict = planning_conflict(store, task).await?;
-    if let Some(conflict) = conflict.as_ref().filter(|_| !options.force) {
-        return Err(task_error(conflict));
-    }
-    reconcile_task_pr_observation(store, task, crate::ops::pr::PrReadFreshness::Cached).await?;
-    // An edge that runs nothing lands nothing: the Task ends as it stands and
-    // keeps its checkout, so what is uncommitted there is not at risk.
-    let keeps_checkout = matches!(how, EndMove::Choose { .. });
-    if !keeps_checkout
-        &amp;&amp; task.worktree.is_some()
-        &amp;&amp; !is_clean(task.worktree()?)
-            .map_err(|error| task_error(format!(&quot;failed to inspect Task worktree: {error}&quot;)))?
-    {
-        return Err(task_error(
-            &quot;Task worktree has uncommitted changes; publish or explicitly abandon them first&quot;,
-        ));
-    }
-    // The completion gate requires every active PR to be settled. Do not
-    // bypass that fact or infer merge from a green head.
-    let gate = task_completion_gate(store, task).await?;
-    if let Some(refusal) = gate.refusal(&amp;task.plan.identifier) {
-        return Err(task_error(refusal));
-    }
-    reconcile_pm_writeback(store, task, None).await?;
-
-// … intervening source omitted …
-
-    // Every other condition is now proven, so an empty unpublished PR is
-    // retired in the completion transaction. Retaining its branch identity
-    // lets cleanup retry after a crash without guessing what it may delete.
-    if !store
-        .complete_task(
-            task,
-            gate.discardable_successor.as_ref(),
-            how,
-            forced.as_deref().or(note),
-        )
-        .await
-        .map_err(|error| task_error(format!(&quot;failed to complete Task: {error}&quot;)))?
-    {
-        return Ok(false);
-    }
-    if keeps_checkout {
-        eprintln!(
-            &quot;Task {} is complete; retained its checkout.&quot;,
-            task.plan.identifier
-        );
-        return Ok(true);
-    }
-    cleanup_completed_task(store, task).await?;
-    Ok(true)
-}</code></pre></figure>
-<p class="note">Publication and auto-merge requests remain intermediate states. The completion gate requires settled delivery, and cleanup happens after the completion transaction. Provider-free planning does not mean remote-free PR delivery.</p>
-<details><summary>Delivery evidence and preserved execution authority</summary><p>The delivery test uses a local bare remote and a GitHub stub. It observes “not done” after publish and after <code>land -c</code>, then injects merge evidence and reconciles. This proves command composition under the fixture, not a real GitHub merge.</p><figure id="source-10"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/dfe18ab6060901992b55e64842e23c4295673b08/rust/loopflow/tests/local_planning.rs#L82-L113">rust/loopflow/tests/local_planning.rs · personal_task_publishes_and_completes_after_verified_merge</a><span>dfe18ab60 · lines 82–113</span></figcaption><pre tabindex="0" aria-label="Source excerpt; scroll horizontally on narrow screens"><code>    lf(
-        worktree,
-        home.path(),
-        &amp;[
-            &quot;pr&quot;,
-            &quot;publish&quot;,
-            &quot;--title&quot;,
-            &quot;Deliver locally owned work&quot;,
-            &quot;--body&quot;,
-            &quot;Local planning through delivery.&quot;,
-        ],
-    );
-    let published = lf(repo.path(), home.path(), &amp;[&quot;task&quot;, &quot;status&quot;, id, &quot;--json&quot;]);
-    assert_ne!(published[&quot;execution&quot;][&quot;status&quot;], &quot;done&quot;);
-    lf(worktree, home.path(), &amp;[&quot;land&quot;, &quot;-c&quot;]);
-    let armed = lf(repo.path(), home.path(), &amp;[&quot;task&quot;, &quot;status&quot;, id, &quot;--json&quot;]);
-    assert_ne!(armed[&quot;execution&quot;][&quot;status&quot;], &quot;done&quot;);
-    assert!(home.path().join(&quot;gh-armed&quot;).exists());
-    let head = std::fs::read_to_string(home.path().join(&quot;gh-head&quot;)).unwrap();
-    assert!(Command::new(&quot;git&quot;)
-        .arg(&quot;--git-dir&quot;)
-        .arg(repo.bare_path())
-        .args([&quot;update-ref&quot;, &quot;refs/heads/main&quot;, head.trim()])
-        .status()
-        .unwrap()
-        .success());
-    std::fs::write(home.path().join(&quot;gh-merged&quot;), &quot;confirmed&quot;).unwrap();
-    lf(repo.path(), home.path(), &amp;[&quot;pr&quot;, &quot;reconcile&quot;]);
-    let completed = lf(repo.path(), home.path(), &amp;[&quot;task&quot;, &quot;status&quot;, id, &quot;--json&quot;]);
-    assert_eq!(completed[&quot;execution&quot;][&quot;status&quot;], &quot;done&quot;);
-    assert_eq!(completed[&quot;execution&quot;][&quot;task_id&quot;], id);
-    assert!(completed[&quot;planning&quot;][&quot;item&quot;][&quot;completed_at&quot;].is_string());</code></pre></figure><p><a href="https://github.com/loopflowstudio/loopflow/blob/dfe18ab6060901992b55e64842e23c4295673b08/rust/loopflow/tests/local_planning.rs#L824-L1009">Public local Task execution and no-remote failure</a> exercises existing execution. <a href="https://github.com/loopflowstudio/loopflow/blob/dfe18ab6060901992b55e64842e23c4295673b08/rust/loopflow/src/lf/commands/util.rs#L285-L304">The native-session admission check</a> now consults Task deletion independently of an optional Linear ID; it retains captured Session/Process ownership. The migration/adoption proof preserves existing shared Task and execution history, including retained deletion evidence.</p></details>
-</section><section id="rotate"><span class="number">04 / Rotation and recovery</span><h2>Retry the plan that was already applied</h2><p>Local rotation changes selected Projects and explicitly moved Task membership in one SQLite transaction. It records the original request. A repeated request recognizes its settled result; a changed request or selection is refused instead of replaying an old move onto newer work.</p>
-<figure id="source-11"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/dfe18ab6060901992b55e64842e23c4295673b08/rust/loopflow/src/store/sqlite/local_planning.rs#L136-L269">rust/loopflow/src/store/sqlite/local_planning.rs · SqliteStore::rotate_local_projects</a><span>dfe18ab60 · lines 136–176, 221–269</span></figcaption><pre tabindex="0" aria-label="Source excerpt; scroll horizontally on narrow screens"><code>    pub(crate) fn rotate_local_projects(
-        &amp;self,
-        name: &amp;str,
-        entries: &amp;[(
-            crate::ops::chapter::WaveChapterPlan,
-            crate::ops::chapter::WaveRotation,
-        )],
-    ) -&gt; StoreResult&lt;()&gt; {
-        if entries.is_empty() {
+}</code></pre></figure><p>This replaces the rejected public creation-token option. Separate explicit creates produce separate IDs even for identical titles. Automatic export retains the saved ID. If a create reply is lost, export observes that exact identity before doing anything further; an attempted create with no confirmed result remains uncertain rather than minting another issue.</p><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/b6f34a6f8b811d95f9fc843ac6592cc2262f2e26/rust/loopflow/src/ops/planning_export.rs#L79-L90">rust/loopflow/src/ops/planning_export.rs · sync_export — observe first; do not repeat an uncertain create</a><span>b6f34a6f8 · lines 79–90</span></figcaption><pre tabindex="0" aria-label="Source excerpt; horizontally scrollable"><code>        if observe(store, repo, owner, &amp;client, &amp;export, &amp;wave_id).await? {
             return Ok(());
         }
-        let mut conn = self.conn.lock().expect(&quot;store mutex poisoned&quot;);
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        for (input, rotation) in entries {
-            let selected = super::project_selection::read_in(&amp;tx, &amp;input.wave_id)?;
-            let original = serde_json::to_string(input)?;
-            let settled: Option&lt;(Option&lt;String&gt;, bool, Option&lt;String&gt;)&gt; = tx
-                .query_row(
-                    &quot;SELECT reset_name, settled_at IS NOT NULL, local_plan_json
-                     FROM project_transitions WHERE wave_id=?1 AND successor_id=?2&quot;,
-                    params![input.wave_id, input.successor_id],
-                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-                )
-                .optional()?;
-            if let Some((reset, true, intent)) = settled {
-                if reset.as_deref() != Some(name)
-                    || selected.as_deref() != Some(&amp;input.successor_id)
-                    || intent.as_deref() != Some(&amp;original)
-                {
-                    return Err(StoreError::InvalidAuthority(
-                        &quot;Project selection or original rotation request changed&quot;.into(),
-                    ));
-                }
-                continue;
-            }
-            let predecessor = rotation.predecessor.as_ref().map(|p| p.id.as_str());
-            if selected.as_deref() != predecessor {
-                return Err(StoreError::InvalidAuthority(
-                    &quot;Project selection changed before rotation&quot;.into(),
-                ));
-            }
-
-// … intervening source omitted …
-
-            tx.execute(
-                &quot;INSERT INTO project_transitions(wave_id,successor_id,predecessor_id,reset_name,
-                     create_successor,created_at,settled_at,local_plan_json)
-                 VALUES(?1,?2,?3,?4,?5,?6,?6,?7)&quot;,
-                params![
-                    input.wave_id,
-                    successor.as_str(),
-                    predecessor,
-                    name,
-                    input.create,
-                    now,
-                    original
-                ],
-            )?;
-            for task in rotation
-                .tasks
-                .iter()
-                .filter(|t| t.disposition == crate::ops::chapter::TaskDisposition::Move)
-            {
-                let changed = tx.execute(
-                    &quot;UPDATE tasks SET project_id=?2,planning_revision=planning_revision+1,updated_at=?3
-                     WHERE id=?1 AND project_id=?4&quot;,
-                    params![task.task.id, successor.as_str(), now, predecessor],
-                )?;
-                if changed != 1 {
-                    return Err(StoreError::InvalidAuthority(
-                        &quot;Task membership changed before rotation&quot;.into(),
-                    ));
-                }
-                tx.execute(
-                    &quot;INSERT INTO project_transition_items(wave_id,successor_id,issue_id)
-                     VALUES(?1,?2,?3)&quot;,
-                    params![input.wave_id, successor.as_str(), task.task.id],
-                )?;
-            }
-            tx.execute(
-                &quot;UPDATE waves SET current_project_id=?2 WHERE id=?1&quot;,
-                params![input.wave_id, successor.as_str()],
-            )?;
-            if let Some(predecessor) = predecessor {
-                tx.execute(
-                    &quot;UPDATE projects SET status=&#x27;completed&#x27;,updated_at=?2 WHERE id=?1&quot;,
-                    params![predecessor, now],
-                )?;
-            }
-        }
-        tx.commit()?;
-        Ok(())
-    }</code></pre></figure>
-<p class="note">A chapter containing both personal and shared Waves is not one distributed transaction. Local rotation commits first; Linear work follows. If a provider step fails, keep the same chapter plan and retry. The local receipt prevents replay while the provider transition finishes.</p>
-<figure id="source-12"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/dfe18ab6060901992b55e64842e23c4295673b08/rust/loopflow/src/ops/chapter.rs#L418-L470">rust/loopflow/src/ops/chapter.rs · chapter apply: local commit, provider recovery</a><span>dfe18ab60 · lines 418–421, 453–470</span></figcaption><pre tabindex="0" aria-label="Source excerpt; scroll horizontally on narrow screens"><code>    store
-        .sqlite
-        .rotate_local_projects(&amp;plan.name, &amp;personal)
-        .map_err(error)?;
-
-// … intervening source omitted …
-
-    drop(personal_guards);
-    // Every pair is reserved before the first provider mutation.
-    for entry in &amp;prepared {
-        if !entry.reserved {
-            store
-                .reserve_project_transition(entry.transition.clone(), entry.acquisition.clone())
-                .await
-                .map_err(error)?;
-        }
+        let (attempted, _) = store
+            .sqlite
+            .planning_export_attempts(owner)
+            .map_err(message)?;
+        if attempted {
+            return Err(message(
+                &quot;Creation remains uncertain; no repeated create issued&quot;,
+            ));
+        }</code></pre></figure></details></section><section id="project"><span class="number">02 / Project</span><h2>Plan edits and Task order become local mutations</h2><p>KRs, targets and the default Workflow retain their existing shape. The Project’s provider link becomes optional, and its mutation API returns the locally saved plan with synchronization evidence.</p><figure class="unified-diff"><figcaption><strong>− Base</strong> <a href="https://github.com/loopflowstudio/loopflow/blob/04a4a296bcb6999e2d15572b69b484d28c79217a/rust/loopflow/src/planning.rs#L44-L53">rust/loopflow/src/planning.rs · ProjectPlan</a><span>04a4a296b · lines 44–53</span><br><strong>+ Head</strong> <a href="https://github.com/loopflowstudio/loopflow/blob/b6f34a6f8b811d95f9fc843ac6592cc2262f2e26/rust/loopflow/src/planning.rs#L111-L122">rust/loopflow/src/planning.rs · ProjectPlan</a><span>b6f34a6f8 · lines 111–122</span></figcaption><pre tabindex="0" aria-label="Unified diff; minus removed, plus added; horizontally scrollable"><code><span class="diff-line context"> pub struct ProjectPlan {</span><span class="diff-line removed">-    pub id: LinearProjectId,</span><span class="diff-line added">+    pub summary: String,</span><span class="diff-line added">+    /// Optional provider mapping; the owning Project carries durable identity.</span><span class="diff-line added">+    pub linear_id: Option&lt;LinearProjectId&gt;,</span><span class="diff-line context">     pub slug: String,</span><span class="diff-line context">     pub name: String,</span><span class="diff-line context">     /// Definition and proof-shaped KRs from the latest PM snapshot.</span><span class="diff-line context">     pub prompt_context: String,</span><span class="diff-line removed">-    pub pm_snapshot_synced_at: i64,</span><span class="diff-line added">+    pub pm_snapshot_synced_at: Option&lt;i64&gt;,</span><span class="diff-line context">     pub workflow: String,</span><span class="diff-line context">     pub status: crate::pm::ProjectStatus,</span><span class="diff-line context"> }</span></code></pre></figure><figure class="unified-diff"><figcaption><strong>− Base</strong> <a href="https://github.com/loopflowstudio/loopflow/blob/04a4a296bcb6999e2d15572b69b484d28c79217a/rust/loopflow/src/ops/project.rs#L335-L363">rust/loopflow/src/ops/project.rs · update_plan and write_plan — provider write and refresh</a><span>04a4a296b · lines 335–363</span><br><strong>+ Head</strong> <a href="https://github.com/loopflowstudio/loopflow/blob/b6f34a6f8b811d95f9fc843ac6592cc2262f2e26/rust/loopflow/src/ops/project.rs#L71-L91">rust/loopflow/src/ops/project.rs · update_plan — common local writer</a><span>b6f34a6f8 · lines 71–91</span></figcaption><pre tabindex="0" aria-label="Unified diff; minus removed, plus added; horizontally scrollable"><code><span class="diff-line removed">-pub fn update_plan(repo: &amp;Path, wave: Option&lt;&amp;str&gt;, content: ProjectContent) -&gt; OpsResult&lt;()&gt; {</span><span class="diff-line removed">-    let wave = crate::work::wave::context::resolve_managed_wave_sync(Some(repo), wave)</span><span class="diff-line added">+pub async fn update_plan(</span><span class="diff-line added">+    repo: &amp;Path,</span><span class="diff-line added">+    wave: Option&lt;&amp;str&gt;,</span><span class="diff-line added">+    content: ProjectContent,</span><span class="diff-line added">+) -&gt; OpsResult&lt;ProjectPlanning&gt; {</span><span class="diff-line added">+    let store = super::pm::pm_store().await?;</span><span class="diff-line added">+    let wave =</span><span class="diff-line added">+        crate::work::wave::context::resolve_managed_wave(Some(&amp;store), Some(repo), wave, None)</span><span class="diff-line added">+            .await</span><span class="diff-line added">+            .map_err(project_error)?;</span><span class="diff-line added">+    let _acquisition = super::pm::lock_wave_planning(&amp;wave).await?;</span><span class="diff-line added">+    let selected = current_project(&amp;store, &amp;wave)?;</span><span class="diff-line added">+    let project = resolve_project(&amp;store, repo, &amp;selected.id).await?;</span><span class="diff-line added">+    super::metrics::validate_chapter_targets(&amp;wave, &amp;content.metric_targets)</span><span class="diff-line context">         .map_err(project_error)?;</span><span class="diff-line removed">-    tokio::runtime::Runtime::new()</span><span class="diff-line removed">-        .map_err(project_error)?</span><span class="diff-line removed">-        .block_on(write_plan(repo, &amp;wave, content))</span><span class="diff-line added">+    store</span><span class="diff-line added">+        .sqlite</span><span class="diff-line added">+        .update_project_content(&amp;project.id, &amp;content)</span><span class="diff-line added">+        .map_err(project_error)?;</span><span class="diff-line added">+    planning(&amp;store, &amp;project)</span><span class="diff-line context"> }</span><span class="diff-line removed">-</span><span class="diff-line removed">-pub(crate) async fn write_plan(repo: &amp;Path, wave: &amp;Wave, content: ProjectContent) -&gt; OpsResult&lt;()&gt; {</span><span class="diff-line removed">-    let store = super::pm::pm_store().await?;</span><span class="diff-line removed">-    let acquisition = super::pm::lock_wave_planning(wave).await?;</span><span class="diff-line removed">-    let ctx = super::pm::resolve_context(repo, wave.slug()).await?;</span><span class="diff-line removed">-    let projects = super::pm::checked_projects_with_store(repo, &amp;ctx, wave.slug(), &amp;store).await?;</span><span class="diff-line removed">-    let project = select_project(&amp;store, wave, &amp;projects)?;</span><span class="diff-line removed">-    let provider = ctx</span><span class="diff-line removed">-        .client</span><span class="diff-line removed">-        .project_ownership(&amp;project.id)</span><span class="diff-line removed">-        .await</span><span class="diff-line removed">-        .map_err(project_error)?;</span><span class="diff-line removed">-    content.validate().map_err(project_error)?;</span><span class="diff-line removed">-    super::metrics::validate_chapter_targets(wave, &amp;content.metric_targets)</span><span class="diff-line removed">-        .map_err(project_error)?;</span><span class="diff-line removed">-    ctx.client</span><span class="diff-line removed">-        .update_project(&amp;provider.id, &amp;provider.name, &amp;content)</span><span class="diff-line removed">-        .await</span><span class="diff-line removed">-        .map_err(project_error)?;</span><span class="diff-line removed">-    super::pm::refresh_pm_snapshot_locked(repo, wave, &amp;ctx, &amp;store, acquisition).await?;</span><span class="diff-line removed">-    Ok(())</span><span class="diff-line removed">-}</span></code></pre></figure><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/b6f34a6f8b811d95f9fc843ac6592cc2262f2e26/rust/loopflow/src/ops/project.rs#L288-L292">rust/loopflow/src/ops/project.rs · ProjectPlanning — new return contract</a><span>b6f34a6f8 · lines 288–292</span></figcaption><pre tabindex="0" aria-label="Source excerpt; horizontally scrollable"><code>pub struct ProjectPlanning {
+    pub sync: crate::planning::PlanningSyncStatus,
+    #[serde(flatten)]
+    pub project: PmProject,
+}</code></pre></figure><p class="note">The outer Project identity and Wave membership remain. PmProject now also projects locally authored data; prompt_context still encodes the content from which KRs and targets are parsed. <a href="https://github.com/loopflowstudio/loopflow/blob/b6f34a6f8b811d95f9fc843ac6592cc2262f2e26/rust/loopflow/src/ops/project.rs#L294">planning</a> reads both the saved Project and its receipts. This changes what success means without inventing a second kind of Project.</p><h3>One reorder changes the list</h3><p>Moving a Task changes other Tasks’ displayed ranks too. This PR removes scalar Task-rank delivery and gives the Project one <code>task_order</code> receipt containing the list, its provider baseline and attempted moves. Partial delivery is compared with those recorded intermediate lists, so Loopflow’s own move does not masquerade as a competing Linear edit.</p><p class="compact">Inspect <a href="https://github.com/loopflowstudio/loopflow/blob/b6f34a6f8b811d95f9fc843ac6592cc2262f2e26/rust/loopflow/src/store/sqlite/planning_order.rs#L16">the Project ordering writer</a> and <a href="https://github.com/loopflowstudio/loopflow/blob/b6f34a6f8b811d95f9fc843ac6592cc2262f2e26/rust/loopflow/src/ops/planning_order.rs#L18">its provider delivery</a>. New members survive; ambiguous omissions defer delivery. A competing observed Linear order wins while the losing local list is retained. Equal sort keys need intermediate moves; unrepresentable intervals remain visibly pending.</p></section><section id="wave"><span class="number">03 / Wave</span><h2>Editing a file stops being editing the active Wave</h2><p>The Wave identity type is unchanged. Its goal, memory and reusable Workflow definitions now belong to stored rows keyed by WaveId. Repository files become import sources.</p><figure class="unified-diff"><figcaption><strong>− Base</strong> <a href="https://github.com/loopflowstudio/loopflow/blob/04a4a296bcb6999e2d15572b69b484d28c79217a/rust/loopflow/src/work/wave/config.rs#L278-L297">rust/loopflow/src/work/wave/config.rs · update_wave_goal_config — file write</a><span>04a4a296b · lines 278–297</span><br><strong>+ Head</strong> <a href="https://github.com/loopflowstudio/loopflow/blob/b6f34a6f8b811d95f9fc843ac6592cc2262f2e26/rust/loopflow/src/work/wave/config.rs#L337-L351">rust/loopflow/src/work/wave/config.rs · update_wave_goal_config — stored write</a><span>b6f34a6f8 · lines 337–351</span></figcaption><pre tabindex="0" aria-label="Unified diff; minus removed, plus added; horizontally scrollable"><code><span class="diff-line context"> pub fn update_wave_goal_config(</span><span class="diff-line context">     repo: &amp;Path,</span><span class="diff-line context">     name: &amp;str,</span><span class="diff-line context">     update: impl FnOnce(&amp;mut Mapping) -&gt; Result&lt;(), String&gt;,</span><span class="diff-line context"> ) -&gt; Result&lt;(), String&gt; {</span><span class="diff-line context">     let path = goal_path(repo, name);</span><span class="diff-line removed">-    if let Some(parent) = path.parent() {</span><span class="diff-line removed">-        std::fs::create_dir_all(parent)</span><span class="diff-line removed">-            .map_err(|err| format!(&quot;failed to create {}: {err}&quot;, parent.display()))?;</span><span class="diff-line removed">-    }</span><span class="diff-line removed">-</span><span class="diff-line removed">-    let (mut value, body) = goal_value_from_content(&amp;path, name)?;</span><span class="diff-line added">+    let (mut value, body) = goal_value_from_content(repo, name)?;</span><span class="diff-line context">     let map = wave_config_map(&amp;mut value, &amp;path)?;</span><span class="diff-line context">     update(map)?;</span><span class="diff-line context"> </span><span class="diff-line context">     let rendered = render_goal_md(&amp;value, &amp;body)?;</span><span class="diff-line removed">-    std::fs::write(&amp;path, rendered)</span><span class="diff-line added">+    write_wave_document(repo, name, &quot;GOAL.md&quot;, &amp;rendered)</span><span class="diff-line context">         .map_err(|err| format!(&quot;failed to write {}: {err}&quot;, path.display()))?;</span><span class="diff-line context">     Ok(())</span><span class="diff-line context"> }</span></code></pre></figure><p class="note">The function signature stays the same while its persistence contract changes. <a href="https://github.com/loopflowstudio/loopflow/blob/b6f34a6f8b811d95f9fc843ac6592cc2262f2e26/rust/loopflow/src/work/wave/config.rs#L10">Reads use stored documents too</a>. Changing an already-imported GOAL.md or MEMORY.md file does not replace the active saved content. Missing stored definitions direct the caller to <code>lf wave ensure</code>; ordinary reads do not silently provision.</p><details><summary>Import fills missing records and preserves existing edits</summary><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/b6f34a6f8b811d95f9fc843ac6592cc2262f2e26/rust/loopflow/src/store/sqlite/wave_documents.rs#L145-L166">rust/loopflow/src/store/sqlite/wave_documents.rs · save_imported_documents — insert-only import</a><span>b6f34a6f8 · lines 145–166</span></figcaption><pre tabindex="0" aria-label="Source excerpt; horizontally scrollable"><code>fn save_imported_documents(
+    conn: &amp;rusqlite::Connection,
+    wave: &amp;str,
+    documents: BTreeMap&lt;String, String&gt;,
+    workflows: &amp;BTreeMap&lt;String, String&gt;,
+) -&gt; StoreResult&lt;()&gt; {
+    for (name, content) in documents {
+        conn.execute(
+            &quot;INSERT INTO wave_documents(wave_id,name,content) VALUES(?1,?2,?3)
+            ON CONFLICT(wave_id,name) DO NOTHING&quot;,
+            params![wave, name, content],
+        )?;
     }
-    for entry in &amp;mut prepared {
-        apply_rotation(&amp;store, entry).await.map_err(|cause| {
-            error(format!(
-                &quot;Wave {}: {cause}; retry with the same chapter plan&quot;,
-                entry.wave.slug()
-            ))
-        })?;
-    }</code></pre></figure>
-<details><summary>Partial-failure proof</summary><p><a href="https://github.com/loopflowstudio/loopflow/blob/dfe18ab6060901992b55e64842e23c4295673b08/rust/loopflow/src/ops/chapter_rotation_tests.rs#L161-L350">mixed_rotation_retry_preserves_settled_personal_work_after_provider_failure</a> injects provider failure, changes the already-settled personal plan, then retries the original mixed rotation. The recorded matrix covered ten failure points. This is fixture evidence, not configured startup-team continuity.</p></details>
-</section><section id="evidence"><span class="number">Evidence / Boundaries</span><h2>What this review establishes</h2><p><strong>Newly run:</strong> the CLI was rebuilt from the published tracked tree. Creation, edit, retry, mismatch rejection, comment and status were captured in a fresh disposable store. No checkout, agent, provider write or installed-store migration was attempted for this capture.</p>
-<p class="meta">Binary reported <code>lf 0.13.9+dfe18ab60.dirty</code>; the dirty marker includes untracked review artifacts. Binary SHA-256: <code>3e7faca3696493b7b69d45e9e35d2eb963330a73d37e763845a77dd3e045f927</code>. The complete command/output capture is a companion JSON file; all excerpts needed to read this page are embedded.</p>
-<p><strong>Recorded gate, not rerun for this review:</strong> 2,293 Rust tests (17 ignored), 402 headless Swift tests, 76 website tests, CLI smoke and app/UI-runner builds passed; the disposable Linux migration/adoption test passed. Formatting, clippy and diff checks passed in that record.</p><p class="meta"><a href="https://github.com/loopflowstudio/loopflow/blob/dfe18ab6060901992b55e64842e23c4295673b08/scratch/explore-loopflow-s-own-store.md#L618-L621">Gate record at the published head</a></p><p><strong>Still unverified:</strong> installed migration and native-provider continuity, a live GitHub delivery, and rendered native-app acceptance. Cross-machine sync, reverse host routing and personal-to-Linear export are outside this PR; no result here establishes them.</p><button type="button" id="expand">Expand supporting evidence</button></section><footer>All source excerpts are embedded from the named Git revisions. Omissions are marked. This local walkthrough changes no product code and makes no merge decision. <a href="#">Back to the reading map</a></footer></main><script>const button=document.getElementById("expand");button.addEventListener("click",()=>{const open=button.textContent.startsWith("Expand");document.querySelectorAll("details").forEach(d=>d.open=open);button.textContent=open?"Collapse supporting evidence":"Expand supporting evidence"});const params=new URLSearchParams(location.search);if(params.has("evidence")){document.querySelectorAll("details").forEach(d=>d.open=true);button.textContent="Collapse supporting evidence"}</script></body></html>
+    for (name, content) in workflows {
+        conn.execute(
+            &quot;INSERT INTO wave_workflows(wave_id,name,content) VALUES(?1,?2,?3)
+            ON CONFLICT(wave_id,name) DO NOTHING&quot;,
+            params![wave, name, content],
+        )?;
+    }
+    Ok(())
+}</code></pre></figure><p>Source files remain intact, stored edits survive repeated import and renamed addresses retain identity. This is local preservation, not cross-machine backup. LOO-412 owns Git-ref synchronization; execution records remain local.</p></details></section><section id="sync"><span class="number">04 / Delivery and visibility</span><h2>Reconnect without another turn or manual refresh</h2><p>Previously these operations depended on provider-first writes and narrower acquisition paths. The new foreground lifetime independently acquires planning/comments and delivers saved effects. Repository and Wave views now keep that lifetime even when no Task is selected.</p><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/b6f34a6f8b811d95f9fc843ac6592cc2262f2e26/rust/loopflow/src/lf/commands/work_watch.rs#L399-L421">rust/loopflow/src/lf/commands/work_watch.rs · Reader::sync_planning — repository selects the lifetime</a><span>b6f34a6f8 · lines 399–421</span></figcaption><pre tabindex="0" aria-label="Source excerpt; horizontally scrollable"><code>    fn sync_planning(&amp;mut self) {
+        if self.planning_sync.as_ref().map(|(repo, _)| repo) == self.scope.repo.as_ref() {
+            return;
+        }
+        self.planning_sync = None;
+        let Some(repo) = &amp;self.scope.repo else {
+            return;
+        };
+        if self.store.is_none() {
+            return;
+        }
+        let result = self.runtime.block_on(async {
+            let store = Arc::new(
+                crate::store::open_store(&amp;StorageConfig::sqlite(self.database.clone())).await?,
+            );
+            crate::ops::linear_observe::PlanningSync::start(store, repo.clone())
+                .map_err(anyhow::Error::from)
+        });
+        match result {
+            Ok(sync) =&gt; self.planning_sync = Some((repo.clone(), sync)),
+            Err(error) =&gt; tracing::warn!(%error, &quot;cannot start repository planning sync&quot;),
+        }
+    }</code></pre></figure><p class="note">Task selection changes the view, not the synchronization owner. Removing the repository or closing the connection drops the lifetime. No resident service is introduced, so a closed CLI/Desktop connection does not promise ongoing propagation.</p><details><summary>Independent incoming and outgoing loops</summary><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/b6f34a6f8b811d95f9fc843ac6592cc2262f2e26/rust/loopflow/src/ops/linear_observe.rs#L85-L130">rust/loopflow/src/ops/linear_observe.rs · PlanningSync::start — one foreground owner, independent attempts</a><span>b6f34a6f8 · lines 85–130</span></figcaption><pre tabindex="0" aria-label="Source excerpt; horizontally scrollable"><code>    pub(crate) fn start(store: SharedStore, repo: String) -&gt; std::io::Result&lt;Self&gt; {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+        let (stop, stopped) = tokio::sync::oneshot::channel();
+        #[cfg(test)]
+        let context = super::pm::PM_TEST_CONTEXT.try_with(Clone::clone).ok();
+        let thread = std::thread::Builder::new()
+            .name(&quot;planning-sync&quot;.into())
+            .spawn(move || {
+                let drive = async {
+                    tokio::select! {
+                        _ = stopped =&gt; {},
+                        _ = repeat_sync(&quot;comment acquisition&quot;, Duration::from_secs(15), || {
+                            refresh_repository_comments(&amp;store, &amp;repo)
+                        }) =&gt; {},
+                        _ = repeat_sync(&quot;planning acquisition&quot;, Duration::from_secs(15), || async {
+                            tokio::time::timeout(Duration::from_secs(5), refresh_repository_planning(&amp;store, &amp;repo))
+                                .await.map_err(|error| OpsError::Message(error.to_string()))?
+                        }) =&gt; {},
+                        _ = repeat_sync(&quot;comment delivery&quot;, Duration::from_secs(1), || {
+                            sync_repository_deliveries(&amp;store, &amp;repo, false)
+                        }) =&gt; {},
+                        _ = repeat_sync(&quot;planning export&quot;, Duration::from_secs(1), || {
+                            super::planning_export::sync_repository_exports(&amp;store, &amp;repo)
+                        }) =&gt; {},
+                        _ = repeat_sync(&quot;field delivery&quot;, Duration::from_secs(1), || {
+                            super::planning_delivery::sync_repository_fields(&amp;store, &amp;repo)
+                        }) =&gt; {},
+                        _ = repeat_sync(&quot;Task state delivery&quot;, Duration::from_secs(1), || {
+                            sync_repository_deliveries(&amp;store, &amp;repo, true)
+                        }) =&gt; {},
+                    }
+                };
+                #[cfg(test)]
+                if let Some(context) = context {
+                    runtime.block_on(super::pm::PM_TEST_CONTEXT.scope(context, drive));
+                    return;
+                }
+                runtime.block_on(drive);
+            })?;
+        Ok(Self {
+            stop: Some(stop),
+            thread: Some(thread),
+        })
+    }</code></pre></figure><p>Acquisition waits 15 seconds after an attempt; delivery waits one second. These are scheduling intervals, not latency guarantees. A pending field write does not prevent comment/state acquisition. Publication and execution completion are not granted by this observer.</p></details><h3>Saved, uncertain, or superseded</h3><p>CLI and Desktop now consume the same receipt-derived status instead of a completion-only pending flag. Creation without a Linear mapping is included. When Linear is disconnected, pending delivery is hidden while retained conflict history remains available.</p><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/b6f34a6f8b811d95f9fc843ac6592cc2262f2e26/rust/loopflow/src/planning.rs#L14-L38">rust/loopflow/src/planning.rs · PlanningSyncStatus, PlanningSyncChange and PlanningSyncState — new shared read contract</a><span>b6f34a6f8 · lines 14–38</span></figcaption><pre tabindex="0" aria-label="Source excerpt; horizontally scrollable"><code>/// Read-only delivery evidence. These rows never confer execution authority.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlanningSyncStatus {
+    pub connected: bool,
+    pub changes: Vec&lt;PlanningSyncChange&gt;,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlanningSyncChange {
+    pub id: String,
+    pub field: String,
+    pub state: PlanningSyncState,
+    pub local_value: serde_json::Value,
+    pub linear_value: Option&lt;serde_json::Value&gt;,
+    pub error: Option&lt;String&gt;,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = &quot;snake_case&quot;)]
+#[non_exhaustive]
+pub enum PlanningSyncState {
+    Pending,
+    Uncertain,
+    AdoptedLinear,
+}</code></pre></figure><table><thead><tr><th>Shown state</th><th>Meaning and recovery</th></tr></thead><tbody><tr><td data-label="State">Saved locally; pending Linear sync</td><td data-label="Meaning">The local value survives. An active connection attempts delivery when prerequisites become available.</td></tr><tr><td data-label="State">Awaiting Linear confirmation</td><td data-label="Meaning">A write was attempted but its effect is not confirmed. Observe the retained identity; do not blindly issue another creation or overwrite.</td></tr><tr><td data-label="State">Adopted Linear change</td><td data-label="Meaning">An observed competing Linear edit won. The saved local value remains in the receipt; its old intention stops being retried.</td></tr></tbody></table><details><summary>Desktop consumes the shared status; it does not invent another sync policy</summary><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/b6f34a6f8b811d95f9fc843ac6592cc2262f2e26/swift/LoopflowMac/Views/PlanningSyncView.swift#L4-L19">swift/LoopflowMac/Views/PlanningSyncView.swift · PlanningSyncView</a><span>b6f34a6f8 · lines 4–19</span></figcaption><pre tabindex="0" aria-label="Source excerpt; horizontally scrollable"><code>struct PlanningSyncView: View {
+    let sync: PlanningSyncStatus
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            ForEach(sync.changes) { change in
+                Text(change.text)
+                    .font(Typography.body(12))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .accessibilityIdentifier(&quot;planning-sync-\(change.id)&quot;)
+            }
+        }
+        .accessibilityIdentifier(&quot;planning-sync&quot;)
+    }
+}</code></pre></figure><p><a href="https://github.com/loopflowstudio/loopflow/blob/b6f34a6f8b811d95f9fc843ac6592cc2262f2e26/swift/Loopflow/Models/PlanningSync.swift#L35">Swift’s text formatter</a> mirrors <a href="https://github.com/loopflowstudio/loopflow/blob/b6f34a6f8b811d95f9fc843ac6592cc2262f2e26/rust/loopflow/src/planning.rs#L41">the CLI formatter</a>. Their DTO and view fixtures are authored; final runtime proof remains outstanding.</p></details><p class="note">Example: local title A → B saves offline. If Linear still has A, B remains pending; if Linear has independently changed it to C, C wins and B is retained as the losing edit. A later local save must survive an earlier write’s acknowledgement. Importing completion changes planning evidence without moving a captured Workflow, stopping a Process or cleaning a checkout.</p></section><section id="proof"><span class="number">05 / Decision evidence</span><h2>Implemented does not yet mean verified end to end</h2><p>The old review’s missing export, cancellation and deletion claims are obsolete at this head. The remaining boundary is proof of the composed CLI/native/Flow/Desktop experience and repair of any failures those checks reveal.</p><table><thead><tr><th>Evidence</th><th>What it establishes</th></tr></thead><tbody><tr><td data-label="Evidence">Earlier focused implementation checks</td><td data-label="Establishes">Recorded passes for export, deletion, state and ordering operations, including lost replies and conflict handling. Those do not cover all later presentation and repository-lifetime changes.</td></tr><tr><td data-label="Evidence">Latest recorded local checks</td><td data-label="Establishes">Formatting, Ruff, SQL preparation and isolated TLS smoke passed. TLS smoke proves fixture transport only.</td></tr><tr><td data-label="Evidence">Final Rust/Swift runtime checks</td><td data-label="Establishes">Unproved: build helpers stalled before tests started. DTO/view, repository work-watch, native and Flow reconnect tests exist but their final-content execution is still required.</td></tr><tr><td data-label="Evidence">Hosted observation</td><td data-label="Establishes">Task status reports CI passing for the pinned published head. The local design still records unexecuted acceptance suites; the aggregate CI label does not establish which of those ran.</td></tr></tbody></table><p class="verdict"><strong>Known limitation:</strong> Linear mutations are unconditional. A provider edit between our observation and write can be overwritten; matching readback cannot expose that loss. The retained concurrent-reopening regression remains recorded as failing. Observed conflicts follow Linear-wins, but this is not atomic conflict prevention.</p><p class="compact">Inspect the <a href="https://github.com/loopflowstudio/loopflow/blob/b6f34a6f8b811d95f9fc843ac6592cc2262f2e26/rust/loopflow/src/ops/pm/task_planning_tests.rs#L1916">reopening regression</a> and the authored <a href="https://github.com/loopflowstudio/loopflow/blob/b6f34a6f8b811d95f9fc843ac6592cc2262f2e26/rust/loopflow/tests/planning_reconnect_tests.rs#L12">public reconnect fixture</a>. This review ran no product tests and made no merge decision. The broader Task/Project model-consolidation proposal remains unselected.</p></section><footer>Prepared for Jack Heart. Behavior → changed model/API → failure and recovery → evidence. Source is revision-pinned; CLI examples are illustrative. Review rendering is not Loopflow Desktop acceptance.</footer></main><script>addEventListener("beforeprint",()=>document.querySelectorAll("details").forEach(e=>e.open=true));</script></body></html>

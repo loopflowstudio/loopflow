@@ -1,102 +1,67 @@
 {
-  "head": "dfe18ab6060901992b55e64842e23c4295673b08",
-  "binary_sha256": "3e7faca3696493b7b69d45e9e35d2eb963330a73d37e763845a77dd3e045f927",
-  "identity": "task_3e34a19a2658499eb5742ef623a22b2f",
+  "base": "04a4a296bcb6999e2d15572b69b484d28c79217a",
+  "head": "b6f34a6f8b811d95f9fc843ac6592cc2262f2e26",
+  "html_sha256": "c3ae4642d13c57216b3f614efdd6ca5f562ef4397d8e0433e78b24914ec19266",
+  "cli_examples": "Illustrative, not executed",
+  "product_tests": "Not run by this review",
+  "source_verification": "18 exact excerpts; anchors valid",
+  "capture_method": "lf screenshot unavailable in installed CLI (skill or flow not found); dedicated Chromium headless shell fallback, no GUI browser",
+  "preview_method": "Full opening; identical CSS and extracted markup for code, API and open disclosure",
   "captures": [
     {
-      "args": [
-        "--version"
-      ],
-      "code": 0,
-      "stdout": "lf 0.13.9+dfe18ab60.dirty\n",
-      "stderr": ""
+      "path": "scratch/pr-review-desktop.png",
+      "width": 1440,
+      "height": 1100,
+      "source": "/Users/jack/src/loopflow.explore-loopflow-s-own-store/scratch/pr-review.html",
+      "sha256": "9312cf7f8031f57984fbeef74c05ee1a49c3799aac49a78c8800eea767e26469"
     },
     {
-      "args": [
-        "task",
-        "create",
-        "--wave",
-        "personal:review",
-        "--title",
-        "Fix the parser",
-        "--notes",
-        "Keep quoted input",
-        "--creation-id",
-        "task_3e34a19a2658499eb5742ef623a22b2f",
-        "--json"
-      ],
-      "code": 0,
-      "stdout": "{\n  \"revision\": null,\n  \"id\": \"task_3e34a19a2658499eb5742ef623a22b2f\",\n  \"identifier\": \"lf-3e34a19a2658\",\n  \"branch_name\": null,\n  \"url\": null,\n  \"name\": \"Fix the parser\",\n  \"description\": \"Keep quoted input\",\n  \"rank\": 0,\n  \"completed\": false,\n  \"completed_at\": null,\n  \"state\": \"unstarted\",\n  \"project_id\": \"proj_8f1eab9d042c43abb5cd477201c6921d\",\n  \"project\": \"review\",\n  \"team_id\": null,\n  \"assignee\": null\n}\n",
-      "stderr": "Creation identity: task_3e34a19a2658499eb5742ef623a22b2f; retain --creation-id task_3e34a19a2658499eb5742ef623a22b2f when retrying this request\n"
+      "path": "scratch/pr-review-narrow.png",
+      "width": 390,
+      "height": 1000,
+      "source": "/Users/jack/src/loopflow.explore-loopflow-s-own-store/scratch/pr-review.html",
+      "sha256": "51501a1c815025bf161b2a93b08225b9b53d1f3b5134eeac326a128055d95dbd"
     },
     {
-      "args": [
-        "task",
-        "edit",
-        "task_3e34a19a2658499eb5742ef623a22b2f",
-        "--title",
-        "Preserve quoted input"
-      ],
-      "code": 0,
-      "stdout": "personal:review: updated task task_3e34a19a2658499eb5742ef623a22b2f\n",
-      "stderr": ""
+      "path": "scratch/pr-review-code-desktop.png",
+      "width": 1440,
+      "height": 1100,
+      "source": "/tmp/lf406-review-current/code.html",
+      "sha256": "10cc05bac7a2423438046a480d3218fcb245e18a1d4f20c8249f0ab9f1de4416"
     },
     {
-      "args": [
-        "task",
-        "create",
-        "--wave",
-        "personal:review",
-        "--title",
-        "Fix the parser",
-        "--notes",
-        "Keep quoted input",
-        "--creation-id",
-        "task_3e34a19a2658499eb5742ef623a22b2f",
-        "--json"
-      ],
-      "code": 0,
-      "stdout": "{\n  \"revision\": null,\n  \"id\": \"task_3e34a19a2658499eb5742ef623a22b2f\",\n  \"identifier\": \"lf-3e34a19a2658\",\n  \"branch_name\": null,\n  \"url\": null,\n  \"name\": \"Preserve quoted input\",\n  \"description\": \"Keep quoted input\",\n  \"rank\": 0,\n  \"completed\": false,\n  \"completed_at\": null,\n  \"state\": \"unstarted\",\n  \"project_id\": \"proj_8f1eab9d042c43abb5cd477201c6921d\",\n  \"project\": \"review\",\n  \"team_id\": null,\n  \"assignee\": null\n}\n",
-      "stderr": "Creation identity: task_3e34a19a2658499eb5742ef623a22b2f; retain --creation-id task_3e34a19a2658499eb5742ef623a22b2f when retrying this request\n"
+      "path": "scratch/pr-review-code-narrow.png",
+      "width": 390,
+      "height": 1100,
+      "source": "/tmp/lf406-review-current/code.html",
+      "sha256": "602276678e9332c2dedfc9eeafd715257a633c9aac8ba77d413c12e790feec9e"
     },
     {
-      "args": [
-        "task",
-        "create",
-        "--wave",
-        "personal:review",
-        "--title",
-        "Different request",
-        "--creation-id",
-        "task_3e34a19a2658499eb5742ef623a22b2f",
-        "--json"
-      ],
-      "code": 1,
-      "stdout": "",
-      "stderr": "Creation identity: task_3e34a19a2658499eb5742ef623a22b2f; retain --creation-id task_3e34a19a2658499eb5742ef623a22b2f when retrying this request\nError: invalid data: creation identity already belongs to a different request\n"
+      "path": "scratch/pr-review-api-desktop.png",
+      "width": 1440,
+      "height": 1500,
+      "source": "/tmp/lf406-review-current/api.html",
+      "sha256": "b027c1e5cca811c9edcd96ddae83d3685b3094d281b19699712dd17c3de7bddb"
     },
     {
-      "args": [
-        "task",
-        "comment",
-        "task_3e34a19a2658499eb5742ef623a22b2f",
-        "Keep the escaped quote",
-        "--json"
-      ],
-      "code": 0,
-      "stdout": "{\"identifier\":\"lf-3e34a19a2658\",\"comments\":[{\"id\":\"17d100ed-ad86-42cb-a863-bb6ac699de20\",\"body\":\"Keep the escaped quote\\n\\n<!-- loopflow-steer:17d100ed-ad86-42cb-a863-bb6ac699de20 -->\",\"author\":{\"kind\":\"person\",\"name\":\"Review fixture\"},\"created_at\":\"2026-10-08T11:31:40.475345Z\"}]}\n",
-      "stderr": ""
+      "path": "scratch/pr-review-disclosure.png",
+      "width": 1440,
+      "height": 1100,
+      "source": "/tmp/lf406-review-current/disclosure.html",
+      "sha256": "80e50ddb14203a15d60adec92e35e2c1c5c9fbebde088ffbd41d8527be3bd78b"
     },
     {
-      "args": [
-        "task",
-        "status",
-        "task_3e34a19a2658499eb5742ef623a22b2f",
-        "--json"
-      ],
-      "code": 0,
-      "stdout": "{\n  \"planning\": {\n    \"item\": {\n      \"revision\": null,\n      \"id\": \"task_3e34a19a2658499eb5742ef623a22b2f\",\n      \"identifier\": \"lf-3e34a19a2658\",\n      \"branch_name\": null,\n      \"url\": null,\n      \"name\": \"Preserve quoted input\",\n      \"description\": \"Keep quoted input\",\n      \"rank\": 0,\n      \"completed\": false,\n      \"completed_at\": null,\n      \"state\": \"unstarted\",\n      \"project_id\": \"proj_8f1eab9d042c43abb5cd477201c6921d\",\n      \"project\": \"review\",\n      \"team_id\": null,\n      \"assignee\": null\n    },\n    \"project\": {\n      \"id\": \"proj_8f1eab9d042c43abb5cd477201c6921d\",\n      \"revision\": null,\n      \"slug\": \"review\",\n      \"name\": \"review\",\n      \"summary\": \"\",\n      \"metric_targets\": [],\n      \"workflow\": \"\",\n      \"status\": \"started\",\n      \"krs\": [],\n      \"initiative_ids\": [],\n      \"team_ids\": []\n    },\n    \"observed_at\": 1791459100\n  },\n  \"planning_error\": null,\n  \"planning_stale\": false,\n  \"planning_state\": \"available\",\n  \"execution\": {\n    \"machine_id\": null,\n    \"issue_id\": null,\n    \"issue_identifier\": \"lf-3e34a19a2658\",\n    \"task_id\": \"task_3e34a19a2658499eb5742ef623a22b2f\",\n    \"external_project_id\": null,\n    \"project\": \"review\",\n    \"pm_snapshot_synced_at\": null,\n    \"pm_writeback\": {\n      \"state\": \"current\"\n    },\n    \"wave\": \"personal:review\",\n    \"project_id\": \"proj_8f1eab9d042c43abb5cd477201c6921d\",\n    \"status\": \"not_ready\",\n    \"planning_conflict\": null,\n    \"execution\": {\n      \"state\": \"idle\",\n      \"reason\": \"No Task Flow has run; independent Sessions may still be active\",\n      \"step\": null,\n      \"captured\": null\n    },\n    \"work\": {\n      \"sessions\": [],\n      \"flow_processes\": [],\n      \"processes\": [],\n      \"workflow\": null\n    },\n    \"worktree\": null,\n    \"workspace_slug\": \"\",\n    \"agent\": null,\n    \"provider\": \"codex\",\n    \"prs\": [],\n    \"active_pr\": null,\n    \"latest_event\": {\n      \"id\": 1,\n      \"task_id\": \"task_3e34a19a2658499eb5742ef623a22b2f\",\n      \"kind\": {\n        \"kind\": \"steer\",\n        \"author\": {\n          \"kind\": \"user\"\n        },\n        \"text\": \"Comment 17d100ed-ad86-42cb-a863-bb6ac699de20 by Review fixture:\\n\\nKeep the escaped quote\\n\\n<!-- loopflow-steer:17d100ed-ad86-42cb-a863-bb6ac699de20 -->\"\n      },\n      \"created_at\": [\n        2026,\n        281,\n        11,\n        31,\n        40,\n        0,\n        0,\n        0,\n        0\n      ]\n    },\n    \"created_at\": [\n      2026,\n      281,\n      11,\n      31,\n      39,\n      0,\n      0,\n      0,\n      0\n    ],\n    \"updated_at\": [\n      2026,\n      281,\n      11,\n      31,\n      40,\n      0,\n      0,\n      0,\n      0\n    ],\n    \"observation\": {\n      \"freshness\": \"not_required\"\n    },\n    \"actions\": {\n      \"recommended\": \"resume\",\n      \"reason\": \"run the next work with `lf task run`; inspect earlier Flows and independent Sessions first\"\n    }\n  }\n}\n",
-      "stderr": ""
+      "path": "scratch/pr-review-disclosure-narrow.png",
+      "width": 390,
+      "height": 1100,
+      "source": "/tmp/lf406-review-current/disclosure.html",
+      "sha256": "14e151999e172728634a99e2c686defa34a2f1051bd3f6797f2d8c88b43743eb"
     }
-  ]
+  ],
+  "visually_inspected": [
+    "code-desktop",
+    "code-narrow",
+    "api-desktop"
+  ],
+  "diff_validation": "Five unified comparisons reconstruct both pinned excerpts exactly"
 }

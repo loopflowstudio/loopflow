@@ -266,3 +266,14 @@ Rule for copy on this site: keep Jack Heart's own sentences as the base; add to 
 Main-page prototype built by a subagent: `scratch/prototypes/anyone.html`, notes in `anyone-notes.md`. Order: hero, the app in full with three beats matching the planned video, "How one piece of work goes." (seven steps tagged You or Loopflow), "What you get.", "What it needs.", "Questions.", install. Not yet ported to `website/`.
 Open from that work: Tasks and Waves need a Linear workspace; setup (agent, git, gh) looks terminal-bound; unclear whether the app can start a brand-new project.
 Computer Use: Jack toggled it; the helper restarted at 12:14 but this session's cmux-cua connection still fails.
+
+## Main page: the "anyone" audience is in doubt (Oct 9)
+
+Jack Heart on `scratch/prototypes/anyone.html`: "Yeah that is not it." Then:
+"I think theres a lot wrong in those ways but it may also be the wrong idea.
+Im not I really want to compete with Replit."
+
+The prototype is not ported. The audience for `/` is open again. Candidates
+put to Jack Heart: people who already run a coding agent and have outgrown one
+chat window; `/cli` as the front page with the Mac app as a surface of it; or
+"anyone" kept but pitched as where you go after a hosted builder.

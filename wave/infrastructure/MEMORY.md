@@ -1005,17 +1005,16 @@ tuning policy; the synthetic harness remains unbuilt. Jack Heart's July 6
 ## Direct invocation and large inputs (curated 2026-10-09)
 
 Jack Heart's LOO-444 direction supersedes 429's all-system transport: preserve
-native prompts/guides, add fixed instructions, put skill/request in the first
-turn and refresh whole-file context at start/compaction. Production is unchanged.
-Unresolved: byte identity versus surface/name/reply metadata; native guides versus
-no-repository-system-text. Refresh Wave/ancestor documents from SQLite, not checkout.
+native prompts/guides, skill/request first, refreshed whole-file context at
+start/compaction. Jack selected option B: fixed additions per surface/reply/participant
+profile, retaining that metadata in the slot. Production cut authorized, not built.
+Native-guide wording remains proposed. Refresh Wave/ancestors from SQLite, not checkout.
 
-Fake-API `scripts/benchmarks/skill-invocation/context_delivery.py`: Claude 2.1.295
-injects user context at startup/compact, unlike 2.1.294. Codex 0.161.0 retains native
-base, AGENTS.md and additive instructions through manual compaction. SessionStart
-injects; PostCompact does not. App-server needs scoped trust; TUI bypass failed.
-Short markers prove neither cap boundaries nor lf integration. First-turn argv,
-automatic compaction, OpenCode, cmux and installation remain unproved.
+Fake-API proofs: Claude 2.1.295 refreshes user context; Codex 0.161.0 retains native
+base/AGENTS.md/additions across compact. SessionStart injects; PostCompact does not.
+App-server needs scoped trust. Codex exec accepts 225,023 stdin bytes; TUI rejects
+nonterminal stdin without a request. Caps, lf integration, automatic compaction,
+OpenCode and cmux remain unproved. [Evidence](../../scripts/benchmarks/skill-invocation/README.md).
 
 Retain setup-free capture, saved config/trust, native identity and caller checkpoints.
 Interrupted profiles may remain unselected; prior PTYs prove no fresh reconnect

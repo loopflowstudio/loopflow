@@ -137,3 +137,24 @@ context as developer conversation content and ignored PostCompact context;
 additive developer instructions and its native base survived manual compaction.
 The app-server probe uses exact per-thread fixture hook hashes: the TUI bypass
 flag did not authorize app-server hooks. Never substitute global trust changes.
+
+### First-turn transport boundary
+
+```sh
+uv run python scripts/test_network.py uv run --no-sync python \
+  scripts/benchmarks/skill-invocation/first_turn_transport.py \
+  --output /tmp/lf-first-turn-proof
+uv run pytest scripts/benchmarks/skill-invocation/test_first_turn_transport.py -q
+```
+
+Compares one complete 225,023-byte first turn through file-backed stdin on
+Codex exec and the native TUI, with a controlling terminal on stdout, fresh Homes
+and a local fake API. All argv entries remain small. Saves exact requests,
+terminal output and exit/timeout evidence. A nonzero result means at least one
+surface did not deliver the full turn; it is not a passing transport check.
+
+Codex 0.161.0 exec delivered the exact user message on October 9. The TUI exited
+1 with `stdin is not a terminal`, without a model request. Thus exec's stdin
+support cannot be used as proof for interactive launches. This rejects that
+transport only; it neither tests PTY input injection nor proves no native
+alternative exists. No Loopflow launch consumer is changed by the probe.

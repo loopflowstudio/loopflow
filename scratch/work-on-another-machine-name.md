@@ -152,6 +152,11 @@ this heading. Keep these replacements deleted:
 - Machine-local creation sequence cutoffs. Captured local/peer change IDs bound
   acknowledgement; the original parent is retained for private-selection holds.
   Optional creation groups use the same journal, not a second receipt transport.
+- `peer_task_creation_insert` and `peer_project_creation_insert`: no writer inserts
+  a prepared receipt. `prepare_planning_export` updates an existing row, so the
+  update triggers alone capture preparation and attempts; migration still seeds
+  retained receipts and imports suppress echo. Readback prepares its two field
+  statements and serializes captured IDs once per receipt, not once per field.
 - Task creation receipt bypass after mapping-only import, missing-list readiness
   rejection and required ancestor placement on first local use. Readback reconciles
   captured saves, not later intentions; local execution placement stays local.
@@ -390,12 +395,9 @@ provenance gap; revise it with the completed composition, not as a product limit
    Complete grouped receipts through their existing common owners, not the scalar
    field loop. Source inspection identifies the remaining seams:
    - `planning_export.rs` owns creation/link attempts. Prepared receipts now travel
-     with exact input, original parent and stable captured change IDs. Common
-     acquisition reconciles Task and Project receipts after mapping-only import,
-     without acknowledging later saves. The Project row replaces transition-owned
-     effect columns; peer imports create no transition. Attempt flags only accumulate;
-     competing effect snapshots retain both histories and isolate projection. Full
-     foreground recovery, unprepared creations and mapped uncertainty remain above.
+     through the storage boundary described at the start of **Remaining integration**.
+     Full foreground recovery, unprepared creations and mapped uncertainty remain;
+     do not treat import or an existing mapping as acknowledgement.
    - Peer comments now reuse `task_comments.rs::ingest_task_comment` and
      `insert_authored_comment`. Comment ID remains delivery identity; reimport
      retains errors/acknowledgement/conflicts, and acquired comments create no
@@ -543,7 +545,7 @@ all 46 tests; all-target Clippy and fmt passed. The sync did not change that sto
 module. Public Task admission changed upstream, so these results do not establish
 combined cold-worker, provider-lifetime or mixed-provider acceptance.
 
-Check (October 9 implement): `cargo fmt`, Linux `cargo clippy --all-targets -- -D warnings` and `cargo test` pass: 48 peer-storage (including migration), 4 `planning_export_`, 1 public `planning_sync_tracks_creation_errors_uncertainty_conflicts_and_settlement`; final `peer_creation_` rerun passes 3 after captured-parent repair. `git diff --check` and `lf context --skill implement` pass; broader connected-provider/Desktop acceptance stays with gate.
+Check (October 9 compress): `cargo fmt --all`, isolated/network-denied Linux `cargo clippy --offline --all-targets -- -D warnings`, `cargo test --offline -p loopflow --lib store::sqlite::planning_peers::tests` (49) and `cargo test --offline -p loopflow --lib planning_export_` (4), `git diff --check` and `lf context --skill compress` pass; gate owns broader connected-provider/Desktop acceptance. Prior implement/public sync-status proof: `5ebcc877e:scratch/work-on-another-machine-name.md`, this heading.
 
 Prior SQL proofs and macOS startup samples remain at
 `e77d2d1c8:scratch/work-on-another-machine-name.md`. A fresh bounded attempt

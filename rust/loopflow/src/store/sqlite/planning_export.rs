@@ -129,22 +129,24 @@ impl SqliteStore {
                 .collect::<Result<BTreeSet<_>, _>>()?;
             ids
         };
-        let mut query = tx
-            .prepare("SELECT id,field FROM planning_peer_changes WHERE kind=?1 AND object_id=?2")?;
-        for row in query.query_map(params![kind, id], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })? {
-            let (mutation, field) = row?;
-            let kind = if kind == "task" {
+        {
+            let peer_kind = if kind == "task" {
                 crate::engine::planning_exchange::PlanningKind::Task
             } else {
                 crate::engine::planning_exchange::PlanningKind::Project
             };
-            if let Some(field) = super::planning_peers::delivery_field(kind, &field) {
-                captured.insert(format!("peer:{mutation}:{field}"));
+            let mut query = tx.prepare(
+                "SELECT id,field FROM planning_peer_changes WHERE kind=?1 AND object_id=?2",
+            )?;
+            for row in query.query_map(params![kind, id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })? {
+                let (mutation, field) = row?;
+                if let Some(field) = super::planning_peers::delivery_field(peer_kind, &field) {
+                    captured.insert(format!("peer:{mutation}:{field}"));
+                }
             }
         }
-        drop(query);
         let parent = tx.query_row(
             if kind == "task" {
                 "SELECT project_id FROM tasks WHERE id=?1"
@@ -260,22 +262,35 @@ pub(super) fn attach_in(
     };
     // Rebase only baseline-free edits. The creation snapshot, not its possibly changed
     // readback, supplies the baseline, so subsequent Linear edits still win conflicts.
-    for (field, value) in export
-        .model
-        .as_object()
-        .ok_or_else(|| StoreError::InvalidData("creation snapshot is not an object".into()))?
     {
-        if field == "rank" {
-            continue;
-        }
-        let value = owner.normalize(conn, field, value.clone())?;
-        conn.execute(&format!("UPDATE {kind}_changes SET base_json=?3 WHERE {kind}_id=?1 AND field=?2 AND base_json IS NULL AND acknowledged=0 AND conflict_json IS NULL"),
-            params![id,field,json!({"revision":observed["revision"],"value":value}).to_string()])?;
-        if observed.get(field).is_some_and(|remote| {
-            owner.normalize(conn, field, remote.clone()).ok().as_ref() == Some(&value)
-        }) {
-            conn.execute(&format!("UPDATE {kind}_changes SET acknowledged=1,acknowledged_revision=?4,error=NULL WHERE {kind}_id=?1 AND field=?2 AND id IN (SELECT value FROM json_each(?3)) AND value_json=?5 AND acknowledged=0 AND conflict_json IS NULL"),
-                params![id,field,serde_json::to_string(&export.captured)?,observed["revision"].as_str(),value.to_string()])?;
+        let captured = serde_json::to_string(&export.captured)?;
+        let mut rebase = conn.prepare(&format!("UPDATE {kind}_changes SET base_json=?3 WHERE {kind}_id=?1 AND field=?2 AND base_json IS NULL AND acknowledged=0 AND conflict_json IS NULL"))?;
+        let mut acknowledge = conn.prepare(&format!("UPDATE {kind}_changes SET acknowledged=1,acknowledged_revision=?4,error=NULL WHERE {kind}_id=?1 AND field=?2 AND id IN (SELECT value FROM json_each(?3)) AND value_json=?5 AND acknowledged=0 AND conflict_json IS NULL"))?;
+        for (field, value) in export
+            .model
+            .as_object()
+            .ok_or_else(|| StoreError::InvalidData("creation snapshot is not an object".into()))?
+        {
+            if field == "rank" {
+                continue;
+            }
+            let value = owner.normalize(conn, field, value.clone())?;
+            rebase.execute(params![
+                id,
+                field,
+                json!({"revision":observed["revision"],"value":value}).to_string()
+            ])?;
+            if observed.get(field).is_some_and(|remote| {
+                owner.normalize(conn, field, remote.clone()).ok().as_ref() == Some(&value)
+            }) {
+                acknowledge.execute(params![
+                    id,
+                    field,
+                    captured,
+                    observed["revision"].as_str(),
+                    value.to_string()
+                ])?;
+            }
         }
     }
     if !project {

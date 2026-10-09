@@ -40,20 +40,20 @@ fn changes_by_object(snapshot: &PlanningSnapshot) -> BTreeMap<&PlanningObject, O
             .winners
             .insert(change.field.as_str(), (id, change));
     }
-    for change in snapshot.changes.values() {
+    for change in snapshot
+        .changes
+        .values()
+        .filter(|change| change.field == "creation" || change.linear.is_some())
+    {
+        let object = objects
+            .get_mut(&change.object)
+            .expect("every retained object has a winning field");
         if change.field == "creation" {
-            objects
-                .get_mut(&change.object)
-                .expect("receipt has a winning field")
-                .creation
-                .push(&change.value);
+            object.creation.push(&change.value);
         }
         let Some(observation) = &change.linear else {
             continue;
         };
-        let object = objects
-            .get_mut(&change.object)
-            .expect("every retained object has a winning field");
         let mapping = match change.object.kind {
             PlanningKind::Task => "external_issue_id",
             PlanningKind::Project => "external_project_id",
@@ -761,24 +761,18 @@ fn reserve_incoming(
 }
 
 fn reference(change: &PlanningMutation) -> Option<PlanningObject> {
-    let (field, value) = (change.field.as_str(), &change.value);
-    if field == "creation" {
-        return Some(PlanningObject {
-            kind: if change.object.kind == PlanningKind::Task {
+    let (kind, value) = match change.field.as_str() {
+        "creation" => (
+            if change.object.kind == PlanningKind::Task {
                 PlanningKind::Project
             } else {
                 PlanningKind::Wave
             },
-            id: value["export"]["parent"]
-                .as_str()
-                .expect("validated creation parent")
-                .into(),
-        });
-    }
-    let kind = match field {
-        "parent_wave_id" | "wave_id" => PlanningKind::Wave,
-        "current_project_id" | "project_id" => PlanningKind::Project,
-        "task_id" => PlanningKind::Task,
+            &change.value["export"]["parent"],
+        ),
+        "parent_wave_id" | "wave_id" => (PlanningKind::Wave, &change.value),
+        "current_project_id" | "project_id" => (PlanningKind::Project, &change.value),
+        "task_id" => (PlanningKind::Task, &change.value),
         _ => return None,
     };
     value.as_str().map(|id| PlanningObject {

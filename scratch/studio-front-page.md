@@ -251,3 +251,10 @@ Jack Heart asked to add OpenCode to the Sessions line. Source: `lf resume` relau
 Jack Heart: "maybe lf resume --task X or lf resume --wave X or somethign". Those flags do not exist on resume; the real commands are `lf session ensure --task EXP-12` and `lf session ensure -w <wave>` (docs/lf.md:175-177). Added to the `/cli` block and the Waves and Tasks item.
 Jack Heart on "lf session ensure finds it or starts it." and "It also takes the ID of a Claude Code or Codex conversation started without lf.": "these are the kinds of things that are way too low-level for this page". Both cut. Standing rule for `/cli` copy: say what a thing is for, not how a command resolves its arguments.
 Then: "figure out the thing were trying to say and say that". Sessions now says conversations are kept and can be picked back up whichever agent ran them; Waves and Tasks says conversations are filed under the work they belong to.
+
+Jack Heart on the `/cli` list: the Accounts and usage item "is reading too much like cli --help. focus on things like managing multiple accounts"; "try to point to the lessons behind These specific instances and see if you can improve the entire list".
+Lessons applied to every item: open with what the reader gets or the problem it removes; do not restate a command the block above already shows; no argument-level detail; name the real situation (several accounts, lost conversations, agents colliding).
+
+## Main page redo (2026-10-09)
+
+Jack Heart asked for a subagent "to take a huge new pass at redoing the desktop app page, focused on two things": first, "Now that we know who we're speaking to -- the Kims and the Scotts, the technical-curious non-technical people who might have an app they want to vibe code. We're saying - we help you build software with minimal dependencies and maximal quality". The second thing was not in the message.

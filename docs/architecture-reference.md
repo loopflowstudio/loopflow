@@ -341,13 +341,13 @@ record observe the most recently launched Flow only: `none`, `latest` or
 `finished`. The one control is `start`, available whenever the Task can run,
 even when an earlier Flow exists.
 
-Completion, cleanup, abandon and restore treat all Task Flows alike. Only live
-or unresolved execution blocks: a live driver, a live or unknown step process,
-or an unresolved provider turn. A stopped Flow is history and blocks nothing. A
-process is never blocked by its own caller lineage or by the Flow whose step it
-is. A Process or provider turn that began before the machine’s last boot has
-exited; live or unknown execution since then still blocks. Passive membership
-grants no control.
+Cleanup, abandon, restore and landing repair treat all Task Flows alike and ask
+one question of one gate: does OS process evidence show any of the work's
+unfinished Processes live or unknown? A stopped Flow is history and blocks
+nothing. A Session's turns, reserved inputs and retirement are conversation
+history and never block. A process is never blocked by its own caller lineage.
+A Process that began before the machine’s last boot has exited; live or unknown
+execution since then still blocks. Passive membership grants no control.
 Template composition compiles into the graph, which the driver holds in memory
 with its cursor. Loop passes are node/iteration positions and lenses over the
 step processes. They have no separate lifecycle. A past Flow keeps the graph it
@@ -492,7 +492,7 @@ provider, and literal subprocess edge must appear exactly once.
 | **Machine / Placement / Promotion** — stable machine identity, Work placement, and artifact selection | `MachineId` is identity; SSH route is mutable. Placement is planning state and never process ownership. Promotion owns immutable artifact selection, isolated schema proof, app replacement, and rollback only. Install selects the latest published release independently of caller Git state; the laptop schedule invokes that same command. Checkout updates belong to sync. | [`Machine`](../rust/loopflow/src/durable.rs), [`Placement`](../rust/loopflow/src/durable.rs), [`SwitchReceipt`](../rust/loopflow/src/installation.rs), [`published installation`](../rust/loopflow/src/lf/commands/install/published.rs) | `machines`, `work_placements`; Machine-local SQLite; installation selection and switch receipts; laptop refresh LaunchAgent | The promotion command owns its OS-locked switch transaction | `lf machine`, `lf self`, `lf --machine`, `lf install`, `lf schedule` | `process:ssh`, `process:launchctl`, `process:systemctl`, `process:/usr/bin/open`, `process:/usr/bin/osascript`, `process:brew`, `process:/bin/sh`, `process:tmux` |
 | **Session history projections** — captured events and exact provider evidence | AgentSession owns provider outcomes and Process owns command outcomes; original payload and exact process receipts confer no Flow authority. | `SessionCaptureSpec`, `SessionCaptureManifest`, `SessionHistory`, `ProviderHistory`, `SessionUsage` | Projects AgentSession-owned input/history; Machine-local `runs/<prefix>/<run-id>/` immutable payload and process receipts | shared conversation admission and history | `lf mon show`, `lf replay`, `lf usage`, `lf activity`; Work/status history | `process:lf`, provider harnesses |
 | **Process** — one actual lf process | The journal transaction records command completion and fixes each child's causal parent at admission. Agent provenance grants no control authority. | [`ProcessLfid`](../rust/loopflow/src/id.rs), [`AgentCaller`](../rust/loopflow/src/process.rs) | `processes` | Outermost foreground command; installation/bootstrap coverage remains a cutover obligation | `lf monitor`, `lf mon list`; ordinary parsed CLI commands | — |
-| **Local process observation** — outer command receipts joined to current OS facts | A live kernel process plus a matching local receipt is observation, not durable ownership. Registered orphan OpenCode groups may be reaped; unclaimed provider PIDs may not. | [`ActivitySnapshot`](../rust/loopflow/src/lf/commands/top.rs), [`ProcessPruneReport`](../rust/loopflow/src/lf/commands/top.rs) | Machine-local Process receipts and OpenCode server registry | The foreground observer samples the process table; no keeper asserts Run liveness | `lf ps`, `lf top`, `lf mon prune`, `lf doctor` | `process:/bin/ps`, `process:ps`, `process:sysctl`, `process:lsof`, `process:kill`, `process:which` |
+| **Local process observation** — outer command receipts joined to current OS facts | A live kernel process plus a matching local receipt is observation, not durable ownership. Engines whose driver Process is provably dead may be reaped; unclaimed provider PIDs may not. | [`ActivitySnapshot`](../rust/loopflow/src/lf/commands/top.rs), [`ProcessPruneReport`](../rust/loopflow/src/lf/commands/top.rs) | Machine-local Process receipts and OpenCode server registry | The foreground observer samples the process table; no keeper asserts Run liveness | `lf ps`, `lf top`, `lf mon prune`, `lf doctor` | `process:/bin/ps`, `process:ps`, `process:sysctl`, `process:lsof`, `process:kill`, `process:which` |
 | **Provider account / route** — credential authority and ordered provider selection on one Machine | Provider token/account rows and Access Profiles own routing; credentials stay in provider homes, encrypted storage or Doppler. Machine connection installs a separate resident login. | [`Provider`](../rust/loopflow/src/provider_auth/mod.rs), [`AccessProfile`](../rust/loopflow/src/profile.rs), [`ProviderRoute`](../rust/loopflow/src/profile.rs), [`ProviderAccount`](../rust/loopflow/src/store/mod.rs) | `access_profiles`, `auth_browser_bindings`, `provider_accounts`, `provider_account_limits`, `provider_account_switches`, `provider_routes`, `provider_session_accounts`, `provider_tokens` | The foreground auth command owns provider login process groups and passive browser handoff; durable processes use credentials installed on their Machine | `lf account` | `provider:claude`, `provider:codex`, `provider:doppler`, `provider:opencodezen`, `process:claude`, `process:codex`, `process:doppler`, `process:opencode`, `process:security`, `process:secret-tool` |
 | **Context budgets** — limits and usage for assembled launch input | Existing personal/repo config and Wave frontmatter resolve each limit; the shared prompt assembler measures and enforces it. | [`ContextBudgets`](../rust/loopflow/src/engine/context_budget.rs), [`ContextBudgetReport`](../rust/loopflow/src/engine/context_budget.rs) | Authored config and source files; complete excerpt sources under `.lf/tmp/context/`; no measurement store | Foreground preview and launch assembly | `lf context` | — |
 | **Code-size measurement** — repository blobs measured in model tokens | Git blob identity owns content; token counts are deterministic memoized measurements, not Run usage. | [`CodeNode`](../rust/loopflow/src/lf/commands/tokens.rs), [`CodeSnapshot`](../rust/loopflow/src/lf/commands/tokens.rs) | `blob_tokens` | Foreground command only | `lf tokens` | — |
@@ -687,8 +687,8 @@ Process's argv.
 
 A driver that dies leaves dead Processes as history. Nothing restarts or resumes
 it. Liveness comes from OS process evidence, and missing evidence stays uncertain.
-Only live or unresolved execution, a live Process or an unresolved provider turn,
-holds Task completion, cleanup and landing. The caller inspects that history
+Only a live or unknown Process holds Task cleanup and landing; a provider turn
+without a completion is history. The caller inspects that history
 before launching fresh work, which starts another Flow.
 
 Independent helpers may carry the same Task and independent Git/PR
@@ -875,11 +875,24 @@ handles permit the spawning process to control its child. Cross-process control
 requires exact PID/start identity and the appropriate native scope, claim and
 provider generation. Revalidate that evidence before every signal.
 
-A driver can die while its engine continues. A saved endpoint alone is not
-liveness; a missing endpoint alone is not engine death. Recovery reads surviving
-native history and preserves unknown command outcomes. Client replacement leaves
-the engine alive; Flow retry replaces an engine only after confirmed exit.
-Neither operation authorizes terminating a shared engine to recover one thread.
+An engine lives only while a process that drives it does. Each Codex and
+OpenCode engine runs in its own process group with a watchdog that holds the
+read end of a lifeline; every driver holds a write end until it ends. Return, a
+signal, a panic and SIGKILL all close it, and the watchdog then terminates the
+group. A driver taking an engine over holds the same lifeline first, so handoff
+leaves the engine alive. A saved endpoint alone is not liveness; a missing
+endpoint alone is not engine death. Recovery reads surviving native history and
+preserves unknown command outcomes; Flow retry replaces an engine only after
+confirmed exit. Neither authorizes terminating a shared engine to recover one
+thread.
+
+One exception to local-handle control exists. The scheduled repository check and
+`lf mon prune` terminate an engine that outlived its driver: the recorded PID and
+start time still name a live provider server leading its own process group, and
+every Session naming it is headless with a driver Process that is provably dead.
+Unknown evidence, a live driver, an interactive Session or a reused PID leaves it
+running. The Session records the exit and why, and its engine identity is cleared.
+Task or Wave membership still grants no authority to stop anything.
 
 ## Machines and process topology
 

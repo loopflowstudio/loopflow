@@ -766,6 +766,11 @@ async fn connect_live_codex(
         driver.clone(),
     );
     let connected = async {
+        // This process now drives the engine, so the engine lives while it does.
+        crate::engine::process::hold_engine_lifeline(
+            &crate::engine::process::engine_lifeline_path(Path::new(&endpoint)),
+        )
+        .context("Codex engine is stopping after its driver exited")?;
         if replace_clients {
             NativeSession::of(session)?.stop_clients(crate::session_record::ProviderClientStopReason::Moved)?;
         }

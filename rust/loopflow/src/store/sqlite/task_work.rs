@@ -15,18 +15,6 @@ use crate::task_work::{TaskSession, TaskWork};
 
 use super::SqliteStore;
 
-// Retirement belongs to the Session, so read it once rather than for every turn.
-// The partial index excludes output/history events from the started-turn scan.
-const SESSION_HAS_PENDING_TURN: &str = "SELECT EXISTS(
-    SELECT 1 FROM session_events start INDEXED BY session_event_input
-    WHERE start.session_id=?1 AND start.kind='started'
-        AND (?2 IS NULL OR start.observed_at>=?2)
-        AND NOT EXISTS(SELECT 1 FROM session_events done
-            WHERE done.session_id=start.session_id AND done.kind='completed'
-                AND done.provider_thread=start.provider_thread AND done.provider_turn=start.provider_turn))
-    AND NOT EXISTS(SELECT 1 FROM session_events retired
-        WHERE retired.session_id=?1 AND retired.receipt_key='task_restart:stopped')";
-
 fn tasks(selector: &str) -> String {
     format!("SELECT id,worktree FROM tasks WHERE id={selector} OR issue_identifier={selector} OR external_issue_id={selector}")
 }
@@ -632,17 +620,6 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         flows_of_task(&conn, task)
     }
-
-    /// A turn runs in a local provider process, so one that began before this
-    /// machine booted can no longer finish; its missing completion stays in history.
-    pub(crate) fn session_has_pending_turn(&self, session: &str) -> StoreResult<bool> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.query_row(
-            SESSION_HAS_PENDING_TURN,
-            rusqlite::params![session, crate::journal::machine_booted_at()],
-            |row| row.get(0),
-        )?)
-    }
 }
 
 #[cfg(test)]
@@ -657,98 +634,6 @@ mod tests {
     use crate::session::SessionFilter;
     use crate::store::sqlite::SqliteStore;
     use crate::task_work::TaskWork;
-
-    #[test]
-    fn pending_turn_preserves_boot_completion_and_retirement_evidence() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
-        let conn = store.conn.lock().unwrap();
-        conn.execute(
-            "INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd)
-            VALUES('session','proof','human',1,0,'/proof')",
-            [],
-        )
-        .unwrap();
-        let read = |boot: Option<i64>| {
-            conn.query_row(
-                super::SESSION_HAS_PENDING_TURN,
-                params!["session", boot],
-                |row| row.get::<_, bool>(0),
-            )
-            .unwrap()
-        };
-        assert!(!read(None));
-        conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,provider_thread,provider_turn,observed_at,payload)
-            VALUES('session','started','start','thread','turn',10,'{}')", []).unwrap();
-        assert!(read(None));
-        assert!(read(Some(10)));
-        assert!(!read(Some(11)));
-        conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,provider_thread,provider_turn,observed_at,payload)
-            VALUES('session','completed','other-thread','other','turn',11,'{}')", []).unwrap();
-        assert!(read(None));
-        conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,provider_thread,provider_turn,observed_at,payload)
-            VALUES('session','completed','done','thread','turn',11,'{}')", []).unwrap();
-        assert!(!read(None));
-        conn.execute(
-            "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
-            VALUES('session','started','unknown-turn',12,'{}')",
-            [],
-        )
-        .unwrap();
-        assert!(read(None));
-        conn.execute(
-            "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
-            VALUES('session','observed','task_restart:stopped',13,'{}')",
-            [],
-        )
-        .unwrap();
-        assert!(!read(None));
-        assert!(!read(Some(12)));
-        assert!(!conn
-            .query_row(
-                super::SESSION_HAS_PENDING_TURN,
-                params!["missing", None::<i64>],
-                |row| row.get::<_, bool>(0)
-            )
-            .unwrap());
-    }
-
-    #[test]
-    fn pending_turn_does_not_rescan_retirement_history_for_each_completed_turn() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
-        let conn = store.conn.lock().unwrap();
-        conn.execute(
-            "INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd)
-            VALUES('session','proof','human',1,0,'/proof')",
-            [],
-        )
-        .unwrap();
-        for n in 0..200 {
-            for kind in ["started", "completed"] {
-                conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,provider_thread,provider_turn,observed_at,payload)
-                    VALUES('session',?1,?2,'thread',?3,10,'{}')",
-                    params![kind, format!("{kind}-{n}"), n.to_string()]).unwrap();
-            }
-        }
-        for n in 0..2_000 {
-            conn.execute(
-                "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
-                VALUES('session','observed',?1,10,'{}')",
-                [format!("output-{n}")],
-            )
-            .unwrap();
-        }
-        let mut query = conn.prepare(super::SESSION_HAS_PENDING_TURN).unwrap();
-        assert!(!query
-            .query_row(params!["session", None::<i64>], |row| row.get::<_, bool>(0))
-            .unwrap());
-        let steps = query.get_status(rusqlite::StatementStatus::VmStep);
-        assert!(
-            steps < 30_000,
-            "Pending-turn check rescanned history: {steps} VM steps"
-        );
-    }
 
     #[test]
     fn process_membership_does_not_read_events_that_name_no_process() {

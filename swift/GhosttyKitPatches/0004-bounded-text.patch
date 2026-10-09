@@ -64,7 +64,16 @@
  selected_command: ?*Pin = null,
  
  /// The charset state
-@@ -3045,6 +3045,32 @@
+@@ -434,6 +434,8 @@
+ /// - Disables protection mode
+ ///
+ pub fn reset(self: *Screen) void {
++    self.clearCommandBlockSelection();
++
+     // Reset our pages
+     self.pages.reset();
+
+@@ -3045,6 +3047,32 @@
      return try aw.toOwnedSliceSentinel(0);
  }
  
@@ -97,7 +106,7 @@
  pub const SelectLine = struct {
      /// The pin of some part of the line to select.
      pin: Pin,
-@@ -3544,9 +3570,9 @@
+@@ -3544,9 +3572,9 @@
      self.selected_command = null;
  }
  
@@ -110,7 +119,7 @@
      const tracked = self.selected_command orelse return null;
      if (!tracked.garbage) {
          if (self.commandBlock(tracked.*)) |block| {
-@@ -3554,7 +3580,6 @@
+@@ -3554,7 +3582,6 @@
                  block.prompt.y == tracked.y) return block;
          }
      }
@@ -118,7 +127,17 @@
      return null;
  }
  
-@@ -12963,3 +12988,73 @@
+@@ -11029,8 +11056,8 @@
+     try testing.expect(try s.selectCommandBlock(s.pages.pin(.{ .active = .{} }).?));
+
+     s.reset();
++    try testing.expect(s.selected_command == null);
+     try testing.expect(s.selectedCommandBlock() == null);
+-    try testing.expect(s.selected_command == null);
+ }
+
+ test "Screen: selectionString basic" {
+@@ -12963,3 +12990,73 @@
          try testing.expectEqualStrings("world", contents);
      }
  }

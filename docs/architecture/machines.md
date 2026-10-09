@@ -57,7 +57,7 @@ lf ps --json                           # OS-live processes on this Machine
 lf wave status product                 # current plan, Task conditions and Session evidence
 
 lf --machine build-home mon list   # run the same reader on build-home
-lf --machine build-home --wave product wave/operate
+lf --machine build-home --wave product wave-operate
 ```
 
 `lf --machine` is transport, not a second API. The target runs its own `lf`, verifies
@@ -109,8 +109,8 @@ those receipts to current OS process facts. Completed processes disappear from
 the live view. This is observation, not a durable lifecycle model.
 
 `lf mon prune` removes dead command receipts only after their terminal outcome
-is recorded, and may reap only registered orphan OpenCode process groups whose
-ownership is known. Receipts use Process IDs, so PID reuse cannot overwrite an
+is recorded, and may reap only provider engines whose recorded identity is live
+and whose driver Process is provably dead. Receipts use Process IDs, so PID reuse cannot overwrite an
 unfinished Process’s identity. Failed terminal writes and interrupt cleanup retain
 that identity without inventing an outcome. An unclaimed provider PID is
 never killed merely because it resembles a Loopflow child.

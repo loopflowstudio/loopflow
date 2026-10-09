@@ -44,13 +44,13 @@ impl ProcessGroupGuard {
         let pid = Arc::new(AtomicU32::new(pid));
         let interrupt_pid = Arc::clone(&pid);
         crate::engine::agent::register_interrupt_cleanup(move || {
-            terminate_process_group(interrupt_pid.swap(0, Ordering::AcqRel));
+            kill_process_group(interrupt_pid.swap(0, Ordering::AcqRel));
         });
         Self { pid }
     }
 
     pub(crate) fn terminate(&self) {
-        terminate_process_group(self.pid.swap(0, Ordering::AcqRel));
+        kill_process_group(self.pid.swap(0, Ordering::AcqRel));
     }
 
     pub(crate) fn disarm(&self) {
@@ -64,8 +64,11 @@ impl Drop for ProcessGroupGuard {
     }
 }
 
-fn terminate_process_group(pid: u32) {
-    if pid == 0 {
+/// SIGKILL every member of a process group the caller created. A provider
+/// entry point is often a shim whose real server is a grandchild in the same
+/// group; killing only the direct child leaves that server running.
+pub(crate) fn kill_process_group(pid: u32) {
+    if pid <= 1 {
         return;
     }
 
@@ -79,6 +82,172 @@ fn terminate_process_group(pid: u32) {
     }
     #[cfg(not(unix))]
     crate::engine::platform::kill_process(pid);
+}
+
+const TERMINATE_GRACE: Duration = Duration::from_secs(2);
+
+/// SIGTERM a process group, wait, then SIGKILL the stragglers. Returns true
+/// when no member remains. The caller proves the group is one Loopflow made.
+#[cfg(unix)]
+pub(crate) fn terminate_process_group(pgid: u32) -> bool {
+    if pgid <= 1 || current_process_group_id() == Some(pgid) {
+        return false;
+    }
+    let Ok(group) = i32::try_from(pgid) else {
+        return false;
+    };
+    for signal in [libc::SIGTERM, libc::SIGKILL] {
+        // SAFETY: a negative pid signals only the named process group.
+        if unsafe { libc::kill(-group, signal) } != 0 {
+            return std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH);
+        }
+        let deadline = Instant::now() + TERMINATE_GRACE;
+        while Instant::now() < deadline {
+            // SAFETY: WNOHANG collects the leader only if it is this
+            // process's exited child; otherwise it fails without effect.
+            unsafe {
+                libc::waitpid(group, std::ptr::null_mut(), libc::WNOHANG);
+            }
+            // SAFETY: signal 0 probes the group and delivers nothing.
+            if unsafe { libc::kill(-group, 0) } != 0
+                && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+            {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+    }
+    false
+}
+
+#[cfg(not(unix))]
+pub(crate) fn terminate_process_group(_pgid: u32) -> bool {
+    false
+}
+
+/// Write ends this process holds for the engines it drives. They are never
+/// closed: the kernel closes them when this process ends, however it ends.
+#[cfg(unix)]
+static HELD_LIFELINES: Mutex<Vec<std::fs::File>> = Mutex::new(Vec::new());
+
+/// The watchdog blocks until every writer of its stdin has gone, then stops
+/// the group it was placed in. An ignored SIGTERM is inherited by `sleep`, so
+/// both outlive the group's SIGTERM and deliver the SIGKILL.
+/// `kill -s NAME --` is the spelling both dash and bash accept before a
+/// negative pid; dash rejects `kill -NAME --`.
+#[cfg(unix)]
+const LIFELINE_WATCHDOG: &str = r#"while read -r _; do :; done
+trap '' TERM
+kill -s TERM -- "-$1" 2>/dev/null
+sleep 2
+kill -s KILL -- "-$1" 2>/dev/null"#;
+
+/// Bind a child process group to the life of this process.
+///
+/// A watchdog joins the group holding the read end of `lifeline`; this
+/// process holds a write end until it exits. Normal return, a signal, a panic
+/// and SIGKILL all close that descriptor, and the watchdog then terminates the
+/// group. A driver that takes the engine over holds the same lifeline with
+/// [`hold_engine_lifeline`], so the group lives while any of its drivers does.
+/// `lifeline` is a FIFO path when another process may take over, or `None`
+/// for a group only this process ever drives.
+///
+/// # Errors
+///
+/// Fails when the group has already exited or the watchdog cannot start. The
+/// caller must then stop the group itself: an unbound group can be orphaned.
+#[cfg(unix)]
+pub(crate) fn bind_group_to_driver(group: u32, lifeline: Option<&Path>) -> std::io::Result<()> {
+    use std::os::fd::AsRawFd;
+    use std::os::unix::fs::OpenOptionsExt;
+    use std::os::unix::process::CommandExt;
+
+    let group = i32::try_from(group)
+        .ok()
+        .filter(|group| *group > 1)
+        .ok_or_else(|| std::io::Error::other("bound process group must have a child pid"))?;
+    let (reader, writer): (std::process::Stdio, std::fs::File) = match lifeline {
+        Some(path) => {
+            let name = std::ffi::CString::new(path.as_os_str().as_encoded_bytes())?;
+            // SAFETY: `name` is a valid NUL-terminated path for the call.
+            if unsafe { libc::mkfifo(name.as_ptr(), 0o600) } != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            // A FIFO reader opens without a writer only when non-blocking.
+            let reader = std::fs::OpenOptions::new()
+                .read(true)
+                .custom_flags(libc::O_NONBLOCK)
+                .open(path)?;
+            let writer = std::fs::OpenOptions::new().write(true).open(path)?;
+            // SAFETY: fcntl on a descriptor this function owns; the watchdog
+            // must block in `read`, so clear the open-time O_NONBLOCK.
+            if unsafe { libc::fcntl(reader.as_raw_fd(), libc::F_SETFL, 0) } != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            (reader.into(), writer)
+        }
+        None => {
+            let (reader, writer) = std::io::pipe()?;
+            (
+                reader.into(),
+                std::fs::File::from(std::os::fd::OwnedFd::from(writer)),
+            )
+        }
+    };
+    // Descriptors Rust opens are close-on-exec, so the watchdog inherits the
+    // read end as stdin and never a write end that would keep itself alive.
+    let mut watchdog = std::process::Command::new("/bin/sh")
+        .args(["-c", LIFELINE_WATCHDOG, "lf-engine-lifeline"])
+        .arg(group.to_string())
+        .current_dir("/")
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .stdin(reader)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .process_group(group)
+        .spawn()?;
+    std::thread::spawn(move || {
+        let _ = watchdog.wait();
+    });
+    HELD_LIFELINES
+        .lock()
+        .expect("lifeline list poisoned")
+        .push(writer);
+    Ok(())
+}
+
+/// Keep an engine another process started alive for as long as this process
+/// lives. Returns false when the engine predates lifelines and has none.
+///
+/// # Errors
+///
+/// `ENXIO` means the watchdog has already seen every driver exit and is
+/// stopping the engine; the caller must not adopt it.
+#[cfg(unix)]
+pub(crate) fn hold_engine_lifeline(lifeline: &Path) -> std::io::Result<bool> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .custom_flags(libc::O_NONBLOCK)
+        .open(lifeline)
+    {
+        Ok(writer) => {
+            HELD_LIFELINES
+                .lock()
+                .expect("lifeline list poisoned")
+                .push(writer);
+            Ok(true)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
+/// The lifeline FIFO of the engine listening at `endpoint`.
+pub(crate) fn engine_lifeline_path(endpoint: &Path) -> PathBuf {
+    endpoint.with_file_name("driver.lifeline")
 }
 
 pub(crate) fn current_process_group_id() -> Option<u32> {
@@ -436,7 +605,161 @@ const SESSION_AUTH_ENV: &[&str] = &[
 #[cfg(test)]
 mod tests {
 
-    use super::{lf_session_shell_command, pin_control_binary};
+    use std::os::unix::process::CommandExt;
+    use std::path::Path;
+    use std::process::{Child, Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    use super::{
+        bind_group_to_driver, hold_engine_lifeline, kill_process_group, lf_session_shell_command,
+        pin_control_binary, terminate_process_group,
+    };
+
+    const DRIVER_MODE: &str = "LF_TEST_LIFELINE_DRIVER";
+    const DRIVER_OUT: &str = "LF_TEST_LIFELINE_OUT";
+    const DRIVER_FIFO: &str = "LF_TEST_LIFELINE_FIFO";
+
+    fn group_alive(group: u32) -> bool {
+        // SAFETY: signal 0 probes a group this test created; nothing is delivered.
+        unsafe { libc::kill(-(group as i32), 0) == 0 }
+    }
+
+    fn wait_until(mut done: impl FnMut() -> bool) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
+            if done() {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        done()
+    }
+
+    /// Not a test of its own: re-executed by the tests below as a throwaway
+    /// driver process that starts an engine, binds it, and then ends the way
+    /// its mode says. Without the mode variable it does nothing.
+    // The driver ends without waiting on purpose: that is the case under test.
+    #[allow(clippy::zombie_processes)]
+    #[test]
+    fn lifeline_driver_process() {
+        let Ok(mode) = std::env::var(DRIVER_MODE) else {
+            return;
+        };
+        let engine = Command::new("sleep")
+            .arg("60")
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let fifo = std::env::var_os(DRIVER_FIFO);
+        bind_group_to_driver(engine.id(), fifo.as_deref().map(Path::new)).unwrap();
+        let out = std::env::var(DRIVER_OUT).unwrap();
+        std::fs::write(format!("{out}.tmp"), engine.id().to_string()).unwrap();
+        std::fs::rename(format!("{out}.tmp"), &out).unwrap();
+        match mode.as_str() {
+            "exit" => std::process::exit(0),
+            "panic" => panic!("driver panicked"),
+            // Killed by the parent test.
+            _ => std::thread::sleep(Duration::from_secs(60)),
+        }
+    }
+
+    /// Start the throwaway driver and return it with its engine's group.
+    fn spawn_driver(mode: &str, dir: &Path, fifo: Option<&Path>) -> (Child, u32) {
+        let out = dir.join(format!("engine-{mode}"));
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command
+            .args([
+                "--exact",
+                "engine::process::tests::lifeline_driver_process",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env(DRIVER_MODE, mode)
+            .env(DRIVER_OUT, &out)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        if let Some(fifo) = fifo {
+            command.env(DRIVER_FIFO, fifo);
+        }
+        let driver = command.spawn().unwrap();
+        assert!(
+            wait_until(|| out.exists()),
+            "driver never started its engine"
+        );
+        let engine = std::fs::read_to_string(&out).unwrap().parse().unwrap();
+        (driver, engine)
+    }
+
+    fn engine_dies_when_driver_ends(mode: &str, signal: Option<libc::c_int>) {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut driver, engine) = spawn_driver(mode, dir.path(), None);
+        if let Some(signal) = signal {
+            assert!(group_alive(engine));
+            // SAFETY: signals only the throwaway driver this test spawned.
+            unsafe { libc::kill(driver.id() as i32, signal) };
+        }
+        driver.wait().unwrap();
+        let died = wait_until(|| !group_alive(engine));
+        kill_process_group(engine);
+        assert!(died, "engine outlived a driver that ended by {mode}");
+    }
+
+    #[test]
+    fn engine_dies_when_its_driver_exits() {
+        engine_dies_when_driver_ends("exit", None);
+    }
+
+    #[test]
+    fn engine_dies_when_its_driver_panics() {
+        engine_dies_when_driver_ends("panic", None);
+    }
+
+    #[test]
+    fn engine_dies_when_its_driver_is_terminated() {
+        engine_dies_when_driver_ends("sigterm", Some(libc::SIGTERM));
+    }
+
+    #[test]
+    fn engine_dies_when_its_driver_is_killed() {
+        engine_dies_when_driver_ends("sigkill", Some(libc::SIGKILL));
+    }
+
+    #[test]
+    fn engine_survives_its_first_driver_while_another_holds_the_lifeline() {
+        let dir = tempfile::tempdir().unwrap();
+        let fifo = dir.path().join("driver.lifeline");
+        let (mut driver, engine) = spawn_driver("handoff", dir.path(), Some(&fifo));
+        // This test process takes the engine over, then the first driver dies.
+        assert!(hold_engine_lifeline(&fifo).unwrap());
+        // SAFETY: signals only the throwaway driver this test spawned.
+        unsafe { libc::kill(driver.id() as i32, libc::SIGKILL) };
+        driver.wait().unwrap();
+        std::thread::sleep(Duration::from_secs(3));
+        let alive = group_alive(engine);
+        assert!(terminate_process_group(engine));
+        assert!(alive, "engine died although a second driver held it");
+        // An engine with no lifeline predates them; there is nothing to hold.
+        assert!(!hold_engine_lifeline(&dir.path().join("absent")).unwrap());
+    }
+
+    #[test]
+    fn terminating_a_group_reaches_a_grandchild_that_outlived_its_leader() {
+        let dir = tempfile::tempdir().unwrap();
+        let flag = dir.path().join("survived");
+        let mut leader = Command::new("sh")
+            .arg("-c")
+            .arg(format!("(sleep 1 && touch {}) &", flag.display()))
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let group = leader.id();
+        leader.wait().unwrap();
+
+        assert!(terminate_process_group(group));
+
+        std::thread::sleep(Duration::from_millis(1500));
+        assert!(!flag.exists(), "grandchild outlived its group");
+    }
 
     #[test]
     fn detached_child_enters_quoted_directory_and_reports_missing_directory() {

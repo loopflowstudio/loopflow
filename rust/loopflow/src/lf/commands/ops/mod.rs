@@ -749,8 +749,8 @@ fn pr_status() -> Result<()> {
     Ok(())
 }
 
-pub fn run_sync_skills(yes: bool, no_prune: bool) -> Result<()> {
-    if !yes {
+pub fn run_sync_skills(yes: bool, no_prune: bool, repo: bool) -> Result<()> {
+    if !yes && !repo {
         if !std::io::stdin().is_terminal() {
             return Err(anyhow!(
                 "skill sync writes under ~/.claude and ~/.agents; rerun with --yes to confirm"
@@ -767,11 +767,13 @@ pub fn run_sync_skills(yes: bool, no_prune: bool) -> Result<()> {
     let report = sync_skills(&SkillSyncOptions {
         prune: !no_prune,
         global_home: None,
+        repo: repo.then(find_repo_root).transpose()?,
     })?;
     println!(
-        "synced skills ({} written, {} pruned)",
+        "synced skills ({} written, {} pruned, {} skipped)",
         report.written.len(),
-        report.pruned.len()
+        report.pruned.len(),
+        report.skipped.len()
     );
     Ok(())
 }

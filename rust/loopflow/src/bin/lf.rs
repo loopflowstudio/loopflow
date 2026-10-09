@@ -919,7 +919,14 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             Ok(())
         }
         TaskCommand::Reconcile { json } => {
-            let result = loopflow::ops::pr_landing::reconcile_repository(repo)?;
+            // The schedule runs this check every minute; an engine whose driver
+            // was killed is reaped here before delivery is observed.
+            let engines = loopflow::harness::engine_orphans::reap_orphaned_engines(false);
+            let mut result = loopflow::ops::pr_landing::reconcile_repository(repo)?;
+            match engines {
+                Ok(engines) => result.errors.extend(engines.errors),
+                Err(error) => result.errors.push(format!("engine reap: {error}")),
+            }
             if *json {
                 println!("{}", serde_json::to_string(&result)?);
             }
@@ -1795,8 +1802,13 @@ fn execute_command(
         },
         Some(Commands::Machine { cmd }) => loopflow::lf::commands::machine::run(cmd, cli.batch),
         Some(Commands::Self_ {
-            cmd: loopflow::lf::SelfCommand::SyncSkills { yes, no_prune },
-        }) => loopflow::lf::commands::ops::run_sync_skills(*yes, *no_prune),
+            cmd:
+                loopflow::lf::SelfCommand::SyncSkills {
+                    yes,
+                    no_prune,
+                    repo,
+                },
+        }) => loopflow::lf::commands::ops::run_sync_skills(*yes, *no_prune, *repo),
         Some(Commands::Wave {
             cmd:
                 loopflow::lf::WaveCommand::Cron {
@@ -2011,6 +2023,7 @@ fn execute_command(
                 name,
                 json,
                 processes: true,
+                ..
             } => loopflow::lf::commands::flow_inventory::inspect(name, *json),
             _ => anyhow::bail!("not a Flow inspection command: {cmd:?}"),
         },

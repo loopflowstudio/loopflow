@@ -11,9 +11,7 @@ use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::harness::opencode_runtime::{
-    reap_selected_orphaned_opencode_servers_at, registered_opencode_servers_at, OpenCodeServerEntry,
-};
+use crate::harness::opencode_runtime::{registered_opencode_servers_at, OpenCodeServerEntry};
 use crate::journal::{prune_process_receipts_at, read_process_receipts_at, ProcessReceipt};
 use crate::lf::output::truncate;
 use crate::store::sqlite::SqliteStore;
@@ -99,8 +97,8 @@ pub struct ProcessPruneReport {
     pub dry_run: bool,
     pub stale_process_receipt_pids: Vec<u32>,
     pub removed_process_receipts: u32,
-    pub orphaned_opencode_process_groups: Vec<u32>,
-    pub reaped_opencode_process_groups: u32,
+    pub orphaned_engine_process_groups: Vec<u32>,
+    pub reaped_engine_process_groups: u32,
     pub errors: u32,
 }
 
@@ -345,17 +343,20 @@ pub fn run_prune(json: bool, dry_run: bool) -> Result<()> {
     let now = OffsetDateTime::now_utc().unix_timestamp();
     let lf_home = crate::store::lf_home_dir();
     let processes = observe_processes(now, &lf_home)?;
-    let (stale_process_receipt_pids, orphaned_opencode_process_groups) =
-        resolve_prune_targets(&processes);
+    // Driver death is proven from Process receipts, so reap before pruning them.
+    let engines = crate::harness::engine_orphans::reap_orphaned_engines(dry_run)?;
+    for error in &engines.errors {
+        tracing::warn!(%error, "failed to reap orphaned engine");
+    }
     let mut report = ProcessPruneReport {
         schema_version: SCHEMA_VERSION,
         observed_at: now,
         dry_run,
-        stale_process_receipt_pids,
+        stale_process_receipt_pids: stale_process_receipt_pids(&processes),
         removed_process_receipts: 0,
-        orphaned_opencode_process_groups,
-        reaped_opencode_process_groups: 0,
-        errors: 0,
+        orphaned_engine_process_groups: engines.orphaned,
+        reaped_engine_process_groups: engines.reaped,
+        errors: u32::try_from(engines.errors.len()).unwrap_or(u32::MAX),
     };
     if !dry_run {
         match prune_process_receipts_at(&lf_home, &report.stale_process_receipt_pids) {
@@ -365,14 +366,6 @@ pub fn run_prune(json: bool, dry_run: bool) -> Result<()> {
                 report.errors += 1;
             }
         }
-        let selected = report
-            .orphaned_opencode_process_groups
-            .iter()
-            .copied()
-            .collect::<HashSet<_>>();
-        let opencode = reap_selected_orphaned_opencode_servers_at(&lf_home, &selected);
-        report.reaped_opencode_process_groups = opencode.reaped;
-        report.errors = report.errors.saturating_add(opencode.errors);
     }
 
     if json {
@@ -390,7 +383,7 @@ pub fn run_prune(json: bool, dry_run: bool) -> Result<()> {
     }
 }
 
-fn resolve_prune_targets(processes: &ProcessSnapshot) -> (Vec<u32>, Vec<u32>) {
+fn stale_process_receipt_pids(processes: &ProcessSnapshot) -> Vec<u32> {
     let process_by_pid = processes
         .processes
         .iter()
@@ -405,23 +398,7 @@ fn resolve_prune_targets(processes: &ProcessSnapshot) -> (Vec<u32>, Vec<u32>) {
     stale_process_receipt_pids.sort_unstable();
     stale_process_receipt_pids.dedup();
 
-    let mut orphaned_opencode_process_groups = processes
-        .opencode_servers
-        .iter()
-        .filter(|entry| !process_by_pid.contains_key(&entry.owner_loopflow_pid))
-        .filter(|entry| {
-            process_by_pid
-                .get(&entry.opencode_pid)
-                .is_some_and(|process| process.kind == Some(ProcessKind::OpenCode))
-                || processes.processes.iter().any(|process| {
-                    process.process_group == entry.opencode_pid && process.pid != entry.opencode_pid
-                })
-        })
-        .map(|entry| entry.opencode_pid)
-        .collect::<Vec<_>>();
-    orphaned_opencode_process_groups.sort_unstable();
-    orphaned_opencode_process_groups.dedup();
-    (stale_process_receipt_pids, orphaned_opencode_process_groups)
+    stale_process_receipt_pids
 }
 
 /// Best-effort snapshot of directories currently owned by a live process.
@@ -1033,9 +1010,9 @@ fn render_prune_report(report: &ProcessPruneReport) -> String {
     let action = if report.dry_run { "PREVIEW" } else { "PRUNED" };
     let mut output = format!("LOOPFLOW PROCESS PRUNE · {action}\n");
     output.push_str(&format!(
-        "{} stale Process receipt PIDs · {} orphaned OpenCode process groups · {} errors\n",
+        "{} stale Process receipt PIDs · {} orphaned engine process groups · {} errors\n",
         report.stale_process_receipt_pids.len(),
-        report.orphaned_opencode_process_groups.len(),
+        report.orphaned_engine_process_groups.len(),
         report.errors,
     ));
     if !report.stale_process_receipt_pids.is_empty() {
@@ -1049,11 +1026,11 @@ fn render_prune_report(report: &ProcessPruneReport) -> String {
                 .join(", ")
         ));
     }
-    if !report.orphaned_opencode_process_groups.is_empty() {
+    if !report.orphaned_engine_process_groups.is_empty() {
         output.push_str(&format!(
-            "OpenCode process groups: {}\n",
+            "Engine process groups: {}\n",
             report
-                .orphaned_opencode_process_groups
+                .orphaned_engine_process_groups
                 .iter()
                 .map(u32::to_string)
                 .collect::<Vec<_>>()
@@ -1063,7 +1040,7 @@ fn render_prune_report(report: &ProcessPruneReport) -> String {
     if !report.dry_run {
         output.push_str(&format!(
             "removed {} receipts · reaped {} process groups\n",
-            report.removed_process_receipts, report.reaped_opencode_process_groups,
+            report.removed_process_receipts, report.reaped_engine_process_groups,
         ));
     }
     output
@@ -1402,7 +1379,7 @@ mod tests {
     }
 
     #[test]
-    fn prune_targets_only_dead_receipts_and_registered_orphan_groups() {
+    fn prune_targets_only_dead_receipts() {
         let snapshot = ProcessSnapshot {
             processes: vec![
                 process(10, 1, 1_000, "/home/.lf/bin/lf-deadbeef wave core"),
@@ -1417,9 +1394,6 @@ mod tests {
             }],
         };
 
-        let (receipts, process_groups) = resolve_prune_targets(&snapshot);
-
-        assert_eq!(receipts, [88]);
-        assert_eq!(process_groups, [99]);
+        assert_eq!(stale_process_receipt_pids(&snapshot), [88]);
     }
 }

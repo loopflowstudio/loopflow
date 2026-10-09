@@ -693,8 +693,8 @@ cargo test -p loopflow --lib legacy_task_flow_repair
 ```
 
 Skill export tests use isolated homes and cover builtin/global definitions,
-personal agent directories and pruning. Repository `.lf/skills` are local
-execution overrides; they are not exported by `sync-skills`.
+personal agent directories and pruning. `sync-skills --repo` exports repository
+skills and Flow recipes into the checkout; default sync exports globally.
 
 ```bash
 cargo test -p loopflow --lib engine::skills::tests
@@ -706,6 +706,13 @@ reflects the intended prompt change, regenerate the snapshots, review their
 diff, and rerun the check before gate.
 Terminology-only replacements count as prompt changes; include the golden
 check in their focused verification even when no prompt assembly code changed.
+Skill/Flow naming changes also update architecture command examples: check both
+the prompt goldens and portable architecture HTML before arming, even when the
+focused discovery and export suites pass.
+
+```bash
+uv run --project website python scripts/render_architecture_html.py --check
+```
 
 ```bash
 cargo test -p loopflow --test golden_prompt

@@ -3,6 +3,8 @@
 //! Registration is automatic: drop a file into the right builtins/
 //! subdirectory and build.rs generates the HashMap entries.
 
+use crate::engine::definition_name::portable_name;
+
 /// Bundled LOOPFLOW.md - the one loopflow operating document every launched
 /// agent receives, including the Work and Session vocabulary.
 pub const LOOPFLOW_DOC: &str = include_str!("builtins/LOOPFLOW.md");
@@ -19,7 +21,7 @@ pub const SURFACE_CHAT: &str = include_str!("builtins/surfaces/chat.md");
 
 /// Returns the content of a built-in skill, if it exists.
 pub fn get_builtin_skill(name: &str) -> Option<&'static str> {
-    BUILTIN_SKILLS.get(name).copied()
+    BUILTIN_SKILLS.get(portable_name(name).as_str()).copied()
 }
 
 /// One-line description for a built-in skill. Prefers the `description:` frontmatter
@@ -57,49 +59,38 @@ fn flow_description_from_content(content: &str) -> String {
 
 /// Returns the content of a built-in flow, if it exists.
 pub fn get_builtin_flow(name: &str) -> Option<&'static str> {
-    BUILTIN_FLOWS.get(name).copied()
+    BUILTIN_FLOWS.get(portable_name(name).as_str()).copied()
 }
 
-/// Resolve a builtin skill key: exact name, `operate` for `repo/operate`, then
+/// Resolve a builtin skill key: exact name, `operate` for `repo-operate`, then
 /// a unique namespace suffix. Returns `None` for absent or ambiguous names.
 pub fn resolve_builtin_skill(name: &str) -> Option<&'static str> {
-    if let Some((key, _)) = BUILTIN_SKILLS.get_key_value(name) {
+    if let Some((key, _)) = BUILTIN_SKILLS.get_key_value(portable_name(name).as_str()) {
         return Some(key);
     }
     // Repository operation owns the short name; Wave operation stays explicit.
     if name == "operate" {
         return BUILTIN_SKILLS
-            .get_key_value("repo/operate")
+            .get_key_value("repo-operate")
             .map(|(key, _)| *key);
     }
-    resolve_bare_in_map(name, &BUILTIN_SKILLS)
+    resolve_shortcut(name, BUILTIN_SKILLS_SHORTCUTS)
 }
 
-/// Resolve a bare name to its builtin flow key. Returns the exact match if one
-/// exists; otherwise, if exactly one namespaced key ends with `/{name}`, returns
-/// that key. Returns `None` for no match or ambiguous matches.
+/// Resolve a canonical or slash spelling, then a unique source-namespace shortcut.
+/// Hyphen suffixes do not create shortcuts. Absent or ambiguous names return `None`.
 pub fn resolve_builtin_flow(name: &str) -> Option<&'static str> {
-    if let Some((key, _)) = BUILTIN_FLOWS.get_key_value(name) {
+    if let Some((key, _)) = BUILTIN_FLOWS.get_key_value(portable_name(name).as_str()) {
         return Some(key);
     }
-    resolve_bare_in_map(name, &BUILTIN_FLOWS)
+    resolve_shortcut(name, BUILTIN_FLOWS_SHORTCUTS)
 }
 
-fn resolve_bare_in_map(
-    bare: &str,
-    map: &std::collections::HashMap<&'static str, &'static str>,
-) -> Option<&'static str> {
-    if bare.contains('/') {
-        return None;
-    }
-    let suffix = format!("/{bare}");
-    let mut matches = map.keys().filter(|key| key.ends_with(&suffix)).copied();
-    let first = matches.next()?;
-    if matches.next().is_some() {
-        None
-    } else {
-        Some(first)
-    }
+fn resolve_shortcut(name: &str, shortcuts: &[(&str, &'static str)]) -> Option<&'static str> {
+    shortcuts
+        .iter()
+        .find(|(bare, _)| *bare == name)
+        .map(|(_, key)| *key)
 }
 
 /// List of all built-in skill names.
@@ -251,7 +242,7 @@ mod tests {
             "lf roadmap --wave <wave> --json",
             "lf task run <ISSUE-ID>",
             "lf machine add <ssh-target>",
-            "lf --machine <machine-id> --wave <wave> wave/operate",
+            "lf --machine <machine-id> --wave <wave> wave-operate",
         ] {
             assert!(init.contains(command), "init omits {command:?}");
         }

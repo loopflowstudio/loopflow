@@ -606,6 +606,16 @@ After Project ownership or uniqueness changes, run the Task-planning consumers
 against CI's materialized schema. Planning sync already creates the local Project;
 registered-Task fixtures must reuse it rather than insert a second owner.
 
+Planning-owner changes must cover context/catalog reads, Wave relocation, Task
+initialization, Workflow completion/reopening and PR delivery fixtures alongside
+the new planning APIs. Seed stored definitions explicitly; writing a fixture file
+is not a planning mutation.
+An existing checkout fixture must settle initialization before testing delivery.
+Prompt fixtures nested in the source tree must fence Git discovery so the enclosing
+checkout cannot become their stored Wave owner. Verify them inside a Git checkout;
+a source archive alone does not exercise that boundary.
+Include the shared DTO fixtures and Desktop planning states in the affected gate.
+
 ```bash
 uv run python scripts/materialize_rust_tests.py -- cargo nextest run -p loopflow --lib -E 'test(ops::pm::task_planning_tests::)' --no-fail-fast
 ```

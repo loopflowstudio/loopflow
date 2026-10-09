@@ -2526,6 +2526,7 @@ mod tests {
 
     #[tokio::test]
     async fn portfolio_ownership_is_scoped_to_repository() {
+        let _machine = crate::journal::TestLedgerGuard::new();
         let directory = tempfile::tempdir().unwrap();
         let store = crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
             directory.path().join("registry.db"),
@@ -2535,6 +2536,7 @@ mod tests {
         let store = Arc::new(store);
         let mut waves = Vec::new();
         for (name, repository) in [("ear", "first"), ("ear", "second"), ("duplicate", "first")] {
+            std::fs::create_dir_all(directory.path().join(repository)).unwrap();
             let wave = Wave::new(
                 crate::id::WaveId::new(),
                 name.into(),

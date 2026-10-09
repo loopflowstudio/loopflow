@@ -89,6 +89,7 @@ fn put_project_snapshot(home: &Path, wave: &Wave, project: &Project) {
             "metric_targets": [],
             "workflow": "feature", "status": "started",
             "krs": [{"text": "Current state and history stay distinct", "holds": false}],
+            "sync": {"connected": false, "changes": []},
             "initiative_ids": ["initiative-infrastructure"],
             "team_ids": ["team-infrastructure"]
         }],
@@ -490,7 +491,8 @@ fn project_operator_failures_remain_historical_without_reappearing_on_the_wave()
             "status": "started",
             "current": true,
             "metric_targets": [],
-            "krs": [{"text": "Current state and history stay distinct", "holds": false}]
+            "krs": [{"text": "Current state and history stay distinct", "holds": false}],
+            "sync": {"connected": false, "changes": []}
         }],
         "truncated": false
     });
@@ -969,12 +971,12 @@ fn exact_task_roadmap_retains_history_without_starting_work() {
                 tasks[0]["task"]["name"],
                 "Preserve historical architecture evidence"
             );
-            assert_eq!(
+            assert!(
                 result["waves"][0]["unavailable_tasks"]
                     .as_array()
                     .unwrap()
-                    .len(),
-                1
+                    .is_empty(),
+                "the saved Task remains readable without its old provider Project"
             );
         }
     }

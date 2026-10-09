@@ -806,6 +806,10 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskProcessOptions) -> OpsRes
             }
             WorkStatus::Ready => {}
         }
+        store
+            .sqlite
+            .validate_task_planning(&task)
+            .map_err(task_error)?;
         if !acquired && options.directive.is_some() {
             return Err(task_error(format!(
                 "Task {} already exists; use `lf task comment {} <new-direction>`",
@@ -1259,7 +1263,7 @@ pub fn task_create(
             Some(&store),
             Some(&main),
             wave,
-            None,
+            std::env::var("LF_WAVE_ID").ok().as_deref(),
         )
         .await
         {

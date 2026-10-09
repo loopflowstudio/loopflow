@@ -90,6 +90,13 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let current = super::plan_read::project_in(&tx, project)?;
+        let repo: String = tx.query_row(
+            "SELECT w.repo FROM projects p JOIN waves w ON w.id=p.wave_id WHERE p.id=?1",
+            [project.as_str()],
+            |row| row.get(0),
+        )?;
+        crate::engine::workflow::parse_workflow(name, definition, std::path::Path::new(&repo))
+            .map_err(StoreError::InvalidData)?;
         write_content(
             &tx,
             project,

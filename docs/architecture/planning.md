@@ -431,7 +431,20 @@ effect, so it cannot settle a newer decision. State acquisition and delivery sha
 one transactional reconciliation rule: observed conflicts adopt Linear and settle
 the losing receipt without changing the Workflow. No local/provider clock comparison orders edits.
 The provider read and mutation remain separate requests; they do not prevent a
-concurrent Linear edit between them. Abandonment saves the decision and cancellation
+concurrent Linear edit between them. Matching readback settles the observed target;
+it does not prove that no intermediate edit was overwritten. An unseen complete/reopen
+cycle can disappear under the unconditional write, leaving no observed conflict
+to retain. Another read cannot close that race.
+
+Jack Heart's October 8 conflict decision and subsequent regression-repair request
+replace the former test's absolute unseen-reopening protection and pending-loser
+expectations. Enabled operation tests now distinguish reopening observed before
+delivery or in readback (Linear wins, both values retained, loser retired, no
+execution changes) from the original unseen interleaving (overwrite remains
+possible). Lost replies retain attempt identity and reconcile without replay.
+This is an explicit concurrency limit, not a provider atomicity guarantee.
+
+Abandonment saves the decision and cancellation
 receipt together without provider access. Cleanup failures preserve the decision;
 unknown or live execution prevents cleanup before provider inspection. Cancellation
 uses the same state delivery path as completion and reopening. Resolve the issue

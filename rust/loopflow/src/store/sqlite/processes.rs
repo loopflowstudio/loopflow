@@ -663,6 +663,42 @@ impl SqliteStore {
         Ok(driver)
     }
 
+    /// Reserve the next OS process for the same invocation after an observed
+    /// exit. An uncertain spawn cannot be retried by overwriting its identity.
+    pub(crate) fn prepare_session_agent_process(
+        &self,
+        session: &str,
+        expected: &SessionAttachment,
+    ) -> StoreResult<SessionAttachment> {
+        let _dispatch = self.lock_session_attachment(session)?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        require_attachment_in(&tx, session, expected)?;
+        let (ended, reserved): (bool, bool) = tx.query_row(
+            "SELECT completed_at IS NOT NULL,spawn_state='reserved' AND pid IS NULL
+             FROM processes WHERE lfid=?1",
+            [&expected.agent_process_lfid],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        let attachment = if ended {
+            attach_in(
+                &tx,
+                session,
+                Some(expected),
+                expected.process_lfid.as_ref().expect("attachment is owned"),
+                true,
+            )?
+        } else if reserved {
+            expected.clone()
+        } else {
+            return Err(StoreError::InvalidAuthority(
+                "Previous AgentProcess has no observed exit".into(),
+            ));
+        };
+        tx.commit()?;
+        Ok(attachment)
+    }
+
     pub fn release_session_attachment(
         &self,
         session: &str,
@@ -1237,6 +1273,60 @@ mod attachment_tests {
     use crate::session::SessionActivity;
     use crate::store::sqlite::SqliteStore;
     use crate::store::StoreError;
+
+    #[test]
+    fn respawn_requires_positive_exit_and_preserves_uncertain_attempts() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        store.test_session("conversation", "run_00000000000000000000000000000001");
+        let parent = insert_process(&store, 1, 1);
+        let first = store
+            .claim_session_attachment("conversation", None, &parent, true)
+            .unwrap();
+        assert_eq!(
+            store
+                .prepare_session_agent_process("conversation", &first)
+                .unwrap(),
+            first
+        );
+        store
+            .record_session_provider_launch(
+                "conversation",
+                &first,
+                &std::process::Command::new("fixture"),
+            )
+            .unwrap();
+        assert!(store
+            .prepare_session_agent_process("conversation", &first)
+            .is_err());
+        assert_eq!(
+            store.session_attachment("conversation").unwrap(),
+            Some(first.clone())
+        );
+        store
+            .record_native_provider_exit("conversation", &first, false)
+            .unwrap();
+        let failed = store.process(&first.agent_process_lfid).unwrap().unwrap();
+        let next = store
+            .prepare_session_agent_process("conversation", &first)
+            .unwrap();
+        assert_ne!(next.agent_process_lfid, first.agent_process_lfid);
+        assert_eq!(next.process_lfid, first.process_lfid);
+        assert_eq!(
+            store.process(&first.agent_process_lfid).unwrap(),
+            Some(failed)
+        );
+        assert!(store
+            .prepare_session_agent_process("conversation", &first)
+            .is_err());
+        assert!(store
+            .with_session_attachment("conversation", &first, || Ok(()))
+            .is_err());
+        assert_eq!(
+            store.session_attachment("conversation").unwrap(),
+            Some(next)
+        );
+    }
 
     #[test]
     fn returning_to_the_same_lf_process_does_not_revive_its_previous_attachment() {

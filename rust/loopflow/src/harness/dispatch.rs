@@ -18,6 +18,7 @@ use std::thread::{self, Thread};
 use std::time::{Duration, Instant};
 
 use futures_util::{Sink, SinkExt};
+use tokio::io::{AsyncWrite, AsyncWriteExt};
 use tokio::runtime::{Handle, RuntimeFlavor};
 
 use crate::store::{StoreError, StoreResult};
@@ -63,6 +64,16 @@ where
             StoreError::InvalidData("Native dispatch timed out; outcome is unknown".into())
         })?
         .map_err(|error| StoreError::InvalidData(format!("Native dispatch failed: {error}")))
+}
+
+/// Pipe writes obey the same real-time fence deadline as socket dispatch.
+pub(super) fn write_fenced<W: AsyncWrite + Unpin>(writer: &mut W, bytes: &[u8]) -> StoreResult<()> {
+    within(DISPATCH_LIMIT, async {
+        writer.write_all(bytes).await?;
+        writer.flush().await
+    })
+    .ok_or_else(|| StoreError::InvalidData("Native dispatch timed out; outcome is unknown".into()))?
+    .map_err(|error| StoreError::InvalidData(format!("Native dispatch failed: {error}")))
 }
 
 /// Run blocking store work from an async task without occupying the runtime

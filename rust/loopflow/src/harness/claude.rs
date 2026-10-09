@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -30,6 +30,7 @@ pub struct ClaudeHarness {
     events: mpsc::UnboundedSender<ConversationEvent>,
     raw_provider: Option<mpsc::UnboundedSender<RawProviderEvent>>,
     config: Option<AgentConfig>,
+    capture: Option<crate::engine::agent::AgentCapture>,
     should_seed_task_prompt: bool,
     /// Vendor session id captured from the first turn's `system` event; a
     /// respawn (after interrupt/crash) resumes it via `--resume`.
@@ -74,6 +75,7 @@ impl ClaudeHarness {
             events,
             raw_provider: None,
             config: None,
+            capture: None,
             should_seed_task_prompt: true,
             provider_session_id: Arc::new(Mutex::new(None)),
             account_route: None,
@@ -112,8 +114,17 @@ impl ClaudeHarness {
         }
         let config = self
             .config
-            .as_ref()
+            .as_mut()
             .ok_or_else(|| anyhow!("claude harness not started"))?;
+        if let (Some(capture), Some((session, attachment))) =
+            (&self.capture, &mut config.session_attachment)
+        {
+            *attachment = capture.prepare_agent_process(session, attachment)?;
+            config.env.insert(
+                crate::process::AGENT_CALLER_ENV.into(),
+                serde_json::to_string(&attachment.caller(session.clone()))?,
+            );
+        }
         let resume_id = self
             .provider_session_id
             .lock()
@@ -150,21 +161,36 @@ impl ClaudeHarness {
                 ))
             })
             .transpose()?;
-        if let Some((store, session, driver)) = &owner {
-            store.record_session_provider_launch(session, driver, cmd.as_std())?;
-        }
-        let mut child = crate::engine::process::spawn_agent_process(cmd, None, |pid| {
-            if let Some((store, session, attachment)) = &owner {
-                let started_at = crate::journal::process_started_at(pid)?.ok_or_else(|| {
-                    std::io::Error::other("AgentProcess birth unavailable before exec")
-                })?;
-                store
-                    .record_session_provider_process(session, attachment, pid, started_at)
-                    .map_err(std::io::Error::other)?;
+        let spawn = || {
+            if let Some((store, session, driver)) = &owner {
+                store.record_session_provider_launch(session, driver, cmd.as_std())?;
             }
-            Ok(())
-        })
-        .map_err(|err| anyhow!("failed to spawn claude: {err}"))?;
+            let spawned = crate::engine::process::spawn_agent_process(cmd, None, |pid| {
+                if let Some((store, session, attachment)) = &owner {
+                    let started_at = crate::journal::process_started_at(pid)?.ok_or_else(|| {
+                        std::io::Error::other("AgentProcess birth unavailable before exec")
+                    })?;
+                    store
+                        .record_session_provider_process(session, attachment, pid, started_at)
+                        .map_err(std::io::Error::other)?;
+                }
+                Ok(())
+            });
+            if spawned.is_err() {
+                if let Some((store, session, attachment)) = &owner {
+                    store.record_native_provider_exit(session, attachment, false)?;
+                }
+            }
+            spawned.map_err(|error| {
+                crate::store::StoreError::InvalidData(format!("failed to spawn claude: {error}"))
+            })
+        };
+        let mut child = super::dispatch::off_reactor(|| match &owner {
+            Some((store, session, attachment)) => {
+                store.with_session_attachment(session, attachment, spawn)
+            }
+            None => spawn(),
+        })?;
         drop(activation);
         let stdin = child
             .stdin
@@ -322,12 +348,29 @@ impl ClaudeHarness {
 
     /// Tear the persistent process down and reap its tasks. The next
     /// `send_input` respawns and resumes the captured session.
-    async fn kill_process(&mut self) {
-        self.stdin = None;
-        if let Some(mut child) = self.child.take() {
-            let _ = child.kill().await;
-            let _ = child.wait().await;
+    async fn kill_process(&mut self) -> Result<()> {
+        let owner = self.owner()?;
+        if let Some(child) = self.child.as_mut() {
+            super::dispatch::off_reactor(|| {
+                let mut signal = || {
+                    child
+                        .start_kill()
+                        .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))
+                };
+                match &owner {
+                    Some((store, session, attachment)) => {
+                        store.with_session_attachment(session, attachment, signal)
+                    }
+                    None => signal(),
+                }
+            })?;
+            child.wait().await?;
+            self.child = None;
+            if let Some((store, session, attachment)) = &owner {
+                store.record_native_provider_exit(session, attachment, true)?;
+            }
         }
+        self.stdin = None;
         if let Some(task) = self.reader_task.take() {
             let mut task = task;
             if tokio::time::timeout(Duration::from_secs(2), &mut task)
@@ -344,11 +387,61 @@ impl ClaudeHarness {
         }
         self.pending_results.store(0, Ordering::SeqCst);
         self.turn_in_progress.store(false, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn owner(
+        &self,
+    ) -> Result<
+        Option<(
+            crate::store::sqlite::SqliteStore,
+            String,
+            crate::process::SessionAttachment,
+        )>,
+    > {
+        self.config
+            .as_ref()
+            .and_then(|config| config.session_attachment.as_ref())
+            .map(|(session, attachment)| {
+                Ok((
+                    crate::store::sqlite::SqliteStore::new(
+                        &crate::store::database_path_from_env()?
+                    )?,
+                    session.clone(),
+                    attachment.clone(),
+                ))
+            })
+            .transpose()
+    }
+
+    async fn send_line(&mut self, line: String) -> Result<()> {
+        let owner = self.owner()?;
+        let mut stdin = self
+            .stdin
+            .take()
+            .ok_or_else(|| anyhow!("claude stdin not available"))?;
+        let (stdin, result) = tokio::task::spawn_blocking(move || {
+            let mut write = || super::dispatch::write_fenced(&mut stdin, line.as_bytes());
+            let result = match &owner {
+                Some((store, session, attachment)) => {
+                    store.with_session_attachment(session, attachment, write)
+                }
+                None => write(),
+            };
+            (stdin, result)
+        })
+        .await?;
+        self.stdin = Some(stdin);
+        result?;
+        Ok(())
     }
 }
 
 #[async_trait]
 impl Harness for ClaudeHarness {
+    fn set_capture(&mut self, capture: Option<crate::engine::agent::AgentCapture>) {
+        self.capture = capture;
+    }
     fn process_id(&self) -> Option<u32> {
         self.child.as_ref().and_then(Child::id)
     }
@@ -457,21 +550,16 @@ impl Harness for ClaudeHarness {
             turn_id: turn_id.clone(),
         });
 
-        let stdin = self
-            .stdin
-            .as_mut()
-            .ok_or_else(|| anyhow!("claude stdin not available"))?;
-        if let Err(error) = stdin
-            .write_all(user_message_line(&turn_content, &turn_id).as_bytes())
+        if let Err(error) = self
+            .send_line(user_message_line(&turn_content, &turn_id))
             .await
         {
             // The process died between spawn and write; tear it down so the
             // next send_input respawns cleanly.
             drop(turn_guard);
-            self.kill_process().await;
+            self.kill_process().await?;
             return Err(anyhow!("failed to write claude seed message: {error}"));
         }
-        let _ = stdin.flush().await;
 
         turn_guard.disarm();
         Ok(())
@@ -502,22 +590,17 @@ impl Harness for ClaudeHarness {
                 };
             }
         };
-        let stdin = self.stdin.as_mut().expect("steer requires open stdin");
         let request = uuid::Uuid::new_v4().to_string();
         self.requests
             .lock()
             .expect("Claude request lock poisoned")
             .insert(request.clone(), origin);
-        if let Err(error) = stdin
-            .write_all(user_message_line(content, &request).as_bytes())
-            .await
-        {
+        if let Err(error) = self.send_line(user_message_line(content, &request)).await {
             self.pending_results.fetch_sub(1, Ordering::SeqCst);
             return SendCurrentOutcome::Failed {
                 error: format!("failed to write claude steer: {error}"),
             };
         }
-        let _ = stdin.flush().await;
         let provider_turn_id = self
             .current_turn_id
             .lock()
@@ -537,14 +620,12 @@ impl Harness for ClaudeHarness {
             return Ok(());
         }
         self.interrupt_requested.store(true, Ordering::SeqCst);
-        self.kill_process().await;
-        Ok(())
+        self.kill_process().await
     }
 
     async fn stop(&mut self) -> Result<()> {
         self.shutdown_requested.store(true, Ordering::SeqCst);
-        self.kill_process().await;
-        Ok(())
+        self.kill_process().await
     }
 
     fn provider_session_id(&self) -> Option<String> {
@@ -680,7 +761,6 @@ mod tests {
                 harness.process_id().unwrap(),
                 store.session_provider_process(id).unwrap(),
             ));
-            store.release_session_attachment(id, &driver).unwrap();
             // Retain the first process while the same Process starts the next step.
             harnesses.push(harness);
         }
@@ -693,6 +773,123 @@ mod tests {
             assert_eq!(pid, saved);
             assert!(start > 0);
         }
+    }
+
+    #[test]
+    fn interrupted_capture_resumes_with_a_new_process_and_fences_old_snapshots() {
+        use crate::session_record::{CaptureHandle, SessionCaptureSpec, SessionFlowMembership};
+
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let _env = crate::test_ambient::EnvGuard::clear(&["PATH", "LF_BIN"]);
+        let home = ledger.home();
+        let script = home.join("claude");
+        std::fs::write(&script, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> launches\nwhile read -r line; do printf '%s\\n' \"$line\" >> inputs; done\n").unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::env::set_var("PATH", format!("{}:/usr/bin:/bin", home.display()));
+        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        crate::journal::with_runtime(home, &["lf".into(), "skill".into()], || {
+            let capture = CaptureHandle::begin_at(
+                home,
+                SessionCaptureSpec {
+                    harness: "claude".into(),
+                    model: None,
+                    surface: "headless".into(),
+                    cwd: home.into(),
+                    repo: None,
+                    worktree: None,
+                    skill: None,
+                    subjects: vec![],
+                    flow: SessionFlowMembership::Independent,
+                    work: None,
+                },
+            )?;
+            capture.claim_conversation_driver()?;
+            let (session, first) = capture.session_attachment().unwrap();
+            let store = crate::store::sqlite::SqliteStore::new(&home.join("loopflow.db"))?;
+            runtime.block_on(async {
+                let (tx, _rx) = mpsc::unbounded_channel();
+                let mut harness = ClaudeHarness::new(tx);
+                harness.config = Some(AgentConfig {
+                    cwd: Some(home.into()),
+                    session_attachment: Some((session.clone(), first.clone())),
+                    ..AgentConfig::default()
+                });
+                harness.set_capture(Some(capture.clone().into()));
+                harness.send_input("first request").await.unwrap();
+                let first_pid = harness.process_id().unwrap();
+                // The native conversation survives the OS process's interruption.
+                harness.set_provider_session_id(Some("native-conversation".into()));
+                harness.interrupt().await.unwrap();
+                let ended = store.process(&first.agent_process_lfid).unwrap().unwrap();
+                assert_eq!(ended.pid, Some(first_pid));
+                assert!(ended.completed_at.is_some());
+
+                harness.send_input("resumed request").await.unwrap();
+                let (_, second) = capture.session_attachment().unwrap();
+                assert_ne!(first.agent_process_lfid, second.agent_process_lfid);
+                assert_ne!(first.token, second.token);
+                let running = store.process(&second.agent_process_lfid).unwrap().unwrap();
+                assert_eq!(running.pid, harness.process_id());
+                assert_eq!(running.parent_process_lfid, first.process_lfid);
+                assert!(running.completed_at.is_none());
+                assert_eq!(
+                    store.process(&first.agent_process_lfid).unwrap(),
+                    Some(ended)
+                );
+                assert!(capture.prepare_agent_process(&session, &first).is_err());
+                assert!(store
+                    .record_session_connection(&session, &first, "stale", "stale")
+                    .is_err());
+
+                // Pending operations retain the old snapshot, not the capture's
+                // current value. Neither a pipe write nor a signal may use it.
+                harness.config.as_mut().unwrap().session_attachment =
+                    Some((session.clone(), first));
+                assert!(harness.send_line("stale request\n".into()).await.is_err());
+                assert!(harness.stop().await.is_err());
+                assert!(harness
+                    .child
+                    .as_mut()
+                    .unwrap()
+                    .try_wait()
+                    .unwrap()
+                    .is_none());
+                harness.config.as_mut().unwrap().session_attachment =
+                    Some((session.clone(), second.clone()));
+                tokio::time::timeout(Duration::from_secs(5), async {
+                    loop {
+                        let inputs =
+                            std::fs::read_to_string(home.join("inputs")).unwrap_or_default();
+                        if inputs.contains("resumed request") {
+                            assert!(!inputs.contains("stale request"));
+                            break;
+                        }
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
+                })
+                .await
+                .unwrap();
+                let launches = std::fs::read_to_string(home.join("launches")).unwrap();
+                assert_eq!(launches.lines().count(), 2);
+                assert!(launches
+                    .lines()
+                    .nth(1)
+                    .unwrap()
+                    .contains("--resume native-conversation"));
+                harness.stop().await.unwrap();
+                capture.finish("completed").unwrap();
+                let settled = store.session_attachment(&session).unwrap().unwrap();
+                assert_eq!(settled.agent_process_lfid, second.agent_process_lfid);
+                assert_eq!(settled.process_lfid, None);
+            });
+            Ok(())
+        })
+        .unwrap();
     }
 
     #[tokio::test]

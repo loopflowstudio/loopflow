@@ -2380,6 +2380,30 @@ impl CaptureHandle {
             .clone()
     }
 
+    /// Only the invocation's capture owner advances its settlement snapshot.
+    /// Dispatch and history retain the immutable snapshot they already took.
+    pub(crate) fn prepare_agent_process(
+        &self,
+        session: &str,
+        expected: &crate::process::SessionAttachment,
+    ) -> StoreResult<crate::process::SessionAttachment> {
+        let mut capture = self.0.lock().expect("Session capture mutex poisoned");
+        if capture.settled_outcome.is_some()
+            || capture
+                .driver
+                .as_ref()
+                .map(|(id, owner)| (id.as_str(), owner))
+                != Some((session, expected))
+        {
+            return Err(StoreError::InvalidAuthority(
+                "Capture attachment changed".into(),
+            ));
+        }
+        let next = row_store(&capture.dir)?.prepare_session_agent_process(session, expected)?;
+        capture.driver = Some((session.to_owned(), next.clone()));
+        Ok(next)
+    }
+
     pub(crate) fn environment(&self) -> BTreeMap<String, String> {
         let capture = self.0.lock().expect("Session capture mutex poisoned");
         let mut environment = BTreeMap::from([(

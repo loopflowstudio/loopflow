@@ -226,13 +226,13 @@ publication. `446cfb2b5` records attachment/lifecycle; `ea205e3d0` simplifies re
 Detached rows remain. Duplicate PID/birth and late history grant no control.
 Tokens fence A → B → A. Release SQLite before nested reads.
 
-Claude respawn needs invocation-owned harness/capture replacement snapshots;
-old operations retain old snapshots. PID overwrite loses history; refusal is not
-accepted resume. Only Codex has FIFO handoff; live-orphan termination
-recognizes only noninteractive Codex/OpenCode. Optional launches, native pre-exec,
+Claude respawn now has source-only capture-owned replacement snapshots; old
+operations stay fenced. PID overwrite loses history; refusal is not resume.
+Runtime proof is deferred for capacity. Only Codex has FIFO handoff; live-orphan
+termination recognizes noninteractive Codex/OpenCode. Optional/native launches,
 generation wires, death orders and fixtures remain unfinished. Release's
 entry-point lesson applies: public top/Task-status/scheduled agreement, two-second
-removal and installed settlement remain unproved. Proofs: `a55f5345b`.
+removal and installed settlement remain unproved. Earlier proofs: `a55f5345b`.
 
 ## Process vocabulary (LOO-400, curated 2026-10-09)
 

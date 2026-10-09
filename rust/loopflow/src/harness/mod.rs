@@ -245,6 +245,9 @@ pub enum ApprovalPolicy {
 
 #[async_trait]
 pub trait Harness: Send + Sync {
+    /// The invocation owner receives replacement attachment snapshots when a
+    /// provider must respawn within the same capture.
+    fn set_capture(&mut self, _capture: Option<crate::engine::agent::AgentCapture>) {}
     async fn start(&mut self, config: &AgentConfig) -> Result<()>;
     /// Start the next provider Turn from durable seed input.
     async fn send_input(&mut self, content: &str) -> Result<()>;

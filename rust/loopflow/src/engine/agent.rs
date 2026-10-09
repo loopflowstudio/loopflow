@@ -375,6 +375,16 @@ impl From<CaptureHandle> for AgentCapture {
     }
 }
 
+impl AgentCapture {
+    pub(crate) fn prepare_agent_process(
+        &self,
+        session: &str,
+        expected: &crate::process::SessionAttachment,
+    ) -> crate::store::StoreResult<crate::process::SessionAttachment> {
+        self.0.prepare_agent_process(session, expected)
+    }
+}
+
 /// Agent capability flags.
 #[derive(Debug, Clone, Default)]
 pub struct AgentCapabilities {
@@ -1645,6 +1655,12 @@ fn _run_harness_once(
     }
 
     let mut config = launch.clone();
+    if let Some(capture) = capture {
+        // A new harness gets the invocation owner's current snapshot. Existing
+        // dispatch/history operations never refresh theirs from the capture.
+        config.session_attachment = capture.session_attachment();
+        config.env.extend(capture.environment());
+    }
     let prompt = std::mem::take(&mut config.task_prompt);
     let launch_worktree = config.cwd.clone().or_else(|| std::env::current_dir().ok());
     if let Some(cwd) = launch_worktree.as_deref() {
@@ -1670,6 +1686,7 @@ fn _run_harness_once(
                 .map(|route| route.account_id().clone()),
         );
         harness.set_provider_session_id(launch.resume_token.clone());
+        harness.set_capture(process.capture.clone());
         if capture.is_some() {
             harness.set_raw_provider_sender(Some(raw_tx));
         }

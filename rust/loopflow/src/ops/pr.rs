@@ -13,7 +13,6 @@ use crate::ops::commit::{commit_workflow, CommitOptions};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
 use crate::ops::util::{command_exists, stderr_from_output};
-use crate::work::task::AfterMerge;
 
 #[derive(Debug, Clone)]
 pub struct PrOptions {
@@ -67,7 +66,6 @@ const TASK_PR_CONTEXT_END: &str = "<!-- loopflow:task-pr-context:end -->";
 pub(crate) enum TaskPrCopyLifecycle {
     Draft,
     Published,
-    Continues { next_slug: Option<String> },
     Completes,
 }
 
@@ -176,18 +174,14 @@ pub fn create_or_update_pr(
         .and_then(|context| context.merge_request.as_ref())
         .filter(|request| request.head_sha == published_head)
     {
-        Some(request) if request.after_merge == AfterMerge::CompleteTask => {
-            TaskPrCopyLifecycle::Completes
-        }
-        Some(request) => TaskPrCopyLifecycle::Continues {
-            next_slug: request.next_slug.clone(),
-        },
+        Some(_) => TaskPrCopyLifecycle::Completes,
         None if draft => TaskPrCopyLifecycle::Draft,
         None => TaskPrCopyLifecycle::Published,
     };
     let copy = normalize_task_pr_copy(copy, task_context.as_ref(), &lifecycle)?;
     let title = copy.title.trim();
     let body = copy.body.trim();
+    crate::ops::task::request_task_pr_publication(repo, title, body)?;
     if let Some(mut pr) = existing_pr {
         let info = pr_info(&branch, &pr);
         crate::ops::task::attach_task_github_pr(repo, Some(&info), &|_| {})?;
@@ -195,17 +189,17 @@ pub fn create_or_update_pr(
             mark_pr_ready(repo, &mut pr)?;
             crate::ops::task::attach_task_github_pr(repo, Some(&pr_info(&branch, &pr)), &|_| {})?;
         }
-        crate::ops::task::request_task_pr_publication(repo, title, body)?;
         progress.status("Updating PR...");
         update_pr(repo, info.number, title, body, &base_branch)?;
+        crate::ops::task::record_task_pr_presentation(repo, title, body)?;
         Ok(PrResult {
             url: info.url,
             created: false,
         })
     } else {
-        crate::ops::task::request_task_pr_publication(repo, title, body)?;
         progress.status("Creating PR...");
         let url = create_pr(repo, title, body, &base_branch, draft, &|_| {})?;
+        crate::ops::task::record_task_pr_presentation(repo, title, body)?;
         let acknowledged = pr_number_from_url(&url).map(|number| PrInfo {
             number,
             url: url.clone(),
@@ -266,34 +260,10 @@ pub(crate) fn normalize_task_pr_copy(
     }
 
     let task_link = context.task_link();
-    let pr_lifecycle = match lifecycle {
-        TaskPrCopyLifecycle::Draft => format!(
-            "PR {} is a draft; no Task settlement is requested.",
-            context.sequence
-        ),
-        TaskPrCopyLifecycle::Published => format!(
-            "PR {} is published for review; no Task settlement is requested.",
-            context.sequence
-        ),
-        TaskPrCopyLifecycle::Continues {
-            next_slug: Some(next_slug),
-        } => format!(
-            "Merging PR {} leaves the Task open and names {} as the next serial PR.",
-            context.sequence,
-            _markdown_code(next_slug)
-        ),
-        TaskPrCopyLifecycle::Continues { next_slug: None } => format!(
-            "Merging PR {} leaves the Task open for another serial PR.",
-            context.sequence
-        ),
-        TaskPrCopyLifecycle::Completes => match &context.follow_up {
-            Some(work) => format!(
-                "Merging PR {} delivers source; {}",
-                context.sequence,
-                work.summary(time::OffsetDateTime::now_utc().unix_timestamp())
-            ),
-            None => format!("Merging PR {} completes the Task.", context.sequence),
-        },
+    let pr_lifecycle: String = match lifecycle {
+        TaskPrCopyLifecycle::Draft => "The pull request is a draft; no Task settlement is requested.".into(),
+        TaskPrCopyLifecycle::Published => "The pull request is published for review; no Task settlement is requested.".into(),
+        TaskPrCopyLifecycle::Completes => "Merge delivers the code. File accepted follow-ups or record none needed, then complete the Task.".into(),
     };
     let managed = format!(
         "{TASK_PR_CONTEXT_START}\n> [!NOTE]\n> **Task:** {task_link}\n> **PR lifecycle:** {pr_lifecycle}\n{TASK_PR_CONTEXT_END}"
@@ -2521,11 +2491,9 @@ esac
 
     fn task_pr_context() -> TaskPrContext {
         TaskPrContext {
-            follow_up: None,
             title: "Make Task PR copy explain intent and lifecycle".to_string(),
             identifier: "LOO-249".to_string(),
             url: Some("https://linear.app/loopflow/issue/LOO-249/task-pr-copy".to_string()),
-            sequence: 1,
             merge_request: None,
         }
     }
@@ -2549,7 +2517,7 @@ esac
 <!-- loopflow:task-pr-context:start -->\n\
 > [!NOTE]\n\
 > **Task:** [Make Task PR copy explain intent and lifecycle · LOO-249](https://linear.app/loopflow/issue/LOO-249/task-pr-copy)\n\
-> **PR lifecycle:** Merging PR 1 completes the Task.\n\
+> **PR lifecycle:** Merge delivers the code. File accepted follow-ups or record none needed, then complete the Task.\n\
 <!-- loopflow:task-pr-context:end -->\n\n\
 ## Evaluate\n\nRecorded proof."
         );
@@ -2602,17 +2570,7 @@ esac
                 TaskPrCopyLifecycle::Published,
                 "no Task settlement is requested.",
             ),
-            (
-                TaskPrCopyLifecycle::Continues {
-                    next_slug: Some("follow-up-proof".to_string()),
-                },
-                "names `follow-up-proof` as the next serial PR.",
-            ),
-            (
-                TaskPrCopyLifecycle::Continues { next_slug: None },
-                "leaves the Task open for another serial PR.",
-            ),
-            (TaskPrCopyLifecycle::Completes, "completes the Task."),
+            (TaskPrCopyLifecycle::Completes, "then complete the Task."),
         ] {
             copy = normalize_task_pr_copy(copy, Some(&context), &lifecycle).unwrap();
             assert!(copy
@@ -2633,7 +2591,6 @@ esac
             );
         }
 
-        context.sequence = 2;
         context.title = "Find the next useful review action".to_string();
         copy.title = "Find the remaining proof after a partial delivery".to_string();
         copy.body = copy.body.replace(
@@ -2652,9 +2609,9 @@ esac
         assert!(revised
             .body
             .contains("Find the next useful review action · LOO-249"));
-        assert!(revised
-            .body
-            .contains("PR 2 is published for review; no Task settlement is requested."));
+        assert!(revised.body.contains(
+            "The pull request is published for review; no Task settlement is requested."
+        ));
         assert!(!revised.body.contains("completes the Task"));
         assert!(!revised.body.contains("Make Task PR copy explain intent"));
     }

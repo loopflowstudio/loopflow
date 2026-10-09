@@ -27,8 +27,8 @@ func roadmapTaskAction(_ task: RoadmapTask) -> RoadmapTaskAction? {
         // Continuing a Task is a fresh Flow launch; Rust's Start legality governs it.
         if startable { return .run }
     case .openPr:
-        if task.activePr?.publication?.github != nil { return .openPr }
-    case .startNextPr, .noAction, .none:
+        if task.pr?.publication?.github != nil { return .openPr }
+    case .noAction, .none:
         break
     }
     return nil
@@ -438,7 +438,7 @@ struct RoadmapView: View {
     private func perform(_ action: RoadmapTaskAction, task: RoadmapTask, wave: WaveSnapshot) {
         switch action {
         case .openPr:
-            if let github = task.activePr?.publication?.github {
+            if let github = task.pr?.publication?.github {
                 NSWorkspace.shared.open(github.url)
             }
         case .run:
@@ -678,7 +678,7 @@ struct TaskActionCluster: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
             }
-            if let github = task.activePr?.publication?.github {
+            if let github = task.pr?.publication?.github {
                 Link("PR #\(github.number)", destination: github.url)
                     .font(Typography.caption(10))
             }

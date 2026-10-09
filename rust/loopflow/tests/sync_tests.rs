@@ -1196,7 +1196,7 @@ fn saved_flow_sync_follows_task_parent_and_skips_an_already_contained_head() {
     repo.commit("Parent work");
     repo.push_new_branch("parent");
     let fork = repo.head_sha();
-    let parent = support::register_task(home.path(), repo.path(), "parent", &fork);
+    let parent = support::register_task_with_pr(home.path(), repo.path(), "parent", &fork);
     let child_path = child_dir.path().join("child");
     git(
         repo.path(),
@@ -1224,12 +1224,8 @@ fn saved_flow_sync_follows_task_parent_and_skips_an_already_contained_head() {
     runtime
         .block_on(parent.store.update_task_pr(&parent_pr))
         .unwrap();
-    let pr = runtime
-        .block_on(parent.store.active_task_pr(&child.id))
-        .unwrap()
-        .unwrap();
     runtime
-        .block_on(parent.store.stack_task_pr(&pr, &parent.pr.id))
+        .block_on(parent.store.stack_task_placement(&child, &parent.pr.id))
         .unwrap();
     std::fs::write(child_path.join("shared.txt"), "child\n").unwrap();
     git(&child_path, &["commit", "-am", "Child work"]);
@@ -1280,11 +1276,18 @@ fn saved_flow_sync_follows_task_parent_and_skips_an_already_contained_head() {
     sync();
     assert_eq!(git(&child_path, &["rev-parse", "HEAD"]), merged_head);
     let saved = runtime
-        .block_on(parent.store.active_task_pr(&child.id))
+        .block_on(parent.store.get_task(&child.id))
         .unwrap()
         .unwrap();
     assert_eq!(saved.base_commit, parent_head);
     assert_eq!(saved.parent_pr_id, Some(parent.pr.id));
+    assert!(
+        runtime
+            .block_on(parent.store.active_task_pr(&child.id))
+            .unwrap()
+            .is_none(),
+        "sync updates placement without inventing a PR"
+    );
 }
 
 #[test]

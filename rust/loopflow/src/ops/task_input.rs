@@ -35,19 +35,15 @@ pub(crate) async fn read_seed(
     let interrupt = store
         .latest_interrupt_id(&WorkRef::Task(task.id.clone()))
         .await?;
-    let pr = store
-        .task_prs(&task.id)
-        .await?
-        .pop()
-        .ok_or_else(|| anyhow!("Task {} has no recorded PR", task.id))?;
+    let pr = store.active_task_pr(&task.id).await?;
     let project = store
         .get_project(&task.project_id)
         .await?
         .ok_or_else(|| anyhow!("Task Project is missing"))?;
     let message = format!(
         "{}\n\n{}",
-        task_seed(task, &project.plan, &pr, wave, &steers),
-        crate::ops::task::task_workspace_context(task, &pr)?
+        task_seed(task, &project.plan, pr.as_ref(), wave, &steers),
+        crate::ops::task::task_workspace_context(task)?
     );
     Ok(TaskSeed {
         task: task.clone(),
@@ -197,12 +193,12 @@ async fn handle_attachment(
 pub(crate) fn task_seed(
     task: &Task,
     project: &ProjectPlan,
-    pr: &crate::work::task::TaskPr,
+    pr: Option<&crate::work::task::TaskPr>,
     wave_name: &str,
     steers: &[Steer],
 ) -> String {
     let context = crate::ops::render_task_context(task, project, pr, wave_name, steers);
     format!(
-        "{context}\n\nTyped PR and Task operations own publication, landing, rotation, and completion. `lf pr abandon` discards only this PR. If this PR already merged out of band and follow-up work remains, `lf pr next [slug]` rotates to the next serial PR, carrying committed and uncommitted follow-up forward."
+        "{context}\n\nA Task has zero or one pull request. After merge, file accepted follow-ups or record none needed, then complete the Task. Dependent pull requests belong to separate stacked Tasks."
     )
 }

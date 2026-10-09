@@ -152,6 +152,7 @@ impl ProjectPlan {
 /// The caller retains this identity across a retry; a separate create mints another.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewTask {
+    pub due_date: Option<String>,
     pub id: crate::durable::TaskId,
     pub project_id: crate::durable::ProjectId,
     pub title: String,

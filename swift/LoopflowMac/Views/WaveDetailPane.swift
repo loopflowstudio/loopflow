@@ -719,12 +719,24 @@ private struct WaveTaskWorkView: View {
                 Text("\(task.task.historyLabel ?? task.runtime?.status.label ?? "unstarted") · next: \(task.nextMove.owner.rawValue)")
                     .font(Typography.caption(10))
                     .foregroundStyle(palette.textSecondary)
+                if let label = task.task.followUpLabel {
+                    Text(label)
+                        .font(Typography.caption(10))
+                        .foregroundStyle(palette.textSecondary)
+                }
+                if let label = task.followThrough.deliveryLabel(
+                    merged: task.pr?.phase == .merged, done: task.runtime?.status == .done
+                ) {
+                    Text(label)
+                        .font(Typography.caption(10))
+                        .foregroundStyle(palette.textSecondary)
+                }
                 if let directive = task.directive {
                     Text("direction v\(directive.version) · \(directive.incorporatedAt == nil ? "pending" : "incorporated")")
                         .font(Typography.caption(10))
                         .foregroundStyle(directive.incorporatedAt == nil ? palette.textSecondary : palette.accent)
                 }
-                ForEach(task.prs) { pr in
+                if let pr = task.pr {
                     PrLink(pr: pr)
                 }
             }
@@ -774,7 +786,7 @@ private struct WaveWorkInspector: View {
                     reason: task.condition.reason,
                     provider: task.runtime?.provider,
                     location: taskLocation,
-                    prs: task.prs
+                    pr: task.pr
                 )
                 if task.reference.workspace != nil {
                     Button("Open Task workspace") {
@@ -808,7 +820,7 @@ private struct WaveWorkInspector: View {
         reason: String,
         provider: String?,
         location: String?,
-        prs: [PrSnapshot]
+        pr: PrSnapshot?
     ) -> some View {
         Text("\(status) · \(reason)")
             .font(Typography.caption(11))
@@ -836,7 +848,7 @@ private struct WaveWorkInspector: View {
                 .foregroundStyle(palette.textSecondary)
                 .textSelection(.enabled)
         }
-        ForEach(prs) { pr in
+        if let pr {
             PrLink(pr: pr)
         }
     }
@@ -850,12 +862,12 @@ private struct PrLink: View {
     var body: some View {
         if let github = pr.publication?.github {
             Link(
-                "PR #\(github.number) · \(pr.phase.rawValue)\(pr.publication?.merge?.afterMerge == .completeTask ? " · completes Task" : "")",
+                "PR #\(github.number) · \(pr.phase.rawValue)",
                 destination: github.url
             )
             .font(Typography.caption(10))
         } else {
-            Text("PR \(pr.sequence) · \(pr.phase.rawValue)\(pr.publication?.merge?.afterMerge == .completeTask ? " · completes Task" : "") · \(pr.branch)")
+            Text("Pull request · \(pr.phase.rawValue) · \(pr.branch)")
                 .font(Typography.caption(10))
                 .foregroundStyle(palette.textSecondary)
         }

@@ -40,6 +40,19 @@ fn load_cases() -> Vec<PathBuf> {
     cases
 }
 
+fn copy_fixture(source: &Path, target: &Path) {
+    fs::create_dir_all(target).unwrap();
+    for entry in fs::read_dir(source).unwrap() {
+        let entry = entry.unwrap();
+        let destination = target.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_fixture(&entry.path(), &destination);
+        } else {
+            fs::copy(entry.path(), destination).unwrap();
+        }
+    }
+}
+
 fn normalize_prompt(prompt: &str, repo: &Path) -> String {
     prompt
         .replace("\r\n", "\n")
@@ -57,25 +70,21 @@ fn golden_prompts_match() {
     std::env::remove_var("LF_WAVE_ID");
     std::env::set_var("LF_USER_NAME", "Fixture Participant");
 
+    let home = tempfile::tempdir().unwrap();
+    std::env::set_var("LF_HOME", home.path());
+
     let root = repo_root();
+    let store =
+        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
     for case_path in load_cases() {
         let yaml = fs::read_to_string(&case_path).expect("read golden yaml");
         let case: GoldenCase = serde_yaml_ng::from_str(&yaml).expect("parse golden yaml");
 
-        let repo = root.join(&case.repo);
-        // These fixture folders are independent repositories for prompt purposes.
-        // Git must not discover the enclosing Loopflow checkout as their owner.
-        std::env::set_var(
-            "GIT_CEILING_DIRECTORIES",
-            repo.parent().unwrap().canonicalize().unwrap(),
-        );
+        let fixture = tempfile::tempdir().unwrap();
+        let repo = fixture.path().canonicalize().unwrap();
+        copy_fixture(&root.join(&case.repo), &repo);
         if let Some(wave) = &case.wave {
-            loopflow::store::sqlite::SqliteStore::new(
-                &loopflow::store::database_path_from_env().unwrap(),
-            )
-            .unwrap()
-            .ensure_wave(repo.canonicalize().unwrap().to_str().unwrap(), wave)
-            .unwrap();
+            store.ensure_wave(repo.to_str().unwrap(), wave).unwrap();
         }
         let opts = GatherContextOpts {
             repo_root: repo.clone(),

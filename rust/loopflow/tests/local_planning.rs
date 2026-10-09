@@ -93,7 +93,7 @@ fn stored_task_publishes_and_completes_after_verified_merge() {
     );
     let published = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
     assert_ne!(published["execution"]["status"], "done");
-    lf(worktree, home.path(), &["land", "-c"]);
+    lf(worktree, home.path(), &["land"]);
     let armed = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
     assert_ne!(armed["execution"]["status"], "done");
     assert!(home.path().join("gh-armed").exists());
@@ -107,6 +107,21 @@ fn stored_task_publishes_and_completes_after_verified_merge() {
         .success());
     std::fs::write(home.path().join("gh-merged"), "confirmed").unwrap();
     lf(repo.path(), home.path(), &["pr", "reconcile"]);
+    let merged = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
+    assert_ne!(merged["execution"]["status"], "done");
+    assert!(worktree.exists(), "retain checkout until follow-through");
+    lf(
+        repo.path(),
+        home.path(),
+        &[
+            "task",
+            "follow-up",
+            id,
+            "--none",
+            "No accepted remaining work",
+        ],
+    );
+    lf(repo.path(), home.path(), &["task", "complete", id]);
     let completed = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
     assert_eq!(completed["execution"]["status"], "done");
     assert_eq!(completed["execution"]["task_id"], id);
@@ -196,16 +211,13 @@ fn concurrent_creations_are_distinct_and_failed_checkout_retains_its_task() {
         &["task", "status", id.as_str(), "--json"],
     );
     assert_eq!(retained["execution"]["task_id"], id.as_str());
-    assert_eq!(retained["execution"]["prs"].as_array().unwrap().len(), 1);
+    assert!(retained["execution"]["pr"].is_null());
     let placed = lf(
         repo.path(),
         home.path(),
         &["checkout", id.as_str(), "--json"],
     );
-    assert_eq!(
-        placed["prs"][0]["id"],
-        retained["execution"]["prs"][0]["id"]
-    );
+    assert_eq!(placed["task_id"], retained["execution"]["task_id"]);
     assert_eq!(placed["worktree"], retained["execution"]["worktree"]);
     assert!(Path::new(placed["worktree"].as_str().unwrap()).is_dir());
     std::fs::remove_dir_all(placed["worktree"].as_str().unwrap()).unwrap();
@@ -395,7 +407,7 @@ fn public_local_plan_matches_desktop() {
     let actual: Value = serde_json::from_str(&canonical).unwrap();
     let expected: Value =
         serde_json::from_str(include_str!("../../../tests/fixtures/dto/local_task.json")).unwrap();
-    assert_eq!(actual, expected);
+    assert_eq!(actual, expected, "actual wire: {actual}");
     serde_json::from_value::<loopflow::lf::commands::waves::RoadmapTask>(actual["task"].clone())
         .unwrap();
     serde_json::from_value::<loopflow::ops::pm::TaskComments>(actual["comments"].clone()).unwrap();
@@ -607,6 +619,7 @@ fn public_task_prefixes_resolve_and_report_ambiguity() {
     for (id, title) in [(first, "First"), (second, "Second")] {
         store
             .create_task(&loopflow::planning::NewTask {
+                due_date: None,
                 id: loopflow::durable::TaskId::parse(id).unwrap(),
                 project_id: loopflow::durable::ProjectId::parse(&project).unwrap(),
                 title: title.into(),
@@ -717,7 +730,7 @@ fn public_local_planning_survives_restart_with_generated_identity() {
     assert_eq!(status["execution"]["task_id"], identity.as_str());
     assert!(status["execution"]["issue_id"].is_null());
     assert!(status["execution"]["worktree"].is_null());
-    assert!(status["execution"]["prs"].as_array().unwrap().is_empty());
+    assert!(status["execution"]["pr"].is_null());
     assert!(status["planning_error"].is_null());
     let wave = lf(
         repo.path(),
@@ -948,7 +961,7 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
     );
     let worktree = placed["worktree"].as_str().unwrap();
     assert_eq!(placed["task_id"], id);
-    assert!(placed["prs"][0]["branch"]
+    assert!(placed["branch"]
         .as_str()
         .unwrap()
         .starts_with(&format!("lf/{}/", id.trim_start_matches("task_"))));
@@ -958,19 +971,15 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
     assert_eq!(status["execution"]["task_id"], id);
     assert!(status["planning_error"].is_null());
     assert!(status["execution"]["work"]["workflow"].is_object());
-    let landing = command(
-        Path::new(worktree),
-        home.path(),
-        &["--task", id, "land", "-c"],
-    )
-    .output()
-    .unwrap();
+    let landing = command(Path::new(worktree), home.path(), &["--task", id, "land"])
+        .output()
+        .unwrap();
     assert!(!landing.status.success());
     let error = String::from_utf8_lossy(&landing.stderr);
     assert!(error.contains("remote"), "{error}");
     let retained = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
     assert_eq!(retained["execution"]["status"], "active");
-    assert!(retained["execution"]["prs"][0]["merge_commit"].is_null());
+    assert!(retained["execution"]["pr"].is_null());
     let backlog = lf(
         repo.path(),
         home.path(),
@@ -1879,6 +1888,7 @@ fn rotation_saves_membership_and_pending_effects_offline() {
         }
         let active = store
             .create_task(&NewTask {
+                due_date: None,
                 id: TaskId::new(),
                 project_id: project.id.clone(),
                 title: "Started work".into(),
@@ -1887,6 +1897,7 @@ fn rotation_saves_membership_and_pending_effects_offline() {
             .unwrap();
         let backlog = store
             .create_task(&NewTask {
+                due_date: None,
                 id: TaskId::new(),
                 project_id: project.id.clone(),
                 title: "Unreviewed backlog".into(),
@@ -2161,6 +2172,7 @@ fn refiling_saves_membership_offline_and_retains_inbound_changes() {
         }
         let task = store
             .create_task(&NewTask {
+                due_date: None,
                 id: TaskId::new(),
                 project_id: projects[0].id.clone(),
                 title: "Refile me".into(),
@@ -2590,7 +2602,7 @@ fn ordinary_task_creation_returns_saved_identity_without_a_public_retry_token() 
     let status = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
     assert_eq!(status["execution"]["task_id"], id);
     assert!(status["execution"]["worktree"].is_null());
-    assert!(status["execution"]["prs"].as_array().unwrap().is_empty());
+    assert!(status["execution"]["pr"].is_null());
 }
 
 #[test]

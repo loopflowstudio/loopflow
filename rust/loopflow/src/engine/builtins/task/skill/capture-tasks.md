@@ -15,7 +15,11 @@ real uncertainty. Preserve ambition; a technical design is not a filing requirem
 Favor larger, cohesive Tasks with clear behavioral promises and benefits. Choose
 boundaries thoughtfully: useful pipelining or parallelism can justify a split,
 but neither is a fragmentation rule. Keep speculative implementation steps inside
-the Task or its design. Several Tasks are supported, never a quota.
+the Task or its design. A Task delivers zero or one PR. A recommendation may
+need no PR; independently deliverable PRs need separate Tasks, stacked where
+dependent. Several Tasks are supported, never a quota. Later proof of an accepted
+outcome belongs to a follow-up Task filed after merge through `lf task follow-up`;
+read `lf help follow-through` for that path, including retry receipts.
 
 ## Resolve ownership
 
@@ -43,6 +47,10 @@ decisions. Separate accepted choices from possible mechanisms. Attribute request
 and decisions using people's known names; leave unknown attribution unresolved.
 Keep implementation sequencing in a design when one exists, but include essential
 intent in the Task itself. A transcript or path in another checkout is insufficient.
+For dependent Tasks, prepare a self-contained child-specific design excerpt with
+its own scope and acceptance; never copy a common plan and toggle “current slice.”
+The later operator transfers it with `lf checkout <child> --stack-on <parent>
+--design <path>` before launch. Capture itself still launches no work.
 
 From the destination repository, file with `lf task create --wave <owner>` without
 `--run`. Supply the title and complete brief through `--title` and stdin or

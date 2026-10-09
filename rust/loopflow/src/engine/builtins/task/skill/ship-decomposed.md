@@ -60,18 +60,32 @@ as one PR; one large honest PR beats an artificially staged series.
 
 1. Order the slices foundation-first and name each one—the branch name
    becomes the PR title prefix.
-2. Build each slice as its own branch: independent slices branch from main;
-   dependent slices stack on the previous slice's branch and sync forward
-   as predecessors land.
-3. Move work with git—`git cherry-pick` for clean commits,
-   `git checkout -p <big-branch> -- <paths>` to carve hunks out of mixed
-   ones. Don't rewrite code by hand that already exists on the big branch.
-4. Give each slice a short `scratch/<branch>.md`: what this slice ships, what
-   it deliberately leaves dead, and its done-when.
+2. Give every independently deliverable PR its own Task. A Task has zero or
+   one PR, never a serial chain. Reuse existing Tasks for matching scope;
+   preserve the original Task's intended outcome when assigning its slice.
+   Independent Tasks start from main; dependent Tasks stack on their parent.
+   A published parent PR, including a draft, is enough to start and publish a
+   child before the parent merges; only landing waits for that dependency.
+3. Preserve the original change with `lf commit` before moving work. Use
+   Loopflow for checkout and Git mutations; transfer the existing code into
+   each slice without rewriting it or losing mixed hunks. Keep the source
+   available until every intended change is accounted for.
+4. Prepare each child's self-contained design excerpt: its own brief, accepted
+   scope, dependencies and done-when. Transfer it before launching with
+   `lf checkout <child> --stack-on <parent> --design <path>`. The command records
+   source identity and content and preserves newer child work. Retry identical
+   input; a changed handoff at an occupied destination is a conflict to reconcile,
+   never permission to overwrite. Do not copy a whole plan and toggle a current
+   slice marker. Later parent scratch does not replace the child's working design.
 5. Verify each slice standalone—build and affected tests on that branch, not
    on the union.
-6. Land the series with the PR lifecycle: `lf pr publish` for headless
-   creation, then `lf land` to request auto-merge. Confirm GitHub reports merged
-   before the next slice syncs and repeats.
-   Once the series is fully landed, retire the original big branch
-   (`lf pr abandon` if it had a PR, otherwise delete it).
+6. Publish each child with `lf pr publish` without waiting for its parent to
+   merge. Use `lf sync` for parent code updates and after its squash merge;
+   the child retains its Task, branch, PR, Session and design while targeting main.
+   Land authorized work through `ship`: gate, waited landing, then follow-through.
+   Preserve accepted unverified outcomes in PR copy before scratch cleanup.
+   After authoritative merge, file linked follow-ups or record none needed, then
+   confirm completion. If finishing stopped, inspect live work and receipts before
+   running `finish-delivery`; never re-land merely to finish filing.
+   Retire a superseded original PR only after its code and intended outcome have
+   owners and the caller's authority covers abandonment; preserve unrelated work.

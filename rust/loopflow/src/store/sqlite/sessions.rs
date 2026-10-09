@@ -1,5 +1,6 @@
 //! Session transactions share the invocation's SQLite transaction and fences.
 
+use crate::id::AgentSessionId;
 use std::fs::File;
 
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
@@ -447,7 +448,10 @@ impl SqliteStore {
     }
 
     /// Sessions that recorded `thread` as their provider's own conversation id.
-    pub(crate) fn sessions_for_provider_thread(&self, thread: &str) -> StoreResult<Vec<String>> {
+    pub(crate) fn sessions_for_agent_session(
+        &self,
+        thread: &AgentSessionId,
+    ) -> StoreResult<Vec<String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(
             "SELECT id FROM agent_sessions WHERE provider_thread=?1
@@ -631,7 +635,7 @@ impl SqliteStore {
                         row.get::<_, Option<bool>>(15)?.unwrap_or(false),
                         row.get::<_, Option<String>>(16)?,
                         row.get::<_, Option<i64>>(17)?,
-                        row.get::<_, Option<String>>(18)?,
+                        row.get::<_, Option<AgentSessionId>>(18)?,
                         row.get::<_, Option<String>>(19)?,
                     ))
                 },
@@ -706,7 +710,7 @@ impl SqliteStore {
                         None => self.orphaned_native_history(
                             &session_id,
                             scope,
-                            thread.as_deref(),
+                            thread.as_ref(),
                             turn.as_deref(),
                         )?,
                     };

@@ -227,14 +227,14 @@ struct RegistryQueryTests {
           "name": "Wire it",
           "description": "",
           "rank": 1,
-          "completed": false, "state": "unstarted", "completed_at": null,
+          "completed": false, "state": "unstarted", "completed_at": null, "due_date": null, "follow_up_sources": [],
           "assignee": null
         },
         "reference": {
           "issue_url": "https://linear.app/loopflow/issue/INF-123/wire-it",
           "workspace": {
             "slug": "wire-it",
-            "branch": "jack/inf-123",
+            "branch": "jack/inf-123", "base_commit": "fixture-base",
             "worktree": "/task-wt"
           }
         },
@@ -247,7 +247,7 @@ struct RegistryQueryTests {
           "started": true
         },
         "directive": null,
-        "workflow_name":"feature","latest_flow_process":null,"execution":null,"run_control":{"unavailable":null},
+        "workflow_name":"feature","latest_flow_process":null,"execution":null,"run_control":{"unavailable":null}, "follow_through": {"intents":[],"links":[],"reason":null,"needs_conversion":false,"scope_notes":[]},
         "next_move": {
           "owner": "task",
           "reason": "ready"
@@ -271,8 +271,7 @@ struct RegistryQueryTests {
           "recommended": "resume",
           "reason": "resume the parked Task"
         },
-        "prs": [],
-        "active_pr": null
+        "pr": null
       }
     ],
     "truncated": false

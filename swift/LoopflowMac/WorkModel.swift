@@ -1231,7 +1231,7 @@ final class WorkModel {
 
     /// Put the Task at a node of its Workflow, then refresh the shared
     /// reading. A refusal is kept on that Task's draft.
-    func moveTask(to node: String, force: Bool = false, task: RoadmapTask, wave: WaveSnapshot) async {
+    func moveTask(to node: String, task: RoadmapTask, wave: WaveSnapshot) async {
         let owner = navigation
         let taskId = task.id
         guard owner.taskRunDrafts[taskId]?.acting != true else { return }
@@ -1239,7 +1239,23 @@ final class WorkModel {
         owner.taskRunDrafts[taskId]?.error = nil
         do {
             try await query.moveTask(
-                issue: task.task.identifier, node: node, force: force, cwd: WaveOrigin.resolve(wave.repo))
+                issue: task.task.identifier, node: node, cwd: WaveOrigin.resolve(wave.repo))
+            owner.taskRunDrafts[taskId] = nil
+            await refresh()
+        } catch {
+            owner.taskRunDrafts[taskId]?.acting = false
+            owner.taskRunDrafts[taskId]?.error = error.localizedDescription
+        }
+    }
+
+    func completeTask(_ task: RoadmapTask, wave: WaveSnapshot) async {
+        let owner = navigation
+        let taskId = task.id
+        guard owner.taskRunDrafts[taskId]?.acting != true else { return }
+        owner.taskRunDrafts[taskId, default: TaskRunDraft()].acting = true
+        owner.taskRunDrafts[taskId]?.error = nil
+        do {
+            try await query.completeTask(issue: task.task.identifier, cwd: WaveOrigin.resolve(wave.repo))
             owner.taskRunDrafts[taskId] = nil
             await refresh()
         } catch {

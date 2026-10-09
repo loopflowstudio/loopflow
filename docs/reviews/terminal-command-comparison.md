@@ -74,7 +74,9 @@ installed help or reviewed Desktop code, not proof that no external tool exists.
   removes dormant Session-list cleanup. Membership moves prune panes/Undo without
   releasing surfaces or touching another Machine's same-ID Session. Focused fixtures
   typecheck; native exited/replaced-surface reads remain unproved. `3321ff419` adds
-  a local Ghostty patch for caller-bounded extraction, with terminal-only Linux proof. The framework remains unbuilt/unpublished;
+  a local Ghostty patch for caller-bounded extraction. `d30198ccb` records Linux
+  formatter tests and embedded C compilation/export, not native surface reads.
+  The framework remains unbuilt/unpublished;
   packaged lf2 still allocates the full result. Swift truncation is no fallback.
   Terminal reads/input, peer composition and native acceptance remain unfinished. The command tables still describe October 7's baseline.
   No cmux/herdr behavior was re-exercised for these deltas.

@@ -44,8 +44,7 @@ failed on an unbound Initiative.
 [LOO-427's comparison](../../docs/reviews/terminal-command-comparison.md) records
 command dispositions. Jack corrected scope: identity, repository-window control
 and terminal I/O belong in one LOO-427 diff, with internal slices; premature
-LOO-430/431/432 are folded back. Jack authorized implementation through demo
-review and approved the design October 8. Owned cmux probe: arrangement, output and retained draft; cleaned up. No Desktop parity proof.
+LOO-430/431/432 are folded back. Jack approved the design and implementation through demo review October 8. Owned cmux probe: arrangement, output, retained draft; cleaned up. No Desktop proof.
 
 October 8: LOO-427 leaves unknown checkout location unavailable. `92cafe61d`
 removes copied placements, preserves legacy overrides and routes known Tasks
@@ -56,13 +55,14 @@ must not synchronize. Seeded IDs prove routing, not exchange/admission.
 LOO-427 keys windows/queues by plan, fencing cancellation. Task/Session actions
 stay separate; saved/failed reads grant none. Session time is unknown. Move retains
 leaves/commands/surfaces; Undo renews closed tokens. Zoom grants no focus.
-`caa48b5c1` publishes command/focus/Undo together; companions preserve selection.
-Lost replies grant no replay; view tokens grant no input. `13cf98bf5` qualifies
-terminals/readings by Machine; `6fec74d2d` prunes membership moves without releasing
-surfaces. Filtered absence proves no deletion; same-ID peers stay separate.
-Inspection uses ProgramStatusSurface's lifetime without allocation/cleanup.
-`3321ff419` bounds Ghostty extraction; Linux tests pass, framework unbuilt/unpublished.
-Swift truncation cannot bound C allocation; empty differs from unavailable.
+Insertion publishes command/focus/Undo together; companions preserve selection.
+Lost replies grant no replay; view tokens grant no input. Machine-qualified
+terminals/readings preserve same-ID peers. `c502cad37` batches membership pruning
+without releasing surfaces; filtered absence proves no deletion. Inspection uses
+ProgramStatusSurface's lifetime without allocation/cleanup.
+`3321ff419` bounds extraction: Linux formatter tests and embedded C compilation
+pass, not native surface reads. Framework unbuilt/unpublished; Desktop still pins
+lf2. Swift truncation cannot bound C allocation; empty differs from unavailable.
 Text I/O, peer composition and packaged/native proof remain.
 
 Jack selected local planning/Git sync: 406 owns writes/Linear, 412 exchange.
@@ -72,15 +72,16 @@ edits, semi-live comments/completion, causal reopening and mutation IDs.
 
 Jack selected user-keyed Git plans by default, explicit shared opt-in, Linear wins;
 otherwise host preference then last-write-wins with recoverable edits. Code remotes
-grant neither identity nor publication permission. LOO-412 at `ce740b028` remains
+grant neither identity nor publication permission. LOO-412 at `270019c8d` remains
 unintegrated: joins select/publish nothing; Wave selection inherits to descendants.
-Multiple destinations in one repository must not split its Desktop window.
-Private-ancestry holds retain journals/dependents without undoing local moves;
+Multiple destinations must not split the repository window.
+Private-ancestry holds retain journals/dependents and local moves;
 peers keep old values, so omission is not convergence.
 
-Mixed Linear/Git stays disabled pending composition, not by policy. Cache rejection
-cannot preserve fields projected before acquisition. Receipts, acquisition/refusal
-and Desktop remain unproved. Precedence solves neither Linear's race nor start admission.
+Mixed Linear/Git stays disabled pending composition. `270019c8d` acquires before
+projection, rolls rejected objects back and retains typed conflicts independently;
+malformed imports abort. Regressions remain unexecuted. Grouped receipts, alternate
+acquisition and Desktop remain; precedence solves neither Linear's race nor start admission.
 
 ## Terminal-host adoption (2026-10-07)
 
@@ -438,8 +439,7 @@ Converted Ask history follows ordinary conversation rules; its former kind alone
 creates no attention obligation. Conversion itself never completes a Session.
 Later confirmed owning-driver exits can retire unassigned, non-primary
 conversations; Task/Wave conversations and Flow reviews remain open. Missing
-process evidence grants neither retirement nor Flow settlement. This is source
-inspection, not full Desktop acceptance.
+process evidence grants neither retirement nor Flow settlement. Full Desktop acceptance remains unproved.
 
 ## Task workspace and primary Sessions (updated 2026-10-01)
 

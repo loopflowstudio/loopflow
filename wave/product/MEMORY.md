@@ -65,22 +65,22 @@ Inspection uses ProgramStatusSurface's lifetime without allocation/cleanup.
 Swift truncation cannot bound C allocation; empty differs from unavailable.
 Text I/O, peer composition and packaged/native proof remain.
 
-Jack selected local operations and Git-ref Task sync: 406 owns writes/Linear,
-412 exchange. Imported completion cannot move local Workflow or clean execution.
-Preserve pending edits, semi-live comments/completion, causal reopening and mutation
-IDs. `29777b8cb` keeps Desktop Linear sync repository-scoped: selecting
-a Task is presentation, not sync lifetime. Composed reconnect remains unproved.
-412's unintegrated `7395cf3bb` pins destinations, starts joins empty and selects
-records; descendants inherit selection. Checkpoints can retain conflicts.
+Jack selected local planning/Git sync: 406 owns writes/Linear, 412 exchange.
+Imported completion cannot move Workflow or clean execution. Preserve pending
+edits, semi-live comments/completion, causal reopening and mutation IDs.
+`29777b8cb` scopes Desktop Linear sync to repository, not selected Task. Composed reconnect remains unproved.
 
-Jack selected user-keyed Git plans by default, explicit shared opt-in through the
-same APIs, Linear conflict wins; otherwise host preference then last-write-wins
-with recoverable edits (`f027890ab:wave/infrastructure/MEMORY.md`). A code remote
-grants neither shared identity nor publication permission.
-Private-ancestry moves hold journals/dependents, including losing references,
-without undoing local moves. Peers retain old values: holds are not convergence.
-Setup/exchange, 427 integration and Rust proof remain. Precedence fixes neither
-Linear's race nor start admission.
+Jack selected user-keyed Git plans by default, explicit shared opt-in, Linear wins;
+otherwise host preference then last-write-wins with recoverable edits. Code remotes
+grant neither identity nor publication permission. LOO-412 at `ce740b028` remains
+unintegrated: joins select/publish nothing; Wave selection inherits to descendants.
+Multiple destinations in one repository must not split its Desktop window.
+Private-ancestry holds retain journals/dependents without undoing local moves;
+peers keep old values, so omission is not convergence.
+
+Mixed Linear/Git stays disabled pending composition, not by policy. Cache rejection
+cannot preserve fields projected before acquisition. Receipts, acquisition/refusal
+and Desktop remain unproved. Precedence solves neither Linear's race nor start admission.
 
 ## Terminal-host adoption (2026-10-07)
 

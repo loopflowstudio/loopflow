@@ -95,12 +95,17 @@ resolved-disposition guards remain. The same check preserves cancellation,
 abandonment, deletion and planning-ownership refusals. This implements Jack's
 independent completion contract; it supplies no new execution or scope approval.
 
-Context limit (2026-10-08): the omitted launch inventory was read from
-`.lf/tmp/context/c7bbdff190d5c85ea8677e348a4af1eec82ac3ac21cfbb6ee62d18b14b277a6f.md`.
-`lf context --skill realign` reports generated Task/PR launch inventory over
-16,000 tokens; shrinking authored scratch or memory cannot fix that source.
-Its historical serial-PR boilerplate also conflicts with this branch's accepted
-contract. No Task directive, generated snapshot or limit was changed to hide
-either conflict. Product has no child memories here. The October 9 gate sample is about 18,535/16,000 tokens; inventory hashes
-change that count between edits. The launch overage remains a context-assembly gap, not a reason to delete
-accepted decisions or weaken the Task brief.
+Earlier generated launch inventory exceeded its 16,000-token limit; no Task
+directive or limit was changed to conceal it. The full observation and source
+paths remain at `980d4e9dd:scratch/questions.md`, “Context limit.”
+
+Sync resolution (2026-10-09): main's repository-wide planning synchronization and
+structured sync projection coexist with independent completion, due follow-ups
+and one optional PR. Runtime `pending_sync` is replaced by planning's structured
+receipt; completion pending remains separate. Main's repository-based export
+signature also applies to follow-through relations. No provider writer or
+Workflow/completion alias was restored. The merge is recorded; follow-up local
+checkpoints retain integration repairs. Push remains with the original sync caller; publication and landing are outside
+this conflict-resolution boundary.
+
+Check: Docker `cargo test -p loopflow --lib ops::task::follow_through::tests::lifecycle::merged_follow_up_completion_and_arrival_share_cli_monitor_and_desktop_evidence -- --exact --test-threads=1` passed (1 test), after repairing the repository-export compile error; broader gate and Swift remain deferred.

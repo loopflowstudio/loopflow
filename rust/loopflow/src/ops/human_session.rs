@@ -432,28 +432,22 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
     };
     let mut unavailable = None;
     // Sessions run where this registry recorded them; no read places one elsewhere.
-    let remote: Option<&crate::durable::MachineId> = None;
-    let clients = if remote.is_none() && unavailable.is_none() {
-        match (&session.provider, local_capture_dir(&session.artifact_key)) {
-            (Some(provider), Some(dir)) => {
-                match crate::lf::commands::util::active_provider_clients(&dir, provider) {
-                    Ok(clients) => clients,
-                    Err(error) => {
-                        unavailable =
-                            Some(format!("Session client observation unavailable: {error}"));
-                        Vec::new()
-                    }
+    let clients = match (&session.provider, local_capture_dir(&session.artifact_key)) {
+        (Some(provider), Some(dir)) => {
+            match crate::lf::commands::util::active_provider_clients(&dir, provider) {
+                Ok(clients) => clients,
+                Err(error) => {
+                    unavailable = Some(format!("Session client observation unavailable: {error}"));
+                    Vec::new()
                 }
             }
-            _ => Vec::new(),
         }
-    } else {
-        Vec::new()
+        _ => Vec::new(),
     };
     let state = session_state(session, !clients.is_empty());
     let mut actions = session_actions(state);
     let open_argv = if unavailable.is_none() {
-        match human_open_argv(remote, &session.id) {
+        match human_open_argv(&session.id) {
             Ok(argv) => argv,
             Err(error) => {
                 unavailable = Some(format!("Session connection unavailable: {error}"));
@@ -477,12 +471,7 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
         task_primary: session.task_primary,
         task_ids: session.task_ids.clone(),
         id: session.id.clone(),
-        workspace: remote.map(|home| SessionWorkspace {
-            machine_id: home.clone(),
-            worktree: session.cwd.clone(),
-            task_id: session.task_id.clone(),
-            unavailable: Some("Checkout resolution is unavailable on this remote Machine".into()),
-        }),
+        workspace: None, // workspace::associate owns checkout location.
         interactive: session.interactive,
         work,
         wave_id: session.wave_id.clone(),
@@ -909,13 +898,10 @@ async fn surface(store: &SharedStore, session: &AgentSession) -> Result<SessionR
         (None, Some(wave)) => Some(WorkRef::Wave(wave.clone())),
         (None, None) => None,
     };
-    let remote: Option<crate::durable::MachineId> = None;
     let dir = local_capture_dir(&session.artifact_key)
         .ok_or_else(|| anyhow!("Session {} has an invalid Run reference", session.id))?;
     let clients = match &session.provider {
-        Some(provider) if remote.is_none() => {
-            crate::lf::commands::util::active_provider_clients(&dir, provider)?
-        }
+        Some(provider) => crate::lf::commands::util::active_provider_clients(&dir, provider)?,
         _ => Vec::new(),
     };
     let metadata = store
@@ -952,12 +938,7 @@ async fn surface(store: &SharedStore, session: &AgentSession) -> Result<SessionR
         task_primary: metadata.task_primary,
         task_ids: store.sqlite.session_task_ids(&session.id)?,
         id: session.id.clone(),
-        workspace: remote.as_ref().map(|home| SessionWorkspace {
-            machine_id: home.clone(),
-            worktree: session.cwd.clone(),
-            task_id: session.task_id.clone(),
-            unavailable: Some("Checkout resolution is unavailable on this remote Machine".into()),
-        }),
+        workspace: None, // workspace::associate owns checkout location.
         interactive: session.interactive,
         wave_id: session.wave_id.clone(),
         work_path: session_work_path(store, session).await?,
@@ -978,7 +959,7 @@ async fn surface(store: &SharedStore, session: &AgentSession) -> Result<SessionR
             .into_iter()
             .filter_map(|client| client.terminal_id)
             .collect(),
-        open_argv: human_open_argv(remote.as_ref(), &session.id)?,
+        open_argv: human_open_argv(&session.id)?,
     };
     workspace::associate(store, std::slice::from_mut(&mut reading)).await?;
     Ok(reading)
@@ -1212,26 +1193,20 @@ pub(crate) fn resume_native_session(
     Ok(true)
 }
 
-pub(crate) fn human_open_argv(
-    remote_machine: Option<&crate::durable::MachineId>,
-    id: &str,
-) -> Result<Vec<String>> {
+fn human_open_argv(id: &str) -> Result<Vec<String>> {
     let context = crate::engine::process::execution_context()?;
     // A fresh terminal does not inherit the listing process's data selection.
     // Carry the executable and its data together, including when a different
     // installation becomes current between listing and opening.
-    let mut argv = vec![
+    Ok(vec![
         "/usr/bin/env".to_string(),
         format!("LF_BIN={}", context.lf_bin.display()),
         format!("LF_HOME={}", context.lf_home.display()),
         context.lf_bin.display().to_string(),
-    ];
-    if let Some(machine_id) = remote_machine {
-        argv.push("--machine".to_string());
-        argv.push(machine_id.to_string());
-    }
-    argv.extend(["session".to_string(), "connect".to_string(), id.to_string()]);
-    Ok(argv)
+        "session".to_string(),
+        "connect".to_string(),
+        id.to_string(),
+    ])
 }
 
 const PRIMARY_MESSAGE: &str = "<lf:primary-session>\nThis is the one ongoing primary conversation of its repository, Wave or Task. Reconcile current evidence, then work with the user.\n</lf:primary-session>";
@@ -1863,7 +1838,7 @@ mod tests {
     fn human_sessions_open_through_the_public_session_command() {
         let _lock = crate::journal::test_env_lock();
         let home = SessionHome::new();
-        let argv = human_open_argv(None, "session_123").unwrap();
+        let argv = human_open_argv("session_123").unwrap();
 
         assert_eq!(
             &argv[argv.len() - 3..],

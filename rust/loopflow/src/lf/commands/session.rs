@@ -45,7 +45,7 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
                 id.as_deref(),
             )
             .await?;
-            open(&id, false, OpenMode::Refuse).await
+            open(&store, &id, false, OpenMode::Refuse).await
         }
         SessionCommand::History {
             id,
@@ -116,8 +116,8 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             replace,
             try_open,
         } => {
-            let mode = OpenMode::from_flags(*replace, *try_open);
-            open(id, *json, mode).await
+            let store = open_shared_store().await?;
+            open(&store, id, *json, OpenMode::from_flags(*replace, *try_open)).await
         }
         SessionCommand::Ensure {
             wave,
@@ -246,9 +246,13 @@ async fn list(
     Ok(())
 }
 
-async fn open(id: &str, json: bool, mode: OpenMode) -> anyhow::Result<()> {
-    let store = open_shared_store().await?;
-    let session = crate::ops::human_session::open(&store, id, mode, !json).await?;
+async fn open(
+    store: &crate::store::SharedStore,
+    id: &str,
+    json: bool,
+    mode: OpenMode,
+) -> anyhow::Result<()> {
+    let session = crate::ops::human_session::open(store, id, mode, !json).await?;
     if json {
         println!("{}", serde_json::to_string_pretty(&session)?);
     }

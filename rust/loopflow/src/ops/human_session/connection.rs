@@ -204,13 +204,19 @@ async fn read_connection(
                 .into(),
         );
     }
-    let surface = super::surface(store, &session).await?;
-    report.state = Some(surface.state);
-    report.actions = surface.actions;
+    // Explanation needs no launch argv or UI workspace projection. Read clients
+    // once so state, legal actions and refusal describe the same observation.
+    let active = !native.clients()?.is_empty();
+    let metadata = store
+        .sqlite
+        .session_summary(&session.id, report.resolution.observed_at)?
+        .ok_or_else(|| super::session_not_found(&session.id))?;
+    let state = super::session_state(&metadata, active);
+    report.state = Some(state);
+    report.actions = super::session_actions(state);
     // The live Codex connection precedes the native-client refusal in ordinary open.
     // With no socket observation, report the native fallback's refusal conditionally.
     if provider.is_some() {
-        let active = !native.clients()?.is_empty();
         if let Err(error) = mode.require_action(active) {
             if intent == SessionConnectIntent::ConnectOrResume {
                 report

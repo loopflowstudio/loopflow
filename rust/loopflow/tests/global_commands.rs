@@ -1479,6 +1479,22 @@ fn session_connect_explain_shares_explicit_native_and_inferred_selection_without
     assert_eq!(explicit["action"]["prepare_only"], true);
     assert_eq!(inferred["action"]["prepare_only"], false);
     assert!(explicit["impediments"].as_array().unwrap().is_empty());
+    // Explaining client state does not prepare launch argv or require a usable
+    // child executable. Actual opening still owns that launch validation.
+    let missing_bin: serde_json::Value = serde_json::from_str(&success(
+        command(
+            home.path(),
+            repo.path(),
+            &["session", "connect", &session.id, "--explain", "--json"],
+        )
+        .env("LF_BIN", home.path().join("missing-lf"))
+        .output()
+        .unwrap(),
+    ))
+    .unwrap();
+    assert_eq!(missing_bin["state"], explicit["state"]);
+    assert_eq!(missing_bin["actions"], explicit["actions"]);
+    assert_eq!(missing_bin["unavailable"], explicit["unavailable"]);
     let replace = read(&[
         "session",
         "connect",

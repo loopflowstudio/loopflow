@@ -116,6 +116,7 @@ impl WorkspaceResolver {
 }
 
 pub(super) async fn associate(store: &SharedStore, sessions: &mut [SessionRecord]) -> Result<()> {
+    // Both callers supply local registry Sessions without workspace projections.
     // A failed snapshot propagates: callers must retain their last good inventory.
     let checkouts = store.task_checkouts().await?;
     let home = store.local_machine().await?.id;
@@ -130,13 +131,6 @@ pub(super) async fn associate(store: &SharedStore, sessions: &mut [SessionRecord
                 unavailable: (!cwd.exists()).then(|| "Persistent checkout is unavailable".into()),
             });
             session.task_ids.clear();
-            continue;
-        }
-        if session
-            .workspace
-            .as_ref()
-            .is_some_and(|workspace| workspace.machine_id != home)
-        {
             continue;
         }
         session.workspace = resolver.resolve(Path::new(&session.cwd), session.work.as_ref());

@@ -363,3 +363,8 @@ Applied to `x6`. Each Flow in the diagram shows its real YAML under a
 centred name; the three arrows share one line. The list now runs: native Mac
 terminal, Skills, the process, Workflows, organized around the work, Sessions
 belong to the work, waiting on you, side by side.
+
+Jack Heart on the diagram's counts: "1 waiting on two steps at once is off.
+needs a current state too", then "oh thats for the project nevermind. just
+atke off the live staet". The diagram in `x6` is the Project's workflow with
+no counts and no current position. Each Task row still names where it is.

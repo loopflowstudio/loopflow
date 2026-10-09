@@ -177,11 +177,16 @@ and retained conflicts are not convergence.
 
 ## Remaining integration — October 9
 
-Current checkpoint: `ffbe0ad42`, integrating parent `cbf0a174a` (LOO-406).
-The conflict-free sync adds terminal-Task guidance ordering, prompt-fixture repository
-isolation and testing guidance; it does not complete peer composition. Prior focused
-proof at `19f0a4b6d` remains evidence for its source, not acceptance of this combined
-candidate. Task admission and cold-worker behavior remain in gate's affected checks.
+Current checkpoint: `eeb98aa89`, integrating parent `a4678d242` (LOO-406).
+`88cd47572` implements prepared creation/link transport and Project readback;
+`b21429d9b` simplifies capture and records 49 peer-storage plus four export tests.
+This supersedes the prior feedback's request to implement that storage boundary.
+The final conflict-free sync changes dependencies only: shlex 2.0.1, libc 0.2.190,
+uuid 1.27.0 and Python lock updates. Its combined candidate has no new executable
+proof; the pre-sync results are retained evidence, not an identical-tree gate pass.
+Task admission, cold-worker behavior and connected-provider recovery remain affected
+checks. The preceding `ffbe0ad42` sync supplied terminal-Task guidance and fixture
+isolation; neither sync completes peer composition.
 Destination-scoped status/conflicts (`de9470d5a`), common comment acquisition and
 receipts (`7e56c01fd`), and semantic Project content (`a518b985b`) are integrated.
 Their owners and preservation boundaries are described under **Delete — do not
@@ -196,10 +201,24 @@ a receipt after a mapping-only import. Entity readback does not clear an uncerta
 attachment without matching Initiative evidence, and later accepted moves remain
 legal. Import fabricates no local transition or execution.
 
-The next boundary is complete foreground creation composition: unprepared local-born
-records, mapped-but-unconfirmed receipt acquisition/status, and connected-provider
-recovery through public commands. Then ordering/deletion receipts and alternate
-provider/relationship acquisition remain, followed by legacy association and Desktop.
+The next boundary is foreground creation composition through the existing common
+owner, not another receipt transport:
+- Unprepared peer-born Tasks have no `task_creation_intents` row; imported Projects
+  have neither an export snapshot nor a local transition. `planning_export_owners`
+  therefore cannot discover them. Eligibility must follow portable planning without
+  fabricating rotation, selection, activation or execution.
+- `planning_export_owners` and `planning_sync.rs` exclude mapped records, and
+  `ops/planning_export.rs::sync_export` returns immediately when mapped. A peer
+  mapping can therefore hide an uncertain creation/link receipt and bypass its
+  recovery. Retained effect state must drive acquisition and status independently
+  of mapping; mapping alone is never acknowledgement or permission to repeat a write.
+- Public connected-provider fixtures must cover both cases, lost creation/link
+  responses, later saves, repeated readback and unchanged execution. The Project
+  storage fixture seeds mapping directly and imports accepted observations; it
+  does not exercise those foreground exits.
+These are substantial remaining implementation changes, not a check-only gap.
+Ordering/deletion receipts and alternate provider/relationship acquisition follow,
+then legacy association and Desktop.
 Mixed-provider exchange stays disabled until those owners compose. Existing mapping
 or an import checkpoint is never effect acknowledgement. These are implementation
 gaps, not a missing parent dependency or verification-only work. Publication still
@@ -465,7 +484,8 @@ provenance gap; revise it with the completed composition, not as a product limit
 ## Committed integration boundary — 2026-10-09
 
 Jack Heart requested stacking on LOO-406 and continuing pursue. Current stack
-`ffbe0ad42` integrates parent `cbf0a174a`; earlier `a6cb48664` integrated
+`eeb98aa89` integrates parent `a4678d242`; `ffbe0ad42` previously integrated
+`cbf0a174a`, and earlier `a6cb48664` integrated
 `7c626ca23`, preserving restored scratch checkpoint `1ad5e1267` and the retained
 stash. The October 9 sync changes no publication or landing authority. Earlier
 parent PR #1503's published base `b6f34a6f8b811d95f9fc843ac6592cc2262f2e26` is integrated,
@@ -493,9 +513,11 @@ and disposable remotes. Installed-release behavior remains separate. Release's c
 records a recovery path missed by lower-level fixtures and a successful failure
 report mistaken for operation success. The same lessons require public command
 coverage here, and status that distinguishes retained conflicts from convergence.
-Its GOAL.md and full MEMORY.md were reread on October 9; filesystem inspection
-found no other immediate Infrastructure child memory, including unregistered scopes.
-Those operation-entry and result-accounting lessons are already in parent memory.
+October 9 reconciliation reread Release's GOAL.md and full MEMORY.md; filesystem
+inspection found no other immediate Infrastructure child memory, including
+unregistered scopes. Its operation-entry lesson applies to creation recovery:
+storage readback cannot prove that mapped receipts reach foreground acquisition.
+Those operation-entry and result-accounting lessons remain in parent memory.
 
 1. Create/edit/comment/read from either machine through public commands. Replicate
    the same ID without placement from creation. Repeated deliveries create no
@@ -540,22 +562,19 @@ focused Project-content and public work-watch evidence remains at
 this heading. Public status/DTO, cold-worker and provider-lifetime execution remain
 with gate, alongside Desktop and mixed-provider acceptance.
 
-Recorded proof at `19f0a4b6d`: isolated/network-denied Linux peer-storage suite passed
-all 46 tests; all-target Clippy and fmt passed. The sync did not change that storage
-module. Public Task admission changed upstream, so these results do not establish
-combined cold-worker, provider-lifetime or mixed-provider acceptance.
+Pre-sync proof at `b21429d9b`: isolated/network-denied Linux peer-storage (49)
+and `planning_export_` (4), all-target Clippy and fmt passed. Earlier public
+sync-status proof is at `5ebcc877e:scratch/work-on-another-machine-name.md`,
+**Acceptance for review**; work-watch evidence remains above. These results do not
+establish the dependency-updated candidate, provider-lifetime, cold-worker or
+mixed-provider acceptance.
 
-Check (October 9 compress): `cargo fmt --all`, isolated/network-denied Linux `cargo clippy --offline --all-targets -- -D warnings`, `cargo test --offline -p loopflow --lib store::sqlite::planning_peers::tests` (49) and `cargo test --offline -p loopflow --lib planning_export_` (4), `git diff --check` and `lf context --skill compress` pass; gate owns broader connected-provider/Desktop acceptance. Prior implement/public sync-status proof: `5ebcc877e:scratch/work-on-another-machine-name.md`, this heading.
+Check (October 9 realign): `git diff --check` and `lf context --skill realign` pass; prose-only reconciliation, no product suites rerun; gate owns the combined candidate and connected-provider/Desktop acceptance.
 
-Prior SQL proofs and macOS startup samples remain at
-`e77d2d1c8:scratch/work-on-another-machine-name.md`. A fresh bounded attempt
-again stopped at `_dyld_start` before the build script, with a valid signature;
-this is not a diagnosed cause or a Rust failure. Disposable Linux compilation
-bypassed that environment boundary and exposed the defects repaired above.
-No installed binary, security setting, credential or host store changed.
-Historical Flow `93d4d4f6-4723-4027-951b-b3aee2e696a2` still retains realign
-step `e94edd38-2a26-4047-9650-41a65ab814f7` without a recorded exit, confirmed
-by `lf flow show --processes` on October 9. No exit or replacement authority is
-inferred. Its reconciliation checkpoint `e8ff4c7f6` remains preserved.
-
-Parent-sync timeout evidence remains at `a6cb48664:scratch/work-on-another-machine-name.md`; it supplies no test verdict. LOO-406's landing authorization does not extend LOO-412's review-only boundary.
+Earlier SQL proofs, macOS startup limitations and the retained historical Flow
+without a recorded exit remain at
+`eeb98aa89:scratch/work-on-another-machine-name.md`, **Acceptance for review**.
+No provider death, replacement authority or installed acceptance follows from those
+observations. Parent-sync timeout evidence remains at
+`a6cb48664:scratch/work-on-another-machine-name.md`; it supplies no test verdict.
+LOO-406's landing authorization does not extend LOO-412's review-only boundary.

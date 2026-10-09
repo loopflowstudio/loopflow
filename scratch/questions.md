@@ -5,7 +5,7 @@ Jack Heart's custom-ref steers supersede host callbacks. The
 deletion cut and remaining acceptance. Earlier callback assumptions are retained
 at `b040c7c8d:scratch/questions.md`.
 
-- LOO-406's common writer is integrated through pinned `cbf0a174a` at `ffbe0ad42`. Peer
+- LOO-406's common writer is integrated through pinned `a4678d242` at `eeb98aa89`. Peer
   import/export, ordering and local-only foreground composition exist in source;
   execution verification remains, independent of the parent's Linear delivery.
 - Jack Heart's newer policy: Linear wins observed conflicts; otherwise host
@@ -32,8 +32,9 @@ at `b040c7c8d:scratch/questions.md`.
 
 The integrated cut remains unpublished. The current design owns verification and
 remaining integration; earlier adoption evidence stays at `5d336868f:scratch/questions.md`.
-October 9's 46 passing peer-storage tests at `19f0a4b6d` cover the storage
-choices below; the later sync changed Task admission, not that storage module.
+October 9's 49 passing peer-storage tests at `b21429d9b` cover the storage
+choices below, including prepared creation/link effects. The later dependency-only
+sync has no new executable proof.
 Public/DTO, provider-lifetime, cold-worker, Desktop and mixed-provider acceptance
 remain separate. No new product decision is selected.
 
@@ -161,9 +162,10 @@ remain separate. No new product decision is selected.
   first; mapping alone neither acknowledges nor clears uncertainty. Review rejected
   freezing Project membership to its creation snapshot: later accepted moves must
   remain possible. Project/link readback therefore stays with its existing
-  owner pending full receipt composition. Creation/link attempt transport, independent
-  relationship ordering and mixed-provider activation remain unfinished; this cut
-  selects no new product policy.
+  owner pending full receipt composition. The later receipt-transport cut below
+  supersedes the missing-transport finding;
+  foreground creation, independent relationship ordering and mixed-provider
+  activation remain unfinished. No new product policy is selected.
 
 - October 9 receipt transport exposed an ownership error: importing Project export
   columns through `project_transitions` would fabricate a local rotation or its

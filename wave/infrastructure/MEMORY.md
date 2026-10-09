@@ -625,27 +625,29 @@ Jack Heart selected custom-ref sync under Plan ownership. Review-only; no landin
 or real public-remote planning export. Joining publishes nothing. Malformed input
 aborts import; contradictions isolate objects. Execution stays local.
 
-Common owners retain disposition, comments/authorship without steer/echo and semantic
-Project content. Prepared creation/link receipts now travel with captured save IDs, original
-parent and uncertain attempts. Project effect columns move from local transitions
-to Projects; import fabricates no rotation or settlement. Accepted Task/Project
-readback reconciles captured saves, never mapping alone. Competing effects retain
-both histories. Foreground creation composition remains unfinished.
+`88cd47572` transports prepared creation/link receipts through common owners with
+captured save IDs, original parent and uncertain attempts. Project rows replace
+transition columns; imports create no rotation or settlement. Readback reconciles
+captured saves; competing effects retain both histories.
+Foreground composition remains: unprepared peer creations lack export eligibility,
+and mapped-record filters hide uncertain receipts from acquisition/status.
+Release's lesson applies: storage readback proves no public recovery.
 
 Peer acquisition preserves provider age; entity revisions do not order relationships.
 Missing inventory is not negative membership; archive, unresolved membership and
 configured-Initiative contradictions still block. Lookup and launch freshness stay
-separate. Imports stay unplaced; unplaced parents use this machine for first local
-placement. Existing placements survive.
+separate. Imports stay unplaced; first local placement uses this machine when its
+parent is unplaced. Existing placements survive.
 
-Linux storage/common-export fixtures prove receipt retention; earlier work-watch
-proves offline propagation. Mixed-provider, SSH and installed acceptance remain open.
+Linux storage/export and work-watch proofs predate dependency-only sync `eeb98aa89`;
+combined, mixed-provider, SSH and installed acceptance remain unproved.
 
 Fetch/import/publication stay separate; effect locks block neither saves nor
 acquisition. Damaged journals retain unknown pending state without hiding plans.
-Private moves hold whole histories/dependents, including retained Git documents, until explicit selection; omission is not convergence. Recovery and
-losing-edit UX need review. Order/deletion receipts, alternate paths, relationship
-ordering, legacy association and Desktop remain before mixed-provider activation.
+Private moves hold whole histories/dependents, including retained Git documents,
+until explicit selection; omission is not convergence. Recovery/losing-edit UX,
+order/deletion receipts, alternate paths, relationship ordering, legacy association
+and Desktop remain before mixed-provider activation.
 Design: `scratch/work-on-another-machine-name.md`; earlier evidence:
 `a6cb48664:wave/infrastructure/MEMORY.md`, this heading.
 

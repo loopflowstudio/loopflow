@@ -226,8 +226,12 @@ Task links and palette Task entries open retained workspaces, including Tasks
 outside the current chapter, without starting a Task Flow. A repository-qualified
 link opens its exact match even when another Wave's planning is unavailable.
 Ambiguous links offer repository-qualified choices; failed reads keep the current
-workspace and offer Retry. Only one workspace window receives a link.
-Links prefer a window already selecting the destination. Reopening its Task keeps
+workspace visible. Only its repository window receives a link.
+Open Repo, Task links and the repository menu reuse one window per plan identity,
+including while it opens. Different repositories keep separate queued destinations;
+closing one needs no replacement window. A restored location that now selects another
+plan reports an error rather than restoring its panes into that plan.
+Reopening a Task keeps
 the selected conversation and pane layout. Loaded repository-qualified links reuse
 observed planning; successful opens do not present a Task-finding sheet.
 Add `session` to open an existing Task conversation in its terminal pane. A
@@ -311,7 +315,8 @@ Manually launched agents in these shells register against their actual terminal.
 Selecting their Session focuses the existing shell; selection leaves both the
 conversation and shell running.
 External clients require explicit **Move here**. Terminals and their command titles survive Work list and detail
-navigation and repository switches within a window. Native surfaces belong to
+navigation. Switching repositories focuses that repository’s window without replacing
+the origin’s panes or drafts. Native surfaces belong to
 that window and are never mounted twice.
 Session reads and preparation run in the opened repository rather than a
 machine-wide aggregate.
@@ -338,8 +343,8 @@ agent readings fail independently. A failed refresh keeps the last useful
 evidence visible with its failure reason rather than painting a healthy empty
 state.
 
-The previous Wave workspace remains available in repository and Portfolio
-windows while its proven inspectors and Chat surface move into the new root.
+Portfolio retains the Wave inspectors. Opening a Task there routes to its
+repository window rather than creating another Task workspace in a sheet.
 Wave Chat loads the active backing's bounded history before SSE, keeps it visible
 through reconnects, and rolls equivalent operational failures into one
 disclosed notice. Cold launch does not start a chat transcript read.

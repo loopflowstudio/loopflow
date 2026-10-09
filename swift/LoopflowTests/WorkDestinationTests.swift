@@ -57,7 +57,6 @@ struct WorkDestinationTests {
         #expect(model.navigation.content == .terminals)
         #expect(model.taskLinkReading.errorMessage == nil)
         #expect(!model.showsTaskLink)
-        #expect(model.containsTaskDestination(try #require(url.url)))
 
         // Reopening what is already open changes nothing, so nothing redraws.
         let invalidations = OSAllocatedUnfairLock(initialState: 0)
@@ -397,40 +396,71 @@ struct WorkDestinationTests {
         #expect(model.showsTaskLink == !scoped)
     }
 
-    @Test func coldAndWarmLinksReachOnlyOneWorkspace() throws {
-        _ = NSApplication.shared
+    @Test func coldRepositoriesRegisterInReverseOrderWithoutLosingDestinations() throws {
         let router = WorkLinkRouter()
-        let url = try #require(URL(string: "loopflow://task/LOO-303"))
-        #expect(!router.deliver(url))
-        #expect(router.deliver(url)) // the requested window has not mounted yet
-        let window = NSWindow(contentRect: .init(x: 0, y: 0, width: 600, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
-        let other = NSWindow(contentRect: .init(x: 0, y: 0, width: 600, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
-        defer { window.orderOut(nil); other.orderOut(nil) }
-        var received: [URL] = []
-        var otherReceived: [URL] = []
-        router.register(UUID(), window: window) { received.append($0) }
-        router.register(UUID(), window: other) { otherReceived.append($0) }
-        #expect(received == [url])
-        #expect(otherReceived.isEmpty)
-        window.makeKeyAndOrderFront(nil)
-        #expect(router.deliver(url))
-        #expect(received == [url, url])
-        #expect(otherReceived.isEmpty)
+        let a = try #require(URL(string: "loopflow://task/A"))
+        let a2 = try #require(URL(string: "loopflow://task/A2"))
+        let b = try #require(URL(string: "loopflow://task/B"))
+        #expect(!router.deliver(a, repository: "plan-a"))
+        #expect(!router.deliver(b, repository: "plan-b"))
+        #expect(!router.deliver(a2, repository: "plan-a"))
+        var first: [URL] = []
+        var second: [URL] = []
+        router.register(UUID(), repository: "plan-b", focus: {}) { second += $0 }
+        #expect(second == [b])
+        #expect(first.isEmpty)
+        router.register(UUID(), repository: "plan-a", focus: {}) { first += $0 }
+        #expect(first == [a, a2])
+        #expect(second == [b])
     }
 
-    @Test func linkPrefersTheWindowAlreadyHoldingItsDestination() throws {
-        _ = NSApplication.shared
+    @Test func samePlanReusesItsRetainedWorkspaceRegardlessOfFocusOrLocator() throws {
+        let a = RepositoryWorkspace(id: "plan", path: "/machine-a/repo")
+        let b = RepositoryWorkspace(id: "plan", path: "/machine-b/repo")
+        #expect(Set([a, b]).count == 1)
+        #expect(a != RepositoryWorkspace(id: "another-plan", path: a.path))
         let router = WorkLinkRouter()
-        let url = try #require(URL(string: "loopflow://task/LOO-368?repo=%2Fsrc%2Floopflow"))
-        let retained = NSWindow(contentRect: .init(x: 0, y: 0, width: 600, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
-        let unrelated = NSWindow(contentRect: .init(x: 0, y: 0, width: 600, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
-        defer { retained.orderOut(nil); unrelated.orderOut(nil) }
-        var opened = ""
-        router.register(UUID(), window: retained, contains: { $0 == url }) { _ in opened = "retained" }
-        router.register(UUID(), window: unrelated) { _ in opened = "unrelated" }
-        unrelated.makeKeyAndOrderFront(nil)
-        #expect(router.deliver(url))
-        #expect(opened == "retained")
+        var focused: [String] = []
+        var received: [URL] = []
+        let url = try #require(URL(string: "loopflow://task/A"))
+        router.register(UUID(), repository: a.id, focus: { focused.append("retained") }) { received += $0 }
+        router.register(UUID(), repository: "other", focus: { focused.append("other") }) { _ in
+            Issue.record("A repository must never receive another repository's link")
+        }
+        #expect(router.deliver(url, repository: b.id))
+        #expect(router.deliver(nil, repository: a.id))
+        #expect(focused == ["retained", "retained"])
+        #expect(received == [url])
+    }
+
+    @Test func lateWindowRemovalDoesNotRemoveItsReplacement() throws {
+        let router = WorkLinkRouter()
+        let old = UUID(), replacement = UUID()
+        router.register(old, repository: "plan", focus: {}) { _ in }
+        var received: [URL] = []
+        router.register(replacement, repository: "plan", focus: {}) { received += $0 }
+        router.remove(old, repository: "plan")
+        let url = try #require(URL(string: "loopflow://task/A"))
+        #expect(router.deliver(url, repository: "plan"))
+        #expect(received == [url])
+        router.remove(replacement, repository: "plan")
+        #expect(!router.deliver(url, repository: "plan"))
+    }
+
+    @Test func repositoryNavigationLeavesTheOriginSelectionAndDraftWorkspaceAlone() async throws {
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(try fixture().utf8))
+        let wave = try #require(snapshot.waves.first)
+        let task = try #require(wave.tasks.items.first)
+        let model = WorkModel(query: RegistryQuery { _, _ in "" }, repoPath: "/origin")
+        model.navigation.selectedSessionId = "retained-session"
+        var requests: [(String, URL?)] = []
+        model.openRepository = { requests.append(($0, $1)) }
+        model.setRepoPath("/other")
+        model.openTaskDestination(wave: wave, task: task)
+        #expect(model.repoPath == "/origin")
+        #expect(model.navigation.selectedSessionId == "retained-session")
+        #expect(requests.map { $0.0 } == ["/other", wave.wave.repo])
+        #expect(try TaskLink(url: #require(requests.last?.1)).issue == task.task.identifier)
     }
 
     @Test(arguments: [false, true])

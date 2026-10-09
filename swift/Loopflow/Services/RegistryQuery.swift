@@ -67,6 +67,11 @@ public struct RegistryQuery: Sendable {
         }
     }
 
+    /// Explicit workspace opening binds a plain repository to its local plan.
+    public func repositoryIdentity(cwd: String) async throws -> String {
+        try Self.decode(String.self, from: await run(["repo", "identity", "--json"], cwd))
+    }
+
     /// Current Waves across the machine. The shared
     /// reader excludes historical registrations; callers only slice by repo.
     public func allWaves() async throws -> [Wave] {

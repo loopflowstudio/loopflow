@@ -62,6 +62,11 @@ One store's SQLite transaction cannot provide that guarantee; never synchronize
 runtime to solve it. Peer exchange, observation/admission, complete routing, Desktop
 control and composed proof remain. Product has no child memories in this checkout.
 
+LOO-427 keys local windows/queues by plan, replacing focus fallback and Portfolio
+Task sheets. Navigation preserves the origin model. Router smoke and Ghostty-disabled
+typecheck pass; configured SwiftPM, native retention/convergence and remote proof
+remain unverified.
+
 Jack selected execution-machine local operations and Git-ref Task sync: 406 owns
 writes/Linear, 412 exchange. Workflow, Sessions, Processes, checkouts and control
 stay local; imported completion cannot move or clean them. Preserve pending edits,
@@ -366,13 +371,12 @@ not establish status in cmux or herdr.
 
 ## Current Tasks and completion history (2026-10-02)
 
-Jack Heart's LOO-371 direct-open work measures against isolated SQLite backups.
-Own benchmark process groups; overlapping runs prove nothing. October 5, same
-snapshot/`lf`, five samples, load 32–65: warm 152 ms and reopen 38 ms versus
-9–10 s; one window, no Task-link sheet. Cold stays 8.4 s behind one `lf` read.
-Fast OCR split `LOO- 368` and timed out a 9/9 sweep: verify the observer
-before blaming the product. LOO-376 owns startup and `launch.py`;
-extend it for Task links. See [the evidence](../../scripts/benchmarks/desktop-performance/20261005-task-open/README.md).
+LOO-371's October 5 snapshot measured warm 152 ms/reopen 38 ms, cold 8.4 s;
+no Task-link sheet. OCR split an ID and falsely failed a sweep: verify the observer.
+Own benchmark process groups; overlapping runs prove nothing. Full population,
+failed attempts and limits: `96a42755e:wave/product/MEMORY.md`, this heading, and
+[the evidence](../../scripts/benchmarks/desktop-performance/20261005-task-open/README.md).
+October 7 retired performance acceptance; LOO-408 owns installed settlement.
 
 Jack Heart requested current work without obsolete duplicates, completed Tasks
 hidden initially, and Show completed with 7 days, positive N days and All time

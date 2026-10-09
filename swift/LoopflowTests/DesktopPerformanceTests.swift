@@ -257,8 +257,8 @@ struct DesktopPerformanceTests {
         var link = URLComponents()
         link.scheme = "loopflow"; link.host = "task"; link.path = "/" + fixture.issue
         link.queryItems = [URLQueryItem(name: "repo", value: fixture.repo)]
-        router.deliver(try #require(link.url))
-        let view = RepoView(portfolioService: PortfolioService(), initialRepoPath: fixture.repo, query: query, taskLinks: router)
+        router.deliver(try #require(link.url), repository: "fixture-plan")
+        let view = RepoView(portfolioService: PortfolioService(), initialRepoPath: fixture.repo, query: query, taskLinks: router, repository: "fixture-plan")
         let window = PerformanceWindow(contentRect: CGRect(x: 0, y: 0, width: 1280, height: 800),
                                        styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -1418,7 +1418,7 @@ extension DesktopPerformanceTests {
             }
             let router = WorkLinkRouter()
             let view = RepoView(portfolioService: PortfolioService(), initialRepoPath: repo,
-                                  query: query, taskLinks: router)
+                                  query: query, taskLinks: router, repository: "fixture-plan")
             let window = PerformanceWindow(contentRect: CGRect(x: 0, y: 0, width: 1280, height: 800),
                                            styleMask: [.titled, .resizable], backing: .buffered, defer: false)
             window.isReleasedWhenClosed = false
@@ -1437,12 +1437,12 @@ extension DesktopPerformanceTests {
                 var lastState = ""
                 do {
                     if scenario == "cold_workspace" {
-                        router.deliver(url)
+                        router.deliver(url, repository: "fixture-plan")
                         window.contentView = NSHostingView(rootView: view)
                         window.makeKeyAndOrderFront(nil)
                     } else {
                         if scenario == "warm_task" { model?.select(nil) }
-                        router.deliver(url)
+                        router.deliver(url, repository: "fixture-plan")
                     }
                     // The receiver schedules its async resolution on the main actor.
                     // Do not accept the previous destination before that request starts.

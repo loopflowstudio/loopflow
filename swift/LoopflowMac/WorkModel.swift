@@ -92,6 +92,8 @@ struct TaskReadings<Value> {
 @MainActor
 @Observable
 final class WorkModel {
+    @ObservationIgnored var openRepository: ((String, URL?) -> Void)?
+
     private(set) var taskLinkURL: URL?
     private(set) var taskLinkReading: WorkReading<RoadmapSnapshot> = .loading
     var showsTaskLink = false
@@ -170,17 +172,11 @@ final class WorkModel {
         return matches.count == 1 ? matches[0] : nil
     }
 
-    func containsTaskDestination(_ url: URL) -> Bool {
-        guard let link = try? TaskLink(url: url), let repo = link.repo?.normalizedFilePath else { return false }
-        return navigationByRepo.values.contains { state in
-            guard let evidence = state.selectedTaskEvidence,
-                  evidence.wave.wave.repo.normalizedFilePath == repo,
-                  evidence.task.task.identifier == link.issue else { return false }
-            return link.session == nil || state.selectedSessionId == link.session
-        }
-    }
-
     private func openLinkedTask(wave: WaveRoadmap, task: RoadmapTask, link: TaskLink, generation: Int) async throws {
+        if let openRepository, repoPath?.normalizedFilePath != wave.wave.repo.normalizedFilePath {
+            openRepository(wave.wave.repo, taskLinkURL)
+            return
+        }
         guard let sessionID = link.session else {
             openTaskDestination(wave: wave, task: task)
             return
@@ -213,6 +209,15 @@ final class WorkModel {
     }
 
     func openTaskDestination(wave: WaveRoadmap, task: RoadmapTask) {
+        if let openRepository, repoPath?.normalizedFilePath != wave.wave.repo.normalizedFilePath {
+            var link = URLComponents()
+            link.scheme = "loopflow"
+            link.host = "task"
+            link.path = "/" + task.task.identifier
+            link.queryItems = [URLQueryItem(name: "repo", value: wave.wave.repo)]
+            openRepository(wave.wave.repo, link.url)
+            return
+        }
         setRepoPath(wave.wave.repo)
         if navigation.selectedTaskEvidence.map({ $0.wave != wave || $0.task != task }) ?? true {
             navigation.selectedTaskEvidence = (wave, task)
@@ -890,6 +895,11 @@ final class WorkModel {
     }
 
     func setRepoPath(_ path: String?) {
+        if let openRepository, let path,
+           repoPath?.normalizedFilePath != WaveOrigin.resolve(path).normalizedFilePath {
+            openRepository(path, nil)
+            return
+        }
         dismissTaskLink()
         let path = path.map(WaveOrigin.resolve)
         if repoPath?.normalizedFilePath != path?.normalizedFilePath {

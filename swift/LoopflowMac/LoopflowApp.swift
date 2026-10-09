@@ -16,6 +16,8 @@ struct LoopflowApp: App {
     @Environment(\.openWindow) private var openWindow
     @State private var snapshotError: String?
     @State private var showSnapshotError = false
+    @State private var openingError: String?
+    @State private var taskChoices: [[TaskWindowChoice]] = []
     @State private var didOpenCaptureView = false
     @AppStorage("taskFilesAutosave") private var taskFilesAutosave = true
     @AppStorage("appearanceMode") private var appearanceMode = AppearanceMode.system.rawValue
@@ -40,25 +42,39 @@ struct LoopflowApp: App {
         let launchRepoURL = LaunchArguments.repoURL()
         let registryQuery = SessionFixture.query ?? RegistryQueryLocal.shared
 
-        WindowGroup(id: "workspace") {
-            RepoView(
-                portfolioService: portfolioService,
-                initialRepoPath: launchRepoURL?.path,
-                query: registryQuery,
-                taskLinks: taskLinks
-            )
+        WindowGroup(id: "workspace", for: RepositoryWorkspace.self) { $workspace in
+            Group {
+                if let workspace {
+                    RepositoryWorkspaceView(workspace: workspace, portfolioService: portfolioService,
+                                            query: registryQuery, router: taskLinks,
+                                            openRepository: requestRepository)
+                } else if AppTestMode.shouldBypassRegistry {
+                    RepoView(portfolioService: portfolioService, initialRepoPath: launchRepoURL?.path,
+                             query: registryQuery)
+                } else {
+                    WorkspaceLaunchView {
+                        if let path = launchRepoURL?.path ?? loadLoopflowState()?.selectedRepoPath {
+                            try await openRepository(path)
+                        } else {
+                            openWindow(id: "portfolio")
+                        }
+                    }
+                }
+            }
             .tint(.loopflowBurgundy)
             .modifier(AppAppearance(mode: resolvedAppearance))
             .onOpenURL { handleDeepLink($0) }
             .uiTestWindowWidth()
             .uiTestSnapshot()
-            .task {
-                openCaptureViewIfNeeded()
-            }
+            .task { openCaptureViewIfNeeded() }
         }
         .windowStyle(.automatic)
         .defaultSize(width: 1280, height: 800)
         .commands {
+            CommandGroup(replacing: .newItem) {
+                Button("Open Repo…") { openRepoPanel() }
+                    .keyboardShortcut("n", modifiers: .command)
+            }
             CommandGroup(after: .appSettings) {
                 Toggle("Autosave Task Files", isOn: $taskFilesAutosave)
                 Picker("Appearance", selection: Binding(
@@ -94,8 +110,7 @@ struct LoopflowApp: App {
                     Menu("Move to Repo") {
                         ForEach(portfolioService.repos) { repo in
                             Button(repo.displayName) {
-                                portfolioService.addRepo(repo.url)
-                                openWindow(id: "repo", value: repo.url)
+                                requestRepository(repo.path, nil)
                             }
                         }
                     }
@@ -108,28 +123,31 @@ struct LoopflowApp: App {
             }
         }
 
-        WindowGroup(id: "repo", for: URL.self) { $repoURL in
-            WavesView(
-                portfolioService: portfolioService,
-                initialRepoPath: repoURL?.path
-            )
-            .tint(.loopflowBurgundy)
-            .modifier(AppAppearance(mode: resolvedAppearance))
-        }
-        .windowStyle(.automatic)
-        .defaultSize(width: 1080, height: 760)
-
         Window("Portfolio", id: "portfolio") {
-            WavesView(portfolioService: portfolioService)
+            WavesView(portfolioService: portfolioService, openTask: { path, id in
+                var link = URLComponents()
+                link.scheme = "loopflow"; link.host = "task"; link.path = "/" + id
+                link.queryItems = [URLQueryItem(name: "repo", value: path)]
+                requestRepository(path, link.url)
+            })
                 .tint(.loopflowBurgundy)
                 .modifier(AppAppearance(mode: resolvedAppearance))
+                .onOpenURL { handleDeepLink($0) }
         }
         .defaultSize(width: 1080, height: 760)
+
+        Window("Open Work", id: "open-work") {
+            WorkspaceOpeningFeedback(error: $openingError, choices: $taskChoices,
+                                     openRepository: requestRepository)
+                .modifier(AppAppearance(mode: resolvedAppearance))
+        }
+        .defaultSize(width: 480, height: 240)
 
         Window("Telemetry", id: "telemetry") {
             TelemetryDashboardView()
                 .tint(.loopflowBurgundy)
                 .modifier(AppAppearance(mode: resolvedAppearance))
+                .onOpenURL { handleDeepLink($0) }
         }
         .defaultSize(width: 1180, height: 860)
 
@@ -166,14 +184,36 @@ struct LoopflowApp: App {
         guard url.scheme == "loopflow" else { return }
         switch url.host {
         case "task":
-            if !taskLinks.deliver(url) { openWindow(id: "workspace") }
+            Task {
+                do {
+                    let link = try TaskLink(url: url)
+                    if let path = link.repo {
+                        try await openRepository(path, link: url)
+                        return
+                    }
+                    let query = SessionFixture.query ?? RegistryQueryLocal.shared
+                    let snapshot = try await query.taskDestination(issue: link.issue, repo: nil)
+                    let choices = snapshot.waves.flatMap { wave in
+                        wave.tasks.items.map { _ in TaskWindowChoice(path: wave.wave.repo, url: url) }
+                    }
+                    guard !snapshot.waves.contains(where: { $0.tasks.unavailableReason != nil }) else {
+                        throw RegistryQueryError("Task lookup is incomplete. Retry, or qualify the link with ?repo=/path/to/repository.")
+                    }
+                    if choices.count == 1, let choice = choices.first {
+                        try await openRepository(choice.path, link: choice.url)
+                    } else if choices.isEmpty {
+                        throw RegistryQueryError("Task \(link.issue) was not found. No workspace was changed.")
+                    } else {
+                        taskChoices.append(choices)
+                        openWindow(id: "open-work")
+                    }
+                } catch { reportOpeningError(error) }
+            }
         case "open":
             guard let repoPath = URLComponents(url: url, resolvingAgainstBaseURL: false)?
                 .queryItems?.first(where: { $0.name == "repo" })?.value
             else { return }
-            let repoURL = URL(fileURLWithPath: repoPath)
-            guard let mainRepo = portfolioService.addRepo(repoURL) else { return }
-            openWindow(id: "repo", value: mainRepo)
+            requestRepository(repoPath, nil)
         case "portfolio":
             openWindow(id: "portfolio")
         case "sessions":
@@ -181,6 +221,37 @@ struct LoopflowApp: App {
         default:
             break
         }
+    }
+
+    @MainActor
+    private func reportOpeningError(_ error: Error) {
+        openingError = error.localizedDescription
+        openWindow(id: "open-work")
+    }
+
+    @MainActor
+    private func requestRepository(_ path: String, _ link: URL?) {
+        Task {
+            do { try await openRepository(path, link: link) }
+            catch { reportOpeningError(error) }
+        }
+    }
+
+    @MainActor
+    private func openRepository(_ path: String, link: URL? = nil) async throws {
+        let query = SessionFixture.query ?? RegistryQueryLocal.shared
+        let workspace = try await RepositoryWorkspace.resolve(path: path, query: query)
+        portfolioService.addRepo(URL(fileURLWithPath: workspace.path))
+        var destination = link
+        if let link, var components = URLComponents(url: link, resolvingAgainstBaseURL: false) {
+            components.queryItems = (components.queryItems ?? []).filter { $0.name != "repo" }
+                + [URLQueryItem(name: "repo", value: workspace.path)]
+            destination = components.url
+        }
+        if !taskLinks.deliver(destination, repository: workspace.id) {
+            openWindow(id: "workspace", value: workspace)
+        }
+        try? saveLoopflowState(LoopflowState(selectedRepoPath: workspace.path))
     }
 
     @MainActor
@@ -200,7 +271,7 @@ struct LoopflowApp: App {
             alert.runModal()
             return
         }
-        openWindow(id: "repo", value: mainRepo)
+        requestRepository(mainRepo.path, nil)
     }
 }
 

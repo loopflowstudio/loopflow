@@ -10,25 +10,30 @@ struct RepoView: View {
     @Environment(\.palette) private var palette
     @State private var showsAutomation = false
     @State private var model: WorkModel
-    /// Per-window terminal workspaces: this window's panes and surfaces are
-    /// never shared with another window showing the same repository.
+    /// The repository window retains its panes and native surfaces through
+    /// navigation. Other repository windows never mount these surfaces.
     @State private var sessionWorkspaces: SessionsWorkspaceRegistry
     private let taskLinks: WorkLinkRouter?
+    private let repository: String?
     private let query: RegistryQuery
 
     init(
         portfolioService: PortfolioService,
         initialRepoPath: String? = nil,
         query: RegistryQuery = RegistryQueryLocal.shared,
-        taskLinks: WorkLinkRouter? = nil
+        taskLinks: WorkLinkRouter? = nil,
+        repository: String? = nil,
+        openRepository: ((String, URL?) -> Void)? = nil
     ) {
         self.portfolioService = portfolioService
         self.initialRepoPath = initialRepoPath
         self.query = query
         self.taskLinks = taskLinks
+        self.repository = repository
         let restored = initialRepoPath == nil && !AppTestMode.shouldBypassRegistry
             ? loadLoopflowState()?.selectedRepoPath : nil
         let model = WorkModel.window(query: query, launchCandidates: [initialRepoPath, restored].compactMap { $0 })
+        model.openRepository = openRepository
         _model = State(initialValue: model)
         _sessionWorkspaces = State(initialValue: SessionsWorkspaceRegistry(localMachineId: model.savedMachineId))
     }
@@ -62,9 +67,9 @@ struct RepoView: View {
         .accessibilityLabel("Loopflow Desktop")
         .accessibilityIdentifier("loopflow")
         .background {
-            if let taskLinks {
-                WorkLinkReceiver(router: taskLinks, contains: model.containsTaskDestination) { url in
-                    Task { await model.openTaskLink(url) }
+            if let taskLinks, let repository {
+                WorkLinkReceiver(router: taskLinks, repository: repository) { url in
+                    await model.openTaskLink(url)
                 }.frame(width: 0, height: 0)
             }
         }

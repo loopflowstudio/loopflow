@@ -45,81 +45,48 @@ struct TaskLink: Equatable, Sendable {
     }
 }
 
-/// Delivers to one repository window. A cold-start request waits for its first mounted window.
-@MainActor
-final class WorkLinkRouter {
-    private struct Target {
-        weak var window: NSWindow?
-        let contains: (URL) -> Bool
-        let receive: (URL) -> Void
-    }
-    private var targets: [UUID: Target] = [:]
-    private var pending: URL?
-
-    func register(_ id: UUID, window: NSWindow, contains: @escaping (URL) -> Bool = { _ in false },
-                  receive: @escaping (URL) -> Void) {
-        targets[id] = Target(window: window, contains: contains, receive: receive)
-        if let pending {
-            self.pending = nil
-            receive(pending)
-        }
-    }
-
-    func remove(_ id: UUID) { targets[id] = nil }
-
-    /// Returns false when a repository window must be opened.
-    @discardableResult
-    func deliver(_ url: URL) -> Bool {
-        targets = targets.filter { $0.value.window != nil }
-        let ordered = NSApp.orderedWindows
-        let orderedTargets = ordered.compactMap { window in
-            targets.values.first { $0.window === window }
-        }
-        let target = orderedTargets.first { $0.contains(url) }
-            ?? targets.values.first { $0.contains(url) }
-            ?? orderedTargets.first ?? targets.values.first
-        guard let target, let window = target.window else {
-            let windowRequested = pending != nil
-            pending = url
-            return windowRequested
-        }
-        window.makeKeyAndOrderFront(nil)
-        target.receive(url)
-        return true
-    }
-}
-
 struct WorkLinkReceiver: NSViewRepresentable {
     let router: WorkLinkRouter
-    let contains: (URL) -> Bool
-    let receive: (URL) -> Void
+    let repository: String
+    let receive: (URL) async -> Void
 
     func makeNSView(context: Context) -> Receiver {
-        Receiver(router: router, contains: contains, receive: receive)
+        Receiver(router: router, repository: repository, receive: receive)
     }
-    func updateNSView(_ view: Receiver, context: Context) {
-        view.contains = contains
-        view.receive = receive
+    func updateNSView(_ view: Receiver, context: Context) { view.receive = receive }
+    static func dismantleNSView(_ view: Receiver, coordinator: ()) {
+        view.router.remove(view.id, repository: view.repository)
     }
-    static func dismantleNSView(_ view: Receiver, coordinator: ()) { view.router.remove(view.id) }
 
     final class Receiver: NSView {
         let id = UUID()
         let router: WorkLinkRouter
-        var contains: (URL) -> Bool
-        var receive: (URL) -> Void
-        init(router: WorkLinkRouter, contains: @escaping (URL) -> Bool, receive: @escaping (URL) -> Void) {
+        let repository: String
+        var receive: (URL) async -> Void
+        private var deliveries: Task<Void, Never>?
+
+        init(router: WorkLinkRouter, repository: String, receive: @escaping (URL) async -> Void) {
             self.router = router
-            self.contains = contains
+            self.repository = repository
             self.receive = receive
             super.init(frame: .zero)
         }
         required init?(coder: NSCoder) { fatalError("init(coder:) is unsupported") }
         override func viewDidMoveToWindow() {
-            router.remove(id)
+            router.remove(id, repository: repository)
             if let window {
-                router.register(id, window: window, contains: { [weak self] url in self?.contains(url) == true }) {
-                    [weak self] url in self?.receive(url)
+                router.register(id, repository: repository, focus: { [weak window] in
+                    window?.makeKeyAndOrderFront(nil)
+                }) { [weak self] links in
+                    guard let self else { return }
+                    let preceding = deliveries
+                    deliveries = Task { [weak self] in
+                        await preceding?.value
+                        for link in links {
+                            guard let self, self.window != nil else { return }
+                            await self.receive(link)
+                        }
+                    }
                 }
             }
         }

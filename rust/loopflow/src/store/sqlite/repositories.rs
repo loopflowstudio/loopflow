@@ -143,15 +143,19 @@ mod tests {
                 rusqlite::params![project.as_str(), wave.as_str()],
             )
             .unwrap();
-            conn.execute("INSERT INTO tasks(id,project_id,issue_identifier,created_at) VALUES(?1,?2,'WORK-1',1)", rusqlite::params![task.as_str(),project.as_str()]).unwrap();
+            conn.execute("INSERT INTO tasks(id,project_id,issue_identifier,issue_title,issue_description,workspace_slug,created_at,updated_at) VALUES(?1,?2,'WORK-1','Shared Task','','',1,1)", rusqlite::params![task.as_str(),project.as_str()]).unwrap();
         }
         first
             .place_work(&WorkRef::Wave(wave.clone()), &destination)
             .unwrap();
+        // Routing uses the read-only owner, not an initializing Store or a
+        // second connection to establish the observing Machine.
+        let observer = SqliteStore::open_read_only(&a.path().join("db")).unwrap();
         assert_eq!(
-            first.task_execution_route(&task).unwrap(),
+            observer.task_execution_route(&task).unwrap(),
             second.task_execution_route(&task).unwrap()
         );
+        assert_ne!(observer.local_machine().unwrap().id, destination);
         // Only the destination records its checkout; planning identity is shared,
         // not the filesystem path or runtime state.
         second

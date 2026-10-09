@@ -1,7 +1,7 @@
 # product wave memory
 
-Renamed from `concerto` July 8, 2026. Product owns the shared API and CLI, Mac,
-iOS, agent and worker surfaces. Older “Concerto” notes mean Mac.
+Renamed from `concerto` July 8, 2026. Product owns shared API/CLI, Mac,
+iOS, agent and worker surfaces. “Concerto” meant Mac.
 
 ## Current direction after the October 7 Tasks
 
@@ -62,16 +62,16 @@ control text and requires finishing active IME composition;
 these are reversible restrictions, not new product decisions. Native draft/cursor
 and replacement fixtures remain unexecuted. Read grants no input authority.
 
-Jack's October 8 API: `--context` previews input without launch;
-`--explain` is broader; `--chrome` controls execution. Source removes root `run`,
-`--max-turns` and `--no-loopflow`, retaining Task skill/Flow selection. History owns
-activity, Process pages, show/replay and usage for Desktop. `desktop open/list` own app launch and inspection; root `open` is ambiguous
-with PR opening; Sessions use `connect`. Composed Work opening, Wave planning and previews remain.
-Lookup now uses Machine-local `repo_root` (default `~/src`) or explicit paths;
-remote selectors expand there. Paths never become portable Work identity.
-Remembered names remain undecided; scoped Task-prefix propagation remains incomplete.
-Discord unchanged.
-`--steers-after` filters repeated nodes, not across restarts.
+Jack's October 8 API: `--context` previews input without launch; `--explain`
+is broader; `--chrome` controls execution. Root `run`, `--max-turns` and
+`--no-loopflow` are removed; Task skill/Flow selection survives. History owns
+activity, Process pages, show/replay and usage. Desktop owns open/list; root
+`open` is ambiguous with PR opening; Sessions use `connect`. Composed opening,
+Wave planning and previews remain. Discord is unchanged; `--steers-after`
+filters repeated nodes, not restarts.
+Lookup uses Machine-local `repo_root` (default `~/src`) or explicit paths,
+expanded on the selected Machine, never portable identity. Remembered names are open; scoped Task prefixes remain incomplete.
+Read-only routing never initializes SQLite; unreadable is not absent.
 
 Jack selected local planning/Git sync: 406 owns writes/Linear, 412 exchange.
 Imported completion cannot move Workflow or clean execution. Preserve pending

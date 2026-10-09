@@ -16,15 +16,4 @@ impl Store {
         let repo = repo.to_string();
         run_sqlite(&self.sqlite, move |store| store.repository_id(&repo)).await
     }
-
-    pub async fn repository_path(&self, id: &RepositoryId) -> StoreResult<Option<String>> {
-        let id = id.clone();
-        run_sqlite(&self.sqlite, move |store| store.repository_path(&id)).await
-    }
-
-    pub async fn bind_repository(&self, repo: &str, id: &RepositoryId) -> StoreResult<()> {
-        let repo = repo.to_string();
-        let id = id.clone();
-        run_sqlite(&self.sqlite, move |store| store.bind_repository(&repo, &id)).await
-    }
 }

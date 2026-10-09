@@ -219,33 +219,33 @@ These boundaries are integration constraints, not separate replacement projects.
 
 ## Delete — do not maintain
 
-The command-map cutover above names pending API removals and required survivors.
-Input reuses `insertTerminalText` and the existing typed pane event; no predecessor
-input command exists to retain. Already removed: copied inheritance, duplicate Desktop window/opening paths,
-unqualified terminal/read keys, separate visibility mutations and repeated layout
-pruning. Existing registry/multiplexer/surface owners remain authoritative.
-Close/Undo renews removed content tokens; filtered absence cannot release a
-surface. Passive reads allocate/clean up nothing; bounded extraction never falls
-back to full-buffer copies. Recorded proof, failed attempts and previous detailed
-removal notes remain in [findings](findings.md) and the October 8 pre-review
-preservation snapshot. Fresh prompt preparation also drops the unused `ProcessPromptInput.cwd` and
-`max_turns` overrides: its checkout already supplies cwd, and historical limits
-stay in captured-request replay. `run::split_skill_args` and its exclusive tests
-are removed; the sole caller parses borrowed arguments inline. Resolver tests
-cover explicit/untyped definitions, trailing colons, namespaces and messages.
+Remaining removals are `Commands::Project`, `Commands::Roadmap` and the
+`Context { explain }` dispatch in `lf/mod.rs` and `bin/lf.rs`, together with
+consumer cutover to Wave planning and invocation preview. Their underlying
+planning/history/prompt owners survive. LOO-412 owns exchange replacement;
+no second planning writer or callback planner is introduced.
 
-LOO-412 owns remaining adoption/exchange replacement; no second planning writer.
+Removed: copied inheritance; duplicate window/opening paths; unqualified terminal
+keys; duplicate visibility/pruning/insertion paths; root `run` and `open`;
+`MonitorCommand::{List,Show,Usage,Activity}` and root Replay; `DesktopCommand::Inspect`;
+`run::split_skill_args`; unused fresh `ProcessPromptInput.cwd`/`max_turns` overrides.
+History owns recorded reads/replay/usage, Desktop owns open/list, and Task edges
+retain explicit skill/Flow dispatch. Historical captures retain their data and
+normalization. `output::print_process` remains shared with live Monitor.
+Detailed cutover evidence and the earlier uncompilable Monitor move remain at
+`e844d1458:scratch/compare-cmux-s-command-line.md`, this heading.
 
-History cut (`7a4ce56cd`): removed `MonitorCommand::{List,Show,Usage,Activity}` and
-root `Commands::Replay`; their command handling now lives in `history`. Keep the activity
-projection, Process cursor/filter owner, captured-input inspection/replay and usage
-readers. Migrate Desktop and fixtures with the CLI; historical receipts and the
-comparison baseline retain their original spelling. Removed `history::feed`'s
-scalar forwarding; the activity reader consumes its parsed options directly.
-`output::print_process` serves History and Monitor; moving it only into History
-had left Monitor uncompilable. Process text/JSON fixtures retain both consumers.
-`DesktopCommand::Inspect` is replaced by `List`, without an alias or a new reader;
-exact targets, transport and wire records are unchanged.
+Destination lookup now uses the existing read-only SQLite owner, removing its
+Tokio runtimes, mutable store initialization, duplicate automatic-route store
+open and unused `Store::{repository_path,bind_repository}` forwarding. Scope checks and repository-plan lookup use the same reader. Missing
+registries stay absent; unreadable registries remain errors. Explicit
+`repo identity` still owns registration. This is observation, not peer admission.
+
+Input reuses `insertTerminalText` and the pane event. Registry, multiplexer and
+surface owners remain authoritative: Close/Undo renews content tokens; filtered
+absence never releases a surface; passive reads allocate/clean up nothing and
+never fall back to unbounded copies. [Findings](findings.md) retain contrary
+native/artifact evidence and the plan below retains incomplete composition.
 
 ## Implementation sequence — one PR
 
@@ -573,4 +573,4 @@ remain in [findings](findings.md), Git blob `6046145dcdd3d334bb2ad3560130de60dce
 and `/tmp/loo427-compress-msMFvo/current-scratch/`. No native surface proof or
 artifact publication follows from these checks.
 
-Check (October 9): `cargo fmt --check`, `git diff --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test -p loopflow --test global_commands repo_selection_` (3), `--lib lf::commands::ssh::tests` (8), and `--test cli_discovery desktop_open_has_one_owner` (1) PASS; logs `/tmp/loo427-repo-*.log`. Initial checks exposed stale imports/planning-lock fixtures, a nonexistent normalization helper, Session's renamed `connect`, and an unnecessary borrow; repaired. Full gate/CI and native/composed demo remain. Earlier passes/timeouts: `fc87e09c1:scratch/compare-cmux-s-command-line.md` and findings.
+Check (October 9): `cargo fmt --check`, `git diff --check`, `cargo clippy --all-targets -- -D warnings` and network-isolated `cargo test --offline -p loopflow --lib` filtered to `lf::commands::work_route::tests` (3), `store::sqlite::repositories::tests` (2), `lf::commands::ssh::tests` (8) PASS; seeded routing fixture's missing title/description repaired after two failures. Logs: `/tmp/loo427-compress-{tests,rerun,final-tests}.log`; earlier lookup checks: `e844d1458:scratch/compare-cmux-s-command-line.md`. Full gate/CI and native/composed demo remain.

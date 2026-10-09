@@ -31,7 +31,7 @@ pub fn run(
         Some(route) => Some(route),
         // A path/name addresses the destination's filesystem, not the caller's.
         None if cli.repo.is_some() => None,
-        None => runtime.block_on(super::work_route::resolve(&cli))?,
+        None => super::work_route::resolve(&cli)?,
     };
     if let Some(route) = &work_route {
         if route.machine_id != target.id {

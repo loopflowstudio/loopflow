@@ -47,10 +47,10 @@ pending-only projections, retaining baselines. Configuration selects pending dis
 creation receipts advance revision. `29777b8cb` scopes sync to repositories;
 `b6f34a6f8` separates Linux reconnect and portable abandonment fixtures.
 `078a6642e`'s Linux migration, native/public Flow/work-watch reconnect and adoption
-passed after fixture/DTO repairs. `ffe986160` removes synthetic settlement; its
-receipt changes still need gate verification. Swift remains unavailable.
-Jack requires queue before landing, without waiver or landing authority here.
-PR #1503's scratch classifier proves no product CI or installed acceptance.
+passed after fixture/DTO repairs. `ffe986160` removes synthetic settlement;
+queue gate's 15-second lock refusal leaves receipt verification open.
+Swift/full matrix need CI. Jack requires queue, without waiver or landing authority.
+PR #1503's classifier proves no product acceptance.
 
 Jack Heart's `8821db44-0480-4493-8609-953207663f1d` removes public creation tokens.
 Each create generates/saves/returns a distinct ID, even for identical titles;

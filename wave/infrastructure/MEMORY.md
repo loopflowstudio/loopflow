@@ -635,12 +635,11 @@ Omission is not convergence. Desktop retains scoped receipts/holds and last-good
 readings. Mixed exchange stays disabled; sharing/recovery and composition remain.
 Prior proofs/limits: `b4a91632e`, this heading.
 
-Legacy association remains unfinished. Clearing a mapping makes retained Work a
-provider-creation candidate while leaving selectors and uncertain effects behind;
-the raw-SQL fixture proved no recovery. Scalar import also bypassed evidence's
-mapping check. One mapping check now precedes both paths. Association must preserve IDs, lookup,
-effects and execution. Plan/check result:
-`scratch/work-on-another-machine-name.md`.
+Legacy association remains unfinished. Clearing a mapping creates a provider-creation
+candidate while retaining selectors and uncertain effects; raw SQL proved no recovery.
+One ownership check protects scalar import and independent evidence from mapping
+replacement, removal and duplicates. Association must preserve IDs, lookup, effects
+and execution. Plan/check result: `scratch/work-on-another-machine-name.md`.
 
 ## Driver recovery
 

@@ -126,20 +126,15 @@ fn changes_by_object(
         let Some(observation) = &change.linear else {
             continue;
         };
-        let mapping = match change.object.kind {
-            PlanningKind::Task => "external_issue_id",
-            PlanningKind::Project => "external_project_id",
+        let matches_mapping = match provider_schema(change.object.kind) {
+            Some((_, mapping)) => object.winners.get(mapping).is_some_and(|(_, winner)| {
+                winner.value.as_str().is_some()
+                    && winner.value.as_str() == observation.body["id"].as_str()
+            }),
             // Comment membership carries provenance too, but content owns acquisition.
-            PlanningKind::Comment if change.field == "content" => {
-                object.observations.push(observation);
-                continue;
-            }
-            _ => continue,
+            None => change.object.kind == PlanningKind::Comment && change.field == "content",
         };
-        if object.winners.get(mapping).is_some_and(|(_, winner)| {
-            winner.value.as_str().is_some()
-                && winner.value.as_str() == observation.body["id"].as_str()
-        }) {
+        if matches_mapping {
             object.observations.push(observation);
         }
     }
@@ -1111,6 +1106,14 @@ fn table(kind: PlanningKind) -> &'static str {
     }
 }
 
+fn provider_schema(kind: PlanningKind) -> Option<(&'static str, &'static str)> {
+    match kind {
+        PlanningKind::Task => Some(("pm_items", "external_issue_id")),
+        PlanningKind::Project => Some(("pm_projects", "external_project_id")),
+        _ => None,
+    }
+}
+
 fn require_repository(conn: &Connection, object: &PlanningObject, repo: &str) -> StoreResult<()> {
     if belongs_elsewhere(conn, object, repo)? {
         return Err(invalid(format!(
@@ -1228,6 +1231,8 @@ fn insert_and_project(
         project_confirmed_teams(conn, object, history)?;
     }
     let previous = delivery_fields(conn, object)?;
+    // Creation readback settles captured receipts before a Linear winner can
+    // retire the remaining local intentions during delivery projection.
     acquire_linear_frontier(conn, object, changes, repo)?;
     let deletion_receipts = object.kind == PlanningKind::Task && !changes.deletions.is_empty();
     if deletion_receipts {
@@ -1268,6 +1273,8 @@ fn insert_and_project(
         super::project_content::save_content(conn, &ProjectId::from_raw(&object.id), &content)?;
     }
     project_delivery_fields(conn, object, winners, snapshot, &previous)?;
+    // Projection may add receipts captured on a peer. Apply readback to those
+    // newly inserted rows too; neither pass acknowledges a later local save.
     if let Some(observation) = changes.observations.last() {
         if matches!(object.kind, PlanningKind::Task | PlanningKind::Project) {
             super::planning_export::attach_in(
@@ -1356,41 +1363,27 @@ fn validate_provider_mapping(
     object: &PlanningObject,
     changes: &ObjectChanges<'_>,
 ) -> StoreResult<()> {
-    let mapping = match object.kind {
-        PlanningKind::Task => "external_issue_id",
-        PlanningKind::Project => "external_project_id",
-        _ => return Ok(()),
+    let Some((_, mapping)) = provider_schema(object.kind) else {
+        return Ok(());
     };
     let provider_id = changes.winners[mapping].1.value.as_str();
-    let mapping_conflict = || StoreError::ProviderObservationConflict {
-        entity: "planning mapping",
-        id: object.id.clone(),
-    };
-    // A remote mapping may not redirect evidence for an existing local object.
-    let local: Option<Option<String>> = conn
-        .query_row(
-            &format!("SELECT {mapping} FROM {} WHERE id=?1", table(object.kind)),
-            [&object.id],
-            |row| row.get(0),
-        )
-        .optional()?;
-    if local
-        .flatten()
-        .as_deref()
-        .is_some_and(|id| Some(id) != provider_id)
-    {
-        return Err(mapping_conflict());
-    }
-    let foreign: bool = conn.query_row(
+    // Preserve this Work's existing mapping and every other Work's ownership.
+    // An unmapped Work may attach, but a null winner cannot clear its mapping.
+    let conflict: bool = conn.query_row(
         &format!(
-            "SELECT EXISTS(SELECT 1 FROM {} WHERE {mapping}=?1 AND id!=?2)",
+            "SELECT EXISTS(SELECT 1 FROM {} WHERE
+                (id=?1 AND {mapping} IS NOT NULL AND {mapping} IS NOT ?2)
+                OR (id!=?1 AND {mapping}=?2))",
             table(object.kind)
         ),
-        params![provider_id, object.id],
+        params![object.id, provider_id],
         |row| row.get(0),
     )?;
-    if foreign {
-        return Err(mapping_conflict());
+    if conflict {
+        return Err(StoreError::ProviderObservationConflict {
+            entity: "planning mapping",
+            id: object.id.clone(),
+        });
     }
     Ok(())
 }
@@ -1405,11 +1398,8 @@ fn acquire_provider_evidence(
     field: &str,
     history: &FieldHistory<ProviderEvidence>,
 ) -> StoreResult<()> {
-    let mapping = if object.kind == PlanningKind::Task {
-        "external_issue_id"
-    } else {
-        "external_project_id"
-    };
+    let (_, mapping) =
+        provider_schema(object.kind).expect("provider evidence belongs to mapped Work");
     let provider_id = changes.winners[mapping].1.value.as_str();
     let mapping_conflict = || StoreError::ProviderObservationConflict {
         entity: "planning mapping",
@@ -1606,10 +1596,8 @@ fn acquire_linear_frontier(
     repo: &str,
 ) -> StoreResult<()> {
     let winners = &changes.winners;
-    let (provider_table, mapping) = match object.kind {
-        PlanningKind::Task => ("pm_items", "external_issue_id"),
-        PlanningKind::Project => ("pm_projects", "external_project_id"),
-        _ => return Ok(()),
+    let Some((provider_table, mapping)) = provider_schema(object.kind) else {
+        return Ok(());
     };
     let Some(provider_id) = winners[mapping].1.value.as_str() else {
         return Ok(());

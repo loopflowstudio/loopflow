@@ -148,6 +148,11 @@ this heading. Keep these replacements deleted:
 - Projected-owner receipt capture/ranking, revision-only Task-body capture, and
   raw-ID order comparisons that discard unresolved aliases. The journal owns
   origins; comparison resolves aliases, while unknown membership defers readback.
+  One origin expression supplies mutations and their parents.
+- Repeated full delivery reads while rebasing order saves and separate existence/
+  membership predicates. Readback partitions attempts from unattempted saves once,
+  updating accepted baselines in memory; the final delivery read drops settled
+  losers. One membership reader preserves unknown versus confirmed removal.
 - Sequence-selected deletion delivery and scalar-clock visibility over a retained
   removal receipt: neither imported arrival nor that clock orders provider evidence.
   Common pending/attempt/status readers retain every unresolved
@@ -696,20 +701,13 @@ this heading; earlier Project-content/public work-watch evidence remains at
 this heading. Public status/DTO, cold-worker and provider-lifetime execution remain
 with gate, alongside Desktop and mixed-provider acceptance.
 
-Prior storage/build/Clippy/fmt and public recovery proofs, with exact candidates
-and limitations: `9b59e9b71:scratch/work-on-another-machine-name.md`,
-**Acceptance for review**. They do not establish this ordering cut, public
-combined behavior or Desktop acceptance.
+Earlier checks and limits: `9b59e9b71` and `b5b491099`, this file's
+**Acceptance for review**. They do not prove this ordering cut, combined public
+behavior or Desktop acceptance.
 
-Static-check evidence and the resource-limited build deferral remain at
-`b5b491099:scratch/work-on-another-machine-name.md`, **Acceptance for review**.
+Check: `cargo test -p loopflow --lib --no-run`; `scripts/test_network.py` lib filters `associated_`, `planning_order_`, `peer_ordering_` (21 passes); `cargo fmt --all --check`; `cargo clippy --all-targets -- -D warnings` pass. Gate owns released-frontier, Git/HTTPS and Desktop acceptance.
 
-Check: `cargo test -p loopflow --lib --no-run`, `scripts/test_network.py` (13 association/order/deletion tests), `cargo fmt --all --check` and `cargo clippy --all-targets -- -D warnings` pass. Gate retains released-frontier, Git/HTTPS and Desktop acceptance.
-
-Earlier SQL proofs, macOS startup limitations and the retained historical Flow
-without a recorded exit remain at
-`eeb98aa89:scratch/work-on-another-machine-name.md`, **Acceptance for review**.
-No provider death, replacement authority or installed acceptance follows from those
-observations. Parent-sync timeout evidence remains at
-`a6cb48664:scratch/work-on-another-machine-name.md`; it supplies no test verdict.
-LOO-406's landing authorization does not extend LOO-412's review-only boundary.
+SQL/macOS and unresolved Flow-exit evidence: `eeb98aa89`, this file's
+**Acceptance for review**. No provider death, replacement authority or installed
+acceptance follows. Parent-sync timeout: `a6cb48664`, same file, supplies no test
+verdict. LOO-406's landing authority excludes this review-only Task.

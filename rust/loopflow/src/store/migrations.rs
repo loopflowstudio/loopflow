@@ -1356,7 +1356,7 @@ mod tests {
     #[test]
     fn optional_task_pr_preserves_placement_and_freezes_prior_delivery() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        apply_before_current_draft(&conn, "optional_task_pr");
+        apply_before_current_draft(&conn, "local_planning");
         conn.execute_batch(r#"
             INSERT INTO waves(id,name,repo,created_at) VALUES('w','product','/repo',1);
             INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES('p','w','linear-p',1);
@@ -1383,18 +1383,35 @@ mod tests {
         conn.execute_batch(r#"INSERT INTO task_workflows(task_id,graph,node,updated_at)
             VALUES('research','{"name":"research","nodes":[],"edges":[]}','end',4);
             INSERT INTO task_events(task_id,kind_json,created_at) VALUES('research','{"kind":"completed","summary":"accepted findings"}',4);"#).unwrap();
-        conn.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
-        conn.execute_batch(&current_draft_sql("optional_task_pr"))
+        conn.execute_batch(r#"
+            UPDATE tasks SET pm_writeback_json='{"state":"pending","operation":"complete_task","error":"offline"}' WHERE id='single';
+            INSERT INTO processes(lfid,trace_id,command,cwd,started_at)
+                VALUES('held','trace','lf run proof','/single',2);
+            INSERT INTO task_workflows(task_id,graph,node,edge,process_lfid,updated_at)
+                VALUES('single','{"name":"proof","nodes":[],"edges":[]}','start',0,'held',2);
+            INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id)
+                VALUES('conversation','Retained conversation','human',2,0,'/single','single','w');
+            UPDATE task_prs SET parent_pr_id='old-pr' WHERE id='current-pr';
+        "#).unwrap();
+        if _draft_is_canonical("local_planning") {
+            // Exercise the combined release, not an intermediate draft schema.
+            apply_sqlite(&conn).unwrap();
+        } else {
+            super::_migration_transaction(&conn, |conn| {
+                conn.execute_batch(&current_draft_sql("local_planning"))?;
+                conn.execute_batch(&current_draft_sql("optional_task_pr"))?;
+                validate_foreign_keys(conn)
+            })
             .unwrap();
-        conn.execute_batch("PRAGMA foreign_keys=ON").unwrap();
+        }
         assert_eq!(
             conn.query_row(
-                "SELECT completed_at FROM tasks WHERE id='research'",
+                "SELECT planning_completed FROM tasks WHERE id='research'",
                 [],
                 |row| row.get::<_, i64>(0)
             )
             .unwrap(),
-            4
+            1
         );
         conn.execute(
             "UPDATE task_workflows SET node='start' WHERE task_id='research'",
@@ -1403,21 +1420,44 @@ mod tests {
         .unwrap();
         assert_eq!(
             conn.query_row(
-                "SELECT completed_at FROM tasks WHERE id='research'",
+                "SELECT planning_completed FROM tasks WHERE id='research'",
                 [],
                 |row| row.get::<_, i64>(0)
             )
             .unwrap(),
-            4
+            1
         );
-        assert!(conn
+        let pending: (String, i64, i64) = conn
             .query_row(
-                "SELECT completed_at FROM tasks WHERE id='single'",
+                "SELECT target,attempted,settled FROM task_state_deliveries WHERE task_id='single'",
                 [],
-                |row| row.get::<_, Option<i64>>(0)
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
-            .unwrap()
-            .is_none());
+            .unwrap();
+        assert_eq!(pending, ("completed".into(), 1, 0));
+        let execution: (String, i64, String, Option<i64>) = conn.query_row(
+            "SELECT w.node,w.edge,w.process_lfid,p.completed_at FROM task_workflows w JOIN processes p ON p.lfid=w.process_lfid WHERE w.task_id='single'",
+            [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?)),
+        ).unwrap();
+        assert_eq!(execution, ("start".into(), 0, "held".into(), None));
+        assert_eq!(
+            conn.query_row(
+                "SELECT task_id FROM agent_sessions WHERE id='conversation'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+            "single"
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT parent_pr_id FROM tasks WHERE id='chain'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+            "old-pr"
+        );
         let placement: (String, String) = conn
             .query_row(
                 "SELECT branch,base_commit FROM tasks WHERE id='research'",

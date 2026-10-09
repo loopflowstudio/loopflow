@@ -31,7 +31,8 @@
       "reason": "ready",
       "updated_at": "2026-07-14T22:00:00Z",
       "provider": "codex",
-      "started": true
+      "started": true,
+      "pending_sync": null
     },
     "next_move": {
       "owner": "wave",
@@ -446,7 +447,8 @@
       "reason": "done",
       "updated_at": "2026-07-14T22:00:00Z",
       "provider": "codex",
-      "started": true
+      "started": true,
+      "pending_sync": null
     },
     "next_move": {
       "owner": "wave",
@@ -869,7 +871,8 @@
       "reason": "done",
       "updated_at": "2026-07-14T22:00:00Z",
       "provider": "codex",
-      "started": true
+      "started": true,
+      "pending_sync": null
     },
     "next_move": {
       "owner": "wave",
@@ -1401,7 +1404,8 @@
       "reason": "ready",
       "updated_at": "2026-07-14T22:00:00Z",
       "provider": "codex",
-      "started": true
+      "started": true,
+      "pending_sync": null
     },
     "next_move": {
       "owner": "wave",
@@ -1818,7 +1822,8 @@
       "reason": "ready",
       "updated_at": "2026-07-14T22:00:00Z",
       "provider": "codex",
-      "started": true
+      "started": true,
+      "pending_sync": null
     },
     "next_move": {
       "owner": "wave",

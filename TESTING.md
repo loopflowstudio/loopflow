@@ -772,15 +772,19 @@ Prove explicit experimental Machine continuity with `global_commands` and
 without an explicit experiment forward to the installed CLI and main Machine.
 Never run candidate mutation checks against the main Machine.
 
-Run the real CLI resume regressions with isolated installation authority:
+Run the Task CLI proofs with isolated installation authority:
 
 ```bash
 uv run python scripts/test_task_installation.py
-# One changed managed operation proof:
-uv run python scripts/test_task_installation.py --test task_operation_starts_with_durable_history_after_claim_only_failure
+# One changed Task adoption proof:
+uv run python scripts/test_task_installation.py --test task_adopts_linear_checkout_and_preserves_flow_history
 ```
 
 Pass several names after `--test` to share one disposable build across related proofs.
+Every ordinary installation run first upgrades populated released planning and
+Task/PR fixtures through the combined drafts. Those checks retain zero/one/multiple
+historical PRs, pending completion delivery, a running Process and its Workflow,
+and an associated Session; they never open an installed Home.
 The default container tracks stable Rust, matching the other CI Rust jobs, and
 logs its compiler version. When adopting a newer standard-library API or Clippy
 fix, verify the installation harness uses the same toolchain policy; a host lint

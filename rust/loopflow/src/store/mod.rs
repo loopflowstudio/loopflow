@@ -1318,7 +1318,7 @@ mod tests {
                     id TEXT PRIMARY KEY,
                     worktree TEXT NOT NULL,
                     abandoned_at INTEGER,
-                    completed_at INTEGER
+                    planning_completed INTEGER
                  );
                  CREATE TABLE task_workflows (task_id TEXT PRIMARY KEY, node TEXT NOT NULL, edge INTEGER);
                  INSERT INTO tasks VALUES ('running', '/repo.running', NULL, NULL);
@@ -1613,17 +1613,19 @@ mod tests {
             expected.plan.title = "Accepted title".into();
             expected.plan.description = "Accepted direction".into();
             expected.plan.pm_snapshot_synced_at = Some(17);
+            assert!(accepted.updated_at >= task.updated_at);
+            expected.updated_at = accepted.updated_at;
             if !mapped {
                 expected.plan.linear_id = None;
             }
             assert_eq!(accepted, expected);
             assert_eq!(store.get_task(&task.id).await.unwrap(), Some(expected));
-            assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
+            assert!(store.task_prs(&task.id).await.unwrap().is_empty());
             let events = store.task_events_after(&task.id, 0).await.unwrap();
             assert_eq!(events.len(), 1);
             assert!(matches!(
                 events[0].kind,
-                TaskEventKind::WorktreeInitializing { .. }
+                TaskEventKind::CheckoutInitializing { .. }
             ));
             assert!(!store.task_started(&task.id).await.unwrap());
         }
@@ -2009,6 +2011,8 @@ mod tests {
             let mut placed = task.clone();
             placed.worktree = Some(directory.path().join("first"));
             placed.workspace_slug = "first".into();
+            placed.branch = "first".into();
+            placed.base_commit = "deadbeef".into();
             let first = make_task_pr(&placed);
             let accepted = store
                 .place_task(
@@ -2036,7 +2040,9 @@ mod tests {
                 .unwrap();
             assert_eq!(retried, accepted);
             assert_eq!(retried.plan, task.plan);
-            assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![first]);
+            assert!(store.task_prs(&task.id).await.unwrap().is_empty());
+            assert_eq!(retried.branch, first.branch);
+            assert_eq!(retried.base_commit, first.base_commit);
             assert_eq!(store.task_events_after(&task.id, 0).await.unwrap().len(), 1);
             assert!(!store.task_started(&task.id).await.unwrap());
             assert!(!directory.path().join("second").exists());
@@ -2182,7 +2188,7 @@ mod tests {
             let saved = store.get_task(&task.id).await.unwrap().unwrap();
             assert_eq!(saved.worktree, task.worktree);
             assert_eq!(saved.id, task.id);
-            assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
+            assert!(store.task_prs(&task.id).await.unwrap().is_empty());
             assert!(!store.task_started(&task.id).await.unwrap());
         }
     }
@@ -3482,6 +3488,9 @@ mod tests {
             created_at: now,
             updated_at: now,
         };
+        child.branch = child_pr.branch.clone();
+        child.base_commit = child_pr.base_commit.clone();
+        child.parent_pr_id = child_pr.parent_pr_id.clone();
         store.seed_task(&child, &child_pr).await.unwrap();
 
         let active = store.active_task_pr(&child.id).await.unwrap().unwrap();
@@ -3579,17 +3588,44 @@ mod tests {
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
         select_project(&store, &project);
-        let task = make_task(&wave, &project);
+        let mut task = make_task(&wave, &project);
+        let mut initial = task_planning_snapshot(&wave, &project, &task);
+        initial.snapshot.items[0].completed = false;
+        initial.snapshot.items[0].completed_at = None;
+        initial.snapshot.items[0].state = Some("unstarted".into());
+        store.put_pm_snapshot(initial, None).await.unwrap();
+        task.id = store
+            .get_task_by_issue(&task.plan.identifier)
+            .await
+            .unwrap()
+            .unwrap()
+            .id;
         let pr = make_task_pr(&task);
-        store.seed_task(&task, &pr).await.unwrap();
+        let task = store
+            .place_task(
+                &task.id,
+                task.worktree.as_ref().unwrap(),
+                &task.workspace_slug,
+                &pr,
+                None,
+            )
+            .await
+            .unwrap();
 
         let mut refreshed_plan = task.plan.clone();
         refreshed_plan.title = "Latest provider title".into();
         let mut snapshot = task_planning_snapshot(&wave, &project, &task);
         snapshot.synced_at = refreshed_plan.pm_snapshot_synced_at.unwrap();
         snapshot.snapshot.items[0].name = refreshed_plan.title.clone();
+        snapshot.snapshot.items[0].revision = Some("2026-10-05T13:00:00Z".into());
+        snapshot.snapshot.items[0].completed = false;
+        snapshot.snapshot.items[0].completed_at = None;
+        snapshot.snapshot.items[0].state = Some("unstarted".into());
         snapshot.snapshot.items[0].description = refreshed_plan.description.clone();
         store.put_pm_snapshot(snapshot, None).await.unwrap();
+        let before_completion = store.get_task(&task.id).await.unwrap().unwrap();
+        assert_eq!(before_completion.plan.title, refreshed_plan.title);
+        refreshed_plan.revision = before_completion.plan.revision + 1;
         store
             .complete_task(
                 &task,
@@ -3602,7 +3638,6 @@ mod tests {
             .await
             .unwrap();
         let retained = store.get_task(&task.id).await.unwrap().unwrap();
-        refreshed_plan.revision += 1;
         assert_eq!(retained.plan, refreshed_plan);
         let stored = store.task_prs(&task.id).await.unwrap();
         assert!(stored.is_empty());

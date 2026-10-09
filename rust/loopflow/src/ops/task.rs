@@ -4474,7 +4474,7 @@ mod tests {
                     .unwrap()
                     .is_none());
                 assert_eq!(task.branch, "retained-branch");
-                assert_eq!(task.base_commit, "retained-base");
+                assert_eq!(task.base_commit, repo.head_sha());
             }
             assert!(runtime
                 .block_on(fixture.store.get_task(&fixture.task.id))
@@ -5342,6 +5342,14 @@ mod tests {
         apply_merged_task_landing(&store, &mut task, &pr, &landing)
             .await
             .unwrap();
+        assert_eq!(store.work_status(&work).await.unwrap(), WorkStatus::Ready);
+        store
+            .sqlite
+            .request_task_completion(&task.id, Some("Accepted outcome complete"))
+            .unwrap();
+        apply_merged_task_landing(&store, &mut task, &pr, &landing)
+            .await
+            .unwrap();
         assert_eq!(store.work_status(&work).await.unwrap(), WorkStatus::Done);
         apply_merged_task_landing(&store, &mut task, &pr, &landing)
             .await
@@ -5457,12 +5465,12 @@ mod tests {
         assert_eq!(
             connection
                 .query_row(
-                    "SELECT completed_at FROM tasks WHERE id=?1",
+                    "SELECT planning_completed FROM tasks WHERE id=?1",
                     [fixture.task.id.as_str()],
                     |row| row.get::<_, i64>(0)
                 )
                 .unwrap(),
-            123
+            1
         );
     }
 

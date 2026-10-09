@@ -496,7 +496,7 @@ pub enum DesktopCommand {
     Read {
         #[arg(long)]
         target: String,
-        /// Native surface incarnation from desktop inspect
+        /// Native surface incarnation from desktop list
         #[arg(long)]
         surface: String,
         #[arg(long, value_enum)]
@@ -594,7 +594,7 @@ pub enum DesktopCommand {
         json: bool,
     },
     /// Read actual windows and panes without launching, focusing, or acquiring clients
-    Inspect {
+    List {
         #[arg(long)]
         json: bool,
     },

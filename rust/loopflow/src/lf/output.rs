@@ -1,5 +1,19 @@
 use std::io::IsTerminal;
 
+pub(crate) fn print_process(process: &crate::process::Process) {
+    let command = process.command.as_deref().unwrap_or("unknown command");
+    let display = serde_json::from_str::<Vec<String>>(command)
+        .map(|argv| argv.join(" "))
+        .unwrap_or_else(|_| command.to_string());
+    println!(
+        "{}  {}  {}  {}",
+        process.lfid,
+        process.started_at,
+        process.outcome.as_deref().unwrap_or("unknown"),
+        display
+    );
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Colors {
     pub cyan: &'static str,

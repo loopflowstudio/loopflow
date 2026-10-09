@@ -82,16 +82,10 @@ pub enum WorkActivityFact {
     },
 }
 
-pub fn run(
-    since_value: &str,
-    limit: usize,
-    wave: Option<&str>,
-    project: Option<&str>,
-    task: Option<&str>,
-    json: bool,
-) -> Result<()> {
+pub fn run(options: &super::history::HistoryFeed) -> Result<()> {
+    let limit = options.limit;
     let generated_at = OffsetDateTime::now_utc();
-    let since = parse_since(since_value, generated_at)?.unix_timestamp();
+    let since = parse_since(&options.since, generated_at)?.unix_timestamp();
     if limit == 0 || limit > MAX_LIMIT {
         return Err(anyhow!(
             "--limit must be between 1 and {MAX_LIMIT}; got {}",
@@ -100,9 +94,9 @@ pub fn run(
     }
 
     let filter = WorkFilter {
-        wave,
-        project,
-        task,
+        wave: options.wave.as_deref(),
+        project: options.project.as_deref(),
+        task: options.task.as_deref(),
     };
     let path = crate::store::database_path_from_env()?;
     let snapshot = if path.exists() {
@@ -118,7 +112,7 @@ pub fn run(
         }
     };
 
-    if json {
+    if options.json {
         println!("{}", serde_json::to_string(&snapshot)?);
     } else {
         print_snapshot(&snapshot);

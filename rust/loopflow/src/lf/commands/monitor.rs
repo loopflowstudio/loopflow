@@ -2,6 +2,8 @@ use std::num::NonZeroU32;
 
 use clap::Subcommand;
 
+use crate::lf::output::print_process;
+
 use crate::process::ProcessFilter;
 use crate::repository::CanonicalRepo;
 use crate::store::{open_store, storage_config_from_env};

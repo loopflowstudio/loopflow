@@ -459,7 +459,7 @@ lf context --explain --task LOO-427 --json
 lf context --explain                         # resolve the current checkout
 lf context --explain --session SESSION_ID
 lf context --explain --process PROCESS_LFID
-lf desktop inspect --json                    # read an already-running Mac app
+lf desktop list --json                       # read an already-running Mac app
 ```
 
 Explanation reads local records without allocating a checkout, creating a plan,
@@ -489,7 +489,7 @@ It requires macOS and a running app with automation access; failure leaves
 Hide and restore an exact retained pane, without closing its Session or shell:
 
 ```sh
-lf desktop inspect --json > /tmp/desktop.json
+lf desktop list --json > /tmp/desktop.json
 # Set pane to a pane ID from that reading.
 target=$(jq -c --arg pane "$pane" '
   .windows[] as $w | $w.workspaces[] as $s |

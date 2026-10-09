@@ -545,7 +545,7 @@ supplies `flow_processes`, using the same execution details as CLI inspection.
 ### Inspect retained workspaces
 
 ```sh
-lf desktop inspect --json
+lf desktop list --json
 lf context --explain --task LOO-427 --json
 ```
 

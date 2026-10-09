@@ -92,6 +92,23 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
     ]))
     .unwrap();
     assert_eq!(detail, second.entries[0]);
+    // Both observations use the same text presentation, including unknown outcomes
+    // and older records that have no command. JSON above retains the raw argv.
+    let expected = format!("{}  9  unknown  lf pr land --strict %_ literal", ids[1]);
+    for args in [
+        vec!["history", "list", "--all", "--parent", parent.as_str()],
+        vec!["history", "show", ids[1].as_str()],
+        vec!["monitor", "--all"],
+    ] {
+        let text = String::from_utf8(invoke(&args)).unwrap();
+        assert!(text.contains(&expected), "{text}");
+        if args[0] == "monitor" {
+            assert!(
+                text.contains(&format!("{parent}  1  unknown  unknown command")),
+                "{text}"
+            );
+        }
+    }
     let caller: ProcessPage = serde_json::from_slice(&invoke(&[
         "history",
         "list",

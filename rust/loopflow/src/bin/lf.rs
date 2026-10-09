@@ -1992,7 +1992,7 @@ fn execute_command(
         },
         Some(Commands::History { feed, cmd }) => match cmd {
             Some(cmd) => loopflow::lf::commands::history::run(cmd),
-            None => loopflow::lf::commands::history::feed(feed),
+            None => loopflow::lf::commands::activity::run(feed),
         },
         Some(Commands::Discord {
             cmd: loopflow::lf::DiscordCommand::Serve { wave },

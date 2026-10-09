@@ -537,6 +537,40 @@ fn help_preserves_location_without_promoting_query_filters() {
 }
 
 #[test]
+fn desktop_list_uses_the_retained_reader_without_an_inspect_alias() {
+    use loopflow::lf::DesktopCommand;
+
+    for args in [
+        vec!["lf", "desktop", "list", "--json"],
+        vec!["lf", "desktop", "li", "--json"],
+    ] {
+        let args = normalize_args(args.into_iter().map(str::to_owned).collect()).unwrap();
+        let cli = Cli::try_parse_from(args).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Desktop {
+                cmd: DesktopCommand::List { json: true }
+            })
+        ));
+    }
+    let repo = fixture();
+    let home = tempfile::tempdir().unwrap();
+    let help = success(run(
+        repo.path(),
+        home.path(),
+        &["desktop", "list", "--help"],
+    ));
+    assert_eq!(
+        help,
+        success(run(repo.path(), home.path(), &["help", "desktop", "list"]))
+    );
+    let retired = run(repo.path(), home.path(), &["desktop", "inspect", "--json"]);
+    assert_eq!(retired.status.code(), Some(2));
+    assert!(retired.stdout.is_empty());
+    assert!(!home.path().join(".lf").exists());
+}
+
+#[test]
 fn history_owns_recorded_reads_and_replay_without_changing_live_monitoring() {
     let parse = |args: &[&str]| {
         Cli::try_parse_from(normalize_args(args.iter().map(|s| s.to_string()).collect()).unwrap())

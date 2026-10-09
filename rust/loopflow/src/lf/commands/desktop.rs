@@ -213,7 +213,7 @@ pub fn run(command: &crate::lf::DesktopCommand) -> Result<()> {
     // Check before decoding targets or looking up any Work/Machine.
     super::open::require_supported()?;
     let (target, action, json) = match command {
-        DesktopCommand::Inspect { json } => return invoke(None, *json),
+        DesktopCommand::List { json } => return invoke(None, *json),
         DesktopCommand::Read {
             target,
             surface,
@@ -317,7 +317,7 @@ pub fn run(command: &crate::lf::DesktopCommand) -> Result<()> {
 
 fn parse_target(target: &str) -> Result<DesktopPaneTarget> {
     serde_json::from_str(target)
-        .context("expected the exact pane target from `lf desktop inspect --json`")
+        .context("expected the exact pane target from `lf desktop list --json`")
 }
 
 fn contact(request: Option<&str>, text_read: bool) -> Result<Vec<u8>> {

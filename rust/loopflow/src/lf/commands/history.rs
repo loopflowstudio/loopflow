@@ -3,9 +3,8 @@ use std::num::NonZeroU32;
 use anyhow::Context;
 use clap::Subcommand;
 
-use crate::process::{
-    Process, ProcessCursor, ProcessFilter, ProcessOutcomeFilter, ProcessWorkFilter,
-};
+use crate::lf::output::print_process;
+use crate::process::{ProcessCursor, ProcessFilter, ProcessOutcomeFilter, ProcessWorkFilter};
 use crate::repository::CanonicalRepo;
 use crate::store::{open_store, storage_config_from_env};
 
@@ -120,17 +119,6 @@ pub enum HistoryCommand {
 
 fn parse_cursor(value: &str) -> Result<ProcessCursor, String> {
     serde_json::from_str(value).map_err(|error| error.to_string())
-}
-
-pub fn feed(options: &HistoryFeed) -> anyhow::Result<()> {
-    super::activity::run(
-        &options.since,
-        options.limit,
-        options.wave.as_deref(),
-        options.project.as_deref(),
-        options.task.as_deref(),
-        options.json,
-    )
 }
 
 pub fn run(command: &HistoryCommand) -> anyhow::Result<()> {
@@ -263,20 +251,6 @@ pub fn run(command: &HistoryCommand) -> anyhow::Result<()> {
     }
 }
 
-fn print_process(process: &Process) {
-    let command = process.command.as_deref().unwrap_or("unknown command");
-    let display = serde_json::from_str::<Vec<String>>(command)
-        .map(|argv| argv.join(" "))
-        .unwrap_or_else(|_| command.to_string());
-    println!(
-        "{}  {}  {}  {}",
-        process.lfid,
-        process.started_at,
-        process.outcome.as_deref().unwrap_or("unknown"),
-        display
-    );
-}
-
 fn show(
     id: &str,
     json: bool,
@@ -313,12 +287,10 @@ fn show(
                 !events && !final_answer && !context,
                 "--events, --final and --context inspect Session evidence; Processes record command outcomes"
             );
-            if json {
-                println!("{}", serde_json::to_string_pretty(&process)?);
-            } else {
+            if !json {
                 print_process(&process);
-                println!("{}", serde_json::to_string_pretty(&process)?);
             }
+            println!("{}", serde_json::to_string_pretty(&process)?);
             Ok(())
         }
         None => super::session_history::inspect(

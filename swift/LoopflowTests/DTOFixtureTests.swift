@@ -236,6 +236,15 @@ struct DTOFixtureTests {
         #expect(snapshot.items[4].fact == .workCreated)
     }
 
+    @Test("unplaced Wave fixture retains planning without a Machine")
+    func unplacedWaveFixture() throws {
+        let wave = try JSONDecoder().decode(WaveSnapshot.self, from: loadFixtureData("unplaced_wave.json"))
+        #expect(wave.machine == nil)
+        #expect(wave.toWave().id == wave.id)
+        #expect(wave.toWave().name == "shared")
+        #expect(wave.activeTasks == 1)
+    }
+
     @Test("wave detail fixture preserves Project and Task identity")
     func waveDetailFixturePreservesHierarchy() throws {
         let data = try loadFixtureData("wave_detail.json")
@@ -244,10 +253,10 @@ struct DTOFixtureTests {
         #expect(detail.projectReadiness.state == .ready)
         #expect(detail.projectReadiness.projectId == detail.currentProject?.id)
         #expect(detail.projectReadiness.activation == nil)
-        #expect(detail.wave.machine.id == "home_00000000000000000000000000000001")
-        #expect(detail.wave.machine.route == "ssh://jack@mini-heart")
-        #expect(detail.wave.machine.label == "mini")
-        #expect(detail.wave.machine.repo == "src/project")
+        #expect(detail.wave.machine?.id == "home_00000000000000000000000000000001")
+        #expect(detail.wave.machine?.route == "ssh://jack@mini-heart")
+        #expect(detail.wave.machine?.label == "mini")
+        #expect(detail.wave.machine?.repo == "src/project")
 
         // The Machine runtime evidence carries the state and the one contextual action.
 
@@ -291,17 +300,6 @@ struct DTOFixtureTests {
             sourceWindowStart: "2026-08-13T18:00:00Z",
             sourceWindowEnd: "2026-08-20T18:00:00Z"
         ))
-
-        var missingMachine = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        var wave = try #require(missingMachine["wave"] as? [String: Any])
-        wave.removeValue(forKey: "machine")
-        missingMachine["wave"] = wave
-        let missingMachineData = try JSONSerialization.data(withJSONObject: missingMachine)
-        #expect(throws: DecodingError.self) {
-            try JSONDecoder().decode(WaveDetailSnapshot.self, from: missingMachineData)
-        }
-
-
     }
 
     @Test("roadmap fixture preserves sections and durable Task references")

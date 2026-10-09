@@ -458,7 +458,7 @@ public struct WaveSnapshot: Decodable, Sendable, Hashable, Identifiable {
     public let retiredAt: String?
     public let supersededByWaveId: String?
     public let retirementReason: String?
-    public let machine: Machine
+    public let machine: Machine?
 
     public var displayName: String { toWave().displayName }
 

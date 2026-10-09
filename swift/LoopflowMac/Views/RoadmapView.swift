@@ -511,7 +511,7 @@ private struct RoadmapWaveCard: View {
                     selection == .wave(id: roadmap.wave.id) ? [.isSelected] : []
                 )
                 Spacer()
-                Text(roadmap.wave.machine.route == "local" ? roadmap.wave.machine.id : roadmap.wave.machine.route)
+                Text(roadmap.wave.machine.map { $0.route == "local" ? $0.id : $0.route } ?? "Unplaced")
                     .font(Typography.caption(10))
                     .foregroundStyle(palette.textSecondary)
                     .textSelection(.enabled)

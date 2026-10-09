@@ -674,3 +674,119 @@ fn taskless_terminal_and_headless_sessions_keep_planning_live() {
         assert_eq!(sessions, (1, 0));
     }
 }
+
+#[test]
+fn public_wave_reads_imported_planning_without_placing_or_changing_execution() {
+    let repo = TestRepo::new();
+    let other = TestRepo::new();
+    let left = tempfile::tempdir().unwrap();
+    let right = tempfile::tempdir().unwrap();
+    let source = repo.path().canonicalize().unwrap();
+    let target = other.path().canonicalize().unwrap();
+    let fixture = support::register_unrun_task(left.path(), &source, "main", &repo.head_sha());
+    let source_store =
+        loopflow::store::sqlite::SqliteStore::new(&left.path().join("loopflow.db")).unwrap();
+    let retained = create(&target, right.path(), "");
+    let worker =
+        loopflow::store::sqlite::SqliteStore::new(&right.path().join("loopflow.db")).unwrap();
+    let binding =
+        PlanningDestination::resolve(&source, "origin", "refs/loopflow/planning/shared/fixture")
+            .unwrap();
+    let source_key = source.to_str().unwrap();
+    let target_key = target.to_str().unwrap();
+    source_store
+        .bind_peer_planning(source_key, &binding)
+        .unwrap();
+    source_store
+        .select_peer_waves(
+            source_key,
+            &binding.id(),
+            std::slice::from_ref(&fixture.task.wave_id),
+        )
+        .unwrap();
+    worker.bind_peer_planning(target_key, &binding).unwrap();
+    let snapshot = source_store
+        .export_peer_planning(source_key, &binding.id())
+        .unwrap();
+    worker
+        .import_peer_planning(target_key, &binding.id(), "fixture", &snapshot)
+        .unwrap();
+    assert!(worker.peer_planning_status(target_key).unwrap()[0]
+        .conflicts
+        .is_empty());
+    let wave_id = fixture.task.wave_id.as_str();
+    let conn = Connection::open(right.path().join("loopflow.db")).unwrap();
+    conn.execute("INSERT INTO processes(lfid,trace_id,started_at) VALUES('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000002',1)", []).unwrap();
+    let retained_task = worker.task(&retained.parse().unwrap()).unwrap().unwrap();
+    conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,interactive,input_published,cwd,task_id,wave_id)
+        VALUES('retained-session','Retained','human',1,1,1,?1,?2,?3)", params![target_key, retained, retained_task.wave_id.as_str()]).unwrap();
+    let graph = json!({"name":"review","nodes":[{"name":"review","skill":"review","description":null}],"edges":[]});
+    conn.execute(
+        "INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,?2,'review',1)",
+        params![retained, graph.to_string()],
+    )
+    .unwrap();
+    let before = execution(&conn, &retained);
+    let imported_before = execution(&conn, fixture.task.id.as_str());
+    let placements = || {
+        let mut query = conn
+            .prepare("SELECT * FROM work_placements ORDER BY rowid")
+            .unwrap();
+        let columns = query.column_count();
+        query
+            .query_map([], |row| {
+                (0..columns)
+                    .map(|i| row.get(i))
+                    .collect::<Result<Vec<rusqlite::types::Value>, _>>()
+            })
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+    };
+    let placements_before = placements();
+    let imported_work = loopflow::durable::WorkRef::Wave(fixture.task.wave_id.clone());
+    assert!(worker.find_placement(&imported_work).unwrap().is_none());
+    for _ in 0..2 {
+        let detail: serde_json::Value = serde_json::from_str(&run(
+            &target,
+            right.path(),
+            &["wave", "status", wave_id, "--json"],
+        ))
+        .unwrap();
+        assert_eq!(detail["wave"]["id"], wave_id);
+        assert!(detail["wave"]["machine"].is_null());
+        assert_eq!(detail["wave"]["active_tasks"], 1);
+        assert!(detail["tasks"]["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|task| task["runtime"]["work_id"] == fixture.task.id.as_str()));
+        let list: serde_json::Value =
+            serde_json::from_str(&run(&target, right.path(), &["wave", "list", "--json"])).unwrap();
+        let wave = list
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|wave| wave["id"] == wave_id)
+            .unwrap();
+        assert!(wave["machine"].is_null());
+        let roadmap: serde_json::Value = serde_json::from_str(&run(
+            &target,
+            right.path(),
+            &["roadmap", "--wave", wave_id, "--json"],
+        ))
+        .unwrap();
+        assert_eq!(roadmap["waves"][0]["wave"]["id"], wave_id);
+        assert!(roadmap["waves"][0]["wave"]["machine"].is_null());
+        assert!(run(&target, right.path(), &["wave", "status", wave_id]).contains("unplaced"));
+        assert!(run(&target, right.path(), &["wave", "list"]).contains("unplaced"));
+    }
+    assert!(worker.find_placement(&imported_work).unwrap().is_none());
+    assert!(worker
+        .find_placement(&loopflow::durable::WorkRef::Task(fixture.task.id.clone()))
+        .unwrap()
+        .is_none());
+    assert_eq!(placements(), placements_before);
+    assert_eq!(execution(&conn, fixture.task.id.as_str()), imported_before);
+    assert_eq!(execution(&conn, &retained), before);
+}

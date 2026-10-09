@@ -31,6 +31,9 @@ repository-wide Linear synchronization. Creation without a Wave uses `inbox`.
 Wave provisioning imports existing Markdown and repository Workflow definitions,
 preserving stable authored IDs and source bytes. Saved documents, including ancestor
 context, serve both connection modes. Reads never provision or fall back to files.
+Imported Waves remain readable without execution placement: Wave list, status
+and roadmap emit `machine: null` and display “unplaced,” not a fabricated local
+Machine. Desktop consumes the same optional placement.
 Explicit edits and relocation change stored planning without rewriting the checkout.
 The released-frontier migration imports available registered definitions; unavailable
 sources can be imported later with `lf wave ensure`.

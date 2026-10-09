@@ -644,9 +644,9 @@ clocks invent no revisions. Scalar/list replay cannot clear freshness;
 acknowledgement requires its accepted frontier. Focused proof only.
 
 Acquisition/saves bypass effect locks; unreadable journals mean unknown pending.
-Private histories/dependents stay held until selection; omission is not convergence.
-Legacy association, unplaced-Wave/Desktop and public verification remain.
-Mixed-provider exchange stays disabled.
+Private histories/dependents stay held; omission is not convergence.
+Wave reads show null placement, never allocate it. Legacy association, Desktop peer presentation and public
+composition remain. Mixed-provider exchange stays disabled.
 Design: `scratch/work-on-another-machine-name.md`. Earlier proofs:
 `7f206cd0e:wave/infrastructure/MEMORY.md`, this heading.
 

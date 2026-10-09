@@ -100,10 +100,16 @@ fn pm_show_preserves_an_unmapped_team_as_null() {
 }
 
 #[test]
-fn wave_detail_preserves_flow_and_requires_machine() {
+fn wave_detail_preserves_flow_and_machine() {
     let snapshot: WaveDetailSnapshot = serde_json::from_str(WAVE_DETAIL).unwrap();
-    assert_eq!(snapshot.wave.machine.label.as_deref(), Some("mini"));
-    assert_eq!(snapshot.wave.machine.repo.as_deref(), Some("src/project"));
+    assert_eq!(
+        snapshot.wave.machine.as_ref().unwrap().label.as_deref(),
+        Some("mini")
+    );
+    assert_eq!(
+        snapshot.wave.machine.as_ref().unwrap().repo.as_deref(),
+        Some("src/project")
+    );
     assert_eq!(
         snapshot.project_readiness.state,
         loopflow::store::sqlite::ProjectReadinessState::Ready
@@ -148,13 +154,6 @@ fn wave_detail_preserves_flow_and_requires_machine() {
         serde_json::to_value(&decoded.projects).unwrap(),
         serde_json::to_value(&snapshot.projects).unwrap()
     );
-
-    let mut missing_machine: serde_json::Value = serde_json::from_str(WAVE_DETAIL).unwrap();
-    missing_machine["wave"]
-        .as_object_mut()
-        .unwrap()
-        .remove("machine");
-    assert!(serde_json::from_value::<WaveDetailSnapshot>(missing_machine).is_err());
 }
 
 #[test]
@@ -631,4 +630,17 @@ fn peer_planning_status_keeps_unknown_local_state_and_retained_receipts() {
     let mut missing = value[1].clone();
     missing.as_object_mut().unwrap().remove("conflicts");
     assert!(serde_json::from_value::<loopflow::store::PeerPlanningStatus>(missing).is_err());
+}
+
+#[test]
+fn unplaced_wave_preserves_nullable_machine() {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/unplaced_wave.json"
+    ))
+    .unwrap();
+    let wave: loopflow::lf::commands::waves::WaveSnapshot =
+        serde_json::from_value(fixture.clone()).unwrap();
+    assert!(wave.machine.is_none());
+    assert_eq!(wave.active_tasks, 1);
+    assert_eq!(serde_json::to_value(wave).unwrap(), fixture);
 }

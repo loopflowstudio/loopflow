@@ -84,18 +84,7 @@ pub(super) fn entry_in(
 ) -> StoreResult<FlowProcessInventoryEntry> {
     let driver = &flow.driver;
     let state = FlowProcessSummaryState::of_driver(driver.outcome.as_deref(), driver.completed_at);
-    let task: Option<String> = match &driver.cwd {
-        Some(cwd) => conn
-            .query_row(
-                "SELECT tw.id FROM tasks tw WHERE tw.worktree!='' AND (?1=rtrim(tw.worktree,'/')
-                    OR instr(?1,rtrim(tw.worktree,'/')||'/')=1)
-                 ORDER BY length(tw.worktree) DESC LIMIT 1",
-                [cwd],
-                |row| row.get(0),
-            )
-            .optional()?,
-        None => None,
-    };
+    let task = super::task_work::task_of_process(conn, &driver.lfid)?;
     let wave: Option<String> = match &task {
         Some(task) => conn
             .query_row(
@@ -207,21 +196,22 @@ impl SqliteStore {
     pub(crate) fn record_flow_process(
         &self,
         driver: &ProcessLfid,
-        flow: &str,
         graph: &FlowGraph,
+        task: Option<&TaskId>,
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
         tx.execute(
             "INSERT INTO flow_processes(process_lfid,flow,graph) VALUES(?1,?2,?3)",
-            params![driver, flow, serde_json::to_string(graph)?],
+            params![driver, graph.name, serde_json::to_string(graph)?],
         )?;
-        tx.execute(
-            "UPDATE tasks SET started_at=?2 WHERE started_at IS NULL AND worktree!=''
-             AND EXISTS(SELECT 1 FROM processes WHERE lfid=?1
-                 AND (cwd=rtrim(tasks.worktree,'/') OR instr(cwd,rtrim(tasks.worktree,'/')||'/')=1))",
-            params![driver, crate::store::rows::now_unix()],
-        )?;
+        let associated = super::task_work::task_of_process(&tx, driver)?;
+        if let Some(task) = task.map(TaskId::as_str).or(associated.as_deref()) {
+            tx.execute(
+                "UPDATE tasks SET started_at=?2 WHERE id=?1 AND started_at IS NULL",
+                params![task, crate::store::rows::now_unix()],
+            )?;
+        }
         tx.commit()?;
         Ok(())
     }
@@ -342,7 +332,7 @@ impl SqliteStore {
                 })
             })
             .collect();
-        self.record_flow_process(&driver, name, &FlowGraph::new(name, &compiled))
+        self.record_flow_process(&driver, &FlowGraph::new(name, &compiled), None)
             .unwrap();
         for (index, (label, outcome)) in steps.iter().enumerate() {
             let step = ProcessLfid::new();
@@ -363,6 +353,47 @@ mod tests {
     use crate::durable::FlowProcessFilter;
     use crate::session::FlowProcessSummaryState;
     use crate::store::sqlite::SqliteStore;
+
+    #[test]
+    fn failed_task_start_records_no_flow() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&directory.path().join("loopflow.db")).unwrap();
+        let task = crate::durable::TaskId::new();
+        let project = crate::durable::ProjectId::new();
+        let wave = crate::id::WaveId::new();
+        let driver = crate::id::ProcessLfid::new();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'proof','/repo',1)",
+                [&wave],
+            )
+            .unwrap();
+            conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", rusqlite::params![project.as_str(),wave]).unwrap();
+            conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at) VALUES(?1,?2,'issue','PROOF-1','/repo/task',1)",rusqlite::params![task.as_str(),project.as_str()]).unwrap();
+            conn.execute("INSERT INTO processes(lfid,trace_id,cwd,started_at) VALUES(?1,?2,'/repo/caller',1)", rusqlite::params![driver,crate::id::TraceId::new()]).unwrap();
+        }
+        let graph = crate::engine::flow_graph::FlowGraph::new("proof", &[]);
+        let error = store
+            .record_flow_process(&driver, &graph, Some(&task))
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("Started requires recorded Task work"),
+            "{error}"
+        );
+        assert!(store.flow_process(driver.as_str()).unwrap().is_none());
+        let conn = store.conn.lock().unwrap();
+        let started: Option<i64> = conn
+            .query_row(
+                "SELECT started_at FROM tasks WHERE id=?1",
+                [task.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(started, None);
+    }
 
     #[test]
     fn flows_are_their_driver_and_step_processes() {

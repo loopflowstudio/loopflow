@@ -113,6 +113,8 @@
           "assignee": "user-1",
           "state": "unstarted",
           "completed_at": null,
+          "due_date": null,
+          "follow_up_sources": [],
           "sync": {
             "connected": true,
             "changes": [
@@ -178,13 +180,14 @@
             "slug": "infrastructure-task",
             "branch": "jack/infrastructure.task.20260713_1200",
             "worktree": "/src/loopflow.infrastructure.task",
-            "local_exists": true
+            "local_exists": true,
+            "base_commit": "1111111111111111111111111111111111111111"
           }
         },
         "runtime": {
           "work_id": "ts_22222222222222222222222222222222",
           "status": "ready",
-          "planning_conflict": null,
+          "completion_pending": null,
           "reason": "ready",
           "updated_at": "2026-07-13T19:00:00Z",
           "provider": "codex",
@@ -202,39 +205,6 @@
           "owner": "user",
           "reason": "merge pull request head 333333333333 on GitHub"
         },
-        "prs": [
-          {
-            "id": "pr_33333333333333333333333333333333",
-            "sequence": 1,
-            "slug": "infrastructure-task",
-            "branch": "jack/infrastructure.task.20260713_1200",
-            "base_commit": "1111111111111111111111111111111111111111",
-            "phase": "open",
-            "empty": false,
-            "publication": {
-              "requested_at": "2026-07-13T18:45:00Z",
-              "presentation": {
-                "title": "Ship infrastructure task",
-                "body": "Explains the intent and proof for this head.",
-                "head_sha": "3333333333333333333333333333333333333333"
-              },
-              "github": {
-                "number": 912,
-                "url": "https://github.com/loopflowstudio/loopflow/pull/912"
-              },
-              "merge": {
-                "mode": "user",
-                "requested_at": "2026-07-13T18:46:00Z",
-                "head_sha": "3333333333333333333333333333333333333333",
-                "after_merge": "complete_task",
-                "next_slug": null
-              }
-            },
-            "merge_commit": null,
-            "abandoned_at": null
-          }
-        ],
-        "active_pr": "pr_33333333333333333333333333333333",
         "actions": {
           "recommended": "open_pr",
           "reason": "merge head 333333333333 on GitHub"
@@ -562,6 +532,41 @@
         },
         "run_control": {
           "unavailable": null
+        },
+        "pr": {
+          "id": "pr_33333333333333333333333333333333",
+          "sequence": 1,
+          "slug": "infrastructure-task",
+          "branch": "jack/infrastructure.task.20260713_1200",
+          "base_commit": "1111111111111111111111111111111111111111",
+          "phase": "open",
+          "empty": false,
+          "publication": {
+            "requested_at": "2026-07-13T18:45:00Z",
+            "presentation": {
+              "title": "Ship infrastructure task",
+              "body": "Explains the intent and proof for this head.",
+              "head_sha": "3333333333333333333333333333333333333333"
+            },
+            "github": {
+              "number": 912,
+              "url": "https://github.com/loopflowstudio/loopflow/pull/912"
+            },
+            "merge": {
+              "mode": "user",
+              "requested_at": "2026-07-13T18:46:00Z",
+              "head_sha": "3333333333333333333333333333333333333333"
+            }
+          },
+          "merge_commit": null,
+          "abandoned_at": null
+        },
+        "follow_through": {
+          "intents": [],
+          "links": [],
+          "reason": null,
+          "needs_conversion": false,
+          "scope_notes": []
         }
       },
       {
@@ -575,6 +580,8 @@
           "assignee": null,
           "state": "unstarted",
           "completed_at": null,
+          "due_date": null,
+          "follow_up_sources": [],
           "sync": {
             "connected": true,
             "changes": [
@@ -643,8 +650,6 @@
           "owner": "wave",
           "reason": "Task is ready to start"
         },
-        "prs": [],
-        "active_pr": null,
         "actions": {
           "recommended": null,
           "reason": "Task is ready to start"
@@ -674,6 +679,14 @@
         },
         "run_control": {
           "unavailable": null
+        },
+        "pr": null,
+        "follow_through": {
+          "intents": [],
+          "links": [],
+          "reason": null,
+          "needs_conversion": false,
+          "scope_notes": []
         }
       }
     ],

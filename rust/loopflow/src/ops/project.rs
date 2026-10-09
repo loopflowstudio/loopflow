@@ -74,11 +74,12 @@ pub async fn update_plan(
     content: ProjectContent,
 ) -> OpsResult<ProjectPlanning> {
     let store = super::pm::pm_store().await?;
+    let ambient = std::env::var(crate::work::wave::context::WAVE_ID_ENV).ok();
     let wave = crate::work::wave::context::resolve_managed_wave(
         Some(&store),
         Some(repo),
         wave,
-        std::env::var("LF_WAVE_ID").ok().as_deref(),
+        ambient.as_deref(),
     )
     .await
     .map_err(project_error)?;

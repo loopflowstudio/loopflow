@@ -45,12 +45,11 @@ mod session_events;
 pub(crate) mod sessions;
 mod task_comments;
 mod task_content;
+mod task_follow_through;
 pub(crate) mod task_state_delivery;
 mod task_work;
 pub(crate) mod wave_documents;
 
-#[cfg(test)]
-pub(crate) use durable::task_state_sql;
 pub use project_selection::{ProjectActivation, ProjectReadiness, ProjectReadinessState};
 pub use revisions::StoreRevisions;
 pub(crate) use task_work::EndMove;

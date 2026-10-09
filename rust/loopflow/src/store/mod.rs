@@ -1319,15 +1319,17 @@ mod tests {
                 "CREATE TABLE tasks (
                     id TEXT PRIMARY KEY,
                     worktree TEXT NOT NULL,
-                    abandoned_at INTEGER
+                    abandoned_at INTEGER,
+                    planning_completed INTEGER
                  );
                  CREATE TABLE task_workflows (task_id TEXT PRIMARY KEY, node TEXT NOT NULL, edge INTEGER);
-                 INSERT INTO tasks VALUES ('running', '/repo.running', NULL);
-                 INSERT INTO tasks VALUES ('waiting', '/repo.waiting', NULL);
-                 INSERT INTO tasks VALUES ('completed', '/repo.completed', NULL);
-                 INSERT INTO tasks VALUES ('abandoned', '/repo.abandoned', 1);
+                 INSERT INTO tasks VALUES ('running', '/repo.running', NULL, NULL);
+                 INSERT INTO tasks VALUES ('waiting', '/repo.waiting', NULL, NULL);
+                 INSERT INTO tasks VALUES ('completed', '/repo.completed', NULL, 1);
+                 INSERT INTO tasks VALUES ('abandoned', '/repo.abandoned', 1, NULL);
                  INSERT INTO task_workflows VALUES ('running', 'review', 2);
-                 INSERT INTO task_workflows VALUES ('completed', 'end', NULL);",
+                 INSERT INTO task_workflows VALUES ('completed', 'review', 2);
+                 INSERT INTO task_workflows VALUES ('waiting', 'end', NULL);",
             )
             .expect("seed task ownership");
         drop(connection);
@@ -1452,6 +1454,9 @@ mod tests {
             project_id: project.id.clone(),
             worktree: Some(PathBuf::from("/repo.inf-123")),
             workspace_slug: format!("task-{}", &id.as_str()[3..11]),
+            branch: format!("jack/task-{}", &id.as_str()[3..11]),
+            base_commit: "deadbeef".to_string(),
+            parent_pr_id: None,
             agent: None,
             abandon_intent: None,
             created_at: now,
@@ -1466,9 +1471,9 @@ mod tests {
             task_id: task.id.clone(),
             sequence: 1,
             slug: task.workspace_slug.clone(),
-            branch: format!("jack/{}", task.workspace_slug),
-            base_commit: "deadbeef".to_string(),
-            parent_pr_id: None,
+            branch: task.branch.clone(),
+            base_commit: task.base_commit.clone(),
+            parent_pr_id: task.parent_pr_id.clone(),
             publication: None,
             merge_commit: None,
             abandoned_at: None,
@@ -1610,17 +1615,19 @@ mod tests {
             expected.plan.title = "Accepted title".into();
             expected.plan.description = "Accepted direction".into();
             expected.plan.pm_snapshot_synced_at = Some(17);
+            assert!(accepted.updated_at >= task.updated_at);
+            expected.updated_at = accepted.updated_at;
             if !mapped {
                 expected.plan.linear_id = None;
             }
             assert_eq!(accepted, expected);
             assert_eq!(store.get_task(&task.id).await.unwrap(), Some(expected));
-            assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
+            assert!(store.task_prs(&task.id).await.unwrap().is_empty());
             let events = store.task_events_after(&task.id, 0).await.unwrap();
             assert_eq!(events.len(), 1);
             assert!(matches!(
                 events[0].kind,
-                TaskEventKind::WorktreeInitializing { .. }
+                TaskEventKind::CheckoutInitializing { .. }
             ));
             assert!(!store.task_started(&task.id).await.unwrap());
         }
@@ -1705,19 +1712,29 @@ mod tests {
             );
             assert_eq!(store.sqlite.workflow(&task.id).unwrap(), workflow);
             store
-                .complete_task(&task, None, crate::store::sqlite::EndMove::Set, None)
+                .complete_task(
+                    &task,
+                    store
+                        .sqlite
+                        .request_task_completion(&task.id, None)
+                        .unwrap()
+                        .unwrap_or(0),
+                )
                 .await
                 .unwrap();
-            let completion = store.sqlite.pending_task_state(&task.id).unwrap().unwrap();
+            assert!(store.sqlite.pending_task_state(&task.id).unwrap().is_none());
+            store
+                .sqlite
+                .reopen_task(&task.id, Some("New scope"))
+                .unwrap();
             store
                 .sqlite
                 .set_workflow_node(&task.id, "review", &driver, None)
                 .unwrap();
             let reopened = store.sqlite.workflow(&task.id).unwrap();
-            assert!(!store
-                .sqlite
-                .observe_task_state(&completion, &snapshot.snapshot.items[0])
-                .unwrap());
+            snapshot.snapshot.items[0].state = Some("unstarted".into());
+            snapshot.snapshot.items[0].completed = false;
+            snapshot.snapshot.items[0].completed_at = None;
             snapshot.snapshot.items[0].revision = Some("2026-10-05T12:02:00Z".into());
             snapshot.snapshot.items[0].assignee = None;
             store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
@@ -1891,11 +1908,12 @@ mod tests {
                 .unwrap()
                 .unwrap();
             task.id = imported.id;
-            let state_before = store.task_state(&task.id).await.unwrap();
+
             snapshot.snapshot.items[0].revision = Some("2026-10-05T12:01:00Z".into());
             snapshot.snapshot.items[0].state = state.map(str::to_string);
             snapshot.snapshot.items[0].completed = completed;
             store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
+            let events = store.task_events_after(&task.id, 0).await.unwrap();
             let pr = make_task_pr(&task);
             let place = || {
                 store.place_task(
@@ -1906,25 +1924,24 @@ mod tests {
                     None,
                 )
             };
-            assert!(place()
-                .await
-                .unwrap_err()
-                .to_string()
-                .contains("terminal planning state"));
-            assert_eq!(store.task_state(&task.id).await.unwrap(), state_before);
+            assert!(place().await.unwrap_err().to_string().contains("terminal"));
+            assert_eq!(
+                store.task_state(&task.id).await.unwrap(),
+                if completed {
+                    crate::durable::TaskState::Done
+                } else {
+                    crate::durable::TaskState::NotReady
+                }
+            );
             assert!(store.sqlite.workflow(&task.id).unwrap().is_none());
             assert!(store.task_prs(&task.id).await.unwrap().is_empty());
-            assert!(store
-                .task_events_after(&task.id, 0)
-                .await
-                .unwrap()
-                .is_empty());
+            assert_eq!(store.task_events_after(&task.id, 0).await.unwrap(), events);
             snapshot.snapshot.items[0].revision = Some("2026-10-05T12:02:00Z".into());
             snapshot.snapshot.items[0].state = Some("unstarted".into());
             snapshot.snapshot.items[0].completed = false;
             store.put_pm_snapshot(snapshot, None).await.unwrap();
             place().await.unwrap();
-            assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
+            assert!(store.task_prs(&task.id).await.unwrap().is_empty());
             assert!(!store.task_started(&task.id).await.unwrap());
         }
     }
@@ -1991,6 +2008,7 @@ mod tests {
                 store
                     .sqlite
                     .create_task(&crate::planning::NewTask {
+                        due_date: None,
                         id: TaskId::new(),
                         project_id: project.id,
                         title: "Retain this plan".into(),
@@ -2001,6 +2019,8 @@ mod tests {
             let mut placed = task.clone();
             placed.worktree = Some(directory.path().join("first"));
             placed.workspace_slug = "first".into();
+            placed.branch = "first".into();
+            placed.base_commit = "deadbeef".into();
             let first = make_task_pr(&placed);
             let accepted = store
                 .place_task(
@@ -2028,7 +2048,9 @@ mod tests {
                 .unwrap();
             assert_eq!(retried, accepted);
             assert_eq!(retried.plan, task.plan);
-            assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![first]);
+            assert!(store.task_prs(&task.id).await.unwrap().is_empty());
+            assert_eq!(retried.branch, first.branch);
+            assert_eq!(retried.base_commit, first.base_commit);
             assert_eq!(store.task_events_after(&task.id, 0).await.unwrap().len(), 1);
             assert!(!store.task_started(&task.id).await.unwrap());
             assert!(!directory.path().join("second").exists());
@@ -2174,7 +2196,7 @@ mod tests {
             let saved = store.get_task(&task.id).await.unwrap().unwrap();
             assert_eq!(saved.worktree, task.worktree);
             assert_eq!(saved.id, task.id);
-            assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
+            assert!(store.task_prs(&task.id).await.unwrap().is_empty());
             assert!(!store.task_started(&task.id).await.unwrap());
         }
     }
@@ -2902,78 +2924,87 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn live_steers_inject_new_comments_and_defer_when_not_steerable() {
-        let _machine = crate::journal::TestLedgerGuard::new();
-        let directory = tempfile::tempdir().unwrap();
-        let store = std::sync::Arc::new(
-            crate::store::open_ephemeral_store(&StorageConfig::sqlite(
-                directory.path().join("registry.db"),
-            ))
-            .await
-            .unwrap(),
-        );
-        let wave = make_wave("/repo");
-        store.create_wave(&wave).await.unwrap();
-        let project = make_project(&wave);
-        store.create_project(&project).await.unwrap();
-        select_project(&store, &project);
-        let task = make_task(&wave, &project);
-        store.seed_task(&task, &make_task_pr(&task)).await.unwrap();
-        let work = WorkRef::Task(task.id.clone());
+    #[test]
+    fn live_steers_inject_new_comments_and_defer_when_not_steerable() {
+        let _lock = crate::journal::test_env_lock();
+        let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let directory = tempfile::tempdir().unwrap();
+            std::env::set_var("LF_HOME", directory.path());
+            let store = std::sync::Arc::new(
+                crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+                    directory.path().join("loopflow.db"),
+                ))
+                .await
+                .unwrap(),
+            );
+            let wave = make_wave(directory.path().to_str().unwrap());
+            store.create_wave(&wave).await.unwrap();
+            let project = make_project(&wave);
+            store.create_project(&project).await.unwrap();
+            select_project(&store, &project);
+            let mut task = make_task(&wave, &project);
+            let checkout = directory.path().join("checkout");
+            std::fs::create_dir(&checkout).unwrap();
+            task.worktree = Some(checkout);
+            store.seed_task(&task, &make_task_pr(&task)).await.unwrap();
+            let work = WorkRef::Task(task.id.clone());
 
-        let sent = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-        let mut harness = RecordingHarness {
-            sent: sent.clone(),
-            steerable: true,
-            ..Default::default()
-        };
+            let sent = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+            let mut harness = RecordingHarness {
+                sent: sent.clone(),
+                steerable: true,
+                ..Default::default()
+            };
 
-        let first = store
-            .append_steer(&work, Author::User, "focus on the parser")
-            .await
-            .unwrap();
-        let second = store
-            .append_steer(&work, Author::User, "keep the API stable")
-            .await
-            .unwrap();
-        let mut cursor = 0;
-        crate::ops::child::inject_live_steers(&store, &task.id, &mut harness, &mut cursor).await;
-        assert_eq!(
-            *sent.lock().unwrap(),
-            ["focus on the parser", "keep the API stable"]
-        );
-        assert_eq!(
-            cursor, second.id,
-            "the cursor advances past what was injected"
-        );
-        assert!(first.id < second.id);
+            let first = store
+                .append_steer(&work, Author::User, "focus on the parser")
+                .await
+                .unwrap();
+            let second = store
+                .append_steer(&work, Author::User, "keep the API stable")
+                .await
+                .unwrap();
+            let mut cursor = 0;
+            crate::ops::child::inject_live_steers(&store, &task.id, &mut harness, &mut cursor)
+                .await;
+            assert_eq!(
+                *sent.lock().unwrap(),
+                ["focus on the parser", "keep the API stable"]
+            );
+            assert_eq!(
+                cursor, second.id,
+                "the cursor advances past what was injected"
+            );
+            assert!(first.id < second.id);
 
-        // A comment that arrives later injects only itself — the cursor gates it.
-        let third = store
-            .append_steer(&work, Author::User, "add a regression test")
-            .await
-            .unwrap();
-        crate::ops::child::inject_live_steers(&store, &task.id, &mut harness, &mut cursor).await;
-        assert_eq!(sent.lock().unwrap().len(), 3);
-        assert_eq!(cursor, third.id);
+            // A comment that arrives later injects only itself — the cursor gates it.
+            let third = store
+                .append_steer(&work, Author::User, "add a regression test")
+                .await
+                .unwrap();
+            crate::ops::child::inject_live_steers(&store, &task.id, &mut harness, &mut cursor)
+                .await;
+            assert_eq!(sent.lock().unwrap().len(), 3);
+            assert_eq!(cursor, third.id);
 
-        // A provider that can't take live input leaves the cursor where it is, so
-        // the comment rides the next skill boundary's seed instead.
-        store
-            .append_steer(&work, Author::User, "later direction")
-            .await
-            .unwrap();
-        let mut deaf = RecordingHarness {
-            steerable: false,
-            ..Default::default()
-        };
-        let before = cursor;
-        crate::ops::child::inject_live_steers(&store, &task.id, &mut deaf, &mut cursor).await;
-        assert_eq!(
-            cursor, before,
-            "NotSteerable defers the comment to the next boundary seed"
-        );
+            // A provider that can't take live input leaves the cursor where it is, so
+            // the comment rides the next skill boundary's seed instead.
+            store
+                .append_steer(&work, Author::User, "later direction")
+                .await
+                .unwrap();
+            let mut deaf = RecordingHarness {
+                steerable: false,
+                ..Default::default()
+            };
+            let before = cursor;
+            crate::ops::child::inject_live_steers(&store, &task.id, &mut deaf, &mut cursor).await;
+            assert_eq!(
+                cursor, before,
+                "NotSteerable defers the comment to the next boundary seed"
+            );
+        });
     }
 
     #[tokio::test]
@@ -3082,6 +3113,8 @@ mod tests {
         task = imported;
         task.worktree = worktree;
         task.workspace_slug = "fixture-task".into();
+        task.branch = "fixture-task".into();
+        task.base_commit = "deadbeef".into();
         let pr = make_task_pr(&task);
 
         store
@@ -3123,7 +3156,7 @@ mod tests {
                 )
                 .unwrap()
         };
-        assert_eq!(durable_child_rows(&database_path), (1, 0, 1));
+        assert_eq!(durable_child_rows(&database_path), (1, 0, 0));
 
         let child_steers = store.task_steers(&task.id).await.unwrap();
         assert!(child_steers.is_empty());
@@ -3134,15 +3167,13 @@ mod tests {
                 .unwrap()
                 .expect("initial Task publication records placement")
                 .kind,
-            TaskEventKind::WorktreeInitializing {
-                pr_id: pr.id.clone(),
-                sequence: pr.sequence,
+            TaskEventKind::CheckoutInitializing {
                 branch: pr.branch.clone(),
                 path: task.worktree.as_ref().unwrap().display().to_string(),
                 base_commit: pr.base_commit.clone(),
             }
         );
-        assert_eq!(durable_child_rows(&database_path), (1, 0, 1));
+        assert_eq!(durable_child_rows(&database_path), (1, 0, 0));
         assert!(!task.worktree.as_ref().unwrap().exists());
     }
 
@@ -3211,6 +3242,7 @@ mod tests {
         let persisted = store.get_task(&task.id).await.unwrap().unwrap();
         let before_pr = store.active_task_pr(&task.id).await.unwrap();
         let mut plan = persisted.plan.clone();
+        plan.revision += 1;
         plan.title = "Edited planning title".into();
         plan.description = "Edited planning notes".into();
         plan.pm_snapshot_synced_at = plan.pm_snapshot_synced_at.map(|at| at + 1);
@@ -3224,7 +3256,6 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        plan.revision += 1;
         assert_eq!(by_stable_id.plan, plan);
         let mut expected = persisted;
         expected.plan = plan;
@@ -3388,125 +3419,6 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn task_prs_are_ordered_and_rotation_is_atomic() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
-            dir.path().join("registry.db"),
-        ))
-        .await
-        .unwrap();
-        let wave = make_wave("/repo");
-        store.create_wave(&wave).await.unwrap();
-        let project = make_project(&wave);
-        store.create_project(&project).await.unwrap();
-        select_project(&store, &project);
-        let task = make_task(&wave, &project);
-        let mut first = make_task_pr(&task);
-        store.seed_task(&task, &first).await.unwrap();
-
-        first.publication = Some(PrPublication {
-            requested_at: first.updated_at,
-            presentation: None,
-            github: Some(GithubPr {
-                number: 101,
-                url: "https://github.com/loopflowstudio/loopflow/pull/101".to_string(),
-                head_sha: None,
-            }),
-            merge: None,
-        });
-        first.merge_commit = Some("merge-101".to_string());
-        first.updated_at = OffsetDateTime::now_utc();
-        let now = OffsetDateTime::now_utc();
-        let second = TaskPr {
-            id: TaskPrId::new(),
-            task_id: task.id.clone(),
-            sequence: 2,
-            slug: "released-proof".to_string(),
-            branch: format!("jack/{}-released-proof", task.workspace_slug),
-            base_commit: "main-after-101".to_string(),
-            parent_pr_id: None,
-            publication: None,
-            merge_commit: None,
-            abandoned_at: None,
-            created_at: now,
-            updated_at: now,
-            ci_observation: None,
-            github_observation: None,
-            linear_attachment_id: None,
-            linear_comment_id: None,
-            linear_link_error: None,
-        };
-        store.settle_task_pr(&first, Some(&second)).await.unwrap();
-        store.settle_task_pr(&first, Some(&second)).await.unwrap();
-
-        assert_eq!(
-            store
-                .task_prs(&task.id)
-                .await
-                .unwrap()
-                .iter()
-                .map(|pr| pr.sequence)
-                .collect::<Vec<_>>(),
-            vec![1, 2]
-        );
-        assert_eq!(
-            store.active_task_pr(&task.id).await.unwrap().unwrap().id,
-            second.id
-        );
-        assert!(store
-            .get_task_by_branch(&first.branch)
-            .await
-            .unwrap()
-            .is_none());
-        assert_eq!(
-            store
-                .get_task_by_branch(&second.branch)
-                .await
-                .unwrap()
-                .unwrap()
-                .id,
-            task.id
-        );
-
-        let mut abandoned = second.clone();
-        let abandoned_at = OffsetDateTime::now_utc();
-        abandoned.abandoned_at = Some(abandoned_at);
-        abandoned.updated_at = abandoned_at;
-        let conflicting = TaskPr {
-            id: TaskPrId::new(),
-            task_id: task.id.clone(),
-            sequence: 3,
-            slug: "conflict".to_string(),
-            branch: first.branch.clone(),
-            base_commit: "main-after-102".to_string(),
-            parent_pr_id: None,
-            publication: None,
-            merge_commit: None,
-            abandoned_at: None,
-            created_at: now,
-            updated_at: now,
-            ci_observation: None,
-            github_observation: None,
-            linear_attachment_id: None,
-            linear_comment_id: None,
-            linear_link_error: None,
-        };
-        assert!(store
-            .settle_task_pr(&abandoned, Some(&conflicting))
-            .await
-            .is_err());
-        assert_eq!(
-            store
-                .active_task_pr(&task.id)
-                .await
-                .unwrap()
-                .unwrap()
-                .phase(),
-            PrPhase::Working
-        );
-    }
-
     /// The settle equality includes `abandoned_at`, so a re-settle must carry
     /// the original abandonment time. GitHub-observation reconcile once
     /// re-stamped it with `now` on every `lf task status`, and the task
@@ -3531,16 +3443,16 @@ mod tests {
         let first_abandonment = OffsetDateTime::now_utc();
         pr.abandoned_at = Some(first_abandonment);
         pr.updated_at = first_abandonment;
-        store.settle_task_pr(&pr, None).await.unwrap();
+        store.settle_task_pr(&pr).await.unwrap();
         store
-            .settle_task_pr(&pr, None)
+            .settle_task_pr(&pr)
             .await
             .expect("same settle is idempotent");
 
         let mut restamped = pr.clone();
         restamped.abandoned_at = Some(first_abandonment + time::Duration::seconds(30));
         assert!(
-            store.settle_task_pr(&restamped, None).await.is_err(),
+            store.settle_task_pr(&restamped).await.is_err(),
             "a drifted abandonment time is a different settle and must refuse"
         );
     }
@@ -3599,6 +3511,9 @@ mod tests {
             created_at: now,
             updated_at: now,
         };
+        child.branch = child_pr.branch.clone();
+        child.base_commit = child_pr.base_commit.clone();
+        child.parent_pr_id = child_pr.parent_pr_id.clone();
         store.seed_task(&child, &child_pr).await.unwrap();
 
         let active = store.active_task_pr(&child.id).await.unwrap().unwrap();
@@ -3612,12 +3527,7 @@ mod tests {
         // A parent update moves the child's durable fork without changing its
         // ownership or parent link.
         store
-            .sync_task_pr(
-                &child_pr.id,
-                "parent-tip-2",
-                false,
-                OffsetDateTime::now_utc(),
-            )
+            .sync_task_placement(&child.id, "parent-tip-2", false, OffsetDateTime::now_utc())
             .await
             .unwrap();
         let synced = store.get_task_pr(&child_pr.id).await.unwrap().unwrap();
@@ -3629,12 +3539,7 @@ mod tests {
         parent.updated_at = OffsetDateTime::now_utc();
         store.update_task_pr(&parent).await.unwrap();
         store
-            .sync_task_pr(
-                &child_pr.id,
-                "main-after-200",
-                true,
-                OffsetDateTime::now_utc(),
-            )
+            .sync_task_placement(&child.id, "main-after-200", true, OffsetDateTime::now_utc())
             .await
             .unwrap();
 
@@ -3694,7 +3599,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn empty_pr_is_retired_with_cleanup_identity_when_task_completes() {
+    async fn no_pr_completion_retains_checkout_placement_and_latest_planning() {
         let dir = tempfile::tempdir().unwrap();
         let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
             dir.path().join("registry.db"),
@@ -3706,30 +3611,61 @@ mod tests {
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
         select_project(&store, &project);
-        let task = make_task(&wave, &project);
+        let mut task = make_task(&wave, &project);
+        let mut initial = task_planning_snapshot(&wave, &project, &task);
+        initial.snapshot.items[0].completed = false;
+        initial.snapshot.items[0].completed_at = None;
+        initial.snapshot.items[0].state = Some("unstarted".into());
+        store.put_pm_snapshot(initial, None).await.unwrap();
+        task.id = store
+            .get_task_by_issue(&task.plan.identifier)
+            .await
+            .unwrap()
+            .unwrap()
+            .id;
         let pr = make_task_pr(&task);
-        store.seed_task(&task, &pr).await.unwrap();
+        let task = store
+            .place_task(
+                &task.id,
+                task.worktree.as_ref().unwrap(),
+                &task.workspace_slug,
+                &pr,
+                None,
+            )
+            .await
+            .unwrap();
 
         let mut refreshed_plan = task.plan.clone();
         refreshed_plan.title = "Latest provider title".into();
         let mut snapshot = task_planning_snapshot(&wave, &project, &task);
         snapshot.synced_at = refreshed_plan.pm_snapshot_synced_at.unwrap();
         snapshot.snapshot.items[0].name = refreshed_plan.title.clone();
+        snapshot.snapshot.items[0].revision = Some("2026-10-05T13:00:00Z".into());
+        snapshot.snapshot.items[0].completed = false;
+        snapshot.snapshot.items[0].completed_at = None;
+        snapshot.snapshot.items[0].state = Some("unstarted".into());
         snapshot.snapshot.items[0].description = refreshed_plan.description.clone();
         store.put_pm_snapshot(snapshot, None).await.unwrap();
+        let before_completion = store.get_task(&task.id).await.unwrap().unwrap();
+        assert_eq!(before_completion.plan.title, refreshed_plan.title);
+        refreshed_plan.revision = before_completion.plan.revision + 1;
         store
-            .complete_task(&task, Some(&pr), crate::store::sqlite::EndMove::Set, None)
+            .complete_task(
+                &task,
+                store
+                    .sqlite
+                    .request_task_completion(&task.id, None)
+                    .unwrap()
+                    .unwrap(),
+            )
             .await
             .unwrap();
         let retained = store.get_task(&task.id).await.unwrap().unwrap();
-        refreshed_plan.revision += 2; // Provider title change, then local completion.
         assert_eq!(retained.plan, refreshed_plan);
         let stored = store.task_prs(&task.id).await.unwrap();
-        assert_eq!(stored.len(), 1);
-        assert_eq!(stored[0].id, pr.id);
-        assert_eq!(stored[0].branch, pr.branch);
-        assert_eq!(stored[0].base_commit, pr.base_commit);
-        assert_eq!(stored[0].phase(), PrPhase::Abandoned);
+        assert!(stored.is_empty());
+        assert_eq!(retained.branch, task.branch);
+        assert_eq!(retained.base_commit, task.base_commit);
         assert!(store.active_task_pr(&task.id).await.unwrap().is_none());
     }
 

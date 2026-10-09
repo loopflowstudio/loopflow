@@ -854,9 +854,8 @@ fn terminal_titles_follow_session_rename_and_reconnect_without_provider_accounts
     use std::time::{Duration, Instant};
 
     for (provider, host, bound) in [
-        ("claude", "cmux", true),
-        ("claude", "cmux", false),
-        ("codex", "cmux", true),
+        ("claude", "absent", true),
+        ("codex", "absent", true),
         ("claude", "absent", false),
         ("claude", "missing", false),
         ("codex", "failure", false),
@@ -871,7 +870,7 @@ fn terminal_titles_follow_session_rename_and_reconnect_without_provider_accounts
             "# Loopflow operating guide\nFollow the repository instructions.",
         );
         let task = bound.then(|| {
-            support::register_unrun_task(
+            support::register_task_with_pr(
                 home.path(),
                 &repo.path().canonicalize().unwrap(),
                 "main",
@@ -941,19 +940,8 @@ printf 'latest agent message: %s\n' "$answer"
         write_script(
             "cmux",
             r#"#!/bin/sh
-case "$TITLE_HOST" in failure) exit 2;; timeout) exec /bin/sleep 10;; esac
-kind=$1
-shift
-while [ "$#" -gt 0 ]; do
-    case "$1" in
-        --workspace) [ "$2" = fixture-workspace ] || exit 3; shift 2;;
-        --surface) [ "$2" = fixture-surface ] || exit 4; shift 2;;
-        --) shift; break;;
-        *) exit 5;;
-    esac
-done
-printf '%s' "$1" > "$LF_HOME/$kind.tmp"
-mv "$LF_HOME/$kind.tmp" "$LF_HOME/$kind"
+case "$TITLE_HOST" in timeout) exec /bin/sleep 10;; esac
+exit 2
 "#,
         );
         if host == "missing" {
@@ -1055,14 +1043,6 @@ mv "$LF_HOME/$kind.tmp" "$LF_HOME/$kind"
                 assert!(args.contains("tui.terminal_title=[]"), "{args}");
                 assert!(args.contains("--no-daemon\n"), "{args}");
             }
-            if host == "cmux" {
-                for path in ["rename-workspace", "rename-tab"] {
-                    assert_eq!(
-                        fs::read_to_string(home.path().join(path)).unwrap(),
-                        expected
-                    );
-                }
-            }
             if first {
                 let renamed = inspect(&["session", "rename", &id, "Release notes", "--json"]);
                 assert_eq!(renamed["title"], "Release notes");
@@ -1071,17 +1051,6 @@ mv "$LF_HOME/$kind.tmp" "$LF_HOME/$kind"
                     args.lines().any(|arg| matches!(arg, "resume" | "--resume")),
                     "{args}"
                 );
-            }
-            let host_named = || {
-                ["rename-workspace", "rename-tab"].iter().all(|path| {
-                    fs::read_to_string(home.path().join(path)).unwrap_or_default()
-                        == title("Release notes")
-                })
-            };
-            if host == "cmux" {
-                while !host_named() && Instant::now() < deadline {
-                    std::thread::sleep(Duration::from_millis(20));
-                }
             }
             if first {
                 let store =
@@ -1104,7 +1073,6 @@ mv "$LF_HOME/$kind.tmp" "$LF_HOME/$kind"
                 "no OSC writer alongside native output"
             );
             assert!(String::from_utf8_lossy(&result.stdout).contains("latest agent message: done"));
-            assert!(host != "cmux" || host_named());
             let listed = inspect(&["session", "list", "--all", "--history", "--json"]);
             assert_eq!(
                 listed

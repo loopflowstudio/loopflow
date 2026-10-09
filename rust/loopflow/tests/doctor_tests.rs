@@ -20,6 +20,8 @@ fn run_lf(home: &Path, args: &[&str]) -> Output {
         .current_dir(home)
         .env("HOME", home)
         .env("LF_HOME", home)
+        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+        .env_remove("LF_AS")
         .env("NO_COLOR", "1")
         .env(
             "PATH",

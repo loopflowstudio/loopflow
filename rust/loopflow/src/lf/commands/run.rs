@@ -1553,13 +1553,22 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
 
     #[test]
     fn worktree_harness_preloads_committed_and_untracked_scratch_with_provenance() {
-        let _machine = crate::journal::TestLedgerGuard::new();
+        let _lock = crate::journal::test_env_lock();
+        let _env = EnvGuard::clear(&["LF_HOME"]);
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_HOME", home.path());
         let repo = loopflow_test_support::TestRepo::new();
         repo.create_file(".lf/skills/proof.md", "inspect the complete basis");
         repo.create_file("scratch/a-committed.md", "committed evidence bytes");
         repo.stage_all();
         repo.commit("committed basis");
         repo.create_file("scratch/z-untracked.md", "untracked evidence bytes");
+        let store =
+            crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join("loopflow.db"))
+                .unwrap();
+        store
+            .ensure_wave(repo.path().to_str().unwrap(), "ship")
+            .unwrap();
 
         let cli = Cli {
             batch: true,
@@ -1797,9 +1806,14 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         let goal =
             "## Objective\nShip a reliable release.\n\n## Bounds\nKeep rollback available.\n";
         repo.create_file("wave/release/GOAL.md", goal);
-        crate::store::sqlite::SqliteStore::new(&home.path().join(".lf/loopflow.db"))
-            .unwrap()
-            .ensure_wave(repo.path().to_str().unwrap(), "release")
+        let store =
+            crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join(".lf/loopflow.db"))
+                .unwrap();
+        store
+            .ensure_wave(
+                repo.path().canonicalize().unwrap().to_str().unwrap(),
+                "release",
+            )
             .unwrap();
         let cli = Cli::parse_from(["lf", "-i", "--wave", "release", "design"]);
         let built = build_prompt_at(

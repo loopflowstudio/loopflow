@@ -54,7 +54,7 @@ pub async fn relocate_wave(
             target.repo()
         ));
     }
-    ensure_repository_team_compatible(&wave, &target)?;
+    ensure_repository_team_compatible(store, &wave, &target)?;
     if wave.repo() != target.repo().to_string() && wave.parent_wave_id().is_some() {
         return Err(anyhow!("repository relocation must start from a root Wave"));
     }
@@ -108,17 +108,22 @@ pub async fn relocate_wave(
     Ok(receipt)
 }
 
-fn ensure_repository_team_compatible(wave: &Wave, target: &WaveLocator) -> Result<()> {
+fn ensure_repository_team_compatible(
+    store: &Store,
+    wave: &Wave,
+    target: &WaveLocator,
+) -> Result<()> {
     let Ok(source) = CanonicalRepo::discover(Path::new(wave.repo())) else {
         return Ok(());
     };
     if &source == target.repo() {
         return Ok(());
     }
-    let source_team = crate::ops::pm::repository_team_for_snapshot_validation(source.as_path())
-        .map_err(|error| anyhow!(error.to_string()))?;
+    let source_team =
+        crate::ops::pm::repository_team_for_snapshot_validation(source.as_path(), store)
+            .map_err(|error| anyhow!(error.to_string()))?;
     let target_team =
-        crate::ops::pm::repository_team_for_snapshot_validation(target.repo().as_path())
+        crate::ops::pm::repository_team_for_snapshot_validation(target.repo().as_path(), store)
             .map_err(|error| anyhow!(error.to_string()))?;
     if let (Some(source_team), Some(target_team)) = (source_team, target_team) {
         if source_team != target_team {

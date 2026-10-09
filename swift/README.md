@@ -152,10 +152,11 @@ labelled arrow per edge, a loop back as an arc over its node. The current node
 or running edge is marked. The labels of the edges leaving the current node
 are buttons; each runs `lf -b task run` as a child of the app. No edge is offered while one runs. An edge whose Flow stopped holds the
 Task, is drawn stopped, and is offered again with the others leaving its
-node. **Move to** puts the Task at any node through `lf task move`; `end` completes it.
-When Linear calls an active Task complete, the header shows that as an error with
-**Complete anyway**, which runs the move with `--force`. A Task that has taken
-up no workflow offers **Start**, which runs `lf -b task run ISSUE`.
+node. **Move to** changes Workflow position; `end` requests completion.
+**Complete** changes Task status independently. **Retry completion** retries a
+failed request without replaying the Flow.
+Linear completion leaves the displayed Workflow and live Processes intact.
+A Task with no Workflow offers **Start**, which runs `lf -b task run ISSUE`.
 
 The toolbar's **+** changes what the multiplexer shows: **New shell**,
 **Files** or **Flow processes**. The Flow process log lists every Flow process in the

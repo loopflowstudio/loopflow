@@ -6,7 +6,7 @@ use loopflow::id::ProcessLfid;
 use loopflow::work::task::{GithubPr, PrPublication};
 use loopflow_test_support::TestRepo;
 use rusqlite::params;
-use support::{register_unrun_task, EnvGuard};
+use support::{register_task_with_pr, EnvGuard};
 
 #[test]
 fn task_abandonment_cli_saves_offline_and_preserves_unresolved_work() {
@@ -15,7 +15,7 @@ fn task_abandonment_cli_saves_offline_and_preserves_unresolved_work() {
         let _env = EnvGuard::with_lf_home(&[], home.path());
         let repo = TestRepo::new();
         let mut registered =
-            register_unrun_task(home.path(), repo.path(), "main", &repo.head_sha());
+            register_task_with_pr(home.path(), repo.path(), "main", &repo.head_sha());
         std::fs::create_dir_all(repo.path().join(".lf")).unwrap();
         std::fs::write(
             repo.path().join(".lf/config.yaml"),
@@ -35,8 +35,12 @@ fn task_abandonment_cli_saves_offline_and_preserves_unresolved_work() {
         }
         let process = ProcessLfid::new();
         db.execute(
-            "INSERT INTO processes(lfid,trace_id,cwd,started_at) VALUES(?1,?1,?2,1)",
-            params![process.as_str(), repo.path().to_str().unwrap()],
+            "INSERT INTO processes(lfid,trace_id,cwd,started_at) VALUES(?1,?1,?2,?3)",
+            params![
+                process.as_str(),
+                repo.path().to_str().unwrap(),
+                time::OffsetDateTime::now_utc().unix_timestamp()
+            ],
         )
         .unwrap();
         db.execute(
@@ -100,7 +104,11 @@ fn task_abandonment_cli_saves_offline_and_preserves_unresolved_work() {
                 "{}",
                 String::from_utf8_lossy(&output.stderr)
             );
-            assert!(String::from_utf8_lossy(&output.stderr).contains("retained checkout/PR"));
+            assert!(
+                String::from_utf8_lossy(&output.stderr).contains("retained checkout/PR"),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
             let saved: (String, String, bool, bool) = db.query_row(
                 "SELECT id,target,attempted,settled FROM task_state_deliveries WHERE task_id=?1",
                 [registered.task.id.as_str()],

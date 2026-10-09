@@ -12,7 +12,7 @@
   "wave": "product",
   "project_id": "ps_11111111111111111111111111111111",
   "status": "ready",
-  "planning_conflict": null,
+  "completion_pending": null,
   "execution": {
     "state": "idle",
     "reason": "Checkout prepared",
@@ -23,8 +23,6 @@
   "workspace_slug": "workspace",
   "agent": null,
   "provider": "codex",
-  "prs": [],
-  "active_pr": null,
   "latest_event": null,
   "created_at": [
     2026,
@@ -60,5 +58,15 @@
     "processes": [],
     "workflow": null,
     "flow_processes": []
+  },
+  "pr": null,
+  "branch": "jack/workspace",
+  "base_commit": "1111111111111111111111111111111111111111",
+  "follow_through": {
+    "intents": [],
+    "links": [],
+    "reason": null,
+    "needs_conversion": false,
+    "scope_notes": []
   }
 }

@@ -224,6 +224,22 @@ impl std::ops::Deref for PmContext {
 }
 
 fn read_wave_pm_config(repo: &Path, wave: &str) -> Option<WavePmConfig> {
+    // The PM fixture's saved Wave definitions share its snapshot/token store.
+    #[cfg(test)]
+    if let Ok(config) = PM_TEST_CONTEXT.try_with(|ctx| {
+        let locator = crate::work::wave::WaveLocator::discover(repo, wave).unwrap();
+        let wave = ctx.store.sqlite.get_wave_at(&locator).unwrap()?;
+        let goal = ctx
+            .store
+            .sqlite
+            .wave_document(wave.id(), "GOAL.md")
+            .unwrap()?;
+        crate::work::wave::config::parse_wave_config(&goal)
+            .unwrap()
+            .pm
+    }) {
+        return config;
+    }
     read_wave_config(repo, wave).and_then(|config| config.pm)
 }
 
@@ -331,9 +347,36 @@ pub(crate) fn repository_team_id(repo: &Path) -> OpsResult<String> {
 /// Expected Team for strict cached reads after migration. During the deliberate
 /// PRD-43/PRD-44 mixed state, legacy snapshots remain inspectable and validate
 /// their own singular Team rather than pretending they already carry the new one.
-pub(crate) fn repository_team_for_snapshot_validation(repo: &Path) -> OpsResult<Option<String>> {
-    if !legacy_pm_sentinels(repo)?.is_empty() {
+pub(crate) fn repository_team_for_snapshot_validation(
+    repo: &Path,
+    store: &Store,
+) -> OpsResult<Option<String>> {
+    let config = load_repo_config(repo)
+        .map_err(|error| OpsError::Message(error.to_string()))?
+        .unwrap_or_default();
+    if config.linear.team.is_some() {
         return Ok(None);
+    }
+    for wave in store
+        .sqlite
+        .list_waves(Some(&repo.to_string_lossy()))
+        .map_err(|error| OpsError::Message(error.to_string()))?
+    {
+        let Some(goal) = store
+            .sqlite
+            .wave_document(wave.id(), "GOAL.md")
+            .map_err(|error| OpsError::Message(error.to_string()))?
+        else {
+            continue;
+        };
+        let definition = crate::work::wave::config::parse_wave_config(&goal)
+            .map_err(|error| OpsError::Message(error.to_string()))?;
+        if definition
+            .pm
+            .is_some_and(|pm| pm.provider.is_some() || pm.linear_team.is_some())
+        {
+            return Ok(None);
+        }
     }
     require_linear_config(repo)?;
     read_repository_team(repo)
@@ -2280,11 +2323,13 @@ pub(crate) async fn pm_rename(
 pub fn list_local_waves(repo: &Path) -> OpsResult<Vec<String>> {
     let canonical = crate::repository::CanonicalRepo::discover(repo)
         .map_err(|error| OpsError::Message(error.to_string()))?;
-    let database = crate::store::database_path_from_env()?;
-    if !database.exists() {
-        return Ok(Vec::new());
+    let StorageConfig::Sqlite { path } = storage_config_from_env()?;
+    match std::fs::metadata(&path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(OpsError::Message(error.to_string())),
+        Ok(_) => {}
     }
-    let store = crate::store::sqlite::SqliteStore::open_read_only(&database)
+    let store = crate::store::sqlite::SqliteStore::open_read_only(&path)
         .map_err(|error| OpsError::Message(error.to_string()))?;
     Ok(store
         .list_waves(Some(&canonical.to_string()))
@@ -2849,7 +2894,7 @@ mod tests {
             "url": null,
             "title": format!("Task {identifier}"),
             "description": "",
-            "completedAt": null, "prioritySortOrder": 0.0,
+            "completedAt": null, "dueDate": null, "prioritySortOrder": 0.0,
             "sortOrder": 0.0, "updatedAt": time::OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339).unwrap(),
             "assignee": null,
             "state": { "type": if completed { "completed" } else { "unstarted" } },
@@ -3475,7 +3520,7 @@ mod tests {
             issues_response(json!([
                 { "id": "issue-1", "identifier": "LOO-1", "url": null,
                   "title": "First", "description": "one",
-                  "completedAt": null, "prioritySortOrder": 0.0, "sortOrder": 0.0, "updatedAt":"2026-09-29T12:00:00.123Z",
+                  "completedAt": null, "dueDate": null, "prioritySortOrder": 0.0, "sortOrder": 0.0, "updatedAt":"2026-09-29T12:00:00.123Z",
                   "assignee": null, "state": { "type": "unstarted" },
                   "project": { "id": "project-123", "name": "Scan" },
                   "team": { "id": "team-123" } }
@@ -3506,14 +3551,14 @@ mod tests {
             issues_response(json!([
                 { "id": "moved", "identifier": "LOO-1", "url": null,
                   "title": "Moved", "description": "Preserve the observed destination",
-                  "completedAt": null, "prioritySortOrder": 0.0, "sortOrder": 0.0,
+                  "completedAt": null, "dueDate": null, "prioritySortOrder": 0.0, "sortOrder": 0.0,
                   "updatedAt": "2026-10-05T12:00:00Z",
                   "assignee": null, "state": { "type": "started" },
                   "project": { "id": "successor", "name": "Next work" },
                   "team": { "id": "team-123" } },
                 { "id": "detached", "identifier": "LOO-2", "url": null,
                   "title": "Detached", "description": "Do not invent membership",
-                  "completedAt": null, "prioritySortOrder": 1.0, "sortOrder": 1.0,
+                  "completedAt": null, "dueDate": null, "prioritySortOrder": 1.0, "sortOrder": 1.0,
                   "updatedAt": "2026-10-05T12:00:01Z",
                   "assignee": null, "state": { "type": "started" },
                   "project": null, "team": { "id": "team-123" } }

@@ -725,6 +725,7 @@ impl Watcher {
             }
         }
         match result {
+            Err(OpsError::CheckoutBusy(reason)) => (true, Some(format!("repair waits: {reason}"))),
             Ok(_) if running(store) => {
                 let reason = failure
                     .map(|(names, _)| names.join(", "))

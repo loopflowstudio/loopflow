@@ -539,4 +539,4 @@ identity/delegation, open them, add shell/Files panes, retain an unfinished draf
 change focus, target a harmless command, read output, hide/restore, and verify the
 original input target and draft survive. Demo owns native usability; preserve comparison evidence and use no real accounts or live user terminals.
 
-Check: `git diff --check` PASS; prose-only reconciliation; prior focused Rust/fmt/Clippy and receipt/CLI/migration results: `18d02a610`, this heading; full suites: gate; native usability: demo.
+Check: `cargo test -p loopflow --test process_ownership_tests process_discovery_pages_real_commands_and_preserves_unknown_history -- --exact` PASS (1); prior checks: `18d02a610`; broader proof: gate/CI; native: demo.

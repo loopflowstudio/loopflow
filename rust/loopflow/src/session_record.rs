@@ -1969,11 +1969,11 @@ pub(crate) struct CaptureHandle(Arc<Mutex<SessionCapture>>);
 pub(crate) fn register_session_attachment_interrupt(
     store: &crate::store::sqlite::SqliteStore,
     session: String,
-    driver: crate::process::SessionAttachment,
+    attachment: crate::process::SessionAttachment,
 ) {
     let store = store.clone();
     crate::engine::agent::register_interrupt_cleanup(move || {
-        match finish_session_attachment(&store, &session, &driver, "interrupted") {
+        match finish_session_attachment(&store, &session, &attachment, "interrupted") {
             Ok(()) | Err(StoreError::InvalidAuthority(_)) => {}
             Err(error) => tracing::warn!(%error, %session, "record interrupted Session connection"),
         }
@@ -2075,7 +2075,7 @@ impl CaptureHandle {
         )))))
     }
 
-    /// Append an input only after the same transaction admits its driver.
+    /// Append an input only after the same transaction admits its attachment.
     pub(crate) fn continue_with_context(
         session: &str,
         mut spec: SessionCaptureSpec,
@@ -2098,7 +2098,7 @@ impl CaptureHandle {
         let expected = store.session_attachment(session)?;
         next.artifact_key = new_artifact_key();
         next.input_published = false;
-        let (next, driver) =
+        let (next, attachment) =
             store.claim_session_input(next, expected.as_ref(), &process_lfid, || {
                 runtime::close_session_agent_process(&store, session)
             })?;
@@ -2113,7 +2113,7 @@ impl CaptureHandle {
             Some(process),
             context,
             |_| {
-                store.with_session_attachment(session, &driver, || {
+                store.with_session_attachment(session, &attachment, || {
                     store.publish_capture(session, next.captured)
                 })
             },
@@ -2124,15 +2124,15 @@ impl CaptureHandle {
                     .0
                     .lock()
                     .expect("Session capture mutex poisoned")
-                    .driver = Some((session.to_string(), driver));
+                    .attachment = Some((session.to_string(), attachment));
                 capture.register_interrupt();
                 Ok(capture)
             }
             Err(error) => {
                 // Publication did not start a provider or complete a turn. Keep
-                // the reservation and release only the driver acquired above.
-                if let Err(release) = store.release_session_attachment(session, &driver) {
-                    tracing::warn!(%release, %session, "release driver after capture publication failure");
+                // the reservation and release only the attachment acquired above.
+                if let Err(release) = store.release_session_attachment(session, &attachment) {
+                    tracing::warn!(%release, %session, "release attachment after capture publication failure");
                 }
                 Err(error)
             }
@@ -2301,13 +2301,13 @@ impl CaptureHandle {
     }
 
     /// Claim an admitted conversation and retain the exact provider provenance
-    /// used by its tools. A later driver transfer never rewrites this process.
-    pub(crate) fn claim_conversation_driver(&self) -> StoreResult<()> {
+    /// used by its tools. A later attachment transfer never rewrites this process.
+    pub(crate) fn claim_session_attachment(&self) -> StoreResult<()> {
         let process_lfid = crate::journal::current_process_lfid().ok_or_else(|| {
             StoreError::InvalidAuthority("AgentProcess requires an admitted invocation".into())
         })?;
         let mut capture = self.0.lock().expect("Session capture mutex poisoned");
-        if capture.driver.is_some() {
+        if capture.attachment.is_some() {
             return Ok(());
         }
         let store = row_store(&capture.dir)?;
@@ -2318,8 +2318,8 @@ impl CaptureHandle {
                     "AgentProcess requires an admitted conversation".into(),
                 )
             })?;
-        let driver = resume_session_agent_process(&store, &session.id, &process_lfid)?;
-        capture.driver = Some((session.id, driver));
+        let attachment = resume_session_agent_process(&store, &session.id, &process_lfid)?;
+        capture.attachment = Some((session.id, attachment));
         drop(capture);
         self.register_interrupt();
         Ok(())
@@ -2356,7 +2356,7 @@ impl CaptureHandle {
         if capture.settled_outcome.is_some() {
             return Err(StoreError::InvalidAuthority("Capture already settled".into()).into());
         }
-        let (session, expected) = capture.driver.as_ref().ok_or_else(|| {
+        let (session, expected) = capture.attachment.as_ref().ok_or_else(|| {
             StoreError::InvalidAuthority("AgentProcess launch has no attachment".into())
         })?;
         let store = row_store(&capture.dir)?;
@@ -2366,7 +2366,7 @@ impl CaptureHandle {
             crate::process::AGENT_CALLER_ENV,
             serde_json::to_string(&attachment.caller(session.clone()))?,
         );
-        capture.driver = Some((session.clone(), attachment.clone()));
+        capture.attachment = Some((session.clone(), attachment.clone()));
         // Keep the capture's settlement snapshot fixed through admission. The
         // recorder only touches the store, never this mutex.
         let child = crate::harness::agent_process::spawn_native(
@@ -2381,7 +2381,7 @@ impl CaptureHandle {
         expected: &crate::process::SessionAttachment,
     ) -> StoreResult<()> {
         let capture = self.0.lock().expect("Session capture mutex poisoned");
-        let Some((session, attachment)) = &capture.driver else {
+        let Some((session, attachment)) = &capture.attachment else {
             return Err(StoreError::InvalidAuthority(
                 "Capture has no attachment".into(),
             ));
@@ -2398,7 +2398,7 @@ impl CaptureHandle {
         self.0
             .lock()
             .expect("Session capture mutex poisoned")
-            .driver
+            .attachment
             .clone()
     }
 
@@ -2412,7 +2412,7 @@ impl CaptureHandle {
         let mut capture = self.0.lock().expect("Session capture mutex poisoned");
         if capture.settled_outcome.is_some()
             || capture
-                .driver
+                .attachment
                 .as_ref()
                 .map(|(id, owner)| (id.as_str(), owner))
                 != Some((session, expected))
@@ -2422,7 +2422,7 @@ impl CaptureHandle {
             ));
         }
         let next = row_store(&capture.dir)?.prepare_session_agent_process(session, expected)?;
-        capture.driver = Some((session.to_owned(), next.clone()));
+        capture.attachment = Some((session.to_owned(), next.clone()));
         Ok(next)
     }
 
@@ -2435,10 +2435,10 @@ impl CaptureHandle {
         if let Ok(declaration) = std::env::var(crate::lf::WORK_DECLARATION_ENV) {
             environment.insert(crate::lf::WORK_DECLARATION_ENV.to_string(), declaration);
         }
-        if let Some((session, driver)) = &capture.driver {
+        if let Some((session, attachment)) = &capture.attachment {
             environment.insert(
                 crate::process::AGENT_CALLER_ENV.into(),
-                serde_json::to_string(&driver.caller(session.clone()))
+                serde_json::to_string(&attachment.caller(session.clone()))
                     .expect("caller provenance serializes"),
             );
         }
@@ -2481,7 +2481,7 @@ impl CaptureHandle {
         if capture.settled_outcome.is_some() {
             anyhow::bail!("Capture already settled");
         }
-        let (session, expected) = capture.driver.as_ref().ok_or_else(|| {
+        let (session, expected) = capture.attachment.as_ref().ok_or_else(|| {
             StoreError::InvalidAuthority("AgentProcess retry has no attachment".into())
         })?;
         let store = row_store(&capture.dir)?;
@@ -2499,7 +2499,7 @@ impl CaptureHandle {
         let next = store.replace_session_agent_process(session, expected, resume_thread, || {
             runtime::close_session_agent_process(&store, session)
         })?;
-        capture.driver = Some((session.clone(), next));
+        capture.attachment = Some((session.clone(), next));
         if let Err(error) = capture.fail_and_begin_attempt(provider, model, account_id) {
             capture.warn_telemetry(error);
         }
@@ -2582,7 +2582,7 @@ impl Drop for CaptureHandle {
 
 #[derive(Debug)]
 struct SessionCapture {
-    driver: Option<(String, crate::process::SessionAttachment)>,
+    attachment: Option<(String, crate::process::SessionAttachment)>,
     manifest: SessionCaptureManifest,
     dir: PathBuf,
     provider: String,
@@ -2668,7 +2668,7 @@ impl SessionCapture {
     fn from_manifest(manifest: SessionCaptureManifest, dir: PathBuf) -> Self {
         let recorder = SessionRecorder::start(&dir, &manifest);
         Self {
-            driver: None,
+            attachment: None,
             provider: manifest.harness.clone(),
             model: manifest.model.clone(),
             account_id: manifest
@@ -2903,9 +2903,9 @@ impl SessionCapture {
             }
         }
         self.recorder.drain_after_settlement();
-        if let Some((session, driver)) = self.driver.take() {
+        if let Some((session, attachment)) = self.attachment.take() {
             match row_store(&self.dir)
-                .and_then(|store| finish_session_attachment(&store, &session, &driver, outcome))
+                .and_then(|store| finish_session_attachment(&store, &session, &attachment, outcome))
             {
                 Ok(_) | Err(StoreError::InvalidAuthority(_)) => {}
                 Err(error) => return Err(std::io::Error::other(error)),
@@ -3420,7 +3420,7 @@ mod tests {
         let home = ledger.home();
         crate::journal::with_runtime(home, &["lf".into(), "skill".into()], || {
             let capture = CaptureHandle::begin_at(home, spec(home))?;
-            capture.claim_conversation_driver()?;
+            capture.claim_session_attachment()?;
             let (session, first) = capture.session_attachment().unwrap();
             let store = super::row_store(&capture.artifact_dir())?;
             let command = || {
@@ -4155,7 +4155,7 @@ mod tests {
             .unwrap();
         let command = vec!["lf".into(), "skill".into()];
         crate::journal::with_runtime(ledger.home(), &command, || {
-            original.claim_conversation_driver()?;
+            original.claim_session_attachment()?;
             let (_, driver) = original.session_attachment().unwrap();
             store.record_session_connection(
                 &session.id,

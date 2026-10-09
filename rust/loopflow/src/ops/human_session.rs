@@ -704,7 +704,7 @@ pub(crate) async fn open(
     Ok(result)
 }
 /// Connect to one existing provider thread. Native UI traffic crosses the same
-/// driver fence as the headless writer; closing the current UI closes the runtime.
+/// attachment fence as the headless writer; client exit leaves the provider alive.
 #[cfg(unix)]
 async fn connect_live_codex(
     store: &SharedStore,
@@ -733,12 +733,12 @@ async fn connect_live_codex(
     }
     let process = crate::journal::current_process_lfid()
         .ok_or_else(|| anyhow!("Connecting requires the current lf Process"))?;
-    let driver =
+    let attachment =
         match store
             .sqlite
             .claim_session_attachment(&session.id, expected.as_ref(), &process, false)
         {
-            Ok(driver) => driver,
+            Ok(attachment) => attachment,
             Err(crate::store::StoreError::InvalidAuthority(_))
                 if store.sqlite.session_connection(&session.id)?.is_none() =>
             {
@@ -749,7 +749,7 @@ async fn connect_live_codex(
         };
     let interrupted_store = store.sqlite.clone();
     let interrupted_session = session.id.clone();
-    let interrupted_attachment = driver.clone();
+    let interrupted_attachment = attachment.clone();
     crate::engine::agent::register_interrupt_cleanup(move || {
         // A native client owns its attachment, never the surviving provider's exit.
         match interrupted_store.finish_session_attachment(
@@ -771,12 +771,12 @@ async fn connect_live_codex(
         if replace_clients {
             NativeSession::of(session)?.stop_clients(crate::session_record::ProviderClientStopReason::Moved)?;
         }
-        store.sqlite.make_session_interactive(&session.id, &driver)?;
+        store.sqlite.make_session_interactive(&session.id, &attachment)?;
         let directory = tempfile::Builder::new().prefix("lf-connect-").tempdir_in("/tmp")?;
         let remote = directory.path().join("client.sock");
         let listener = tokio::net::UnixListener::bind(&remote)?;
         let connection = crate::harness::codex_connection::CodexConnection {
-            store: store.sqlite.clone(), session_id: session.id.clone(), thread_id: thread, attachment: Some(driver.clone()),
+            store: store.sqlite.clone(), session_id: session.id.clone(), thread_id: thread, attachment: Some(attachment.clone()),
         };
         connection.recover_history(Path::new(&endpoint)).await?;
         let upstream = PathBuf::from(&endpoint);
@@ -798,16 +798,16 @@ async fn connect_live_codex(
         });
         let session = session.clone();
         let provider = provider.clone();
-        let attachment = driver.clone();
+        let launch_attachment = attachment.clone();
         let environment = BTreeMap::from([(
             crate::process::AGENT_CALLER_ENV.into(),
-            serde_json::to_string(&attachment.caller(session.id.clone()))?,
+            serde_json::to_string(&launch_attachment.caller(session.id.clone()))?,
         )]);
         let result = tokio::task::spawn_blocking(move || {
             crate::lf::commands::util::resume_session_with_env(
                 "codex", session.model.as_deref(), &session.cwd, &session.artifact_key, &provider,
                 &environment, None, Some(crate::lf::commands::util::NativeConnection { relay: remote, upstream }),
-                Some((session.id.clone(), attachment)),
+                Some((session.id.clone(), launch_attachment)),
             )
         }).await;
         relay.abort();
@@ -817,7 +817,7 @@ async fn connect_live_codex(
     }.await;
     match store.sqlite.finish_session_attachment(
         &session.id,
-        &driver,
+        &attachment,
         if connected.is_ok() {
             "completed"
         } else {

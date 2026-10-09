@@ -57,7 +57,7 @@ pub(super) fn close_session_agent_process(store: &SqliteStore, session: &str) ->
                 ));
             }
             crate::harness::codex_connection::close_agent_process(
-                Some((&endpoint, &thread)),
+                (&endpoint, &thread),
                 pid,
                 started,
             )

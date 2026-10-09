@@ -2140,7 +2140,7 @@ mod tests {
                         work: None,
                     },
                 )?;
-                capture.claim_conversation_driver()?;
+                capture.claim_session_attachment()?;
                 let (session, attachment) = capture.session_attachment().unwrap();
                 let store = SqliteStore::new(&home.join("loopflow.db"))?;
                 if opening_error {

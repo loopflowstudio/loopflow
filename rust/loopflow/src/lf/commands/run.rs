@@ -751,7 +751,7 @@ fn begin_capture(
     .map_err(|error| {
         anyhow!("failed to publish Session capture manifest before agent launch: {error}")
     })?;
-    capture.claim_conversation_driver()?;
+    capture.claim_session_attachment()?;
     capture.record_input("initial", &built.context.task.text);
     debug!(
         elapsed_ms = started.elapsed().as_millis(),

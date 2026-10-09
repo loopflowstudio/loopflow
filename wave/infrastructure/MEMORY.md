@@ -225,17 +225,16 @@ Jack Heart requested one inventory; #1512/#1516 integrated. Unknown stays visibl
 retry preserves history; remote clients cannot settle providers.
 
 `c1c09fb6c` fences resume close/claim; `9255e9b03` shares native admission.
-Native launch carries frozen attachment separately from provenance;
-relay and provider endpoints stay distinct. Composed stand-ins prove launch,
-pre-launch takeover and A → B → A rejection. Connection exit records its
-attachment outcome without closing or ending the provider. Configured connection
-and full relay acceptance remain unproved. Release's operation-entry lesson
-exposed both the admission gap and generic cleanup's excess authority.
+`82b5d90d5` carries frozen native attachment separately from provenance and
+relay separately from upstream. Stand-ins prove launch, pre-launch takeover and
+A → B → A rejection; configured connection/full relay remain unproved.
+Client exit records attachment outcome, not provider death. Provider death alone
+never settles an unknown attachment. Release's entry-point lesson exposed
+admission and generic-cleanup authority gaps.
 
 Headless optional admission, generations, foreground cleanup, takeover death
 orders, public/scheduled agreement, two-second removal and installed settlement
 remain open. FIFO is Codex-only; reaping is noninteractive Codex/OpenCode.
-Earlier slice proofs: `9255e9b03`, this heading.
 
 ## Execution ownership names (LOO-441, 2026-10-09)
 

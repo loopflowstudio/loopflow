@@ -1241,7 +1241,7 @@ fn run_admitted_agent(
         process.capture = Some(capture.clone());
     }
     if let Some(capture) = &process.capture {
-        capture.0.claim_conversation_driver().map_err(|error| {
+        capture.0.claim_session_attachment().map_err(|error| {
             CoreError::ExecutionFailed(format!("conversation admission failed: {error}"))
         })?;
         launch.session_attachment = capture.0.session_attachment();

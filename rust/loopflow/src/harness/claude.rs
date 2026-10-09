@@ -769,7 +769,7 @@ mod tests {
                     work: None,
                 },
             )?;
-            capture.claim_conversation_driver()?;
+            capture.claim_session_attachment()?;
             let (session, first) = capture.session_attachment().unwrap();
             let store = crate::store::sqlite::SqliteStore::new(&home.join("loopflow.db"))?;
             runtime.block_on(async {

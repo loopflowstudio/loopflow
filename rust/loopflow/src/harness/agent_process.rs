@@ -8,7 +8,6 @@ use crate::process::SessionAttachment;
 use crate::store::sqlite::SqliteStore;
 use crate::store::{StoreError, StoreResult};
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::process::Command;
 
@@ -133,11 +132,10 @@ pub(crate) fn stop_native(
     .map_err(Into::into)
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default)]
 pub struct AgentProcessReapReport {
     pub orphaned: Vec<u32>,
     pub reaped: u32,
-    pub settled_drivers: u32,
     pub errors: Vec<String>,
 }
 
@@ -199,35 +197,31 @@ fn reap_in(store: &SqliteStore, dry_run: bool) -> StoreResult<AgentProcessReapRe
             Ok(())
         });
         match result {
-            Ok(true) => {
-                report.reaped += u32::from(orphaned);
-                if let Some(session) = agent.process.agent_session_id.as_deref() {
-                    if let Some(attachment) = store.session_attachment(session)? {
-                        if attachment.agent_process_lfid == agent.process.lfid
-                            && attachment.process_lfid.as_ref().is_some_and(|attached| {
-                                process_evidence(store, attached) == ProcessIdentityEvidence::Dead
-                            })
-                        {
-                            match store.finish_session_attachment(
-                                session,
-                                &attachment,
-                                "interrupted",
-                                || Ok(false),
-                            ) {
-                                Ok(()) => report.settled_drivers += 1,
-                                Err(StoreError::InvalidAuthority(_)) => {}
-                                Err(error) => {
-                                    report.errors.push(format!("Session {session}: {error}"))
-                                }
-                            }
-                        }
-                    }
-                }
+            Ok(true) => report.reaped += u32::from(orphaned),
+            Ok(false) => continue,
+            Err(error) => {
+                report
+                    .errors
+                    .push(format!("AgentProcess {}: {error}", agent.process.lfid));
+                continue;
             }
-            Ok(false) => {}
-            Err(error) => report
-                .errors
-                .push(format!("AgentProcess {}: {error}", agent.process.lfid)),
+        }
+        let Some(session) = agent.process.agent_session_id.as_deref() else {
+            continue;
+        };
+        let Some(attachment) = store.session_attachment(session)? else {
+            continue;
+        };
+        if attachment.agent_process_lfid != agent.process.lfid
+            || !attachment.process_lfid.as_ref().is_some_and(|attached| {
+                process_evidence(store, attached) == ProcessIdentityEvidence::Dead
+            })
+        {
+            continue;
+        }
+        match store.finish_session_attachment(session, &attachment, "interrupted", || Ok(false)) {
+            Ok(()) | Err(StoreError::InvalidAuthority(_)) => {}
+            Err(error) => report.errors.push(format!("Session {session}: {error}")),
         }
     }
     Ok(report)
@@ -345,6 +339,66 @@ mod tests {
     use crate::store::sqlite::SqliteStore;
     use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
+
+    #[test]
+    fn observed_agent_death_settles_only_a_provably_dead_attachment() {
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let database = ledger.home().join("loopflow.db");
+        let store = SqliteStore::open_ephemeral(&database).unwrap();
+        let sql = rusqlite::Connection::open(database).unwrap();
+        for ended in [false, true] {
+            let session = store.test_session(
+                if ended { "ended" } else { "unknown" },
+                &crate::session_record::new_artifact_key(),
+            );
+            let parent = ProcessLfid::new();
+            sql.execute(
+                "INSERT INTO processes(lfid,trace_id,started_at,completed_at) VALUES(?1,?1,?2,?3)",
+                rusqlite::params![
+                    parent,
+                    time::OffsetDateTime::now_utc().unix_timestamp(),
+                    ended.then_some(1)
+                ],
+            )
+            .unwrap();
+            let attachment = store
+                .claim_session_attachment(&session.id, None, &parent, true)
+                .unwrap();
+            let mut command = Command::new("/usr/bin/true");
+            command.env_clear();
+            let mut child = super::spawn_native(
+                command,
+                &(store.clone(), session.id.clone(), attachment.clone()),
+            )
+            .unwrap();
+            child.wait().unwrap();
+            // No launcher exit receipt: the reaper must observe the OS death.
+            let report = super::reap_in(&store, false).unwrap();
+            assert!(report.errors.is_empty());
+            assert!(report.orphaned.is_empty());
+            assert_eq!(report.reaped, 0);
+            let process = store
+                .process(&attachment.agent_process_lfid)
+                .unwrap()
+                .unwrap();
+            assert!(process.completed_at.is_some());
+            assert!(process.outcome.is_none());
+            let current = store.session_attachment(&session.id).unwrap().unwrap();
+            assert_eq!(current.process_lfid.is_none(), ended);
+            let history = store.session_history(&session.id, 0, 0).unwrap();
+            let exits: Vec<_> = history
+                .iter()
+                .filter(|event| event.payload["type"] == "attachment_exit")
+                .collect();
+            assert_eq!(exits.len(), usize::from(ended));
+            if ended {
+                assert_eq!(exits[0].payload["outcome"], "interrupted");
+            } else {
+                assert_eq!(current, attachment);
+            }
+        }
+    }
 
     #[test]
     fn native_cleanup_records_wait_without_touching_a_replacement_or_remote_provider() {

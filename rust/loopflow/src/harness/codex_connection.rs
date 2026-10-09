@@ -17,11 +17,11 @@ use crate::store::sqlite::SqliteStore;
 use crate::store::{StoreError, StoreResult};
 
 /// Called under the Session attachment lock, so takeover cannot race the provider
-/// shutdown. Saved history and the provider thread ID survive. `serving` is
-/// the recorded endpoint and thread; an AgentProcess that also serves an unrelated
+/// shutdown. Saved history and the provider thread ID survive. The endpoint and thread
+/// must come from the record; an AgentProcess that also serves an unrelated
 /// conversation is left running, and that is an error.
 pub(crate) fn close_agent_process(
-    serving: Option<(&str, &str)>,
+    (endpoint, thread): (&str, &str),
     pid: u32,
     started: i64,
 ) -> Result<()> {
@@ -37,28 +37,26 @@ pub(crate) fn close_agent_process(
     if !same_process()? {
         return Ok(());
     }
-    if let Some((endpoint, thread)) = serving {
-        // Use a separate runtime: exit is also reached from synchronous capture
-        // settlement and signal cleanup, sometimes inside an existing runtime.
-        std::thread::scope(|scope| {
-            scope
-                .spawn(|| {
-                    tokio::runtime::Builder::new_current_thread()
-                        .enable_all()
-                        .build()?
-                        .block_on(async {
-                            tokio::time::timeout(
-                                Duration::from_secs(3),
-                                inspect_agent_threads(endpoint, thread),
-                            )
-                            .await
-                            .map_err(|_| anyhow!("AgentProcess inspection timed out"))?
-                        })
-                })
-                .join()
-                .map_err(|_| anyhow!("AgentProcess close worker panicked"))?
-        })?;
-    }
+    // Use a separate runtime: exit is also reached from synchronous capture
+    // settlement and signal cleanup, sometimes inside an existing runtime.
+    std::thread::scope(|scope| {
+        scope
+            .spawn(|| {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()?
+                    .block_on(async {
+                        tokio::time::timeout(
+                            Duration::from_secs(3),
+                            inspect_agent_threads(endpoint, thread),
+                        )
+                        .await
+                        .map_err(|_| anyhow!("AgentProcess inspection timed out"))?
+                    })
+            })
+            .join()
+            .map_err(|_| anyhow!("AgentProcess close worker panicked"))?
+    })?;
     if !same_process()? {
         return Ok(());
     }

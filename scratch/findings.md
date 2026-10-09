@@ -87,9 +87,7 @@ joining publishes nothing. Local placement is not peer-exclusive admission.
 Dependency detail: `cdec83fe8:scratch/work-on-another-machine-name.md`,
 **Remaining integration**, and its Infrastructure memory, **Tasks across machines**.
 
-Main's LOO-406/#1503 remains integrated. Relevant local/dependency Infrastructure
-memories were read through `cdec83fe8`, not unrelated history. Product has no child
-directories or memories. Pre-edit notes: `/tmp/loo427-realign-endpoints-PvXjSl/`.
+Dependency memory coverage: through `cdec83fe8`; Product has no child memories.
 
 ## Arrangement evidence — October 8
 

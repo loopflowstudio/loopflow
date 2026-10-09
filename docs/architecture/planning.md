@@ -180,10 +180,16 @@ Export validates causal closure but holds unselected origins and dependents.
 Scalar Task/Project and comment references resolve at projection. Membership
 delivery and baseline comparison resolve Project references without rewriting the
 saved receipt. Exact readback rebases later unattempted saves only when their
-resolved baselines match. Associated order or deletion histories retain a
-projection conflict rather than partially applying
-them. Relationship, state and non-creation receipt composition still needs its
-remaining implementation and public proof; retained history is not convergence.
+resolved baselines match. Order/deletion capture derives immutable receipt origins
+from the existing journal, separately from the local owner. Reused receipt IDs
+across origins are invalid. Order selection uses the original save's clock;
+projection, delivery and complete-list comparison resolve member references without
+rewriting captured lists or effect inputs. Associated receipt projection no longer
+requires a blanket refusal, but association exchange/effects remain held pending
+complete relationship/state composition and public proof.
+Task capture compares complete provider bodies: a detail and a later list may
+share an issue revision while carrying different list ranks. Revision equality
+alone cannot establish that the later observation is retained.
 
 `ops/planning_delivery.rs` consumes mapped Task titles, descriptions, nullable
 assignees and membership, and Project names, summaries, statuses and structured

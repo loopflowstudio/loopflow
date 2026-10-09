@@ -121,17 +121,53 @@ fn deliveries(conn: &Connection, project: &ProjectId) -> StoreResult<Vec<OrderDe
         let value: String = row.get(1)?;
         let base: Option<String> = row.get(2)?;
         let effects: String = row.get(3)?;
+        let mut desired = Vec::new();
+        for id in resolved_order(conn, &serde_json::from_str::<Vec<String>>(&value)?)? {
+            let known: bool = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1)",
+                [&id],
+                |r| r.get(0),
+            )?;
+            // An unprojected alias is not evidence of a removed member. Retain
+            // it so delivery waits for correspondence rather than dropping it.
+            if members.contains(&id) || !known {
+                desired.push(id);
+            }
+        }
         Ok(OrderDelivery {
             id: row.get(0)?,
             baseline: base.map(|v| serde_json::from_str(&v)).transpose()?,
             effects: serde_json::from_str(&effects)?,
-            desired: serde_json::from_str::<Vec<String>>(&value)?
-                .into_iter()
-                .filter(|id| members.contains(id))
-                .collect(),
+            desired,
         })
     })?;
     rows.collect()
+}
+
+// Resolve only for projection/comparison. Persisted effect inputs, desired
+// lists and receipt histories retain the IDs captured by their original writer.
+fn resolved_order(conn: &Connection, order: &[String]) -> StoreResult<Vec<String>> {
+    let mut resolved = Vec::with_capacity(order.len());
+    for id in order {
+        let id = super::planning_peers::associated_local_id(
+            conn,
+            crate::engine::planning_exchange::PlanningKind::Task,
+            id,
+            None,
+        )?
+        .unwrap_or_else(|| id.clone());
+        if !resolved.contains(&id) {
+            resolved.push(id);
+        }
+    }
+    Ok(resolved)
+}
+
+fn same_projected_order(conn: &Connection, left: &[String], right: &[String]) -> StoreResult<bool> {
+    Ok(same_order(
+        &resolved_order(conn, left)?,
+        &resolved_order(conn, right)?,
+    ))
 }
 
 // Compare relative order among shared members. A new member does not conflict
@@ -195,6 +231,16 @@ pub(super) fn observe_in(
     }
     let previous = observed_order(conn, &project)?;
     let pending = deliveries(conn, &project)?;
+    for id in pending.iter().flat_map(|delivery| &delivery.desired) {
+        let known: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1)",
+            [id],
+            |r| r.get(0),
+        )?;
+        if !known {
+            return Ok(false);
+        }
+    }
     let mut retained_lists = previous.iter().collect::<Vec<_>>();
     for delivery in &pending {
         retained_lists.extend(&delivery.baseline);
@@ -204,15 +250,21 @@ pub(super) fn observe_in(
     }
     // A cold peer may have captured attempts but no local list inventory. Their
     // known members still prevent an empty/partial read from settling the move.
-    let mut membership = conn.prepare("SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND project_id=?2 AND planning_deleted_at IS NULL)")?;
-    for id in retained_lists
+    let mut membership = conn
+        .prepare("SELECT project_id=?2 AND planning_deleted_at IS NULL FROM tasks WHERE id=?1")?;
+    let retained = retained_lists
         .into_iter()
         .flatten()
+        .cloned()
+        .collect::<Vec<_>>();
+    for id in resolved_order(conn, &retained)?
+        .iter()
         .filter(|id| !observed.contains(id))
     {
-        let retained: bool =
-            membership.query_row(params![id, project.as_str()], |row| row.get(0))?;
-        if retained {
+        let retained: Option<bool> = membership
+            .query_row(params![id, project.as_str()], |row| row.get(0))
+            .optional()?;
+        if retained != Some(false) {
             return Ok(false);
         }
     }
@@ -223,7 +275,7 @@ pub(super) fn observe_in(
     let observation = json!({"value":observed}).to_string();
     for mut delivery in pending {
         if let Some(last) = delivery.effects.last_mut() {
-            if !last.settled && same_order(&observed, &last.after) {
+            if !last.settled && same_projected_order(conn, &observed, &last.after)? {
                 last.settled = true;
                 // Every unattempted save against this baseline retains its value.
                 // Arrival sequence on another machine cannot order these intentions.
@@ -232,7 +284,9 @@ pub(super) fn observe_in(
                         && later
                             .baseline
                             .as_ref()
-                            .is_none_or(|base| same_order(base, &last.before))
+                            .map(|base| same_projected_order(conn, base, &last.before))
+                            .transpose()?
+                            .unwrap_or(true)
                     {
                         conn.execute(
                             "UPDATE project_changes SET base_json=?2 WHERE id=?1",
@@ -258,7 +312,11 @@ pub(super) fn observe_in(
                 }
             })
             .or(delivery.baseline.as_ref());
-        if expected.is_some_and(|base| !same_order(base, &observed)) {
+        if expected
+            .map(|base| same_projected_order(conn, base, &observed))
+            .transpose()?
+            == Some(false)
+        {
             conn.execute(
                 "UPDATE project_changes SET conflict_json=?2,error=NULL WHERE id=?1",
                 params![delivery.id, observation],
@@ -294,7 +352,7 @@ pub(super) fn project_pending(conn: &Connection, project: &ProjectId) -> StoreRe
         return Ok(false);
     };
     let members = project_members(conn, project)?;
-    let desired = serde_json::from_value::<Vec<String>>(change.value)?
+    let desired = resolved_order(conn, &serde_json::from_value::<Vec<String>>(change.value)?)?
         .into_iter()
         .filter(|id| members.contains(id))
         .collect::<Vec<_>>();
@@ -428,7 +486,15 @@ pub(super) fn import_peer_receipt<'a>(
     for head in heads {
         let head: OrderReceipt = serde_json::from_value(head.clone())?;
         match (&merged.base, &head.base) {
-            (Some(left), Some(right)) if left["value"] != right["value"] => return Err(conflict()),
+            (Some(left), Some(right)) if left["value"] != right["value"] => {
+                let left: Option<Vec<String>> = serde_json::from_value(left["value"].clone())?;
+                let right: Option<Vec<String>> = serde_json::from_value(right["value"].clone())?;
+                match (left, right) {
+                    (Some(left), Some(right))
+                        if resolved_order(conn, &left)? == resolved_order(conn, &right)? => {}
+                    _ => return Err(conflict()),
+                }
+            }
             (None, Some(_)) => merged.base = head.base,
             _ => {}
         }

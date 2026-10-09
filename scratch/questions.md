@@ -30,13 +30,9 @@ at `b040c7c8d:scratch/questions.md`.
   failures still roll back the import. Legacy-provider association remains unfinished;
   conflicts preserve both IDs rather than guessing which execution history to use.
 
-The integrated cut remains unpublished. The current design owns verification and
-remaining integration; earlier adoption evidence stays at `5d336868f:scratch/questions.md`.
-The pre-cut 68-test storage pass at `e08dc9312` supersedes the earlier subset-only
-coverage (`25cbc0a09`, `6ccbbabe3`, `b21429d9b`), including invalidation and mapping
-preservation. It establishes neither association recovery nor public composition.
-Broader public/DTO, provider-lifetime, cold-worker, Desktop and mixed-provider acceptance
-remain separate. No new product decision is selected.
+The cut remains unpublished. The design owns remaining integration and acceptance;
+earlier adoption and pre-cut storage evidence, with their limitations, remain at
+`79e478550:scratch/questions.md`, the paragraph before selection choice.
 
 - October 8 selection choice: selecting a Wave includes its descendants; joining
   selects nothing. Existing moves never enroll a private parent or change the
@@ -128,10 +124,10 @@ remain separate. No new product decision is selected.
   either side or clears projection/effect conflicts. Ordinary import now retains
   each associated creation receipt under its original ID on the local owner;
   no physical identity or captured input is reassigned. Common acquisition owns
-  exact readback. Joint scalar/relationship projection stays held. Lookup rechecks
+  exact readback. The joint cut below supersedes its scalar projection hold. Lookup rechecks
   local mapping/repository and contradictory incoming scalar claims. This is a
   reversible composition choice, not new policy. Tests now enter through ordinary
-  association/import/acquisition; execution remains gate-deferred.
+  association/import/acquisition; the design records the later focused pass.
 
 - October 9 causal representation: retain the existing journal rather than export
   machine-local correspondence. Common acquisition may capture a cross-origin parent
@@ -141,6 +137,14 @@ remain separate. No new product decision is selected.
   Dependency closure is validation-only: unselected origins and dependents remain
   held, never enrolled. Review caught a preserved local value incorrectly borrowing
   provider parents; both scalar and content capture now require accepted equality.
-  This is a partial implementation choice, not new policy from Jack Heart. Held
-  import still does not project a winner or acknowledge it; peer-authored winner
-  causality and joint projection remain in item 3.
+  This was a partial implementation choice, not new policy from Jack Heart.
+  The joint-owner cut below supersedes its Linear-only causal-link validation;
+  unobserved retained provider heads still require accepted equality.
+
+- October 9 joint-owner and membership choices are consolidated in the design,
+  **Remaining integration**, item 3. `1cbbba625`/`01769ea0d` reuse accepted sources
+  for causal scalar winners; `79e478550`/`521c7040f` resolve membership delivery
+  and readback without rewriting captured values. These are reversible composition
+  choices, not new product policy. Private groups and association/mixed exchange
+  remain held; order/deletion origins derive from the journal's unique receipt
+  identity, not a second mutable column. The validator rejects cross-origin reuse.

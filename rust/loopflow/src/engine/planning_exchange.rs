@@ -249,6 +249,9 @@ impl PlanningSnapshot {
                 return Err(PlanningExchangeError::ReusedChange(id.clone()));
             }
         }
+        // Individually valid documents can still reuse one receipt identity
+        // under different origins. Validate that invariant across the union.
+        merged.validate()?;
         Ok(merged)
     }
 
@@ -334,7 +337,17 @@ impl PlanningSnapshot {
     }
 
     pub fn validate(&self) -> Result<(), PlanningExchangeError> {
+        let mut receipt_origins = BTreeMap::new();
         for (id, change) in &self.changes {
+            if (change.order_receipt().is_some() || change.deletion_receipt().is_some())
+                && receipt_origins
+                    .insert((change.object.kind, &change.field), &change.object)
+                    .is_some_and(|origin| origin != &change.object)
+            {
+                return Err(PlanningExchangeError::Invalid(
+                    "planning receipt has multiple origins",
+                ));
+            }
             if id.is_empty()
                 || change.object.id.is_empty()
                 || change.clock < 0

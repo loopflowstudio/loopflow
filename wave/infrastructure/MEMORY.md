@@ -626,17 +626,18 @@ Joining publishes nothing; imports remain unplaced. Malformed input aborts impor
 contradictions defer effects, not saves/acquisition. Preserve execution, baselines,
 uncertainty and losers. Readback cannot settle mappings/errors or removal via creation.
 Desktop retains last-good scoped status; per-Work recovery remains. Mixed exchange
-stays disabled. Omission is not convergence. Earlier proofs: `9dfb95451`, this heading.
+stays disabled. Earlier proofs: `9dfb95451`, this heading.
 
 Creation origins retain exact readback; joint winners reuse accepted observations
-on explicit correspondence. Earlier cuts: `521c7040f`, this heading.
+on explicit correspondence. Cuts: `521c7040f`, this heading.
 Causality precedes ranking; portable parents prove observation, not identity or
 authority. Private references hold groups. Membership delivery/readback resolves
 aliases without rewriting inputs (`79e478550`/`521c7040f`); exact readback rebases
-later saves. Receipt origin stays distinct from projection through capture, order selection
-and list comparison. Order/deletion
-composition and association/mixed exchange remain held. Focused proofs establish
-no public/installed acceptance. Earlier proofs: `163362aad`, this heading.
+later saves. Journal origins survive capture/ranking; list comparison resolves
+aliases without rewriting inputs. Equal revisions can carry different list ranks;
+capture bodies. Association/mixed exchange stays held. Storage proves
+no public/installed acceptance.
+Proofs: `163362aad`, this heading.
 Plan: `scratch/work-on-another-machine-name.md`.
 
 ## Driver recovery

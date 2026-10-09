@@ -137,37 +137,17 @@ this heading. Keep these replacements deleted:
   identical-body acquisition bypasses and replay of superseded provider revisions.
   Common acquisition owns validation; savepoints isolate valid contradictions and
   retain membership evidence after rollback. Entity revisions never order relationships.
-- Creation/link effect columns on `project_transitions`, Project rows and
-  `task_creation_intents`. The peer draft migrates released receipts directly to
-  common `planning_creations`, keyed by kind/original Work ID with a separate local
-  Task/Project foreign key. Task request idempotence stays on its existing owner.
-  Common `planning_export.rs` owns capture, attempts and readback; transitions,
-  activation, membership and execution stay local.
-- Peer import's synthetic `task_creation_intents` insertion. Only an actual local
-  creation request owns idempotence; the common receipt already retains its original
-  parent and model. Retain released local requests. Creation validation returns its
-  decoded receipt, and retained receipt reads use typed columns rather than rebuilding
-  wire JSON in SQL. Check distinct origin/projection conflicts without querying the
-  same identity twice. Existing moved-parent and empty-local-history fixtures cover
-  the surviving owner; execution of these changes remains deferred below.
-- Machine-local creation sequence cutoffs. Captured local/peer change IDs bound
-  acknowledgement; the original parent is retained for private-selection holds.
-  Optional creation groups use the same journal, not a second receipt transport.
-- Separate Task/Project creation capture triggers. Common receipt insert/update
-  triggers retain the original Work ID; changing local projection alone creates no
-  journal mutation or sharing membership. Migration seeds retained effects and import
-  suppresses echo. Readback retains captured IDs, not local sequence positions.
-- Transition/intent-only export discovery, mapping-only completion shortcuts and
-  duplicate status eligibility filters. One `planning_exports` view reads common
-  receipt acknowledgement; preparation alone creates missing Task receipts.
-- Local-receipt/Work-ID-only attempt eligibility after rejected peer projection.
-  Common attempts consult retained conflicts, including skipped holds and another
-  ID claiming the same provider object, in their write transaction. Losing mappings
-  and creation inputs survive; pending/readback and saves remain independent.
+- Earlier creation/export receipt reductions remain at
+  `d7392531d:scratch/work-on-another-machine-name.md`, **Delete — do not maintain**.
+  Keep the single common receipt writer, per-origin captured IDs, original parents,
+  uncertain attempts and effect eligibility; remove no retained local requests.
 - Sequence-selected Project order intentions and delivery of settled, superseded
   partial moves. Shared views select the original save, while uncertain losing
   effects still hold delivery. Import projects the chosen list after Task rows;
   scalar rank replay cannot overwrite it or advance revisions on reimport.
+- Projected-owner receipt capture/ranking, revision-only Task-body capture, and
+  raw-ID order comparisons that discard unresolved aliases. The journal owns
+  origins; comparison resolves aliases, while unknown membership defers readback.
 - Sequence-selected deletion delivery and scalar-clock visibility over a retained
   removal receipt: neither imported arrival nor that clock orders provider evidence.
   Common pending/attempt/status readers retain every unresolved
@@ -179,6 +159,12 @@ this heading. Keep these replacements deleted:
   Store error, not diagnostic-string matching; malformed input still aborts import.
 - Acquisition-side `inherit_project_placement`: provider readback is planning,
   not first local execution. Explicit placement retains its existing owner.
+- Physical-only membership delivery lookup and raw-ID readback/baseline comparisons.
+  Reuse explicit correspondence at delivery/comparison; keep captured IDs unchanged.
+- Repeated baseline normalization and decoding entire later receipts just to rebase
+  them. One comparison helper retains absent-versus-null baselines; read only IDs
+  and baselines and serialize readback once. Reuse the peer head index for per-origin
+  completeness and creation winners, without merging creation ownership.
 - Task creation receipt bypass after mapping-only import, missing-list readiness
   rejection and required ancestor placement on first local use. Readback reconciles
   captured saves, not later intentions; local execution placement stays local.
@@ -211,38 +197,34 @@ eligibility and Desktop scope/generation fences. The derived
 `planning_peer_provider_claims` view owns retained mapping/creation predicates;
 issue-name fallback records no association. Item 3 remains unfinished.
 
-Delete cloned head-value collections in `FieldHistory`: each decoded value now
-carries its head marker, with borrowed iteration for acquisition and order import.
-Scalar SQL projection uses `PlanningKind::fields`, not a second exclusion list
-of creation/deletion/order/evidence protocols. Receipt writers, all retained
-mutations and association holds remain unchanged; no joint projection is added.
+Earlier head-value, creation-fixture, association-conflict and accepted-observation
+reductions remain at `96f714bd6:scratch/work-on-another-machine-name.md`,
+**Delete — do not maintain**. Preserve the single journal, per-origin heads,
+exact common acquisition and accepted field frontiers; do not recreate the
+removed writers or helper-only proofs.
 
-Delete the creation-origin fixture's direct `import_peer_receipts`/`attach_in`
-shortcut: ordinary association/import and common acquisition now exercise that
-boundary. Keep both origin IDs, captured inputs, uncertainty and private membership.
+Delete origin-keyed scalar winner grouping during import and the capture restriction
+that only Linear facts can follow an accepted foreign source. One resolved-owner
+frontier traverses causal ancestors before ranking; the existing observation table
+commits accepted source IDs. Per-origin journals/heads, losing edits, creation
+origins and raw delivery inputs survive. Scalar relationship values resolve only
+at projection. Associated order/deletion receipt projection now uses the common writers; the
+association exchange/effect hold remains until composition and its proof are complete.
 
-Association and import share one conflict writer and one skipped-projection
-receipt. Delete diagnostic-text branching between association and sharing holds:
-both retain incomplete effects until successful import; status derives their
-specific current reasons. One object scan covers repository and association
-holds. Historical conflict rows survive; no correspondence or mixed-provider
-authority is added. The association fixture checks one current explanation for
-each Task/Project after reversed and repeated imports.
-
-Delete same-origin-only capture and blanket cross-origin rejection for exact
-Linear observations. One derived capture-head view serves scalar/content writers;
-it now also owns missing-parent detection, replacing three copies of the same
-ancestry query and five origin joins. No alias payload or second journal is added.
-Preserve per-origin heads, source mutation IDs, baseline traversal and private-history
-holds. Joint projection remains unfinished; this reduction releases no holds.
+Compression shares predecessor traversal between resolved-owner frontier selection
+and delivery baselines. Walk shared ancestry once per owner, including paths through
+unassociated origins without merging them. Selection checks reuse one object index,
+not a rebuilt journal scan per association. Per-origin heads, private holds and
+receipt composition boundaries are unchanged.
 
 ## Remaining integration — October 9
 
 Receipt origins and full-ID correspondence exist. Ordinary import now projects
 associated creation receipts onto their local owner without releasing holds
 (`39dba32c1`).
-**Joint projection and association recovery remain unfinished**; item 3 owns
-the causal, relationship and receipt composition before lifting those holds.
+**Joint scalar projection now exists; complete association recovery remains
+unfinished.** Item 3 owns relationship and receipt composition before releasing
+exchange/effect holds. Private or failed groups never advance observations.
 
 Destination-level Desktop status has focused headless proof; per-Work membership,
 authorship/assignees and losing-edit recovery remain unfinished. Public Git/Linear
@@ -308,6 +290,15 @@ The detailed ordering, alternate-acquisition and invalidation proofs remain at
 `c6874c01b:scratch/work-on-another-machine-name.md`, **Remaining integration**.
 Keep their counterexamples and acceptance limits; no second implementation is needed:
 
+- **Accepted import observation (`dac02060a`–`96f714bd6`).**
+  Ordinary same-origin projection records accepted scalar/content source IDs in
+  `planning_peer_observed` within its savepoint, without echo. Local capture uses
+  that frontier; rejected/held imports retain the prior observation. The fixture
+  covers Task title and Project workflow through rejection, repair, local save and
+  return import, with original baselines, repeated/older snapshots and populated
+  execution. Focused observation execution is recorded below; released-frontier
+  and revision checks remain with gate. The joint-owner cut reuses this mechanism, without
+  proving public exchange or complete association recovery.
 - **Effect eligibility (`08a285872`).** Common field/deletion, creation/link,
   state and order attempts consult retained projection conflicts in the attempt
   transaction. Saves and acquisition remain independent. Selection releases no
@@ -356,17 +347,10 @@ to gate; publication still requires the acceptance below, with no landing author
 Earlier cut-by-cut evidence: `3f7d9f2da:scratch/work-on-another-machine-name.md`,
 **Remaining integration**.
 
-Earlier registry, SQLite-binding and Task-default repairs:
-`08a285872:scratch/work-on-another-machine-name.md`, **Remaining integration**.
-Imported planning stays unplaced; focused results prove no composed acceptance.
-
-Earlier acquisition-age/readiness findings and the public work-watch evidence:
-`fcd64901f:scratch/work-on-another-machine-name.md`, **Remaining integration**.
-They establish neither connected Linear/Git composition nor real SSH.
-
-Earlier parent-integration results and the synthetic-state-settlement removal:
-`9b59e9b71:scratch/work-on-another-machine-name.md`, **Remaining integration**.
-They establish no combined peer acceptance; observed facts, not errors, settle effects.
+Earlier registry, acquisition-age/readiness and parent-integration evidence:
+`08a285872`, `fcd64901f`, `9b59e9b71:scratch/work-on-another-machine-name.md`,
+**Remaining integration**. Planning stays unplaced; observations, not errors,
+settle effects. These proofs establish neither composed acceptance nor SSH.
 
 Source reconciliation at `4e3cb2160` supersedes the earlier no-production-caller
 finding: `6c0f2256f` connects exchange and `4e3cb2160` isolates destination attempts.
@@ -441,8 +425,8 @@ invalidation) remain. The diagnostic is temporary, not product policy.
    local execution lookup, common effect ownership, uncertain receipts and private
    selection. Neither transferring a mapping nor merging execution is an accepted
    implementation. The common receipt-origin cut below resolves storage multiplicity.
-   Explicit correspondence/lookup now exists; joint projection and completed
-   recovery do not.
+   Explicit correspondence/lookup and joint scalar projection now exist;
+   complete receipt/relationship recovery does not.
    Mapping validation precedes scalar and independent-evidence acquisition.
    Common effect attempts consult cross-ID conflicts against retained provider
    claims, including losing mappings and creation inputs; nulling a mapping
@@ -451,17 +435,12 @@ invalidation) remain. The diagnostic is temporary, not product policy.
    `f2a5c94e8:scratch/work-on-another-machine-name.md`, item 3.
 
    **Receipt-origin cut — October 9, not a new product decision.**
-   Common `planning_creations` now holds each original Task/Project creation and
-   attachment operation under `(kind, origin_id)`, separately from its local
-   Task/Project foreign key. Capture validates the original UUID/model unchanged.
-   Import merges attempts/acknowledgements per origin, rejects silent reassignment,
-   and retains both operations when two origins target one projection. Discovery
-   groups by projection for locking, then delivers/readbacks each origin separately;
-   status shows original receipt IDs. No Project transition or parallel peer queue
-   is added. Released Task/transition effects migrate directly into this final
-   draft; the obsolete columns and per-kind capture paths are deleted. Review caught
-   pre-capture diagnostic loss: nullable captured input now preserves discovery
-   failures through migration and status without inventing an attempt.
+   `planning_creations` separates each original creation/attachment identity from
+   its local projection. Preserve captured UUIDs/models, per-origin uncertainty,
+   projection-scoped locking and exact-origin readback/status. Nullable input keeps
+   pre-capture discovery failures without inventing attempts. Released effects
+   migrate directly into the final draft; obsolete per-kind columns/writers stay
+   deleted. Detailed cut: `1cbbba625:scratch/work-on-another-machine-name.md`, item 3.
 
    **October 9 receipt composition:** ordinary import consumes explicit
    correspondence and projects each creation origin through the existing common
@@ -475,8 +454,8 @@ invalidation) remain. The diagnostic is temporary, not product policy.
    `correspondence_import_retains_creation_origins_and_exact_readback`: both kinds,
    reversed/repeated imports, retained uncertainty and captured inputs, private
    membership, populated execution, and ordinary Store acquisition settling only
-   the exact origin. It also covers later contradictory mappings. Execution is
-   deferred below; this is not public Git/HTTPS or joint scalar acceptance.
+   the exact origin. It also covers later contradictory mappings. The focused pass
+   below includes this fixture, not public Git/HTTPS acceptance.
    Helper evidence: `de3c84b08`, this item. Readback of a
    different created provider object cannot transfer mappings or settle receipts.
 
@@ -486,56 +465,80 @@ invalidation) remain. The diagnostic is temporary, not product policy.
    It refuses redirecting an existing physical row. The common Task resolver and
    Project selector resolve associated full IDs only; direct identity readers
    remain exact. Membership, captured effects and execution foreign keys do not
-   change. Lookup rechecks mapping/repository, and association/reimport keeps an
-   explicit projection hold rather than enabling partial effects. This temporary
-   hold is incomplete implementation, not Jack Heart's final policy.
+   change. Lookup rechecks mapping/repository. Selected origins can jointly
+   project scalar fields; association/reimport retains exchange/effect holds until
+   receipt composition is complete. These are incomplete implementation boundaries,
+   not Jack Heart's final policy.
 
    The Store correspondence fixture imports older/newer snapshots in both orders,
    repeats association and resolves both IDs. It asserts unchanged private planning,
    local uncertain field receipts and populated execution; it does not project a
    cross-origin winner. The CLI fixture seeds/imports through Store APIs, then runs
    public association and Task status (not Git acquisition or provider readback).
-   Its corrected `execution.task_id` assertion awaits rerun; `381c88fec`'s revised
-   Store hold assertions remain gate-deferred.
+   The recorded 11-test pass includes this public association case after
+   `521c7040f` corrected its hold diagnostic; it is not public Git/HTTPS acceptance.
 
-   **October 9 portable observation cut (`8f3472eda`, source only).** Common
-   scalar/content acquisition can capture an exact Linear fact with a parent on
-   another associated origin. Validation requires identical kind, field, value
-   and provider body plus ascending clocks; a local lookup or equal text is not
-   evidence. The later local save retains that parent through its own observed
-   mutation, and `linear_predecessor` traverses the existing links. Per-origin
-   heads remain complete; a foreign child cannot erase another origin's frontier.
-   Export reads causal dependency closure for validation, then holds unselected
-   origins and their dependents without enrolling or publishing them.
+   Portable-observation rationale and the same-object counterexample remain at
+   `01769ea0d:scratch/work-on-another-machine-name.md`, item 3, **October 9 portable
+   observation cut**. Exact provider equality still governs unobserved sources;
+   the joint cut below supersedes its Linear-only parent validation. Private
+   dependency serialization proves no public exchange.
 
-   The fixture enters ordinary association and common acquisition, checks
-   unchanged readback after local Task/Project scalar and Project workflow saves,
-   predecessor and baseline readback after serialization, repeat import, private
-   destination separation and populated execution preservation. Execution remains
-   deferred; SQL preparation is not behavioral evidence. It does **not**
-   prove joint import observes a winner: held import still acquires no associated
-   scalar frontier. The earlier same-object limitation and counterexample remain
-   at `8f3472eda:scratch/work-on-another-machine-name.md`, item 3.
+   **October 9 joint scalar cut (`1cbbba625`, compressed at `01769ea0d`).**
+   Ordinary import resolves explicit associated origins to the existing local owner and evaluates the full causal frontier
+   before ranking concurrent heads. Each original record must remain complete.
+   The existing `planning_peer_observed` writer stores accepted source IDs under
+   the local owner in the same savepoint, including peer-authored IDs. Creation
+   histories remain keyed by original origin. Private origins/references hold the
+   whole group; association does not enroll them. Captured inputs and execution
+   foreign keys are unchanged.
 
-   Remaining association implementation order:
-   - Replace incoming-ID-only projection with deterministic joint planning winners.
-     Group selection must traverse cross-origin ancestry while preserving each
-     origin's complete journal and heads; comparing the current per-origin winners
-     by Linear priority/clock alone would still resurrect an observed peer fact.
-     Compose actual accepted peer acquisition with the common observation capture
-     before releasing holds. Peer-authored winners also need portable observed
-     causality; the exact-Linear-fact bridge alone does not acknowledge them.
-   - Resolve planning references as well as the object being projected. Current
-     `insert_and_project`/`project_comment` and post-pass Wave selection/order
-     projection use incoming IDs directly. Associated parents may have no physical
-     incoming row: Task membership, comment ownership and order members must resolve
-     to the local planning owner without rewriting journal values, captured effect
-     inputs or execution foreign keys. Association alone changes no Wave selection.
-     Import coverage must include relationships, not only full-ID lookup.
+   Cross-origin scalar predecessors now mean observation, not equivalent identity
+   or equal provider facts. The validator requires matching kind/field and ascending
+   clocks; provider bodies independently justify Linear priority. Only explicit
+   local correspondence groups winners. Common acquisition still requires exact
+   matching facts when borrowing *unobserved* retained heads; accepted IDs can be
+   predecessors of later peer saves or changed provider facts. This supersedes
+   the portable-observation cut's Linear-only validation rule, not its evidence.
+
+   The new Store fixture covers both Task title and Project name/workflow through
+   ordinary association/import, local save and return import, reversing/repeating
+   snapshots, retaining uncertain losing receipts, delivery baselines and populated
+   execution. Later Linear acquisition follows the accepted peer-authored frontier.
+   It serializes retained history because public association exchange
+   remains held. It is not public Git/HTTPS acceptance.
+
+   Remaining association implementation order (reconciled October 9 at `521c7040f`):
+   - Finish planning-reference composition. Scalar Task membership, comment
+     ownership and Wave selection now resolve associated IDs at projection;
+     order members resolve for projection/delivery/comparison without changing
+     captured IDs. Membership has ordinary-import and absent-parent readback proof; comment ownership and Wave selection still
+     need focused composition proof. Preserve journal values, captured inputs and
+     execution foreign keys. Association alone changes no Wave selection.
    - Compose non-creation receipts against the resolved local owner.
-     `project_delivery_fields`, deletion import and order import still construct
-     owners from the incoming ID. Creation-origin retention does not repair these
-     paths. Preserve field/state mutation identities, deletion/order receipt IDs,
+     Grouped scalar delivery and order/deletion receipts use the resolved local
+     owner. Membership resolves explicit Project correspondence in
+     delivery and common readback comparisons, retaining captured values/baselines.
+     Exact readback rebases later saves by resolved baseline identity, not raw ID;
+     equal projected membership creates no redundant receipt. The focused fixture
+     uses ordinary association/import in both orders, an earlier uncertain local
+     move, a later peer move and populated execution during readback. Public
+     Git/HTTPS delivery remains gate-owned; state still needs composed verification.
+     October 9 receipt-origin composition uses the journal's immutable origin
+     for capture and order ranking, without a second origin store. Cross-origin
+     receipt-ID reuse aborts import. Common delivery and complete-list comparisons
+     resolve Task aliases, preserving captured lists, baselines and effect inputs.
+     The ordinary-import regression passes reversed/repeated imports, partial
+     readback, later-save rebasing, return import and execution preservation.
+     Detail/list reads with one revision but different rank exposed a missing
+     capture: compare complete provider bodies, not revision alone. Exact trash
+     acknowledgement returns on the original deletion history. The private-origin
+     fixture preserves execution and uncertain removal through explicit selection,
+     reimport and readback. Missing Task correspondence must remain an unresolved
+     member, never become an empty desired list or acknowledge an uncertain move.
+     State/comment/Wave composition and public Git/HTTPS proof remain;
+     association/mixed exchange and effects stay held.
+     Preserve field/state mutation identities, deletion/order receipt IDs,
      original inputs, baselines and uncertain losing attempts; relationship
      resolution changes the local projection, not captured delivery inputs.
    - Independent private selection: associating private B with selected A cannot
@@ -698,7 +701,10 @@ and limitations: `9b59e9b71:scratch/work-on-another-machine-name.md`,
 **Acceptance for review**. They do not establish this ordering cut, public
 combined behavior or Desktop acceptance.
 
-Check: `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, in-memory released/draft SQL plus capture-query `EXPLAIN`, and `git diff --check` pass; disk remains 30.2 GiB after resource recovery, below the 32 GiB reserve, so build/focused causal-observation and correspondence tests remain with capable gate, alongside combined acceptance.
+Static-check evidence and the resource-limited build deferral remain at
+`b5b491099:scratch/work-on-another-machine-name.md`, **Acceptance for review**.
+
+Check: `cargo test -p loopflow --lib --no-run`, `scripts/test_network.py` (13 association/order/deletion tests), `cargo fmt --all --check` and `cargo clippy --all-targets -- -D warnings` pass. Gate retains released-frontier, Git/HTTPS and Desktop acceptance.
 
 Earlier SQL proofs, macOS startup limitations and the retained historical Flow
 without a recorded exit remain at

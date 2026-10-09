@@ -309,8 +309,7 @@ BEGIN
         AND j.value IS json_extract((SELECT fields FROM planning_peer_context), '$.' || j.key)
         AND (NOT EXISTS(SELECT 1 FROM planning_peer_observed h JOIN planning_peer_changes c ON c.id=h.id
             WHERE c.kind='task' AND h.object_id=NEW.id AND c.field=j.key AND c.linear IS NOT NULL
-            AND json_extract(c.linear,'$.body.id') IS json_extract((SELECT observation FROM planning_peer_context),'$.body.id')
-            AND json_extract(c.linear,'$.body.revision') IS json_extract((SELECT observation FROM planning_peer_context),'$.body.revision'))
+            AND json_extract(c.linear,'$.body') IS json_extract((SELECT observation FROM planning_peer_context),'$.body'))
         OR EXISTS(SELECT 1 FROM planning_peer_capture_heads h
                 WHERE h.kind='task' AND h.object_id=NEW.id AND h.field=j.key AND h.missing_parent)));
 END;
@@ -495,23 +494,31 @@ ALTER TABLE task_changes ADD COLUMN deletion_saved_at INTEGER;
 UPDATE task_changes SET deletion_saved_at=(SELECT planning_deleted_at FROM tasks WHERE id=task_id)
 WHERE field='deleted';
 
+-- Receipt origins are immutable journal facts, not the local projection owner.
+-- The snapshot validator rejects one receipt identity claimed by two origins.
+CREATE INDEX planning_peer_receipts ON planning_peer_changes(kind,field,object_id);
+CREATE VIEW planning_receipt_origins AS
+SELECT kind,field,object_id FROM planning_peer_changes
+WHERE (kind='task' AND field LIKE 'deletion:%') OR (kind='project' AND field LIKE 'order:%')
+GROUP BY kind,field,object_id;
+
 -- Each deletion receipt retains its own identity and causal history. A later save
 -- cannot clock-select away an earlier uncertain provider effect.
 CREATE TRIGGER peer_task_deletion_insert AFTER INSERT ON task_changes
 WHEN NEW.field='deleted' AND (SELECT importing FROM planning_peer_context)=0
 BEGIN
     INSERT INTO planning_peer_changes(id,kind,object_id,field,value,clock,linear,parents)
-    SELECT lower(hex(randomblob(16))),'task',NEW.task_id,'deletion:'||NEW.id,json_object('deleted_at',NEW.deletion_saved_at,'base',json(NEW.base_json),'attempted',json(CASE WHEN NEW.attempted THEN 'true' ELSE 'false' END),'acknowledged',json(CASE WHEN NEW.acknowledged THEN 'true' ELSE 'false' END),'acknowledged_revision',NEW.acknowledged_revision,'conflict',json(NEW.conflict_json),'error',NEW.error),
+    SELECT lower(hex(randomblob(16))),'task',COALESCE((SELECT object_id FROM planning_receipt_origins WHERE kind='task' AND field='deletion:'||NEW.id),NEW.task_id),'deletion:'||NEW.id,json_object('deleted_at',NEW.deletion_saved_at,'base',json(NEW.base_json),'attempted',json(CASE WHEN NEW.attempted THEN 'true' ELSE 'false' END),'acknowledged',json(CASE WHEN NEW.acknowledged THEN 'true' ELSE 'false' END),'acknowledged_revision',NEW.acknowledged_revision,'conflict',json(NEW.conflict_json),'error',NEW.error),
         max(CAST(unixepoch('subsec')*1000 AS INTEGER),COALESCE((SELECT max(clock)+1 FROM planning_peer_changes),0)),NULL,
-        (SELECT json_group_array(id) FROM planning_peer_heads WHERE kind='task' AND object_id=NEW.task_id AND field='deletion:'||NEW.id);
+        (SELECT json_group_array(id) FROM planning_peer_heads WHERE kind='task' AND object_id=COALESCE((SELECT object_id FROM planning_receipt_origins WHERE kind='task' AND field='deletion:'||NEW.id),NEW.task_id) AND field='deletion:'||NEW.id);
 END;
 CREATE TRIGGER peer_task_deletion_update AFTER UPDATE ON task_changes
 WHEN NEW.field='deleted' AND (SELECT importing FROM planning_peer_context)=0 AND (NEW.deletion_saved_at IS NOT OLD.deletion_saved_at OR NEW.base_json IS NOT OLD.base_json OR NEW.attempted IS NOT OLD.attempted OR NEW.acknowledged IS NOT OLD.acknowledged OR NEW.acknowledged_revision IS NOT OLD.acknowledged_revision OR NEW.conflict_json IS NOT OLD.conflict_json OR NEW.error IS NOT OLD.error)
 BEGIN
     INSERT INTO planning_peer_changes(id,kind,object_id,field,value,clock,linear,parents)
-    SELECT lower(hex(randomblob(16))),'task',NEW.task_id,'deletion:'||NEW.id,json_object('deleted_at',NEW.deletion_saved_at,'base',json(NEW.base_json),'attempted',json(CASE WHEN NEW.attempted THEN 'true' ELSE 'false' END),'acknowledged',json(CASE WHEN NEW.acknowledged THEN 'true' ELSE 'false' END),'acknowledged_revision',NEW.acknowledged_revision,'conflict',json(NEW.conflict_json),'error',NEW.error),
+    SELECT lower(hex(randomblob(16))),'task',COALESCE((SELECT object_id FROM planning_receipt_origins WHERE kind='task' AND field='deletion:'||NEW.id),NEW.task_id),'deletion:'||NEW.id,json_object('deleted_at',NEW.deletion_saved_at,'base',json(NEW.base_json),'attempted',json(CASE WHEN NEW.attempted THEN 'true' ELSE 'false' END),'acknowledged',json(CASE WHEN NEW.acknowledged THEN 'true' ELSE 'false' END),'acknowledged_revision',NEW.acknowledged_revision,'conflict',json(NEW.conflict_json),'error',NEW.error),
         max(CAST(unixepoch('subsec')*1000 AS INTEGER),COALESCE((SELECT max(clock)+1 FROM planning_peer_changes),0)),NULL,
-        (SELECT json_group_array(id) FROM planning_peer_heads WHERE kind='task' AND object_id=NEW.task_id AND field='deletion:'||NEW.id);
+        (SELECT json_group_array(id) FROM planning_peer_heads WHERE kind='task' AND object_id=COALESCE((SELECT object_id FROM planning_receipt_origins WHERE kind='task' AND field='deletion:'||NEW.id),NEW.task_id) AND field='deletion:'||NEW.id);
 END;
 INSERT INTO planning_peer_changes(id,kind,object_id,field,value,clock,linear,parents)
 SELECT lower(hex(randomblob(16))),'task',NEW.task_id,'deletion:'||NEW.id,json_object('deleted_at',NEW.deletion_saved_at,'base',json(NEW.base_json),'attempted',json(CASE WHEN NEW.attempted THEN 'true' ELSE 'false' END),'acknowledged',json(CASE WHEN NEW.acknowledged THEN 'true' ELSE 'false' END),'acknowledged_revision',NEW.acknowledged_revision,'conflict',json(NEW.conflict_json),'error',NEW.error),0,NULL,'[]'
@@ -523,17 +530,17 @@ CREATE TRIGGER peer_project_order_insert AFTER INSERT ON project_changes
 WHEN NEW.field='task_order' AND (SELECT importing FROM planning_peer_context)=0
 BEGIN
     INSERT INTO planning_peer_changes(id,kind,object_id,field,value,clock,linear,parents)
-    SELECT lower(hex(randomblob(16))),'project',NEW.project_id,'order:'||NEW.id,json_object('desired',json(NEW.value_json),'base',json(NEW.base_json),'effects',json(NEW.order_effects_json),'attempted',json(CASE WHEN NEW.attempted THEN 'true' ELSE 'false' END),'acknowledged',json(CASE WHEN NEW.acknowledged THEN 'true' ELSE 'false' END),'conflict',json(NEW.conflict_json),'error',NEW.error),
+    SELECT lower(hex(randomblob(16))),'project',COALESCE((SELECT object_id FROM planning_receipt_origins WHERE kind='project' AND field='order:'||NEW.id),NEW.project_id),'order:'||NEW.id,json_object('desired',json(NEW.value_json),'base',json(NEW.base_json),'effects',json(NEW.order_effects_json),'attempted',json(CASE WHEN NEW.attempted THEN 'true' ELSE 'false' END),'acknowledged',json(CASE WHEN NEW.acknowledged THEN 'true' ELSE 'false' END),'conflict',json(NEW.conflict_json),'error',NEW.error),
         max(CAST(unixepoch('subsec')*1000 AS INTEGER),COALESCE((SELECT max(clock)+1 FROM planning_peer_changes),0)),NULL,
-        (SELECT json_group_array(id) FROM planning_peer_heads WHERE kind='project' AND object_id=NEW.project_id AND field='order:'||NEW.id);
+        (SELECT json_group_array(id) FROM planning_peer_heads WHERE kind='project' AND object_id=COALESCE((SELECT object_id FROM planning_receipt_origins WHERE kind='project' AND field='order:'||NEW.id),NEW.project_id) AND field='order:'||NEW.id);
 END;
 CREATE TRIGGER peer_project_order_update AFTER UPDATE ON project_changes
 WHEN NEW.field='task_order' AND (SELECT importing FROM planning_peer_context)=0 AND (NEW.value_json IS NOT OLD.value_json OR NEW.base_json IS NOT OLD.base_json OR NEW.order_effects_json IS NOT OLD.order_effects_json OR NEW.attempted IS NOT OLD.attempted OR NEW.acknowledged IS NOT OLD.acknowledged OR NEW.conflict_json IS NOT OLD.conflict_json OR NEW.error IS NOT OLD.error)
 BEGIN
     INSERT INTO planning_peer_changes(id,kind,object_id,field,value,clock,linear,parents)
-    SELECT lower(hex(randomblob(16))),'project',NEW.project_id,'order:'||NEW.id,json_object('desired',json(NEW.value_json),'base',json(NEW.base_json),'effects',json(NEW.order_effects_json),'attempted',json(CASE WHEN NEW.attempted THEN 'true' ELSE 'false' END),'acknowledged',json(CASE WHEN NEW.acknowledged THEN 'true' ELSE 'false' END),'conflict',json(NEW.conflict_json),'error',NEW.error),
+    SELECT lower(hex(randomblob(16))),'project',COALESCE((SELECT object_id FROM planning_receipt_origins WHERE kind='project' AND field='order:'||NEW.id),NEW.project_id),'order:'||NEW.id,json_object('desired',json(NEW.value_json),'base',json(NEW.base_json),'effects',json(NEW.order_effects_json),'attempted',json(CASE WHEN NEW.attempted THEN 'true' ELSE 'false' END),'acknowledged',json(CASE WHEN NEW.acknowledged THEN 'true' ELSE 'false' END),'conflict',json(NEW.conflict_json),'error',NEW.error),
         max(CAST(unixepoch('subsec')*1000 AS INTEGER),COALESCE((SELECT max(clock)+1 FROM planning_peer_changes),0)),NULL,
-        (SELECT json_group_array(id) FROM planning_peer_heads WHERE kind='project' AND object_id=NEW.project_id AND field='order:'||NEW.id);
+        (SELECT json_group_array(id) FROM planning_peer_heads WHERE kind='project' AND object_id=COALESCE((SELECT object_id FROM planning_receipt_origins WHERE kind='project' AND field='order:'||NEW.id),NEW.project_id) AND field='order:'||NEW.id);
 END;
 INSERT INTO planning_peer_changes(id,kind,object_id,field,value,clock,linear,parents)
 SELECT lower(hex(randomblob(16))),'project',NEW.project_id,'order:'||NEW.id,json_object('desired',json(NEW.value_json),'base',json(NEW.base_json),'effects',json(NEW.order_effects_json),'attempted',json(CASE WHEN NEW.attempted THEN 'true' ELSE 'false' END),'acknowledged',json(CASE WHEN NEW.acknowledged THEN 'true' ELSE 'false' END),'conflict',json(NEW.conflict_json),'error',NEW.error),NEW.seq,NULL,'[]'
@@ -544,7 +551,7 @@ SELECT project_id,id FROM (
     SELECT c.project_id,c.id,row_number() OVER (
         PARTITION BY c.project_id ORDER BY min(m.clock) DESC,c.id DESC) AS position
     FROM project_changes c JOIN planning_peer_changes m
-        ON m.kind='project' AND m.object_id=c.project_id AND m.field='order:'||c.id
+        ON m.kind='project' AND m.field='order:'||c.id
     WHERE c.field='task_order' GROUP BY c.project_id,c.id
 ) WHERE position=1;
 

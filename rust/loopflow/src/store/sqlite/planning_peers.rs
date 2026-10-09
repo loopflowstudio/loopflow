@@ -1460,16 +1460,6 @@ fn insert_and_project(
     snapshot: &PlanningSnapshot,
 ) -> StoreResult<()> {
     let winners = &changes.winners;
-    if changes
-        .observed
-        .iter()
-        .any(|(_, change)| change.object != *object)
-        && (!changes.orders.is_empty() || !changes.deletions.is_empty())
-    {
-        return Err(StoreError::PlanningReceiptConflict {
-            effect: "associated ordering or deletion",
-        });
-    }
     if object.kind == PlanningKind::Comment {
         project_comment(conn, object, changes)?;
         require_repository(conn, object, repo)?;
@@ -7646,6 +7636,438 @@ mod tests {
     }
 
     #[test]
+    fn associated_deletion_readback_retains_uncertain_origin_and_private_execution() {
+        use super::PlanningChanges;
+        use crate::engine::planning_exchange::{PlanningKind, PlanningObject};
+
+        let (_source_home, source) = store();
+        let (_, row, task) = linear_seed(&source);
+        let project = source.task(&task).unwrap().unwrap().project_id;
+        let before = export(&source, "/source");
+        source.delete_task(&task).unwrap();
+        let removed = deletion_change(&source, &task);
+        assert!(source
+            .attempt_planning_field(
+                PlanningChanges::Task(&task),
+                &removed,
+                row.snapshot.items[0].revision.as_deref()
+            )
+            .unwrap());
+        source
+            .planning_field_error(PlanningChanges::Task(&task), &removed, "response lost")
+            .unwrap();
+        let attempted = export(&source, "/source");
+        for reverse in [false, true] {
+            let (_target_home, target) = store();
+            let wave = WaveId::new();
+            target
+                .create_wave(&Wave::new(wave.clone(), "private".into(), "/target".into()))
+                .unwrap();
+            let mut local_row = row.clone();
+            local_row.wave_id = wave.clone();
+            target.put_pm_snapshot(&local_row).unwrap();
+            let local = target
+                .task_by_issue(&row.snapshot.items[0].id)
+                .unwrap()
+                .unwrap();
+            // The existing local origin is private. Importing the selected peer
+            // and recording correspondence must neither enroll nor overwrite it.
+            import(&target, "/target", "unassociated", &attempted);
+            let associations = [
+                (
+                    PlanningKind::Task,
+                    task.as_str(),
+                    local.id.as_str(),
+                    row.snapshot.items[0].id.as_str(),
+                ),
+                (
+                    PlanningKind::Project,
+                    project.as_str(),
+                    local.project_id.as_str(),
+                    "current",
+                ),
+            ];
+            for (kind, origin, owner, provider) in associations {
+                target
+                    .associate_peer_planning(
+                        "/target",
+                        &PlanningObject {
+                            kind,
+                            id: origin.into(),
+                        },
+                        owner,
+                        provider,
+                    )
+                    .unwrap();
+            }
+            preserve_execution(&target, &wave, &local.id);
+            let execution = execution_rows(&target);
+            for snapshot in [&before, &attempted] {
+                import(&target, "/target", "private", snapshot);
+            }
+            assert!(target
+                .pending_task_changes(&local.id)
+                .unwrap()
+                .iter()
+                .all(|c| c.id != removed.id));
+            assert!(!export(&target, "/target")
+                .objects()
+                .iter()
+                .any(|o| o.id == task.as_str() || o.id == local.id.as_str()));
+            // Explicit selection releases privacy, not effects. Only the next
+            // import can incorporate the held uncertainty on the existing owner.
+            target
+                .select_peer_waves("/target", &destination(), std::slice::from_ref(&wave))
+                .unwrap();
+            let snapshots = if reverse {
+                [&attempted, &before]
+            } else {
+                [&before, &attempted]
+            };
+            for snapshot in [snapshots[0], snapshots[1], &attempted] {
+                import(&target, "/target", "selected", snapshot);
+                assert_eq!(
+                    deletion_receipt(&target, &removed.id),
+                    deletion_receipt(&source, &removed.id)
+                );
+            }
+            assert!(target
+                .attempt_planning_field(
+                    PlanningChanges::Task(&local.id),
+                    &removed,
+                    row.snapshot.items[0].revision.as_deref()
+                )
+                .is_err());
+            assert!(target
+                .acknowledge_task_deletion(&local.id, &removed, Some("2026-10-09T12:00:00Z"))
+                .unwrap());
+            let returned =
+                super::export_in(&target.conn.lock().unwrap(), "/target", &destination()).unwrap();
+            let returned = PlanningSnapshot::from_bytes(&returned.to_bytes().unwrap()).unwrap();
+            let field = format!("deletion:{}", removed.id);
+            assert!(returned
+                .changes
+                .values()
+                .filter(|c| c.field == field)
+                .all(|c| c.object.id == task.as_str()));
+            assert!(returned.heads().any(|(_, c)| c.field == field
+                && c.value["acknowledged"] == true
+                && c.value["attempted"] == true));
+            assert_eq!(execution_rows(&target), execution);
+            assert!(target.task(&task).unwrap().is_none());
+        }
+    }
+
+    #[test]
+    fn associated_order_and_deletion_keep_origins_through_readback_and_return_import() {
+        use crate::engine::planning_exchange::{PlanningKind, PlanningObject};
+        use crate::store::sqlite::planning_order::OrderEffect;
+
+        for reverse in [false, true] {
+            let (_source_home, source) = store();
+            let (wave, mut row, _) = linear_seed(&source);
+            for index in 1..4 {
+                let mut item = row.snapshot.items[0].clone();
+                item.id = format!("issue-{index}");
+                item.identifier = format!("FIX-{}", index + 1);
+                item.rank = index;
+                row.snapshot.items.push(item);
+            }
+            source.put_pm_snapshot(&row).unwrap();
+            let (_target_home, target) = store();
+            target
+                .create_wave(&Wave::new(
+                    wave.clone(),
+                    "planning".into(),
+                    "/target".into(),
+                ))
+                .unwrap();
+            target.put_pm_snapshot(&row).unwrap();
+            target
+                .select_peer_waves("/target", &destination(), std::slice::from_ref(&wave))
+                .unwrap();
+            let task_ids = |store: &SqliteStore| {
+                row.snapshot
+                    .items
+                    .iter()
+                    .map(|item| store.task_by_issue(&item.id).unwrap().unwrap().id)
+                    .collect::<Vec<_>>()
+            };
+            let source_tasks = task_ids(&source);
+            let target_tasks = task_ids(&target);
+            let source_project = source.task(&source_tasks[0]).unwrap().unwrap().project_id;
+            let target_project = target.task(&target_tasks[0]).unwrap().unwrap().project_id;
+            let before = export(&source, "/source");
+            let reorder = |task: &TaskId| {
+                let current = source.task(task).unwrap().unwrap();
+                source
+                    .edit_task(
+                        task,
+                        current.plan.revision,
+                        &crate::pm::PmItemUpdate {
+                            rank: Some(0),
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap();
+            };
+            reorder(&source_tasks[3]);
+            reorder(&source_tasks[2]);
+            let attempted = source
+                .project_order_delivery(&source_project)
+                .unwrap()
+                .unwrap();
+            assert!(source
+                .put_pm_project_order("/source", "current", &row.snapshot.items)
+                .unwrap());
+            let strings = |ids: &[TaskId], indices: &[usize]| {
+                indices
+                    .iter()
+                    .map(|i| ids[*i].to_string())
+                    .collect::<Vec<_>>()
+            };
+            let effect = OrderEffect {
+                before: strings(&source_tasks, &[0, 1, 2, 3]),
+                after: strings(&source_tasks, &[3, 0, 1, 2]),
+                issue: row.snapshot.items[3].id.clone(),
+                input: json!({"prioritySortOrder":-1}),
+                settled: false,
+            };
+            assert!(source
+                .attempt_project_order(&source_project, &attempted.id, &effect)
+                .unwrap());
+            reorder(&source_tasks[1]);
+            let latest = source
+                .pending_project_changes(&source_project)
+                .unwrap()
+                .into_iter()
+                .find(|c| c.field == "task_order")
+                .unwrap();
+            let after = export(&source, "/source");
+            let snapshots = if reverse {
+                [&after, &before]
+            } else {
+                [&before, &after]
+            };
+            import(&target, "/target", "unassociated", snapshots[0]);
+            let associations = std::iter::once((
+                PlanningKind::Project,
+                source_project.as_str(),
+                target_project.as_str(),
+                "current",
+            ))
+            .chain(
+                source_tasks
+                    .iter()
+                    .zip(&target_tasks)
+                    .zip(&row.snapshot.items)
+                    .map(|((source, target), item)| {
+                        (
+                            PlanningKind::Task,
+                            source.as_str(),
+                            target.as_str(),
+                            item.id.as_str(),
+                        )
+                    }),
+            )
+            .collect::<Vec<_>>();
+            for (kind, origin, owner, provider) in &associations {
+                for _ in 0..2 {
+                    target
+                        .associate_peer_planning(
+                            "/target",
+                            &PlanningObject {
+                                kind: *kind,
+                                id: (*origin).into(),
+                            },
+                            owner,
+                            provider,
+                        )
+                        .unwrap();
+                }
+                if *kind == PlanningKind::Project {
+                    import(&target, "/target", "members-unassociated", &after);
+                    assert!(!target
+                        .put_pm_project_order("/target", "current", &row.snapshot.items)
+                        .unwrap());
+                    let waiting = target
+                        .project_order_delivery(&target_project)
+                        .unwrap()
+                        .unwrap();
+                    assert_eq!(waiting.effects, vec![effect.clone()]);
+                    assert_eq!(waiting.desired, strings(&source_tasks, &[2, 3, 0, 1]));
+                }
+            }
+            preserve_execution(&target, &wave, &target_tasks[0]);
+            let execution = execution_rows(&target);
+            for snapshot in [snapshots[1], &after, &before, &after] {
+                import(&target, "/target", "repeat", snapshot);
+            }
+            let delivery = target
+                .project_order_delivery(&target_project)
+                .unwrap()
+                .unwrap();
+            assert_eq!(delivery.id, attempted.id);
+            assert_eq!(delivery.effects, vec![effect.clone()]);
+            assert_eq!(delivery.desired, strings(&target_tasks, &[2, 3, 0, 1]));
+            let pending = target
+                .pending_project_changes(&target_project)
+                .unwrap()
+                .into_iter()
+                .find(|c| c.field == "task_order")
+                .unwrap();
+            assert_eq!(pending.id, latest.id);
+            assert_eq!(pending.value, latest.value);
+            assert_eq!(pending.base, latest.base);
+            // Cold/partial inventory cannot turn an alias into a missing member.
+            assert!(!target
+                .put_pm_project_order("/target", "current", &row.snapshot.items[..3])
+                .unwrap());
+            assert!(
+                !target
+                    .project_order_delivery(&target_project)
+                    .unwrap()
+                    .unwrap()
+                    .effects[0]
+                    .settled
+            );
+            let mut progress = row.clone();
+            for (rank, index) in [3, 0, 1, 2].into_iter().enumerate() {
+                progress.snapshot.items[index].rank = rank as u32;
+                progress.snapshot.items[index].revision = Some("2026-10-09T10:00:00Z".into());
+            }
+            progress.synced_at += 1;
+            // Detail acquisition alone cannot acknowledge an ordering effect.
+            for item in &progress.snapshot.items {
+                target
+                    .put_pm_task(
+                        "/target",
+                        "linear",
+                        &crate::store::PmTaskRecord {
+                            item: item.clone(),
+                            project: Some(progress.snapshot.projects[0].clone()),
+                            observed_at: progress.synced_at,
+                        },
+                        Some((&wave, "initiative")),
+                    )
+                    .unwrap();
+            }
+            assert!(
+                !target
+                    .project_order_delivery(&target_project)
+                    .unwrap()
+                    .unwrap()
+                    .effects[0]
+                    .settled
+            );
+            assert!(target
+                .put_pm_project_order("/target", "current", &progress.snapshot.items)
+                .unwrap());
+            let selected = target
+                .project_order_delivery(&target_project)
+                .unwrap()
+                .unwrap();
+            assert_eq!(selected.id, latest.id);
+            assert_eq!(selected.desired, strings(&target_tasks, &[1, 2, 3, 0]));
+            assert_eq!(
+                selected.baseline,
+                Some(strings(&target_tasks, &[3, 0, 1, 2]))
+            );
+            // Association still grants neither effects nor publication.
+            assert!(target
+                .attempt_project_order(&target_project, &selected.id, &effect)
+                .is_err());
+            assert!(!export(&target, "/target")
+                .objects()
+                .iter()
+                .any(|o| o.id == source_project.as_str() || o.id == target_project.as_str()));
+            let retained = |store: &SqliteStore, repo: &str| {
+                let snapshot =
+                    super::export_in(&store.conn.lock().unwrap(), repo, &destination()).unwrap();
+                PlanningSnapshot::from_bytes(&snapshot.to_bytes().unwrap()).unwrap()
+            };
+            let returned = retained(&target, "/target");
+            let field = format!("order:{}", attempted.id);
+            let history = returned
+                .changes
+                .values()
+                .filter(|c| c.field == field)
+                .collect::<Vec<_>>();
+            assert!(history
+                .iter()
+                .all(|c| c.object.id == source_project.as_str()));
+            let settled = returned.heads().find(|(_, c)| c.field == field).unwrap().1;
+            let mut expected = effect.clone();
+            expected.settled = true;
+            assert_eq!(settled.value["effects"], json!([expected]));
+            import(&source, "/source", "returned-unassociated", &returned);
+            for (kind, owner, origin, provider) in &associations {
+                source
+                    .associate_peer_planning(
+                        "/source",
+                        &PlanningObject {
+                            kind: *kind,
+                            id: (*origin).into(),
+                        },
+                        owner,
+                        provider,
+                    )
+                    .unwrap();
+            }
+            for snapshot in [&returned, &before, &returned] {
+                import(&source, "/source", "returned", snapshot);
+                let delivery = source
+                    .project_order_delivery(&source_project)
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(delivery.id, latest.id);
+                assert_eq!(delivery.desired, strings(&source_tasks, &[1, 2, 3, 0]));
+                assert_eq!(delivery.baseline, selected.baseline);
+            }
+            // Removal readback updates the incoming origin, not the local Task.
+            // Saves still succeed while effects and exchange remain held.
+            source.delete_task(&source_tasks[2]).unwrap();
+            let removed = deletion_change(&source, &source_tasks[2]);
+            let removal = retained(&source, "/source");
+            for snapshot in [&removal, &after, &removal] {
+                import(&target, "/target", "removal", snapshot);
+            }
+            assert!(
+                target
+                    .pending_task_changes(&target_tasks[2])
+                    .unwrap()
+                    .iter()
+                    .any(|c| c.id == removed.id),
+                "removal did not project: {:?}",
+                target.peer_projection_conflicts("/target").unwrap()
+            );
+            assert_eq!(
+                deletion_receipt(&target, &removed.id),
+                deletion_receipt(&source, &removed.id)
+            );
+            assert!(target
+                .acknowledge_task_deletion(&target_tasks[2], &removed, Some("2026-10-09T12:00:00Z"))
+                .unwrap());
+            assert_eq!(deletion_receipt(&target, &removed.id)["acknowledged"], 1);
+            let readback = retained(&target, "/target");
+            let field = format!("deletion:{}", removed.id);
+            assert!(readback
+                .changes
+                .values()
+                .filter(|c| c.field == field)
+                .all(|c| c.object.id == source_tasks[2].as_str()));
+            for snapshot in [&readback, &removal, &readback] {
+                import(&source, "/source", "removed-readback", snapshot);
+                assert_eq!(deletion_receipt(&source, &removed.id)["acknowledged"], 1);
+            }
+            assert_eq!(execution_rows(&target), execution);
+            for id in &source_tasks {
+                assert!(target.task(id).unwrap().is_none());
+            }
+        }
+    }
+
+    #[test]
     fn associated_membership_retains_captured_ids_through_projection_and_readback() {
         use crate::engine::planning_exchange::{PlanningKind, PlanningObject};
 
@@ -9372,6 +9794,39 @@ mod tests {
             .unwrap();
         drop(conn);
         let mut snapshot = export(&source, "/source");
+        let mut reused = snapshot.clone();
+        let mut claim = snapshot
+            .changes
+            .values()
+            .find(|c| c.order_receipt().is_some())
+            .unwrap()
+            .clone();
+        claim.object.id = ProjectId::new().to_string();
+        reused.changes.insert("reused-receipt".into(), claim);
+        assert!(target
+            .import_peer_planning("/target", &destination(), "reused", &reused)
+            .unwrap_err()
+            .to_string()
+            .contains("multiple origins"));
+        assert_eq!(import_revision(&target, "/target", &destination()), None);
+        import(&target, "/target", "initial", &snapshot);
+        let incoming = PlanningSnapshot {
+            changes: [(
+                "foreign-receipt".into(),
+                reused.changes["reused-receipt"].clone(),
+            )]
+            .into(),
+        };
+        incoming.validate().unwrap();
+        assert!(target
+            .import_peer_planning("/target", &destination(), "reused-union", &incoming)
+            .unwrap_err()
+            .to_string()
+            .contains("multiple origins"));
+        assert_eq!(
+            import_revision(&target, "/target", &destination()).as_deref(),
+            Some("initial")
+        );
         let mutation = snapshot
             .changes
             .values_mut()
@@ -9383,8 +9838,11 @@ mod tests {
         assert!(target
             .import_peer_planning("/target", &destination(), "bad", &snapshot)
             .is_err());
-        assert_eq!(import_revision(&target, "/target", &destination()), None);
-        assert!(target.task(&first).unwrap().is_none());
+        assert_eq!(
+            import_revision(&target, "/target", &destination()).as_deref(),
+            Some("initial")
+        );
+        assert!(target.task(&first).unwrap().is_some());
     }
     #[test]
     fn peer_ordering_retains_competing_attempts_without_authorizing_another() {

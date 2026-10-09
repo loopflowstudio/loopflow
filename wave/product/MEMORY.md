@@ -55,16 +55,15 @@ must not synchronize. Seeded IDs prove routing, not exchange/admission.
 
 LOO-427's local window, exact-pane arrangement, Machine-qualified terminal and
 bounded-read work retains partial proof in `scratch/findings.md`; native artifact,
-peer composition and packaged acceptance remain unfinished. No read grants input
-or lifecycle authority. Failed native builds and limited Linux proof remain evidence.
+peer composition and packaged acceptance remain unfinished. Read grants no input authority; proof remains partial.
 
-Jack's October 8 API review: `--context` previews agent input without launch;
+Jack queued the reviewed API for implementation (October 8): `--context` previews agent input without launch;
 `--explain` is broader. Remove `--max-turns` and probably `--no-loopflow`;
-`--chrome` is execution configuration. Group monitoring with ps/top; explore history.
+`--chrome`: execution. Monitoring: ps/top. Combine activity/history; `history usage`: aggregates.
 Favor Wave-owned planning over public Project/roadmap, remove duplicate `run NAME`,
-and explore `desktop open/list` with unique shorthand. These regroupings are draft.
+`desktop open/list` with unique shorthand.
 Repo lookup defaults to `~/src` with a user override; remembered names remain open.
-Discord is omitted pending Jack's return; implementation-removal scope is unanswered.
+Discord changes deferred. Keep `--steers-after`; repeated-node filtering is wired, not cross-restart deduplication.
 
 Jack selected local planning/Git sync: 406 owns writes/Linear, 412 exchange.
 Imported completion cannot move Workflow or clean execution. Preserve pending

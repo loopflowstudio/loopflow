@@ -249,10 +249,10 @@ competing plans remain unresolved. Preserve active Task identity, worktree, PR
 and execution. Preserve unreviewed backlog until explicit disposition; missing evidence is unknown.
 Current navigation stays Wave → Task and Linear retains past Projects.
 
-Process is one actual lf process, including direct and agent-issued nested commands.
+LfProcess is one actual lf process, including direct and agent-issued nested commands.
 Its `lfid` is durable Loopflow identity; `pid` is the optional Unix PID and may
 collide across history. References use `process_lfid` and `parent_process_lfid`.
-AgentSession is one durable agent conversation, interactive or headless; identity,
+LfSession is one Loopflow-owned durable conversation, interactive or headless; identity,
 name, feedback and native history survive driver replacement. Product text says
 Session for interactive and Run for headless work. Waiting is the one attention
 state, judged in Rust from owned provider streams and validated terminal reports. A step's result

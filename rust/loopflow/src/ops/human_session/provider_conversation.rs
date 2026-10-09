@@ -12,12 +12,12 @@ use anyhow::{anyhow, bail, Result};
 use super::{local_capture_dir, lock_session_process, publish_prepared_input};
 use crate::provider_account::activation::native_home;
 use crate::provider_auth::Provider;
-use crate::session::{AgentSession, TitleSource};
+use crate::session::{LfSession, TitleSource};
 use crate::store::{ProviderAccountId, SharedStore};
 
 pub(super) async fn human_input_times<'a>(
     store: &SharedStore,
-    sessions: impl IntoIterator<Item = &'a AgentSession>,
+    sessions: impl IntoIterator<Item = &'a LfSession>,
 ) -> Result<BTreeMap<String, i64>> {
     let mut codex = BTreeMap::<PathBuf, Vec<(String, String)>>::new();
     let mut claude = BTreeMap::new();
@@ -171,7 +171,7 @@ fn claude_input_time(path: &Path, id: &str) -> Option<i64> {
 }
 
 /// The Session that recorded `id` as its provider conversation.
-pub(crate) async fn recorded(store: &SharedStore, id: &str) -> Result<Option<AgentSession>> {
+pub(crate) async fn recorded(store: &SharedStore, id: &str) -> Result<Option<LfSession>> {
     let sessions = store.sqlite.sessions_for_provider_thread(id)?;
     match sessions.as_slice() {
         [] => Ok(None),
@@ -194,7 +194,7 @@ struct NativeConversation {
 
 /// Admit the conversation a provider started on its own, attributed to no
 /// Task. `None` when no provider home holds a conversation with this id.
-pub(crate) async fn admit(store: &SharedStore, id: &str) -> Result<Option<AgentSession>> {
+pub(crate) async fn admit(store: &SharedStore, id: &str) -> Result<Option<LfSession>> {
     // Provider conversation ids are UUIDs; nothing else names a transcript.
     if uuid::Uuid::parse_str(id).is_err() {
         return Ok(None);
@@ -222,7 +222,7 @@ pub(crate) async fn admit(store: &SharedStore, id: &str) -> Result<Option<AgentS
         None => crate::repo::working_directory()?,
     };
     let session = store
-        .create_session(AgentSession {
+        .create_session(LfSession {
             captured: None,
             id: format!("session_{}", uuid::Uuid::new_v4().simple()),
             artifact_key: crate::session_record::new_artifact_key(),
@@ -343,7 +343,7 @@ fn recorded_cwd(transcript: &Path) -> Option<PathBuf> {
 mod tests {
     use super::{recorded, recorded_cwd, transcript};
     use crate::provider_auth::Provider;
-    use crate::session::AgentSession;
+    use crate::session::LfSession;
     use crate::store::SharedStore;
     use std::fs;
     use std::path::PathBuf;
@@ -529,7 +529,7 @@ mod tests {
         );
         let input = crate::session_record::new_artifact_key();
         let session = store.sqlite.test_session("conversation", &input);
-        let observe = |session: &AgentSession, source: &str| {
+        let observe = |session: &LfSession, source: &str| {
             store
                 .sqlite
                 .retain_session_observation(

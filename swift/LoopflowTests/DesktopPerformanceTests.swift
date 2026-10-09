@@ -84,7 +84,7 @@ struct DesktopPerformanceTests {
         child["LF_HOME"] = home
         let reader = child
         let query = RegistryQuery(watchWork: {
-            let process = Foundation.Process()
+            let process = Process()
             process.executableURL = URL(fileURLWithPath: lf)
             process.arguments = ["monitor", "work", "--watch", "--json"]
             process.environment = reader
@@ -1319,7 +1319,7 @@ private struct PerformanceStore {
     let database: String
 
     func write(_ sql: String) throws {
-        let process = Foundation.Process()
+        let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
         process.arguments = ["-bail", "-cmd", ".timeout 5000", database, sql]
         let errors = Pipe()
@@ -1579,7 +1579,7 @@ private func snapshotRead(binary: String, home: String, args: [String], cwd: Str
     guard ["roadmap", "activity"].contains(args.first ?? "") || ["wave list", "wave status", "session list", "session history", "machine id", "task status", "task files", "task diff", "flow list"].contains(verb) else {
         throw RegistryQueryError("Snapshot does not execute \(verb)")
     }
-    let process = Foundation.Process()
+    let process = Process()
     process.executableURL = URL(fileURLWithPath: binary)
     process.arguments = args
     process.currentDirectoryURL = URL(fileURLWithPath: cwd)

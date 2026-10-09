@@ -748,8 +748,8 @@ captures and manually transferred Tasks; import neither old turns nor driver aut
 
 September 29–30's detailed owner/compilation decisions and superseded schema
 proofs remain at `fe07245a3614334aea71dc40e802b54b47ccaf17:wave/infrastructure/MEMORY.md`
-under this heading. Current Process vocabulary supersedes Exec/FlowSession names:
-one actual lf Process, one durable AgentSession conversation and one compiled
+under this heading. Current vocabulary supersedes Exec/FlowSession names:
+one LfProcess, one durable LfSession conversation and one compiled
 Flow graph with step Processes. History has no independent lifecycle. Skill steps
 use ordinary `lf skill`; operations use their own commands. Parent means Process
 ancestry, matched to Session/provider generation and origin, never Task or Flow

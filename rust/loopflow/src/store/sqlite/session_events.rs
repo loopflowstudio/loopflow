@@ -84,7 +84,7 @@ impl SqliteStore {
 
     pub(crate) fn retain_session_observation(
         &self,
-        session: &crate::session::AgentSession,
+        session: &crate::session::LfSession,
         observation: &crate::session::SessionObservation,
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");

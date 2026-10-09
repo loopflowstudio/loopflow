@@ -852,7 +852,7 @@ responses, absence, and provider failure. Neither is configured live-provider pr
 The mechanical Flow proof uses that disposable account without an installation
 selection. A claim followed by admission failure/release leaves Started absent;
 the real worker records operation history and Started together. It retains the
-captured Flow after the template disappears and records an ordinary child Process without creating an AgentSession.
+captured Flow after the template disappears and records an ordinary child Process without creating an LfSession.
 The default-Machine proof sends two nested source CLI processes through a simulated
 installed executable and checks that both select the main Machine despite stale
 control pins. The explicit-Machine Flow proof runs locally in `one_machine_tests`. The declaration proof starts Task Y

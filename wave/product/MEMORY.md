@@ -146,15 +146,19 @@ selectors, which can resolve only later through retained placement.
 No preview endpoint probes, takeover or end-intent completion/cleanup; native proof remains.
 
 October 9 integration lesson: unchanged execution rows did not prove completion-intent
-supersession (`37cd026a7`). Public complete/reopen exchange reproduced a retained
-failed request. Git projection now supersedes it using the newly accepted winning
+supersession (`37cd026a7`). `e79451d05`/`2a2379913` add public complete/reopen
+exchange and end retry. Git projection supersedes intent by newly accepted winning
 mutation, not changed bytes: offline complete/reopen can return to the same open
-value. Stale/replayed facts preserve newer requests. Linear keeps its status-change
-owner; the first repair wrongly treated a title-only revision as new status.
-The two-Home fixture retains Workflow/PR/placement, draft bytes and an owned fake
-provider through exchange and end retry. Explicit complete authors new intent;
-retrying retained end cannot revive superseded intent. Requests never synchronize.
-Mixed-provider and native acceptance remain unproved.
+value. Replay preserves newer requests. Supersession and state-delivery receipts
+share a savepoint; receipt failure preserves both planning and intent. Linear
+retains its status-change owner: the first repair wrongly let a title-only revision
+cancel intent.
+The file-Git fixture retains seeded Workflow/PR/placement, disk drafts
+and one owned fake provider. It does not run a Task Flow or prove native input or
+configured providers. Explicit complete authors new intent; end retry cannot revive
+superseded intent. Requests never synchronize. Delegation exchange and exclusive
+admission remain unfinished; neither this proof nor assignment
+authorizes first start. Mixed-provider and native acceptance remain unproved.
 
 ## Task delivery boundary (LOO-418, reconciled 2026-10-09)
 

@@ -10,8 +10,8 @@ Focused local Rust and model evidence establish neither native acceptance nor de
 LOO-418/#1499 is integrated; completion/checkout previews and creation receipts are reconciled.
 LOO-406/#1503 and LOO-412 through `96f714bd6` are composed locally;
 `1ece5cc52` reconciles transitive ancestry. Section 2 retains remaining composition.
-Public completion/reopening exchange now supersedes old intent. Mixed-provider
-composition, delegation exchange, first-start admission, remote opening and broader
+Public completion/reopening exchange supersedes old intent. Delegation exchange,
+first-start admission, mixed-provider composition, remote opening and broader
 explanation remain. Mixed Linear/Git
 stays disabled; native proof remains, including request-scoped Task/Session-plus-Changes opening.
 [Findings](findings.md), [questions](questions.md) and the
@@ -260,7 +260,7 @@ Peers use Machine/repository keys. `repo identity --bind ID` associates establis
 roots, preserving prior local locators, Work, mappings, effects and execution;
 it selects/publishes nothing. Imported Waves remain unplaced. Independent-root
 and provider fixtures prove retained identity/lookup, not running controls or
-exclusive start. Earlier details: `28fc5274a`, this section.
+exclusive start. History: `28fc5274a`, this section.
 
 Known started Tasks route by recorded checkout Machine; locally unstarted Tasks
 use effective delegation. Neither changes Machine defaults. LOO-412's TaskSource
@@ -355,23 +355,24 @@ input and seeded execution. Git confirmation never acknowledges Linear delivery.
 [Findings](findings.md#shared-planning-composition) retain failed attempts and exact
 limits; no live Linear, running provider or mounted Desktop proof follows.
 
-Remaining: foreground Git/Linear/Desktop composition, delegation exchange,
-exclusive admission, remote opening and broader explanation. Mixed-provider and
-shared first-start refusals remain.
+**Post-LOO-418 completion boundary (reconciled October 9):** `e79451d05`/`2a2379913`
+complete `public_completion_exchange_supersedes_only_old_completion_requests`,
+the requested public-command fixture. It uses two isolated Homes, file-only Git and repository work-watch. Public complete,
+reopen and end retry cover retained failed requests, same-value offline reopening,
+stale completion and replay. Seeded Workflow/PR/placement, a disk draft and one owned
+fake provider survive. This does not exercise a running `task run` Flow, configured
+providers, native drafts or remote routing.
 
-**Post-LOO-418 completion boundary (October 9):** the public two-Home fixture
-reproduced retained failed end intent after imported completion. Accepted Git
-disposition now clears old requests in the projection transaction, using the winning
-mutation and existing accepted frontier. Value comparison alone misses offline
-complete/reopen returning to the same open value; replay must preserve a newer
-request. Linear's existing status-change owner stays authoritative: review reproduced
-a title-only provider refresh wrongly clearing intent in the first repair.
+Accepted Git mutation identity supersedes requests; changed values alone trigger
+state delivery. Both consequences share the projection savepoint, and the rollback
+fixture preserves intent on receipt failure. Linear retains its status-change owner:
+a title-only revision must not cancel intent. Explicit complete authors new intent;
+retrying retained end cannot revive superseded intent. [Findings](findings.md#task-completion-integration--october-9)
+retain the failed counterexamples and focused checks.
 
-Explicit `task complete` authors new intent after reopening; an end retry does not.
-[Findings](findings.md#task-completion-integration--october-9) retain public-command,
-provider-status and rollback coverage, including unchanged execution/draft/provider
-lifetime and failed attempts. Mixed Linear/Git remains disabled; native and
-configured-provider proof remain.
+Next is authored delegation, still absent from the portable schema. Assignment,
+execution-location observation and exclusive admission remain separate. Mixed-provider
+exchange and shared first start remain refused.
 
 **Required mixed-operation proofs:** local `task run` writes its own Workflow and
 runs locally while Task comments/follow-ups/completion synchronize to a second
@@ -528,4 +529,4 @@ identity/delegation, open them, add shell/Files panes, retain an unfinished draf
 change focus, target a harmless command, read output, hide/restore, and verify the
 original input target and draft survive. Demo owns native usability; preserve comparison evidence and use no real accounts or live user terminals.
 
-Check: `cargo test -p loopflow --lib --test planning_foreground_tests --no-run` + `scripts/test_network.py` focused completion/exchange, provider-status, rollback and non-lifecycle tests PASS (5); `cargo fmt`, Clippy all-targets and diff PASS; broader suites/migrations gate/CI, native demo.
+Check: `git diff --check` PASS; reuse `2a2379913` build, five focused isolated tests, fmt/Clippy (no code changes); broader suites/migrations gate/CI, native demo.

@@ -215,6 +215,7 @@ Disposition projection now keeps request supersession beside its delivery receip
 separate from generic scalar delivery. Mutation observation governs request
 supersession; changed values govern delivery. Both roll back together on receipt
 failure. Linear still uses its status-change owner, not entity revisions.
-Foreground comment checks use the common typed thread reader instead of a second
-SQL/JSON decoder, retaining exact IDs, bodies, dates, named authors and deduplication.
-Mixed-provider, delegation, admission, remote and native limits remain in the plan.
+`2a2379913` uses the common typed comment reader instead of a second SQL/JSON
+decoder, retaining IDs, bodies, dates, authors and deduplication. The completion
+fixture seeds Workflow; its disk draft is not native input. Provider survival and one launch do not prove every signal/control
+path. Remaining proof stays in the plan.

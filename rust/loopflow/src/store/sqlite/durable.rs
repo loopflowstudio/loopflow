@@ -792,7 +792,7 @@ mod durable_store_tests {
 
     use crate::id::WaveId;
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
-    use crate::session::{AgentSession, TitleSource, WorkSource};
+    use crate::session::{LfSession, TitleSource, WorkSource};
     use crate::store::sqlite::SqliteStore;
 
     use crate::work::project::Project;
@@ -802,8 +802,8 @@ mod durable_store_tests {
         task_id: Option<TaskId>,
         wave_id: Option<WaveId>,
         created_at: i64,
-    ) -> AgentSession {
-        AgentSession {
+    ) -> LfSession {
+        LfSession {
             captured: None,
             id: uuid::Uuid::new_v4().to_string(),
             artifact_key: crate::session_record::new_artifact_key(),
@@ -1064,8 +1064,8 @@ mod durable_store_tests {
         flow_process_lfid: Option<String>,
         task_id: Option<TaskId>,
         wave_id: Option<WaveId>,
-    ) -> crate::session::AgentSession {
-        crate::session::AgentSession {
+    ) -> crate::session::LfSession {
+        crate::session::LfSession {
             captured: None,
             id: uuid::Uuid::new_v4().to_string(),
             artifact_key: crate::session_record::new_artifact_key(),
@@ -1734,7 +1734,7 @@ mod durable_store_tests {
             )
             .unwrap();
         let open = |id: &str, wave: Option<WaveId>| {
-            let session = crate::session::AgentSession {
+            let session = crate::session::LfSession {
                 captured: None,
                 caller_artifact_key: None,
                 task_id: None,
@@ -1766,7 +1766,7 @@ mod durable_store_tests {
         let replacement = store
             .replace_session_input(
                 first.captured,
-                crate::session::AgentSession {
+                crate::session::LfSession {
                     caller_artifact_key: None,
                     artifact_key: crate::session_record::new_artifact_key(),
                     ..first.clone()
@@ -1777,7 +1777,7 @@ mod durable_store_tests {
             store
                 .replace_session_input(
                     replacement.captured,
-                    crate::session::AgentSession {
+                    crate::session::LfSession {
                         cwd: "/changed".into(),
                         provider: Some("changed".into()),
                         model: Some("changed".into()),
@@ -1862,7 +1862,7 @@ mod durable_store_tests {
         let future = store
             .replace_session_input(
                 replacement.captured,
-                crate::session::AgentSession {
+                crate::session::LfSession {
                     caller_artifact_key: None,
                     artifact_key: crate::session_record::new_artifact_key(),
                     ..bound.clone()

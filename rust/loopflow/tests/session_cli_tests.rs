@@ -490,7 +490,7 @@ fn prepare_conversation(
     let input = format!("run_{}", uuid::Uuid::new_v4().simple());
     let session = store
         .create_session(
-            loopflow::session::AgentSession {
+            loopflow::session::LfSession {
                 captured: None,
                 id: format!("session_{input}"),
                 artifact_key: input.clone(),

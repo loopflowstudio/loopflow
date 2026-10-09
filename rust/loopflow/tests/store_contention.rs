@@ -8,7 +8,7 @@
 //! file locks and the WAL's shared memory, not per process, so threads here
 //! contend exactly as separate processes do.
 
-use loopflow::process::Process;
+use loopflow::process::LfProcess;
 use loopflow::store::sqlite::SqliteStore;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -18,9 +18,9 @@ use std::sync::{Arc, Barrier};
 const FLEET: usize = 51;
 const EVENTS_PER_WRITER: usize = 20;
 
-fn process() -> Process {
+fn process() -> LfProcess {
     let ts = 1_700_000_000;
-    Process {
+    LfProcess {
         lfid: loopflow::id::ProcessLfid::new(),
         pid: None,
         trace_id: loopflow::id::TraceId::new(),

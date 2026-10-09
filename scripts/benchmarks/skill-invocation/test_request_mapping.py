@@ -1,7 +1,24 @@
 from pathlib import Path
 
 import pytest
-from request_mapping import _assess
+from request_mapping import _assess, _marker_locations
+
+
+@pytest.mark.parametrize("field", ["messages", "input"])
+@pytest.mark.parametrize("role", ["user", "developer", "assistant"])
+def test_marker_locations_report_message_content_not_metadata(field, role):
+    request = {field: [{"role": role, "content": "context", "id": "metadata"}]}
+    assert _marker_locations(request, "context") == [role]
+    assert _marker_locations(request, "metadata") == []
+
+
+@pytest.mark.parametrize("field", ["system", "instructions"])
+def test_marker_locations_retain_duplicate_instruction_channel(field):
+    request = {
+        field: "context",
+        "input": [{"role": "developer", "content": [{"type": "text", "text": "context"}]}],
+    }
+    assert _marker_locations(request, "context") == [field, "developer"]
 
 
 @pytest.mark.parametrize("role", ["system", "assistant", "user", None])

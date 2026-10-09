@@ -66,7 +66,7 @@ def _hook(root: Path) -> str:
     return shlex.join([sys.executable, str(script)])
 
 
-def _claude(root: Path, env: dict[str, str], server: Requests) -> dict:
+def _claude(root: Path, env: dict[str, str], port: int) -> None:
     settings = root / "settings.json"
     settings.write_text(
         json.dumps(
@@ -86,7 +86,7 @@ def _claude(root: Path, env: dict[str, str], server: Requests) -> dict:
     env.update(
         CLAUDE_CONFIG_DIR=str(root / "home/.claude"),
         ANTHROPIC_API_KEY="local-fixture-not-a-credential",
-        ANTHROPIC_BASE_URL=f"http://127.0.0.1:{server.server_port}",
+        ANTHROPIC_BASE_URL=f"http://127.0.0.1:{port}",
         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1",
         DISABLE_AUTOUPDATER="1",
     )
@@ -116,15 +116,9 @@ def _claude(root: Path, env: dict[str, str], server: Requests) -> dict:
         (root / f"{phase}.stdout").write_text(result.stdout)
         (root / f"{phase}.stderr").write_text(result.stderr)
         assert result.returncode == 0, f"Claude {phase} failed: see {root}"
-    first, last = server.bodies[0], server.bodies[-1]
-    return {
-        "startup_context_user_only": _marker_locations(first, "LOO444_START_CONTEXT") == ["user"],
-        "fresh_context_user_only": _marker_locations(last, "LOO444_FRESH_CONTEXT") == ["user"],
-        "old_context_compacted": not _marker_locations(last, "LOO444_START_CONTEXT"),
-    }
 
 
-def _codex(root: Path, env: dict[str, str], server: Requests) -> dict:
+def _codex(root: Path, env: dict[str, str], port: int) -> None:
     native = root / "home/.codex"
     native.mkdir()
     env["CODEX_HOME"] = str(native)
@@ -147,7 +141,7 @@ command = {command}
 shell_snapshot = false
 [model_providers.fixture]
 name = "Local fixture"
-base_url = "http://127.0.0.1:{server.server_port}/v1"
+base_url = "http://127.0.0.1:{port}/v1"
 wire_api = "responses"
 requires_openai_auth = false
 [analytics]
@@ -181,32 +175,29 @@ enabled = false
         reader.start()
         sequence = 0
 
-        def send(method: str, params: dict, notify: bool = False) -> int:
-            nonlocal sequence
-            sequence += 1
-            message = {"method": method, "params": params}
-            if not notify:
-                message["id"] = sequence
-            process.stdin.write(json.dumps(message) + "\n")
-            process.stdin.flush()
-            return sequence
-
         def wait(predicate) -> dict:
             deadline = time.monotonic() + 30
-            while True:
-                message = messages.get(timeout=max(0.001, deadline - time.monotonic()))
+            while (remaining := deadline - time.monotonic()) > 0:
+                message = messages.get(timeout=remaining)
                 if predicate(message):
                     return message
+            raise TimeoutError(f"Codex response deadline exceeded: see {root}")
 
         def call(method: str, params: dict) -> dict:
-            request_id = send(method, params)
-            message = wait(lambda item: item.get("id") == request_id)
+            nonlocal sequence
+            sequence += 1
+            process.stdin.write(
+                json.dumps({"id": sequence, "method": method, "params": params}) + "\n"
+            )
+            process.stdin.flush()
+            message = wait(lambda item: item.get("id") == sequence)
             assert "error" not in message, message
             return message["result"]
 
         try:
             call("initialize", {"clientInfo": {"name": "context-probe", "version": "1"}})
-            send("initialized", {}, True)
+            process.stdin.write('{"method":"initialized"}\n')
+            process.stdin.flush()
             listed = call("hooks/list", {"cwds": [str(root / "work")]})
             hooks = listed["data"][0]["hooks"]
             assert len(hooks) == 2
@@ -241,28 +232,43 @@ enabled = false
                 process.wait(timeout=5)
             reader.join(timeout=5)
             (root / "messages.json").write_text(json.dumps(transcript, indent=2))
-    first, last = server.bodies[0], server.bodies[-1]
 
-    def roles(body: dict, marker: str) -> list[str]:
-        return [item.get("role") for item in body["input"] if marker in json.dumps(item)]
 
-    return {
-        "startup_context_developer_only": roles(first, "LOO444_START_CONTEXT") == ["developer"],
-        "fresh_context_developer_only": roles(last, "LOO444_FRESH_CONTEXT_SessionStart")
-        == ["developer"],
-        "post_compact_does_not_inject": not roles(last, "LOO444_FRESH_CONTEXT_PostCompact"),
-        "old_context_compacted": not roles(last, "LOO444_START_CONTEXT"),
-        "additive_instructions_survive": all(
-            roles(body, "LOO444_FIXED_ADDITION") == ["developer"] for body in [first, last]
-        ),
-        "native_base_preserved": all(
-            bool(body["instructions"]) and "LOO444" not in body["instructions"]
-            for body in [first, last]
-        ),
-        "repo_guide_user_only": all(
-            roles(body, "LOO444_REPO_GUIDE") == ["user"] for body in [first, last]
-        ),
+def _assess(provider: str, requests: list[dict], events: list[dict]) -> dict[str, bool]:
+    first, last = requests[0], requests[-1]
+    role = "user" if provider == "claude" else "developer"
+    checks = {
+        "startup_context_conversation_only": _marker_locations(first, "LOO444_START_CONTEXT")
+        == [role],
+        "fresh_context_conversation_only": _marker_locations(
+            last, "LOO444_FRESH_CONTEXT_SessionStart"
+        )
+        == [role],
+        "old_context_compacted": not _marker_locations(last, "LOO444_START_CONTEXT"),
+        "startup_hook_ran": any(event.get("source") == "startup" for event in events),
+        "compact_hook_ran": any(event.get("source") == "compact" for event in events),
     }
+    if provider == "codex":
+        checks.update(
+            post_compact_hook_ran=any(
+                event["hook_event_name"] == "PostCompact" for event in events
+            ),
+            post_compact_does_not_inject=not _marker_locations(
+                last, "LOO444_FRESH_CONTEXT_PostCompact"
+            ),
+            additive_instructions_survive=all(
+                _marker_locations(body, "LOO444_FIXED_ADDITION") == ["developer"]
+                for body in [first, last]
+            ),
+            native_base_preserved=all(
+                bool(body["instructions"]) and "LOO444" not in body["instructions"]
+                for body in [first, last]
+            ),
+            repo_guide_user_only=all(
+                _marker_locations(body, "LOO444_REPO_GUIDE") == ["user"] for body in [first, last]
+            ),
+        )
+    return checks
 
 
 def main() -> int:
@@ -280,14 +286,9 @@ def main() -> int:
     serving = threading.Thread(target=server.serve_forever, daemon=True)
     serving.start()
     try:
-        checks = (_claude if args.provider == "claude" else _codex)(root, env, server)
+        (_claude if args.provider == "claude" else _codex)(root, env, server.server_port)
         events = [json.loads(line) for line in (root / "hooks.jsonl").read_text().splitlines()]
-        checks["startup_hook_ran"] = any(event.get("source") == "startup" for event in events)
-        checks["compact_hook_ran"] = any(event.get("source") == "compact" for event in events)
-        if args.provider == "codex":
-            checks["post_compact_hook_ran"] = any(
-                event["hook_event_name"] == "PostCompact" for event in events
-            )
+        checks = _assess(args.provider, server.bodies, events)
         result = {"provider": args.provider, "checks": checks, "evidence": str(root)}
         (root / "result.json").write_text(json.dumps(result, indent=2))
         print(json.dumps(result, indent=2))

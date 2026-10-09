@@ -28,11 +28,13 @@ def _output_events(output: str) -> list[dict]:
 
 def _marker_locations(request: dict, marker: str) -> list[str]:
     locations = []
-    if marker in json.dumps(request.get("system", [])):
-        locations.append("system")
-    for message in request.get("messages", []):
-        if marker in json.dumps(message.get("content", [])):
-            locations.append(message["role"])
+    for field in ("system", "instructions"):
+        if marker in json.dumps(request.get(field, [])):
+            locations.append(field)
+    for field in ("messages", "input"):
+        for message in request.get(field, []):
+            if marker in json.dumps(message.get("content", [])):
+                locations.append(message["role"])
     return locations
 
 

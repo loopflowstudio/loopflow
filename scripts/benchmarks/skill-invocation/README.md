@@ -120,6 +120,7 @@ uv run python scripts/test_network.py uv run --no-sync python \
   scripts/benchmarks/skill-invocation/context_delivery.py \
   --provider claude --output /tmp/lf-context-proof
 # Repeat with --provider codex.
+uv run pytest scripts/benchmarks/skill-invocation/test_context_delivery.py -q
 ```
 
 Checks native model-request channels across manual compaction. Disposable Homes,

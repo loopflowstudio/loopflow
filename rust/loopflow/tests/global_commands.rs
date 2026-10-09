@@ -457,11 +457,11 @@ fn context_explanation_works_outside_git_and_preserves_unavailable_registry() {
 
 #[cfg(not(target_os = "macos"))]
 #[test]
-fn desktop_inspection_rejects_linux_before_machine_routing_or_work_preparation() {
+fn desktop_rejects_linux_before_machine_routing_or_work_preparation() {
     let home = tempfile::tempdir().unwrap();
     for operation in [
-        "list", "hide", "restore", "focus", "split", "move", "resize", "zoom", "shell", "files",
-        "flow-log", "read", "text", "key",
+        "open", "list", "hide", "restore", "focus", "split", "move", "resize", "zoom", "shell",
+        "files", "flow-log", "read", "text", "key",
     ] {
         let output = command(
             home.path(),
@@ -473,11 +473,11 @@ fn desktop_inspection_rejects_linux_before_machine_routing_or_work_preparation()
                 "absent",
                 "desktop",
                 operation,
-                "--json",
             ],
         )
         .args(match operation {
-            "list" => vec![],
+            "open" => vec![],
+            "list" => vec!["--json"],
             "text" => vec!["--target", "invalid-json", "--surface", "stale", "literal"],
             "key" => vec!["--target", "invalid-json", "--surface", "stale", "enter"],
             "read" => vec![

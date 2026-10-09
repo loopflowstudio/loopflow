@@ -419,6 +419,8 @@ struct WorkDestinationTests {
         let workspaces = SessionsWorkspaceRegistry()
         let report = model.inspectDesktop(repository: "plan", window: UUID(), workspaces: workspaces)
         #expect(report.reading == "loading")
+        #expect(report.supportedOperations.contains("list"))
+        #expect(!report.supportedOperations.contains("inspect"))
         #expect(report.task?.reading == "current")
         #expect(report.task?.actions == task.actions)
         #expect(report.task?.runControl == task.runControl)
@@ -544,7 +546,7 @@ struct WorkDestinationTests {
     private func windowInspection(_ id: UUID) -> DesktopWindowInspection {
         DesktopWindowInspection(repository: "fixture", window: id.uuidString, path: nil,
             selectionKind: nil, selectionId: nil, reading: "loading", reason: nil,
-            task: nil, session: nil, supportedOperations: ["inspect"], workspaces: [], layouts: [])
+            task: nil, session: nil, supportedOperations: ["list"], workspaces: [], layouts: [])
     }
 
     @Test func inspectionIncludesOnlyRegisteredWindowIncarnationsWithoutFocusing() {

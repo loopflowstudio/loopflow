@@ -10,7 +10,7 @@
       "reading": "unavailable",
       "reason": "Registry read failed; retained views remain available",
       "supported_operations": [
-        "inspect",
+        "list",
         "hide",
         "restore",
         "focus",
@@ -115,7 +115,7 @@
       "reading": "current",
       "reason": null,
       "supported_operations": [
-        "inspect",
+        "list",
         "hide",
         "restore",
         "focus",

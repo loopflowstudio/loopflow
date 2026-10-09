@@ -1413,8 +1413,8 @@ fn run() -> anyhow::Result<()> {
         }
     };
     init_tracing(cli.verbose);
-    if matches!(cli.command, Some(Commands::Open | Commands::Desktop { .. })) {
-        loopflow::lf::commands::open::require_supported()?;
+    if matches!(cli.command, Some(Commands::Desktop { .. })) {
+        loopflow::lf::commands::desktop::require_supported()?;
     }
     if cli.task.is_none() && cli.wt.is_none() {
         if let Some(result) = loopflow::lf::navigation::inspect(&cli) {
@@ -1545,8 +1545,11 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
     // Remote commands prove they reached the saved machine before dispatch.
     loopflow::lf::commands::machine::validate_expected_machine_process()?;
 
+    // Opening retains ordinary Work selection; exact pane controls do not prepare Work.
     if let Some(Commands::Desktop { cmd }) = &cli.command {
-        return loopflow::lf::commands::desktop::run(cmd);
+        if !matches!(cmd, loopflow::lf::DesktopCommand::Open) {
+            return loopflow::lf::commands::desktop::run(cmd);
+        }
     }
     // Explanation reads the selected local records, including remote checkout
     // evidence. It must not route, bind a launch, or require a PR/checkout.
@@ -1725,7 +1728,7 @@ fn execute_command(
                 None => loopflow::lf::commands::run::run(repo, None, Some(&text), cli),
             })
         }
-        Some(Commands::Open) => loopflow::lf::commands::open::run(),
+        Some(Commands::Desktop { cmd }) => loopflow::lf::commands::desktop::run(cmd),
         Some(Commands::Config {
             cmd: loopflow::lf::ConfigCommand::User { json },
         }) => loopflow::lf::commands::config::print_user(*json),
@@ -1977,7 +1980,7 @@ fn execute_command(
                 loopflow::lf::commands::doctor::run(*json)
             }
         }
-        Some(Commands::List { .. } | Commands::Help { .. } | Commands::Desktop { .. }) => {
+        Some(Commands::List { .. } | Commands::Help { .. }) => {
             unreachable!("inspection returned before execution")
         }
         Some(Commands::Roadmap {

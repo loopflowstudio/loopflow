@@ -16,7 +16,6 @@ pub mod list;
 pub mod machine;
 mod machine_credentials;
 pub mod monitor;
-pub mod open;
 pub mod ops;
 pub mod placement;
 pub mod profile;

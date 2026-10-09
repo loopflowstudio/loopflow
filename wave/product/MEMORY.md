@@ -62,13 +62,14 @@ control text and requires finishing active IME composition;
 these are reversible restrictions, not new product decisions. Native draft/cursor
 and replacement fixtures remain unexecuted. Read grants no input authority.
 
-Jack queued the API (October 8): `--context` previews input without launch;
+Jack's October 8 API: `--context` previews input without launch;
 `--explain` is broader; `--chrome` controls execution. Source removes root `run`,
-`--max-turns` and `--no-loopflow`, preserving Task skill/Flow selection and steer
-filtering; Rust execution remains unverified. History now owns the activity feed, Process pages, show/replay and usage;
-Desktop uses it. Rust execution remains unverified. Pending: Wave planning and Desktop open/list.
-Repository lookup defaults to configurable `~/src`; remembered names remain open.
-Discord stays unchanged. `--steers-after` filters repeated nodes, not across restarts.
+`--max-turns` and `--no-loopflow`, retaining Task skill/Flow selection. History owns
+activity, Process pages, show/replay and usage for Desktop. `desktop open/list` own app launch and inspection; root `open` is ambiguous
+with PR/Session opening. Composed Work opening, Wave planning and previews remain.
+Rust unverified. Lookup: configurable `~/src`; remembered names undecided.
+Discord unchanged.
+`--steers-after` filters repeated nodes, not across restarts.
 
 Jack selected local planning/Git sync: 406 owns writes/Linear, 412 exchange.
 Imported completion cannot move Workflow or clean execution. Preserve pending

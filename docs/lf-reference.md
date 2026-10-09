@@ -1033,7 +1033,7 @@ Print the configured participant display name
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
-## lf open
+## lf desktop open
 
 Open or focus Loopflow.app
 

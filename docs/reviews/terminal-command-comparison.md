@@ -68,6 +68,9 @@ installed help or reviewed Desktop code, not proof that no external tool exists.
   fixture is unexecuted. Native extraction, peer composition, complete opening and
   native acceptance remain unfinished. Detailed implementation and contrary check evidence:
   `a342d6870:docs/reviews/terminal-command-comparison.md`, this section.
+  The later CLI cut moves the app launcher to `desktop open` and inspection to
+  `desktop list`; bare `open` is ambiguous with PR/Session opening. This does not
+  establish composed Work opening or native readiness.
   The tables retain October 7's baseline judgments; no cmux/herdr behavior was
   re-exercised for these deltas.
 - Public [cmux API](https://cmux.com/docs/api) and

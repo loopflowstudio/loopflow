@@ -537,6 +537,35 @@ fn help_preserves_location_without_promoting_query_filters() {
 }
 
 #[test]
+fn desktop_open_has_one_owner_and_ambiguous_shorthand_has_no_effects() {
+    use loopflow::lf::DesktopCommand;
+
+    let cli = Cli::try_parse_from(normalized(&["lf", "desktop", "open"])).unwrap();
+    assert!(matches!(
+        cli.command,
+        Some(Commands::Desktop {
+            cmd: DesktopCommand::Open
+        })
+    ));
+    assert!(Cli::command().find_subcommand("open").is_none());
+    let saved: loopflow::engine::flow::Command =
+        serde_json::from_value(serde_json::json!({"command": "open", "args": []})).unwrap();
+    assert_eq!(saved.argv(), ["lf", "desktop", "open"]);
+    assert_eq!(saved.clone().current(), saved);
+
+    let repo = fixture();
+    let home = tempfile::tempdir().unwrap();
+    let output = run(repo.path(), home.path(), &["open"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    let error = String::from_utf8(output.stderr).unwrap();
+    for owner in ["desktop", "pr", "session"] {
+        assert!(error.contains(&format!("lf {owner} open")), "{error}");
+    }
+    assert!(!home.path().join(".lf").exists());
+}
+
+#[test]
 fn desktop_list_uses_the_retained_reader_without_an_inspect_alias() {
     use loopflow::lf::DesktopCommand;
 
@@ -783,13 +812,17 @@ fn installation_configuration_and_app_commands_have_distinct_owners() {
     );
     let help =
         String::from_utf8(success(run(repo.path(), home.path(), &["help", "--all"]))).unwrap();
-    for path in ["self install", "self doctor", "config user", "open"] {
+    for path in ["self install", "self doctor", "config user", "desktop open"] {
         assert!(help.contains(path), "{help}");
     }
     assert!(!help.contains("screenshot"));
     assert!(!help.contains("machine desktop"));
-    success(run(repo.path(), home.path(), &["open", "--help"]));
-    // Root open must not change the explicit PR operation.
+    success(run(
+        repo.path(),
+        home.path(),
+        &["desktop", "open", "--help"],
+    ));
+    // Desktop opening must not change the explicit PR operation.
     success(run(repo.path(), home.path(), &["pr", "open", "--help"]));
     assert!(!home.path().join(".lf").exists());
 }

@@ -375,13 +375,11 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: ConfigCommand,
     },
-    /// Inspect Loopflow Desktop's retained repository windows (macOS only)
+    /// Open, inspect and control Loopflow Desktop (macOS only)
     Desktop {
         #[command(subcommand)]
         cmd: DesktopCommand,
     },
-    /// Open or focus Loopflow.app
-    Open,
     /// Name and connect to machines
     Machine {
         #[command(subcommand)]
@@ -492,6 +490,8 @@ pub enum Commands {
 
 #[derive(Subcommand, Debug)]
 pub enum DesktopCommand {
+    /// Open or focus Loopflow.app
+    Open,
     /// Insert literal text at an exact surface's cursor; never submits or clears a draft
     Text {
         #[arg(long)]

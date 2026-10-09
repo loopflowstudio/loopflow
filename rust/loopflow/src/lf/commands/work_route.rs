@@ -31,6 +31,9 @@ pub fn repository_path(id: &RepositoryId) -> Result<std::path::PathBuf> {
 
 fn launch_task(cli: &Cli) -> Option<&str> {
     match &cli.command {
+        Some(Commands::Desktop {
+            cmd: crate::lf::DesktopCommand::Open,
+        }) => cli.task.as_deref(),
         Some(Commands::Context { explain: true, .. } | Commands::Desktop { .. }) => None,
         Some(Commands::Task {
             cmd: TaskCommand::Run { issue, .. } | TaskCommand::Checkout { issue, .. },
@@ -90,4 +93,20 @@ pub(super) async fn resolve(cli: &Cli) -> Result<Option<crate::durable::TaskExec
         ));
     }
     Ok(Some(route))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::launch_task;
+    use crate::lf::Cli;
+    use clap::Parser;
+
+    #[test]
+    fn desktop_open_keeps_work_routing_but_pane_reads_do_not_prepare_work() {
+        for (operation, expected) in [("open", Some("LOO-427")), ("list", None)] {
+            let cli =
+                Cli::try_parse_from(["lf", "--task", "LOO-427", "desktop", operation]).unwrap();
+            assert_eq!(launch_task(&cli), expected);
+        }
+    }
 }

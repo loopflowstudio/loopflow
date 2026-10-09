@@ -459,6 +459,7 @@ lf context --explain --task LOO-427 --json
 lf context --explain                         # resolve the current checkout
 lf context --explain --session SESSION_ID
 lf context --explain --process PROCESS_LFID
+lf desktop open                             # open or focus the Mac app
 lf desktop list --json                       # read an already-running Mac app
 ```
 
@@ -470,6 +471,9 @@ execution observation. The timestamp dates this read, not planning freshness or
 permission to start. Process checkout resolution describes current Work at that
 location, not historical usage attribution. Ordinary `lf context` still reads
 prompt budgets.
+
+`desktop open` launches/focuses the app; selected Task/Session opening is not yet
+composed with this command. Bare `open` is ambiguous with PR and Session commands.
 
 Desktop inspection reports registered repository/window identities, selection,
 reading availability and retained Machine/checkout pane trees with focus, zoom

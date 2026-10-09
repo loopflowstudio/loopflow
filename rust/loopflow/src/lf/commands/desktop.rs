@@ -216,7 +216,7 @@ pub enum DesktopTextUnavailable {
 const DESKTOP_EVENT: &str = r#"
 on run argv
     if application id "com.loopflow.mac" is not running then
-        error "Loopflow Desktop is not running. Open it with lf open, or inspect Work with lf task status <task>."
+        error "Loopflow Desktop is not running. Open it with lf desktop open, or inspect Work with lf task status <task>."
     end if
     with timeout of 5 seconds
         if (count of argv) is 0 then
@@ -233,11 +233,31 @@ on run argv
 end run
 "#;
 
+pub fn require_supported() -> Result<()> {
+    if !cfg!(target_os = "macos") {
+        bail!("Loopflow Desktop launching and control require macOS; use `lf task status <task>` or `lf --task <task>` in this terminal instead");
+    }
+
+    Ok(())
+}
+
+fn open() -> Result<()> {
+    let status = std::process::Command::new("open")
+        .args(["-a", "Loopflow"])
+        .status()
+        .context("launch Loopflow.app with the macOS `open` command")?;
+    if !status.success() {
+        bail!("cannot launch Loopflow.app: `open -a Loopflow` exited with {status}");
+    }
+    Ok(())
+}
+
 pub fn run(command: &crate::lf::DesktopCommand) -> Result<()> {
     use crate::lf::DesktopCommand;
     // Check before decoding targets or looking up any Work/Machine.
-    super::open::require_supported()?;
+    require_supported()?;
     let (target, action, json) = match command {
+        DesktopCommand::Open => return open(),
         DesktopCommand::List { json } => return invoke(None, *json),
         DesktopCommand::Text {
             target,
@@ -382,7 +402,6 @@ fn parse_target(target: &str) -> Result<DesktopPaneTarget> {
 }
 
 fn contact(request: Option<&str>, text_read: bool) -> Result<Vec<u8>> {
-    super::open::require_supported()?;
     let output = std::process::Command::new("/usr/bin/osascript")
         .args(["-e", DESKTOP_EVENT, "--"])
         .args(request)

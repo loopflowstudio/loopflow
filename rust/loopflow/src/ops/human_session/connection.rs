@@ -170,7 +170,7 @@ async fn read_connection(
     if let Some((_, thread)) = connection {
         let matching = provider
             .as_ref()
-            .is_some_and(|provider| provider.provider_session_id == thread);
+            .is_some_and(|provider| provider.agent_session == thread);
         report.unavailable.push(if matching {
             "Recorded live endpoint is not probed; reachability and driver takeover are checked only when opening"
         } else {

@@ -51,9 +51,12 @@ explanation without endpoint probes. End intent does not perform completion reco
 preparation grants no takeover. Planning create/edit/comment now share input,
 current-Project, scope and saved-record validation, reporting intended effects
 without acquisition or delivery. Unknown initialization/provenance stays unavailable.
-Other Task commands, `history show` and skill/Flow/inline
-invocations still have identity-only `--explain`, not mutation validation or a
-complete action plan. Agent `--context` is a separate input preview. These source
+`42a6cb7f7`/`8157583a9` add refile/save validation: destination identity/current
+Project and recorded-work restrictions, plus pinned path/revision/draft checks,
+without planning locks or file recovery writes. Unknown destination initialization
+remains unavailable. Checkout, abandon/delete, interrupt, `history show` and
+skill/Flow/inline invocations still have identity-only `--explain`, not mutation
+validation or a complete action plan. Agent `--context` is a separate input preview. These source
 boundaries do not add native, configured-peer or installed acceptance.
 Earlier command names below are dated evidence, not compatibility aliases.
 

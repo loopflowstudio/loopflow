@@ -91,11 +91,11 @@ order intentions; unresolved losers hold delivery. Complete lists alone settle
 order; primary-only moves retain input. Provider facts retain separate savepoints,
 ages/baselines and causal frontiers. Import reuses portable fields.
 Entity revisions cannot order relationships; scalar/list replay cannot clear
-freshness or unseen notices. Prior evidence: `7d12ab10a`, this heading.
+freshness or unseen notices.
 
 Binding retains locators/Work/execution; imports allocate identity, exporting no
 RepositoryId/delegation. Locator readings need observation fences: A→B→A and concurrent
-locators defeat scene/per-path fences. No native proof (`d4fbca0ae`/`a73198197`).
+locators defeat scene/per-path fences. Native proof remains.
 
 **Unmapping is not association:** it can enable duplicate creation. `66dd3c44f`
 composes LOO-412 through `de3c84b08`: correspondence/full-ID lookup preserves
@@ -108,8 +108,8 @@ frontiers from rejected heads (counterexample: `29fa9a90e`). `7165f9a62`/`dffdba
 jointly project associated origins, retaining original journals/receipts/private
 holds. `1ece5cc52` retires foreign-bridge ancestry before ranking. Mapping validation,
 per-origin heads and creation inputs survive; causality grants no identity/selection.
-The foreground fixture covers offline/reconnect,
-associated continuation, causal reopening, recovery and unchanged seeded execution.
+Foreground fixtures cover reconnect, associated continuation, causal reopening and
+recovery with unchanged seeded execution.
 Cached confirmation cannot prove repeat exchange: require fresh stream confirmation
 of an unconfirmed receipt. Git confirmation never acknowledges provider
 delivery; comment errors stay local. No live Linear, running-provider or mounted
@@ -117,28 +117,28 @@ Desktop proof. Mixed exchange, delegation, admission and remote opening remain;
 mixed-provider and first-start refusals stay.
 
 #1512: live connect hands off; dead-driver resume uses native history, never
-import-triggered launch. Native proof remains.
+import-triggered launch. #1517 adds opaque AgentSessionId, preserving wire/storage
+bytes; `9cfc15451` missed the new explanation reader's field rename, repaired
+locally. Typed identity supplies no endpoint or takeover authority. Native proof remains.
 
 `e3ca861b1`: mounted-page/visibility observation replaces callbacks, including
 pre-registration failure. Request IDs fence registration only; native proof remains.
 
-October 9 planning reads use read-only storage and skip Process admission;
-missing-registry/checkpointed-WAL tests exposed fallback writes. Resolve chapters
-once on the operation's store; Workflow reads/writes have separate APIs. Preview
-shares launch admission, Workflow, URL validation and definition syntax; only
-launch prepares Work. Linux previews report platform impediments. Explicit-Machine
-previews skip probes/credentials; entry validates addressed identity before early
-readers and suppresses fallback Process writes. Parsed transport retains scoped IDs.
-Checkpoint both stores: an effect-free receiver cannot undo a sender's write.
-Two-CLI fixtures cover routing/Flow previews, not configured SSH or exclusive start.
+October 9 preview/launch share selection, admission, Workflow, URL validation and
+input assembly; only launch prepares Work. Read-only SQLite, early addressed-identity
+validation and fallback suppression prevent both sender and receiver writes.
+Unreadable is not absent; explicit-Machine previews skip probes/credentials.
+Missing-registry and checkpointed-WAL regressions, chapter-store ownership and
+two-CLI routing/Flow fixtures: `9cfc15451:wave/product/MEMORY.md`, this heading.
+They prove neither configured SSH nor exclusive start.
 
 Identity is not action validation. Shared validators recheck writes; `--context`
 rejects non-agent commands before stdin. Refile resolves IDs before initialization;
 preview never locks. Save shares pinned-path/revision/draft checks, not recovery
 writes. Creation stays unplaced; provenance follows selection. Refresh stays in
 execution; initialization/authorship remain unavailable. Checkout/abandon/delete/
-interrupt remain identity-only. No Session endpoint probes, takeover or end-intent
-completion/cleanup. Native proof remains.
+interrupt remain identity-only. No preview endpoint probes, takeover or end-intent
+completion/cleanup; native proof remains.
 
 ## Terminal-host adoption (2026-10-07)
 
@@ -904,7 +904,7 @@ July–August incidents: `b908182f5:wave/product/MEMORY.md`; Steer delivery rema
   conversational reply.
 - App surfaces navigate, present, and Steer Work. A view, terminal, provider
   process, or listener is never the source of Work or review-playhead truth.
-- A provider session is AgentInvocation continuity, not Work identity.
+- AgentSessionId identifies opaque provider history, not Work or process authority.
 - Machine-local execution, Work continuity, provider history, and direct process
   control have separate owners. The current boundary is documented in
   `docs/architecture/{execution,planning,machines}.md`; earlier topology questions

@@ -106,10 +106,10 @@ Store/CLI/migration checks pass, not Git acquisition.
 `2afcfba1a`: lookup, mapping and record reads share one snapshot;
 subsequent calls recheck. Observation reserves nothing.
 
-Uncomposed `3c67b29b1`: creation-origin import and exact-Linear-fact causal links;
-fixtures unexecuted. Equal text is not causality; links retain per-origin heads and
-private dependencies. Joint projection remains unfinished; mixed exchange/first-start
-refusals and TaskSource exclusion stay.
+Composed through `3c67b29b1`: import retains creation origins; exact Linear facts
+link causal predecessors. Equal text is not causality; per-origin heads and private
+dependencies survive. Five focused fixtures pass; snapshot lookup survives.
+Joint projection, mixed exchange and first-start remain unfinished; no native proof.
 
 #1512 (`3e1e6245c`): live connect hands off; dead-driver resume starts an engine
 on native history. Local resume is not import-triggered launch; native proof remains.

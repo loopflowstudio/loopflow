@@ -1430,7 +1430,7 @@ fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
             .unwrap()
             .unwrap();
         assert!(fixture.store.sqlite.attempt_task_state(&completed).unwrap());
-        let process = crate::process::Process {
+        let process = crate::process::LfProcess {
             lfid: crate::id::ProcessLfid::new(),
             pid: None,
             trace_id: crate::id::TraceId::new(),

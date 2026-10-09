@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::durable::WorkRef;
-use crate::session::{AgentSession, WorkSource};
+use crate::session::{LfSession, WorkSource};
 use crate::session_record::{SessionCaptureManifest, SessionTitleSource};
 use crate::store::SharedStore;
 use crate::work::task::Task;
@@ -31,7 +31,7 @@ pub(crate) mod provider_conversation;
 pub async fn latest_interactive_session(
     store: &SharedStore,
     cwd: &Path,
-) -> Result<Option<AgentSession>> {
+) -> Result<Option<LfSession>> {
     fn checkout(path: &Path) -> Option<PathBuf> {
         let path = fs::canonicalize(path).ok()?;
         let root = crate::repo::discover_repo_root(&path).ok()?.unwrap_or(path);
@@ -60,8 +60,8 @@ pub async fn latest_interactive_session(
 /// opening, then its creation. Assistant output never changes the choice.
 async fn most_recent(
     store: &SharedStore,
-    candidates: Vec<(AgentSession, Option<i64>)>,
-) -> Result<Option<AgentSession>> {
+    candidates: Vec<(LfSession, Option<i64>)>,
+) -> Result<Option<LfSession>> {
     let human = provider_conversation::human_input_times(
         store,
         candidates.iter().map(|(session, _)| session),
@@ -299,9 +299,9 @@ pub enum SessionFlowOccurrence {
 
 pub(crate) fn publish_prepared_input(
     store: &crate::store::sqlite::SqliteStore,
-    session: &AgentSession,
+    session: &LfSession,
     flow: crate::session_record::SessionFlowMembership,
-) -> Result<AgentSession> {
+) -> Result<LfSession> {
     anyhow::ensure!(
         session.captured.is_some(),
         "Session input must be reserved before artifact publication"
@@ -504,7 +504,7 @@ async fn find_session(
     store: &SharedStore,
     session_id: &str,
     open_completed: bool,
-) -> Result<Option<AgentSession>> {
+) -> Result<Option<LfSession>> {
     let Some(session) = session_by_id(store, session_id).await? else {
         return Ok(None);
     };
@@ -521,7 +521,7 @@ struct NativeSession<'a> {
 }
 
 impl<'a> NativeSession<'a> {
-    fn of(session: &'a AgentSession) -> Result<Self> {
+    fn of(session: &'a LfSession) -> Result<Self> {
         Ok(Self {
             dir: local_capture_dir(&session.artifact_key).ok_or_else(|| {
                 anyhow!("Session {} has an invalid capture reference", session.id)
@@ -568,18 +568,14 @@ pub(crate) async fn serve_conversation(store: &SharedStore, artifact_key: &Strin
     serve_locked(store, &session, launch_lock).await
 }
 
-fn session_token(session: &AgentSession) -> HumanSessionToken {
+fn session_token(session: &LfSession) -> HumanSessionToken {
     HumanSessionToken::Primary {
         id: session.id.clone(),
     }
 }
 
 /// Launch the prepared input of a conversation or of a saved Flow's review.
-async fn serve_locked(
-    store: &SharedStore,
-    session: &AgentSession,
-    launch_lock: File,
-) -> Result<()> {
+async fn serve_locked(store: &SharedStore, session: &LfSession, launch_lock: File) -> Result<()> {
     let lf = crate::engine::process::resolve_pinned_lf_binary()?;
     let mut command = tokio::process::Command::new(lf);
     let token = session_token(session);
@@ -598,7 +594,7 @@ async fn serve_locked(
     }
 }
 
-async fn conversation_launch_args(store: &SharedStore, session: &AgentSession) -> Vec<String> {
+async fn conversation_launch_args(store: &SharedStore, session: &LfSession) -> Vec<String> {
     let mut args = vec![
         "-i".to_string(),
         "--agent".to_string(),
@@ -631,7 +627,7 @@ async fn conversation_launch_args(store: &SharedStore, session: &AgentSession) -
 }
 
 pub(crate) fn capture_subjects(
-    session: &AgentSession,
+    session: &LfSession,
 ) -> Vec<crate::session_record::SubjectAttribution> {
     work_selector(session)
         .map(|selector| crate::session_record::SubjectAttribution {
@@ -646,7 +642,7 @@ pub(crate) fn capture_subjects(
         .collect()
 }
 
-fn work_selector(session: &AgentSession) -> Option<String> {
+fn work_selector(session: &LfSession) -> Option<String> {
     match (&session.task_id, &session.wave_id) {
         (Some(task), _) => Some(format!("task:{task}")),
         (None, Some(wave)) => Some(format!("wave:{wave}")),
@@ -740,7 +736,7 @@ pub(crate) async fn open(
 #[cfg(unix)]
 async fn connect_live_codex(
     store: &SharedStore,
-    session: &AgentSession,
+    session: &LfSession,
     provider: &crate::session_record::ProviderSessionRef,
     replace_clients: bool,
 ) -> Result<bool> {
@@ -897,7 +893,7 @@ pub(crate) fn capture_is_prepared(run_id: &str) -> Result<bool> {
 }
 
 /// A Session as its row and its current input describe it.
-async fn surface(store: &SharedStore, session: &AgentSession) -> Result<SessionRecord> {
+async fn surface(store: &SharedStore, session: &LfSession) -> Result<SessionRecord> {
     let work = match (&session.task_id, &session.wave_id) {
         (Some(task), _) => Some(WorkRef::Task(task.clone())),
         (None, Some(wave)) => Some(WorkRef::Wave(wave.clone())),
@@ -971,7 +967,7 @@ async fn surface(store: &SharedStore, session: &AgentSession) -> Result<SessionR
 }
 
 /// The `provider[:model]` a captured input launched with.
-fn launch_model(session: &AgentSession) -> String {
+fn launch_model(session: &LfSession) -> String {
     let provider = session.provider.clone().unwrap_or_default();
     match &session.model {
         Some(model) => format!("{provider}:{model}"),
@@ -979,7 +975,7 @@ fn launch_model(session: &AgentSession) -> String {
     }
 }
 
-async fn session_work_path(store: &SharedStore, session: &AgentSession) -> Result<Option<String>> {
+async fn session_work_path(store: &SharedStore, session: &LfSession) -> Result<Option<String>> {
     let Some(wave_id) = &session.wave_id else {
         return Ok(None);
     };
@@ -1068,7 +1064,7 @@ pub(crate) async fn preview_binding(
     })
 }
 
-async fn binding_target(store: &SharedStore, id: &str, task: &str) -> Result<(AgentSession, Task)> {
+async fn binding_target(store: &SharedStore, id: &str, task: &str) -> Result<(LfSession, Task)> {
     let session = session_by_id(store, id)
         .await?
         .ok_or_else(|| session_not_found(id))?;
@@ -1081,7 +1077,7 @@ async fn binding_target(store: &SharedStore, id: &str, task: &str) -> Result<(Ag
 }
 
 /// Resolve a Session in any state by its durable or native conversation id.
-pub(crate) async fn session_by_id(store: &SharedStore, id: &str) -> Result<Option<AgentSession>> {
+pub(crate) async fn session_by_id(store: &SharedStore, id: &str) -> Result<Option<LfSession>> {
     if let Some(session) = store.session(id).await? {
         return Ok(Some(session));
     }
@@ -1579,7 +1575,7 @@ mod tests {
     use std::sync::{LazyLock, Mutex};
 
     use super::{human_open_argv, session_is_resumable};
-    use crate::session::AgentSession;
+    use crate::session::LfSession;
     use crate::store::{open_ephemeral_store, SharedStore, StorageConfig};
     use crate::work::task::TaskId;
 
@@ -1776,7 +1772,7 @@ mod tests {
             directory.path().display().to_string(),
         );
         store.create_wave(&wave).await.unwrap();
-        let session = |task_id: Option<crate::work::task::TaskId>| AgentSession {
+        let session = |task_id: Option<crate::work::task::TaskId>| LfSession {
             captured: None,
             caller_artifact_key: None,
             id: "conversation".into(),
@@ -1809,7 +1805,7 @@ mod tests {
                 .as_deref(),
             Some("product")
         );
-        let unbound = AgentSession {
+        let unbound = LfSession {
             wave_id: None,
             ..session(None)
         };

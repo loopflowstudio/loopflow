@@ -273,7 +273,7 @@ struct DTOFixtureTests {
     @Test("Process pages retain command outcomes, caller evidence and continuation")
     func processPageFixture() throws {
         let data = try loadFixtureData("process_page.json")
-        let page = try JSONDecoder().decode(ProcessPage.self, from: data)
+        let page = try JSONDecoder().decode(LfProcessPage.self, from: data)
         #expect(page.entries[0].exitCode == 42)
         #expect(page.entries[0].viaAgent == nil)
         #expect(page.entries[0].pid == nil)
@@ -281,9 +281,9 @@ struct DTOFixtureTests {
         #expect(page.entries[1].parentProcessLFID == page.entries[0].lfid)
         #expect(page.entries[1].outcome == nil)
         #expect(page.next?.lfid == page.entries[1].lfid)
-        #expect(try JSONDecoder().decode(ProcessPage.self, from: JSONEncoder().encode(page)) == page)
+        #expect(try JSONDecoder().decode(LfProcessPage.self, from: JSONEncoder().encode(page)) == page)
         #expect(throws: DecodingError.self) {
-            try JSONDecoder().decode(ProcessPage.self, from: Data("{}".utf8))
+            try JSONDecoder().decode(LfProcessPage.self, from: Data("{}".utf8))
         }
     }
 

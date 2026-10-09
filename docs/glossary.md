@@ -18,10 +18,10 @@ first, then the engineering words it borrows.
 | **Project** | One Wave's Linear plan: status, Tasks, KRs, targets and the workflow its Tasks take up. |
 | **KR** | Key result. A result you can check, stated before the work starts. |
 | **Memory** | A text file, `MEMORY.md`, where a Wave writes down what it learned. |
-| **AgentSession**, **Session** | One continuable agent conversation, interactive or headless, with identity, feedback and native history. |
+| **LfSession**, **Session** | One continuable agent conversation, interactive or headless, with identity, feedback and native history. |
 | **Run** | What the product calls a headless Session; an interactive one is a Session. |
 | **Waiting** | A conversation that asked a question, handed its turn back, or went quiet with no tool call outstanding. |
-| **Process** | One actual lf process: durable `lfid`, optional Unix `pid`, causal parent and observed command outcome. |
+| **LfProcess**, **Process** | One actual lf process: durable `lfid`, optional Unix `pid`, causal parent and observed command outcome. |
 | **Machine** | One OS user’s Loopflow authority in one data directory; two users on one host have separate identities. |
 | **Data directory** | Local Loopflow state in `~/.lf` by default; explicit `LF_HOME` selects a disposable experiment. |
 | **Steer** | A message you send to work that is already running, to change its direction. |

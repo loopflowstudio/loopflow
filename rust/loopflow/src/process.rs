@@ -7,7 +7,7 @@ use crate::id::{ProcessLfid, TraceId, WaveId};
 
 /// One recorded lf process. Unknown historical caller and exit evidence stays absent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Process {
+pub struct LfProcess {
     pub lfid: ProcessLfid,
     pub pid: Option<u32>,
     pub trace_id: TraceId,
@@ -29,21 +29,21 @@ pub struct Process {
 /// Command discovery filters. Work means recorded work, never today's caller binding.
 /// Contains searches are literal; command case folding follows SQLite lower().
 #[derive(Debug, Clone, Default)]
-pub struct ProcessFilter {
+pub struct LfProcessFilter {
     pub lfid: Option<ProcessLfid>,
     pub repo: Option<String>,
     pub parent_process_lfid: Option<ProcessLfid>,
     pub caller_session_id: Option<String>,
     pub command_contains: Option<String>,
     pub identity_contains: Option<String>,
-    pub outcome: Option<ProcessOutcomeFilter>,
-    pub performed_work: Option<ProcessWorkFilter>,
+    pub outcome: Option<LfProcessOutcomeFilter>,
+    pub performed_work: Option<LfProcessWorkFilter>,
 }
 
 /// Unknown means no terminal observation, not an OS liveness judgment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum ProcessOutcomeFilter {
+pub enum LfProcessOutcomeFilter {
     Succeeded,
     Failed,
     Interrupted,
@@ -53,7 +53,7 @@ pub enum ProcessOutcomeFilter {
 /// IDs are already resolved by the caller, independently of launch eligibility.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum ProcessWorkFilter {
+pub enum LfProcessWorkFilter {
     Task(TaskId),
     Wave(WaveId),
 }
@@ -62,16 +62,16 @@ pub enum ProcessWorkFilter {
 /// A cursor is not a cross-request snapshot: late observations or changed outcomes may
 /// change membership. Refresh from the first page to observe those changes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProcessCursor {
+pub struct LfProcessCursor {
     pub started_at: i64,
     pub lfid: ProcessLfid,
 }
 
 /// At most the requested number of command rows; no Session or Flow payloads.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProcessPage {
-    pub entries: Vec<Process>,
-    pub next: Option<ProcessCursor>,
+pub struct LfProcessPage {
+    pub entries: Vec<LfProcess>,
+    pub next: Option<LfProcessCursor>,
 }
 
 pub const AGENT_CALLER_ENV: &str = "LF_AGENT_CALLER";

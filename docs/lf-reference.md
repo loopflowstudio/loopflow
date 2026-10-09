@@ -2115,7 +2115,7 @@ List a bounded page of recorded commands, newest first
 | `--limit` | limit Default: 100. |
 | `--after` | Continue with the previous page's next object, encoded as JSON |
 | `--parent` | Direct children of an exact or unambiguous parent Process |
-| `--caller` | Commands issued by this AgentSession |
+| `--caller` | Commands issued by this Session |
 | `--search` | Literal command text, ignoring ASCII case |
 | `--outcome` | outcome |
 | `--task` | Recorded work for a Task, including completed Tasks |

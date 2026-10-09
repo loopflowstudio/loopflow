@@ -226,14 +226,15 @@ Process `ef54b06d-9896-467f-a920-f8d4648f9d8b`, and interrupted research Process
 closure is not yet observed. LOO-378 is explicitly paused with substantial
 unpublished code retained, without deletion or delivery authorization.
 
-## Process vocabulary (LOO-400, 2026-10-07)
+## Execution ownership names (LOO-441, 2026-10-09)
 
-Jack Heart approved Process, LFID/PID and PR #1483 landing
-(`32c00054-4c60-4b96-bdf4-4d5f142ab881`). `process.lfid` is durable identity;
-optional `pid` is reusable. One draft preserves identities, parents, outcomes,
-unknown PIDs and historical JSON. Sequencer wire `process_id` still maps to Rust
-`process_lfid`. Fixtures establish no installed control authority; LOO-397 owns
-command placement. Exact evidence: `cbdb9a43b:wave/infrastructure/MEMORY.md`.
+Jack Heart selected LfSession/LfProcess; provider names remain LOO-442. He approved
+#1516 landing. The rename preserves wire/storage/fixtures, ProcessLfid,
+variants and product Session/Process; SQL/profiling retain historical names.
+`2b183c547` implements Rust/Swift/docs. Gate: fmt/Clippy pass; disk-blocked suites
+defer to CI. Installation unproved.
+LFID durable; PID reusable. LOO-400 history, mapping, placement and proofs:
+`6130a4eed:wave/infrastructure/MEMORY.md`, “Process vocabulary.”
 
 ## Terminal conversation recovery (LOO-409, 2026-10-07)
 
@@ -766,7 +767,7 @@ captures and manually transferred Tasks; import neither old turns nor driver aut
 
 September 29–30's superseded owner/schema proofs:
 `fe07245a3:wave/infrastructure/MEMORY.md`.
-Current Process/Session/Flow contracts live in the architecture reference;
+Current LfProcess/LfSession/Flow contracts live in the architecture reference;
 ancestry grants no Task/Flow authority. Preserve proven ancestry, captured input
 and iteration identity. Deleted RunId/conversion owners stay deleted; old proofs
 establish no final-frontier conversion.

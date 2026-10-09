@@ -94,7 +94,7 @@ public enum WaveOrigin {
     }
 
     private static func git(_ args: [String], at path: String) -> String? {
-        let process = Foundation.Process()
+        let process = Process()
         let stdout = Pipe()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = ["git", "-C", path] + args

@@ -76,7 +76,7 @@ struct WorkObservationTransportTests {
 
     @Test("A stalled or noncooperative reader is reaped without touching other processes")
     func cancellation() async throws {
-        let survivor = Foundation.Process()
+        let survivor = Process()
         survivor.executableURL = URL(fileURLWithPath: "/bin/sleep")
         survivor.arguments = ["30"]
         try survivor.run()
@@ -173,8 +173,8 @@ struct WorkObservationTransportTests {
             #""unavailable":"Task LOO-1 is not registered","body":null}"# + "\n"
     }
 
-    private func shell(_ script: String, cwd: URL? = nil) -> Foundation.Process {
-        let process = Foundation.Process()
+    private func shell(_ script: String, cwd: URL? = nil) -> Process {
+        let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = ["-c", script]
         process.currentDirectoryURL = cwd

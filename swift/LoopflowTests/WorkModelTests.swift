@@ -456,7 +456,7 @@ struct WorkModelTests {
     }
 
     private func git(_ args: [String], at directory: URL) throws {
-        let process = Foundation.Process()
+        let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = ["git", "-C", directory.path] + args
         process.standardOutput = Pipe()

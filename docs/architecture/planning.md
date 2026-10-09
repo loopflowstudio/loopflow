@@ -655,7 +655,7 @@ before selecting further work; pane closure and provider exit grant no authority
 
 Saved handoffs retain executable, Machine and database together. Renaming, binding
 and driver replacement retain conversation identity and feedback. Desktop reads
-the same record and keys its terminal surface on AgentSession identity.
+the same record and keys its terminal surface on LfSession identity.
 
 ## Work, steering and execution
 
@@ -682,7 +682,7 @@ saved direction. The shared skill path supplies Task context and live steers whe
 the checkout or explicit attribution selects a Task.
 Idle steering starts no Flow. Prompt inclusion and provider acceptance do not
 prove the model followed a correction. Wave planning uses ordinary finite
-AgentSessions.
+LfSessions.
 
 Work reservation sets Task Started once; an inspection Process does not. Constructors
 validate Task/Wave ancestry, and chapter transfers preserve historical event

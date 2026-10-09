@@ -170,7 +170,7 @@ repository scope governs `lf wave list` and `lf wave show` (both take `--all`); 
 status` resolves one Wave within the repository.
 
 When the User selects a Session, run `lf session connect <session-id> --json`.
-It prepares or recovers the boundary's AgentSession and captured input and returns its
+It prepares or recovers the boundary's Session and captured input and returns its
 `open_argv` for the app or requested terminal. Execute that argv unchanged: it
 carries the executable and owning data together. JSON preparation does not mean
 the conversation opened; verify provider readiness in the requested terminal.

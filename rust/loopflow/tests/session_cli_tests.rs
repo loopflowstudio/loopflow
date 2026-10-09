@@ -490,7 +490,7 @@ fn prepare_conversation(
     let input = format!("run_{}", uuid::Uuid::new_v4().simple());
     let session = store
         .create_session(
-            loopflow::session::AgentSession {
+            loopflow::session::LfSession {
                 captured: None,
                 id: format!("session_{input}"),
                 artifact_key: input.clone(),
@@ -1039,6 +1039,7 @@ mv "$LF_HOME/$kind.tmp" "$LF_HOME/$kind"
                 );
             } else {
                 assert!(args.contains("tui.terminal_title=[]"), "{args}");
+                assert!(args.contains("--no-daemon\n"), "{args}");
             }
             if host == "cmux" {
                 for path in ["rename-workspace", "rename-tab"] {

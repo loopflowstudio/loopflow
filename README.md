@@ -231,7 +231,7 @@ Bind assigns an unbound conversation to one Task permanently, including a done T
 | **Chapter** | Names the repository's current group of In Progress Projects | Linear Project names and statuses |
 | **Task** | Owns concrete work, its checkout, serial PRs and every Flow process for it | Linear and local SQLite |
 | **Process** | Records one actual lf process and its observed command outcome | Machine-local SQLite |
-| **AgentSession** | Keeps a continuable interactive or headless conversation and native history | Machine-local SQLite and provider-native storage |
+| **LfSession** | Keeps a continuable interactive or headless conversation and native history | Machine-local SQLite and provider-native storage |
 | **Machine** | Places execution and scopes its store, credentials and process authority | Machine identity and local data |
 
 The [execution contract and cutover status](docs/architecture-reference.md#cutover-status)

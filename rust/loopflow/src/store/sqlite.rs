@@ -2079,7 +2079,7 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn record_process(&self, process: &crate::process::Process) -> StoreResult<()> {
+    pub fn record_process(&self, process: &crate::process::LfProcess) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "INSERT INTO processes(lfid,trace_id,parent_process_lfid,command,repo,cwd,started_at,
@@ -2099,7 +2099,7 @@ impl SqliteStore {
     /// is one attempt.
     pub(crate) fn record_process_within(
         &self,
-        process: &crate::process::Process,
+        process: &crate::process::LfProcess,
         wait: Duration,
     ) -> StoreResult<()> {
         let previous: u32 = {

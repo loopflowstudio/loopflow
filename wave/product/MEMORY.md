@@ -5,34 +5,37 @@ iOS, agents and workers. Older “Concerto” notes mean Mac.
 
 ## Task delivery boundary (LOO-418, reconciled 2026-10-08)
 
-Jack Heart decided: zero or one PR per Task. Delivery files follow-ups or records
-“none needed” after merge, then completes. Dependent PRs use stacked Tasks.
-October 8: end triggers completion; status, Workflow position and Process liveness
-are independent. Linear completion preserves execution; failed end requests retry
-without replaying the Flow. Reopening supersedes old completion intent.
+Jack Heart decided: zero or one PR per Task; dependent PRs use stacked Tasks.
+After merge, file follow-ups or record “none needed”, then complete. October 8:
+end triggers completion; Task status, Workflow position and Process liveness
+are independent. Linear completion preserves execution. Failed end requests
+retry without replaying the Flow; reopening supersedes old completion intent.
 
-October 8, Jack Heart authorized stacking LOO-418 on LOO-406 `558a39232`: local
-planning, optional placement, independent completion. Observed conflicts adopt Linear; the enabled unseen
-read/write-race regression remains. Matching readback proves no concurrency
-guarantee. Integration proves no acceptance.
+Jack authorized stacking on LOO-406 `558a39232`: one local planning owner,
+optional placement and independent completion. `314095b00` retains that cut.
+Observed conflicts adopt Linear; the enabled unseen read/write-race regression
+still fails. Matching readback proves no concurrency guarantee. Integration
+proves no acceptance. LOO-385 overlaps without closure authority; full lifecycle
+proof on #1499 precedes Jack’s demo, and landing remains unauthorized.
 
-Task owns placement and one optional PR, preserving history and unresolved scope.
-LOO-385 overlaps without closure authority. Jack accepted ship or the next
-Task/Wave pass finishing delivery, without a watcher or implicit wake. Full
-lifecycle proof on #1499 precedes demo; landing remains unauthorized.
+Task owns placement and one optional PR, retaining history and unresolved scope.
+Jack accepted normal delivery or the next Task/Wave pass finishing follow-through,
+without a watcher or implicit wake. Common planning owns local creation/status;
+foreground export owns optional issue creation and relations after mapping, even
+after source completion. Lost replies retain identity. Links read current saved
+names/dates, including removal, without changing immutable filing input.
 
-Retries pin UUIDs, destination and payload before mutation. Links use observed
-Linear due dates, including removal; retry intent stays immutable. Failed promotion
-retains confirmed copy. Handoffs preserve child edits; Task placement owns the
-validated PR copy. Admission records performed location; Flow/Started commit atomically.
+Stable IDs do not close a reservation/creation crash gap: after rotation,
+creation rejects the pinned Project. Recovery and historical filing conversion
+remain unbuilt. Independent local reopening also lacks a CLI path; Workflow
+restart correctly retains completion. Repairs keep the common planning owner.
 
-Docker's integrated fixture proves
-local filing → completion during a real Flow → actual CLI/monitor arrival.
-Observed reopening and durable end retry pass; the unseen-write race fails.
-Foreground export delivers mapped follow-up relations after source completion;
-lost responses retain the UUID. Reads use current saved link names/dates,
-not immutable filing input. Historical creation conversion, local reopening,
-combined gate and native acceptance remain. Settlement rechecks evidence transactionally.
+Failed promotion retains confirmed copy; handoffs preserve child edits. Admission
+records performed location; Flow/Started commit atomically. Docker’s integrated
+fixture proves local filing → completion during a real Flow → actual CLI/monitor
+arrival. Observed provider reopening and durable end retry pass; unseen-write
+reopening fails. Combined gate, populated upgrade and native acceptance remain.
+Settlement rechecks merge/disposition in its transaction, not from an earlier read.
 
 ## Terminal-host adoption (2026-10-07)
 
@@ -60,12 +63,9 @@ preserve evidence and limits. No external-progress proof.
 
 ## Live Home reconciliation (2026-10-05)
 
-Jack Heart requested cleanup first (LOO-380). Desktop/CLI 0.13.3 shared one
-Home; supported operations reconciled completion/cancel writebacks and stopped
-Flows. Full receipts and recency caveat: `7c3072d64:wave/product/MEMORY.md`.
-Unresolved then, not rechecked: LOO-367's handoff, Intelligence's backlog
-Project (LOO-366), test Waves, LOO-343's dead claim; no rendered proof.
-This branch preserves the sidebar fix; parent #1439 has landed.
+LOO-380’s dated cleanup/sidebar proof and unresolved LOO-367/366/343 and test-Wave
+findings remain at `314095b00:wave/product/MEMORY.md`, this heading. Not rechecked;
+no rendered proof or new cleanup authority follows. Parent #1439 landed.
 
 ## Reactive workspace (2026-10-05)
 
@@ -890,9 +890,11 @@ October 4 retired automatic recovery; unknown liveness grants no retry.
 
 ### Planning authority and historical migration lessons
 
-- Linear owns authored chapter and Task content. No local `projects/*.md`, issue
-  mirror, or roadmap table is authoritative. Shared current reads expose one chapter
-  summary and direct Tasks; historical Project identity remains readable provenance.
+- Jack Heart’s October 8 LOO-406 decision supersedes provider-only ownership:
+  one local Wave/Project/Task model works with optional Linear sync; observed
+  conflicts adopt Linear. Provider mappings never own execution. No parallel
+  Markdown plan or issue mirror is authoritative. Shared reads retain current
+  chapter selection and historical Project identity.
 - PM writes resolve stable provider edges, not names or Issue prefixes. Task creation
   selects its Wave's current Project; ordinary Task saves cannot restore an old
   parent after transfer. Wave-linked Initiative identity remains in GOAL frontmatter;

@@ -639,9 +639,9 @@ Fetch/import/publication stay separate; confirmation excludes later saves.
 Readback resolves uncertainty; workers retain effect locks through cancellation.
 Acquisition/saves stay independent. A damaged journal breaks status, not exchange.
 Taskless providers sync; saves attempt exchange after commit.
-Two-store fixtures replace SQL edits, requiring preserved execution,
-reconnect and deduplication. Authored fixtures prove no behavior: SQL runs;
-Rust times out before tests. Desktop status remains.
+Status/publication share the held-history filter. Fixtures require
+preserved execution, reconnect and deduplication; Rust times out before
+tests. SQL proof is separate. Desktop status remains.
 
 Move counterexample: `a43f3e2ea`; repairs: `b5dafd918`/`7395cf3bb`. Holds retain
 moves, private journals and dependents. Only explicit selection releases history.

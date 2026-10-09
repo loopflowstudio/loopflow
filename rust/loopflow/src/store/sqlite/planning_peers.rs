@@ -78,9 +78,7 @@ impl SqliteStore {
         drop(query);
         let mut statuses = Vec::new();
         for (mut status, digest) in rows {
-            let mut snapshot = export_in(&tx, repo, &status.id)?;
-            let held = selection_conflicts(&tx, repo, &status.id, &snapshot)?;
-            omit_held(&mut snapshot, &held);
+            let snapshot = export_selected(&tx, repo, &status.id)?;
             status.pending_local = match digest {
                 Some(digest) => digest != planning_digest(&snapshot)?,
                 None => !snapshot.changes.is_empty(),
@@ -301,9 +299,7 @@ impl SqliteStore {
     ) -> StoreResult<PlanningSnapshot> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.unchecked_transaction()?;
-        let mut snapshot = export_in(&tx, repo, destination)?;
-        let held = selection_conflicts(&tx, repo, destination, &snapshot)?;
-        omit_held(&mut snapshot, &held);
+        let snapshot = export_selected(&tx, repo, destination)?;
         tx.commit()?;
         Ok(snapshot)
     }
@@ -323,9 +319,13 @@ impl SqliteStore {
         let saved = export_in(&tx, repo, destination)?;
         let merged = saved.merge(incoming).map_err(invalid)?;
         reserve_incoming(&tx, repo, destination, incoming)?;
-        let objects = merged.resolved();
+        let mut objects: BTreeMap<_, BTreeMap<&str, &Value>> = BTreeMap::new();
         let mut winners: BTreeMap<_, Vec<_>> = BTreeMap::new();
         for (id, change) in merged.winners() {
+            objects
+                .entry(change.object.clone())
+                .or_default()
+                .insert(change.field.as_str(), &change.value);
             winners
                 .entry(change.object.clone())
                 .or_default()
@@ -392,7 +392,7 @@ impl SqliteStore {
             match project_fields(
                 &tx,
                 object,
-                std::iter::once(("current_project_id", &fields["current_project_id"])),
+                std::iter::once(("current_project_id", fields["current_project_id"])),
             ) {
                 Ok(()) => {}
                 Err(error) if projection_conflict(&error) => {
@@ -664,6 +664,19 @@ fn retain_mutations(
     Ok(())
 }
 
+// Status and publication must compare the same eligible history. Retained private
+// references stay in the journal but cannot become pending publication content.
+fn export_selected(
+    conn: &Connection,
+    repo: &str,
+    destination: &str,
+) -> StoreResult<PlanningSnapshot> {
+    let mut snapshot = export_in(conn, repo, destination)?;
+    let held = selection_conflicts(conn, repo, destination, &snapshot)?;
+    omit_held(&mut snapshot, &held);
+    Ok(snapshot)
+}
+
 fn export_in(conn: &Connection, repo: &str, destination: &str) -> StoreResult<PlanningSnapshot> {
     require_destination(conn, repo, destination)?;
     let mut query = conn.prepare("SELECT c.kind,c.object_id,c.field,c.value,c.clock,c.linear,c.parents,c.id
@@ -717,7 +730,7 @@ fn table(kind: PlanningKind) -> &'static str {
     }
 }
 
-fn require_complete(object: &PlanningObject, fields: &BTreeMap<String, Value>) -> StoreResult<()> {
+fn require_complete(object: &PlanningObject, fields: &BTreeMap<&str, &Value>) -> StoreResult<()> {
     if object
         .kind
         .fields()
@@ -772,7 +785,7 @@ fn exists(conn: &Connection, object: &PlanningObject) -> StoreResult<bool> {
 fn insert_and_project(
     conn: &Connection,
     object: &PlanningObject,
-    fields: &BTreeMap<String, Value>,
+    fields: &BTreeMap<&str, &Value>,
     repo: &str,
     winners: &[(&str, &PlanningMutation)],
     snapshot: &PlanningSnapshot,
@@ -781,7 +794,7 @@ fn insert_and_project(
         let required = |key: &str| {
             fields
                 .get(key)
-                .and_then(Value::as_str)
+                .and_then(|value| value.as_str())
                 .ok_or_else(|| invalid(format!("missing {key} for {}", object.id)))
         };
         match object.kind {
@@ -802,7 +815,7 @@ fn insert_and_project(
                     params![object.id,required("project_id")?,required("issue_identifier")?])?;
             }
             PlanningKind::Comment => {
-                let content = &fields["content"];
+                let content = fields["content"];
                 conn.execute("INSERT INTO task_comments(id,task_id,body,author,created_at) VALUES(?1,?2,?3,?4,?5)",
                     params![object.id,required("task_id")?,content["body"].as_str(),content["author"].as_str(),content["created_at"].as_str()])?;
             }
@@ -818,9 +831,9 @@ fn insert_and_project(
         fields
             .iter()
             .filter(|(field, _)| {
-                object.kind != PlanningKind::Wave || *field != "current_project_id"
+                object.kind != PlanningKind::Wave || **field != "current_project_id"
             })
-            .map(|(field, value)| (field.as_str(), value)),
+            .map(|(&field, &value)| (field, value)),
     )?;
     project_delivery_fields(conn, object, winners, snapshot, &previous)?;
     require_repository(conn, object, repo)
@@ -998,7 +1011,7 @@ fn reconcile_conflicts(
 fn validate_wave(
     conn: &Connection,
     object: &PlanningObject,
-    fields: &BTreeMap<String, Value>,
+    fields: &BTreeMap<&str, &Value>,
     repo: &str,
 ) -> StoreResult<()> {
     let id = crate::id::WaveId::parse(&object.id).map_err(invalid)?;
@@ -1938,13 +1951,13 @@ mod tests {
         }
         let selected = right.export_peer_planning("/target", &id).unwrap();
         assert!(selected
-            .resolved()
-            .keys()
+            .objects()
+            .iter()
             .any(|object| object.id == task.as_str()));
         assert!(
             !selected
-                .resolved()
-                .keys()
+                .objects()
+                .iter()
                 .any(|object| object.id == private_task.as_str()
                     || object.id == private.id().as_str())
         );
@@ -2043,8 +2056,8 @@ mod tests {
         let (_target_home, target) = store();
         // Reproduce an already-known local identity, without selecting it.
         let wave_id = incoming
-            .resolved()
-            .keys()
+            .objects()
+            .iter()
             .find(|object| object.kind == crate::engine::planning_exchange::PlanningKind::Wave)
             .unwrap()
             .id

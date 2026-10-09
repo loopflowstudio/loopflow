@@ -40,55 +40,66 @@ async fn exchange_repository(store: &Store, repo: &str, publish: bool) -> OpsRes
     let results = futures_util::future::join_all(destinations.into_iter().map(|id| {
         let store = store.sqlite.clone();
         let repo = repo.to_owned();
-        tokio::task::spawn_blocking(move || {
-            let id = &id;
-            let linear = super::linear_observe::connected(&repo);
-            // The blocking worker retains effect ownership through status writes,
-            // even if its async waiter is canceled. Acquisition never takes it.
-            let _lock = if publish {
-                let path = store.home_dir().map_err(message)?
-                    .join("locks/planning-peers").join(format!("{id}.lock"));
-                let Some(lock) = super::planning_delivery::lock_delivery(&path)? else {
-                    return Ok(());
-                };
-                Some(lock)
-            } else {
-                None
-            };
-            let result = (|| {
-                // Peer provider frontiers/grouped receipts are not composed yet.
-                // Do not activate the known unsafe mixed-provider path.
-                if linear {
-                    return Err(message("Git planning awaits Linear provenance reconciliation; local planning is retained"));
-                }
-                let binding = store.peer_planning_destination(&repo, id).map_err(message)?
-                    .ok_or_else(|| message("planning destination is missing"))?;
-                let git = PlanningGit::new(Path::new(&repo), &binding).map_err(message)?;
-                if publish {
-                    publish_destination(&store, &repo, id, &git)
-                } else {
-                    acquire_destination(&store, &repo, id, &git).map(|_| ())
-                }
-            })();
-            // Do not persist provider data or credential-bearing destinations in errors.
-            let error = result.as_ref().err().map(|_| {
-                if linear {
-                    "Git planning awaits Linear provenance reconciliation"
-                } else if publish {
-                    "Git publication pending; local planning retained"
-                } else {
-                    "Git acquisition failed; retained import unchanged"
-                }
-            });
-            store.record_peer_error(&repo, id, !publish, error).map_err(message)?;
-            result
-        })
-    })).await;
+        tokio::task::spawn_blocking(move || exchange_destination(&store, &repo, &id, publish))
+    }))
+    .await;
     // Every destination gets an independent attempt, even if another failed.
     for result in results {
         result.map_err(message)??;
     }
     Ok(())
+}
+
+fn exchange_destination(store: &SqliteStore, repo: &str, id: &str, publish: bool) -> OpsResult<()> {
+    let linear = super::linear_observe::connected(repo);
+    // The blocking worker retains effect ownership through status writes, even
+    // if its async waiter is canceled. Acquisition never takes this lock.
+    let _lock = if publish {
+        let path = store
+            .home_dir()
+            .map_err(message)?
+            .join("locks/planning-peers")
+            .join(format!("{id}.lock"));
+        let Some(lock) = super::planning_delivery::lock_delivery(&path)? else {
+            return Ok(());
+        };
+        Some(lock)
+    } else {
+        None
+    };
+    let result = (|| {
+        // Peer provider frontiers/grouped receipts are not composed yet.
+        // Do not activate the known unsafe mixed-provider path.
+        if linear {
+            return Err(message(
+                "Git planning awaits Linear provenance reconciliation; local planning is retained",
+            ));
+        }
+        let binding = store
+            .peer_planning_destination(repo, id)
+            .map_err(message)?
+            .ok_or_else(|| message("planning destination is missing"))?;
+        let git = PlanningGit::new(Path::new(repo), &binding).map_err(message)?;
+        if publish {
+            publish_destination(store, repo, id, &git)
+        } else {
+            acquire_destination(store, repo, id, &git).map(|_| ())
+        }
+    })();
+    // Do not persist provider data or credential-bearing destinations in errors.
+    let error = result.as_ref().err().map(|_| {
+        if linear {
+            "Git planning awaits Linear provenance reconciliation"
+        } else if publish {
+            "Git publication pending; local planning retained"
+        } else {
+            "Git acquisition failed; retained import unchanged"
+        }
+    });
+    store
+        .record_peer_error(repo, id, !publish, error)
+        .map_err(message)?;
+    result
 }
 
 fn acquire_destination(

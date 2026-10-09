@@ -155,17 +155,6 @@ impl PlanningSnapshot {
         })
     }
 
-    pub fn resolved(&self) -> BTreeMap<PlanningObject, BTreeMap<String, Value>> {
-        let mut objects: BTreeMap<_, BTreeMap<_, _>> = BTreeMap::new();
-        for (_, change) in self.winners() {
-            objects
-                .entry(change.object.clone())
-                .or_default()
-                .insert(change.field.clone(), change.value.clone());
-        }
-        objects
-    }
-
     pub fn validate(&self) -> Result<(), PlanningExchangeError> {
         for (id, change) in &self.changes {
             if id.is_empty()

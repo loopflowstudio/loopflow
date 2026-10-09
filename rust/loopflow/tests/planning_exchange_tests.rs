@@ -39,15 +39,16 @@ fn write(
 }
 
 fn value(snapshot: &PlanningSnapshot, field: &str) -> serde_json::Value {
-    let value = snapshot.resolved()[&PlanningObject {
-        kind: PlanningKind::Task,
-        id: "task-existing".into(),
-    }][field]
-        .clone();
+    let value = &snapshot
+        .winners()
+        .find(|(_, change)| change.field == field)
+        .unwrap()
+        .1
+        .value;
     if field == "disposition" {
         value["planning_state"].clone()
     } else {
-        value
+        value.clone()
     }
 }
 

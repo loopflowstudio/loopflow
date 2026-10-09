@@ -39,12 +39,13 @@ def test_cli_page_makes_the_case_for_engineers(page: Page, base_url: str) -> Non
     assert page.locator("main > section[id]").evaluate_all(
         "sections => sections.map(section => section.id)"
     ) == ["flows", "where", "start"]
-    assert "loopflow.studio/install.sh" in page.locator(".home-hero .install-row pre").text_content()
-    expect(page.locator(".home-hero").get_by_role("button", name="Copy", exact=True)).to_be_visible()
+    assert "loopflow.studio/install.sh" in page.locator("#start .install-row pre").text_content()
+    expect(page.locator("#start").get_by_role("button", name="Copy", exact=True)).to_be_visible()
+    expect(page.locator(".home-hero .install-row")).to_have_count(0)
     expect(page.locator(".home-hero .eyebrow, #flows h2")).to_have_count(0)
     assert page.locator("#flows .plain li b").all_text_contents()[:2] == [
-        "Flows",
-        "Steps",
+        "Launcher",
+        "Skills",
     ]
     expect(page.get_by_role("link", name="Download for Mac")).to_have_count(0)
     expect(page.locator("main img")).to_have_count(0)

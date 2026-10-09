@@ -242,3 +242,8 @@ Jack Heart asked for a subagent "to really try to study the question of what cmd
 - "then also we have this higher-level API that is about working around organizing around the work, which is basically saying we're doing project management. Maybe we want to mention having a linear integration"
 - "something about how you can mix and match and use what you like and not use what you don't like"
 Jack Heart on the separate Flows section of `/cli`: "I think this should mostly be covered by the previous seciton". Section removed; its share-your-own line folded into Built-ins.
+
+`/cli` command study result (2026-10-09), applied: 13 commands in order prompt → Skill → Flow → show → customize → headless and model → resume → account → usage → task create → task run → usage by Task → land, every one checked against the installed `lf`; `pursue` (a built-in) replaces the invented `ship-api`. List follows the same order. Linear and "mix and match" sit in the lower list, per Jack Heart ("dont need that in the cmds. would be more of a later down mention").
+Found false and removed: "Each step can be interactive or autonomous". Interactivity is per run (`-i`/`-b`); a step can name its own agent and model.
+Jack Heart also: the double gap before the install section was awkward (fixed); "I think i prefer $ curl -fsSL https://loopflow.studio/install.sh | sh at the end for now" (moved; the top of `/cli` is headline then commands); "probably worth a structural design pass once we've done this copy update" (not started).
+Not shown on the page yet: a Flow file with per-step `agent:`; `--json`, `--machine`, `--account`, `lf monitor`, `lf roadmap`.

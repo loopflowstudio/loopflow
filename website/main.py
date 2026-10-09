@@ -872,7 +872,7 @@ def _faq_section() -> FT:
     )
 
 
-def _install_section(download: bool = True) -> FT:
+def _install_section() -> FT:
     return Section(
         P(INSTALL_CONTENT["label"], cls="eyebrow"),
         H2(INSTALL_CONTENT["heading"]),
@@ -885,9 +885,7 @@ def _install_section(download: bool = True) -> FT:
                 data_copy=INSTALL_CONTENT["install_command"],
                 aria_live="polite",
             ),
-            A(INSTALL_CONTENT["download_label"], href=INSTALL_CONTENT["download_url"], cls="button")
-            if download
-            else None,
+            A(INSTALL_CONTENT["download_label"], href=INSTALL_CONTENT["download_url"], cls="button"),
             cls="actions",
         ),
         P(
@@ -1058,12 +1056,7 @@ def build_cli_page() -> tuple:
     return _product_page(
         "Loopflow — " + hero["title"],
         "/cli",
-        Section(
-            _rotating_heading(hero["heading"]),
-            _install_row(),
-            P(hero["cost"], cls="cost"),
-            cls="home-hero",
-        ),
+        Section(_rotating_heading(hero["heading"]), cls="home-hero"),
         Section(
             _terminal(agents["commands"], "lf commands"),
             _plain_list(agents["items"]),
@@ -1077,7 +1070,17 @@ def build_cli_page() -> tuple:
             id="where",
             cls="reading",
         ),
-        _install_section(download=False),
+        Section(
+            P(INSTALL_CONTENT["label"], cls="eyebrow"),
+            _install_row(),
+            P(hero["cost"], cls="cost"),
+            P(
+                *[A(link["label"], href=link["href"]) for link in INSTALL_CONTENT["links"]],
+                cls="capture-label install-links",
+            ),
+            id="start",
+            cls="reading closing",
+        ),
     )
 
 

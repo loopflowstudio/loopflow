@@ -53,18 +53,18 @@ without rewriting Machine defaults. Inheritance is unapproved; Rust unverified.
 Neither negative peer observation nor local SQLite reserves first start; runtime
 must not synchronize. Seeded IDs prove routing, not exchange/admission.
 
-LOO-427 keys windows/queues by plan, fencing cancellation. Task/Session actions
-stay separate; saved/failed reads grant none. Session time is unknown. Move retains
-leaves/commands/surfaces; Undo renews closed tokens. Zoom grants no focus.
-Insertion publishes command/focus/Undo together; companions preserve selection.
-Lost replies grant no replay; view tokens grant no input. Machine-qualified
-terminals/readings preserve same-ID peers. Membership pruning releases no surfaces; filtered absence proves no deletion.
-ProgramStatusSurface owns the observed lifetime.
-`5f4440e52` has exact-target reads and shared terminal/event resolution. Passive
-window/content/surface validation under lf2 returns unavailable, not empty. Linux
-bounded-text tests and embedded C compilation/export pass, not native extraction.
-Independent pre-main C stalling does not explain the cause. No symbol import,
-unbounded fallback or publication; native composition/input/peer work remain.
+LOO-427's local window, exact-pane arrangement, Machine-qualified terminal and
+bounded-read work retains partial proof in `scratch/findings.md`; native artifact,
+peer composition and packaged acceptance remain unfinished. No read grants input
+or lifecycle authority. Failed native builds and limited Linux proof remain evidence.
+
+Jack's October 8 API review: `--context` previews agent input without launch;
+`--explain` is broader. Remove `--max-turns` and probably `--no-loopflow`;
+`--chrome` is execution configuration. Group monitoring with ps/top; explore history.
+Favor Wave-owned planning over public Project/roadmap, remove duplicate `run NAME`,
+and explore `desktop open/list` with unique shorthand. These regroupings are draft.
+Repo lookup defaults to `~/src` with a user override; remembered names remain open.
+Discord is omitted pending Jack's return; implementation-removal scope is unanswered.
 
 Jack selected local planning/Git sync: 406 owns writes/Linear, 412 exchange.
 Imported completion cannot move Workflow or clean execution. Preserve pending
@@ -901,8 +901,8 @@ automatic recovery; durable Steers survive exits, with provider-dependent delive
 - A provider session is AgentInvocation continuity, not Work identity.
 - Machine-local execution, Work continuity, provider history, and direct process
   control have separate owners. The current boundary is documented in
-  `docs/architecture/{execution,planning,machines}.md`; earlier open topology
-  questions below are historical context, not an alternate authority model.
+  `docs/architecture/{execution,planning,machines}.md`; earlier topology questions
+  are historical, not authority.
 
 ### Planning authority and historical migration lessons
 

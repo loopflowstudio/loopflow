@@ -20,6 +20,16 @@ CREATE TABLE planning_peer_changes (
 );
 CREATE INDEX planning_peer_changes_object ON planning_peer_changes(kind,object_id,field);
 CREATE INDEX planning_peer_changes_clock ON planning_peer_changes(clock);
+-- Projection and effect acquisition consult the same retained provider claims.
+-- Losing mappings and captured creation inputs still name their original object;
+-- this view neither associates Work IDs nor changes sharing selection.
+CREATE VIEW planning_peer_provider_claims AS
+SELECT kind,object_id,
+    CASE field WHEN 'creation' THEN json_extract(value,'$.export.id')
+        ELSE json_extract(value,'$') END AS provider_id
+FROM planning_peer_changes
+WHERE (kind='task' AND field IN ('external_issue_id','creation'))
+   OR (kind='project' AND field IN ('external_project_id','creation'));
 CREATE TABLE planning_peer_heads (
     id TEXT PRIMARY KEY REFERENCES planning_peer_changes(id),
     kind TEXT NOT NULL,

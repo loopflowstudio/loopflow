@@ -80,21 +80,21 @@ pub(super) fn require_projected_effects(
     // all retained mappings, not just the winning head: a later null/replacement
     // cannot erase an uncertain effect against the original provider identity.
     // This is effect deferral only, never implicit association or selection.
-    let conflict: Option<String> = conn.query_row(
-        &format!(
-            "SELECT c.object_id FROM planning_peer_conflicts c
+    let conflict: Option<String> = conn
+        .query_row(
+            &format!(
+                "SELECT c.object_id FROM planning_peer_conflicts c
              WHERE c.kind=?1 AND c.active=1 AND (c.object_id=?2 OR EXISTS(
-                 SELECT 1 FROM planning_peer_changes h JOIN {} local
-                 ON local.id=?2 AND local.{mapping} IS NOT NULL
-                 WHERE h.kind=c.kind AND h.object_id=c.object_id AND (
-                     (h.field=?3 AND json_extract(h.value,'$')=local.{mapping})
-                     OR (h.field='creation' AND json_extract(h.value,'$.export.id')=local.{mapping}))))
+                 SELECT 1 FROM planning_peer_provider_claims h JOIN {} local
+                 ON local.id=?2 AND local.{mapping}=h.provider_id
+                 WHERE h.kind=c.kind AND h.object_id=c.object_id))
              ORDER BY c.object_id LIMIT 1",
-            table(object_kind)
-        ),
-        params![kind, id, mapping],
-        |row| row.get(0),
-    ).optional()?;
+                table(object_kind)
+            ),
+            params![kind, id],
+            |row| row.get(0),
+        )
+        .optional()?;
     if let Some(conflict) = conflict {
         return Err(invalid(format!(
             "Planning effects deferred: retained peer projection conflict for {kind} {conflict}; no new mutation issued",
@@ -1395,13 +1395,11 @@ fn validate_provider_mapping(
             "SELECT EXISTS(SELECT 1 FROM {} WHERE
                 (id=?1 AND {mapping} IS NOT NULL AND {mapping} IS NOT ?2)
                 OR (id!=?1 AND ({mapping}=?2 OR EXISTS(
-                    SELECT 1 FROM planning_peer_changes h
-                    WHERE h.kind=?3 AND h.object_id=?1 AND (
-                        (h.field=?4 AND json_extract(h.value,'$')={mapping})
-                        OR (h.field='creation' AND json_extract(h.value,'$.export.id')={mapping}))))))",
+                    SELECT 1 FROM planning_peer_provider_claims h
+                    WHERE h.kind=?3 AND h.object_id=?1 AND h.provider_id={mapping}))))",
             table(object.kind)
         ),
-        params![object.id, provider_id, object.kind.as_str(), mapping],
+        params![object.id, provider_id, object.kind.as_str()],
         |row| row.get(0),
     )?;
     if conflict {
@@ -1719,11 +1717,7 @@ fn acquire_linear_frontier(
     // A mapping is not a creation acknowledgement. Only an accepted provider
     // body can reconcile the original attempt, including after a peer supplied
     // the mapping first. Keep this inside the object's projection savepoint.
-    if let Some(observation) = changes
-        .observations
-        .last()
-        .filter(|_| matches!(object.kind, PlanningKind::Task | PlanningKind::Project))
-    {
+    if let Some(observation) = changes.observations.last() {
         super::planning_export::attach_in(
             conn,
             repo,
@@ -6938,13 +6932,14 @@ mod tests {
         assert_eq!(execution_rows(&target), execution);
         assert_eq!(export(&target, "/target"), masked);
 
-        // Exact provider identity, not Project membership or a matching title,
-        // scopes deferral. Independent effects can still acquire their receipt.
+        // Exact provider kind and identity, not Project membership or a matching
+        // title, scope deferral. A Task whose provider ID equals the conflicted
+        // Project's ID still has an independent effect.
         let independent = TaskId::new();
         target.conn.lock().unwrap().execute(
             "INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,issue_title,issue_description,created_at,updated_at,workspace_slug)
-             VALUES(?1,?2,'independent-provider','OTHER-1','Private uncertain title','',1,1,'')",
-            params![independent.as_str(), legacy.project_id.as_str()],
+             VALUES(?1,?2,?3,'OTHER-1','Private uncertain title','',1,1,'')",
+            params![independent.as_str(), legacy.project_id.as_str(), row.snapshot.projects[0].id],
         ).unwrap();
         edit_title(&target, &independent, "Independent edit");
         let change = target.pending_task_changes(&independent).unwrap().remove(0);

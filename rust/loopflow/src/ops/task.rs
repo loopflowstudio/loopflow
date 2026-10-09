@@ -772,8 +772,8 @@ pub(crate) async fn resolve_task(
         .map_err(task_error)?;
     if task.is_none() {
         if let Some(source) = &source {
-            // Older independently created identities remain local. The explicit
-            // provider alias associates them; matching titles never does.
+            // The issue-name fallback keeps older independent IDs usable, but
+            // records no correspondence between them. Titles never select identity.
             task = store
                 .get_task_by_issue(&source.identifier)
                 .await

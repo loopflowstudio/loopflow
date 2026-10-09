@@ -626,16 +626,16 @@ Joining publishes nothing; imports remain unplaced. Malformed input aborts impor
 contradictions defer effects, never saves/acquisition. Retain baselines, uncertainty
 and losers. Readback settles effects, not mappings/errors or removal via creation.
 
-Ordering, causal evidence/freshness, private-history holds and unknown-journal
-status constraints/proofs remain at `9dfb95451`, this heading. Retain original
-ages, baselines and losers; omission is not convergence. Desktop keeps last-good
-scoped status. Mixed exchange stays disabled; sharing/recovery and public
-composition remain unfinished.
+Ordering, causal freshness, private-history holds and unknown-journal proofs:
+`9dfb95451`, this heading. Retain ages, baselines and losers; omission is not
+convergence. Desktop keeps last-good scoped status. Mixed exchange stays disabled;
+sharing/recovery and public composition remain unfinished.
 
 Legacy association remains unfinished. Clearing mappings creates new provider-creation
-candidates; issue-name fallback persists no association. Cross-ID deferral now
-consults retained mappings/creation inputs, including losing claims, before effects;
-nulling a rejected mapping cannot hide that ownership. This grants no association.
+candidates; issue-name fallback persists no association. Projection and cross-ID
+effect deferral share one derived query of retained mappings/creation inputs,
+including losers; nulling a rejected mapping cannot hide ownership. This grants
+no association.
 Creation receipts bind provider UUID and captured model to their original Work ID;
 redirecting A onto B cannot rewrite that attempted input. The common single-receipt
 layout needs revision before composing correspondence, lookup and projection.

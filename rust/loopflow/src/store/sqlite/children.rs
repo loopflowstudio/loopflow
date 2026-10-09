@@ -853,6 +853,7 @@ impl SqliteStore {
                 project.plan.summary,
             ],
         )?;
+        super::project_content::capture_content(&transaction, &project.id)?;
         inherit_project_placement(&transaction, &project.id)?;
         transaction.commit()?;
         Ok(())

@@ -150,6 +150,8 @@ SELECT lower(hex(randomblob(16))),'wave',r.id,j.key,
     CASE WHEN j.type IN ('object','array') THEN j.value ELSE json_quote(j.value) END,
     0,NULL,'[]' FROM waves r, json_each(json_object('name',r.name,'parent_wave_id',r.parent_wave_id,'current_project_id',r.current_project_id)) j;
 
+-- Semantic workflow/KR/target capture belongs to the common Rust content owner;
+-- migration application seeds existing content in the same transaction.
 CREATE TRIGGER peer_project_insert AFTER INSERT ON projects
 WHEN (SELECT importing FROM planning_peer_context)=0
 BEGIN
@@ -160,7 +162,7 @@ BEGIN
         (SELECT CASE WHEN j.key IN (SELECT key FROM json_each(fields))
             AND j.value IS json_extract(fields, '$.' || j.key) THEN observation END FROM planning_peer_context),
         (SELECT json_group_array(id) FROM planning_peer_heads WHERE kind='project' AND object_id=NEW.id AND field=j.key)
-    FROM json_each(json_object('wave_id',NEW.wave_id,'external_project_id',NEW.external_project_id,'project_slug',NEW.project_slug,'project_name',NEW.project_name,'project_summary',NEW.project_summary,'project_prompt_context',NEW.project_prompt_context,'workflow',NEW.workflow,'status',NEW.status,'planning_rank',NEW.planning_rank,'planning_initiatives',NEW.planning_initiatives,'planning_teams',NEW.planning_teams)) j ;
+    FROM json_each(json_object('wave_id',NEW.wave_id,'external_project_id',NEW.external_project_id,'project_slug',NEW.project_slug,'project_name',NEW.project_name,'project_summary',NEW.project_summary,'status',NEW.status,'planning_rank',NEW.planning_rank,'planning_initiatives',NEW.planning_initiatives,'planning_teams',NEW.planning_teams)) j ;
 END;
 
 CREATE TRIGGER peer_project_update AFTER UPDATE ON projects
@@ -173,7 +175,7 @@ BEGIN
         (SELECT CASE WHEN j.key IN (SELECT key FROM json_each(fields))
             AND j.value IS json_extract(fields, '$.' || j.key) THEN observation END FROM planning_peer_context),
         (SELECT json_group_array(id) FROM planning_peer_heads WHERE kind='project' AND object_id=NEW.id AND field=j.key)
-    FROM json_each(json_object('wave_id',NEW.wave_id,'external_project_id',NEW.external_project_id,'project_slug',NEW.project_slug,'project_name',NEW.project_name,'project_summary',NEW.project_summary,'project_prompt_context',NEW.project_prompt_context,'workflow',NEW.workflow,'status',NEW.status,'planning_rank',NEW.planning_rank,'planning_initiatives',NEW.planning_initiatives,'planning_teams',NEW.planning_teams)) j WHERE j.value IS NOT json_extract(json_object('wave_id',OLD.wave_id,'external_project_id',OLD.external_project_id,'project_slug',OLD.project_slug,'project_name',OLD.project_name,'project_summary',OLD.project_summary,'project_prompt_context',OLD.project_prompt_context,'workflow',OLD.workflow,'status',OLD.status,'planning_rank',OLD.planning_rank,'planning_initiatives',OLD.planning_initiatives,'planning_teams',OLD.planning_teams), '$.' || j.key) OR ((SELECT observation FROM planning_peer_context) IS NOT NULL
+    FROM json_each(json_object('wave_id',NEW.wave_id,'external_project_id',NEW.external_project_id,'project_slug',NEW.project_slug,'project_name',NEW.project_name,'project_summary',NEW.project_summary,'status',NEW.status,'planning_rank',NEW.planning_rank,'planning_initiatives',NEW.planning_initiatives,'planning_teams',NEW.planning_teams)) j WHERE j.value IS NOT json_extract(json_object('wave_id',OLD.wave_id,'external_project_id',OLD.external_project_id,'project_slug',OLD.project_slug,'project_name',OLD.project_name,'project_summary',OLD.project_summary,'status',OLD.status,'planning_rank',OLD.planning_rank,'planning_initiatives',OLD.planning_initiatives,'planning_teams',OLD.planning_teams), '$.' || j.key) OR ((SELECT observation FROM planning_peer_context) IS NOT NULL
         AND j.key IN (SELECT key FROM json_each((SELECT fields FROM planning_peer_context)))
         AND j.value IS json_extract((SELECT fields FROM planning_peer_context), '$.' || j.key)
         AND NOT EXISTS(SELECT 1 FROM planning_peer_heads h JOIN planning_peer_changes c ON c.id=h.id
@@ -185,7 +187,7 @@ END;
 INSERT INTO planning_peer_changes(id,kind,object_id,field,value,clock,linear,parents)
 SELECT lower(hex(randomblob(16))),'project',r.id,j.key,
     CASE WHEN j.type IN ('object','array') THEN j.value ELSE json_quote(j.value) END,
-    0,NULL,'[]' FROM projects r, json_each(json_object('wave_id',r.wave_id,'external_project_id',r.external_project_id,'project_slug',r.project_slug,'project_name',r.project_name,'project_summary',r.project_summary,'project_prompt_context',r.project_prompt_context,'workflow',r.workflow,'status',r.status,'planning_rank',r.planning_rank,'planning_initiatives',r.planning_initiatives,'planning_teams',r.planning_teams)) j;
+    0,NULL,'[]' FROM projects r, json_each(json_object('wave_id',r.wave_id,'external_project_id',r.external_project_id,'project_slug',r.project_slug,'project_name',r.project_name,'project_summary',r.project_summary,'status',r.status,'planning_rank',r.planning_rank,'planning_initiatives',r.planning_initiatives,'planning_teams',r.planning_teams)) j;
 
 CREATE TRIGGER peer_task_insert AFTER INSERT ON tasks
 WHEN (SELECT importing FROM planning_peer_context)=0

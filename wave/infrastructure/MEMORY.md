@@ -629,13 +629,12 @@ Entity revisions cannot order relationships.
 `a388ed425` shares disposition receipts without Workflow moves: a selected Linear
 winner retires losing intention; ordinary unchanged acquisition preserves it.
 
-Comments retain common owners, IDs, observations and losing receipts, without steer
-or echo. Migrated acquired rows await observed authorship. Creation, Project/order,
-deletion, alternate acquisition, legacy association and Desktop remain. Raw Markdown
-can replace independent KR/target edits even without Linear; replace it semantically.
-Design: `scratch/work-on-another-machine-name.md`; prior proofs:
-`ae6f392c2:wave/infrastructure/MEMORY.md`. SQL proves no executable acceptance;
-checkpoint CI skips product suites with scratch.
+Comments retain common owners and authorship without steer/echo. Project content
+now journals semantic workflow/KR/target fields, not raw Markdown, through the
+common parser and receipts. Rust tests remain unexecuted; SQL proves no composed
+acceptance. Creation/link, order, deletion, alternate acquisition, legacy association
+and Desktop remain. Design: `scratch/work-on-another-machine-name.md`; prior proofs:
+`ae6f392c2:wave/infrastructure/MEMORY.md`. Checkpoint CI skips product suites with scratch.
 
 Parent `ffe986160` settles state from observations, not synthetic success.
 Joining publishes nothing; mixed Linear awaits composition, not policy.

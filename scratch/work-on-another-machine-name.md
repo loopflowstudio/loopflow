@@ -149,6 +149,10 @@ Keep these replacements deleted:
 - Value-only projection indexes and copied causal-head indexes. One borrowed,
   field-keyed winner index now feeds completeness, projection and delivery across
   retries; stable IDs and provider provenance stay attached.
+- Raw Project Markdown mutations and duplicate workflow representation are
+  removed. The existing semantic content owner captures all three fields and
+  renders their combined winners; retained Markdown storage and original migration
+  bytes remain. Whole KR/target lists preserve their existing common field semantics.
 - Peer-only scalar/state receipt SQL, identical-body acquisition bypasses and
   replay of superseded provider revisions. Use common acquisition and receipt
   owners, retaining typed contradictions after object rollback. Entity revisions
@@ -188,13 +192,22 @@ original acquisition times travel in the journal; imported authorship creates no
 local steer. Authored regressions cover lost replies, later edits, conflicts,
 no echo, migration and execution preservation. Rust execution remains unavailable.
 
-The next bounded implementation is semantic Project content: journal workflow,
-KRs and metric targets through the existing common owner, replacing the raw
-Markdown winner and separately ordered workflow in the same diff. This gap affects
-local-only concurrent edits too; independent KR and target changes can currently
-replace each other. Acceptance needs two stores retaining both changes and the
-losing same-field edit, plus common receipts when Linear is connected. This is an
-implementation order, not new product scope or completed behavior.
+October 8 semantic Project content now replaces the raw Markdown mutation and its
+separately duplicated workflow. The common content owner captures workflow, KRs
+and metric targets independently in the existing journal, then renders their
+combined winners. Creation, selection, rotation and accepted acquisition capture
+inside their existing transactions. Migration application seeds retained content
+through the same parser in the SQL transaction, without rewriting its source bytes.
+No SQLite Markdown parser, parallel content table or export-time mutation exists.
+The common field receipts retain peer mutation IDs, causal provider baselines,
+uncertain attempts and Linear losers. Rust tests are authored for two-store
+independent edits, same-field losers, receipt retention, provider winners,
+malformed-input rollback, failed capture and populated migration; not executed.
+
+The next bounded implementation is creation/link receipt composition through
+`planning_export.rs`, retaining imported identities and uncertain attempts without
+minting replacements or acknowledging identity alone. This is implementation
+order, not new product scope or completed acceptance.
 
 Creation/link, order and deletion receipts, alternate acquisition paths, legacy
 association and Desktop presentation still follow. Comments and Task disposition
@@ -309,8 +322,7 @@ provenance gap; revise it with the completed composition, not as a product limit
    Task test preserves a pending local value on an unchanged provider baseline.
    Rust execution remains unproved; disposable SQL checks do not execute these tests.
 
-   Creation, Project KRs/targets and ordering, and deletion receipts remain
-   uncomposed. Comments now use the common owners described below. Task disposition now uses the common receipt owner;
+   Creation, ordering and deletion receipts remain uncomposed. Comments now use the common owners described below. Task disposition now uses the common receipt owner;
    authored regressions cover lost replies, later reopening, late readback exclusion,
    unchanged-state provider conflict, idempotence and transaction-wide receipt failure.
    Cancellation is covered by the same authored test; Rust execution remains. Common accepted Task/Project acquisition captures
@@ -387,12 +399,13 @@ provenance gap; revise it with the completed composition, not as a product limit
      Non-lifecycle cached states (for example started/backlog) project without
      inventing a local state intention. Alternate-provider-path coverage and Rust
      execution remain; imported completion-time preservation is asserted explicitly.
-   - Project content still travels as `project_prompt_context`, with `workflow`
-     separately ordered. `project_content.rs::write_content` already owns semantic
-     workflow/KR/target receipts. Merely parsing the winning Markdown to enqueue
-     receipts would still let independent KR and target edits replace each other;
-     finish semantic capture/ordering before claiming composition, removing the
-     raw-content winner and duplicated Workflow representation together.
+   - Project content now travels as semantic workflow/KR/target fields, not raw
+     `project_prompt_context`. `project_content.rs` owns parsing and combined
+     persistence; peer receipt projection uses its common field-delivery owner.
+     Each KR list and target list is one existing semantic field, not a new
+     per-item identity model. Acquisition records original provider provenance
+     only on equal values. Populated migration and runtime writers use the same
+     capture owner; import suppresses echo. Rust/composed acceptance remains.
    - `planning_order.rs::observe_in` requires complete-list evidence; Task entity
      revisions and scalar peer fields cannot settle a captured move. Deletion
      retains its separate baselines and attempts in `planning_changes.rs`.
@@ -480,7 +493,7 @@ Infrastructure child memory exists in this checkout.
 7. Replace PR copy and create a walkthrough of final behavior and evidence;
    publish #1491 for Jack Heart's review and stop without landing.
 
-Check (October 8 realign, prose only): `git diff --check` and `lf context --skill realign` pass; Rust execution remains deferred to a capable isolated gate/CI, not rerun after unchanged build-script startup timeouts.
+Check (October 8 semantic content): `cargo fmt --all --check`, `git diff --check` and canonical/draft SQL plus source-extracted capture pass; `lf context --skill implement` fits. Build, focused `peer_project_content`/malformed-content/migration tests and Clippy remain with capable isolated gate/CI; unchanged build-script startup stalls were not reprobed.
 
 Prior fmt and source-extracted SQL passes, focused-test/Clippy timeouts and their
 startup samples are preserved at `e77d2d1c8:scratch/work-on-another-machine-name.md`.

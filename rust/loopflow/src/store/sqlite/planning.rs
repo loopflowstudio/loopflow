@@ -580,6 +580,7 @@ fn project_accepted_planning(
                 WHERE wave_id=?2 AND project_id=?3),planning_rank) WHERE id=?1",
             params![id.as_str(), wave_id, project.id],
         )?;
+        super::project_content::capture_content(tx, &id)?;
         super::planning_peers::clear_observation(tx)?;
         super::durable::inherit_project_placement(tx, &id)?;
     }

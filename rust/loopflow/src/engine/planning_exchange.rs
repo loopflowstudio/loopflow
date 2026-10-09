@@ -37,8 +37,9 @@ impl PlanningKind {
                 "project_slug",
                 "project_name",
                 "project_summary",
-                "project_prompt_context",
                 "workflow",
+                "krs",
+                "metric_targets",
                 "status",
                 "planning_rank",
                 "planning_initiatives",
@@ -111,9 +112,7 @@ impl LinearObservation {
                 serde_json::json!({
                     "external_project_id":project.id,"project_slug":project.slug,"project_name":project.name,
                     "project_summary":project.summary,"workflow":project.workflow,"status":project.status.as_str(),
-                    "project_prompt_context":crate::pm::render_project_content(&crate::pm::ProjectContent {
-                        workflow:project.workflow.clone(), krs:project.krs.clone(), metric_targets:project.metric_targets.clone(),
-                    }),
+                    "krs":project.krs,"metric_targets":project.metric_targets,
                 })
             }
             PlanningKind::Comment => {
@@ -309,6 +308,15 @@ fn validate_value(change: &PlanningMutation) -> Result<(), PlanningExchangeError
     let value = &change.value;
     let text = |value: &Value| value.is_null() || value.is_string();
     let valid = match change.field.as_str() {
+        "workflow" | "krs" | "metric_targets" if change.object.kind == PlanningKind::Project => {
+            let mut content = serde_json::json!({"workflow":"","krs":[],"metric_targets":[]});
+            content[&change.field] = value.clone();
+            serde_json::from_value::<crate::pm::ProjectContent>(content).is_ok_and(|content| {
+                content.validate().is_ok()
+                    && serde_json::to_value(&content)
+                        .is_ok_and(|roundtrip| roundtrip[&change.field] == *value)
+            })
+        }
         "planning_rank" => value.as_u64().is_some_and(|rank| rank <= u32::MAX as u64),
         "planning_deleted_at" => value.is_null() || value.as_i64().is_some_and(|at| at >= 0),
         "planning_initiatives" | "planning_teams" => value

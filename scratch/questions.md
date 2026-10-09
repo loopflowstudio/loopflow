@@ -132,3 +132,16 @@ is retained at `5d336868f:scratch/questions.md`.
   database failures still fail status. This replaces the second global conflict reader,
   not the journal or its validation. `de9470d5a` also shares the destination-scoped
   conflict query with import settlement. Public/DTO regressions remain unexecuted.
+
+- October 8 semantic-content choice: retain existing common Markdown storage,
+  but remove it from peer ordering. Rust's content owner captures workflow, the
+  KR list and the target list in the existing journal; each list keeps its common
+  receipt granularity. All production creation/acquisition/content writers capture
+  before committing. The existing migration data-hook pattern seeds populated
+  content with that parser in the same transaction, rather than adding a SQL
+  parser, a second table or export-time edits. Malformed retained content fails
+  migration without discarding its bytes. This is an implementation choice, not
+  new policy from Jack Heart. Review removed an incorrect test expectation that
+  an observed concurrent Linear winner must preserve a losing local field; the
+  selected winner retires its intention and retains the losing receipt. Independent
+  edits without a competing observation remain covered. Rust tests are unexecuted.

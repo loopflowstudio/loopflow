@@ -26,6 +26,77 @@ fn invalid(error: impl std::fmt::Display) -> StoreError {
     StoreError::InvalidData(error.to_string())
 }
 
+/// Content is parsed by its common owner, not by a second SQL Markdown parser.
+/// Capture in the caller's transaction, using the same journal and causal heads
+/// as scalar triggers. Import suppresses echo; readback only adds missing facts.
+pub(super) fn capture_project_content(
+    conn: &Connection,
+    project: &ProjectId,
+    content: &crate::pm::ProjectContent,
+) -> StoreResult<()> {
+    let (importing, observation, observed): (bool, Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT importing,observation,fields FROM planning_peer_context WHERE singleton=1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+    if importing {
+        return Ok(());
+    }
+    let observation: Option<LinearObservation> = observation
+        .map(|body| serde_json::from_str(&body))
+        .transpose()?;
+    let observed: Option<Value> = observed
+        .map(|body| serde_json::from_str(&body))
+        .transpose()?;
+    let mut query = conn.prepare(
+        "SELECT c.kind,c.object_id,c.field,c.value,c.clock,c.linear,c.parents,c.id
+        FROM planning_peer_changes c JOIN planning_peer_heads h ON h.id=c.id
+        WHERE c.kind='project' AND c.object_id=?1",
+    )?;
+    let mut heads = PlanningSnapshot::default();
+    let mut rows = query.query([project.as_str()])?;
+    while let Some(row) = rows.next()? {
+        heads.changes.insert(row.get(7)?, read_mutation(row)?);
+    }
+    let winners: BTreeMap<_, _> = heads
+        .winners()
+        .map(|(_, c)| (c.field.as_str(), c))
+        .collect();
+    let fields = serde_json::to_value(content)?;
+    for (field, value) in fields.as_object().expect("Project content is an object") {
+        let linear = observation
+            .as_ref()
+            .filter(|_| observed.as_ref().and_then(|o| o.get(field)) == Some(value));
+        let unchanged = winners
+            .get(field.as_str())
+            .is_some_and(|winner| winner.value == *value);
+        let frontier_retained = linear.is_none_or(|observation| {
+            heads.changes.values().any(|head| {
+                head.field == *field
+                    && head.value == *value
+                    && head.linear.as_ref().is_some_and(|prior| {
+                        prior.body["id"] == observation.body["id"]
+                            && prior.revision() == observation.revision()
+                    })
+            })
+        });
+        if unchanged && frontier_retained {
+            continue;
+        }
+        conn.execute("INSERT INTO planning_peer_changes(id,kind,object_id,field,value,clock,linear,parents)
+            SELECT lower(hex(randomblob(16))),'project',?1,?2,?3,
+                max(CAST(unixepoch('subsec')*1000 AS INTEGER),COALESCE((SELECT max(clock)+1 FROM planning_peer_changes),0)),?4,
+                (SELECT json_group_array(id) FROM planning_peer_heads WHERE kind='project' AND object_id=?1 AND field=?2)",
+            params![project.as_str(),field,value.to_string(),linear.map(serde_json::to_string).transpose()?])?;
+    }
+    Ok(())
+}
+
+fn content_field(field: &str) -> bool {
+    matches!(field, "workflow" | "krs" | "metric_targets")
+}
+
 /// Mark only fields equal to the accepted provider fact. Reconciliation may
 /// preserve a pending local value; that value must not acquire Linear priority.
 pub(super) fn observe_task(
@@ -912,10 +983,19 @@ fn insert_and_project(
         winners
             .values()
             .filter(|(_, change)| {
-                object.kind != PlanningKind::Wave || change.field != "current_project_id"
+                !(object.kind == PlanningKind::Wave && change.field == "current_project_id"
+                    || object.kind == PlanningKind::Project && content_field(&change.field))
             })
             .map(|(_, change)| (change.field.as_str(), &change.value)),
     )?;
+    if object.kind == PlanningKind::Project {
+        let content = serde_json::from_value(serde_json::json!({
+            "workflow":winners["workflow"].1.value,
+            "krs":winners["krs"].1.value,
+            "metric_targets":winners["metric_targets"].1.value,
+        }))?;
+        super::project_content::save_content(conn, &ProjectId::from_raw(&object.id), &content)?;
+    }
     project_delivery_fields(conn, object, winners, snapshot, &previous)?;
     require_repository(conn, object, repo)
 }
@@ -1132,6 +1212,8 @@ fn delivery_field(kind: PlanningKind, field: &str) -> Option<&'static str> {
         (PlanningKind::Task, "project_id") => Some("project_id"),
         (PlanningKind::Project, "project_summary") => Some("summary"),
         (PlanningKind::Project, "workflow") => Some("workflow"),
+        (PlanningKind::Project, "krs") => Some("krs"),
+        (PlanningKind::Project, "metric_targets") => Some("metric_targets"),
         (PlanningKind::Project, "status") => Some("status"),
         _ => None,
     }
@@ -1145,7 +1227,10 @@ fn delivery_fields(
         .kind
         .fields()
         .iter()
-        .filter(|field| delivery_field(object.kind, field).is_some())
+        .filter(|field| {
+            delivery_field(object.kind, field).is_some()
+                && !(object.kind == PlanningKind::Project && content_field(field))
+        })
         .map(|field| format!("'{field}',{field}"))
         .collect::<Vec<_>>();
     if object.kind == PlanningKind::Task {
@@ -1164,7 +1249,14 @@ fn delivery_fields(
         [&object.id],
         |row| row.get(0),
     )?;
-    serde_json::from_str(&body).map_err(Into::into)
+    let mut fields: BTreeMap<String, Value> = serde_json::from_str(&body)?;
+    if object.kind == PlanningKind::Project {
+        let content = super::project_content::read_content(conn, &ProjectId::from_raw(&object.id))?;
+        fields.extend(serde_json::from_value::<BTreeMap<String, Value>>(
+            serde_json::to_value(content)?,
+        )?);
+    }
+    Ok(fields)
 }
 
 fn project_delivery_fields(
@@ -1469,6 +1561,7 @@ mod tests {
             VALUES(?1,?2,1,'chapter','Chapter','')", params![project.as_str(),wave.id()]).unwrap();
         conn.execute("INSERT INTO tasks(id,project_id,issue_identifier,issue_title,issue_description,created_at)
             VALUES(?1,?2,'FIX-1','Original','Brief',1)",params![task.as_str(),project.as_str()]).unwrap();
+        super::super::project_content::capture_content(&conn, &project).unwrap();
         drop(conn);
         store
             .select_peer_waves("/source", &destination(), std::slice::from_ref(wave.id()))
@@ -1546,6 +1639,334 @@ mod tests {
             "SELECT comment_json,acknowledged,error,conflicting_comment_json FROM task_comment_deliveries WHERE comment_id=?1",
             [id], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?)),
         ).unwrap()
+    }
+
+    #[test]
+    fn peer_project_content_merges_independent_fields_and_retains_losing_edits() {
+        for linear in [false, true] {
+            let (_source_home, source) = store();
+            let (_target_home, target) = store();
+            let task = if linear {
+                linear_seed(&source).2
+            } else {
+                seed(&source)
+            };
+            let original = source.task(&task).unwrap().unwrap();
+            let project = &original.project_id;
+            let base = source
+                .export_peer_planning("/source", &destination())
+                .unwrap();
+            target
+                .import_peer_planning("/target", &destination(), "base", &base)
+                .unwrap();
+            preserve_execution(&target, &original.wave_id, &task);
+            let execution = target.revisions().unwrap();
+            let task_before = target.task(&task).unwrap();
+            let workflow_before = target.workflow(&task).unwrap();
+            let baseline =
+                super::super::project_content::read_content(&source.conn.lock().unwrap(), project)
+                    .unwrap();
+            let mut left = baseline.clone();
+            left.krs = vec![crate::pm::PmKr {
+                text: "Keep the independent KR".into(),
+                holds: false,
+            }];
+            source.update_project_content(project, &left).unwrap();
+            let mut right = baseline.clone();
+            right.workflow = "peer-review".into();
+            right.metric_targets = vec![crate::pm::ChapterMetricTarget {
+                metric_id: "fixture/coverage".into(),
+                target: crate::work::wave::metrics::MetricTarget::AtLeast { value: 1.0 },
+            }];
+            target.update_project_content(project, &right).unwrap();
+            let incoming = source
+                .export_peer_planning("/source", &destination())
+                .unwrap();
+            assert!(incoming
+                .changes
+                .values()
+                .all(|c| c.field != "project_prompt_context"));
+            let kr_mutation = incoming
+                .winners()
+                .find(|(_, c)| c.object.id == project.as_str() && c.field == "krs")
+                .unwrap()
+                .0
+                .to_owned();
+            target
+                .import_peer_planning("/target", &destination(), "independent", &incoming)
+                .unwrap();
+            right.krs = left.krs.clone();
+            let merged = target.planning_project(project).unwrap();
+            assert_eq!(merged.krs, right.krs);
+            assert_eq!(merged.metric_targets, right.metric_targets);
+            assert_eq!(merged.workflow, right.workflow);
+            let receipt = target
+                .pending_project_changes(project)
+                .unwrap()
+                .into_iter()
+                .find(|c| c.field == "krs")
+                .unwrap();
+            assert_eq!(receipt.id, format!("peer:{kr_mutation}:krs"));
+            assert_eq!(receipt.value, json!(right.krs));
+            if linear {
+                assert_eq!(receipt.base.as_ref().unwrap()["value"], json!(baseline.krs));
+                assert_eq!(
+                    receipt.base.as_ref().unwrap()["revision"],
+                    json!(merged.revision)
+                );
+            } else {
+                assert!(receipt.base.is_none());
+            }
+            target
+                .conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "UPDATE project_changes SET attempted=1,error='lost reply' WHERE id=?1",
+                    [&receipt.id],
+                )
+                .unwrap();
+            let union = target
+                .export_peer_planning("/target", &destination())
+                .unwrap();
+            source
+                .import_peer_planning("/source", &destination(), "union", &union)
+                .unwrap();
+            assert_eq!(source.planning_project(project).unwrap(), merged);
+            target
+                .import_peer_planning("/target", &destination(), "independent", &incoming)
+                .unwrap();
+            let receipt_state: (bool,bool,Option<String>,Option<String>) = target.conn.lock().unwrap().query_row(
+                "SELECT attempted,acknowledged,error,conflict_json FROM project_changes WHERE id=?1", [&receipt.id],
+                |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).unwrap();
+            assert_eq!(
+                receipt_state,
+                (true, false, Some("lost reply".into()), None)
+            );
+            assert_eq!(
+                target
+                    .export_peer_planning("/target", &destination())
+                    .unwrap(),
+                union
+            );
+
+            // Concurrent edits of the same semantic field retain both values.
+            left = right.clone();
+            left.krs[0].text = "Source's later KR".into();
+            right.krs[0].text = "Target's later KR".into();
+            source.update_project_content(project, &left).unwrap();
+            target.update_project_content(project, &right).unwrap();
+            let a = source
+                .export_peer_planning("/source", &destination())
+                .unwrap();
+            let b = target
+                .export_peer_planning("/target", &destination())
+                .unwrap();
+            let combined = a.merge(&b).unwrap();
+            let winner = combined
+                .winners()
+                .find(|(_, c)| c.object.id == project.as_str() && c.field == "krs")
+                .unwrap()
+                .1
+                .value
+                .clone();
+            target
+                .import_peer_planning("/target", &destination(), "concurrent", &a)
+                .unwrap();
+            source
+                .import_peer_planning("/source", &destination(), "concurrent", &b)
+                .unwrap();
+            for (store, repo) in [(&source, "/source"), (&target, "/target")] {
+                assert_eq!(json!(store.planning_project(project).unwrap().krs), winner);
+                let journal = store.export_peer_planning(repo, &destination()).unwrap();
+                assert_eq!(journal, combined);
+                for value in [json!(left.krs), json!(right.krs)] {
+                    assert!(journal
+                        .changes
+                        .values()
+                        .any(|c| c.object.id == project.as_str()
+                            && c.field == "krs"
+                            && c.value == value));
+                }
+            }
+            assert_eq!(target.task(&task).unwrap(), task_before);
+            assert_eq!(target.workflow(&task).unwrap(), workflow_before);
+            let after = target.revisions().unwrap();
+            assert_eq!(
+                (after.sessions, after.processes, after.flows),
+                (execution.sessions, execution.processes, execution.flows)
+            );
+        }
+    }
+
+    #[test]
+    fn peer_project_content_linear_winner_retires_loser_and_retains_receipt() {
+        let (_source_home, source) = store();
+        let (_target_home, target) = store();
+        let (wave, row, task) = linear_seed(&source);
+        let project = source.task(&task).unwrap().unwrap().project_id;
+        let base = source
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        target
+            .import_peer_planning("/target", &destination(), "base", &base)
+            .unwrap();
+        let mut content =
+            super::super::project_content::read_content(&target.conn.lock().unwrap(), &project)
+                .unwrap();
+        content.krs = vec![crate::pm::PmKr {
+            text: "Retain losing local KR".into(),
+            holds: false,
+        }];
+        target.update_project_content(&project, &content).unwrap();
+        let receipt = target
+            .pending_project_changes(&project)
+            .unwrap()
+            .into_iter()
+            .find(|c| c.field == "krs")
+            .unwrap();
+        target
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE project_changes SET attempted=1,error='lost reply' WHERE id=?1",
+                [&receipt.id],
+            )
+            .unwrap();
+        let mut observed = row.snapshot.projects[0].clone();
+        observed.krs = vec![crate::pm::PmKr {
+            text: "Accepted provider KR".into(),
+            holds: true,
+        }];
+        observed.revision = Some("2026-10-08T15:00:00Z".into());
+        source
+            .put_pm_project(&wave, "linear", "initiative", &observed, 70)
+            .unwrap();
+        let incoming = source
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        let winner = incoming
+            .winners()
+            .find(|(_, c)| c.object.id == project.as_str() && c.field == "krs")
+            .unwrap()
+            .1;
+        assert_eq!(winner.linear.as_ref().unwrap().body, json!(observed));
+        target
+            .import_peer_planning("/target", &destination(), "observed", &incoming)
+            .unwrap();
+        let actual = target.planning_project(&project).unwrap();
+        assert_eq!(actual.krs, observed.krs);
+        assert_eq!(actual.workflow, observed.workflow);
+        let state: (String,bool,bool,Option<String>) = target.conn.lock().unwrap().query_row(
+            "SELECT value_json,attempted,acknowledged,conflict_json FROM project_changes WHERE id=?1", [&receipt.id],
+            |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&state.0).unwrap(),
+            json!(content.krs)
+        );
+        assert!(state.1);
+        assert!(!state.2);
+        assert!(state.3.is_some());
+        assert!(target
+            .pending_project_changes(&project)
+            .unwrap()
+            .iter()
+            .all(|c| c.field != "krs"));
+        let before = target
+            .export_peer_planning("/target", &destination())
+            .unwrap();
+        target
+            .import_peer_planning("/target", &destination(), "observed", &incoming)
+            .unwrap();
+        assert_eq!(
+            target
+                .export_peer_planning("/target", &destination())
+                .unwrap(),
+            before
+        );
+    }
+
+    #[test]
+    fn malformed_project_content_aborts_import_without_partial_projection() {
+        let (_source_home, source) = store();
+        let (_target_home, target) = store();
+        let task = seed(&source);
+        let project = source.task(&task).unwrap().unwrap().project_id;
+        let base = source
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        for (field, value) in [
+            (
+                "krs",
+                json!([{"text":"Hidden execution","holds":false,"process_lfid":"forbidden"}]),
+            ),
+            (
+                "metric_targets",
+                json!([
+                    {"metric_id":"duplicate","target":{"kind":"at_least","value":1}},
+                    {"metric_id":"duplicate","target":{"kind":"at_most","value":2}},
+                ]),
+            ),
+            ("workflow", json!(null)),
+        ] {
+            let mut invalid = base.clone();
+            let change = invalid
+                .changes
+                .values_mut()
+                .find(|c| c.object.id == project.as_str() && c.field == field)
+                .unwrap();
+            change.value = value;
+            assert!(target
+                .import_peer_planning("/target", &destination(), "invalid", &invalid)
+                .is_err());
+            assert!(target.task(&task).unwrap().is_none());
+            assert!(target.project(&project).unwrap().is_none());
+            assert!(target
+                .export_peer_planning("/target", &destination())
+                .unwrap()
+                .changes
+                .is_empty());
+            assert_eq!(import_revision(&target, "/target", &destination()), None);
+        }
+    }
+
+    #[test]
+    fn peer_project_content_capture_failure_rolls_back_content_and_receipts() {
+        let (_home, store) = store();
+        let task = seed(&store);
+        let project = store.task(&task).unwrap().unwrap().project_id;
+        let before = store.project(&project).unwrap();
+        let journal = store
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute_batch(
+                "CREATE TRIGGER fail_content_capture BEFORE INSERT ON planning_peer_changes
+            WHEN NEW.kind='project' AND NEW.field='krs'
+            BEGIN SELECT RAISE(ABORT,'injected semantic capture failure'); END;",
+            )
+            .unwrap();
+        let content = crate::pm::ProjectContent {
+            workflow: "review".into(),
+            metric_targets: vec![],
+            krs: vec![crate::pm::PmKr {
+                text: "Must not partially save".into(),
+                holds: false,
+            }],
+        };
+        assert!(store.update_project_content(&project, &content).is_err());
+        assert_eq!(store.project(&project).unwrap(), before);
+        assert_eq!(
+            store
+                .export_peer_planning("/source", &destination())
+                .unwrap(),
+            journal
+        );
+        assert!(store.pending_project_changes(&project).unwrap().is_empty());
     }
 
     #[test]
@@ -3230,6 +3651,7 @@ mod tests {
                 params![private_project, private.id()],
             )
             .unwrap();
+            super::super::project_content::capture_content(&conn, &private_project).unwrap();
             conn.execute(
                 "UPDATE waves SET current_project_id=?2 WHERE id=?1",
                 params![private.id(), private_project],
@@ -3455,6 +3877,7 @@ mod tests {
         {
             let conn = store.conn.lock().unwrap();
             conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,?3,1)", params![private_id,private_wave.id(),project.id]).unwrap();
+            super::super::project_content::capture_content(&conn, &private_id).unwrap();
             conn.execute(
                 "UPDATE projects SET wave_id=?2 WHERE id=?1",
                 params![private_id, wave.id()],
@@ -3628,6 +4051,7 @@ mod tests {
                 params![private_project, private.id()],
             )
             .unwrap();
+            super::super::project_content::capture_content(&conn, &private_project).unwrap();
             conn.execute("INSERT INTO tasks(id,project_id,issue_identifier,issue_title,created_at,worktree) VALUES(?1,?2,'PRIVATE-1','Private draft',1,'/retained/private')", params![private_task,private_project]).unwrap();
         }
         right.bind_peer_planning("/target", &destination).unwrap();
@@ -3668,6 +4092,7 @@ mod tests {
                 params![project, shared.id()],
             )
             .unwrap();
+            super::super::project_content::capture_content(&conn, &project).unwrap();
             conn.execute("INSERT INTO tasks(id,project_id,issue_identifier,issue_title,created_at) VALUES(?1,?2,'SHARED-1','Shared work',1)", params![task,project]).unwrap();
             conn.execute(
                 "UPDATE tasks SET issue_title='Still private' WHERE id=?1",
@@ -4053,8 +4478,15 @@ mod tests {
             VALUES('acquired','task','Provider body','{\"kind\":\"integration\"}',NULL,'2026-10-08T10:00:00Z');",
         )
         .unwrap();
+        let retained_content = "workflow: review\n\n## KRs\n- [x] Keep the accepted proof\n";
+        conn.execute(
+            "UPDATE projects SET project_prompt_context=?1,workflow='review' WHERE id='project'",
+            [retained_content],
+        )
+        .unwrap();
         conn.execute_batch(&upgrade.expect("peer draft or materialized migration"))
             .unwrap();
+        super::super::project_content::seed_peer_content(&conn).unwrap();
         conn.execute("INSERT INTO planning_destinations(repo,id,endpoint,reference) VALUES('/fixture',?1,?2,?3)",
             params![destination(),binding().endpoint(),binding().reference()]).unwrap();
         assert!(super::export_in(&conn, "/fixture", &destination())
@@ -4070,6 +4502,27 @@ mod tests {
         .unwrap();
         let before = super::export_in(&conn, "/fixture", &destination()).unwrap();
         assert!(!before.changes.is_empty());
+        let content: std::collections::BTreeMap<_, _> = before
+            .winners()
+            .filter(|(_, c)| c.object.id == "project")
+            .map(|(_, c)| (c.field.as_str(), c.value.clone()))
+            .collect();
+        assert_eq!(content["workflow"], json!("review"));
+        assert_eq!(
+            content["krs"],
+            json!([{"text":"Keep the accepted proof","holds":true}])
+        );
+        assert_eq!(content["metric_targets"], json!([]));
+        assert!(!content.contains_key("project_prompt_context"));
+        assert_eq!(
+            conn.query_row(
+                "SELECT project_prompt_context FROM projects WHERE id='project'",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            retained_content
+        );
         assert!(!before
             .changes
             .values()
@@ -4421,6 +4874,7 @@ mod tests {
                 params![moved_project, moved_wave.id()],
             )
             .unwrap();
+            super::super::project_content::capture_content(&conn, &moved_project).unwrap();
             conn.execute(
                 "UPDATE tasks SET project_id=?2 WHERE id=?1",
                 params![task, moved_project],

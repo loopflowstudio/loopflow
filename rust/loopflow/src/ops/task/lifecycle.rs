@@ -193,12 +193,9 @@ async fn abandon(repo: &Path, selector: &str, force: bool) -> OpsResult<String> 
     let task = match resolve_task(&store, selector).await? {
         Some(task) => task,
         None => {
-            // An unseen provider alias needs acquisition before there is a local
-            // record to decide. Existing Tasks never depend on this lookup.
-            let resolved = crate::ops::pm::pm_resolve_task_async(repo, selector).await?;
-            resolve_task(&store, &resolved.item.id)
+            crate::ops::pm::resolve_saved_task(repo, None, selector)
                 .await?
-                .ok_or_else(|| task_error("Task was not retained after acquisition"))?
+                .1
         }
     };
     save_abandon(&store, &task).await?;
@@ -224,6 +221,8 @@ async fn save_abandon(store: &SharedStore, task: &Task) -> OpsResult<()> {
         .abandon(&WorkRef::Task(task.id.clone()), "explicit Task abandonment")
         .await
         .map_err(task_error)?;
+    let wave = owning_wave(store, task).await?;
+    crate::ops::planning_peer::sync_after_save(store, wave.repo()).await;
     Ok(())
 }
 
@@ -235,13 +234,14 @@ pub fn task_delete(repo: &Path, issue: &str) -> OpsResult<String> {
         let task = match resolve_task(&store, issue).await? {
             Some(task) => task,
             None => {
-                let resolved = crate::ops::pm::pm_resolve_task_async(&repo, issue).await?;
-                resolve_task(&store, &resolved.item.id)
+                crate::ops::pm::resolve_saved_task(&repo, None, issue)
                     .await?
-                    .ok_or_else(|| task_error("Task was not retained after acquisition"))?
+                    .1
             }
         };
         store.sqlite.delete_task(&task.id).map_err(task_error)?;
+        let wave = owning_wave(&store, &task).await?;
+        crate::ops::planning_peer::sync_after_save(&store, wave.repo()).await;
         Ok(task.plan.identifier)
     })
 }

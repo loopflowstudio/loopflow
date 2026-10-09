@@ -235,9 +235,11 @@ lf planning status --json
 ```
 
 Setup is local: these commands neither fetch nor publish planning. In local-only
-repositories, foreground Task work and Desktop's work connection exchange selected
-planning. Machine dispatch publishes first; cold Task resolution acquires before
-placement. A disconnected remote leaves local saves intact.
+repositories, interactive and headless sessions exchange selected planning, even
+without a Task. Desktop's work connection does the same. Task saves and Project
+edits commit locally, then attempt exchange before returning; failed exchange
+leaves pending state, not a failed save. Machine dispatch publishes first; cold
+Task resolution acquires before placement. No resident or turn retry runs.
 
 Status separates fetched revisions, retained imports, pending local edits and
 pending/unconfirmed/confirmed publication. Confirmation covers the recorded revision,

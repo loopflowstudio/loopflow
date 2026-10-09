@@ -2,6 +2,8 @@ mod support;
 
 use std::fs::{self, File};
 use std::io::Write;
+#[cfg(unix)]
+use std::os::unix::{fs::PermissionsExt, process::CommandExt};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
@@ -20,11 +22,39 @@ fn command(repo: &Path, home: &Path) -> Command {
         .env("HOME", home)
         .env("LF_HOME", home)
         .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+        .env("CLAUDE_CONFIG_DIR", home.join("claude"))
+        .env("CODEX_HOME", home.join("codex"))
         .env("PATH", "/usr/bin:/bin")
         .env("GIT_ALLOW_PROTOCOL", "file")
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .env("GIT_CONFIG_GLOBAL", "/dev/null");
     command
+}
+
+fn run(repo: &Path, home: &Path, args: &[&str]) -> String {
+    let output = command(repo, home)
+        .args(args)
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{args:?}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).unwrap()
+}
+
+fn create(repo: &Path, home: &Path, wave: &str) -> String {
+    let mut args = vec!["task", "create", "--title", "Same title", "--json"];
+    if !wave.is_empty() {
+        args.extend(["--wave", wave]);
+    }
+    let output = run(repo, home, &args);
+    serde_json::from_str::<serde_json::Value>(&output).unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .into()
 }
 
 struct Watch(Child);
@@ -84,7 +114,7 @@ fn status(runtime: &tokio::runtime::Runtime, store: &Store, repo: &str) -> PeerP
         .remove(0)
 }
 
-fn execution(conn: &Connection) -> Vec<Vec<Vec<rusqlite::types::Value>>> {
+fn execution(conn: &Connection, task: &str) -> Vec<Vec<Vec<rusqlite::types::Value>>> {
     [
         "agent_sessions",
         "processes",
@@ -94,17 +124,19 @@ fn execution(conn: &Connection) -> Vec<Vec<Vec<rusqlite::types::Value>>> {
     ]
     .into_iter()
     .map(|table| {
-        let predicate = if table == "processes" {
-            " WHERE lfid='00000000-0000-4000-8000-000000000001'"
+        let (predicate, identity) = if table == "processes" {
+            ("lfid=?1", "00000000-0000-4000-8000-000000000001")
         } else {
-            ""
+            ("task_id=?1", task)
         };
         let mut query = conn
-            .prepare(&format!("SELECT * FROM {table}{predicate} ORDER BY rowid"))
+            .prepare(&format!(
+                "SELECT * FROM {table} WHERE {predicate} ORDER BY rowid"
+            ))
             .unwrap();
         let columns = query.column_count();
         query
-            .query_map([], |row| (0..columns).map(|i| row.get(i)).collect())
+            .query_map([identity], |row| (0..columns).map(|i| row.get(i)).collect())
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap()
@@ -123,6 +155,8 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
     let target = other.path().canonicalize().unwrap();
     let source_key = source.to_str().unwrap();
     let target_key = target.to_str().unwrap();
+    fs::write(left.path().join("config.yaml"), "user:\n  name: Maya\n").unwrap();
+    fs::write(right.path().join("config.yaml"), "user:\n  name: Lee\n").unwrap();
     let fixture = support::register_unrun_task(left.path(), &source, "main", &repo.head_sha());
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let worker = runtime
@@ -165,9 +199,28 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
         params![fixture.task.id.as_str(), graph.to_string()],
     )
     .unwrap();
-    let before = execution(&conn);
+    let before = execution(&conn, fixture.task.id.as_str());
     let placement = fixture.task.worktree.clone();
     assert!(status(&runtime, &fixture.store, source_key).pending_local);
+    // Short commands exchange without a watcher, and identical create requests
+    // remain different intentions, unlike repeated delivery of the same journal.
+    let first = create(&source, left.path(), "task-pr-tests");
+    let second = create(&source, left.path(), "task-pr-tests");
+    assert_ne!(first, second);
+    let cold = run(
+        &target,
+        right.path(),
+        &["task", "comment", &first, "--json"],
+    );
+    assert!(serde_json::from_str::<serde_json::Value>(&cold).is_ok());
+    let third = create(&target, right.path(), "task-pr-tests");
+    assert_ne!(first, third);
+    assert_ne!(second, third);
+    run(&source, left.path(), &["task", "move", &first, "end"]);
+    assert!(runtime
+        .block_on(worker.get_task(&first.parse().unwrap()))
+        .unwrap()
+        .is_some());
     let source_watch = Watch::start(&source, left.path());
     let worker_watch = Watch::start(&target, right.path());
     wait_for(|| {
@@ -201,14 +254,55 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
     fs::rename(remote, &disconnected).unwrap();
     let worker_conn = Connection::open(right.path().join("loopflow.db")).unwrap();
     worker_conn.busy_timeout(Duration::from_secs(5)).unwrap();
-    conn.execute(
-        "UPDATE tasks SET issue_description='Written offline on source' WHERE id=?1",
-        [fixture.task.id.as_str()],
-    )
-    .unwrap();
-    worker_conn.execute("UPDATE tasks SET issue_title='Written offline on worker',planning_completed=1,planning_state='completed' WHERE id=?1", [fixture.task.id.as_str()]).unwrap();
-    worker_conn.execute("INSERT INTO task_comments(id,task_id,body,author,created_at) VALUES('peer-comment',?1,'Keep the running conversation',?2,'2026-10-08T12:00:00Z')",
-        params![fixture.task.id.as_str(),json!({"kind":"person","name":"Maya"}).to_string()]).unwrap();
+    run(
+        &source,
+        left.path(),
+        &[
+            "task",
+            "edit",
+            fixture.task.id.as_str(),
+            "--notes",
+            "Written offline on source",
+        ],
+    );
+    run(
+        &target,
+        right.path(),
+        &[
+            "task",
+            "edit",
+            fixture.task.id.as_str(),
+            "--title",
+            "Written offline on worker",
+        ],
+    );
+    run(
+        &target,
+        right.path(),
+        &[
+            "task",
+            "comment",
+            fixture.task.id.as_str(),
+            "Keep the running conversation",
+            "--json",
+        ],
+    );
+    run(
+        &source,
+        left.path(),
+        &[
+            "task",
+            "comment",
+            fixture.task.id.as_str(),
+            "Saved on source too",
+            "--json",
+        ],
+    );
+    run(
+        &target,
+        right.path(),
+        &["task", "move", fixture.task.id.as_str(), "end"],
+    );
     wait_for(|| {
         status(&runtime, &worker, target_key)
             .acquisition_error
@@ -256,8 +350,8 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
     });
     wait_for(|| {
         conn.query_row(
-            "SELECT count(*) FROM task_comments WHERE id='peer-comment'",
-            [],
+            "SELECT count(*) FROM task_comments WHERE task_id=?1 AND body LIKE '%Keep the running conversation%'",
+            [fixture.task.id.as_str()],
             |r| r.get::<_, i64>(0),
         )
         .unwrap()
@@ -280,7 +374,7 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
     });
     drop(source_watch);
     drop(worker_watch);
-    assert_eq!(execution(&conn), before);
+    assert_eq!(execution(&conn, fixture.task.id.as_str()), before);
     assert_eq!(
         runtime
             .block_on(fixture.store.get_task(&fixture.task.id))
@@ -289,7 +383,58 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
             .worktree,
         placement
     );
-    assert_eq!(runtime.block_on(worker.list_tasks(None)).unwrap().len(), 1);
+    assert_eq!(runtime.block_on(worker.list_tasks(None)).unwrap().len(), 4);
+    assert_eq!(
+        runtime
+            .block_on(fixture.store.list_tasks(None))
+            .unwrap()
+            .len(),
+        4
+    );
+    for connection in [&conn, &worker_conn] {
+        let comments: i64 = connection
+            .query_row(
+                "SELECT count(*) FROM task_comments WHERE task_id=?1",
+                [fixture.task.id.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            comments, 2,
+            "repeated exchange must not duplicate either comment"
+        );
+    }
+    let comments = |connection: &Connection| {
+        connection
+            .prepare(
+                "SELECT id,body,author,created_at FROM task_comments WHERE task_id=?1 ORDER BY id",
+            )
+            .unwrap()
+            .query_map([fixture.task.id.as_str()], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+    };
+    let saved = comments(&conn);
+    assert_eq!(saved, comments(&worker_conn));
+    let mut authors: Vec<_> = saved
+        .iter()
+        .map(|(_, _, author, _)| {
+            serde_json::from_str::<serde_json::Value>(author).unwrap()["name"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        })
+        .collect();
+    authors.sort();
+    assert_eq!(authors, ["Lee", "Maya"]);
     let printed = command(&target, right.path())
         .args(["planning", "status", "--json"])
         .output()
@@ -345,4 +490,168 @@ fn fetched_invalid_document_does_not_claim_import_or_publication() {
     assert!(status.imported_revision.is_none());
     assert!(status.publication_revision.is_none());
     drop(watch);
+}
+
+#[cfg(unix)]
+struct Agent {
+    child: Child,
+    home: std::path::PathBuf,
+}
+
+#[cfg(unix)]
+impl Agent {
+    fn start(repo: &Path, home: &Path, interactive: bool) -> Self {
+        let bin = home.join("bin");
+        fs::create_dir(&bin).unwrap();
+        let provider = bin.join("claude");
+        fs::write(
+            &provider,
+            r#"#!/bin/sh
+printf 'launch\n' >> "$HOME/launches"
+for argument in "$@"; do
+  if [ "$argument" = --print ]; then cat > /dev/null; fi
+done
+printf 'ready\n' > "$HOME/ready.tmp"
+mv "$HOME/ready.tmp" "$HOME/ready"
+while [ ! -f "$HOME/stop" ]; do sleep 0.1; done
+printf '%s\n' '{"type":"result","subtype":"success","result":"done"}'
+"#,
+        )
+        .unwrap();
+        fs::set_permissions(&provider, fs::Permissions::from_mode(0o755)).unwrap();
+        let child = command(repo, home)
+            .process_group(0)
+            .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+            .args([if interactive { "-i" } else { "-b" }, "-a", "claude:sonnet"])
+            .stdin(Stdio::null())
+            .stdout(File::create(home.join("agent.stdout")).unwrap())
+            .stderr(File::create(home.join("agent.stderr")).unwrap())
+            .spawn()
+            .unwrap();
+        let mut agent = Self {
+            child,
+            home: home.to_path_buf(),
+        };
+        wait_for(|| {
+            assert!(
+                agent.child.try_wait().unwrap().is_none(),
+                "{}",
+                fs::read_to_string(home.join("agent.stderr")).unwrap()
+            );
+            home.join("ready").exists()
+        });
+        agent
+    }
+
+    fn finish(&mut self) {
+        fs::write(self.home.join("stop"), "stop").unwrap();
+        wait_for(|| self.child.try_wait().unwrap().is_some());
+        assert!(
+            self.child.wait().unwrap().success(),
+            "{}",
+            fs::read_to_string(self.home.join("agent.stderr")).unwrap()
+        );
+        assert_eq!(
+            fs::read_to_string(self.home.join("launches")).unwrap(),
+            "launch\n"
+        );
+    }
+}
+
+#[cfg(unix)]
+impl Drop for Agent {
+    fn drop(&mut self) {
+        if self.child.try_wait().ok().flatten().is_none() {
+            // SAFETY: this fixture created and still owns this live process group.
+            unsafe { libc::kill(-(self.child.id() as i32), libc::SIGKILL) };
+            let _ = self.child.wait();
+        }
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn taskless_terminal_and_headless_sessions_keep_planning_live() {
+    let source = TestRepo::new();
+    let target = TestRepo::new();
+    let left = tempfile::tempdir().unwrap();
+    let right = tempfile::tempdir().unwrap();
+    let source_path = source.path().canonicalize().unwrap();
+    let target_path = target.path().canonicalize().unwrap();
+    let source_key = source_path.to_str().unwrap();
+    let target_key = target_path.to_str().unwrap();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let a = runtime
+        .block_on(open_ephemeral_store(&StorageConfig::sqlite(
+            left.path().join("loopflow.db"),
+        )))
+        .unwrap();
+    let b = runtime
+        .block_on(open_ephemeral_store(&StorageConfig::sqlite(
+            right.path().join("loopflow.db"),
+        )))
+        .unwrap();
+    let binding = PlanningDestination::resolve(
+        &source_path,
+        "origin",
+        "refs/loopflow/planning/shared/taskless",
+    )
+    .unwrap();
+    // The connection must also discover destinations selected after launch.
+    let mut source_agent = Agent::start(&source_path, left.path(), true);
+    let mut target_agent = Agent::start(&target_path, right.path(), false);
+    runtime.block_on(async {
+        a.bind_peer_planning(source_key, &binding).await.unwrap();
+        a.use_peer_planning(source_key, Some(&binding.id()))
+            .await
+            .unwrap();
+        b.bind_peer_planning(target_key, &binding).await.unwrap();
+    });
+    let id = create(&source_path, left.path(), "");
+    let task_id = id.parse().unwrap();
+    // No work-watch, Task placement, explicit Work binding or further turn.
+    wait_for(|| runtime.block_on(b.get_task(&task_id)).unwrap().is_some());
+    let remote = Path::new(binding.endpoint());
+    let disconnected = remote.with_extension("disconnected");
+    fs::rename(remote, &disconnected).unwrap();
+    run(
+        &source_path,
+        left.path(),
+        &["task", "edit", &id, "--title", "Source offline"],
+    );
+    run(
+        &target_path,
+        right.path(),
+        &["task", "edit", &id, "--notes", "Target offline"],
+    );
+    assert!(status(&runtime, &a, source_key).pending_local);
+    assert!(status(&runtime, &b, target_key).pending_local);
+    fs::rename(&disconnected, remote).unwrap();
+    wait_for(|| {
+        let source = runtime.block_on(a.get_task(&task_id)).unwrap().unwrap();
+        let target = runtime.block_on(b.get_task(&task_id)).unwrap().unwrap();
+        source.plan.description == "Target offline"
+            && target.plan.title == "Source offline"
+            && !status(&runtime, &a, source_key).pending_local
+            && !status(&runtime, &b, target_key).pending_local
+    });
+    source_agent.finish();
+    target_agent.finish();
+    for (store, home) in [(&a, left.path()), (&b, right.path())] {
+        assert!(runtime
+            .block_on(store.get_task(&task_id))
+            .unwrap()
+            .unwrap()
+            .worktree
+            .is_none());
+        let connection = Connection::open(home.join("loopflow.db")).unwrap();
+        let sessions: (i64, i64) = connection
+            .query_row(
+                "SELECT count(*),count(task_id) FROM agent_sessions",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(sessions, (1, 0));
+    }
 }

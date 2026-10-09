@@ -637,10 +637,11 @@ provenance gap without activation, not a product limit.
 
 Fetch/import/publication stay separate; confirmation excludes later saves.
 Readback resolves uncertainty; workers retain effect locks through cancellation.
-Acquisition/saves stay independent. A damaged journal breaks CLI status, not independent exchange. Taskless/mutation lifetimes and Desktop status remain.
-The work-watch fixture uses SQL edits. Release's entry-point lesson applies:
-transport proofs cannot establish public saves, cold dispatch or reconnect.
-SQL runs; Rust remains unexecuted.
+Acquisition/saves stay independent. A damaged journal breaks status, not exchange.
+Taskless providers sync; saves attempt exchange after commit.
+Two-store fixtures replace SQL edits, requiring preserved execution,
+reconnect and deduplication. Authored fixtures prove no behavior: SQL runs;
+Rust times out before tests. Desktop status remains.
 
 Move counterexample: `a43f3e2ea`; repairs: `b5dafd918`/`7395cf3bb`. Holds retain
 moves, private journals and dependents. Only explicit selection releases history.

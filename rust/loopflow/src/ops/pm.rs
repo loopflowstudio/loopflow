@@ -1040,6 +1040,12 @@ pub(crate) async fn task_comment_async(
     let (store, task) = resolve_saved_task(repo, wave, issue).await?;
     if let Some(message) = message {
         super::task::append_task_comment(&store, &task, message, steer)?;
+        let owner = store
+            .get_wave(&task.wave_id)
+            .await
+            .map_err(|error| OpsError::Message(error.to_string()))?
+            .ok_or_else(|| OpsError::Message("Task Wave is missing".into()))?;
+        super::planning_peer::sync_after_save(&store, owner.repo()).await;
     }
     let refresh_error = if message.is_none() && task.plan.linear_id.is_some() {
         match tokio::time::timeout(
@@ -1069,10 +1075,26 @@ pub(crate) async fn resolve_saved_task(
     issue: &str,
 ) -> OpsResult<(Arc<Store>, crate::work::task::Task)> {
     let store = Arc::new(pm_store().await?);
+    let canonical = crate::repository::CanonicalRepo::discover(repo)
+        .map_err(|error| OpsError::Message(error.to_string()))?;
     let task = store
         .get_task_by_issue(issue)
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?;
+    let task = if task.is_none() {
+        if super::planning_peer::acquire_repository(&store, &canonical.to_string())
+            .await
+            .is_err()
+        {
+            tracing::debug!("Git planning acquisition pending; using saved Task");
+        }
+        store
+            .get_task_by_issue(issue)
+            .await
+            .map_err(|error| OpsError::Message(error.to_string()))?
+    } else {
+        task
+    };
     let task = match task {
         Some(task) => task,
         None => {
@@ -1091,8 +1113,6 @@ pub(crate) async fn resolve_saved_task(
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?
         .ok_or_else(|| OpsError::Message("Task Wave is missing".into()))?;
-    let canonical = crate::repository::CanonicalRepo::discover(repo)
-        .map_err(|error| OpsError::Message(error.to_string()))?;
     let expected_wave = match wave {
         Some(selector) => Some(
             crate::work::wave::context::resolve_managed_wave(

@@ -24,6 +24,14 @@ pub(crate) async fn publish_repository(store: &Store, repo: &str) -> OpsResult<(
     exchange_repository(store, repo, true).await
 }
 
+/// A short command saves first, then makes one foreground exchange attempt.
+/// Failure leaves its successful local mutation and durable pending state intact.
+pub(crate) async fn sync_after_save(store: &Store, repo: &str) {
+    if publish_repository(store, repo).await.is_err() {
+        eprintln!("Saved locally; Git planning sync pending. See `lf planning status`.");
+    }
+}
+
 async fn exchange_repository(store: &Store, repo: &str, publish: bool) -> OpsResult<()> {
     let destinations = store
         .peer_planning_destination_ids(repo)

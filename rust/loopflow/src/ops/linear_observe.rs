@@ -82,6 +82,18 @@ pub(crate) struct PlanningSync {
 }
 
 impl PlanningSync {
+    /// Repository planning follows every foreground provider, not Task attribution.
+    pub(crate) fn start_for_directory(directory: &std::path::Path) -> OpsResult<Self> {
+        super::task::block_on_task(async {
+            let store = super::pm::pm_store().await?;
+            let repo = crate::repository::CanonicalRepo::discover(directory)
+                .map_err(|error| OpsError::Message(error.to_string()))?
+                .to_string();
+            Self::start(std::sync::Arc::new(store), repo)
+                .map_err(|error| OpsError::Message(error.to_string()))
+        })
+    }
+
     pub(crate) fn start(store: SharedStore, repo: String) -> std::io::Result<Self> {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()

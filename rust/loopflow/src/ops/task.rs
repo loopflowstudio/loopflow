@@ -1369,6 +1369,7 @@ pub fn task_create(
             )
             .await
             .map_err(task_error)?;
+        super::planning_peer::sync_after_save(&store, wave.repo()).await;
         task_planning_item(&store, &task)
     })
 }
@@ -3705,26 +3706,7 @@ pub fn task_follow_up(
 pub fn task_end(repo: &Path, issue: &str, note: Option<&str>, end: &EndOptions) -> OpsResult<Task> {
     let note = note.map(str::trim).filter(|note| !note.is_empty());
     block_on_task(async {
-        let store = task_store().await?;
-        let task = store
-            .get_task_by_issue(issue)
-            .await
-            .map_err(|error| task_error(format!("failed to read Task: {error}")))?;
-        let mut task = match task {
-            Some(task) => task,
-            None => {
-                let resolved =
-                    super::task_pm::resolve_task_async(repo, issue, super::pm::PmRefresh::Force)
-                        .await?;
-                store
-                    .get_task_by_issue(&resolved.item.id)
-                    .await
-                    .map_err(task_error)?
-                    .ok_or_else(|| {
-                        task_error("accepted planning did not retain the Task identity")
-                    })?
-            }
-        };
+        let (store, mut task) = super::pm::resolve_saved_task(repo, None, issue).await?;
         reach_end(&store, &mut task, EndMove::Set, note, end).await?;
         Ok(task)
     })
@@ -3833,6 +3815,8 @@ async fn reach_end(
         .await
         .map_err(task_error)?
         .ok_or_else(|| task_error("completed Task is missing"))?;
+    let wave = owning_wave(store, task).await?;
+    super::planning_peer::sync_after_save(store, wave.repo()).await;
     if keeps_checkout {
         eprintln!(
             "Task {} is complete; retained its checkout.",
@@ -4163,6 +4147,8 @@ pub(crate) async fn reconcile_task_completion(
         .await
         .map_err(task_error)?
         .ok_or_else(|| task_error("completed Task is missing"))?;
+    let wave = owning_wave(store, task).await?;
+    super::planning_peer::sync_after_save(store, wave.repo()).await;
     Ok(())
 }
 
@@ -4863,6 +4849,7 @@ pub fn task_edit(
             .await
             .map_err(task_error)?;
         let owner = owning_wave(&store, &edited).await?;
+        super::planning_peer::sync_after_save(&store, owner.repo()).await;
         Ok(TaskEdit {
             wave: owner.slug().into(),
             id: edited.id.to_string(),
@@ -4919,6 +4906,8 @@ pub fn task_refile(repo: &Path, issue: &str, wave: &str) -> OpsResult<super::pm:
         {
             eprintln!("Saved locally; pending Linear sync.");
         }
+        drop(guards);
+        super::planning_peer::sync_after_save(&store, destination.repo()).await;
         Ok(super::pm::PmUpdateResult {
             wave: destination.slug().into(),
             id: task.id.to_string(),

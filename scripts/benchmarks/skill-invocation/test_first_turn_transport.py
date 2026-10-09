@@ -41,3 +41,11 @@ def test_native_guide_before_first_turn_is_preserved():
     request = _request("native guide")
     request["input"].extend(_request("request")["input"])
     assert all(_assess([request], "request").values())
+
+
+def test_terminal_normalization_is_not_exact_delivery():
+    for original, received in [
+        ("skill\r\nrequest", "skill\nrequest"),
+        ("literal \x1b[201~ request", "literal  request"),
+    ]:
+        assert not _assess([_request(received)], original)["complete_first_turn"]

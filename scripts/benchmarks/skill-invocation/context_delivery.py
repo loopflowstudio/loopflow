@@ -119,7 +119,11 @@ def _claude(root: Path, env: dict[str, str], port: int) -> None:
         ("after", ["--resume", session, "LOO444_AFTER_REQUEST"]),
     ]:
         if phase == "compact":
-            (root / "current.txt").write_text("LOO444_FRESH_CONTEXT")
+            (root / "current.txt").write_text(
+                (root / "current.txt")
+                .read_text()
+                .replace("LOO444_START_CONTEXT", "LOO444_FRESH_CONTEXT")
+            )
         result = _run(base + args, root / "work", env)
         (root / f"{phase}.stdout").write_text(result.stdout)
         (root / f"{phase}.stderr").write_text(result.stderr)
@@ -227,7 +231,11 @@ enabled = false
                 wait(lambda item: item.get("method") == "turn/completed")
 
             turn("LOO444_REQUEST")
-            (root / "current.txt").write_text("LOO444_FRESH_CONTEXT")
+            (root / "current.txt").write_text(
+                (root / "current.txt")
+                .read_text()
+                .replace("LOO444_START_CONTEXT", "LOO444_FRESH_CONTEXT")
+            )
             call("thread/compact/start", {"threadId": thread})
             wait(lambda item: item.get("method") == "turn/completed")
             turn("LOO444_AFTER_REQUEST")
@@ -242,10 +250,34 @@ enabled = false
             (root / "messages.json").write_text(json.dumps(transcript, indent=2))
 
 
-def _assess(provider: str, requests: list[dict], events: list[dict]) -> dict[str, bool]:
+def _contains_context(request: dict, role: str, context: str) -> bool:
+    for message in request.get("messages", request.get("input", [])):
+        if message.get("role") != role:
+            continue
+        content = message.get("content", [])
+        texts = (
+            [content] if isinstance(content, str) else [block.get("text", "") for block in content]
+        )
+        if any(context in text for text in texts):
+            return True
+    return False
+
+
+def _assess(
+    provider: str,
+    requests: list[dict],
+    events: list[dict],
+    context: str = "LOO444_START_CONTEXT",
+) -> dict[str, bool]:
     first, last = requests[0], requests[-1]
     role = "user" if provider == "claude" else "developer"
     checks = {
+        "startup_context_complete": _contains_context(first, role, context + "_SessionStart"),
+        "fresh_context_complete": _contains_context(
+            last,
+            role,
+            context.replace("LOO444_START_CONTEXT", "LOO444_FRESH_CONTEXT") + "_SessionStart",
+        ),
         "startup_context_conversation_only": _marker_locations(first, "LOO444_START_CONTEXT")
         == [role],
         "fresh_context_conversation_only": _marker_locations(
@@ -283,20 +315,35 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--provider", choices=["claude", "codex"], required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--context-chars", type=int, default=len("LOO444_START_CONTEXT_SessionStart")
+    )
+    parser.add_argument("--unicode", action="store_true", help="fill the hook context with emoji")
     args = parser.parse_args()
+    if args.context_chars < len("LOO444_START_CONTEXT_SessionStart"):
+        parser.error("--context-chars must leave room for the context marker")
     args.output.mkdir(parents=True, exist_ok=True)
     root = Path(tempfile.mkdtemp(prefix=f"{args.provider}-", dir=args.output)).resolve()
     for name in ["work", "home"]:
         (root / name).mkdir()
-    (root / "current.txt").write_text("LOO444_START_CONTEXT")
+    context = ("🐙" if args.unicode else "x") * (
+        args.context_chars - len("LOO444_START_CONTEXT_SessionStart")
+    ) + "LOO444_START_CONTEXT"
+    (root / "current.txt").write_text(context)
     env = {"PATH": os.environ["PATH"], "HOME": str(root / "home")}
     server = Requests(args.provider)
     try:
         with server:
             (_claude if args.provider == "claude" else _codex)(root, env, server.server_port)
             events = [json.loads(line) for line in (root / "hooks.jsonl").read_text().splitlines()]
-            checks = _assess(args.provider, server.bodies, events)
-            result = {"provider": args.provider, "checks": checks, "evidence": str(root)}
+            checks = _assess(args.provider, server.bodies, events, context)
+            result = {
+                "provider": args.provider,
+                "checks": checks,
+                "evidence": str(root),
+                "context_chars": len(context + "_SessionStart"),
+                "context_bytes": len((context + "_SessionStart").encode()),
+            }
             (root / "result.json").write_text(json.dumps(result, indent=2))
             print(json.dumps(result, indent=2))
             return 0 if all(checks.values()) else 1

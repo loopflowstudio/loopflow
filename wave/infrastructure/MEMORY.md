@@ -1005,16 +1005,18 @@ tuning policy; the synthetic harness remains unbuilt. Jack Heart's July 6
 ## Direct invocation and large inputs (curated 2026-10-09)
 
 Jack Heart's LOO-444 supersedes 429's all-system transport: native prompts/guides,
-skill/request first, whole-file context refreshed at start/compaction. Option B
-fixes additions per surface/reply/participant profile; metadata stays there.
-Production authorized, not built. Native-guide wording is proposed. Wave/ancestor
-bytes come from SQLite, not checkout.
+skill/request first, whole-file start/compact context. Option B
+fixes additions per surface/reply/participant profile.
+Production authorized, unchanged; native-guide wording proposed. Wave/ancestor
+bytes remain SQLite-owned.
 
-Fake-API proofs: Claude 2.1.295 refreshes user context; Codex 0.161.0 retains native
-base/AGENTS.md/additions across compact. SessionStart injects, PostCompact does not;
-app-server needs scoped trust. Exec accepts 225,023 stdin bytes; TUI rejects them
-without a request. Caps, lf integration, automatic compact, OpenCode and cmux are
-unproved. [Evidence](../../scripts/benchmarks/skill-invocation/README.md).
+Fake APIs: Claude 2.1.295/Codex 0.161.0 refresh 10,000-byte ASCII blocks;
+both truncate 10,000-scalar emoji blocks. Codex keeps markers around missing
+text: compare whole strings, budget provider units. SessionStart injects;
+PostCompact does not. Codex keeps native base/guides/additions; trust is scoped.
+TUI rejects stdin; paste delivers 285 KB Unicode, but alters CRLF/terminators.
+Production, lossless terminal/resume, automatic compact, OpenCode and cmux are open.
+[Evidence](../../scripts/benchmarks/skill-invocation/README.md).
 
 Main `3e1e6245c` (#1512) ties engines to driver lifelines; dead-driver replacement
 resumes native history on a new engine, not the abandoned turn. Context/trust must
@@ -1025,11 +1027,10 @@ Retain setup-free capture, saved config/trust, native identity and caller checkp
 Interrupted profiles may remain unselected; PTYs prove no fresh reconnect hooks or
 host tracking. 429/428 history: `3a0aa5ca4:wave/infrastructure/MEMORY.md`, this heading.
 
-Flow output shows position/name/messages; verbose adds accounting/INFO, not prompts.
-Started commits with registration. Jack removed `--tui`: terminal defaults interactive,
-`-i` forces it, `-b` stays headless; stale forwarding is removed. CI owns the matrix.
-Proofs: `9ab5b6a52`, this heading. LOO-422 owns OSC 7501 simplification after adoption.
-Rejected-turn recovery remains unresolved; homepage capture follows installation.
+Flow output omits prompts; Started commits with registration. Jack removed
+`--tui`: terminal defaults interactive, `-i` forces it, `-b` stays headless.
+Proofs: `9ab5b6a52`, this heading; CI owns the matrix. LOO-422 owns OSC 7501
+simplification after adoption; rejected-turn recovery and installed homepage capture remain open.
 
 LOO-420: Jack Heart's October 8 comments `5f149330-5f5d-4a71-bb05-289b13fe2d94`
 and `76407cd0-b271-45e7-8953-62abe7f9df2b` correct the overexpanded scope:

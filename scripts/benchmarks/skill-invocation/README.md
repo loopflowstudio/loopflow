@@ -147,11 +147,36 @@ uv run python scripts/test_network.py uv run --no-sync python \
 uv run pytest scripts/benchmarks/skill-invocation/test_first_turn_transport.py -q
 ```
 
-Compares 225,023-byte stdin turns on Codex exec/TUI with terminal stdout, fresh
+Compares 285 KB Unicode stdin turns on Codex exec/TUI with terminal stdout, fresh
 Homes and a fake API. Saves requests, terminal output, argv sizes and exit/timeout
 evidence. Nonzero means failed delivery.
 
 Codex 0.161.0 (October 9): exec delivered exact user text; TUI exited 1 with
 `stdin is not a terminal`, without a request. This rejects file-backed stdin
-only. PTY injection and other native transports remain untested; production is
-unchanged.
+only. Production is unchanged.
+
+```sh
+uv run python scripts/test_network.py uv run --no-sync python \
+  scripts/benchmarks/skill-invocation/first_turn_transport.py \
+  --transport paste --output /tmp/lf-paste-proof
+# Repeat with --case carriage-return and --case paste-marker (expected failures).
+uv run python scripts/test_network.py uv run --no-sync python \
+  scripts/benchmarks/skill-invocation/context_delivery.py \
+  --provider codex --context-chars 10000 --output /tmp/lf-hook-size-proof
+# Repeat with --provider claude, and with --unicode on both (expected failures).
+```
+
+Codex 0.161.0's bracketed paste delivered 285,023 UTF-8 bytes including emoji
+with a maximum 86-byte argument. Raw-editor readiness, resize, follow-up history
+and `/quit` passed. CRLF became LF and a literal paste terminator was consumed:
+this is not a lossless transport. Exact first-request comparison rejects those
+cases even though the client exits successfully. Signals, concurrent input,
+native resume, Claude terminal transport and cmux remain unproved.
+
+Claude 2.1.295 and Codex 0.161.0 preserve 10,000 ASCII characters at start and
+manual compaction. Both spill and truncate 10,000 Unicode scalars / 39,901 UTF-8
+bytes. Codex retains the boundary markers around a cut in the middle; the probe
+now compares the entire context string. A 2,500-scalar / 9,901-byte Codex block
+passes. Count provider units before selecting whole files, not just Unicode
+scalars; a native spill preview is still truncation. These samples prove no
+Loopflow integration or automatic compaction.

@@ -57,3 +57,22 @@ def test_post_compact_receipt_does_not_prove_delivery():
     assert checks["post_compact_hook_ran"]
     assert not checks["post_compact_does_not_inject"]
     assert not checks["fresh_context_conversation_only"]
+
+
+@pytest.mark.parametrize("filler", ["x" * 9968, "🐙" * 9968])
+def test_complete_boundary_context_survives_both_injections(observation, filler):
+    provider, bodies, events = observation
+    field = "messages" if provider == "claude" else "input"
+    for body in bodies:
+        body[field][0]["content"] = filler + body[field][0]["content"]
+    checks = _assess(provider, bodies, events, filler + "LOO444_START_CONTEXT")
+    assert checks["startup_context_complete"]
+    assert checks["fresh_context_complete"]
+
+
+def test_markers_cannot_hide_a_cut_in_the_middle(observation):
+    provider, bodies, events = observation
+    checks = _assess(provider, bodies, events, "omitted text\nLOO444_START_CONTEXT")
+    assert checks["fresh_context_conversation_only"]
+    assert not checks["startup_context_complete"]
+    assert not checks["fresh_context_complete"]

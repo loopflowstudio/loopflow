@@ -32,8 +32,6 @@ pub struct ProcessPromptInput {
     pub skill_arguments: String,
     pub no_loopflow: bool,
     pub agent: Option<String>,
-    pub cwd: Option<PathBuf>,
-    pub max_turns: Option<u32>,
     pub yolo_mode: bool,
     pub source_overrides: ContextSourceOverrides,
     pub summary: Option<String>,
@@ -83,8 +81,6 @@ pub(crate) fn preview_process_prompt(
         skill_arguments,
         no_loopflow,
         agent,
-        cwd,
-        max_turns,
         yolo_mode,
         source_overrides,
         summary,
@@ -199,11 +195,11 @@ pub(crate) fn preview_process_prompt(
         task_prompt,
         skill_invocation,
         agent: Some(agent),
-        max_turns,
+        max_turns: None,
         resume_token: None,
         provider_account_id: None,
         provider_account_authority_home: None,
-        cwd: Some(cwd.unwrap_or(repo_root)),
+        cwd: Some(repo_root),
         write_scope: crate::engine::agent::AgentWriteScope::Configured,
         execution_boundary: None,
         skip_permissions: yolo_mode,
@@ -850,6 +846,8 @@ Test skill body.
             },
         )
         .expect("prepare prompt");
+        assert_eq!(prepared.config.cwd.as_deref(), Some(tmp.path()));
+        assert_eq!(prepared.config.max_turns, None);
         assert!(prepared.prompt.contains("<lf:loopflow>"));
         assert!(prepared
             .config

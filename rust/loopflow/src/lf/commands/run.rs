@@ -392,8 +392,6 @@ fn build_prompt_at(
                 .as_ref()
                 .and_then(|(_, seed)| seed.task.agent.clone())
                 .or_else(|| cli.agent.clone()),
-            cwd: Some(repo_root.clone()),
-            max_turns: None,
             yolo_mode: cli.yolo || config.yolo,
             source_overrides: ContextSourceOverrides {
                 diff_files: cli.diff_files_setting(),
@@ -1064,30 +1062,12 @@ fn relay_directives(relay: &std::path::Path, target: &str) {
     }
 }
 
-pub fn split_skill_args(args: &[String]) -> Result<(String, Vec<String>)> {
-    let first = args.first().ok_or_else(|| anyhow!("no skill specified"))?;
-
-    let mut skill = first.clone();
-    let skill_args = args.iter().skip(1).cloned().collect::<Vec<_>>();
-
-    // Trailing colon is a separator: `implement: add auth` → skill="implement"
-    if let Some(stripped) = skill.strip_suffix(':') {
-        skill = stripped.to_string();
-    }
-
-    if skill.is_empty() {
-        return Err(anyhow!("no skill specified"));
-    }
-
-    Ok((skill, skill_args))
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
         attributed_context, begin_capture, build_bound_prompt_at, build_prompt_at,
         is_interactive_run, is_interactive_run_with_tty, run_headless_prompt, run_prompt,
-        split_skill_args, PromptBuild,
+        PromptBuild,
     };
 
     use crate::engine::agent::{run_agent, AgentCapabilities, AgentConfig, ProcessConfig};
@@ -1951,33 +1931,5 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             .assets
             .iter()
             .all(|asset| asset.kind != ContextAssetKind::Assembly));
-    }
-
-    #[test]
-    fn split_skill_args_handles_trailing_colon() {
-        let args = vec![
-            "implement:".to_string(),
-            "add".to_string(),
-            "logs".to_string(),
-        ];
-        let (skill, rest) = split_skill_args(&args).expect("split args");
-        assert_eq!(skill, "implement");
-        assert_eq!(rest, vec!["add".to_string(), "logs".to_string()]);
-    }
-
-    #[test]
-    fn split_skill_args_preserves_namespaced_skill() {
-        let args = vec!["team/explain-code".to_string()];
-        let (skill, rest) = split_skill_args(&args).expect("split args");
-        assert_eq!(skill, "team/explain-code");
-        assert!(rest.is_empty());
-    }
-
-    #[test]
-    fn split_skill_args_preserves_namespaced_skill_with_args() {
-        let args = vec!["gstack/office-hours".to_string(), "auth flow".to_string()];
-        let (skill, rest) = split_skill_args(&args).expect("split args");
-        assert_eq!(skill, "gstack/office-hours");
-        assert_eq!(rest, vec!["auth flow".to_string()]);
     }
 }

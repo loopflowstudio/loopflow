@@ -3,6 +3,7 @@ use std::io::{IsTerminal, Read};
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
 
+use anyhow::Context;
 use clap::Parser;
 use tracing::debug;
 use tracing_subscriber::EnvFilter;
@@ -418,25 +419,14 @@ fn resolve_cli_target(
 ) -> anyhow::Result<Option<(loopflow::engine::target::Target, Option<String>)>> {
     use loopflow::engine::target::Target;
 
-    let (name, kind, message) = match &cli.command {
+    let (rest, kind) = match &cli.command {
         Some(Commands::Flow {
             cmd: FlowCommand::External(rest),
-        })
-        | Some(Commands::Skill {
+        }) => (rest, Some(DefinitionKind::Flow)),
+        Some(Commands::Skill {
             cmd: SkillCommand::External(rest),
-        }) => {
-            let (name, messages) = loopflow::lf::commands::run::split_skill_args(rest)?;
-            let kind = if matches!(cli.command, Some(Commands::Flow { .. })) {
-                DefinitionKind::Flow
-            } else {
-                DefinitionKind::Skill
-            };
-            (name, Some(kind), join_args(&messages))
-        }
-        Some(Commands::External(rest)) => {
-            let (name, messages) = loopflow::lf::commands::run::split_skill_args(rest)?;
-            (name, None, join_args(&messages))
-        }
+        }) => (rest, Some(DefinitionKind::Skill)),
+        Some(Commands::External(rest)) => (rest, None),
         Some(_) => {
             let index =
                 first_target_index(&args[1..]).expect("parsed builtin has a command token") + 1;
@@ -450,6 +440,11 @@ fn resolve_cli_target(
         }
         None => return Ok(None),
     };
+    let (name, messages) = rest.split_first().context("no skill specified")?;
+    // A trailing colon separates the definition name from its message.
+    let name = name.strip_suffix(':').unwrap_or(name);
+    anyhow::ensure!(!name.is_empty(), "no skill specified");
+    let message = join_args(messages);
     let repo = loopflow::repo::working_directory()?;
     if let Some(path) = &cli.skill_input {
         let invocation = loopflow::engine::skill_invocation::SkillInvocation::read(path)?;
@@ -461,7 +456,7 @@ fn resolve_cli_target(
         cli.resolved_invocation = Some(invocation);
         return Ok(Some((target, message)));
     }
-    let target = loopflow::engine::target::resolve_definition(&repo, &name, kind)?;
+    let target = loopflow::engine::target::resolve_definition(&repo, name, kind)?;
     Ok(Some((target, message)))
 }
 
@@ -2117,14 +2112,26 @@ mod tests {
             ["lf", "pr", "land", "--message", "Keep this together"]
         );
         assert!(message.is_none());
-        assert!(matches!(
-            resolve(&["lf", "flow", "land"]).0,
-            Target::Flow(_)
-        ));
-        assert!(matches!(
-            resolve(&["lf", "skill", "land"]).0,
-            Target::Skill(_)
-        ));
+        for args in [
+            vec!["lf", "flow", "land", "keep", "together"],
+            vec!["lf", "flow", "land:", "keep", "together"],
+            vec!["lf", "land:", "keep", "together"],
+        ] {
+            let (target, message) = resolve(&args);
+            assert!(matches!(target, Target::Flow(_)));
+            assert_eq!(message.as_deref(), Some("keep together"));
+        }
+        std::fs::create_dir_all(repo.path().join(".lf/skills/team")).unwrap();
+        std::fs::write(repo.path().join(".lf/skills/team/review.md"), "Review.").unwrap();
+        assert!(resolve(&["lf", "skill", "team/review"]).1.is_none());
+        for name in ["land", "land:", "team/review", "team/review:"] {
+            let (target, message) = resolve(&["lf", "skill", name, "auth flow"]);
+            let Target::Skill(skill) = target else {
+                panic!("expected skill")
+            };
+            assert_eq!(skill.name, name.trim_end_matches(':'));
+            assert_eq!(message.as_deref(), Some("auth flow"));
+        }
     }
 
     fn published_pr() -> TaskPr {

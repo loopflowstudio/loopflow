@@ -197,3 +197,11 @@ Second page:
 
 Built: `/` carries the first, `/cli` the second (it used to redirect to docs). The terminal claims, the command list and the Task / Workflow / Wave / Project rows moved to `/cli`.
 Open: `/cli` does not yet argue why this data model is the right one; it shows the model. Section headings there are draft.
+
+## Hero video (2026-10-09)
+
+Jack Heart: the Mac app / anyone page "really needs a video of a flow from initial just first usage -- starts in repo/session, to then eventually like some waves and tasks and then eventually like some sort of complex multi-split set up showing task flows". He asked Claude to record it, on "a legified version of the kata repo", using "the best you can find in todays app"; length "might be like 10seconds, 3 seconds per stage or seomthing. or it oculdbe up to 60sec".
+
+What exists in the app today (read from source, not yet seen running): no onboarding flow; Go > Open Repo (⇧⌘O); New Session with a skill picker; Waves → Tasks → Sessions navigator; pane splits (⌘D, ⇧⌘D) and worktree-level splits; a Task workflow graph above the terminals. `LF_HOME` isolates state; `--repo` picks the repository.
+Kata today: Waves core, dj, ear, release, teacher, theory (scores abandoned), 8 tasks.
+Blocked: the cmux Computer Use helper is not running, so nothing has been recorded.

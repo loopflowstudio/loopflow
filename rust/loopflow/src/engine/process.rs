@@ -133,12 +133,14 @@ static HELD_LIFELINES: Mutex<Vec<std::fs::File>> = Mutex::new(Vec::new());
 /// The watchdog blocks until every writer of its stdin has gone, then stops
 /// the group it was placed in. An ignored SIGTERM is inherited by `sleep`, so
 /// both outlive the group's SIGTERM and deliver the SIGKILL.
+/// `kill -s NAME --` is the spelling both dash and bash accept before a
+/// negative pid; dash rejects `kill -NAME --`.
 #[cfg(unix)]
 const LIFELINE_WATCHDOG: &str = r#"while read -r _; do :; done
 trap '' TERM
-kill -TERM -- "-$1" 2>/dev/null
+kill -s TERM -- "-$1" 2>/dev/null
 sleep 2
-kill -KILL -- "-$1" 2>/dev/null"#;
+kill -s KILL -- "-$1" 2>/dev/null"#;
 
 /// Bind a child process group to the life of this process.
 ///

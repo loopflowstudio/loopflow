@@ -408,11 +408,7 @@ impl SqliteStore {
         }
         // Correspondence enables lookup, not joint projection. Keep incomplete
         // receipt composition visibly held instead of clearing mapping conflicts.
-        tx.execute(
-            "INSERT INTO planning_peer_conflicts(repo,kind,object_id,reason,active) VALUES(?1,?2,?3,?4,1)
-             ON CONFLICT(kind,object_id,reason) DO UPDATE SET active=1 WHERE active=0",
-            params![repo,origin.kind.as_str(),origin.id,ASSOCIATION_PROJECTION_PENDING],
-        )?;
+        retain_projection_conflict(&tx, repo, origin, SHARING_PROJECTION_PENDING)?;
         tx.commit()?;
         Ok(())
     }
@@ -864,14 +860,12 @@ impl SqliteStore {
         // A skipped projection may retain new effects only in the journal.
         // Selection can later release a sharing hold without importing again;
         // keep the projection conflict until those receipts actually project.
-        conflicts.extend(held.into_iter().map(|(object, reason)| {
-            let reason = if reason == ASSOCIATION_PROJECTION_PENDING {
-                reason
-            } else {
-                SHARING_PROJECTION_PENDING.into()
-            };
-            (object, reason)
-        }));
+        // The receipt records skipped projection, not its current cause. Status
+        // derives the specific hold; diagnostic wording never chooses authority.
+        conflicts.extend(
+            held.into_keys()
+                .map(|object| (object, SHARING_PROJECTION_PENDING.into())),
+        );
         reconcile_conflicts(&tx, repo, destination, &conflicts)?;
         tx.execute("UPDATE planning_peer_context SET importing=0", [])?;
         tx.execute(
@@ -1119,8 +1113,6 @@ fn selection_conflicts(
             held.insert(object.clone(), "planning exchange held: record moved outside this repository; local work and peer history are retained".into());
             pending.insert(object.clone());
         }
-    }
-    for object in snapshot.objects() {
         let associated: bool = conn.query_row(
             "SELECT EXISTS(SELECT 1 FROM planning_associations WHERE kind=?1 AND repo=?2
              AND (origin_id=?3 OR COALESCE(task_id,project_id)=?3))",
@@ -2113,12 +2105,22 @@ fn reconcile_conflicts(
         }
     }
     for (object, reason) in conflicts {
-        conn.execute(
-            "INSERT INTO planning_peer_conflicts(repo,kind,object_id,reason,active) VALUES(?1,?2,?3,?4,1)
-             ON CONFLICT(kind,object_id,reason) DO UPDATE SET active=1 WHERE active=0",
-            params![repo,object.kind.as_str(),object.id,reason],
-        )?;
+        retain_projection_conflict(conn, repo, object, reason)?;
     }
+    Ok(())
+}
+
+fn retain_projection_conflict(
+    conn: &Connection,
+    repo: &str,
+    object: &PlanningObject,
+    reason: &str,
+) -> StoreResult<()> {
+    conn.execute(
+        "INSERT INTO planning_peer_conflicts(repo,kind,object_id,reason,active) VALUES(?1,?2,?3,?4,1)
+         ON CONFLICT(kind,object_id,reason) DO UPDATE SET active=1 WHERE active=0",
+        params![repo, object.kind.as_str(), object.id, reason],
+    )?;
     Ok(())
 }
 
@@ -7289,10 +7291,17 @@ mod tests {
                     || o.id == local.id.as_str()
                     || o.id == local.project_id.as_str()));
             let status = target.peer_planning_status("/target").unwrap();
-            assert!(status
-                .iter()
-                .flat_map(|d| &d.conflicts)
-                .any(|c| c.object == task && c.reason.contains("joint planning projection")));
+            for object in [&task, &project] {
+                let reasons: Vec<_> = status
+                    .iter()
+                    .flat_map(|d| &d.conflicts)
+                    .filter(|c| &c.object == object)
+                    .map(|c| c.reason.as_str())
+                    .collect();
+                // One current explanation, not both the skipped-projection
+                // receipt and its independently derived association hold.
+                assert_eq!(reasons, [super::ASSOCIATION_PROJECTION_PENDING]);
+            }
             // Further local saves remain possible; correspondence grants no effect.
             edit_title(&target, &local.id, "Next private save");
             let pending = target.pending_task_changes(&local.id).unwrap();

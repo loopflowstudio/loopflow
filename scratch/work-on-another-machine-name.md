@@ -224,17 +224,19 @@ cache or second owner is added. Independent evidence retains its separate
 savepoints and identity validation. Review also corrected the resolver comment:
 issue-name fallback records no association; item 3 remains unfinished.
 
+Association and import share one conflict writer and one skipped-projection
+receipt. Delete diagnostic-text branching between association and sharing holds:
+both retain incomplete effects until successful import; status derives their
+specific current reasons. One object scan covers repository and association
+holds. Historical conflict rows survive; no correspondence or mixed-provider
+authority is added. The association fixture checks one current explanation for
+each Task/Project after reversed and repeated imports.
+
 ## Remaining integration — October 9
 
-The receipt-origin prerequisite is implemented at `19e31f64d`/`5e5786bff`.
-Explicit local correspondence and full-ID lookup now enter through `planning
-associate`; ordinary import retains its hold and both journals. Task/Project
-readers resolve the incoming full ID to the existing local owner, never rename
-physical rows. Repeating association preserves revisions, selection and execution.
-This is lookup recovery, **not joint projection or completed association recovery**:
-production projection still uses incoming IDs, and mixed-provider exchange remains
-disabled. Earlier receipt-helper evidence and its limits remain at
-`bf4c39b2e:scratch/work-on-another-machine-name.md`, item 3.
+Receipt origins (`19e31f64d`/`5e5786bff`) and explicit correspondence/full-ID lookup
+exist; **joint projection and association recovery remain unfinished**. Item 3
+owns the implementation boundary, preservation constraints and evidence.
 
 Destination-level Desktop status has focused headless proof; per-Work membership,
 authorship/assignees and losing-edit recovery remain unfinished. Public Git/Linear
@@ -663,7 +665,7 @@ and limitations: `9b59e9b71:scratch/work-on-another-machine-name.md`,
 **Acceptance for review**. They do not establish this ordering cut, public
 combined behavior or Desktop acceptance.
 
-Check: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test -p loopflow --lib explicit_correspondence_resolves_local_work_but_retains_projection_holds` pass; public association fixture's wrong JSON path is corrected to `execution.task_id`, rerun resource-deferred after supported recovery. Gate owns that rerun and combined acceptance.
+Check: `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` pass; build and focused correspondence/private-history tests are gate-deferred at 31.5 GiB free after supported recovery (32 GiB reserve); earlier correspondence pass and corrected public `execution.task_id` assertion/rerun limit remain at `1fe416837:scratch/work-on-another-machine-name.md`, **Acceptance for review**.
 
 Earlier SQL proofs, macOS startup limitations and the retained historical Flow
 without a recorded exit remain at

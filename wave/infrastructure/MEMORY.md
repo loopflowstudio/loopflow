@@ -632,13 +632,13 @@ convergence. Desktop keeps last-good scoped status. Mixed exchange stays disable
 sharing/recovery and public composition remain unfinished.
 
 Legacy association remains unfinished. Explicit correspondence resolves incoming
-full Task/Project IDs to local owners; IDs, execution and selection stay unchanged. It retains projection/effect holds, not
-joint winners or completed recovery. Ordinary import still cannot project across
-origins; common capture and causal validation currently require same-ID parents.
-Grouping winners alone cannot acknowledge an observed peer Linear head before a
-later local save. Mixed exchange stays disabled. Receipt-origin and earlier refusal
-proofs: `bf4c39b2e`, this heading. Public origin settlement and order-independent
-projection remain unproved; lookup is not effect authority.
+full Task/Project IDs without changing IDs, execution or selection. Lookup grants
+no joint projection or effect authority. Association and import retain the same
+skipped-projection receipt; status derives current hold reasons, not permission.
+Common capture/validation still require same-ID parents: grouping winners cannot
+acknowledge a peer Linear head before a later local save. Mixed exchange stays
+disabled. Receipt-origin/refusal proofs: `bf4c39b2e`, this heading. Public origin
+settlement and order-independent projection remain unproved.
 Plan: `scratch/work-on-another-machine-name.md`.
 
 ## Driver recovery

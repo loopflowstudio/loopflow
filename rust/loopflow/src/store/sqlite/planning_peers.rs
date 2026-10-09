@@ -3097,6 +3097,26 @@ mod tests {
             .unwrap();
         assert_eq!(creation.parent, project.as_str());
         assert_eq!(creation.input["title"], "Original");
+        assert_eq!(creation.input["projectId"], export.id);
+        let captured = target
+            .export_peer_planning("/target", &destination())
+            .unwrap();
+        captured.to_bytes().unwrap();
+        let receipt = captured
+            .winners()
+            .find(|(_, change)| change.object.id == task.as_str() && change.field == "creation")
+            .unwrap()
+            .0;
+        for (field, value) in [
+            ("title", json!("Uncaptured title")),
+            ("projectId", json!(null)),
+            ("teamId", json!("")),
+            ("process_lfid", json!("forbidden")),
+        ] {
+            let mut malformed = captured.clone();
+            malformed.changes.get_mut(receipt).unwrap().value["export"]["input"][field] = value;
+            assert!(malformed.to_bytes().is_err(), "{field}");
+        }
         assert_eq!(
             target
                 .prepare_planning_export(task_owner, "ignored", "ignored")
@@ -3554,13 +3574,23 @@ mod tests {
             .unwrap()
             .0
             .to_string();
-        let mut malformed = base.clone();
-        malformed.changes.get_mut(&receipt_id).unwrap().value["export"]["model"]["process_lfid"] =
-            json!("forbidden");
-        assert!(target
-            .import_peer_planning("/target", &destination(), "malformed", &malformed)
-            .is_err());
-        assert!(export(&target, "/target").changes.is_empty());
+        for (section, field, value) in [
+            ("model", "process_lfid", json!("forbidden")),
+            ("input", "content", json!("Uncaptured content")),
+            ("input", "teamIds", json!(["team", "another"])),
+            ("input", "teamIds", json!([""])),
+            ("input", "useDefaultTemplate", json!(true)),
+        ] {
+            let mut malformed = base.clone();
+            malformed.changes.get_mut(&receipt_id).unwrap().value["export"][section][field] = value;
+            assert!(
+                target
+                    .import_peer_planning("/target", &destination(), "malformed", &malformed)
+                    .is_err(),
+                "{section}.{field}"
+            );
+            assert!(export(&target, "/target").changes.is_empty());
+        }
         import(&target, "/target", "base", &base);
         let mut competing = base.clone();
         let mut other = competing.changes[&receipt_id].clone();

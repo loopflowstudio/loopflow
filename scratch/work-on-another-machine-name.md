@@ -124,44 +124,18 @@ The prior cut-by-cut inventory and evidence remain at
 `b0f2a00702ccdbe1b11c22fa55f472cc649bf8d1:scratch/work-on-another-machine-name.md`,
 this heading. Keep these replacements deleted:
 
-- Earlier transport/selection/content deletions remain at
-  `b4a91632e:scratch/work-on-another-machine-name.md`, this heading: copied
-  planning, issue-derived IDs, host callbacks, repository-global export,
-  alias-addressed routing, move-coupled selection and duplicate content parsers.
-  Preserve saved identity, pushed-code checks, private-history holds, causal
-  journals and the common semantic-content writer.
-- Evidence-only mapping validation and the duplicate-mapping fixture's raw SQL
-  unmapping shortcut. One import check owns scalar/evidence mapping preservation;
-  retain both IDs, mutation history, effects and independent projection.
-- Peer-only scalar/state/comment receipt writers, reconstructed comment provenance,
-  identical-body acquisition bypasses and replay of superseded provider revisions.
-  Common acquisition owns validation; savepoints isolate valid contradictions and
-  retain membership evidence after rollback. Entity revisions never order relationships.
-- Earlier creation/export receipt reductions remain at
-  `d7392531d:scratch/work-on-another-machine-name.md`, **Delete — do not maintain**.
-  Keep the single common receipt writer, per-origin captured IDs, original parents,
-  uncertain attempts and effect eligibility; remove no retained local requests.
-- Sequence-selected Project order intentions and delivery of settled, superseded
-  partial moves. Shared views select the original save, while uncertain losing
-  effects still hold delivery. Import projects the chosen list after Task rows;
-  scalar rank replay cannot overwrite it or advance revisions on reimport.
-- Projected-owner receipt capture/ranking, revision-only Task-body capture, and
-  raw-ID order comparisons that discard unresolved aliases. The journal owns
-  origins; comparison resolves aliases, while unknown membership defers readback.
-  One origin expression supplies mutations and their parents.
-- Repeated full delivery reads while rebasing order saves and separate existence/
-  membership predicates. Readback partitions attempts from unattempted saves once,
-  updating accepted baselines in memory; the final delivery read drops settled
-  losers. One membership reader preserves unknown versus confirmed removal.
-- Sequence-selected deletion delivery and scalar-clock visibility over a retained
-  removal receipt: neither imported arrival nor that clock orders provider evidence.
-  Common pending/attempt/status readers retain every unresolved
-  removal identity. Tombstone projection alone never prepares or settles a delete.
-- Deletion import's scalar `record_value` followed by an overwrite. The common
-  deletion owner now upserts the merged captured receipt once, without sampling
-  this machine's baseline or visibility. History decoding streams rather than
-  collecting another receipt vector. Creation/deletion conflicts use one typed
-  Store error, not diagnostic-string matching; malformed input still aborts import.
+- Earlier transport, selection, content, mapping and receipt deletions are preserved
+  at `8a6f8f807:scratch/work-on-another-machine-name.md`, **Delete — do not maintain**.
+  Keep copied planning, issue-derived IDs, host callbacks, repository-global export,
+  alias-addressed routing, move-coupled selection and duplicate parsers deleted.
+  Common acquisition and receipt writers own provider facts and effects; journal
+  origins, exact inputs, causal baselines, uncertain losers and private holds survive.
+  Do not restore sequence-ranked order/deletion delivery, raw-ID comparisons,
+  scalar visibility over removal receipts, or duplicate receipt writes.
+- Duplicate creation-payload renderers in `planning_export.rs` are replaced by
+  `task_creation_input` and `project_creation_input`, shared by capture and peer
+  validation. Complete model/input comparisons still reject unknown payload;
+  Team shape, parent mapping and origin identity remain independently checked.
 - Acquisition-side `inherit_project_placement`: provider readback is planning,
   not first local execution. Explicit placement retains its existing owner.
 - State delivery's cache-only readback, which settled its local receipt without
@@ -708,7 +682,9 @@ Earlier checks and limits: `9b59e9b71` and `b5b491099`, this file's
 **Acceptance for review**. They do not prove this ordering cut, combined public
 behavior or Desktop acceptance.
 
-Check: `cargo test -p loopflow --lib --no-run`, `cargo fmt --all --check` and `cargo clippy --all-targets -- -D warnings` pass; network-isolated lib filters `associated_`, `task_completion_lost_reply_adopts_linear_reopening`, `task_completion_late_acknowledgement_preserves_explicit_reopening`, `task_completion_preserves_linear_reopening_during_delivery`: 11 passes. Gate owns released-frontier, public Git/HTTPS and Desktop acceptance.
+The prior state/comment/Wave and completion checks remain at `8a6f8f807`, this heading; they predate creation-payload compression.
+
+Check: `cargo test -p loopflow --lib --no-run`, `cargo fmt --all --check`, `cargo clippy --all-targets -- -D warnings` pass; `scripts/test_network.py <lib-test> peer_creation_ peer_project_creation_and_link_readback correspondence_import_retains_creation_origins --test-threads=1`: 7 pass. Gate owns released-frontier, public Git/HTTPS and Desktop acceptance.
 
 SQL/macOS and unresolved Flow-exit evidence: `eeb98aa89`, this file's
 **Acceptance for review**. No provider death, replacement authority or installed

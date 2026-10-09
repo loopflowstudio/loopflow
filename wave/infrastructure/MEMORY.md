@@ -633,7 +633,7 @@ Causality precedes ranking. Correspondence reuses accepted observations, never
 identity or authority; private references hold groups. Journal origins and alias
 comparisons preserve inputs and rebase later saves. Equal revisions can carry
 different ranks; retain bodies. Earlier proofs: `6f1869e9b`, this heading.
-State readback must enter common planning projection: cache/receipt settlement alone
+`8a6f8f807`: state readback enters common planning projection; cache/receipt settlement alone
 omits the observation from peer history. Association fixtures cover state, comment
 authorship, Wave selection and private uncertainty without changing execution;
 association alone selects nothing. Public Git/HTTPS proof remains.

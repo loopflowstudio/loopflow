@@ -10,6 +10,7 @@ use serde_json::{json, Value};
 use super::planning_changes::PlanningChanges;
 use super::SqliteStore;
 use crate::durable::{ProjectId, TaskId, WorkRef};
+use crate::pm::{PmItem, PmProject, ProjectContent};
 use crate::store::{StoreError, StoreResult};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -22,6 +23,20 @@ pub(crate) struct PlanningExport {
     pub input: Value,
     pub initiative: String,
     pub link_id: String,
+}
+
+// Capture and peer validation use the same provider payload. Validation still
+// compares the complete model and input, so unknown fields cannot travel.
+fn task_creation_input(id: &str, team: &str, item: &PmItem) -> Value {
+    json!({"id":id,"teamId":team,"projectId":item.project_id,"title":item.name,
+        "description":item.description,"assigneeId":item.assignee})
+}
+
+fn project_creation_input(id: &str, team: &str, project: &PmProject) -> Value {
+    json!({"id":id,"teamIds":[team],"name":project.name,"description":project.summary,
+        "content":crate::pm::render_project_content(&ProjectContent {
+            workflow:project.workflow.clone(),krs:project.krs.clone(),metric_targets:project.metric_targets.clone(),
+        }),"useDefaultTemplate":false})
 }
 
 impl SqliteStore {
@@ -116,20 +131,16 @@ impl SqliteStore {
                     "SELECT p.external_project_id FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?1",
                     [id.as_str()], |row| row.get(0),
                 )?;
-                let external = external.ok_or_else(|| {
+                external.ok_or_else(|| {
                     StoreError::InvalidData("Task export awaits its Project mapping".into())
                 })?;
                 let item = record.item;
-                let input = json!({"id":uuid,"teamId":team,"projectId":external,"title":item.name,
-                    "description":item.description,"assigneeId":item.assignee});
+                let input = task_creation_input(&uuid, team, &item);
                 (serde_json::to_value(item)?, input)
             }
             PlanningChanges::Project(id) => {
                 let project = super::plan_read::project_in(&tx, id)?;
-                let input = json!({"id":uuid,"teamIds":[team],"name":project.name,"description":project.summary,
-                    "content":crate::pm::render_project_content(&crate::pm::ProjectContent {
-                        workflow:project.workflow.clone(),krs:project.krs.clone(),metric_targets:project.metric_targets.clone()
-                    }),"useDefaultTemplate":false});
+                let input = project_creation_input(&uuid, team, &project);
                 (serde_json::to_value(project)?, input)
             }
         };
@@ -378,6 +389,17 @@ pub(crate) fn validate_peer_receipt(
     use crate::engine::planning_exchange::PlanningKind;
     let receipt: CreationReceipt = serde_json::from_value(value.clone())?;
     let export = &receipt.export;
+    let project = object.kind == PlanningKind::Project;
+    let team = if project {
+        export.input["teamIds"]
+            .as_array()
+            .filter(|ids| ids.len() == 1)
+            .and_then(|ids| ids[0].as_str())
+    } else {
+        export.input["teamId"].as_str()
+    }
+    .filter(|team| !team.is_empty())
+    .ok_or_else(|| StoreError::InvalidData("invalid planning creation receipt".into()))?;
     let expected = uuid::Uuid::parse_str(
         object
             .id
@@ -388,21 +410,17 @@ pub(crate) fn validate_peer_receipt(
     .to_string();
     let (model, mut input) = match object.kind {
         PlanningKind::Task => {
-            let item: crate::pm::PmItem = serde_json::from_value(export.model.clone())?;
+            let item: PmItem = serde_json::from_value(export.model.clone())?;
             (
                 serde_json::to_value(&item)?,
-                json!({"id":expected,"teamId":export.input["teamId"],
-                "projectId":item.project_id,"title":item.name,"description":item.description,"assigneeId":item.assignee}),
+                task_creation_input(&expected, team, &item),
             )
         }
         PlanningKind::Project => {
-            let project: crate::pm::PmProject = serde_json::from_value(export.model.clone())?;
+            let project: PmProject = serde_json::from_value(export.model.clone())?;
             (
                 serde_json::to_value(&project)?,
-                json!({"id":expected,"teamIds":export.input["teamIds"],
-                "name":project.name,"description":project.summary,"content":crate::pm::render_project_content(&crate::pm::ProjectContent {
-                    workflow:project.workflow,krs:project.krs,metric_targets:project.metric_targets,
-                }),"useDefaultTemplate":false}),
+                project_creation_input(&expected, team, &project),
             )
         }
         _ => {
@@ -411,7 +429,6 @@ pub(crate) fn validate_peer_receipt(
             ))
         }
     };
-    let project = object.kind == PlanningKind::Project;
     let status = if project { "statusId" } else { "stateId" };
     if let Some(id) = export.input.get(status) {
         if !id.is_string() {
@@ -419,18 +436,6 @@ pub(crate) fn validate_peer_receipt(
         }
         input[status] = id.clone();
     }
-    let team_valid = if project {
-        export.input["teamIds"]
-            .as_array()
-            .is_some_and(|ids| ids.len() == 1 && ids[0].as_str().is_some_and(|s| !s.is_empty()))
-    } else {
-        export.input["teamId"]
-            .as_str()
-            .is_some_and(|s| !s.is_empty())
-            && export.input["projectId"]
-                .as_str()
-                .is_some_and(|s| !s.is_empty())
-    };
     let parent_valid = if project {
         crate::id::WaveId::parse(&export.parent).is_ok()
     } else {
@@ -441,7 +446,7 @@ pub(crate) fn validate_peer_receipt(
         || export.model["id"].as_str() != Some(object.id.as_str())
         || model != export.model
         || input != export.input
-        || !team_valid
+        || !project && export.input["projectId"].as_str().is_none_or(str::is_empty)
         || uuid::Uuid::parse_str(&export.link_id).is_err()
         || export.initiative.is_empty()
         || receipt.link_attempted && (!project || !receipt.attempted)

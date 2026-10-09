@@ -354,14 +354,12 @@ Creation-origin retention, accepted-observation repair and their failed attempts
 [findings](findings.md#shared-planning-composition). Rejected heads
 remain recoverable, never save parents. Snapshot lookup and TaskSource exclusion survive.
 
-**Joint projection, October 9:** `7165f9a62`/`dffdbaaa5` project explicitly associated
-origins through one local owner, retaining original mutations/creation inputs and
-`d62003e0f`'s separate accepted-observation query. Common writers resolve relationship
-IDs; only joint accepted frontiers parent later saves. Both origins require explicit
-selection; correspondence never enrolls private Work. Conflicting provider inputs
-remain held, not rewritten. Store coverage and failed attempts:
+**Joint projection:** associated origins retain original mutations/creation inputs;
+only accepted joint frontiers parent saves. Relationship IDs use common writers.
+Both origins require explicit selection; correspondence never enrolls private Work
+or rewrites conflicting provider inputs. Implementation and failed attempts:
 `859c414d1:scratch/findings.md`, **Shared planning composition**. Foreground evidence
-below supersedes the transport-only fixture, not these constraints.
+below replaces transport-only proof, not these constraints.
 
 **Ancestry and foreground composition, October 9:** `1ece5cc52` retires transitive
 ancestors while retaining original heads, mapping validation, accepted-only save
@@ -398,10 +396,13 @@ completions. Utility windows and retained surfaces keep their own lifetimes.
 Inspection forwards Task and Session actions independently, retaining Task dates;
 Session observation time stays unavailable. Saved/failed readings grant no actions.
 Shared peer identity, remote observations/opening and configured proof remain.
-Outside Task run/move/restart, Desktop open and Session connect/resume, supported previews
-mostly explain identity rather than effects; unsupported commands refuse. Broader
-action explanation must reuse each operation's validation, not report the generic
-Work resolution as an invocation plan.
+**Explanation coverage (`e3d5d46df`):** Task run/move/Workflow restart, Desktop open,
+Session connect and interactive message-less resume have operation-specific readings.
+Other Task commands, `history show` and skill/Flow/inline invocations read identity only;
+`--context` separately previews input. Other shapes refuse. Resolving
+`task edit/create/comment` does not validate its mutation. Remaining explanations
+must reuse operation validation and expose effects/impediments in text and JSON,
+with valid/refused cases; identity-only success is not completion.
 
 `task move` and Workflow restart now share captured-node validation with execution.
 Preview retains the exact prior node/edge, reason and force choice; restart intends
@@ -525,4 +526,4 @@ identity/delegation, open them, add shell/Files panes, retain an unfinished draf
 change focus, target a harmless command, read output, hide/restore, and verify the
 original input target and draft survive. Demo owns native usability; preserve comparison evidence and use no real accounts or live user terminals.
 
-Check: network-isolated `global_commands task_` PASS (8; installation ignored → CI); build/fmt/Clippy PASS. Full suites: gate; native: demo. Earlier DTO passes: `4688a4d85`, this line.
+Check: `git diff --check` PASS (prose-only reconciliation); prior network-isolated `global_commands task_` 8 PASS/build/fmt/Clippy retained at `e3d5d46df`; full suites/installation: gate/CI, native: demo.

@@ -44,6 +44,14 @@ cover branches/loops, command-first Flows, native argument preservation and unch
 checkpointed stores. Configured SSH/native invocation remain unproved. Broader action
 explanation, peer composition/admission and native acceptance remain; bounded
 extraction is composed with lf3 as recorded below.
+The later `4688a4d85`/`e3d5d46df` cut explains Task movement/restart through
+captured Workflow validation, sharing Task selection/location with run explanation.
+Session connect and interactive message-less resume have operation-specific
+explanation without endpoint probes. End intent does not perform completion reconciliation or cleanup; JSON
+preparation grants no takeover. Other Task commands, `history show` and skill/Flow/inline
+invocations still have identity-only `--explain`, not mutation validation or a
+complete action plan. Agent `--context` is a separate input preview. These source
+boundaries do not add native, configured-peer or installed acceptance.
 Earlier command names below are dated evidence, not compatibility aliases.
 
 ## Evidence and version boundary

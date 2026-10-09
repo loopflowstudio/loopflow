@@ -106,11 +106,10 @@ These are reversible lookup choices, not shared Work identity or publication.
 Primary and stack-parent Task selectors now carry repository-scoped full IDs through
 dispatch; an unscoped ambiguous prefix still fails.
 
-October 9 compression query: generated Work seed 31,940/16,000 tokens (15,940 over).
-The complete launch source (`.lf/tmp/context/2aabfbd083f3aefc421c37c7b83092a4ed36efeb8ada8277112894c0c5f21b4b.md`)
-contains repeated provider steers and the generated workspace inventory. Editing
-authored notes cannot shrink that producer gap; rewriting historical steers is not
-this compression's authority. Limits remain unchanged.
+October 9 reconciliation: generated Work seed 31,941/16,000 tokens (15,941 over).
+The complete launch source (`.lf/tmp/context/075cb2a32e315fb38e16707a46e51fabeaba16d0c32f6c6f0534ef8cbdb325f2.md`)
+was read, including repeated steers and workspace inventory. Authored-note edits
+cannot repair that producer gap; historical steers and limits remain unchanged.
 
 ## Explicit repository association — October 9
 

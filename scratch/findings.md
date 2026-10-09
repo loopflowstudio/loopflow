@@ -88,8 +88,9 @@ selection. Preview also exposed two hidden writes: opening an “existing” sto
 migrate it, and bounding input wrote full-source files. Preview uses the shared
 read-only registry; prompt assembly returns complete sources for launch to persist.
 Fake-provider parity proves neither real-provider nor remote behavior.
-Bound-snapshot fixture failures required registering the canonical Wave, not a production workaround. `--explain` is local identity reading,
-not a complete action plan. The plan owns remaining work and the check-result line.
+Bound-snapshot failures required registering the canonical Wave, not a production
+workaround. `e3d5d46df` shares Task selection before dispatch; generic explanations
+still do not validate mutation arguments. The plan owns coverage.
 
 ## Composed-opening review — October 9
 

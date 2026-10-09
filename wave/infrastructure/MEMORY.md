@@ -222,19 +222,17 @@ unpublished code retained, without deletion or delivery authorization.
 ## AgentProcess (LOO-443, 2026-10-09)
 
 Jack Heart requested one inventory. #1512: `3e1e6245c`; integrate LOO-441 before
-publication. Proofs: `a55f5345b`, this heading.
+publication. `446cfb2b5` records attachment/lifecycle; `ea205e3d0` simplifies reads.
+Detached rows remain. Duplicate PID/birth and late history grant no control.
+Tokens fence A → B → A. Release SQLite before nested reads.
 
-Attachment/lifecycle move onto processes, replacing inferred ownership, registry
-and orphan inventories. Record projections are stateless.
-Detached rows remain; duplicate PID/birth grants no signal authority. Late history grants no control; tokens fence A → B → A.
-Release SQLite before nested evidence reads.
-
-Claude restarts its OS process within one attachment. A PID overwrite loses
-history; harness-only replacement strands capture. Invocation must hand replacement snapshots to harness and capture
-before more launch work. Old operations retain old snapshots. Identity refusal is
-not accepted resume behavior. Optional launches, native pre-exec, generation wires,
-FIFO death orders, full fixture replacement and LOO-441 remain unfinished.
-Two-second/public-entry/installed agreement remains unproved.
+Claude respawn needs invocation-owned harness/capture replacement snapshots;
+old operations retain old snapshots. PID overwrite loses history; refusal is not
+accepted resume. Only Codex has FIFO handoff; live-orphan termination
+recognizes only noninteractive Codex/OpenCode. Optional launches, native pre-exec,
+generation wires, death orders and fixtures remain unfinished. Release's
+entry-point lesson applies: public top/Task-status/scheduled agreement, two-second
+removal and installed settlement remain unproved. Proofs: `a55f5345b`.
 
 ## Process vocabulary (LOO-400, curated 2026-10-09)
 

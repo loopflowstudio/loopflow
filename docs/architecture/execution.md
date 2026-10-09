@@ -95,11 +95,18 @@ thread to run its recording callback before exec. For an attached Session, this
 persists OS identity in the AgentProcess row; without an attachment it writes
 nothing. Failed recording refuses exec;
 a failed exec retains any recorded identity without claiming provider execution.
-No post-spawn bind is needed. A reconnecting lf invocation holds
-the same FIFO. Writers remain held until OS exit, even after attachment transfer;
+No post-spawn bind is needed. Codex reconnect holds the endpoint's FIFO;
+Claude and OpenCode currently use anonymous lifelines without that handoff path.
+Writers remain held until OS exit, even after attachment transfer;
 only the last holder's exit closes the lifeline and stops the group, including
 after SIGKILL. The lifeline does not itself enforce current attachment authority.
 Native terminal process groups are unchanged.
+
+Scheduled settlement reads unfinished AgentProcess rows, but live-orphan
+termination currently recognizes only noninteractive Codex app-server and
+OpenCode serve groups. Claude and native foreground coverage remain unfinished;
+recording them alone does not establish orphan cleanup. Unknown identities and
+duplicate PID/birth records remain non-signallable.
 
 Prepared rows without publication are recoverable preparation failures. A missing
 spawn receipt is uncertainty, not permission to duplicate a possibly live engine.

@@ -221,18 +221,18 @@ unpublished code retained, without deletion or delivery authorization.
 
 ## AgentProcess (LOO-443, 2026-10-09)
 
-Jack Heart requested one inventory; #1512 is `3e1e6245c`. Integrate LOO-441
-before publication. Records: `446cfb2b5`; reads: `ea205e3d0`.
-Detached rows remain. Duplicate PID/birth and late history grant no control.
-Tokens fence A → B → A. Release SQLite before nested reads.
+Jack Heart requested one inventory. #1512: `3e1e6245c`; records: `446cfb2b5`;
+reads: `ea205e3d0`. Integrate LOO-441 before publication. Retain detached rows;
+duplicate PID/birth and late history grant no control. Tokens fence A → B → A.
 
-Captured Claude replacement advances only the owner's snapshot. Shared headless
-admission fences pre-exec recording and retains failures. Keep admission synchronous:
-canceling an async waiter must not detach an admitted child. Runtime checks unrun.
-Only Codex has FIFO handoff; live-orphan termination recognizes noninteractive
-Codex/OpenCode. Optional/native launches, generation wires, death orders and fixtures
-remain unfinished. Public top/Task-status/scheduled agreement, two-second removal
-and installed settlement remain unproved. Earlier proofs: `a55f5345b`.
+`6fe75717f` advances only Claude's capture-owner snapshot on replacement;
+`a81397932` shares fenced admission. Runtime checks are unrun. Async cancellation
+must not detach an admitted child. Hold the Session lock, not SQLite across I/O
+or nested reads. Synchronous admission cannot depend on its blocked reactor.
+Only Codex has FIFO handoff; live-orphan termination covers noninteractive
+Codex/OpenCode. Optional/native launches, generation removal, death orders and
+fixtures remain. Public-entry agreement, two-second removal and installed settlement
+remain unproved. Earlier proofs: `a55f5345b`.
 
 ## Process vocabulary (LOO-400, curated 2026-10-09)
 

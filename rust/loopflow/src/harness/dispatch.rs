@@ -1,13 +1,14 @@
-//! Native dispatch holds the Session fence — the store mutex and SQLite's
-//! write lock — while one transport write completes. Whatever holds that fence
-//! must finish without help from a thread that may be waiting for it.
+//! Native dispatch holds the per-Session OS lock while one transport write
+//! completes. Attachment validation releases SQLite before transport I/O, so
+//! history and unrelated database writes remain independent of that fence.
 //!
 //! Two rules keep the fence from joining a cycle with the runtime:
 //!
 //! - The write is driven and timed on the dispatching thread. A stalled
 //!   runtime cannot postpone the deadline, so the fence is always released.
-//! - Store work reached from an async task leaves the runtime's worker first,
-//!   so waiting for the fence never stops the runtime that the write needs.
+//! - Async transport writes run on blocking workers. Synchronous store work
+//!   yields a multithreaded runtime's worker; on a current-thread runtime it
+//!   runs inline, so it must not depend on that runtime making progress.
 
 use std::fmt::Display;
 use std::future::Future;
@@ -76,8 +77,9 @@ pub(super) fn write_fenced<W: AsyncWrite + Unpin>(writer: &mut W, bytes: &[u8]) 
     .map_err(|error| StoreError::InvalidData(format!("Native dispatch failed: {error}")))
 }
 
-/// Run blocking store work from an async task without occupying the runtime
-/// worker that drives I/O and timers.
+/// Yield a multithreaded runtime's worker during synchronous store work.
+/// Current-thread and non-runtime callers run inline; work must not require
+/// their reactor to make progress.
 pub(super) fn off_reactor<T>(work: impl FnOnce() -> T) -> T {
     match Handle::try_current().map(|handle| handle.runtime_flavor()) {
         Ok(RuntimeFlavor::MultiThread) => tokio::task::block_in_place(work),

@@ -669,18 +669,20 @@ impl SqliteStore {
             // projected in this pass may replace an earlier missing-parent error.
             let mut conflicts = BTreeSet::new();
             for (object, changes) in pending {
-                let mut acquired = Ok(());
-                for (field, history) in &changes.evidence {
-                    let evidence = tx.savepoint()?;
-                    match acquire_provider_evidence(
-                        &evidence, repo, object, changes, field, history,
-                    ) {
-                        Ok(()) => evidence.commit()?,
-                        Err(error) if projection_conflict(&error) => {
-                            evidence.finish()?;
-                            acquired = Err(error);
+                let mut acquired = validate_provider_mapping(&tx, object, changes);
+                if acquired.is_ok() {
+                    for (field, history) in &changes.evidence {
+                        let evidence = tx.savepoint()?;
+                        match acquire_provider_evidence(
+                            &evidence, repo, object, changes, field, history,
+                        ) {
+                            Ok(()) => evidence.commit()?,
+                            Err(error) if projection_conflict(&error) => {
+                                evidence.finish()?;
+                                acquired = Err(error);
+                            }
+                            Err(error) => return Err(error),
                         }
-                        Err(error) => return Err(error),
                     }
                 }
                 let savepoint = tx.savepoint()?;
@@ -1346,31 +1348,24 @@ fn latest_observations<'a>(
     Ok(retained)
 }
 
-/// Acquire independent evidence before scalar projection. A stale entity may be
-/// rejected without rolling back an accepted removal, archive or Team readback.
-fn acquire_provider_evidence(
+/// Mapping ownership is common to scalar projection and independent evidence.
+/// A peer edit cannot detach or redirect existing Work and its retained effects.
+/// In particular, NULL would make a legacy record eligible for provider creation.
+fn validate_provider_mapping(
     conn: &Connection,
-    repo: &str,
     object: &PlanningObject,
     changes: &ObjectChanges<'_>,
-    field: &str,
-    history: &FieldHistory<ProviderEvidence>,
 ) -> StoreResult<()> {
-    let mapping = if object.kind == PlanningKind::Task {
-        "external_issue_id"
-    } else {
-        "external_project_id"
+    let mapping = match object.kind {
+        PlanningKind::Task => "external_issue_id",
+        PlanningKind::Project => "external_project_id",
+        _ => return Ok(()),
     };
     let provider_id = changes.winners[mapping].1.value.as_str();
     let mapping_conflict = || StoreError::ProviderObservationConflict {
         entity: "planning mapping",
         id: object.id.clone(),
     };
-    for fact in &history.values {
-        if Some(fact.id()) != provider_id {
-            return Err(mapping_conflict());
-        }
-    }
     // A remote mapping may not redirect evidence for an existing local object.
     let local: Option<Option<String>> = conn
         .query_row(
@@ -1396,6 +1391,34 @@ fn acquire_provider_evidence(
     )?;
     if foreign {
         return Err(mapping_conflict());
+    }
+    Ok(())
+}
+
+/// Acquire independent evidence before scalar projection. A stale entity may be
+/// rejected without rolling back an accepted removal, archive or Team readback.
+fn acquire_provider_evidence(
+    conn: &Connection,
+    repo: &str,
+    object: &PlanningObject,
+    changes: &ObjectChanges<'_>,
+    field: &str,
+    history: &FieldHistory<ProviderEvidence>,
+) -> StoreResult<()> {
+    let mapping = if object.kind == PlanningKind::Task {
+        "external_issue_id"
+    } else {
+        "external_project_id"
+    };
+    let provider_id = changes.winners[mapping].1.value.as_str();
+    let mapping_conflict = || StoreError::ProviderObservationConflict {
+        entity: "planning mapping",
+        id: object.id.clone(),
+    };
+    for fact in &history.values {
+        if Some(fact.id()) != provider_id {
+            return Err(mapping_conflict());
+        }
     }
     match field {
         "provider_invalidation" => {
@@ -6483,6 +6506,101 @@ mod tests {
     }
 
     #[test]
+    fn peer_mapping_replacement_preserves_provider_effects_and_execution() {
+        use super::super::planning_changes::PlanningChanges;
+
+        for replacement in [None, Some("another-provider-id")] {
+            let (_source_home, source) = store();
+            let (_target_home, target) = store();
+            let task = seed(&source);
+            let project = source.task(&task).unwrap().unwrap().project_id;
+            let wave = source.project(&project).unwrap().unwrap().wave_id;
+            {
+                let conn = source.conn.lock().unwrap();
+                conn.execute(
+                    "UPDATE tasks SET external_issue_id='original-issue' WHERE id=?1",
+                    [task.as_str()],
+                )
+                .unwrap();
+                conn.execute(
+                    "UPDATE projects SET external_project_id='original-project' WHERE id=?1",
+                    [project.as_str()],
+                )
+                .unwrap();
+            }
+            import(&target, "/target", "base", &export(&source, "/source"));
+            preserve_execution(&target, &wave, &task);
+            edit_title(&target, &task, "Uncertain local title");
+            let change = target.pending_task_changes(&task).unwrap().remove(0);
+            assert!(target
+                .attempt_planning_field(PlanningChanges::Task(&task), &change, None)
+                .unwrap());
+            let retained_task = target.task(&task).unwrap().unwrap();
+            let retained_project = target.project(&project).unwrap().unwrap();
+            let retained_effects = target.pending_task_changes(&task).unwrap();
+            let retained_workflow = target.workflow(&task).unwrap();
+            let execution = target.revisions().unwrap();
+            {
+                // This incoming document has no provider-evidence fields. Scalar
+                // mapping changes must have the same ownership boundary as evidence.
+                let conn = source.conn.lock().unwrap();
+                conn.execute(
+                    "UPDATE tasks SET external_issue_id=?2 WHERE id=?1",
+                    params![task.as_str(), replacement],
+                )
+                .unwrap();
+                conn.execute(
+                    "UPDATE projects SET external_project_id=?2 WHERE id=?1",
+                    params![project.as_str(), replacement],
+                )
+                .unwrap();
+            }
+            let independent = Wave::new(WaveId::new(), "independent".into(), "/source".into());
+            source.create_wave(&independent).unwrap();
+            source
+                .select_peer_waves(
+                    "/source",
+                    &destination(),
+                    std::slice::from_ref(independent.id()),
+                )
+                .unwrap();
+            let incoming = export(&source, "/source");
+            import(&target, "/target", "replacement", &incoming);
+            assert_eq!(target.task(&task).unwrap().unwrap(), retained_task);
+            assert_eq!(target.project(&project).unwrap().unwrap(), retained_project);
+            assert_eq!(
+                target.pending_task_changes(&task).unwrap(),
+                retained_effects
+            );
+            assert_eq!(target.workflow(&task).unwrap(), retained_workflow);
+            let after = target.revisions().unwrap();
+            assert_eq!(
+                (after.sessions, after.processes, after.flows),
+                (execution.sessions, execution.processes, execution.flows)
+            );
+            assert!(target.get_wave(independent.id()).unwrap().is_some());
+            assert!(!target
+                .planning_export_pending(PlanningChanges::Task(&task))
+                .unwrap());
+            assert!(!target
+                .planning_export_pending(PlanningChanges::Project(&project))
+                .unwrap());
+            assert_eq!(
+                target.peer_projection_conflicts("/target").unwrap().len(),
+                2
+            );
+            let retained = export(&target, "/target");
+            assert!(incoming
+                .changes
+                .iter()
+                .all(|(id, change)| retained.changes.get(id) == Some(change)));
+            import(&target, "/target", "replacement", &incoming);
+            assert_eq!(target.revisions().unwrap(), after);
+            assert_eq!(export(&target, "/target"), retained);
+        }
+    }
+
+    #[test]
     fn duplicate_provider_identity_retains_pending_objects_without_blocking_other_tasks() {
         let (_left_home, left) = store();
         let (_right_home, right) = store();
@@ -6561,7 +6679,7 @@ mod tests {
         assert_eq!(conflicts.len(), 2);
         assert!(conflicts
             .iter()
-            .any(|c| c.object.id == task.as_str() && c.reason.contains("external_issue_id")));
+            .any(|c| c.object.id == task.as_str() && c.reason.contains("planning mapping")));
         assert!(conflicts.iter().any(|c| c.object.id == "pending-comment"));
         let exported = export(&right, "/target");
         assert_eq!(exported, expected);
@@ -6577,42 +6695,20 @@ mod tests {
             .import_peer_planning("/other", &destination(), "cross-repo", &incoming)
             .is_err());
 
-        // An explicit mapping repair allows a later acquisition to project the
-        // retained journal even if that acquisition supplies no new mutations.
-        right
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "UPDATE tasks SET external_issue_id=NULL WHERE id=?1",
-                [legacy.as_str()],
-            )
-            .unwrap();
-        import(&right, "/target", "repaired", &Default::default());
-        assert!(right
-            .peer_projection_conflicts("/target")
-            .unwrap()
-            .is_empty());
-        assert_eq!(right.task_comments(&task).unwrap().comments.len(), 1);
-        let conn = right.conn.lock().unwrap();
+        // Retention is not recovery: clearing the legacy mapping would turn it
+        // into a new provider-creation candidate while leaving its issue selector
+        // and effects behind. No raw-SQL shortcut stands in for association.
+        import(&right, "/target", "still-held", &Default::default());
         assert_eq!(
-            conn.query_row(
-                "SELECT worktree FROM tasks WHERE id=?1",
-                [legacy.as_str()],
-                |r| r.get::<_, String>(0)
-            )
-            .unwrap(),
-            "/legacy/checkout"
+            right.peer_projection_conflicts("/target").unwrap(),
+            conflicts
         );
         assert_eq!(
-            conn.query_row(
-                "SELECT count(*) FROM planning_peer_conflicts WHERE active=0",
-                [],
-                |r| r.get::<_, i64>(0)
-            )
-            .unwrap(),
-            2
+            right.task_by_issue("provider-1").unwrap().unwrap().id,
+            legacy
         );
+        assert!(right.task(&task).unwrap().is_none());
+        assert_eq!(export(&right, "/target"), expected);
     }
 
     #[test]

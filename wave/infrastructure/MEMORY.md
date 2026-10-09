@@ -622,25 +622,25 @@ acceptance remain at
 ## Tasks across machines (LOO-412, 2026-10-09)
 
 Jack Heart selected review-only custom-ref sync, not landing/real plan export.
-Joining publishes nothing; imports remain unplaced.
-Malformed input aborts import; contradictions isolate objects and defer effects,
-never saves/acquisition. Receipts retain saves, baselines, uncertainty and losers,
-not transitions. Readback settles effects, not mappings/errors or removal via creation.
+Joining publishes nothing; imports remain unplaced. Malformed input aborts import;
+contradictions defer effects, never saves/acquisition. Retain baselines, uncertainty
+and losers. Readback settles effects, not mappings/errors or removal via creation.
 
 Complete lists alone settle order progress; primary-only moves retain exact input.
-Effect updates cannot promote losers; reread eligibility after settlement.
-Independent removal/archive/Team facts need independent savepoints and original
-ages/baselines; legacy ages stay unknown. Entity revisions cannot order relationships.
-Causal acknowledgements require accepted frontiers and retire only observed notices.
-Preserve revision floors; scalar/list replay cannot clear freshness.
+Effect updates cannot promote losers. Independent provider facts retain separate
+savepoints, original ages/baselines and causal frontiers. Entity revisions cannot
+order relationships; scalar/list replay cannot clear freshness. Preserve revision
+floors, private histories/dependents and unknown pending on unreadable journals.
+Omission is not convergence. Desktop retains scoped receipts/holds and last-good
+readings. Mixed exchange stays disabled; sharing/recovery and composition remain.
+Prior proofs/limits: `b4a91632e`, this heading.
 
-Saves/acquisition bypass effect locks. Active evidence retains losing removals.
-Unreadable journals mean unknown pending. Private histories/dependents stay held;
-omission is not convergence. Desktop streams scoped receipts/holds and retains
-last-good readings. Per-Work membership, authorship/recovery UI, legacy association
-and public composition remain; mixed exchange stays disabled. Focused proofs exclude
-live controls/composed partial lists. Plan: `scratch/work-on-another-machine-name.md`;
-prior evidence: `ce1750393`, this heading.
+Legacy association remains unfinished. Clearing a mapping makes retained Work a
+provider-creation candidate while leaving selectors and uncertain effects behind;
+the raw-SQL fixture proved no recovery. Scalar import also bypassed evidence's
+mapping check. One mapping check now precedes both paths. Association must preserve IDs, lookup,
+effects and execution. Plan/check result:
+`scratch/work-on-another-machine-name.md`.
 
 ## Driver recovery
 

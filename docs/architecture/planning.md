@@ -127,6 +127,14 @@ authorize another write. Pending reads, local saves and provider acquisition rem
 independent; successful peer projection incorporates retained receipts before
 releasing the conflict. Local sharing selection alone never acquires an effect.
 
+The same provider-mapping check precedes peer scalar projection and independent
+provider evidence. Initial attachment is allowed; ordinary peer edits cannot
+replace or clear an existing Task/Project mapping. Contradictions retain the
+journal and isolate that object while independent plans advance. Clearing a legacy
+mapping is not identity association: it makes the retained Work a provider-creation
+candidate and leaves its old selectors and effect receipts behind. Explicit legacy
+association remains unfinished; neither IDs nor execution histories are merged.
+
 `ops/planning_delivery.rs` consumes mapped Task titles, descriptions, nullable
 assignees and membership, and Project names, summaries, statuses and structured
 content. Content patches retain unrelated provider prose. The foreground lifetime

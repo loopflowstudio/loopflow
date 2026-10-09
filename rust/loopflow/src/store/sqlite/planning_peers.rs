@@ -9,7 +9,8 @@ use sha2::{Digest, Sha256};
 
 use crate::durable::{ProjectId, TaskId};
 use crate::engine::planning_exchange::{
-    LinearObservation, PlanningKind, PlanningMutation, PlanningObject, PlanningSnapshot,
+    winning_heads, LinearObservation, PlanningKind, PlanningMutation, PlanningObject,
+    PlanningSnapshot,
 };
 use crate::engine::planning_git::PlanningDestination;
 use crate::id::WaveId;
@@ -118,16 +119,16 @@ fn changes_by_object(
     snapshot: &PlanningSnapshot,
 ) -> StoreResult<BTreeMap<&PlanningObject, ObjectChanges<'_>>> {
     let mut objects: BTreeMap<_, ObjectChanges<'_>> = BTreeMap::new();
-    for (id, change) in snapshot.winners() {
+    let heads: BTreeMap<_, _> = snapshot.heads().collect();
+    for (id, change) in winning_heads(heads.iter().map(|(&id, &change)| (id, change))) {
         objects
             .entry(&change.object)
             .or_default()
             .winners
             .insert(change.field.as_str(), (id, change));
     }
-    let heads: BTreeSet<_> = snapshot.heads().map(|(id, _)| id).collect();
     for (id, change) in &snapshot.changes {
-        let is_head = heads.contains(id.as_str());
+        let is_head = heads.contains_key(id.as_str());
         let object = objects
             .get_mut(&change.object)
             .expect("every retained object has a winning field");
@@ -235,10 +236,14 @@ pub(super) fn capture_project_content(conn: &Connection, project: &ProjectId) ->
             AND c.field IN ('workflow','krs','metric_targets')",
     )?;
     let accepted = read_snapshot(query.query([project.as_str()])?)?;
-    let winners: BTreeMap<_, _> = accepted
-        .winners()
-        .map(|(_, c)| (c.field.as_str(), c))
-        .collect();
+    let winners: BTreeMap<_, _> = winning_heads(
+        accepted
+            .changes
+            .iter()
+            .map(|(id, change)| (id.as_str(), change)),
+    )
+    .map(|(_, c)| (c.field.as_str(), c))
+    .collect();
     // Journal the saved canonical representation, not the caller's untrimmed
     // Markdown inputs. Import has already returned without parsing or echoing it.
     let fields = serde_json::to_value(super::project_content::read_content(conn, project)?)?;

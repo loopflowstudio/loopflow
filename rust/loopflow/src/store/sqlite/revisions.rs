@@ -63,6 +63,7 @@ mod tests {
         "planning_user",
         "planning_peer_changes",
         "planning_peer_heads",
+        "planning_peer_observed",
         "project_binding_imports",
         "auth_browser_bindings",
         "blob_tokens",

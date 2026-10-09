@@ -284,25 +284,7 @@ impl PlanningSnapshot {
     /// Keep winner identity and origin available to delivery projection. Values
     /// alone cannot distinguish a local intention from an observed Linear fact.
     pub fn winners(&self) -> impl Iterator<Item = (&str, &PlanningMutation)> {
-        let mut fields = BTreeMap::new();
-        for (id, change) in self.heads() {
-            let priority = (
-                change.linear.is_some(),
-                change
-                    .linear
-                    .as_ref()
-                    .and_then(LinearObservation::revision_time),
-                change.clock,
-                id,
-            );
-            let winner = fields
-                .entry((&change.object, change.field.as_str()))
-                .or_insert((priority, (id, change)));
-            if priority > winner.0 {
-                *winner = (priority, (id, change));
-            }
-        }
-        fields.into_values().map(|(_, winner)| winner)
+        winning_heads(self.heads())
     }
 
     pub fn validate(&self) -> Result<(), PlanningExchangeError> {
@@ -364,6 +346,32 @@ impl PlanningSnapshot {
         }
         Ok(())
     }
+}
+
+/// Select within an already evaluated frontier. Import and accepted local
+/// observations share this policy without reconstructing a partial journal.
+pub(crate) fn winning_heads<'a>(
+    heads: impl IntoIterator<Item = (&'a str, &'a PlanningMutation)>,
+) -> impl Iterator<Item = (&'a str, &'a PlanningMutation)> {
+    let mut fields = BTreeMap::new();
+    for (id, change) in heads {
+        let priority = (
+            change.linear.is_some(),
+            change
+                .linear
+                .as_ref()
+                .and_then(LinearObservation::revision_time),
+            change.clock,
+            id,
+        );
+        let winner = fields
+            .entry((&change.object, change.field.as_str()))
+            .or_insert((priority, (id, change)));
+        if priority > winner.0 {
+            *winner = (priority, (id, change));
+        }
+    }
+    fields.into_values().map(|(_, winner)| winner)
 }
 
 fn validate_value(change: &PlanningMutation) -> Result<(), PlanningExchangeError> {

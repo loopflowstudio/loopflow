@@ -46,6 +46,10 @@ CREATE TABLE planning_associations (
 );
 CREATE TRIGGER store_revision_planning_associations_insert AFTER INSERT ON planning_associations
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+CREATE TRIGGER store_revision_planning_associations_update AFTER UPDATE ON planning_associations
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+CREATE TRIGGER store_revision_planning_associations_delete AFTER DELETE ON planning_associations
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
 CREATE TABLE planning_peer_heads (
     id TEXT PRIMARY KEY REFERENCES planning_peer_changes(id),
     kind TEXT NOT NULL,

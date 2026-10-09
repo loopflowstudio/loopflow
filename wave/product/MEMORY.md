@@ -84,7 +84,7 @@ Multiple destinations must not split the repository window.
 Private-ancestry holds retain journals/dependents and local moves;
 peers keep old values, so omission is not convergence.
 
-LOO-427 now composes LOO-412's `7260e4602` journals, common receipts, unplaced-Wave
+LOO-427 composes LOO-412's `19e31f64d` journals, common receipts, unplaced-Wave
 reads and destination-level Desktop Work stream. Mixed Linear/Git stays disabled.
 **Retained uncertainty constrains effects, not saves/acquisition.** Save clocks
 order intentions; unresolved losers hold delivery. Complete lists alone settle
@@ -98,14 +98,13 @@ lookup through retained repository locators. Work, mappings, effects and executi
 survive. Both fixture roots own Work before binding. Binding publishes nothing. Journals exclude RepositoryId/delegation.
 Imports allocate identity. October 9 opening/restoration now consumes atomic local
 locator readings, retaining scene/queue/native owners while renewing input targets.
-Headless tests retain drafts and view ownership, not mounted/native usability.
+Headless proof retains drafts and views, not native usability.
 
 Repository association does not associate divergent Task/Project provider IDs.
-**Unmapping is not association.** LOO-412's newer provider claims cross IDs;
-`19e31f64d` separates effect origin from projection ownership.
-Inspected, not composed: LOO-427 retains same-ID holds. Correspondence remains
-unfinished there too; mixed exchange stays disabled. Exclude transfer/preparing
-resolution, preserving Jack Heart's recorded-Machine retention and effect-free
+**Unmapping is not association.** `d378f31ae` composes LOO-412's cross-ID provider
+claims and origin-keyed creation effects through `19e31f64d`. Correspondence remains
+unfinished; mixed exchange stays disabled. Transfer/preparing resolution stays
+deleted, preserving Jack Heart's recorded-Machine retention and effect-free
 selection. Peer reads use Machine/repository keys. Sharing/recovery and remote/native
 acceptance remain unproved.
 

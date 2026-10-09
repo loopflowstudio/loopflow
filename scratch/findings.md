@@ -43,7 +43,7 @@ proof remains.
 
 ### Committed exchange update — October 9
 
-LOO-412 through `7260e4602` is now composed locally; earlier source observations follow.
+LOO-412 through `19e31f64d` is composed locally; earlier observations follow.
 Receipt ordering, independent removal/archive/Team rollback, original acquisition
 ages and causal invalidation findings remain at
 `2c23acbb8:scratch/findings.md`, this heading. Complete lists alone settle order;
@@ -178,14 +178,12 @@ forever on the worktree URL after canonical-root rewriting; sampling exposed the
 fixture error. Corrected expected URLs pass. Initial Swift/Rust compilation failures
 were stale constructor/scalar assumptions and were repaired.
 
-New committed dependency evidence: `63d292896`/`19dab80dd` retain cross-ID provider
-claims for both projection and effect eligibility. `19e31f64d` moves creation receipts
-to the common origin-keyed owner, distinct from local projection foreign keys.
-LOO-427 still contains `7260e4602`'s same-Work-ID effect-conflict check. The newer
-cuts are not ancestors of this checkout; their source/fixtures were inspected, not
-executed. Origin preservation is not legacy association: the dependency still lacks
-correspondence, lookup and deterministic projection. Compose the common owners,
-not a second repair; preserve mixed-provider refusal and excluded TaskSource transfer.
+Merge `d378f31ae` composes `63d292896`/`19dab80dd` provider claims and
+`19e31f64d` origin-keyed creation receipts. The deleted source-transfer resolver
+conflicted with a dependency comment edit; it stayed deleted. The common peer
+owner keeps immutable import preparation and per-field savepoints. Dependency
+scratch remains in its commit, not ambient here. Origin preservation is not legacy
+correspondence; mixed-provider exchange and peer-first-start refusals remain.
 
 Filesystem inspection again found no Product child directories/memories. Relevant
 Infrastructure peer/recovery/planning and Intelligence check/context/memory sections
@@ -193,4 +191,7 @@ were read, plus LOO-412's committed plan and peer memory at `19e31f64d`; unrelat
 sibling history was not re-audited. Local main remains `3e1e6245c`; no fetch was made.
 Delegation exchange, exclusive first-start admission and remote/native composition
 remain. Jack Heart's inheritance choice is unresolved; cursor insertion is settled.
-Pre-edit uncommitted evidence is preserved at `/tmp/loo427-realign-YhViGf/`.
+Earlier pre-edit evidence: `/tmp/loo427-realign-YhViGf/`. Window implementation
+preserved its starting notes at `/tmp/loo427-before-window-scratch/` and reconciled
+them in `3a96bdc76`. The generated Work seed still exceeds its 16,000-token limit;
+authored scratch/memory fit. No budget was raised.

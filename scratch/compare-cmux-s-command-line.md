@@ -8,14 +8,14 @@ fixed-buffer reader with exact pane/surface validation; native proof remains.
 Focused local Rust and model evidence establish neither native acceptance nor delivery.
 
 LOO-406 is integrated through main’s `d20c56daf` (#1503). LOO-412 through
-`7260e4602` is composed locally: common receipts, unplaced-Wave reads and
+`19e31f64d` is composed locally: common receipts, unplaced-Wave reads and
 destination-level Desktop status survive. Established repository roots can now be
 explicitly associated; divergent Task/Project provider identities remain unresolved.
 Mixed Linear/Git stays disabled pending the remaining composition.
 Local Task/Session-plus-Changes opening follows request-scoped readiness; native proof remains.
 Remaining implementation: broader explanation, delegation
-exchange, first-start admission and remote opening. LOO-412 has newer committed
-provider-effect repairs, not yet composed here. Native I/O and full-path proof remain.
+exchange, first-start admission and remote opening. Provider-effect repairs are
+composed; divergent provider correspondence and full-path/native proof remain.
 [Findings](findings.md), [questions](questions.md) and the
 [comparison](../docs/reviews/terminal-command-comparison.md) retain evidence and open choices.
 
@@ -213,7 +213,7 @@ Dependency composition excludes `ops/task/remote.rs`, `TaskSource`,
 `task_remote_tests`. Started Tasks keep their recorded Machine; shared planning
 acquisition, pushed-branch preparation in the existing Task owner, preview parity
 and account handling survive. Copied child placements stay deleted. Dependency
-scratch stays at `7260e4602`, not beside this Task's plan. Desktop replaces the
+scratch stays at `19e31f64d`, not beside this Task's plan. Desktop replaces the
 path-only peer reading key with the existing Machine/repository reading key.
 
 
@@ -270,7 +270,7 @@ exclusive first start, native/compositor usability nor provider continuation.
 ### 2. Shared Work identity, delegation and routing
 
 **Locally composed, incomplete.** The branch includes LOO-406's common writer
-and LOO-412's `7260e4602` exchange, journal, foreground sync and repository Work-stream
+and LOO-412's `19e31f64d` exchange, journal, foreground sync and repository Work-stream
 receipts. Wave commands retain their shared readers and separate writes. The
 Desktop peer cache reuses Machine/repository keys, not path-only readings. `repository_plans` supplies local plan
 identity even without Tasks; explicit binding can associate a peer path with that
@@ -365,7 +365,7 @@ Pending data is not remotely durable until published. Existing execution keeps
 its own lifecycle; no automatic turn/Flow retry is introduced. Online comments
 and completion propagate semi-live through the active sync owner. Main's LOO-406
 `d20c56daf` is integrated, retaining repository-scoped foreground Linear sync.
-Readback cannot exclude unseen Linear reopening. LOO-412 through `7260e4602` is
+Readback cannot exclude unseen Linear reopening. LOO-412 through `19e31f64d` is
 integrated locally, excluding the incompatible started-Task transfer path. Its receipt ordering, independent evidence rollback and
 causal invalidation replace no local owner; prior mechanisms and contrary evidence:
 `2c23acbb8:scratch/compare-cmux-s-command-line.md`, **Mixed command**.
@@ -378,15 +378,13 @@ Wave-owned planning and repository-keyed windows; do not add another poller or i
 repository identity from a destination. Per-Work sharing/authorship/assignee and
 losing-edit recovery presentation remain, distinct from implemented destination status.
 
-LOO-412's newer committed `63d292896`/`19dab80dd` defer effects across divergent
-Work IDs that retain claims on the same provider object. `19e31f64d` separates
-creation-effect origin from the local projection owner, preserving original UUIDs,
-inputs and attempts. These cuts were inspected, not integrated or tested here.
-The composed `7260e4602` checks conflicts only against the effect owner's Work ID;
-repository binding does not repair that gap. Composition must consume the common
-receipt/migration owners without restoring TaskSource transfer or launch-time
-selection effects. Correspondence, lookup and deterministic projection remain
-unimplemented in that dependency too; no automatic rekeying follows.
+`d378f31ae` composes LOO-412 through `19e31f64d`: common provider claims defer
+effects across divergent Work IDs; creation receipts retain origin UUIDs, inputs
+and attempts independently of projection ownership. The merge discarded the
+dependency's modified transfer/preparing resolver rather than restoring TaskSource.
+Common receipt/migration owners survive. This does not implement correspondence,
+lookup or deterministic projection for divergent provider identities; mixed
+Linear/Git remains disabled. No automatic rekeying or start authority follows.
 
 `7260e4602` also protects provider mappings before scalar and evidence projection.
 Clearing a legacy mapping would make retained Work eligible for provider creation;
@@ -546,4 +544,4 @@ identity/delegation, open them, add shell/Files panes, retain an unfinished draf
 change focus, target a harmless command, read output, hide/restore, and verify the
 original input target and draft survive. Demo owns native usability; preserve comparison evidence and use no real accounts or live user terminals.
 
-Check: Rust build/fmt/Clippy PASS; network-isolated repository_identity_binding + repository_identity DTO PASS (2); headless Swift focused identity/opening checks PASS (8, then 3 after stale-target review); affected suites/installation: gate; native usability: demo.
+Check: Rust build/fmt/Clippy PASS; network-isolated repository_identity_binding + repository_identity DTO PASS (2); headless Swift identity/opening checks PASS (8, then 3 after review); composed peer filters duplicate_provider_/peer_creation_identity_/peer_mapping_replacement_/creation_origins/independent_peer_tasks PASS (6); affected suites/installation: gate; native usability: demo.

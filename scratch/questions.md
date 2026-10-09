@@ -5,7 +5,7 @@ Jack Heart's custom-ref steers supersede host callbacks. The
 deletion cut and remaining acceptance. Earlier callback assumptions are retained
 at `b040c7c8d:scratch/questions.md`.
 
-- LOO-406's common writer is integrated through pinned `ffe986160`. Peer
+- LOO-406's common writer is integrated through pinned `cbf0a174a` at `ffbe0ad42`. Peer
   import/export, ordering and local-only foreground composition exist in source;
   execution verification remains, independent of the parent's Linear delivery.
 - Jack Heart's newer policy: Linear wins observed conflicts; otherwise host
@@ -32,9 +32,10 @@ at `b040c7c8d:scratch/questions.md`.
 
 The integrated cut remains unpublished. The current design owns verification and
 remaining integration; earlier adoption evidence stays at `5d336868f:scratch/questions.md`.
-October 9's 46 passing peer-storage tests supersede the dated unexecuted claims below
-for that suite. Public/DTO, provider-lifetime, cold-worker, Desktop and mixed-provider
-acceptance remain separate. No new product decision is selected.
+October 9's 46 passing peer-storage tests at `19f0a4b6d` cover the storage
+choices below; the later sync changed Task admission, not that storage module.
+Public/DTO, provider-lifetime, cold-worker, Desktop and mixed-provider acceptance
+remain separate. No new product decision is selected.
 
 - October 8 selection choice: selecting a Wave includes its descendants; joining
   selects nothing. Existing moves never enroll a private parent or change the
@@ -70,12 +71,12 @@ acceptance remain separate. No new product decision is selected.
   provider revisions, not the receiving machine's clock. This reversible representation
   duplicates the immutable observation across field receipts; the existing document
   size bound still applies. It is not a new product decision from Jack Heart.
-- `e608b0d2d` supplies the requested provider-frontier representation; its regressions
-  are authored, not executed. October 8 repairs move acquisition before projection
+- `e608b0d2d` supplies the requested provider-frontier representation. October 8
+  repairs move acquisition before projection
   and reassert typed membership-conflict evidence after the object's rollback.
   Identical bodies still undergo removal/archive checks; superseded entity revision
   groups remain journal history, not reacquisition. Common no-op upserts preserve
-  readback idempotence. SQL checks pass; Rust regressions are unexecuted. Grouped
+  readback idempotence. The October 9 storage suite covers these regressions. Grouped
   receipts, alternate provider paths and independent relationship ordering remain,
   alongside legacy association and Desktop presentation. No mixed-provider
   completion or compare-and-swap is claimed.
@@ -115,7 +116,7 @@ acceptance remain separate. No new product decision is selected.
   explicitly retires it. Cached non-lifecycle states still project without minting
   unsupported lifecycle deliveries; the common writer still owns its three targets.
   No new product policy is selected. Remaining grouped
-  receipts and executable checks stay in the design; mixed-provider exchange is
+  receipts and composed checks stay in the design; mixed-provider exchange is
   still disabled and not ready for publication.
 
 - October 8 comment composition uses the existing comment ID as delivery identity,
@@ -133,7 +134,8 @@ acceptance remain separate. No new product decision is selected.
   are not reported as empty convergence. Only malformed journal errors are isolated;
   database failures still fail status. This replaces the second global conflict reader,
   not the journal or its validation. `de9470d5a` also shares the destination-scoped
-  conflict query with import settlement. Public/DTO regressions remain unexecuted.
+  conflict query with import settlement. Storage checks passed; public/DTO execution
+  remains with gate.
 
 - October 8 semantic-content choice: retain existing common Markdown storage,
   but remove it from peer ordering. Rust's content owner captures workflow, the
@@ -146,7 +148,7 @@ acceptance remain separate. No new product decision is selected.
   new policy from Jack Heart. Review removed an incorrect test expectation that
   an observed concurrent Linear winner must preserve a losing local field; the
   selected winner retires its intention and retains the losing receipt. Independent
-  edits without a competing observation remain covered. Rust tests are unexecuted.
+  edits without a competing observation remain covered by the passing storage suite.
 
 - October 9 executable feedback exposed two missing common-writer boundaries:
   accepted peer provider facts lacked their original acquisition age on local rows,

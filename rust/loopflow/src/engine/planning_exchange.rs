@@ -130,6 +130,10 @@ impl PlanningSnapshot {
         heads
     }
 
+    pub(crate) fn objects(&self) -> BTreeSet<&PlanningObject> {
+        self.changes.values().map(|change| &change.object).collect()
+    }
+
     pub fn resolved(&self) -> BTreeMap<PlanningObject, BTreeMap<String, Value>> {
         let mut objects: BTreeMap<_, BTreeMap<_, _>> = BTreeMap::new();
         for ((object, field), heads) in self.heads() {

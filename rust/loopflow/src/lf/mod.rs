@@ -1,4 +1,4 @@
-/// Portable planning and code requirements for one SSH invocation.
+/// Saved Task identity and pushed-code requirements for one SSH invocation.
 pub const TASK_SOURCE_ENV: &str = "LF_TASK_SOURCE";
 /// Explicit Work declaration inherited by descendants; checkout inference never writes it.
 pub const WORK_DECLARATION_ENV: &str = "LF_AS";

@@ -148,7 +148,7 @@ impl SqliteStore {
             }
         }
         let selected = export_in(&tx, repo, destination)?;
-        require_selected_references(&tx, destination, &selected)?;
+        require_selected_references(&tx, destination, &selected.resolved())?;
         tx.commit()?;
         Ok(())
     }
@@ -161,7 +161,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.unchecked_transaction()?;
         let snapshot = export_in(&tx, repo, destination)?;
-        require_selected_references(&tx, destination, &snapshot)?;
+        require_selected_references(&tx, destination, &snapshot.resolved())?;
         tx.commit()?;
         Ok(snapshot)
     }
@@ -178,12 +178,12 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let saved = export_in(&tx, repo, destination)?;
-        reserve_incoming(&tx, repo, destination, incoming)?;
         let merged = saved.merge(incoming).map_err(invalid)?;
-        require_selected_references(&tx, destination, &merged)?;
+        reserve_incoming(&tx, repo, destination, incoming)?;
+        let objects = merged.resolved();
+        require_selected_references(&tx, destination, &objects)?;
         retain_mutations(&tx, &saved, incoming)?;
         tx.execute("UPDATE planning_peer_context SET importing=1", [])?;
-        let objects = merged.resolved();
         for (object, fields) in &objects {
             require_complete(object, fields)?;
             match object.kind {
@@ -198,8 +198,6 @@ impl SqliteStore {
                 }
                 PlanningKind::Comment => {}
             }
-            // Pending projections retain ownership even without a live row.
-            require_repository(&tx, object, repo)?;
         }
         let mut conflicts = BTreeSet::new();
         let mut pending: Vec<_> = objects.iter().collect();
@@ -342,8 +340,9 @@ fn reserve_incoming(
     destination: &str,
     incoming: &PlanningSnapshot,
 ) -> StoreResult<()> {
-    incoming.validate().map_err(invalid)?;
-    for object in incoming.resolved().keys() {
+    // Merge validated mutations before membership can change. Check ownership
+    // without resolving field winners or copying their values.
+    for object in incoming.objects() {
         require_repository(conn, object, repo)?;
         if member_destination(conn, object)?.is_none() && recorded(conn, object)? {
             return Err(invalid(format!(
@@ -353,15 +352,15 @@ fn reserve_incoming(
         }
         enroll(conn, repo, destination, object)?;
     }
-    require_selected_references(conn, destination, incoming)
+    require_selected_references(conn, destination, &incoming.resolved())
 }
 
 fn require_selected_references(
     conn: &Connection,
     destination: &str,
-    snapshot: &PlanningSnapshot,
+    objects: &BTreeMap<PlanningObject, BTreeMap<String, Value>>,
 ) -> StoreResult<()> {
-    for fields in snapshot.resolved().values() {
+    for fields in objects.values() {
         for (field, kind) in [
             ("parent_wave_id", PlanningKind::Wave),
             ("wave_id", PlanningKind::Wave),
@@ -438,25 +437,26 @@ fn export_in(conn: &Connection, repo: &str, destination: &str) -> StoreResult<Pl
     require_destination(conn, repo, destination)?;
     let mut query = conn.prepare("SELECT c.kind,c.object_id,c.field,c.value,c.clock,c.linear,c.parents,c.id
         FROM planning_peer_changes c JOIN planning_members m ON m.kind=c.kind AND m.object_id=c.object_id
-        WHERE m.repo=?1 AND m.destination=?2 ORDER BY c.clock,c.id")?;
+        WHERE m.repo=?1 AND m.destination=?2")?;
     let mut snapshot = PlanningSnapshot::default();
     let mut rows = query.query(params![repo, destination])?;
     while let Some(row) = rows.next()? {
         snapshot.changes.insert(row.get(7)?, read_mutation(row)?);
     }
     snapshot.validate().map_err(invalid)?;
-    for object in snapshot.resolved().keys() {
+    for object in snapshot.objects() {
         require_repository(conn, object, repo)?;
     }
     let expected: BTreeSet<_> = snapshot.heads().into_values().flatten().collect();
-    let mut query = conn.prepare("SELECT id FROM planning_peer_heads")?;
-    let retained = query
-        .query_map([], |row| row.get::<_, String>(0))?
-        .collect::<Result<Vec<_>, _>>()?;
-    let actual: BTreeSet<_> = retained
-        .into_iter()
-        .filter(|id| snapshot.changes.contains_key(id))
-        .collect();
+    let mut query = conn.prepare(
+        "SELECT h.id FROM planning_peer_heads h
+         JOIN planning_peer_changes c ON c.id=h.id
+         JOIN planning_members m ON m.kind=c.kind AND m.object_id=c.object_id
+         WHERE m.repo=?1 AND m.destination=?2",
+    )?;
+    let actual = query
+        .query_map(params![repo, destination], |row| row.get::<_, String>(0))?
+        .collect::<Result<BTreeSet<_>, _>>()?;
     if expected != actual {
         return Err(invalid(
             "planning causal heads disagree with retained mutations",
@@ -787,6 +787,49 @@ mod tests {
             .select_peer_waves("/source", &destination(), std::slice::from_ref(wave.id()))
             .unwrap();
         task
+    }
+
+    #[test]
+    fn export_validates_only_the_selected_plans_causal_heads() {
+        let (_home, store) = store();
+        seed(&store);
+        let before = store
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        let unrelated = Wave::new(WaveId::new(), "private".into(), "/source".into());
+        store.create_wave(&unrelated).unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "DELETE FROM planning_peer_heads WHERE object_id=?1",
+                [unrelated.id()],
+            )
+            .unwrap();
+        assert_eq!(
+            store
+                .export_peer_planning("/source", &destination())
+                .unwrap(),
+            before
+        );
+
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "DELETE FROM planning_peer_heads WHERE id=?1",
+                [before.changes.keys().next().unwrap()],
+            )
+            .unwrap();
+        let error = store
+            .export_peer_planning("/source", &destination())
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("causal heads disagree"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -1245,7 +1288,7 @@ mod tests {
         assert_eq!(right.revisions().unwrap(), revisions);
         assert_eq!(
             right
-                .peer_import_revision("/target", "synthetic")
+                .peer_import_revision("/target", &destination())
                 .unwrap()
                 .as_deref(),
             Some("second")
@@ -1684,7 +1727,7 @@ mod tests {
             .changes
             .is_empty());
         assert!(right
-            .peer_import_revision("/target", "synthetic")
+            .peer_import_revision("/target", &destination())
             .unwrap()
             .is_none());
         right
@@ -1709,7 +1752,7 @@ mod tests {
             .is_err());
         assert_eq!(
             right
-                .peer_import_revision("/target", "synthetic")
+                .peer_import_revision("/target", &destination())
                 .unwrap()
                 .as_deref(),
             Some("candidate")
@@ -1730,12 +1773,14 @@ mod tests {
             .export_peer_planning("/source", &destination())
             .unwrap();
         let mut reused = original.clone();
+        // Use a new object so repository ownership cannot mask the global
+        // mutation-ID collision this fixture is meant to exercise.
         reused
             .changes
-            .values_mut()
-            .find(|change| change.field == "issue_title")
-            .unwrap()
-            .value = json!("Conflicting identity from another plan");
+            .retain(|_, change| change.field == "issue_title");
+        let change = reused.changes.values_mut().next().unwrap();
+        change.object.id = TaskId::new().to_string();
+        change.value = json!("Conflicting identity from another plan");
         let error = store
             .import_peer_planning("/other", &destination(), "reused", &reused)
             .unwrap_err();
@@ -1755,7 +1800,7 @@ mod tests {
             .changes
             .is_empty());
         assert!(store
-            .peer_import_revision("/other", "synthetic")
+            .peer_import_revision("/other", &destination())
             .unwrap()
             .is_none());
     }

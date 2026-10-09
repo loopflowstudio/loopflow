@@ -33,9 +33,8 @@ failed on an unbound Initiative.
 - LOO-418: a Task has zero or one PR; follow-through is another Task. Serial PR
   chains below describe the implementation being replaced. LOO-401 selects
   `self`, `config user`, app opening and HTML screenshot removal without a
-  replacement. Desktop's native snapshot is separate. LOO-406 now owns the accepted local
-  planning lifecycle, preserving connected Linear repositories; cross-machine
-  plan authority remains separate from that Task.
+  replacement. Desktop's native snapshot is separate. LOO-406 owns the accepted local
+  planning lifecycle, preserving connected Linear repositories; LOO-412 owns exchange.
 - LOO-428 retains argument delivery in its launch/output repair. LOO-429's later
   decision puts all assembled context in the system file: no split, fallback or
   lf-side interactive error wording. LOO-420 uses native invocation for native
@@ -48,8 +47,7 @@ and terminal I/O belong in one LOO-427 diff, with internal slices; premature
 LOO-430/431/432 are folded back. Jack authorized implementation through demo
 review and approved the design October 8. Owned cmux probe: arrangement, output and retained draft; cleaned up. No Desktop parity proof.
 
-Shared Work replaces repository pairing. Exact targets do not protect unsent
-drafts; retain LOO-387's boundary.
+Shared Work replaces pairing. Exact targets cannot protect drafts (LOO-387).
 
 October 8: LOO-427's checkout cut (`f5f742058`) leaves unknown location unavailable.
 Prototypes through `92cafe61d` remove copied placements, preserve legacy overrides
@@ -63,16 +61,17 @@ control and composed proof remain.
 
 LOO-427 keys windows/queues by plan; delivery tokens fence canceled completions.
 Inspection separates Task/Session actions; Session time stays unknown. Saved/failed
-readings grant none. Exact hide/restore retains panes; Undo renews closed-pane
-tokens, not untouched panes. View identity grants no terminal input authority.
-Full Rust/Swift and native/remote checks remain; controls are unfinished.
+readings grant none. Hide/restore retains panes; Undo renews only closed-pane
+tokens. View identity grants no input authority. Seeded shared IDs prove routing,
+not exchange or exclusive start. Rust/Swift and native/remote proof remain.
 
-Jack selected execution-machine local operations and Git-ref Task sync: 406 owns
-writes/Linear, 412 exchange. Workflow, Sessions, Processes, checkouts and control
-stay local; imported completion cannot move or clean them. Preserve pending edits,
-semi-live comments/completion, causal reopening and stable mutation IDs.
-412's unintegrated `7395cf3bb` pins destinations, starts joins empty and explicitly
-selects records; descendants inherit selection. Checkpoints can retain conflicts.
+Jack selected local operations and Git-ref Task sync: 406 owns writes/Linear,
+412 exchange. Imported completion cannot move local Workflow or clean execution.
+Preserve pending edits, semi-live comments/completion, causal reopening and mutation
+IDs. `29777b8cb` keeps Desktop Linear sync repository-scoped: selecting
+a Task is presentation, not sync lifetime. Composed reconnect remains unproved.
+412's unintegrated `7395cf3bb` pins destinations, starts joins empty and selects
+records; descendants inherit selection. Checkpoints can retain conflicts.
 
 Jack selected user-keyed Git plans by default, explicit shared opt-in through the
 same APIs, Linear conflict wins; otherwise host preference then last-write-wins
@@ -80,8 +79,8 @@ with recoverable edits (`f027890ab:wave/infrastructure/MEMORY.md`). A code remot
 grants neither shared identity nor publication permission.
 Private-ancestry moves hold journals/dependents, including losing references,
 without undoing local moves. Peers retain old values: holds are not convergence.
-Public setup/exchange, 427 plan-ID/delegation integration and Rust proof remain.
-Precedence fixes neither Linear's race nor start admission.
+Setup/exchange, 427 integration and Rust proof remain. Precedence fixes neither
+Linear's race nor start admission.
 
 ## Terminal-host adoption (2026-10-07)
 

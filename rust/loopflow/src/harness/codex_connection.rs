@@ -16,9 +16,11 @@ use crate::process::SessionDriver;
 use crate::store::sqlite::SqliteStore;
 use crate::store::{StoreError, StoreResult};
 
-/// Called under the Session driver transaction, so takeover cannot race the
-/// provider shutdown. Saved history and the provider thread ID survive.
-pub(crate) fn close_engine(endpoint: &str, thread: &str, pid: u32, started: i64) -> Result<()> {
+/// Called under the Session driver lock, so takeover cannot race the provider
+/// shutdown. Saved history and the provider thread ID survive. `serving` is
+/// the recorded endpoint and thread; an engine that also serves an unrelated
+/// conversation is left running, and that is an error.
+pub(crate) fn close_engine(serving: Option<(&str, &str)>, pid: u32, started: i64) -> Result<()> {
     let same_process = || -> Result<bool> {
         Ok(crate::journal::process_started_at(pid)?
             .is_some_and(|actual| (actual - started).abs() <= 3))
@@ -26,26 +28,28 @@ pub(crate) fn close_engine(endpoint: &str, thread: &str, pid: u32, started: i64)
     if !same_process()? {
         return Ok(());
     }
-    // Use a separate runtime: exit is also reached from synchronous capture
-    // settlement and signal cleanup, sometimes inside an existing runtime.
-    std::thread::scope(|scope| {
-        scope
-            .spawn(|| {
-                tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()?
-                    .block_on(async {
-                        tokio::time::timeout(
-                            Duration::from_secs(3),
-                            inspect_engine_threads(endpoint, thread),
-                        )
-                        .await
-                        .map_err(|_| anyhow!("engine inspection timed out"))?
-                    })
-            })
-            .join()
-            .map_err(|_| anyhow!("engine close worker panicked"))?
-    })?;
+    if let Some((endpoint, thread)) = serving {
+        // Use a separate runtime: exit is also reached from synchronous capture
+        // settlement and signal cleanup, sometimes inside an existing runtime.
+        std::thread::scope(|scope| {
+            scope
+                .spawn(|| {
+                    tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()?
+                        .block_on(async {
+                            tokio::time::timeout(
+                                Duration::from_secs(3),
+                                inspect_engine_threads(endpoint, thread),
+                            )
+                            .await
+                            .map_err(|_| anyhow!("engine inspection timed out"))?
+                        })
+                })
+                .join()
+                .map_err(|_| anyhow!("engine close worker panicked"))?
+        })?;
+    }
     if !same_process()? {
         return Ok(());
     }
@@ -63,7 +67,7 @@ pub(crate) fn close_engine(endpoint: &str, thread: &str, pid: u32, started: i64)
     }
     if owner != group {
         return Err(anyhow!(
-            "recorded Codex process does not own its process group"
+            "recorded process does not lead its own process group"
         ));
     }
     for signal in [libc::SIGTERM, libc::SIGKILL] {
@@ -87,7 +91,7 @@ pub(crate) fn close_engine(endpoint: &str, thread: &str, pid: u32, started: i64)
             std::thread::sleep(Duration::from_millis(25));
         }
     }
-    Err(anyhow!("Codex process {pid} did not exit"))
+    Err(anyhow!("process {pid} did not exit"))
 }
 
 async fn inspect_engine_threads(endpoint: &str, thread: &str) -> Result<()> {

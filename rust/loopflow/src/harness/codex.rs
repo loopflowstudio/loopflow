@@ -31,6 +31,9 @@ use tokio_tungstenite::{client_async, tungstenite::Message};
 
 use crate::chat::types::{ConversationEvent, ConversationItem, TurnUsage};
 use crate::engine::agent::{build_codex_thread_start_params, AgentConfig};
+use crate::engine::process::{
+    bind_group_to_driver, engine_lifeline_path, hold_engine_lifeline, kill_process_group,
+};
 use crate::harness::codex_mapping::ItemPhase;
 use crate::harness::common::spawn_stderr_logger;
 use crate::harness::lf_tag::LfTagParser;
@@ -40,21 +43,6 @@ use crate::harness::{
 use crate::provider_account::{resolve_provider_account_exact, ProviderAccountRoute};
 use crate::provider_auth::Provider;
 use crate::store::ProviderAccountId;
-
-/// SIGKILL an entire process group. Killing only the direct child orphans
-/// the real app-server when `codex` on PATH is an npm shim that spawns it as
-/// a grandchild (verified live — the orphan kept running and held the stdio
-/// pipes open). Shared by `stop()` and the interrupt hook.
-fn kill_process_group(pid: u32) {
-    #[cfg(unix)]
-    // SAFETY: plain syscall; a negative pid targets the process group we
-    // created for the child at spawn (process_group(0)).
-    unsafe {
-        libc::kill(-(pid as i32), libc::SIGKILL)
-    };
-    #[cfg(not(unix))]
-    let _ = pid;
-}
 
 fn build_thread_request(
     launch: &AgentConfig,
@@ -603,13 +591,10 @@ pub struct CodexHarness {
     thread_start_request_id: Arc<AtomicI64>,
     launch: Option<AgentConfig>,
     should_seed_prompt: bool,
-    /// Pid of the live child's process group; 0 = none. Read by the interrupt
-    /// hook so SIGINT/SIGTERM/SIGHUP kill the whole codex group before the
-    /// process exits — the signal handler exits without running destructors,
-    /// so `kill_on_drop` never fires on that path (observed live: `tmux
-    /// kill-session` orphaned the app-server pair).
+    /// Pid of the live child's process group; 0 = none. `stop()` kills it;
+    /// every other way this process can end is covered by the driver
+    /// lifeline bound at spawn.
     child_group: Arc<AtomicU32>,
-    interrupt_hook_registered: bool,
     engine_directory: Option<tempfile::TempDir>,
     endpoint: Option<PathBuf>,
     session_driver: Option<(
@@ -651,7 +636,6 @@ impl CodexHarness {
             launch: None,
             should_seed_prompt: true,
             child_group: Arc::new(AtomicU32::new(0)),
-            interrupt_hook_registered: false,
             engine_directory: None,
             endpoint: None,
             session_driver: None,
@@ -1131,12 +1115,11 @@ impl CodexHarness {
         };
         drop(activation);
 
-        // Publish the group pid for the interrupt hook: the signal handler
-        // (SIGINT/SIGTERM/SIGHUP — see bin/lf.rs) exits the process before
-        // destructors run, so `kill_on_drop` never fires on that path. The
-        // hook is what keeps `tmux kill-session` from orphaning the
-        // app-server group. Registered once per harness; restarts just
-        // update the atomic.
+        // The engine runs in its own group and deliberately survives this
+        // harness, so no destructor or signal hook can be what stops it. The
+        // lifeline ties it to the processes that drive it: when the last one
+        // ends, by return, signal, panic or SIGKILL, the group is terminated.
+        let lifeline = engine_lifeline_path(&endpoint);
         if let Some(pid) = child.as_ref().and_then(tokio::process::Child::id) {
             self.child_group.store(pid, Ordering::Release);
             if let Some((store, session, driver)) = &self.session_driver {
@@ -1144,16 +1127,14 @@ impl CodexHarness {
                     store.record_session_provider_process(session, driver, pid, started_at)?;
                 }
             }
-        }
-        if self.session_driver.is_none() && !self.interrupt_hook_registered {
-            self.interrupt_hook_registered = true;
-            let group = Arc::clone(&self.child_group);
-            crate::engine::agent::register_interrupt_cleanup(move || {
-                let pid = group.swap(0, Ordering::AcqRel);
-                if pid != 0 {
-                    kill_process_group(pid);
-                }
-            });
+            bind_group_to_driver(pid, Some(&lifeline)).map_err(|error| {
+                anyhow!("failed to bind codex app-server to its driver: {error}")
+            })?;
+        } else {
+            // Reconnecting adopts the engine; one that predates lifelines has none.
+            hold_engine_lifeline(&lifeline).map_err(|error| {
+                anyhow!("Codex engine is stopping after its driver exited ({error}); retry")
+            })?;
         }
 
         self.endpoint = Some(endpoint.clone());
@@ -1536,7 +1517,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn saved_thread_rejection_retains_pre_spawn_retry_evidence() {
+    fn saved_thread_rejection_precedes_spawn_and_leaves_the_conversation_resumable() {
         let ledger = crate::journal::TestLedgerGuard::new();
         let _ambient = crate::test_ambient::EnvGuard::new();
         let _binary = crate::test_ambient::EnvGuard::clear(&["LF_BIN"]);
@@ -1561,9 +1542,6 @@ mod tests {
         let driver = store
             .claim_session_driver("saved", Some(&old), &process, true)
             .unwrap();
-        store
-            .record_session_provider_launch("saved", &driver, false)
-            .unwrap();
         let (tx, _rx) = mpsc::unbounded_channel();
         let mut harness = CodexHarness::new(tx, ApprovalPolicy::AutoApprove);
         let config = AgentConfig {
@@ -1580,14 +1558,9 @@ mod tests {
         assert!(error
             .to_string()
             .contains("Saved conversation thread differs"));
-        assert!(store.session_provider_unstarted("saved").unwrap());
-        assert!(!crate::session_record::conversation_engine_exited(&store, "saved").unwrap());
         let released = store.release_session_driver("saved", &driver).unwrap();
         let retry = store
             .claim_session_driver("saved", Some(&released), &process, true)
-            .unwrap();
-        store
-            .record_session_provider_launch("saved", &retry, false)
             .unwrap();
         harness.resume_provider_session_id = Some("saved-thread".into());
         let config = AgentConfig {
@@ -1601,7 +1574,6 @@ mod tests {
                 .contains("failed to spawn codex app-server"),
             "{error}"
         );
-        assert!(!store.session_provider_unstarted("saved").unwrap());
         assert_eq!(
             store.session_thread("saved").unwrap().as_deref(),
             Some("saved-thread")
@@ -1711,33 +1683,6 @@ mod tests {
         let (method, params) = build_thread_request(&AgentConfig::default(), None);
         assert_eq!(method, "thread/start");
         assert!(!params.contains_key("threadId"));
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn kill_process_group_reaches_the_grandchild() {
-        // The npm-shim shape: the direct child backgrounds a grandchild
-        // (same process group) and exits. The grandchild touches a flag
-        // file after a short sleep; killing the group must take it down
-        // before the sleep finishes, so the flag never appears. This is
-        // the same kill the interrupt hook fires on SIGINT/SIGTERM/SIGHUP.
-        let tmp = tempfile::tempdir().unwrap();
-        let flag = tmp.path().join("survived");
-        let mut command = Command::new("sh");
-        command
-            .arg("-c")
-            .arg(format!("(sleep 1 && touch {}) &", flag.display()));
-        command.process_group(0);
-        let mut child = command.spawn().unwrap();
-        let pid = child.id().unwrap();
-        // Let the shell fork the grandchild and exit.
-        let _ = child.wait().await;
-
-        kill_process_group(pid);
-
-        // Past the grandchild's sleep: if it leaked, the flag would exist.
-        tokio::time::sleep(Duration::from_millis(1500)).await;
-        assert!(!flag.exists(), "grandchild outlived the group kill");
     }
 
     #[test]

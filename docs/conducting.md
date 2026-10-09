@@ -113,7 +113,7 @@ lf doctor          # check installation, Process integrity and scheduled receipt
 Use `lf ps --json` when another tool or agent needs one stable, parseable frame.
 Both contain only OS-live process trees; completed calls disappear. Run
 `lf mon prune --dry-run` before cleanup. Plain `lf mon prune` removes stale Process
-receipts and registered orphan OpenCode groups, never unclaimed provider PIDs.
+receipts and engines whose driver is provably dead, never unclaimed provider PIDs.
 `lf ci` reads the local ledger, not GitHub: it reports how
 much of CI repair happened without a person.
 

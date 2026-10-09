@@ -266,11 +266,6 @@ unread legacy `traces`, `backups`, `lfd.db*`, `logs`; LOO-304's 40 GiB of
 `/private/tmp` fixtures. Unknown ownership is not permission to delete. Test
 `session_record` with `LF_*` cleared.
 
-## Retained capture storage and autonomous cleanup (2026-10-05)
-
-LOO-370's current decision is under Capture cutover. PR #1450 is integrated;
-exact earlier delegation/steer: `2d333d18c:wave/infrastructure/MEMORY.md`, this heading.
-
 ## Project configuration and review direction (2026-10-05)
 
 LOO-366's October 5 decisions are under Optional chapters and Task workflows;
@@ -635,17 +630,21 @@ Workflow position or controls. Imported completion grants no execution authority
 Jack authorized review-only publication and stacking on `e68f2a423`/`84664e661`,
 not public-remote planning export or landing. Plan ownership above governs sharing.
 
-Source removes copied planning/issue-derived IDs. Causality precedes Linear,
-then clock/ID; losers survive. Projection conflicts retain records without blocking
-independent objects; checkpoints acknowledge retention, not convergence. Release's
-entry-point lesson applies: fetch, import and publication need distinct outcomes.
-Bindings pin endpoint/ref; export uses explicit record membership, not repository
-ownership. Joining selects no local records; new descendants inherit selection.
-Key recovery exists; setup/root selection remain unfinished.
-Peer projection does not reconcile Linear delivery receipts. Foreground exchange,
-legacy association and composed preservation remain unfinished. SQL replay proves no
-Rust/public acceptance. Fixtures must target saved destinations and reach the claimed failure.
-Design: `scratch/work-on-another-machine-name.md`; prior gaps: `7af31f09f`, this heading.
+Copied planning/issue-derived IDs are removed. Causality precedes Linear,
+then clock/ID; losers survive. Projection conflicts retain independent objects;
+checkpoints acknowledge retention, not convergence. Release's entry-point lesson
+applies: fetch, import and publication need distinct outcomes. Bindings pin
+endpoint/ref; export uses selected records, not repository ownership. Joining is
+empty; new descendants inherit selection. Key recovery exists; public setup,
+root selection, foreground exchange and legacy association remain unfinished.
+Peer projection still bypasses Linear delivery receipts.
+
+Selection checks at import/export do not fence common-writer reparenting. October 8
+SQL replay permits a selected Task move to an unselected Project; source validation
+then rejects the entire export. Insert-only membership is insufficient: cover moves
+after joining without implicit sharing or blocking unrelated exchange. SQL proves
+no Rust/public acceptance. Design: `scratch/work-on-another-machine-name.md`;
+prior isolation proofs and limits: `fea5156eb`, this heading.
 
 ## Synced planning integration (LOO-334)
 

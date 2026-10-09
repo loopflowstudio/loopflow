@@ -1,7 +1,7 @@
 //! Peer receipts and projection commit together on the existing planning tables.
 //! Export reads retained mutation identities; it never creates a new edit.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{btree_map::Entry, BTreeMap, BTreeSet};
 
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde_json::Value;
@@ -111,7 +111,8 @@ impl SqliteStore {
     }
 
     /// Explicitly include entire Waves and their existing descendants. Never
-    /// select by name or silently include an ancestor's other work.
+    /// select by name or silently include an ancestor's other work. Private
+    /// references hold exchange, not selection of independent Waves.
     pub fn select_peer_waves(
         &self,
         repo: &str,
@@ -147,8 +148,6 @@ impl SqliteStore {
                 enroll(&tx, repo, destination, &object)?;
             }
         }
-        let selected = export_in(&tx, repo, destination)?;
-        require_selected_references(&tx, repo, destination, &selected.resolved())?;
         tx.commit()?;
         Ok(())
     }
@@ -445,42 +444,36 @@ fn selection_conflicts(
     destination: &str,
     snapshot: &PlanningSnapshot,
 ) -> StoreResult<BTreeMap<PlanningObject, String>> {
-    let mut references: BTreeMap<&PlanningObject, BTreeSet<PlanningObject>> = BTreeMap::new();
+    let mut dependents: BTreeMap<PlanningObject, BTreeSet<&PlanningObject>> = BTreeMap::new();
     for change in snapshot.changes.values() {
         if let Some(parent) = reference(&change.field, &change.value) {
-            references.entry(&change.object).or_default().insert(parent);
+            dependents.entry(parent).or_default().insert(&change.object);
         }
     }
-    let mut private = BTreeSet::new();
-    for parent in references.values().flatten().collect::<BTreeSet<_>>() {
+    let mut pending = BTreeSet::new();
+    for parent in dependents.keys() {
         if unselected(conn, repo, destination, parent)? {
-            private.insert(parent.clone());
+            pending.insert(parent.clone());
         }
     }
     let mut held = BTreeMap::new();
     for object in snapshot.objects() {
         if belongs_elsewhere(conn, object, repo)? {
             held.insert(object.clone(), "planning exchange held: record moved outside this repository; local work and peer history are retained".into());
+            pending.insert(object.clone());
         }
     }
-    loop {
-        let before = held.len();
-        for (object, parents) in &references {
-            if held.contains_key(*object) {
-                continue;
-            }
-            if let Some(parent) = parents
-                .iter()
-                .find(|p| private.contains(*p) || held.contains_key(*p))
-            {
-                held.insert((*object).clone(), format!(
+    // Follow each dependency once, including Wave/selected-Project cycles,
+    // rather than rescanning every record for each level of held ancestry.
+    while let Some(parent) = pending.pop_first() {
+        for object in dependents.remove(&parent).into_iter().flatten() {
+            if let Entry::Vacant(entry) = held.entry(object.clone()) {
+                entry.insert(format!(
                     "planning exchange held: reference {} is outside the exchangeable selection; local work and peer history are retained",
                     parent.id
                 ));
+                pending.insert(object.clone());
             }
-        }
-        if held.len() == before {
-            break;
         }
     }
     Ok(held)
@@ -1055,6 +1048,76 @@ mod tests {
             .peer_projection_conflicts("/source")
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn held_wave_selection_cycles_keep_descendants_private_until_explicit_selection() {
+        let (_home, store) = store();
+        let task = seed(&store);
+        let saved = store.task(&task).unwrap().unwrap();
+        let private = Wave::new(WaveId::new(), "private".into(), "/source".into());
+        let independent = Wave::new(WaveId::new(), "independent".into(), "/source".into());
+        store.create_wave(&private).unwrap();
+        store.create_wave(&independent).unwrap();
+        store
+            .append_task_comment(
+                &task,
+                &TaskComment {
+                    id: "held-comment".into(),
+                    body: "Retain this with the Task".into(),
+                    author: TaskCommentAuthor::Person { name: None },
+                    created_at: None,
+                },
+            )
+            .unwrap();
+        // The Wave selects its Project, which references the Wave. Holding the
+        // Wave must also hold the Project, Task and comment without looping.
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE waves SET parent_wave_id=?2,current_project_id=?3 WHERE id=?1",
+                params![saved.wave_id, private.id(), saved.project_id],
+            )
+            .unwrap();
+        let held = store.peer_projection_conflicts("/source").unwrap();
+        assert_eq!(held.len(), 4);
+        // An existing hold cannot veto explicit selection of independent work.
+        store
+            .select_peer_waves(
+                "/source",
+                &destination(),
+                std::slice::from_ref(independent.id()),
+            )
+            .unwrap();
+        let outgoing = store
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        assert!(outgoing
+            .objects()
+            .iter()
+            .all(|object| object.id == independent.id().as_str()));
+        assert!(!outgoing.changes.is_empty());
+        assert!(store.task(&task).unwrap().is_some());
+        assert_eq!(store.task_comments(&task).unwrap().comments.len(), 1);
+        store
+            .select_peer_waves(
+                "/source",
+                &destination(),
+                std::slice::from_ref(private.id()),
+            )
+            .unwrap();
+        assert!(store
+            .peer_projection_conflicts("/source")
+            .unwrap()
+            .is_empty());
+        let released = store
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        assert!(held
+            .iter()
+            .all(|conflict| released.objects().contains(&conflict.object)));
     }
 
     #[test]

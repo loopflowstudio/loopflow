@@ -108,10 +108,13 @@ impl PlanningSnapshot {
         incoming.validate()?;
         let mut merged = self.clone();
         for (id, change) in &incoming.changes {
-            if merged.changes.get(id).is_some_and(|saved| saved != change) {
+            let saved = merged
+                .changes
+                .entry(id.clone())
+                .or_insert_with(|| change.clone());
+            if saved != change {
                 return Err(PlanningExchangeError::ReusedChange(id.clone()));
             }
-            merged.changes.insert(id.clone(), change.clone());
         }
         Ok(merged)
     }

@@ -956,7 +956,7 @@ async fn restore_task_checkout(store: &SharedStore, task: &Task) -> OpsResult<()
             )));
         }
     }
-    let blockers = lifecycle::associated_execution_blockers(store, task)?;
+    let blockers = crate::ops::task_automation::task_execution_blockers(&store.sqlite, &task.id)?;
     if !blockers.is_empty() {
         return Err(task_error(blockers.join("; ")));
     }
@@ -5151,17 +5151,15 @@ mod tests {
             )
             .unwrap();
         let before = fixture.store.sqlite.session(&session.id).unwrap();
-        let blockers =
-            super::lifecycle::associated_execution_blockers(&fixture.store, &fixture.task).unwrap();
-        assert!(blockers
-            .iter()
-            .any(|reason| reason.contains("reserved input")));
-        assert!(blockers
-            .iter()
-            .any(|reason| reason.contains("unresolved provider turn")));
-        assert!(blockers
-            .iter()
-            .any(|reason| reason.contains(process.lfid.as_str())));
+        // A reserved input and an unanswered turn are history; only the
+        // Process with unknown evidence blocks.
+        let blockers = crate::ops::task_automation::task_execution_blockers(
+            &fixture.store.sqlite,
+            &fixture.task.id,
+        )
+        .unwrap();
+        assert_eq!(blockers.len(), 1, "{blockers:?}");
+        assert!(blockers[0].contains(process.lfid.as_str()));
         let gate = runtime
             .block_on(super::task_completion_gate(&fixture.store, &fixture.task))
             .unwrap();
@@ -5214,18 +5212,14 @@ mod tests {
             Some(process)
         );
         assert_eq!(fixture.store.sqlite.session(&session.id).unwrap(), before);
-        assert!(fixture
-            .store
-            .sqlite
-            .session_has_pending_turn(&session.id)
-            .unwrap());
         assert_eq!(std::fs::read(receipt_path).unwrap(), receipt_bytes);
-        assert!(
-            super::lifecycle::associated_execution_blockers(&fixture.store, &fixture.task)
-                .unwrap()
-                .iter()
-                .any(|reason| reason.contains("live or unresolved"))
-        );
+        assert!(crate::ops::task_automation::task_execution_blockers(
+            &fixture.store.sqlite,
+            &fixture.task.id,
+        )
+        .unwrap()
+        .iter()
+        .any(|reason| reason.contains("live or unresolved")));
     }
 
     #[test]
@@ -5460,84 +5454,6 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn completed_session_with_exited_provider_does_not_block_task_work() {
-        let mut child = std::process::Command::new("true").spawn().unwrap();
-        let exited_pid = child.id();
-        child.wait().unwrap();
-        let live_pid = std::process::id();
-        let live_start = crate::journal::process_started_at(live_pid)
-            .unwrap()
-            .unwrap();
-        for (completed, provider, blocked) in [
-            (false, Some((exited_pid, 1_i64)), true),
-            (true, Some((exited_pid, 1_i64)), false),
-            (true, Some((live_pid, live_start)), true),
-            (true, None, true),
-        ] {
-            let fixture = task_fixture("CLOSED-SESSION").await;
-            let conn = rusqlite::Connection::open(&fixture.database_path).unwrap();
-            conn.execute(
-                "INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,
-                    interactive,task_id,completed_at,provider_pid,provider_started_at,wave_id,cwd)
-                 VALUES('old-session','old implement','generated',1,1,0,?1,?2,?3,?4,?5,?6)",
-                rusqlite::params![
-                    fixture.task.id.as_str(),
-                    completed.then_some(2_i64),
-                    provider.map(|value| value.0),
-                    provider.map(|value| value.1),
-                    fixture.task.wave_id.as_str(),
-                    fixture.task.worktree.as_ref().unwrap().to_str().unwrap(),
-                ],
-            )
-            .unwrap();
-            conn.execute(
-                "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
-                 VALUES('old-session','captured',?1,1,'{}')",
-                [crate::session_record::new_artifact_key()],
-            )
-            .unwrap();
-            conn.execute(
-                "UPDATE agent_sessions SET current_capture=?1 WHERE id='old-session'",
-                [conn.last_insert_rowid()],
-            )
-            .unwrap();
-            fixture
-                .store
-                .sqlite
-                .record_session_event(
-                    "old-session",
-                    "thread",
-                    "turn",
-                    crate::session::SessionEventKind::Started,
-                    &serde_json::json!({}),
-                )
-                .unwrap();
-            assert_eq!(
-                crate::ops::task_automation::admission_blocker(
-                    &fixture.store.sqlite,
-                    &fixture.task.id,
-                    None,
-                )
-                .unwrap()
-                .is_some(),
-                blocked,
-            );
-            assert_eq!(
-                !super::lifecycle::associated_execution_blockers(&fixture.store, &fixture.task)
-                    .unwrap()
-                    .is_empty(),
-                blocked,
-            );
-            // Administrative closure never invents a native completion receipt.
-            assert!(fixture
-                .store
-                .sqlite
-                .session_has_pending_turn("old-session")
-                .unwrap());
-        }
-    }
-
     #[test]
     fn a_dead_flow_is_history_while_a_live_driver_retains_the_checkout() {
         let _ledger = crate::journal::TestLedgerGuard::new();
@@ -5551,7 +5467,11 @@ mod tests {
             .to_string_lossy()
             .into_owned();
         let blockers = || {
-            super::lifecycle::associated_execution_blockers(&fixture.store, &fixture.task).unwrap()
+            crate::ops::task_automation::task_execution_blockers(
+                &fixture.store.sqlite,
+                &fixture.task.id,
+            )
+            .unwrap()
         };
         fixture.store.sqlite.test_flow(
             "code",
@@ -5630,11 +5550,9 @@ mod tests {
         crate::journal::set_test_machine_booted_at(Some(now - 50));
         let after_boot = blockers();
         crate::journal::set_test_machine_booted_at(None);
-        assert_eq!(unresolved.len(), 2, "{unresolved:?}");
-        assert!(unresolved
-            .iter()
-            .any(|reason| reason.contains(process.lfid.as_str())));
-        assert!(unresolved.iter().any(|reason| reason.contains("stalled")));
+        // The stalled Session's unanswered turn is history, not execution.
+        assert_eq!(unresolved.len(), 1, "{unresolved:?}");
+        assert!(unresolved[0].contains(process.lfid.as_str()));
         assert!(after_boot.is_empty(), "{after_boot:?}");
         assert_eq!(
             fixture.store.sqlite.process(&process.lfid).unwrap(),

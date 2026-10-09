@@ -1,10 +1,13 @@
 //! Delivery observation and CI repair settings. Repository checks never resume Flows.
+use std::collections::HashSet;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
 use crate::durable::WorkStatus;
 use crate::journal::{process_evidence, ProcessIdentityEvidence};
+use crate::process::Process;
+use crate::store::sqlite::SqliteStore;
 use crate::store::SharedStore;
 use crate::work::task::Task;
 
@@ -41,63 +44,45 @@ pub fn select(issue: &str, enabled: bool) -> OpsResult<()> {
     })
 }
 
-/// No pending review, unknown provider, or unrelated live Process is exempted.
-pub(crate) fn admission_blocker(
-    store: &crate::store::sqlite::SqliteStore,
-    task: &crate::durable::TaskId,
-    repair_session: Option<&str>,
-) -> OpsResult<Option<String>> {
-    let work = store.task_work(task).map_err(error)?;
-    let caller = crate::journal::current_process_lfid();
-    for session in &work.sessions {
-        if Some(session.id.as_str()) == repair_session {
-            continue;
-        }
-        if let Some(input) = store.session(&session.id).map_err(error)? {
-            if !input.interactive && !input.input_published {
-                return Ok(Some(format!("Session {} has a reserved input", session.id)));
-            }
-        }
-        if store.session_has_pending_turn(&session.id).map_err(error)?
-            && (session.completed_at.is_none() || session_engine_unresolved(store, &session.id)?)
-        {
-            return Ok(Some(format!(
-                "Session {} has an unresolved provider turn",
-                session.id
-            )));
-        }
+/// Whether anything is executing is asked only of the OS, about recorded
+/// Processes. Unknown evidence blocks. The caller's lineage waits on the caller,
+/// so it never does; that exempts waiting and grants no authority.
+pub(crate) fn execution_blockers(
+    store: &SqliteStore,
+    processes: &[Process],
+) -> OpsResult<Vec<String>> {
+    let mut lineage = HashSet::new();
+    let mut next = crate::journal::current_process_lfid();
+    while let Some(id) = next.filter(|id| lineage.insert(id.clone())) {
+        next = store
+            .process(&id)
+            .map_err(error)?
+            .and_then(|process| process.parent_process_lfid);
     }
-    for process in &work.processes {
-        if caller.as_ref() == Some(&process.lfid) {
-            continue;
-        }
-        if process_evidence(store, &process.lfid) != ProcessIdentityEvidence::Dead {
-            return Ok(Some(format!(
-                "Process {} is live or unresolved",
-                process.lfid
-            )));
-        }
-    }
-    Ok(None)
+    Ok(processes
+        .iter()
+        .filter(|process| {
+            process.completed_at.is_none()
+                && !lineage.contains(&process.lfid)
+                && process_evidence(store, &process.lfid) != ProcessIdentityEvidence::Dead
+        })
+        .map(|process| {
+            format!(
+                "Process {} has live or unresolved execution; inspect `lf monitor show {}`",
+                process.lfid, process.lfid
+            )
+        })
+        .collect())
 }
 
-pub(crate) fn session_engine_unresolved(
-    store: &crate::store::sqlite::SqliteStore,
-    session: &str,
-) -> OpsResult<bool> {
-    if let Some((pid, started)) = store.session_provider_process(session).map_err(error)? {
-        return Ok(match crate::journal::process_started_at(pid) {
-            Ok(Some(actual)) => (actual - started).abs() <= 3,
-            Ok(None) => false,
-            Err(_) => true,
-        });
-    }
-    Ok(store
-        .session_driver(session)
-        .map_err(error)?
-        .is_none_or(|driver| {
-            process_evidence(store, &driver.provider_process_lfid) != ProcessIdentityEvidence::Dead
-        }))
+/// A Task's work is every Process in its checkout or bound through a Session.
+pub(crate) fn task_execution_blockers(
+    store: &SqliteStore,
+    task: &crate::durable::TaskId,
+) -> OpsResult<Vec<String>> {
+    let open = store.open_processes().map_err(error)?;
+    let work = store.task_open_work(task, &open).map_err(error)?;
+    execution_blockers(store, &work.processes)
 }
 
 pub(crate) async fn repository_tasks(

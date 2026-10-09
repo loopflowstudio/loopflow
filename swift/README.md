@@ -169,7 +169,7 @@ how long it ran. A row opens to its id, graph and steps (the shape of
 as running. **Task details → Debug** lists the Task's raw Sessions and Processes.
 Sessions list **Waiting** first and working ones in a compact group.
 The Wave page's **Workflow** sets the Project's workflow from the catalogue
-(`lf project workflow list`); **Customize** or **Edit** opens its source in
+(`lf wave workflow list`); **Customize** or **Edit** opens its source in
 your editor, writing a builtin to `.lf/` first.
 **Session history** under the Flow reads nothing until expanded; it then lists that
 Task's complete recorded input history (`lf usage --days 0 --task ID --json`) with each recorded
@@ -360,7 +360,7 @@ from `lf wave status <wave> --json`.
 Start, attach, or interrupt a Task from the roadmap. Open its worktree
 in Warp, or attach to the running Task agent in the workspace sheet beside its
 changed files, per-file patches, current contents, and embedded shells.
-The condition chip and spoken row use the same `lf roadmap` reason: green is a
+The condition chip and spoken row use the same `lf wave show` reason: green is a
 live advancing body, blue is waiting, red is blocked, black is settled or
 unstarted, and unknown means the required evidence could not be read.
 
@@ -380,7 +380,7 @@ codebase tree, and registry health.
   Lifecycle mutations remain `lf task run` and `lf interrupt`; review nodes use
   the Task's persisted flow position and provider Run identity.
 - **Registry queries** own durable reads. `RegistryQuery` runs
-  `lf wave list/status/roadmap/ps/activity/usage/doctor/tokens --json`; the app does not
+  `lf wave list/show/status`, `lf monitor`, and `lf history` JSON commands; the app does not
   maintain a second roadmap or lifecycle database. Unavailable per-Wave evidence
   renders its reason, and refresh failures leave the last successful roadmap or
   Activity history visible.

@@ -26,8 +26,8 @@ print, and keeps no separate copy.
 ## From the command line
 
 ```bash
-lf roadmap                             # tasks in this project, sorted by what they need
-lf roadmap --all                       # every project on this computer
+lf wave show                             # tasks in this project, sorted by what they need
+lf wave show --all                       # every project on this computer
 lf top                                 # what is running right now
 lf usage --days 0 --wave infra                   # the record of each time the AI was started
 lf --machine <machine-id> roadmap               # ask another computer the same question
@@ -41,18 +41,18 @@ at once; `lf --machine` is how you ask a different one.
 ```bash
 lf wave list                  # every registered Wave and its placement
 lf wave status <wave>       # one wave's Project → Task hierarchy, execution and conditions
-lf roadmap             # every open Task across this repository's Waves
-lf roadmap --all       # every repository on this machine
+lf wave show             # every open Task across this repository's Waves
+lf wave show --all       # every repository on this machine
 lf history            # what changed, newest first, with durable evidence
 ```
 
-`lf wave status` and every `lf roadmap --json` Wave row carry the same
+`lf wave status` and every `lf wave show --json` Wave row carry the same
 Project-owned `metric_portfolio`: current Met/Missed evidence, explicit
 Unknown or Unavailable states, candidate instruments, and contract issues.
 The Mac Wave detail renders that Rust-derived evidence without recomputing
 targets or freshness.
 
-`lf roadmap` buckets this repository's work by what it needs: **Now** (live
+`lf wave show` buckets this repository's work by what it needs: **Now** (live
 and advancing), **Waiting**, **Available**, **Later**. It overlays live evidence
 on the Linear-backed plan. Each Task carries one semantic condition — clear,
 waiting, blocked, or unknown — while `lf session list` is the separate list of

@@ -294,14 +294,14 @@ is no approve or complete command. Give feedback in the Task conversation,
 which is told its node's skill and the command for each edge leaving it. `lf --task ISSUE flow FLOW` runs a Flow without moving the Task.
 
 Builtins are `feature` (design, demo, land), `code` (demo, land) and
-`research` (findings, no PR). `lf project workflow list` lists Workflows;
+`research` (findings, no PR). `lf wave workflow list` lists Workflows;
 `lf flow list` lists autonomous Flows. To edit a Workflow, read its source,
 edit the file, then save it to the Wave:
 
 ```bash
-lf project workflow source PROJECT feature > /tmp/feature.yaml
+lf wave workflow source feature WAVE > /tmp/feature.yaml
 # Edit /tmp/feature.yaml.
-lf project workflow set PROJECT feature --file /tmp/feature.yaml
+lf wave workflow set feature WAVE --file /tmp/feature.yaml
 ```
 
 `lf flow customize NAME` copies a builtin into `.lf/flows/`, reusing an
@@ -309,7 +309,7 @@ existing local file and printing its path.
 Overrides stay within their kind: a Flow and a Workflow can share a name.
 An invalid local source stays unavailable and never exposes a hidden builtin.
 
-`lf project workflow set PROJECT NAME` changes what future Tasks take up.
+`lf wave workflow set NAME WAVE` changes what future Tasks take up.
 Existing Tasks retain their captured graph. `lf task workflow restart ISSUE`
 moves that graph to `start`, retaining its move and execution history; it
 neither reloads the definition nor executes work.

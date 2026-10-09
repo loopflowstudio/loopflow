@@ -77,15 +77,15 @@ struct DesktopHeadlessTests {
         }
         let source = Source()
         let model = WorkModel(query: RegistryQuery(runWithInput: { args, _, content in
-            guard args.prefix(3) == ["project", "workflow", "set"], args.contains("code") else {
+            guard args.prefix(3) == ["wave", "workflow", "set"], args.contains("code") else {
                 throw RegistryQueryError("Unexpected write: \(args)")
             }
             try await source.save(content)
             return ""
         }, run: { args, _ in
-            if args.first == "roadmap" { return snapshot }
-            if args.prefix(3) == ["project", "workflow", "list"] { return catalog }
-            if args.prefix(3) == ["project", "workflow", "source"] { return await source.content }
+            if args.prefix(2) == ["wave", "show"] { return snapshot }
+            if args.prefix(3) == ["wave", "workflow", "list"] { return catalog }
+            if args.prefix(3) == ["wave", "workflow", "source"] { return await source.content }
             throw RegistryQueryError("Unexpected command: \(args)")
         }))
         await model.refresh()
@@ -278,7 +278,7 @@ struct DesktopHeadlessTests {
             func fail() { failed = true }
             func read(_ args: [String]) throws -> String {
                 if failed { throw RegistryQueryError("catalog unreadable") }
-                return args.first == "project" ? workflows : flows
+                return args.prefix(2) == ["wave", "workflow"] ? workflows : flows
             }
         }
         let source = Source(flows: flows, workflows: text)
@@ -309,11 +309,11 @@ struct DesktopHeadlessTests {
         let calls = Recorder()
         let model = WorkModel(query: RegistryQuery { args, _ in
             await calls.add(args)
-            if args.prefix(3) == ["project", "workflow", "list"] { return catalog }
-            if args.prefix(3) == ["project", "workflow", "set"], args.last == "broken" {
+            if args.prefix(3) == ["wave", "workflow", "list"] { return catalog }
+            if args.prefix(3) == ["wave", "workflow", "set"], args.dropFirst(3).first == "broken" {
                 throw RegistryQueryError("broken does not load")
             }
-            if args.first == "roadmap" { return String(decoding: try Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")), as: UTF8.self) }
+            if args.prefix(2) == ["wave", "show"] { return String(decoding: try Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")), as: UTF8.self) }
             return "{}"
         })
         await model.refresh()
@@ -335,7 +335,7 @@ struct DesktopHeadlessTests {
 
         // Setting the workflow changes only that line; a refusal is shown on the Wave.
         await model.setWorkflow("code", wave: wave)
-        #expect(await calls.calls.contains(["project", "workflow", "set", roadmap.waves[0].projects.currentProject!.id, "code"]))
+        #expect(await calls.calls.contains(["wave", "workflow", "set", "code", wave.id]))
         #expect(model.workflowErrors[wave.id] == nil)
         await model.setWorkflow("broken", wave: wave)
         #expect(try view("code").inspect().find(viewWithAccessibilityIdentifier: "wave-workflow-error").text().string() == "broken does not load")

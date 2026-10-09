@@ -88,7 +88,7 @@ Inspect execution and effect history before choosing further work. Historical
 review boundaries grant no authority to close a conversation or launch a Flow.
 
 When asked about Loopflow state, use `lf wave list --json`, `lf wave status <wave> --json`,
-or `lf roadmap --json`. Do not reconstruct shared state from processes or
+or `lf wave show --json`. Do not reconstruct shared state from processes or
 worktrees. Supervision, recovery and placement belong to `repo-operate`,
 `wave-operate` and `task-operate`. The ongoing repository, Wave or Task
 conversation is that scope's operator: it reads failed work's logs and keeps

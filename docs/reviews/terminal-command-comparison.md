@@ -1,5 +1,8 @@
 # cmux, lf / Loopflow for Mac, and herdr
 
+Inline `# lf-doc: ambiguous` comments annotate retired spellings for today's
+command checker; they were not part of the recorded trial commands.
+
 Behavioral comparison for [LOO-427](https://linear.app/loopflow/issue/LOO-427),
 2026-10-07 Pacific. Jack Heart asked for command-by-command judgments after an
 agent arranged his work in cmux. Jack selected **at most one repository window
@@ -22,6 +25,11 @@ workspace, pane, surface IDs in cmux; herdr IDs belong to its own objects.
 Use returned IDs, not these placeholders. `—` means no counterpart found in the
 installed help or reviewed Desktop code, not proof that no external tool exists.
 
+October 9 implementation cutover: `lf wave show [WAVE]` owns the plan reading;
+`wave workflow` and `wave edit-plan` replace public Project commands. Internal
+Project identity and historical planning remain. Earlier command names below
+are dated comparison evidence, not compatibility aliases.
+
 ## Evidence and version boundary
 
 - **P**: exercised locally. Pane operations used only the disposable cmux window;
@@ -40,7 +48,7 @@ installed help or reviewed Desktop code, not proof that no external tool exists.
   installed binary (`home`, `ssh`, `flow show --sessions`). Source also exposes
   `flow show --processes`. Exact older commands below are explicitly the installed
   baseline; they are not current design recommendations.
-- Source rechecked at **7e852defe** on October 7: root `lf open` now launches
+- Source rechecked at **7e852defe** on October 7: root `lf open # lf-doc: ambiguous` now launches
   the app and rejects non-macOS, but lacks a terminal alternative and Work target.
   HTML `lf screenshot` is removed. Repository-window addressing, remote Desktop
   opening and programmatic pane control remain absent. Global `--machine` uses
@@ -159,9 +167,9 @@ related Tasks' boundaries; this Task exposes the existing workspace owners.
 
 | Job | cmux command (evidence) | lf / Desktop today (L) | herdr command (H) | Judgment and owner |
 |---|---|---|---|---|
-| Open on a supported platform | Mac app control; no Linux Desktop trial | Source `lf open` rejects non-macOS; no terminal alternative yet | Terminal host, not a Mac app launcher | **worse** — explicit, actionable Linux errors for Desktop operations; LOO-426/427. |
-| ★ Open a working directory | `<path>`, `open`, `new-workspace --cwd PATH` (P for new-workspace) | Installed `lf desktop`; source `lf open` launches the app only; `open 'loopflow://open?repo=PATH'`; Task links below | `workspace create --cwd PATH`; `worktree open` | **worse** — app launch and Work opening are separate; LOO-426. |
-| ★ Open the actual Task/conversation | `new-workspace --command CMD`; `new-surface --command CMD` (P) | `open 'loopflow://task/ISSUE?repo=PATH&session=ID'`; no installed `lf open ISSUE` | `tab create`, then `pane run P CMD` | **worse** — Task links already preserve Work identity, but lack the one-command entry; LOO-426. |
+| Open on a supported platform | Mac app control; no Linux Desktop trial | Source `lf open # lf-doc: ambiguous` rejects non-macOS; no terminal alternative yet | Terminal host, not a Mac app launcher | **worse** — explicit, actionable Linux errors for Desktop operations; LOO-426/427. |
+| ★ Open a working directory | `<path>`, `open`, `new-workspace --cwd PATH` (P for new-workspace) | Installed `lf desktop`; source `lf open # lf-doc: ambiguous` launches the app only; `open 'loopflow://open?repo=PATH'`; Task links below | `workspace create --cwd PATH`; `worktree open` | **worse** — app launch and Work opening are separate; LOO-426. |
+| ★ Open the actual Task/conversation | `new-workspace --command CMD`; `new-surface --command CMD` (P) | `open 'loopflow://task/ISSUE?repo=PATH&session=ID'`; no installed `lf open ISSUE # lf-doc: ambiguous` | `tab create`, then `pane run P CMD` | **worse** — Task links already preserve Work identity, but lack the one-command entry; LOO-426. |
 | ★ Open everything waiting | `jump-to-unread` (H); notifications are not Work Waiting | `lf session list --waiting --json`; no batch Desktop open | `agent list`; no matching batch open found | **want** — open shared Waiting conversations once, not every completed Run; LOO-426. |
 | ★ Open/identify the repository window | `new-window`, `list-windows`, `current-window` (P except current-window) | Native windows; no addressable window inventory | `session list`; terminal-host windows are outside herdr | **want** — at most one window per repository across machines; repeated opens reuse it and commands address the repo; LOO-427 arrangement slice. |
 | ★ Focus an existing destination | `focus-window`, `select-workspace`, `focus-pane`, `focus-panel` (P for select-workspace) | Task link; sidebar, palette and pane click; no exact-window/pane CLI | `workspace focus`, `tab focus`, `pane focus --direction`, `agent focus` | **worse** — opening is addressable, existing pane focus is not; LOO-426 plus LOO-427 arrangement. |
@@ -217,7 +225,7 @@ related Tasks' boundaries; this Task exposes the existing workspace owners.
 
 | Job | cmux command (evidence) | lf / Desktop today (L) | herdr command (H) | Judgment and owner |
 |---|---|---|---|---|
-| Start agent work | `new-surface --type agent-session`; `claude-teams`, `codex-teams`, `omo`, `omx`, `omc` (H) | `lf skill NAME`, `lf run FLOW`, `lf --task ISSUE : MESSAGE`; Desktop New Session | `agent start NAME --kind KIND --pane P` | **have** for lf-owned skills/Flows; LOO-420 owns native/cross-harness skill fidelity. LOO-428 owns known host launch failures; no team-runner clone. |
+| Start agent work | `new-surface --type agent-session`; `claude-teams`, `codex-teams`, `omo`, `omx`, `omc` (H) | `lf skill NAME`, `lf run FLOW # lf-doc: ambiguous`, `lf --task ISSUE : MESSAGE`; Desktop New Session | `agent start NAME --kind KIND --pane P` | **have** for lf-owned skills/Flows; LOO-420 owns native/cross-harness skill fidelity. LOO-428 owns known host launch failures; no team-runner clone. |
 | Detect/report the running agent | `hooks setup/uninstall`, `hooks AGENT install/uninstall/event`, `hooks feed` (H) | Owned provider streams plus terminal reports; host interoperability incomplete | `integration install/uninstall/status`, `agent explain`, lifecycle reporting | **worse** — LOO-422; do not install host hooks or create duplicate status authority here. |
 | Hibernate the agent/terminal | `agent-hibernation on/off/hibernate/wake` (H) | No equivalent transparent suspension; provider continuation is distinct | Persistent server and `agent attach`; not evidence of hibernation | **no** — leave host lifecycle in cmux/herdr; continuation work belongs to LOO-424. |
 | Resume saved provider work | `restore`, `surface resume set/show/get/clear`, `session restore`, `recover` (H) | `lf session resume ID`, `lf session connect ID`; Desktop Open / Move here | `agent attach`, `session attach NAME` retain a host terminal, not necessarily provider history | **worse** — LOO-424 owns adoption, names, directories and host portability. |
@@ -259,7 +267,7 @@ The `vm`/`cloud` disposition covers every leaf advertised in top-level help:
 |---|---|---|---|---|
 | Learn commands from the tool | `help`, `help GROUP`, `guide` / `--skill`, `docs` (P for help/guide) | `lf help --all`, `lf help PATH`, `lf list --json`; ambiguity/typo rough edges | `--help`, leaf help, `--skill`, `completion` | **worse** — LOO-397 owns learnability; do not clone another tool's help or skill text. |
 | Observe changing Work | `events` | `lf monitor work --json --watch`; `lf activity --json` | `api snapshot`; waits for pane/agent conditions | **have** — Work events already feed Desktop; a visual layout snapshot belongs in LOO-427 arrangement. |
-| Schedule/run automation | `automation list/show/test/enable/disable/logs/reload`, `set-hook` | `lf wave cron`, `lf run FLOW`, `lf task run` | Shell tooling; integration lifecycle hooks | **have** — existing Work automation suffices; no second host automation engine. |
+| Schedule/run automation | `automation list/show/test/enable/disable/logs/reload`, `set-hook` | `lf wave cron`, `lf run FLOW # lf-doc: ambiguous`, `lf task run` | Shell tooling; integration lifecycle hooks | **have** — existing Work automation suffices; no second host automation engine. |
 | Use a host-specific automation service | `glaeda request/observe` | No Glaeda-specific equivalent | — | **no** — run lf inside the host; no integration need was demonstrated. |
 | Keep an ad hoc host todo list | `todo add/list/check/uncheck/start/rm/clear` | `lf task create`, Task Workflow and Project plan | No todo group found | **no** — preserve Work planning; LOO-406 owns the local planning lifecycle, not a terminal-local backlog. |
 | Customize terminal appearance | `themes list/set/clear`, `import`, `reload-config`, `shortcuts`, `bind-key`, `unbind-key` | Desktop Settings and fixed workspace composition; no general terminal configuration CLI | `config`, `server reload-config`, `channel`, `completion` | **no** to a host config clone — LOO-403 already owns discoverable Desktop shortcuts and palette actions. |

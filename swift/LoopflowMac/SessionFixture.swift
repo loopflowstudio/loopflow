@@ -54,7 +54,7 @@ private actor SessionFixtureStore {
         if args.starts(with: ["session", "connect", kind.id]), args.contains("--json") {
             return kind.record
         }
-        if args == ["roadmap", "--all", "--json"] {
+        if args == ["wave", "show", "--all", "--json"] {
             return #"{"generated_at":"2026-08-30T00:00:00Z","waves":[]}"#
         }
         throw RegistryQueryError("Unsupported Session fixture command: \(args.joined(separator: " "))")

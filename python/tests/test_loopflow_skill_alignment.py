@@ -53,4 +53,4 @@ def test_agent_surfaces_share_the_inspection_commands():
     for text in surfaces:
         assert "lf wave list --json" in text
         assert "lf wave status <wave> --json" in text
-        assert "lf roadmap --json" in text
+        assert "lf wave show --json" in text

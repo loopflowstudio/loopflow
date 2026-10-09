@@ -239,7 +239,7 @@ mod tests {
             "lf id --json",
             "lf wave list --json",
             "lf wave status <wave> --json",
-            "lf roadmap --wave <wave> --json",
+            "lf wave show <wave> --json",
             "lf task run <ISSUE-ID>",
             "lf machine add <ssh-target>",
             "lf --machine <machine-id> --wave <wave> wave-operate",
@@ -344,7 +344,7 @@ mod tests {
 
         for name in ["wave/operate", "wave-report"] {
             let skill = get_builtin_skill(name).expect("multi-Task output skill");
-            assert!(skill.contains("lf roadmap"));
+            assert!(skill.contains("lf wave show"));
             assert!(skill.contains("lf wave status"));
             assert!(skill.contains("task.identifier"));
             assert!(skill.contains("reference.issue_url"));

@@ -24,7 +24,7 @@ lf wave ensure intelligence --json
 Ensure reuses the shared configured Project, activates it if needed, or recovers
 one reserved creation. Existing Project selection is explicit by UUID. Names,
 chapters and default Flows are optional. Failed reads preserve the binding;
-status and roadmap never create Projects. Desktop prepares the Project on opening
+status and show never create Projects. Desktop prepares the Project on opening
 and offers Retry while retaining the cached plan and independent conversation.
 
 For coordinated chapters, plan KRs first and retain exact destination IDs:
@@ -65,8 +65,8 @@ lf --agent claude:opus debug
 ## Run a Flow interactively
 
 ```bash
-lf -i -a claude run my-flow
-lf -b -a claude run my-flow # run every step headlessly
+lf -i -a claude flow my-flow
+lf -b -a claude flow my-flow # run every step headlessly
 ```
 
 Each skill opens in the native agent conversation. Exit the conversation
@@ -122,9 +122,10 @@ you choose again or `lf task move EXP-12 <node>` puts it at a node outright. `lf
 its start. See [workflows](authoring.md#workflows).
 
 ```bash
-lf project workflow list                 # Workflow definitions and validity
-lf project workflow set PROJECT code     # selection for future Tasks
-lf project workflow source PROJECT feature # read the definition
+lf wave show product --json              # current and retained chapter planning
+lf wave workflow list                 # Workflow definitions and validity
+lf wave workflow set code WAVE     # selection for future Tasks
+lf wave workflow source feature WAVE # read the definition
 lf task workflow show EXP-12             # captured graph, position and history
 lf task workflow restart EXP-12          # move to start; retain graph and history
 lf flow list                             # autonomous Flow definitions
@@ -186,16 +187,20 @@ full IDs in automation.
 ```bash
 lf task edit <id> --rank 0 --assignee <person-id>
 lf task edit <id> --unassign
-lf project edit <project-id> --name "Parser" --summary "Retain quoted input"
-lf project workflow set <project-id> review --file /tmp/review.yaml
-lf project workflow list --project <project-id> --json
-lf project workflow source <project-id> review
+lf wave edit-plan WAVE --name "Parser" --summary "Retain quoted input"
+lf wave workflow set review WAVE --file /tmp/review.yaml
+lf wave workflow list --wave WAVE --json
+lf wave workflow source review WAVE
 lf wave update-plan --wave parser --plan /tmp/plan.json
 ```
 
+Use `--project ID` instead of a Wave on `workflow show/set/source` or `edit-plan`
+to address an exact retained chapter. An explicit `wave show WAVE` includes history;
+`wave show --all` reads current Waves across repositories. Neither starts work.
+
 Project names, summaries, Workflow selections and complete plan replacements save
 locally, including during a Linear outage. Connected repositories report pending sync;
-`lf project workflow show <project-id> --json` includes `sync`: pending changes,
+`lf wave workflow show WAVE --json` includes `sync`: pending changes,
 uncertain attempts, errors and retained losing values. Task edits and status use
 the same receipt-backed presentation as Desktop.
 Inbound refreshes preserve saves against unchanged baselines and adopt conflicting
@@ -226,7 +231,7 @@ lf repo connect --all --team-key EXP # connect goals and choose the Task prefix
 lf task create --wave exports --title "Add CSV export"
 lf checkout <task-id>               # use the ID printed at creation
 lf task run <task-id>
-lf roadmap --json                   # plans and Tasks across Waves
+lf wave show --json                   # plans and Tasks across Waves
 lf wave status exports --json       # one Wave's detailed evidence
 ```
 
@@ -652,7 +657,7 @@ with the fixture demo.
 
 ```sh
 open 'loopflow://task/LOO-303'
-lf roadmap --task LOO-303 --all --json
+lf wave show --task LOO-303 --all --json
 ```
 
 Task links open details without starting work, including retained and completed

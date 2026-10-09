@@ -1094,7 +1094,7 @@ struct DesktopPerformanceTests {
             await planning.count(args)
             switch args.first {
             case "machine" where args.dropFirst().first == "id": return "{\"id\":\"\(fixtureMachineId)\"}"
-            case "roadmap": return await planning.read()
+            case "wave" where args.dropFirst().first == "show": return await planning.read()
             case "flow" where args.dropFirst().first == "list" && args.contains("--json"): return catalogJSON
             case "project" where args.dropFirst().prefix(2) == ["workflow", "list"]: return workflowJSON
             case "wave" where args.dropFirst().first == "list": return "[]"
@@ -1542,8 +1542,8 @@ actor SnapshotReads {
             }.value
             guard let fixture else { return .success(output) }
             var value = try JSONSerialization.jsonObject(with: Data(output.utf8))
-            if args.first == "roadmap", !args.contains("--task") {
-                let owned = try await fixture.read(["roadmap", "--all", "--json"])
+            if args.prefix(2) == ["wave", "show"], !args.contains("--task") {
+                let owned = try await fixture.read(["wave", "show", "--all", "--json"])
                 var page = try #require(value as? [String: Any])
                 let extra = try #require(JSONSerialization.jsonObject(with: Data(owned.utf8)) as? [String: Any])
                 page["waves"] = (try #require(page["waves"] as? [Any])) + (try #require(extra["waves"] as? [Any]))
@@ -1576,7 +1576,7 @@ private func snapshotRead(binary: String, home: String, args: [String], cwd: Str
     // Copied launch authority is never exercised. This transport permits only local
     // reads; no network, Session connection, watcher, worker or provider can start.
     let verb = args.prefix(2).joined(separator: " ")
-    guard ["roadmap", "history"].contains(args.first ?? "") || ["wave list", "wave status", "session list", "session history", "machine id", "task status", "task files", "task diff", "flow list"].contains(verb) else {
+    guard args.first == "history" || ["wave show", "wave list", "wave status", "session list", "session history", "machine id", "task status", "task files", "task diff", "flow list"].contains(verb) else {
         throw RegistryQueryError("Snapshot does not execute \(verb)")
     }
     let process = Foundation.Process()

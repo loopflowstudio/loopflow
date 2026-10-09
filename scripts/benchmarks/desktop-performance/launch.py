@@ -38,7 +38,7 @@ from timings import BUDGETS_MS, _stats
 REPO = Path(__file__).resolve().parents[3]
 SWIFT = REPO / "swift"
 BUNDLE_ID = "com.loopflow.mac.bench"
-READS = '"machine id"|"wave list"|"roadmap "*|"session list"|"activity "*|"ps "*|"ps "'
+READS = '"machine id"|"wave list"|"wave show"*|"session list"|"activity "*|"ps "*|"ps "'
 SHIM = f"""#!/bin/sh
 # Forward the app's startup reads to the real lf; refuse everything else.
 case "$1 $2" in
@@ -55,7 +55,7 @@ SCENARIOS = {
     "saved": {"saved": True, "fail": "", "until": "fresh", "new_binary": False},
     "saved_refresh_fails": {
         "saved": True,
-        "fail": "roadmap session",
+        "fail": "wave session",
         "until": "refresh_failed",
         "new_binary": False,
     },

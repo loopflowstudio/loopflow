@@ -108,7 +108,7 @@ track remaining implementation and acceptance.
 ## The planning model
 
 ```bash
-lf roadmap --json
+lf wave show --json
 lf repo new-chapter 2026-10 --plan scratch/chapter.json --dry-run
 lf repo new-chapter 2026-10 --plan scratch/chapter.json
 ```
@@ -158,7 +158,7 @@ workflow: feature
 
 A Task with no workflow takes that one up on its first `lf task run <task>`;
 naming another takes that up instead, and the Task keeps it.
-`lf project workflow set PROJECT NAME` validates the Workflow and rewrites only
+`lf wave workflow set NAME WAVE` validates the Workflow and rewrites only
 that selection, preserving KRs and metric targets. `lf task run` refuses a name
 that is not a workflow until a Flow or workflow is named. A Project written with the earlier
 `flow:` line reads the same and is rewritten by the next plan update. Existing
@@ -252,7 +252,7 @@ The Wave objective stays in `GOAL.md`; Project plans have no second objective.
 ```bash
 lf wave status <wave>                  # owner, value, target, window, freshness, reason
 lf wave status <wave> --json           # the shared metric_portfolio DTO
-lf roadmap --json                      # the same DTO on every Wave row
+lf wave show --json                      # the same DTO on every Wave row
 ```
 
 `installed` metrics appear under Instrumenting. Promote a contract to
@@ -347,9 +347,9 @@ See [Machines and processes](architecture/machines.md) and
 ```bash
 lf wave status infra --json
 lf update-plan --wave infra --plan plan.json
-lf project workflow set PROJECT research    # only the workflow
-lf project workflow source PROJECT research > /tmp/research.yaml
-lf project workflow set PROJECT research --file /tmp/research.yaml
+lf wave workflow set research WAVE    # only the workflow
+lf wave workflow source research WAVE > /tmp/research.yaml
+lf wave workflow set research WAVE --file /tmp/research.yaml
 ```
 
 `plan.json` contains the complete current plan:

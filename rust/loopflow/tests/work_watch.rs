@@ -410,7 +410,7 @@ fn a_task_committed_elsewhere_appears_once_and_bursts_converge() {
     assert!((1..=5).contains(&frames), "{frames} planning frames");
     let last = last.unwrap();
     assert_eq!(identifiers(&last).len(), 21);
-    let fresh = lf(home.path(), &["roadmap", "--all", "--json"])
+    let fresh = lf(home.path(), &["wave", "show", "--all", "--json"])
         .output()
         .unwrap();
     assert!(fresh.status.success());

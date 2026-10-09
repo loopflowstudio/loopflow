@@ -1329,6 +1329,89 @@ Manage Wave identity, placement and planning
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
+## lf wave show
+
+Read chapter plans and Tasks without starting work; an explicit Wave includes history
+
+| Argument | What it does |
+|---|---|
+| `<wave>` | wave |
+| `--task` | Find an exact Task, including historical planning |
+| `--json` | json Default: false. |
+| `--all` | Read every repository on this Machine Default: false. |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf wave workflow
+
+Select and inspect the chapter Workflow
+
+| Argument | What it does |
+|---|---|
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf wave workflow source
+
+Read the authored definition without creating a repository file
+
+| Argument | What it does |
+|---|---|
+| `<name>` | name |
+| `<wave>` | Wave name or ID (default: the ambient Wave) |
+| `--project` | Exact retained Project ID, provider ID or unique name instead of current selection |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf wave workflow list
+
+List Workflow definitions, including unavailable local files
+
+| Argument | What it does |
+|---|---|
+| `--wave` | Include this Wave's stored definitions |
+| `--json` | json Default: false. |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf wave workflow show
+
+Show the selected chapter's Workflow
+
+| Argument | What it does |
+|---|---|
+| `<wave>` | Wave name or ID (default: the ambient Wave) |
+| `--project` | Exact retained Project ID, provider ID or unique name instead of current selection |
+| `--json` | json Default: false. |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf wave workflow set
+
+Select the Workflow future Tasks take up; captured Tasks stay unchanged
+
+| Argument | What it does |
+|---|---|
+| `<name>` | name |
+| `<wave>` | Wave name or ID (default: the ambient Wave) |
+| `--project` | Exact retained Project ID, provider ID or unique name instead of current selection |
+| `--file` | Store this definition in the Wave |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf wave edit-plan
+
+Edit the selected chapter's name or summary
+
+| Argument | What it does |
+|---|---|
+| `<wave>` | Wave name or ID (default: the ambient Wave) |
+| `--project` | Exact retained Project ID, provider ID or unique name instead of current selection |
+| `--name` | name |
+| `--summary` | summary |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
 ## lf wave edit
 
 Replace stored Wave documents without modifying repository files
@@ -1554,81 +1637,6 @@ Replace the current chapter's KRs, targets and workflow
 |---|---|
 | `--wave / -w` | wave |
 | `--plan` | The complete plan as JSON |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
-| `--help / -h` | Print help |
-
-## lf project
-
-Project-owned planning configuration
-
-| Argument | What it does |
-|---|---|
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
-| `--help / -h` | Print help |
-
-## lf project edit
-
-Update a Project's name or summary
-
-| Argument | What it does |
-|---|---|
-| `<project>` | project |
-| `--name` | name |
-| `--summary` | summary |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
-| `--help / -h` | Print help |
-
-## lf project workflow
-
-Select and inspect reusable Workflows
-
-| Argument | What it does |
-|---|---|
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
-| `--help / -h` | Print help |
-
-## lf project workflow source
-
-Read the authored definition without creating a repository file
-
-| Argument | What it does |
-|---|---|
-| `<project>` | project |
-| `<name>` | name |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
-| `--help / -h` | Print help |
-
-## lf project workflow list
-
-List Workflow definitions, including unavailable local files
-
-| Argument | What it does |
-|---|---|
-| `--project` | Include this Project's stored Wave definitions |
-| `--json` | json Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
-| `--help / -h` | Print help |
-
-## lf project workflow show
-
-Show the Project's selected Workflow
-
-| Argument | What it does |
-|---|---|
-| `<project>` | project |
-| `--json` | json Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
-| `--help / -h` | Print help |
-
-## lf project workflow set
-
-Select the Workflow future Tasks take up; captured Tasks stay unchanged
-
-| Argument | What it does |
-|---|---|
-| `<project>` | project |
-| `<name>` | name |
-| `--file` | Store this definition in the Wave |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
@@ -2003,19 +2011,6 @@ Explain a command, skill, or flow without launching it
 |---|---|
 | `<path>` | path |
 | `--all` | all Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
-| `--help / -h` | Print help |
-
-## lf roadmap
-
-Show the current repository's roadmap: every open Task across the repo's Waves, joined to live evidence and bucketed into Now / Waiting / Available / Later. `--wave` scopes it; `--all` spans every repository on this machine. Local-only, deterministic
-
-| Argument | What it does |
-|---|---|
-| `--wave` | Scope to one Wave (default: every Wave in the current repository) |
-| `--task` | Find an exact issue identifier, including retained historical Tasks |
-| `--json` | Emit the roadmap snapshot as JSON Default: false. |
-| `--all` | Span every repository on this machine, not just the current one Default: false. |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 

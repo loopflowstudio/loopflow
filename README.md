@@ -156,8 +156,8 @@ Watch this repository and the current Machine:
 ```bash
 lf wave list                  # every durable Wave and its Machine/runtime evidence
 lf user           # read config: display name from Git or a personal override
-lf roadmap             # every open Task across this repository's Waves
-lf roadmap --all       # every repository on this machine
+lf wave show             # every open Task across this repository's Waves
+lf wave show --all       # every repository on this machine
 lf wave status designer     # one Wave's current chapter and Tasks
 lf history             # durable work, delivery and steering history
 lf session list --json # conversations on this Machine

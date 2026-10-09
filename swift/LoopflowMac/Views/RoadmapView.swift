@@ -34,7 +34,7 @@ func roadmapTaskAction(_ task: RoadmapTask) -> RoadmapTaskAction? {
     return nil
 }
 
-/// One query, two shapes. Both read the single `lf roadmap` snapshot: NOW
+/// One query, two shapes. Both read the single `lf wave show` snapshot: NOW
 /// re-shapes it into a flat, cross-wave, condition-grouped list; ROADMAP keeps
 /// the Wave › Task tree.
 enum WorkLens: String, CaseIterable, Identifiable {
@@ -58,7 +58,7 @@ func roadmapTaskIsActionable(_ task: RoadmapTask) -> Bool {
     roadmapTaskAction(task) != nil
 }
 
-/// Loopflow Desktop's shared Work surface: one machine-wide `lf roadmap --json`
+/// Loopflow Desktop's shared Work surface: one machine-wide `lf wave show --json`
 /// read, rendered without re-querying each Wave or inventing another work model.
 struct RoadmapView: View {
     let onOpenWave: (WaveSnapshot) -> Void

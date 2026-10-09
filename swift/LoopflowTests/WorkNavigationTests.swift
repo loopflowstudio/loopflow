@@ -619,7 +619,7 @@ struct WorkNavigationTests {
         let planning = String(decoding: try JSONSerialization.data(withJSONObject: snapshot), as: UTF8.self)
         let model = WorkModel(query: RegistryQuery { args, _ in
             switch args.first {
-            case "roadmap": return planning
+            case "wave" where args.dropFirst().first == "show": return planning
             case "wave" where args.dropFirst().first == "list": return "[]"
             case "session": return #"{"entries":[],"next":null}"#
             default: return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
@@ -646,7 +646,7 @@ struct WorkNavigationTests {
         let gate = PlanningGate()
         let model = WorkModel(query: RegistryQuery { args, _ in
             switch args.first {
-            case "roadmap": await gate.wait(); return snapshot
+            case "wave" where args.dropFirst().first == "show": await gate.wait(); return snapshot
             case "session": return #"{"entries":\#(records),"next":null}"#
             case "wave" where args.dropFirst().first == "list": return "[]"
             default: return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
@@ -831,7 +831,7 @@ private actor ReadingSource {
     func read(_ args: [String]) throws -> String {
         if failed { throw RegistryQueryError("offline") }
         switch args.first {
-        case "roadmap": return roadmap
+        case "wave" where args.dropFirst().first == "show": return roadmap
         case "session": return #"{"entries":\#(sessions),"next":null}"#
         case "wave" where args.dropFirst().first == "list": return "[]"
         case "history": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#

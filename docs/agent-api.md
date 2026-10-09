@@ -174,7 +174,7 @@ Every read the conducting surfaces offer is `--json`:
 ```bash
 lf wave list --json                    # every durable Wave and its Machine/runtime evidence
 lf wave status <wave> --json           # hierarchy plus one Rust-derived metric_portfolio
-lf roadmap --json                      # every Wave repeats that required portfolio envelope
+lf wave show --json                      # every Wave repeats that required portfolio envelope
 lf history --task INF-123 --json
 lf usage --project parser --json
 lf history list --task INF-123 --json
@@ -186,7 +186,7 @@ lf ps --json                # one OS-live process frame
 ```
 
 `lf wave list` is the registry plane, `lf wave status` is the focused operational view,
-and `lf roadmap` joins the current Linear plan to that runtime truth.
+and `lf wave show` joins the current Linear plan to that runtime truth.
 `lf history` is the ordered durable history; each item reuses `WorkRef` and
 carries one typed fact with its execution, Task PR, or Steer evidence. Agents consume
 those projections; they do not rebuild the joins.

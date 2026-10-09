@@ -663,7 +663,7 @@ private actor FlowSource {
 
     func respond(_ args: [String]) throws -> String {
         switch (args.first, args.dropFirst().first) {
-        case ("roadmap", _):
+        case ("wave", "show"):
             return String(decoding: try JSONSerialization.data(withJSONObject: roadmap), as: UTF8.self)
         case ("wave", "list"): return "[]"
         case ("history", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#

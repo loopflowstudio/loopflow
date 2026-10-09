@@ -303,10 +303,10 @@ struct RegistryQueryTests {
         #expect(result.workMap.tasks.items[0].actions.recommended == .resume)
     }
 
-    @Test("lf roadmap is one optionally scoped machine query")
+    @Test("lf wave show is one optionally scoped machine query")
     func roadmapUsesOneMachineQuery() async throws {
         let query = RegistryQuery { args, cwd in
-            #expect(args == ["roadmap", "--wave", "product", "--json"])
+            #expect(args == ["wave", "show", "product", "--json"])
             #expect(cwd == nil)
             return #"{"generated_at":"2026-07-15T00:00:00Z","waves":[]}"#
         }
@@ -316,10 +316,10 @@ struct RegistryQueryTests {
         #expect(result.waves.isEmpty)
     }
 
-    @Test("lf roadmap requests every repository when no Wave narrows it")
+    @Test("lf wave show requests every repository when no Wave narrows it")
     func roadmapRequestsAllRepositories() async throws {
         let query = RegistryQuery { args, cwd in
-            #expect(args == ["roadmap", "--all", "--json"])
+            #expect(args == ["wave", "show", "--all", "--json"])
             #expect(cwd == nil)
             return #"{"generated_at":"2026-07-15T00:00:00Z","waves":[]}"#
         }

@@ -58,7 +58,7 @@ struct SessionChromeProofTests {
         let sessions = String(decoding: try JSONSerialization.data(withJSONObject: [value]), as: UTF8.self)
         let query = RegistryQuery { args, _ in
             switch (args.first, args.dropFirst().first) {
-            case ("roadmap", _): return roadmap
+            case ("wave", "show"): return roadmap
             case ("wave", "list"): return "[]"
             case ("history", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             case ("session", "list"): return #"{"entries":\#(sessions),"next":null}"#
@@ -174,7 +174,7 @@ struct SessionChromeProofTests {
         let surface = try #require(terminal.surface)
         let query = RegistryQuery { args, _ in
             switch args.first {
-            case "roadmap": return #"{"generated_at":1,"waves":[]}"#
+            case "wave" where args.dropFirst().first == "show": return #"{"generated_at":1,"waves":[]}"#
             case "wave" where args.dropFirst().first == "list": return "[]"
             case "session": return #"{"entries":[],"next":null}"#
             case "history": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
@@ -267,7 +267,7 @@ struct SessionChromeProofTests {
         let flows = try String(contentsOf: repoRoot.appendingPathComponent("tests/fixtures/dto/flow_catalog.json"), encoding: .utf8)
         let inventory = PaletteSessionInventory(sessions)
         let query = RegistryQuery { args, _ in
-            if args.first == "roadmap" { return roadmap }
+            if args.prefix(2) == ["wave", "show"] { return roadmap }
             if args.first == "session" { return try await inventory.read() }
             if args.first == "flow" { return flows }
             if args.first == "wave" { return "[]" }

@@ -44,8 +44,8 @@ def test_report_separates_saved_from_fresh_launches_and_counts_failures(tmp_path
     _write(
         tmp_path / "reads.ndjson",
         [
-            {"event": "read", "verb": "roadmap", "ms": 14000, "ok": True, "app": "1.2.3"},
-            {"event": "read", "verb": "roadmap", "ms": 90000, "ok": False, "app": "1.2.3"},
+            {"event": "read", "verb": "wave show", "ms": 14000, "ok": True, "app": "1.2.3"},
+            {"event": "read", "verb": "wave show", "ms": 90000, "ok": False, "app": "1.2.3"},
             {"event": "refresh", "part": "sessions", "ms": 12000, "ok": True, "app": "1.2.3"},
         ],
     )
@@ -66,7 +66,7 @@ def test_report_separates_saved_from_fresh_launches_and_counts_failures(tmp_path
     assert version["never_usable"] == 1
     assert version["never_fresh"] == 1
     assert version["refresh_failed_before_fresh"] == {"planning": 1}
-    assert version["reads"]["roadmap"] == {
+    assert version["reads"]["wave show"] == {
         "samples": 1,
         "median_ms": 14000,
         "p95_ms": None,

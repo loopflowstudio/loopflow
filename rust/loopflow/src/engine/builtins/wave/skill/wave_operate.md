@@ -18,7 +18,7 @@ Wave. Read its objective and memory, current Project's plan, Task outcomes and
 unresolved concerns. The Project is part of the Wave, not another operator.
 
 Start with `lf wave status <exact-wave> --json` and
-`lf roadmap --wave <exact-wave> --json`. Read relevant Task detail with
+`lf wave show <exact-wave> --json`. Read relevant Task detail with
 `lf task status <issue> --json`. Follow summaries to the source only where a
 claim, conflict or missing fact matters; do not ingest every transcript.
 

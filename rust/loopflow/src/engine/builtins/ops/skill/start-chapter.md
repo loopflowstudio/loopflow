@@ -10,7 +10,7 @@ names nor a workflow. Linear retains Project content, status and history.
 ## Review and plan
 
 Read available dated reviews, Wave goals and memory, `lf wave status <wave>
---no-sync --json`, and `lf roadmap --json`. Use stable Project IDs. Missing
+--no-sync --json`, and `lf wave show --json`. Use stable Project IDs. Missing
 history remains unknown; current readings cannot reconstruct earlier outcomes.
 Run review-chapter when needed. Obtain explicit acceptance of direction before
 scoped planning. Existing acceptance remains valid; headless work without it

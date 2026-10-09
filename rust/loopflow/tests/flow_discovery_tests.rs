@@ -220,7 +220,7 @@ fn flow_and_workflow_catalogs_keep_same_name_sources_separate() {
     std::fs::write(repo.path().join(".lf/flows/feature.yaml"), "- cmd: help\n").unwrap();
     let flows = run(&["flow", "list", "--json"]);
     assert!(flows.status.success());
-    let workflows = run(&["project", "workflow", "list", "--json"]);
+    let workflows = run(&["wave", "workflow", "list", "--json"]);
     assert!(workflows.status.success());
     let entry = |output: &std::process::Output| {
         serde_json::from_slice::<Vec<serde_json::Value>>(&output.stdout)
@@ -254,9 +254,10 @@ fn flow_and_workflow_catalogs_keep_same_name_sources_separate() {
     )
     .unwrap();
     let selected = run(&[
-        "project",
+        "wave",
         "workflow",
         "set",
+        "--project",
         project.id.as_str(),
         "feature",
         "--file",
@@ -267,20 +268,14 @@ fn flow_and_workflow_catalogs_keep_same_name_sources_separate() {
         "{}",
         String::from_utf8_lossy(&selected.stderr)
     );
-    let workflows = run(&[
-        "project",
-        "workflow",
-        "list",
-        "--project",
-        project.id.as_str(),
-        "--json",
-    ]);
+    let workflows = run(&["wave", "workflow", "list", "--wave", "proof", "--json"]);
     assert!(entry(&workflows)["workflow"].is_object());
     std::fs::write(&definition, "invalid: true\n").unwrap();
     assert!(!run(&[
-        "project",
+        "wave",
         "workflow",
         "set",
+        "--project",
         project.id.as_str(),
         "feature",
         "--file",
@@ -290,12 +285,7 @@ fn flow_and_workflow_catalogs_keep_same_name_sources_separate() {
     .success());
     assert_eq!(
         entry(&run(&[
-            "project",
-            "workflow",
-            "list",
-            "--project",
-            project.id.as_str(),
-            "--json"
+            "wave", "workflow", "list", "--wave", "proof", "--json"
         ])),
         entry(&workflows)
     );

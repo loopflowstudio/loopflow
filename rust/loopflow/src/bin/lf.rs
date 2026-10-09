@@ -782,6 +782,99 @@ fn print_task_control(
 
 fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
     match command {
+        WaveCommand::EditPlan {
+            target,
+            name,
+            summary,
+        } => {
+            let saved = tokio::runtime::Runtime::new()?.block_on(async {
+                let project = loopflow::ops::project::plan_selector(
+                    repo,
+                    target.wave.as_deref(),
+                    target.project.as_deref(),
+                )
+                .await?;
+                loopflow::ops::project::edit(repo, &project, name.as_deref(), summary.as_deref())
+                    .await
+            })?;
+            print_planning_sync(&saved.sync);
+            Ok(())
+        }
+        WaveCommand::Workflow { cmd } => {
+            use loopflow::lf::WaveWorkflowCommand;
+            tokio::runtime::Runtime::new()?.block_on(async {
+                match cmd {
+                    WaveWorkflowCommand::List { wave, json } => {
+                        let entries =
+                            loopflow::ops::project::workflow_catalog(repo, wave.as_deref()).await?;
+                        if *json {
+                            println!("{}", serde_json::to_string(&entries)?);
+                        } else {
+                            for entry in entries {
+                                println!(
+                                    "{}{}",
+                                    entry.name,
+                                    entry
+                                        .unavailable
+                                        .map(|e| format!(" (unavailable: {e})"))
+                                        .unwrap_or_default()
+                                );
+                            }
+                        }
+                    }
+                    WaveWorkflowCommand::Source { target, name } => {
+                        let project = loopflow::ops::project::plan_selector(
+                            repo,
+                            target.wave.as_deref(),
+                            target.project.as_deref(),
+                        )
+                        .await?;
+                        print!(
+                            "{}",
+                            loopflow::ops::project::workflow_source(repo, &project, name).await?
+                        );
+                    }
+                    WaveWorkflowCommand::Show { target, json } => {
+                        let project = loopflow::ops::project::plan_selector(
+                            repo,
+                            target.wave.as_deref(),
+                            target.project.as_deref(),
+                        )
+                        .await?;
+                        let selected =
+                            loopflow::ops::project::workflow(repo, &project, None, None).await?;
+                        if *json {
+                            println!("{}", serde_json::to_string_pretty(&selected)?);
+                        } else {
+                            println!(
+                                "{} · Workflow {}",
+                                selected.project.name, selected.project.workflow
+                            );
+                            print_planning_sync(&selected.sync);
+                        }
+                    }
+                    WaveWorkflowCommand::Set { target, name, file } => {
+                        let project = loopflow::ops::project::plan_selector(
+                            repo,
+                            target.wave.as_deref(),
+                            target.project.as_deref(),
+                        )
+                        .await?;
+                        let saved = loopflow::ops::project::workflow(
+                            repo,
+                            &project,
+                            Some(name),
+                            file.as_deref(),
+                        )
+                        .await?;
+                        println!("{}: Workflow {name}", saved.project.name);
+                        print_planning_sync(&saved.sync);
+                    }
+                }
+                Ok(())
+            })
+        }
+
         WaveCommand::NewChapter {
             wave,
             name,
@@ -829,7 +922,7 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             Ok(())
         }
         WaveCommand::Cron { .. } => unreachable!("cron dispatches separately"),
-        WaveCommand::List { .. } | WaveCommand::Status { .. } => {
+        WaveCommand::List { .. } | WaveCommand::Status { .. } | WaveCommand::Show { .. } => {
             unreachable!("read commands dispatch separately")
         }
         WaveCommand::Place { .. } | WaveCommand::Rename { .. } => {
@@ -1404,7 +1497,7 @@ fn run() -> anyhow::Result<()> {
             Err(error) => return Err(error.into()),
         };
         if preview {
-            journal::mark_effect_free_preview();
+            journal::mark_effect_free_read();
             anyhow::bail!("remote invocation preview is unavailable without an effect-free identity transport; no remote command was sent. Run the preview directly on the selected Machine");
         }
         // The target owns command flags, including --verbose; RUST_LOG controls transport logs.
@@ -1442,8 +1535,19 @@ fn run() -> anyhow::Result<()> {
             return Err(loopflow::process::CommandExit(code).into());
         }
     };
-    if cli.context || cli.explain {
-        journal::mark_effect_free_preview();
+    let planning_read = matches!(
+        &cli.command,
+        Some(Commands::Wave {
+            cmd: WaveCommand::Show { .. }
+                | WaveCommand::Workflow {
+                    cmd: loopflow::lf::WaveWorkflowCommand::List { .. }
+                        | loopflow::lf::WaveWorkflowCommand::Show { .. }
+                        | loopflow::lf::WaveWorkflowCommand::Source { .. }
+                }
+        })
+    );
+    if cli.context || cli.explain || planning_read {
+        journal::mark_effect_free_read();
     }
     init_tracing(cli.verbose);
     // Opening previews report the platform impediment without attempting control.
@@ -1471,6 +1575,34 @@ fn run() -> anyhow::Result<()> {
     loopflow::lf::commands::work_route::resolve_repository_selection(&mut cli)?;
     if cli.context || cli.explain {
         return preview_invocation(&cli, &args);
+    }
+    if planning_read {
+        let _cwd = cli
+            .wt
+            .as_deref()
+            .map(|name| CwdGuard::enter(&loopflow::lf::commands::ops::resolve_worktree(name)?))
+            .transpose()?;
+        let _scope = if cli.wave.is_some() || cli.task.is_some() {
+            let context = loopflow::lf::commands::context::explain(
+                cli.wave.as_deref(),
+                cli.task.as_deref(),
+                None,
+                None,
+            )?;
+            match context.wave {
+                loopflow::ops::context::ContextFact::Bound { value, .. } => Some(EnvGuard::set(
+                    loopflow::work::wave::context::WAVE_ID_ENV,
+                    value,
+                )),
+                loopflow::ops::context::ContextFact::Unavailable { reason } => {
+                    anyhow::bail!(reason)
+                }
+                loopflow::ops::context::ContextFact::Unbound => None,
+            }
+        } else {
+            None
+        };
+        return execute_command(&cli, &args, None);
     }
     if cli.task.is_none() && cli.wt.is_none() {
         if let Some(result) = loopflow::lf::navigation::inspect(&cli) {
@@ -2067,6 +2199,22 @@ fn execute_command(
         Some(Commands::Wave {
             cmd: cmd @ (WaveCommand::Rename { .. } | WaveCommand::Place { .. }),
         }) => in_directory_runtime(args, |repo| run_wave_command(repo, cmd)),
+        Some(Commands::Wave {
+            cmd: cmd @ WaveCommand::Workflow { .. },
+        }) => {
+            let cwd = std::env::current_dir()?;
+            let repo = loopflow::repo::discover_repo_root(&cwd)?.unwrap_or(cwd);
+            run_wave_command(&repo, cmd)
+        }
+        Some(Commands::Wave {
+            cmd:
+                WaveCommand::Show {
+                    wave,
+                    task,
+                    json,
+                    all,
+                },
+        }) => loopflow::lf::commands::waves::show(wave.as_deref(), task.as_deref(), *json, *all),
         Some(Commands::Wave { cmd }) => in_repo_runtime(args, |repo| run_wave_command(repo, cmd)),
         Some(Commands::Pr { cmd }) => in_repo_runtime(args, |_| {
             loopflow::lf::commands::ops::run_pr(cmd.as_ref(), cli.agent.as_deref())
@@ -2110,91 +2258,6 @@ fn execute_command(
                 | TaskCommand::Files { .. }
                 | TaskCommand::Save { .. }),
         }) => run_task_command(&std::env::current_dir()?, cmd),
-        Some(Commands::Project {
-            cmd:
-                loopflow::lf::ProjectCommand::Edit {
-                    project,
-                    name,
-                    summary,
-                },
-        }) => {
-            let cwd = std::env::current_dir()?;
-            let repo = loopflow::repo::discover_repo_root(&cwd)?.unwrap_or(cwd);
-            let saved = tokio::runtime::Runtime::new()?.block_on(loopflow::ops::project::edit(
-                &repo,
-                project,
-                name.as_deref(),
-                summary.as_deref(),
-            ))?;
-            print_planning_sync(&saved.sync);
-            Ok(())
-        }
-        Some(Commands::Project {
-            cmd: loopflow::lf::ProjectCommand::Workflow { cmd },
-        }) => {
-            let cwd = std::env::current_dir()?;
-            let repo = loopflow::repo::discover_repo_root(&cwd)?.unwrap_or(cwd);
-            match cmd {
-                loopflow::lf::ProjectWorkflowCommand::Source { project, name } => {
-                    let source = tokio::runtime::Runtime::new()?.block_on(
-                        loopflow::ops::project::workflow_source(&repo, project, name),
-                    )?;
-                    print!("{source}");
-                    Ok(())
-                }
-                loopflow::lf::ProjectWorkflowCommand::List { json, project } => {
-                    let entries = tokio::runtime::Runtime::new()?.block_on(
-                        loopflow::ops::project::workflow_catalog(&repo, project.as_deref()),
-                    )?;
-                    if *json {
-                        println!("{}", serde_json::to_string(&entries)?);
-                    } else {
-                        for entry in entries {
-                            println!(
-                                "{}{}",
-                                entry.name,
-                                entry
-                                    .unavailable
-                                    .map(|e| format!(" (unavailable: {e})"))
-                                    .unwrap_or_default()
-                            );
-                        }
-                    }
-                    Ok(())
-                }
-                loopflow::lf::ProjectWorkflowCommand::Show { project, json } => {
-                    let selected = tokio::runtime::Runtime::new()?
-                        .block_on(loopflow::ops::project::workflow(&repo, project, None, None))?;
-                    if *json {
-                        println!("{}", serde_json::to_string_pretty(&selected)?);
-                    } else {
-                        println!(
-                            "{} · Workflow {}",
-                            selected.project.name, selected.project.workflow
-                        );
-                        print_planning_sync(&selected.sync);
-                    }
-                    Ok(())
-                }
-                loopflow::lf::ProjectWorkflowCommand::Set {
-                    project,
-                    name,
-                    file,
-                } => with_runtime(&repo, args, || {
-                    let saved = tokio::runtime::Runtime::new()?.block_on(
-                        loopflow::ops::project::workflow(
-                            &repo,
-                            project,
-                            Some(name),
-                            file.as_deref(),
-                        ),
-                    )?;
-                    println!("Project {project}: Workflow {name}");
-                    print_planning_sync(&saved.sync);
-                    Ok(())
-                }),
-            }
-        }
         Some(Commands::Task { cmd }) => {
             let directory = loopflow::repo::working_directory()?;
             let repo = selected_task_repository(cli, &directory, cmd.selector())?;
@@ -2223,12 +2286,6 @@ fn execute_command(
         Some(Commands::List { .. } | Commands::Help { .. }) => {
             unreachable!("inspection returned before execution")
         }
-        Some(Commands::Roadmap {
-            wave,
-            task,
-            json,
-            all,
-        }) => loopflow::lf::commands::waves::roadmap(wave.as_deref(), task.as_deref(), *json, *all),
         Some(Commands::Monitor { cmd, json, all }) => match cmd {
             Some(cmd) => loopflow::lf::commands::monitor::run(cmd),
             None => loopflow::lf::commands::monitor::overview(*json, *all),

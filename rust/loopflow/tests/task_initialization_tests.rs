@@ -293,7 +293,7 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
     let wait: serde_json::Value = serde_json::from_slice(&wait.stdout).expect("wait JSON");
     assert_eq!(wait["actions"], status["actions"]);
 
-    let roadmap = run_lf(&["roadmap", "--wave", "task-pr-tests", "--json"]);
+    let roadmap = run_lf(&["wave", "show", "task-pr-tests", "--json"]);
     assert!(
         roadmap.status.success(),
         "roadmap stays readable: {}",
@@ -338,7 +338,7 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
         .as_str()
         .expect("stale action reason")
         .contains("initialization did not complete"));
-    let stale_roadmap = run_lf(&["roadmap", "--wave", "task-pr-tests", "--json"]);
+    let stale_roadmap = run_lf(&["wave", "show", "task-pr-tests", "--json"]);
     assert!(
         stale_roadmap.status.success(),
         "stale roadmap stays readable"

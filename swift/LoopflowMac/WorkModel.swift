@@ -528,8 +528,8 @@ final class WorkModel {
         flowCatalogReadings[repoPath ?? ""] ?? .loading
     }
     private var workflowCatalogReadings: [String: WorkReading<[WorkflowCatalogEntry]>] = [:]
-    private var workflowProject: String? { breadcrumb?.wave?.roadmap.projects.currentProject?.id }
-    private var workflowCatalogKey: String { "\(repoPath ?? "")|\(workflowProject ?? "")" }
+    private var workflowWave: String? { breadcrumb?.wave?.roadmap.wave.id }
+    private var workflowCatalogKey: String { "\(repoPath ?? "")|\(workflowWave ?? "")" }
     var workflowCatalog: WorkReading<[WorkflowCatalogEntry]> {
         workflowCatalogReadings[workflowCatalogKey] ?? .loading
     }
@@ -1354,23 +1354,17 @@ final class WorkModel {
         if !force, workflowCatalogReadings[key]?.value != nil { return }
         let previous = workflowCatalogReadings[key]?.value
         let result: Result<[WorkflowCatalogEntry], Error>
-        do { result = .success(try await query.workflowCatalog(cwd: repoPath, project: workflowProject)) }
+        do { result = .success(try await query.workflowCatalog(cwd: repoPath, wave: workflowWave)) }
         catch { result = .failure(error) }
         workflowCatalogReadings[key] = reading(from: result, lastGood: previous)
     }
 
     func workflowSource(_ name: String, wave: WaveSnapshot) async throws -> String {
-        guard let project = visibleRoadmaps.first(where: { $0.wave.id == wave.id })?.projects.currentProject else {
-            throw RegistryQueryError("Current Project is unavailable")
-        }
-        return try await query.workflowSource(name, project: project.id, cwd: WaveOrigin.resolve(wave.repo))
+        return try await query.workflowSource(name, wave: wave.id, cwd: WaveOrigin.resolve(wave.repo))
     }
 
     func saveWorkflow(_ name: String, content: String, wave: WaveSnapshot) async throws {
-        guard let project = visibleRoadmaps.first(where: { $0.wave.id == wave.id })?.projects.currentProject else {
-            throw RegistryQueryError("Current Project is unavailable")
-        }
-        try await query.saveWorkflow(name, content: content, project: project.id, cwd: WaveOrigin.resolve(wave.repo))
+        try await query.saveWorkflow(name, content: content, wave: wave.id, cwd: WaveOrigin.resolve(wave.repo))
         await refresh()
         await loadWorkflowCatalog(force: true)
     }
@@ -1381,8 +1375,7 @@ final class WorkModel {
     /// Make `name` the workflow of the Wave's current chapter, then reread planning.
     func setWorkflow(_ name: String, wave: WaveSnapshot) async {
         do {
-            guard let project = visibleRoadmaps.first(where: { $0.wave.id == wave.id })?.projects.currentProject else { throw RegistryQueryError("Current Project is unavailable") }
-            try await query.setWorkflow(name, project: project.id, cwd: WaveOrigin.resolve(wave.repo))
+            try await query.setWorkflow(name, wave: wave.id, cwd: WaveOrigin.resolve(wave.repo))
             workflowErrors[wave.id] = nil
             await refresh()
         } catch {

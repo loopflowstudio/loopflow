@@ -47,7 +47,7 @@ find wave -mindepth 2 -maxdepth 2 -name GOAL.md -print 2>/dev/null
 ```
 
 Do not reconstruct distributed state from processes, worktrees, or provider
-web pages. `lf wave list`, `lf wave status`, and `lf roadmap` are the shared read surfaces.
+web pages. `lf wave list`, `lf wave status`, and `lf wave show` are the shared read surfaces.
 If `lf id` says the local store is not initialized, record that plainly
 and continue; do not invent a Machine identity.
 
@@ -161,7 +161,7 @@ Read its `wave/<name>/GOAL.md`, then verify its shared state:
 
 ```bash
 lf wave status <wave> --json
-lf roadmap --wave <wave> --json
+lf wave show <wave> --json
 lf wave status <wave>
 ```
 
@@ -282,7 +282,7 @@ lf wave list --json
 ```
 
 For a selected Wave, also run `lf wave status <wave> --json` and
-`lf roadmap --wave <wave> --json`. After placement, use
+`lf wave show <wave> --json`. After placement, use
 `lf wave status <wave> --json`. For a selected Task, run
 `lf task status <ISSUE-ID> --json`. Do not run the machine-wide roadmap or
 doctor as routine setup: both can be large, and doctor can surface unrelated
@@ -301,7 +301,7 @@ Wave         designer placed on home_...
 Planning     Linear bound; 1 current chapter / 7 open Tasks
 
 Next         lf --wave designer wave-operate
-Also         lf roadmap --wave designer | lf task run DES-123 | lf debug -c
+Also         lf wave show designer | lf task run DES-123 | lf debug -c
 ```
 
 If something remains unavailable, say exactly which authority is missing and

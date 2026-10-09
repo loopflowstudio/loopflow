@@ -542,7 +542,7 @@ pub(crate) fn select_task_run(
             if definition.is_none() {
                 let Some(flow) = requested else {
                     return Err(task_error(format!(
-                        "Task {}'s Project names {name:?}, which is not a workflow. `lf project workflow set <project> <name>` sets one; `lf task run {} <workflow>` takes one up for this Task",
+                        "Task {}'s Project names {name:?}, which is not a workflow. `lf wave workflow set <name> <wave>` sets one; `lf task run {} <workflow>` takes one up for this Task",
                         task.plan.identifier, task.plan.identifier
                     )));
                 };

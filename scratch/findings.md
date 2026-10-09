@@ -28,17 +28,10 @@ or remote-URL matching as Work identity; rewriting Machine defaults per request.
 
 ## October 8 implementation review
 
-Checkout location now lives on `tasks`, using the existing `TaskCheckout` reader.
-Review found two paths outside that reader: SQL membership matched only paths,
-and comparisons bypassed file-location validation. Both now use recorded Machine
-evidence. Unknown Machine evidence previously allowed local file reads and
-missing-path Session association; it now stays unavailable, preserving explicit
-bindings. No new DTO or parallel placement store was needed.
-
-The first focused run failed on fixture setup (missing required `input_published`
-and a nonexistent PR branch); both fixtures were corrected. Gate still owns
-materialized/installation migration and complete Session lifecycle verification.
-This is slice-1 evidence, not shared-source or native Desktop proof.
+Checkout-location review and corrected fixtures: `f881ae647:scratch/findings.md`,
+this heading. SQL membership and file comparisons now respect recorded Machine
+identity; unknown location stays unavailable, preserving explicit binds.
+Gate owns installed migration and full Session-lifecycle proof.
 
 ## Integration boundary — October 8
 

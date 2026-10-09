@@ -12,8 +12,7 @@ LOO-406 is integrated through main’s `d20c56daf` (#1503). LOO-412 through
 receipt transport now join creation/deletion recovery in the common owners.
 Mixed Linear/Git stays disabled pending the remaining composition.
 Local Task/Session-plus-Changes opening follows request-scoped readiness; native proof remains.
-Remaining implementation: Wave-owned planning,
-remote/Flow input and broader explanation, shared identity/exchange and first-start
+Remaining implementation: remote/Flow input and broader explanation, shared identity/exchange and first-start
 admission, and verified native bounded extraction. Full-path proof remains.
 [Findings](findings.md), [questions](questions.md) and the
 [comparison](../docs/reviews/terminal-command-comparison.md) retain evidence and open choices.
@@ -235,8 +234,8 @@ for launch/preview; preview no longer tracks separate mutable name/kind/agent fl
 Opening explanation reports platform impediments; actual Desktop control still
 refuses before repository lookup. Linux execution remains with gate/CI.
 
-Remaining removals are `Commands::Project` and `Commands::Roadmap`, with consumer
-cutover to Wave planning. `Context { explain }`, validation-only scope checks,
+Removed `Commands::Project`, `Commands::Roadmap` and their dispatch. Wave owns
+planning commands; the existing plan and Workflow readers/writers remain. `Context { explain }`, validation-only scope checks,
 `execute_command`'s raw-argv reparse and unused `resolve_checkout_binding` are removed.
 Checkout/retirement fixtures now exercise the surviving execution-binding reader. The standalone budget reader remains;
 its final home is open. Prompt excerpts now defer persistence until launch. Their underlying
@@ -270,29 +269,30 @@ Implementation sequence. Root run/open and public max-turns/no-loopflow are remo
 Task edges retain skill/Flow dispatch and steer filtering. One draft separates
 recorded checkout Machine from delegation; installed migration proof stays with gate.
 
-### Invocation explanation — October 9
+### Wave planning and invocation explanation — October 9
 
-Implemented locally: text/JSON carries identity, selected edge/ad-hoc Flow,
-impediments and unavailable evidence. Launch and preview share `select_task_run`,
-Task option validation and launch admission; only launch prepares Work or moves
-Workflow. Selection owns Project fallback without cloning its definition.
-Routing returns provenance with the destination, not a later rereading of Started.
-Omitted Tasks use checkout/declaration resolution in both paths. Recorded execution
-wins for started Tasks; delegation for unstarted Tasks never grants first-start permission.
+`wave show [WAVE]` replaces root roadmap on the existing snapshot owner, including
+`--all` and exact `--task` lookup. Text now retains historical chapters, KRs and
+metric targets beside current selection. Wire types and internal Project identity
+remain unchanged. `wave workflow` replaces Project workflow; ordinary selection
+addresses a Wave, with `--project` for exact retained chapters. `wave edit-plan`
+reuses the common name/summary writer. Desktop sends Wave identity rather than
+choosing a Project from an older reading. No migration, new writer or live rotation.
 
-Remote Workflow state is not read from a caller's copy. Missing/corrupt registries,
-unknown Machine, absent checkout, future placement, completion reconciliation and
-provider/account checks remain explicit. Parsed previews suppress the post-command
-Process observation that otherwise writes after their read-only code returns.
-The strengthened state fixture checkpoints WAL before comparing the whole database;
-its initial failure and repaired owner are in [findings](findings.md).
+Planning reads skip Process admission and use the read-only store.
+A missing-registry regression first exposed fallback Process initialization, as
+preview's checkpointed-WAL fixture had before. Mutations retain ordinary admission.
+Desktop, fixtures and examples move together.
+These reversible spellings remain distinct from Jack Heart's accepted Wave ownership.
 
-`desktop open --explain` now shares opening URL validation with launch, retaining
-Session/diff intent and reporting platform/selection impediments in text and JSON.
-The proposed URL is not a readiness receipt; native state remains uninspected.
+Task-run and opening explanation share launch selection/validation; only launch
+prepares Work. Parsed previews suppress fallback Process writes. Original failures,
+route provenance and option details: `f881ae647:scratch/compare-cmux-s-command-line.md`,
+**Invocation explanation** and [findings](findings.md). A proposed URL proves no native
+readiness. Local absence and delegation never grant peer-exclusive first start.
 
-Remaining: other action explanation, remote/Flow input, Wave planning, composed
-exchange/admission and verified bounded native extraction. No separate delivery or native acceptance follows.
+Remaining: broader action explanation, remote/Flow input, exchange/admission and
+verified bounded native extraction; one PR through demo, not separate delivery.
 
 ### Local composed opening — October 9
 
@@ -581,4 +581,4 @@ original input target and draft survive. Demo owns native usability; preserve co
 Earlier failed attempts and check archives: [findings](findings.md) and
 `f48d84511:scratch/compare-cmux-s-command-line.md`.
 
-Check (October 9 realign): `git diff --check` PASS; `lf context --skill realign` confirms authored memory/scratch fit; generated goal remains about 7.5k tokens over. No code changed; prior build/Clippy/26 focused tests: `af34dd20c:scratch/compare-cmux-s-command-line.md`. Combined verification: gate/CI; native usability: demo.
+Check (October 9): Rust build/Clippy, `local_planning wave_planning` (2), catalog (1), Desktop RegistryQuery/Headless (25), Python timings/alignment (6), documented commands (3) PASS. Gate owns combined verification; demo owns native usability.

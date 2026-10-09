@@ -301,7 +301,10 @@ fn repository_team_matrix() {
     assert!(status.contains("survival"));
     assert!(status.contains("survival/infrastructure"));
     // Another repository's same-named Wave does not hide this repository's work.
-    let roadmap = assert_success(&run_lf(&home, &repo, &["roadmap", "--json"]), "roadmap");
+    let roadmap = assert_success(
+        &run_lf(&home, &repo, &["wave", "show", "--json"]),
+        "roadmap",
+    );
     assert!(roadmap.contains("LOO-1"));
     assert!(roadmap.contains("LOO-2"));
 
@@ -347,8 +350,8 @@ fn repository_team_matrix() {
     for args in [
         &["wave", "list", "--json"][..],
         &["wave", "status", "survival", "--json"][..],
-        &["roadmap", "--json"][..],
-        &["roadmap", "--wave", "survival", "--json"][..],
+        &["wave", "show", "--json"][..],
+        &["wave", "show", "survival", "--json"][..],
     ] {
         let output = assert_success(&run_lf(&home, &repo, args), "retained planning");
         assert!(!output.contains("LOO-4"));

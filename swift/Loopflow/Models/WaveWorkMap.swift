@@ -129,7 +129,7 @@ public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
     }
 }
 
-/// Stable Task references shared by `lf wave status` and `lf roadmap`. The issue URL
+/// Stable Task references shared by `lf wave status` and `lf wave show`. The issue URL
 /// comes from the cached PM snapshot; workspace evidence comes from durable
 /// Task Work and remains after execution finishes.
 public struct TaskReferenceSnapshot: Decodable, Sendable, Hashable {

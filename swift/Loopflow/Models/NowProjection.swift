@@ -11,7 +11,7 @@ public extension TaskConditionState {
     }
 }
 
-/// NOW shows non-clear Task conditions from the one `lf roadmap` read. Rust
+/// NOW shows non-clear Task conditions from the one `lf wave show` read. Rust
 /// owns the condition; Swift only omits clear rows and groups the rest.
 public func nowGroup(for task: RoadmapTask) -> TaskConditionState? {
     switch task.condition.state {

@@ -96,10 +96,10 @@ const COMMANDS: &[Cmd] = &[
         global_default: false,
     },
     Cmd {
-        id: "roadmap",
-        path: &["roadmap"],
-        base_args: &["roadmap", "--json"],
-        wave_form: WaveForm::Flag,
+        id: "wave show",
+        path: &["wave", "show"],
+        base_args: &["wave", "show", "--json"],
+        wave_form: WaveForm::Positional,
         global_default: true,
     },
     // ── Mutations ────────────────────────────────────────────────────────

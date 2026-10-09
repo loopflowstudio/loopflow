@@ -42,7 +42,7 @@ struct DesktopNativeSessionFixture: Decodable, Sendable {
             record["open_argv"] = isolatedCommand(argv)
             return String(decoding: try JSONSerialization.data(withJSONObject: record), as: UTF8.self)
         }
-        guard ["roadmap", "history"].contains(args.first ?? "") || ["wave list", "machine id", "session list", "session history", "task status", "task files", "task file", "task diff", "flow list"].contains(args.prefix(2).joined(separator: " ")) else {
+        guard args.first == "history" || ["wave show", "wave list", "machine id", "session list", "session history", "task status", "task files", "task file", "task diff", "flow list"].contains(args.prefix(2).joined(separator: " ")) else {
             throw RegistryQueryError("Fixture does not execute this command")
         }
         return try await Task.detached { try capture([cli] + args) }.value
@@ -86,7 +86,7 @@ struct DesktopNativeSessionFixture: Decodable, Sendable {
         // Exact Task destinations resolve within the Wave's repository. The
         // owned checkout remains the cwd for native execution. File commands use
         // the Task’s recorded checkout through the shared CLI reader.
-        process.currentDirectoryURL = URL(fileURLWithPath: ["roadmap", "history", "task", "flow", "wave"].contains(argv.dropFirst().first ?? "") ? repo : checkout)
+        process.currentDirectoryURL = URL(fileURLWithPath: ["history", "task", "flow", "wave"].contains(argv.dropFirst().first ?? "") ? repo : checkout)
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = handle
         process.standardError = errorHandle

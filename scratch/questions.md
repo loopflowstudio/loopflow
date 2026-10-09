@@ -70,7 +70,10 @@ unbounded fallback.
 ## Command-map review — October 8
 
 Open choices:
-- Wave plan/report shape after removing public Project/roadmap; a cross-Wave backlog is optional.
+- Wave plan/report spelling is reversible: `wave show [WAVE]` retains the existing
+  snapshot and cross-Wave `--all`/exact `--task` reads. `wave workflow set/source NAME [WAVE]`
+  and `wave edit-plan [WAVE]` use current selection; `--project ID` addresses history.
+  Project identity and Workflow capture stay with their existing owners.
 - Skill/Flow name collisions and Flow-wide context preview semantics.
 - Final home for standalone prompt-budget reporting. Keep `--steers-after` and its existing filtering.
 - Remembered repository names: Jack is unsure; draft uses root/name or explicit path.
@@ -104,10 +107,8 @@ These are reversible lookup choices, not shared Work identity or publication.
 Primary and stack-parent Task selectors now carry repository-scoped full IDs through
 dispatch; an unscoped ambiguous prefix still fails.
 
-The October 9 generated goal is 23479/16000 tokens (7479 over). Its complete
-local source was read, including Jack Heart's Q3 steer and the 169-file inventory.
-Memory/scratch edits cannot curate that generated source; context-producer work
-remains outside this cut. No limit changed.
+Generated goal remains about 10k tokens over 16000, mostly the file inventory.
+Authored-note curation cannot shrink it; context-producer work remains separate.
 
 ## Reversible preview limits — October 9
 

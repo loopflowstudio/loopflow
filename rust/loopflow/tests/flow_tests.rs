@@ -1937,7 +1937,7 @@ fn builtin_deploy_uses_ops_land_item() {
 }
 
 fn roadmap_task(repo: &Path, home: &Path) -> serde_json::Value {
-    lf_json(repo, home, &["roadmap", "--json"])["waves"][0]["tasks"]["items"][0].clone()
+    lf_json(repo, home, &["wave", "show", "--json"])["waves"][0]["tasks"]["items"][0].clone()
 }
 
 fn labels(graph: &serde_json::Value) -> Vec<&str> {

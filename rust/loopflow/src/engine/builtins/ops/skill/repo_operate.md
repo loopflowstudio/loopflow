@@ -10,7 +10,7 @@ new Tasks as direction emerges.
 
 ### Find stale work
 
-Read `lf roadmap --json`, `lf session list --json`, and `lf wt list --json`.
+Read `lf wave show --json`, `lf session list --json`, and `lf wt list --json`.
 Join Task and Session state to worktrees using Loopflow's returned identities
 and paths. Inspect branches and PRs to explain gaps in that shared picture.
 
@@ -166,7 +166,7 @@ the same runtime/Machine; a failed read is not an empty list.
 The list is scoped to the repository this conversation runs in: worktrees
 collapse to their main checkout, and review steps from other repositories are hidden.
 Add `--all` to see every repository's review steps on this machine. The same
-repository scope governs `lf wave list` and `lf roadmap` (both take `--all`); `lf wave
+repository scope governs `lf wave list` and `lf wave show` (both take `--all`); `lf wave
 status` resolves one Wave within the repository.
 
 When the User selects a Session, run `lf session connect <session-id> --json`.
@@ -289,7 +289,7 @@ a competing implementation. No automatic scratch-transfer flag is available.
 ## Placement and bounded contributions
 
 Use shared readers: `lf wave list --json` for the repository, `lf wave status <wave> --json`
-for one Wave, and `lf roadmap --json` for the plan joined to runtime evidence.
+for one Wave, and `lf wave show --json` for the plan joined to runtime evidence.
 Do not reconstruct their state from processes, checkouts or Linear alone.
 
 A Work names a stable Machine authority. Placement changes through `lf wave place <wave-id> <machine-id>`.

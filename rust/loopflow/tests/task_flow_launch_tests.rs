@@ -181,7 +181,7 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
         let error = String::from_utf8_lossy(&output.stderr);
         assert!(error.contains("which is not a workflow"), "{error}");
         assert!(
-            error.contains("lf project workflow set <project>"),
+            error.contains("lf wave workflow set <name> <wave>"),
             "{error}"
         );
         assert_eq!(support::recorded_flows(home.path()).len(), 3);

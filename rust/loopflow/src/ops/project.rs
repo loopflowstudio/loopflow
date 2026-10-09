@@ -179,6 +179,47 @@ async fn resolve_project(store: &Store, repo: &Path, selector: &str) -> OpsResul
     Ok(project)
 }
 
+/// Resolve current Wave selection without ensuring a Project or starting work.
+pub async fn plan_selector(
+    repo: &Path,
+    wave: Option<&str>,
+    project: Option<&str>,
+) -> OpsResult<String> {
+    let store = read_store()?;
+    if let Some(project) = project {
+        return Ok(resolve_project(&store, repo, project).await?.id.to_string());
+    }
+    let wave = crate::work::wave::context::resolve_managed_wave(
+        Some(&store),
+        Some(repo),
+        wave,
+        std::env::var("LF_WAVE_ID").ok().as_deref(),
+    )
+    .await
+    .map_err(project_error)?;
+    let selected = store
+        .sqlite
+        .selected_planning_project(wave.id())
+        .map_err(project_error)?
+        .ok_or_else(|| project_error(format!("Wave {} has no configured Project", wave.slug())))?;
+    Ok(resolve_project(&store, repo, &selected.id)
+        .await?
+        .id
+        .to_string())
+}
+
+fn read_store() -> OpsResult<Store> {
+    #[cfg(test)]
+    if let Ok(store) = super::pm::PM_TEST_CONTEXT
+        .try_with(|ctx| Store::from_sqlite_for_test(ctx.store.sqlite.clone()))
+    {
+        return Ok(store);
+    }
+    crate::store::read_existing_registry()
+        .map_err(project_error)?
+        .ok_or_else(|| project_error("Planning unavailable: local registry is absent"))
+}
+
 pub async fn workflow_catalog(
     repo: &Path,
     selector: Option<&str>,
@@ -186,11 +227,18 @@ pub async fn workflow_catalog(
     let Some(selector) = selector else {
         return crate::engine::workflow::workflow_catalog(repo).map_err(project_error);
     };
-    let store = super::pm::pm_store().await?;
-    let project = resolve_project(&store, repo, selector).await?;
+    let store = read_store()?;
+    let wave = crate::work::wave::context::resolve_managed_wave(
+        Some(&store),
+        Some(repo),
+        Some(selector),
+        None,
+    )
+    .await
+    .map_err(project_error)?;
     let stored: BTreeMap<_, _> = store
         .sqlite
-        .wave_workflows(&project.wave_id)
+        .wave_workflows(wave.id())
         .map_err(project_error)?
         .into_iter()
         .collect();
@@ -229,7 +277,7 @@ pub async fn workflow_catalog(
 }
 
 pub async fn workflow_source(repo: &Path, selector: &str, name: &str) -> OpsResult<String> {
-    let store = super::pm::pm_store().await?;
+    let store = read_store()?;
     let project = resolve_project(&store, repo, selector).await?;
     read_workflow_source(&store, &project.wave_id, name)?
         .ok_or_else(|| project_error(format!("Workflow {name:?} is unavailable")))
@@ -242,7 +290,7 @@ pub async fn edit(
     summary: Option<&str>,
 ) -> OpsResult<ProjectPlanning> {
     if name.is_none() && summary.is_none() {
-        return Err(project_error("project edit requires --name or --summary"));
+        return Err(project_error("wave edit-plan requires --name or --summary"));
     }
     let store = super::pm::pm_store().await?;
     let project = resolve_project(&store, repo, selector).await?;
@@ -265,7 +313,11 @@ pub async fn workflow(
     selection: Option<&str>,
     file: Option<&Path>,
 ) -> OpsResult<ProjectPlanning> {
-    let store = super::pm::pm_store().await?;
+    let store = if selection.is_some() {
+        super::pm::pm_store().await?
+    } else {
+        read_store()?
+    };
     let project = resolve_project(&store, repo, selector).await?;
     if let Some(name) = selection {
         let definition = match file {

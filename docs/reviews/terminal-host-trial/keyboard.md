@@ -1,5 +1,8 @@
 # Terminal-host keyboard trials · 2026-10-07
 
+Inline `# lf-doc: ambiguous` comments annotate retired spellings for today's
+command checker; they were not part of the recorded trial commands.
+
 Jack Heart authorized opening separate windows for specific UX tests, superseding
 the earlier prohibition for these newly created trial surfaces only. Existing
 windows/conversations remain untouched. Real-provider commands are staged without
@@ -45,15 +48,15 @@ priority without deleting the original Flow trial or claiming it complete.
 [Jack's second screenshot](terminal-host-keyboard-flow.png) shows the previous
 interactive workspace displaying “Blue.” and “Idle”, with no Needs input label.
 That provides visible post-answer attention-clearing evidence. The new workspace
-shows `lf -b -m claude run ux-flow` and Running while the terminal prints
+shows `lf -b -m claude run ux-flow # lf-doc: ambiguous` and Running while the terminal prints
 `[1/2] ux-first` and its twenty-second sleep. The current step is visible in
 terminal output but absent from the sidebar at that instant. No second-step,
 final-state or notification-delivery result is established by this screenshot.
 
 ## Interactive Flow expectation
 
-Jack Heart then tried `lf -m claude run ux-flow` and
-`lf -m claude run ux-flow -i`, reporting “i dont seem to be able to run an
+Jack Heart then tried `lf -m claude run ux-flow # lf-doc: ambiguous` and
+`lf -m claude run ux-flow -i # lf-doc: ambiguous`, reporting “i dont seem to be able to run an
 interactive flow?” His third screenshot shows the same streamed step output
 for both commands, rather than the native Claude conversation interface.
 Source inspection explains this: `Cli::step_args` always supplies `--batch`,

@@ -43,7 +43,7 @@ struct WorkNavigationProofTests {
         let roadmap = String(decoding: try JSONSerialization.data(withJSONObject: snapshot), as: UTF8.self)
         let query = RegistryQuery { args, _ in
             switch args.first {
-            case "roadmap": return roadmap
+            case "wave" where args.dropFirst().first == "show": return roadmap
             case "wave" where args.dropFirst().first == "list": return "[]"
             case "session": return #"{"entries":[],"next":null}"#
             case "history": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
@@ -161,7 +161,7 @@ struct WorkNavigationProofTests {
         let source = SidebarSessionSource(list: try encode(attached + orphans))
         let query = RegistryQuery { args, _ in
             switch args.first {
-            case "roadmap": return roadmap
+            case "wave" where args.dropFirst().first == "show": return roadmap
             case "wave" where args.dropFirst().first == "list": return "[]"
             case "session": return #"{"entries":\#(await source.list()),"next":null}"#
             case "history": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
@@ -290,7 +290,7 @@ struct WorkNavigationProofTests {
         let planning = SidebarSessionSource(list: roadmap)
         let query = RegistryQuery { args, _ in
             switch (args.first, args.dropFirst().first) {
-            case ("roadmap", _): return await planning.list()
+            case ("wave", "show"): return await planning.list()
             case ("wave", "list"): return "[]"
             case ("history", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             case ("session", "list"): return try await named.page(args)
@@ -588,7 +588,7 @@ struct WorkNavigationProofTests {
         let sessionJSON = String(decoding: try JSONSerialization.data(withJSONObject: records), as: UTF8.self)
         let query = RegistryQuery { args, _ in
             switch args.first {
-            case "roadmap": return #"{"generated_at":1,"waves":[]}"#
+            case "wave" where args.dropFirst().first == "show": return #"{"generated_at":1,"waves":[]}"#
             case "wave" where args.dropFirst().first == "list": return "[]"
             case "session" where args.dropFirst().first == "list": return #"{"entries":\#(sessionJSON),"next":null}"#
             default: throw RegistryQueryError("Local row must focus its existing shell")
@@ -756,7 +756,7 @@ struct WorkNavigationProofTests {
         """
         let query = RegistryQuery { args, cwd in
             switch args.first {
-            case "roadmap": return roadmap
+            case "wave" where args.dropFirst().first == "show": return roadmap
             case "wave" where args.dropFirst().first == "list": return "[]"
             case "session" where args.dropFirst().first == "list":
                 return #"{"entries":\#(cwd == "/src/context" ? otherRecords : records),"next":null}"#

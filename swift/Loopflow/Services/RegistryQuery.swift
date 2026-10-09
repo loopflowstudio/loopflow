@@ -109,9 +109,9 @@ public struct RegistryQuery: Sendable {
     }
 
     public func roadmap(wave: String? = nil) async throws -> RoadmapSnapshot {
-        var args = ["roadmap"]
+        var args = ["wave", "show"]
         if let wave {
-            args.append(contentsOf: ["--wave", wave])
+            args.append(wave)
         } else {
             args.append("--all")
         }
@@ -121,7 +121,7 @@ public struct RegistryQuery: Sendable {
     }
 
     public func taskDestination(issue: String, repo: String?) async throws -> RoadmapSnapshot {
-        var args = ["roadmap", "--task", issue, "--json"]
+        var args = ["wave", "show", "--task", issue, "--json"]
         if repo == nil { args.append("--all") }
         return try Self.decode(RoadmapSnapshot.self, from: await run(args, repo))
     }
@@ -199,25 +199,25 @@ public struct RegistryQuery: Sendable {
         return try Self.decode([FlowCatalogEntry].self, from: stdout)
     }
 
-    public func workflowCatalog(cwd: String?, project: String? = nil) async throws -> [WorkflowCatalogEntry] {
-        let stdout = try await run(["project", "workflow", "list", "--json"] + (project.map { ["--project", $0] } ?? []), cwd)
+    public func workflowCatalog(cwd: String?, wave: String? = nil) async throws -> [WorkflowCatalogEntry] {
+        let stdout = try await run(["wave", "workflow", "list", "--json"] + (wave.map { ["--wave", $0] } ?? []), cwd)
         return try Self.decode([WorkflowCatalogEntry].self, from: stdout)
     }
 
-    public func workflowSource(_ name: String, project: String, cwd: String?) async throws -> String {
-        try await run(["project", "workflow", "source", project, name], cwd)
+    public func workflowSource(_ name: String, wave: String, cwd: String?) async throws -> String {
+        try await run(["wave", "workflow", "source", name, wave], cwd)
     }
 
-    public func saveWorkflow(_ name: String, content: String, project: String, cwd: String?) async throws {
-        _ = try await runWithInput(["project", "workflow", "set", project, name, "--file", "/dev/stdin"], cwd, content)
+    public func saveWorkflow(_ name: String, content: String, wave: String, cwd: String?) async throws {
+        _ = try await runWithInput(["wave", "workflow", "set", name, wave, "--file", "/dev/stdin"], cwd, content)
     }
 
     public func customizeFlow(_ name: String, cwd: String?) async throws -> String {
         try await run(["flow", "customize", name], cwd).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    public func setWorkflow(_ name: String, project: String, cwd: String?) async throws {
-        _ = try await run(["project", "workflow", "set", project, name], cwd)
+    public func setWorkflow(_ name: String, wave: String, cwd: String?) async throws {
+        _ = try await run(["wave", "workflow", "set", name, wave], cwd)
     }
 
     /// Run a fresh Flow for the Task headless, placing it when needed. Without

@@ -89,11 +89,11 @@ reconstructing it from processes, worktrees, or Linear:
 ```bash
 lf wave list --json              # every durable Wave and its Machine/runtime evidence
 lf wave status <wave> --json   # one Wave's Work hierarchy, Sessions, and Task conditions
-lf roadmap --json         # current plan across Waves joined to runtime truth
+lf wave show --json         # current plan across Waves joined to runtime truth
 ```
 
 These are read surfaces. `lf wave status` is the focused operational view;
-`lf roadmap` is the planning overlay, not a second runtime model.
+`lf wave show` is the planning overlay, not a second runtime model.
 
 ## Place And Run
 

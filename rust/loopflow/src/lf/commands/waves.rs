@@ -1,4 +1,4 @@
-//! `lf wave list`, `lf wave status`, and `lf roadmap` — read the wave registry (`store`).
+//! `lf wave list`, `lf wave status`, and `lf wave show` — read the wave registry (`store`).
 //!
 //! `lf wave list` lists durable Wave identities, authored goals, Task counts and
 //! Machine placement. `lf wave status [wave]` adds current Projects, Task conditions,
@@ -223,7 +223,7 @@ pub struct TaskConditionSnapshot {
 }
 
 /// Stable references for one Task, shared verbatim by `lf wave status` and
-/// `lf roadmap`. The issue URL is cached PM evidence. Workspace evidence comes
+/// `lf wave show`. The issue URL is cached PM evidence. Workspace evidence comes
 /// from the durable Task and outlives its execution and final PR.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskReferenceSnapshot {
@@ -381,7 +381,7 @@ pub enum RoadmapSection {
     Later,
 }
 
-/// `lf roadmap` — every Wave's plan joined to durable Work and local delivery
+/// `lf wave show` — every Wave's plan joined to durable Work and local delivery
 /// evidence, bucketed by planning section.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoadmapSnapshot {
@@ -459,15 +459,35 @@ fn print_projects(projects: &Evidence<ProjectSummary>) {
     match projects {
         Evidence::Unavailable { reason } => println!("  projects unavailable: {reason}"),
         Evidence::Ok { items, .. } => {
-            for project in items.iter().filter(|project| project.current) {
+            for project in items {
                 println!(
-                    "  project   {} ({}) · workflow {}",
-                    project.name, project.id, project.workflow
+                    "  chapter   {} ({}) · {} · {} · workflow {}",
+                    project.name,
+                    project.id,
+                    if project.current {
+                        "current"
+                    } else {
+                        "historical"
+                    },
+                    project.status.as_str(),
+                    project.workflow
                 );
                 if let Some(sync) = &project.sync {
                     for line in sync.lines() {
                         println!("    {line}");
                     }
+                }
+                for target in &project.metric_targets {
+                    use crate::work::wave::metrics::MetricTarget;
+                    let comparison = match target.target {
+                        MetricTarget::AtLeast { .. } => ">=",
+                        MetricTarget::AtMost { .. } => "<=",
+                    };
+                    println!(
+                        "    target {} {comparison} {}",
+                        target.metric_id,
+                        target.target.value()
+                    );
                 }
                 for kr in &project.krs {
                     println!("  [{}] {}", if kr.holds { "x" } else { " " }, kr.text);
@@ -603,18 +623,18 @@ pub(crate) async fn wave_detail(store: &SharedStore, wave: &Wave) -> Result<Wave
     })
 }
 
-/// `lf roadmap [wave]` — the machine-wide intent plane. Every Wave (or one, when
+/// `lf wave show [wave]` — the machine-wide intent plane. Every Wave (or one, when
 /// scoped) with its plan joined to live evidence and each row bucketed into a
 /// section. Deterministic and local: one runtime observation for the whole
 /// read, bounded Git probes for Task Work, and no network. `lf wave status`
 /// answers "is it healthy"; this answers "what is being worked on and what
 /// could be".
-pub fn roadmap(wave: Option<&str>, task: Option<&str>, json: bool, all: bool) -> Result<()> {
+pub fn show(wave: Option<&str>, task: Option<&str>, json: bool, all: bool) -> Result<()> {
     let include_history = wave.is_some() || task.is_some();
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let evaluation_time = now();
-        let Some(store) = open_existing_store().await.map(std::sync::Arc::new) else {
+        let Some(store) = crate::store::read_existing_registry()?.map(std::sync::Arc::new) else {
             if task.is_some() {
                 anyhow::bail!("Task lookup unavailable: local registry could not be opened");
             }
@@ -678,7 +698,7 @@ pub fn roadmap(wave: Option<&str>, task: Option<&str>, json: bool, all: bool) ->
     })
 }
 
-/// `lf roadmap --all`: every current Wave in every repository.
+/// `lf wave show --all`: every current Wave in every repository.
 pub(crate) async fn roadmap_all(store: &SharedStore) -> Result<RoadmapSnapshot> {
     let waves = store
         .list_waves(None)
@@ -1442,7 +1462,7 @@ async fn snapshot_task_detail(
             .iter()
             .map(|pr| {
                 // PR emptiness is an execution-plane fact (`lf wave status`); it costs
-                // an additional Git comparison, so `lf roadmap` opts out. The
+                // an additional Git comparison, so `lf wave show` opts out. The
                 // Task condition already carries the progress evidence it needs.
                 let empty = match (task, active) {
                     (Some(task), Some(active)) if probe_pr_empty && active.id == pr.id => {

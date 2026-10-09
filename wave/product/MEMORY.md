@@ -59,8 +59,9 @@ removed; Task skill/Flow selection survives. History owns activity, Process page
 show/replay and usage; Desktop owns open/list. Bare `open` conflicts with PR opening;
 Sessions use `connect`. October 9 local Task/Session-plus-Changes opening bypasses
 execution routing and CLI preparation. Session/companion intent travels together; a partial Session inventory must not
-retire other panes. Opening generations follow Session/Files/pane readiness and failures. Wave planning,
-remote/Flow input and full action explanation remain. Discord is unchanged;
+retire other panes. Opening generations follow Session/Files/pane readiness and failures. Wave-owned `show`, `workflow` and `edit-plan` replace root roadmap/Project locally;
+retained Project IDs and the snapshot/writer owners survive. Desktop sends Wave identity.
+Remote/Flow input and full action explanation remain. Discord is unchanged;
 `--steers-after` filters nodes, not restarts.
 `repo_root` (default `~/src`) and paths resolve on the selected Machine, never as
 portable identity; remembered names remain open. Scoped IDs survive dispatch.
@@ -98,7 +99,8 @@ Router receipts expose pre-registration failures; plain Task links await mounted
 content. Validated request IDs fence registration, never URLs or later arrivals.
 Headless callbacks prove neither compositor usability nor native Session readiness.
 
-October 9 previews share Task admission/Workflow, Desktop URL validation and
+October 9 planning reads skip Process admission; missing-registry tests exposed its
+fallback initialization. Previews share Task admission/Workflow, Desktop URL validation and
 skill/Flow syntax with launch. Builtins dispatch parsed commands.
 Only launch prepares Work; proposals grant neither native readiness nor peer start.
 Checkpointed WAL exposed fallback Process writes missed by main-file comparisons;
@@ -131,8 +133,8 @@ preserve evidence and limits. No external-progress proof.
 
 ## Live Home reconciliation
 
-LOO-367, Intelligence's backlog, test Waves and LOO-343 remain unverified.
-LOO-380/#1439, no rendered proof: `fc87e09c1:wave/product/MEMORY.md`, this heading.
+LOO-367, Intelligence backlog, test Waves, LOO-343 and LOO-380 remain unverified;
+no rendered proof. Prior account: `f881ae647:wave/product/MEMORY.md`, this heading.
 
 ## Reactive workspace (2026-10-05)
 
@@ -365,9 +367,8 @@ conversations read the same skill without changing their existing authority.
 Keep design and general/Task conversations. After an uncertain write, reconcile
 in its destination and retry identical input there; preserve each successful filing.
 
-The branch uses lf-owned discovery and explicit `skill <name>` launch syntax to
-avoid Flow-name collisions. Repository presentation retains `(Home, checkout)`
-identity and both layouts without changing Task selection. A successful app build
+Capture uses lf-owned discovery and `skill <name>` to avoid Flow collisions;
+presentation retains `(Home, checkout)`, both layouts and Task selection. A successful app build
 proved insufficient when its configured CLI lacked the skill: configured runtime
 and shipped packaging need their own evidence. Six focused post-sync tests cover
 selection, scope and production-control layout/error behavior; native picker
@@ -580,9 +581,9 @@ curation changes no ownership or acceptance.
   [LOO-297](https://linear.app/loopflow/issue/LOO-297).
 - Fixture renders do not prove tab/window interaction or native recovery.
 
-The prior name-attribution gate passed its affected suites; full Swift package
-and native-rendering proof remain absent. Fresh real CLI generations demonstrated Jack/Maya/unknown prose,
-not a live Task write or the review-bearing design Flow. Native review resume
+Name-attribution gate and fresh Jack/Maya/unknown CLI prose are recorded at
+`f881ae647:wave/product/MEMORY.md`, this heading; no native, live Task-write or
+review-Flow proof. Native review resume
 still needs anonymous → named → corrected → unknown participant acceptance on
 a differently named Home, preserving historical authors and review authority.
 LOO-297's attempted read failed on missing Linear credentials; local Task absence
@@ -1123,9 +1124,6 @@ proof; LOO-282 client provenance; LOO-283 the shared-viewing comparison.
   `--test dto_fixtures` to run that integration file. Headless runs set
   `LF_RUN_ID`, `LF_AS` and `LF_FLOW_ID`; Rust tests that launch or assert journal ids
   must clear them or `cargo test -p loopflow` fails only under agent runs.
-- **Historical migrations demonstrated the shared-store blast radius.** Product
-  and Intelligence collided on `061`; editing an already-applied migration left
-  existing databases without a required column. Preserve released migrations and
-  test upgrades from the released frontier. The incident detail and June's
-  superseded remote-client recipes are in the
-  [pre-chapter memory](../../.lf/chapters/20260923T000959Z-502f011b/sources/wave/product/MEMORY.md). AGENTS.md owns the current one-draft-per-Task rule.
+- **Released migrations are immutable.** The Product/Intelligence `061` collision
+  left existing databases missing a column. Test upgrades from the released frontier;
+  AGENTS.md owns one draft per Task. [Incident history](../../.lf/chapters/20260923T000959Z-502f011b/sources/wave/product/MEMORY.md).

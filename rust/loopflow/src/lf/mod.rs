@@ -419,11 +419,6 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: WaveCommand,
     },
-    /// Project-owned planning configuration
-    Project {
-        #[command(subcommand)]
-        cmd: ProjectCommand,
-    },
     /// Concrete work and Task lifecycle
     Task {
         #[command(subcommand)]
@@ -459,24 +454,6 @@ pub enum Commands {
     /// Explain a command, skill, or flow without launching it
     Help {
         path: Vec<String>,
-        #[arg(long)]
-        all: bool,
-    },
-    /// Show the current repository's roadmap: every open Task across the repo's
-    /// Waves, joined to live evidence and bucketed into Now / Waiting /
-    /// Available / Later. `--wave` scopes it; `--all` spans every repository on
-    /// this machine. Local-only, deterministic.
-    Roadmap {
-        /// Scope to one Wave (default: every Wave in the current repository)
-        #[arg(long)]
-        wave: Option<String>,
-        /// Find an exact issue identifier, including retained historical Tasks.
-        #[arg(long)]
-        task: Option<String>,
-        /// Emit the roadmap snapshot as JSON
-        #[arg(long)]
-        json: bool,
-        /// Span every repository on this machine, not just the current one.
         #[arg(long)]
         all: bool,
     },
@@ -652,45 +629,45 @@ pub enum SkillCommand {
     External(Vec<String>),
 }
 
-#[derive(Subcommand, Debug)]
-pub enum ProjectCommand {
-    /// Update a Project's name or summary
-    Edit {
-        project: String,
-        #[arg(long)]
-        name: Option<String>,
-        #[arg(long)]
-        summary: Option<String>,
-    },
-    /// Select and inspect reusable Workflows
-    Workflow {
-        #[command(subcommand)]
-        cmd: ProjectWorkflowCommand,
-    },
+/// Select a Wave's current chapter, or an exact retained historical Project.
+#[derive(Args, Debug)]
+pub struct WavePlanTarget {
+    /// Wave name or ID (default: the ambient Wave)
+    #[arg(conflicts_with = "project")]
+    pub wave: Option<String>,
+    /// Exact retained Project ID, provider ID or unique name instead of current selection
+    #[arg(long)]
+    pub project: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
-pub enum ProjectWorkflowCommand {
+pub enum WaveWorkflowCommand {
     /// Read the authored definition without creating a repository file
-    Source { project: String, name: String },
+    Source {
+        name: String,
+        #[command(flatten)]
+        target: WavePlanTarget,
+    },
     /// List Workflow definitions, including unavailable local files
     List {
-        /// Include this Project's stored Wave definitions
+        /// Include this Wave's stored definitions
         #[arg(long)]
-        project: Option<String>,
+        wave: Option<String>,
         #[arg(long)]
         json: bool,
     },
-    /// Show the Project's selected Workflow
+    /// Show the selected chapter's Workflow
     Show {
-        project: String,
+        #[command(flatten)]
+        target: WavePlanTarget,
         #[arg(long)]
         json: bool,
     },
     /// Select the Workflow future Tasks take up; captured Tasks stay unchanged
     Set {
-        project: String,
         name: String,
+        #[command(flatten)]
+        target: WavePlanTarget,
         /// Store this definition in the Wave
         #[arg(long)]
         file: Option<std::path::PathBuf>,
@@ -884,6 +861,33 @@ pub enum SessionCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum WaveCommand {
+    /// Read chapter plans and Tasks without starting work; an explicit Wave includes history
+    Show {
+        wave: Option<String>,
+        /// Find an exact Task, including historical planning
+        #[arg(long)]
+        task: Option<String>,
+        #[arg(long)]
+        json: bool,
+        /// Read every repository on this Machine
+        #[arg(long)]
+        all: bool,
+    },
+    /// Select and inspect the chapter Workflow
+    Workflow {
+        #[command(subcommand)]
+        cmd: WaveWorkflowCommand,
+    },
+    /// Edit the selected chapter's name or summary
+    EditPlan {
+        #[command(flatten)]
+        target: WavePlanTarget,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        summary: Option<String>,
+    },
+
     /// Replace stored Wave documents without modifying repository files
     Edit {
         wave: String,

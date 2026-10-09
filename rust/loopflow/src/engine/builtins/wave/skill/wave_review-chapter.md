@@ -11,7 +11,7 @@ Read supplied dated reviews, this Wave's GOAL.md and MEMORY.md, and:
 
 ```bash
 lf wave status <wave> --no-sync --json
-lf roadmap --wave <wave> --json
+lf wave show <wave> --json
 ```
 
 These commands describe cached current planning and Task conditions. Inspect

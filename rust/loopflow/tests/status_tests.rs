@@ -181,7 +181,7 @@ fn status_human(home: &Path, wave: &str) -> String {
 fn roadmap_json(home: &Path, wave: &str) -> serde_json::Value {
     let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
     command
-        .args(["roadmap", "--wave", wave, "--json"])
+        .args(["wave", "show", wave, "--json"])
         .env("LF_HOME", home)
         .env_remove("LF_TRACE_ID")
         .env_remove("LF_WAVE_ID")
@@ -538,7 +538,7 @@ fn all_roadmaps_ignore_inherited_wave_from_a_gui_launch() {
     let second = seed(home.path(), "two");
     for ambient in [first.id().as_str(), "stale-wave-id"] {
         let output = Command::new(env!("CARGO_BIN_EXE_lf"))
-            .args(["roadmap", "--all", "--json"])
+            .args(["wave", "show", "--all", "--json"])
             .env("LF_HOME", home.path())
             .env_remove("LF_TRACE_ID")
             .env("LF_WAVE_ID", ambient)
@@ -943,7 +943,7 @@ fn exact_task_roadmap_retains_history_without_starting_work() {
     for identifier in ["W2-127", "PRD-52", "not-a-task"] {
         let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
         command
-            .args(["roadmap", "--task", identifier, "--all", "--json"])
+            .args(["wave", "show", "--task", identifier, "--all", "--json"])
             .env("LF_HOME", home.path())
             .env("LF_WAVE_ID", "must-not-narrow-exact-lookup")
             .env_remove("LF_CAPTURE_KEY")
@@ -1025,7 +1025,7 @@ fn exact_task_roadmap_scopes_duplicate_identifiers_to_registered_repositories() 
 
     for all in [true, false] {
         let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
-        command.args(["roadmap", "--task", "PRD-52", "--json"]);
+        command.args(["wave", "show", "--task", "PRD-52", "--json"]);
         if all {
             command.arg("--all");
         }

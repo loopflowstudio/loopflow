@@ -510,7 +510,7 @@ async fn project_workflow_uses_stored_definition_offline() {
                     .as_deref(),
                 Some(definition)
             );
-            let catalog = crate::ops::project::workflow_catalog(&repo, Some("project-1"))
+            let catalog = crate::ops::project::workflow_catalog(&repo, Some(wave.id().as_str()))
                 .await
                 .unwrap();
             let entries = catalog

@@ -446,7 +446,7 @@ struct WorkDestinationTests {
         let exact = try oneTask(data, taskId: task.id)
         let exactQuery = RegistryQuery { args, _ in
             if args.contains("--task") { return exact }
-            if args.first == "roadmap" { return #"{"generated_at":"2026-09-26T00:00:00Z","waves":[]}"# }
+            if args.prefix(2) == ["wave", "show"] { return #"{"generated_at":"2026-09-26T00:00:00Z","waves":[]}"# }
             if args.first == "session" { return #"{"entries":[],"next":null}"# }
             if args.first == "wave" { return "[]" }
             throw RegistryQueryError("No mutation permitted")
@@ -492,7 +492,7 @@ struct WorkDestinationTests {
         let current = try oneTask(data, taskId: "absent")
         let model = WorkModel(query: RegistryQuery { args, _ in
             if args.contains("--task") { return exact }
-            if args.first == "roadmap" { return current }
+            if args.prefix(2) == ["wave", "show"] { return current }
             if args.first == "session" { return #"{"entries":[],"next":null}"# }
             if args.first == "wave" { return "[]" }
             throw RegistryQueryError("No mutation permitted")
@@ -526,7 +526,7 @@ struct WorkDestinationTests {
                     if response == "failure" { throw RegistryQueryError("Machine unavailable") }
                     return response
                 }
-                if args.first == "roadmap" { return current }
+                if args.prefix(2) == ["wave", "show"] { return current }
                 if args.first == "session" { return #"{"entries":[],"next":null}"# }
                 if args.first == "wave" { return "[]" }
                 throw RegistryQueryError("No mutation permitted")
@@ -556,7 +556,7 @@ struct WorkDestinationTests {
         let records = try (0..<30).map { try renameFixtureRecord("\($0)", title: "Session \($0)") }
         let sessions = String(decoding: try JSONEncoder().encode(records), as: UTF8.self)
         let model = WorkModel(query: RegistryQuery { args, _ in
-            if args.first == "roadmap" { return data }
+            if args.prefix(2) == ["wave", "show"] { return data }
             if args.first == "session" { return #"{"entries":\#(sessions),"next":null}"# }
             if args.first == "wave" { return "[]" }
             throw RegistryQueryError("Unavailable")
@@ -598,7 +598,7 @@ struct WorkDestinationTests {
                     if response == "transport-error" { throw RegistryQueryError("Machine unavailable") }
                     return response
                 }
-                if args.first == "roadmap" { return data }
+                if args.prefix(2) == ["wave", "show"] { return data }
                 if args.first == "session" { return #"{"entries":[],"next":null}"# }
                 if args.first == "wave" { return "[]" }
                 throw RegistryQueryError("No mutation permitted")
@@ -1135,7 +1135,7 @@ struct WorkDestinationTests {
                 await barrier.wait(issue)
                 return responses[issue]!
             }
-            if args.first == "roadmap" { return data }
+            if args.prefix(2) == ["wave", "show"] { return data }
             if args.first == "session" { return #"{"entries":[],"next":null}"# }
             if args.first == "wave" { return "[]" }
             throw RegistryQueryError("No mutation permitted")

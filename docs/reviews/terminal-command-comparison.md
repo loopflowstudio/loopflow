@@ -97,6 +97,15 @@ installed help or reviewed Desktop code, not proof that no external tool exists.
   headless run records 60 passing tests, not native or remote acceptance.
   Remote composition and native endpoints remain. Historical tables and
   cmux/herdr judgments are unchanged.
+- **October 9 preview delta (`b7f7a234c`–`af34dd20c`):** Task-run explanation
+  shares Workflow selection/admission with launch; Desktop opening explanation
+  shares URL validation and reports platform impediments. Proposed URLs are not
+  readiness receipts. Parsed previews suppress fallback Process writes; a
+  checkpointed-WAL regression exposed writes missed by main-file comparisons.
+  Launch/preview share definition syntax, and builtin dispatch retains parsed
+  scoped IDs. The recorded build/Clippy and 26 focused tests passed; broader action,
+  remote/Flow input and Wave planning remain incomplete. No installed or native
+  acceptance follows, and the original host judgments remain unchanged.
 - Public [cmux API](https://cmux.com/docs/api) and
   [concepts](https://cmux.com/docs/concepts) provide context, but the tables below
   use the installed command discovery and our local observations. The public API

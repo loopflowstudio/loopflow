@@ -84,15 +84,13 @@ Multiple destinations must not split the repository window.
 Private-ancestry holds retain journals/dependents and local moves;
 peers keep old values, so omission is not convergence.
 
-Mixed Linear/Git stays disabled. LOO-412 through `cdec83fe8` is inspected, not
-integrated. Creation recovery and common deletion receipts exist; rejected object
-projection can roll back uncertain receipts while retaining the peer conflict.
-Delivery ignores that conflict: **retained uncertainty must constrain effects,
-not only status**. This source gap is not an observed duplicate write. Deletion
-fixtures compare seven populated execution tables including Processes, not live
-controls; creation's revised status assertions await gate. Ordering receipts,
-alternate/relationship acquisition, legacy association and unplaced-Wave/Desktop
-remain. Imports stay unplaced; readback is not peer-exclusive admission.
+Mixed Linear/Git stays disabled; LOO-412 `fcd64901f` is inspected, not integrated.
+**Retained uncertainty constrains effects.** `08a285872` defers attempts on
+journal-only conflicts, not saves/acquisition. Selection cannot release them. Ordering receipts use
+save clocks, not effect/readback clocks; unresolved losing effects hold delivery.
+Only complete-list acquisition recognizes progress (`af34dd20c` retains the gap).
+Mixed transport/live controls remain unproved; public reconnect awaits gate. Alternate/relationship acquisition, legacy association and
+unplaced-Wave/Desktop remain. Imports stay unplaced; readback is not peer admission.
 
 October 9 (`e3ca861b1`): observe pane visibility before Session readings; a callback
 had masked missed closure. MultiplexerStore owns visibility for readiness and reads.

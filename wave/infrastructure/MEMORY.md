@@ -621,30 +621,29 @@ acceptance remain at
 
 ## Tasks across machines (LOO-412, 2026-10-08)
 
-Jack Heart selected custom-ref bidirectional planning sync, replacing host callbacks.
-LOO-412 owns transport/machine integration; LOO-406 owns common storage/Linear.
-Never share execution, paths, Workflow position or controls. Jack authorized
-review-only publication stacked on `e68f2a423`/`84664e661`, not public-remote
-planning export or landing. Plan ownership above governs sharing.
+Jack Heart selected custom-ref sync; LOO-412 owns transport/machines, LOO-406
+storage/Linear. Plan ownership above governs sharing and execution exclusion.
+Review-only publication remains stacked on `e68f2a423`/`84664e661`; no landing
+or public-remote planning export.
 
-Copied planning/issue-derived IDs are removed. Causality precedes Linear, then
-clock/ID; losers survive. Checkpoints acknowledge retention, not convergence.
+Copied planning/issue-derived IDs are removed; causal ordering retains losers. Checkpoints acknowledge retention, not convergence.
 Release's entry-point lesson requires separate fetch/import/publication outcomes.
-Scalar imports share field receipts, stable IDs and causal baselines, retaining uncertainty.
-Receipt retirement supplies no provider frontier: delayed older Linear acquisition
-remains unproved. Grouped receipts and legacy association remain.
+Scalar imports share receipts and causal baselines, but no provider revisions.
+Receipt retirement cannot fence older Linear reads; equal-value facts need provenance. This differs from the parent's unseen provider-write race.
+Grouped receipts and legacy association remain.
 
-`repo planning key/connect/use/select/status` pins bindings and explicit selection.
-Joining is empty; key recovery preserves identity. `use` routes future roots only;
-children inherit selection. Status omits endpoint credentials. No foreground exchange
-caller exists. SQL routing/status passes; Rust/public execution remains unproved.
-Active import errors come from the final dependency pass; checkpoint tests use
-production status.
+`repo planning key/connect/use/select/status` pins empty bindings; recovery retains
+keys. `use` routes future roots, children inherit selection; status hides endpoints.
+SQL routing/status passes; Rust/public execution is unproved.
+Parent `b6f34a6f8` supplies repository-scoped foreground lifetime and Linux-only
+public Linear reconnect fixtures, not Git exchange. Reuse that lifetime; local-only
+peer work need not wait for Linear delivery. Mixed-provider acceptance needs the
+frontier repair. No production peer-exchange caller exists.
 
 Move counterexample: `a43f3e2ea`; repairs: `b5dafd918`/`7395cf3bb`. Holds retain
-accepted moves/private journals and dependents. Moving back cannot release history;
-explicit selection can. Independent exchange/selection proceeds; omission retains
-peers' last values, not convergence. Recovery UX remains for review.
+moves/private journals and dependents. Moving back cannot release history; explicit
+selection can. Independent exchange/selection proceeds; omission retains peer values,
+not convergence. Recovery UX remains for review.
 Design: `scratch/work-on-another-machine-name.md`; prior limits: `4d31254c3`.
 
 ## Synced planning integration (LOO-334)

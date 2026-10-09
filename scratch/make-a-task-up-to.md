@@ -9,7 +9,7 @@ filing/completion writers; `1fe22f565` adds relation export and `314095b00`
 simplifies completion and shared reads.
 Task completion remains independent of Workflow position and Process liveness.
 The earlier evidence below describes pre-integration populations; it does not
-verify the combined branch. Completion-before-filing recovery, full gate,
+verify the combined branch. Full gate,
 stacked/due-return proof and Jack's demo remain. Landing and Task completion are unauthorized.
 
 ## Decision and intended experience
@@ -85,31 +85,35 @@ Integration update (2026-10-08):
 - Combined CLI/Desktop lifecycle, populated released-data upgrade, stacking and
   due-return acceptance remain with gate; Jack's complete demo remains separate.
 
-### Completion before filing — remaining implementation (2026-10-08)
+### Completion before filing — repaired locally (2026-10-08)
 
-Source review at `7ae7f8e6b` confirms the previous iteration's reservation,
-historical local conversion and local reopening repairs already exist. They are
-not three new implementation tasks. Historical remote export remains uncertain
-as described above.
+The prior guard confused terminal planning with resolved delivery: first filing
+after observed Done failed despite an authoritative merge. Reservation now permits
+that ordering for unresolved merged delivery, without reopening or moving Workflow.
+The existing receipt wins retries; resolved disposition still refuses new scope.
+No-PR or unmerged completion, cancellation, abandonment and invalid planning do not
+grant this finishing admission. Historical remote-export uncertainty remains unchanged.
 
-A different ordering still fails the accepted independent-completion contract:
-Linear marks the source Done before its first follow-up is reserved.
-`SqliteStore::reserve_follow_through` rejects every terminal source with no
-existing receipt, even with unresolved disposition and an authoritative merge.
-The existing local lifecycle files first, then completes; the export test only
-proves relations can arrive after completion. Neither covers completion first.
-The follow-through and Task operator instructions also stopped at Done; this
-reconciliation corrects those instructions to retain the obligation and report
-a filing refusal, never reopen merely to bypass it.
+The operator's `lf --task ISSUE run finish-delivery` also needed repair:
+ordinary Flow admission rejects Done. A compiled Flow containing only
+`follow-through` now checks the same unresolved merged-delivery evidence instead;
+a Flow's name alone grants nothing. Normal Flow and Workflow launches retain
+their terminal guards. Recovery retains planning ownership/invalidation checks
+and checkout exclusion, never selects another Workflow or replays gate.
 
-Remaining implementation must allow finishing accepted, unresolved delivery
-without reversing provider status or changing Workflow, PR or Process identity.
-Resolved disposition must still prevent new scope; completion alone authorizes
-neither new execution nor another PR. Cover first filing after observed Done,
-repeat filing/finish and the operator recovery path. This is a coordinated
-filing/admission/recovery change, not permission to remove all terminal guards.
-It remains before the complete demo; no new product decision is needed to honor
-Jack's existing separation of completion and delivery facts.
+Review found a third coupling: repeated completion could clean up the checkout
+before first filing. Cleanup now retains unresolved delivery, independently of
+planning completion and Process liveness. No new scheduler, receipt, Task state,
+migration or provider writer was added. The predecessor terminal reservation
+guard is replaced, not bypassed through reopening.
+
+The public CLI fixture observes provider completion, retains the checkout,
+rejects ordinary execution and a misleading local Flow override, then runs the
+builtin finishing Flow with synthetic agent judgment and real filing commands.
+It asserts one child/disposition across retries before and after finishing,
+unchanged Workflow/PR/old Process outcomes, retained placement and a still-open
+child. Separate cases refuse first filing/recovery without a merged delivery.
+These are headless fixtures, not Jack's acceptance or live provider proof.
 
 LOO-406's design records Jack Heart's Linear-wins policy for observed conflicts.
 Its enabled `task_completion_preserves_linear_reopening_during_delivery` regression
@@ -444,6 +448,21 @@ commands must use the new command contract.
 
 ### Delete — do not maintain
 
+Completion-before-filing removes the terminal-status-as-disposition guard.
+The shared pending-delivery check owns completed reservation and finishing-Flow
+admission. Cleanup uses the existing completion gate rather than a second
+delivery predicate. The synthetic Codex account helper is shared by Flow proofs.
+
+Compression removes the unreachable abandoned/unsettled-PR cleanup branches:
+the completion gate admits only merged, resolved delivery. Cleanup evaluates its
+already loaded PR instead of reading it twice. Abandonment and chapter sweep
+prepare one optional deletion, not a serial-PR list; linked-PR and live-work
+checks remain. Planning admission checks deletion and ownership once through
+the shared identity check. No schema or recovery authority changes.
+The focused abandonment check initially failed because its synthetic unresolved
+Process started at Unix second 1: boot evidence correctly classified it as dead.
+The fixture now records its actual start time; production liveness is unchanged.
+
 Task acquisition now shares one local-first lookup for completion, existing
 follow-up selection and historical links. Filing and `--finish` share one
 reserve/acquire/link path; the separate `confirm_intent` helper and duplicate
@@ -507,14 +526,13 @@ simulated design review established those failure boundaries, not Jack's approva
 
 One coherent lifecycle landing for LOO-418; internal slices do not authorize a
 serial PR chain. If independent work is split later, each additional PR needs
-its own Task and child-specific design. The original four slices and independent
-completion trigger exist locally; completion-before-filing recovery is incomplete.
+its own Task and child-specific design. The original four slices, independent
+completion trigger and completion-before-filing recovery exist locally.
 The common planning integration and crash/local-reopening repairs exist;
 historical remote-creation uncertainty, combined acceptance and the complete
 demo remain within that same boundary.
 
-**Remaining work:** repair completion-before-filing recovery above; resolve the
-historical remote-export choice; run the unified lifecycle acceptance population
+**Remaining work:** resolve the historical remote-export choice; run the unified lifecycle acceptance population
 below and Jack's complete demo. Completion and filing now
 use local planning; the earlier evidence does not verify the combined source. The affected
 gate ran against the earlier model; its failures have passing focused repairs.
@@ -573,7 +591,7 @@ also run `cargo test -p loopflow --lib engine::flow_graph::tests`.
 | --- | --- |
 | Normal delivery completes a merged Task only after follow-through is resolved; CLI, work monitor and Desktop show independent status, Workflow position, PR and links | Extend `task_flow_launch_tests`, `land_tests`, DTO fixtures and `TaskFlowProofTests`/`RegistryQueryTests` with the same lifecycle population |
 | `task complete` changes status without moving Workflow; move/arrival at end triggers the same operation; completion inside follow-through followed by driver arrival records one completion and actual movement | Task launch, authority and command-tree tests; shared Rust/Swift DTO/view population |
-| Observed Done before first filing still permits accepted follow-through without reopening; retries retain one child and one disposition | Follow-through operation and operator recovery tests; current fixtures cover only filing before completion |
+| Observed Done before first filing still permits accepted follow-through without reopening; retries retain one child and one disposition | Public CLI completion-before-filing and builtin finishing-Flow fixture; unchanged Workflow, PR, placement and prior Process outcomes |
 | Accepted Linear completion while a real held Process is running preserves its Process identity, liveness, Workflow edge, Session and checkout; later driver exit records its true result | Public Task/Flow case plus PM observation tests and CLI/monitor/Desktop projection |
 | End is durable before a failed completion; crash/retry finishes only completion, keeps successful Flow history, and exposes the reason; repeated completion is harmless | Task launch, store transactions and operator guidance; verify gate/Flow invocation counts |
 | Newer Linear reopening changes status without Workflow movement; old end and pending retries cannot re-complete it; stale provider observations do not undo newer state; reopening between outbound read and mutation survives | PM revision/writeback and completion trigger tests, including LOO-406's enabled failing concurrent-reopening regression |
@@ -674,4 +692,11 @@ unsupported started-state write and unimported Workflow assumptions were correct
 The enabled unseen-write regression remains unresolved; combined gate, Swift,
 populated installation and Jack's demo remain separate.
 
-Check (2026-10-08): `git diff --check` passes for this prose reconciliation; reused `7ae7f8e6b` evidence: disposable Docker `cargo test -p loopflow --lib ops::task::follow_through::tests` (5, including CLI/monitor lifecycle), `cargo test -p loopflow --test task_follow_through_tests` (3), and `cargo clippy --all-targets -- -D warnings` pass after installing the container’s missing Clippy component; native `cargo fmt --check` and `git diff --check` pass. Combined gate/Swift/installation and Jack’s demo remain.
+The new fixture initially failed to compile (private Store field, then the moved
+account helper's missing import); its first Flow attempt stopped without a
+synthetic managed account. Those fixture errors are corrected. Native compilation
+stalled in `_dyld_start` before the build script ran and was stopped; disposable
+Docker supplied focused compilation and execution instead. Earlier focused
+evidence remains at `b92683789:scratch/make-a-task-up-to.md`.
+
+Check (2026-10-08): disposable Docker `cargo test -p loopflow --test task_flow_launch_tests provider_completed_delivery_can_file_and_finish_without_reopening -- --exact` (1), `cargo test -p loopflow --test task_flow_launch_tests provider_completion_without_merged_delivery_does_not_admit_first_filing -- --exact` (1), `cargo test -p loopflow --test task_abandonment` (1, after the pre-boot fixture repair), `cargo test -p loopflow --lib configured_project_admission` (2), and `cargo clippy --all-targets -- -D warnings` pass; native `cargo fmt --check` and `git diff --check` pass; unchanged implementation evidence for `task_follow_through_tests` (3) is reused. Combined gate/Swift/populated installation and Jack's demo remain; unseen-write preservation remains an enabled known failure.

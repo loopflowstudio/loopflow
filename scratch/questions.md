@@ -25,8 +25,9 @@ The original four slices, landing corrections and independent completion trigger
 are present. Earlier checks cover the predecessor; current focused evidence is
 in the design. The composed simulated-provider lifecycle now has CLI/monitor and Rust/Swift
 proof. The local filing/completion and held-Flow composition now pass in Docker.
-Completion-before-filing recovery, historical remote-export uncertainty, combined
-acceptance and the complete demo remain; the design names the uncovered ordering. No landing or installed-Home
+Completion-before-filing recovery is implemented, including the operator’s finishing
+Flow and retained checkout. Historical remote-export uncertainty, combined
+acceptance and the complete demo remain. No landing or installed-Home
 migration is authorized.
 
 Implementation choice: `task follow-up --key` identifies an obligation across retries; the default is `follow-up`, and additional obligations use distinct keys. New local receipts pin child ID, Project, content and date; provider Team/state
@@ -78,9 +79,17 @@ exact readback, or authorize a recovery rule for an absent issue whose old recei
 has no send boundary. Current code takes the conservative first path. Local child
 conversion is implemented; absence alone still cannot authorize another create.
 
-Context limit (2026-10-08): the complete supplied launch source
-`.lf/tmp/context/c3cd15b3da0922883c49c853ab7fd9b74f437bd89b43419c895dc4e22455cdf2.md`
-was read, including all 148 inventory entries. A post-edit `lf context --skill realign` sample reported
-16,315/16,000 goal tokens (315 over); this is generated launch inventory, not
-excess authored scratch or memory. No Task directive or limit was changed to hide
-it. Product has no child directories or child memories in this checkout.
+Recovery choice (2026-10-08): only unresolved merged delivery permits first filing
+after Done. The finishing Flow is identified by its compiled single
+`follow-through` step, not a privileged name. Ordinary Flow/Workflow starts and
+resolved-disposition guards remain. The same check preserves cancellation,
+abandonment, deletion and planning-ownership refusals. This implements Jack's
+independent completion contract; it supplies no new execution or scope approval.
+
+Context limit (2026-10-08): the supplied launch inventory's omitted entries were
+read from `.lf/tmp/context/b018d3eca61fde43d0fba993cf1a183bb5c42c4b3aa2d1f97379a825311f3255.md`.
+`lf context --skill compress` reports generated Task/PR launch inventory over
+16,000 tokens, not excess authored scratch or memory; shortening those cannot
+fix it. No Task directive or limit was changed to hide the conflict. Product has
+no child memories here. The post-edit sample is 16,394/16,000 goal tokens
+(394 over); memory is 15,997/16,000 and scratch is within 12,000.

@@ -1543,6 +1543,8 @@ fn provider_completion_without_merged_delivery_does_not_admit_first_filing() {
             task.publish(false);
         }
         task.complete_in_linear();
+        task.ok(&["task", "complete", "INF-123"]);
+        assert!(task.registered.task.worktree.as_ref().unwrap().exists());
         assert!(!task
             .run(&[
                 "task",

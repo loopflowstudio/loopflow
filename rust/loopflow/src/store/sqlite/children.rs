@@ -1026,7 +1026,7 @@ pub(super) fn require_task_not_deleted(conn: &Connection, task: &Task) -> StoreR
 /// Saved planning admits work without acquisition. Retained contrary provider
 /// evidence still applies; missing inventory cannot erase the saved Task.
 pub(super) fn require_task_planning(conn: &Connection, task: &Task) -> StoreResult<()> {
-    require_task_not_deleted(conn, task)?;
+    require_task_planning_identity(conn, task)?;
     let (state, completed): (Option<String>, bool) = conn.query_row(
         "SELECT planning_state,planning_completed FROM tasks WHERE id=?1",
         [task.id.as_str()],
@@ -1039,7 +1039,7 @@ pub(super) fn require_task_planning(conn: &Connection, task: &Task) -> StoreResu
             "terminal planning state cannot start work; its execution history is preserved".into(),
         ));
     }
-    require_task_planning_identity(conn, task)
+    Ok(())
 }
 
 /// Planning ownership remains relevant when finishing already completed work.

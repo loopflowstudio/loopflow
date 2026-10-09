@@ -31,10 +31,10 @@ execution/PR. Recovery: `7671f8e9f`; compression: `81055b278`.
 
 Done does not resolve delivery. Unresolved merged Tasks permit filing and
 follow-through-only recovery without reopening; resolved disposition prevents
-new scope. Cleanup retains pending delivery. Fixture proof only.
+new scope. Cleanup admits only merged, resolved delivery. Fixture proof only.
 
 Failed promotion retains confirmed copy; handoffs preserve child edits.
-Performed location owns admission; Flow/Started commit atomically. Docker proves
+Performed location owns admission; Flow/Started commit atomically. Docker covers
 local filing → completion during a real Flow → CLI/monitor arrival, observed
 reopening and durable end retry, not unseen-write preservation. Combined gate,
 populated upgrade and native acceptance remain. Settlement rechecks merge and

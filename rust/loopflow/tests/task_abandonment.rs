@@ -31,9 +31,14 @@ fn task_abandonment_cli_saves_offline_and_preserves_unresolved_work() {
                 .unwrap();
         }
         let process = uuid::Uuid::new_v4().to_string();
+        // A pre-boot Process is known dead, not unresolved execution.
         db.execute(
-            "INSERT INTO processes(lfid,trace_id,cwd,started_at) VALUES(?1,?1,?2,1)",
-            params![process, repo.path().to_str().unwrap()],
+            "INSERT INTO processes(lfid,trace_id,cwd,started_at) VALUES(?1,?1,?2,?3)",
+            params![
+                process,
+                repo.path().to_str().unwrap(),
+                time::OffsetDateTime::now_utc().unix_timestamp()
+            ],
         )
         .unwrap();
         let authored = repo.path().join("unfinished.txt");
@@ -56,7 +61,11 @@ fn task_abandonment_cli_saves_offline_and_preserves_unresolved_work() {
                 "{}",
                 String::from_utf8_lossy(&output.stderr)
             );
-            assert!(String::from_utf8_lossy(&output.stderr).contains("retained checkout/PR"));
+            assert!(
+                String::from_utf8_lossy(&output.stderr).contains("retained checkout/PR"),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
             let saved: (String, String, bool, bool) = db.query_row(
                 "SELECT id,target,attempted,settled FROM task_state_deliveries WHERE task_id=?1",
                 [registered.task.id.as_str()],

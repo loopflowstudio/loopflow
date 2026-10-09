@@ -9,7 +9,8 @@
       "completed": false,
       "assignee": null,
       "state": "unstarted",
-      "completed_at": null
+      "completed_at": null,
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -63,7 +64,8 @@
       "completed": true,
       "assignee": null,
       "state": "completed",
-      "completed_at": null
+      "completed_at": null,
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -81,8 +83,7 @@
       "reason": "done",
       "updated_at": "2026-07-14T20:00:00Z",
       "provider": "codex",
-      "started": true,
-      "pending_sync": null
+      "started": true
     },
     "next_move": {
       "owner": "wave",
@@ -380,7 +381,8 @@
       "completed": false,
       "assignee": null,
       "state": "unstarted",
-      "completed_at": null
+      "completed_at": null,
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -398,8 +400,7 @@
       "reason": "ready",
       "updated_at": "2026-07-14T18:00:00Z",
       "provider": "codex",
-      "started": true,
-      "pending_sync": null
+      "started": true
     },
     "next_move": {
       "owner": "task",
@@ -745,7 +746,8 @@
       "completed": false,
       "assignee": null,
       "state": "unstarted",
-      "completed_at": null
+      "completed_at": null,
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -763,8 +765,7 @@
       "reason": "ready",
       "updated_at": "2026-07-14T23:00:00Z",
       "provider": "codex",
-      "started": true,
-      "pending_sync": null
+      "started": true
     },
     "next_move": {
       "owner": "task",
@@ -813,7 +814,8 @@
       "completed": false,
       "assignee": null,
       "state": "unstarted",
-      "completed_at": null
+      "completed_at": null,
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -831,8 +833,7 @@
       "reason": "ready",
       "updated_at": "2026-07-14T23:59:00Z",
       "provider": "codex",
-      "started": true,
-      "pending_sync": null
+      "started": true
     },
     "next_move": {
       "owner": "user",
@@ -1179,7 +1180,8 @@
       "completed": false,
       "assignee": null,
       "state": "unstarted",
-      "completed_at": null
+      "completed_at": null,
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -1197,8 +1199,7 @@
       "reason": "ready",
       "updated_at": "2026-07-14T23:50:00Z",
       "provider": "codex",
-      "started": true,
-      "pending_sync": null
+      "started": true
     },
     "next_move": {
       "owner": "task",
@@ -1247,7 +1248,8 @@
       "completed": false,
       "assignee": null,
       "state": "unstarted",
-      "completed_at": null
+      "completed_at": null,
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -1265,8 +1267,7 @@
       "reason": "ready",
       "updated_at": "2026-07-14T22:00:00Z",
       "provider": "codex",
-      "started": true,
-      "pending_sync": null
+      "started": true
     },
     "next_move": {
       "owner": "user",

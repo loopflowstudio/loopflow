@@ -11,6 +11,62 @@ pub struct PlanningChange {
     pub base: Option<serde_json::Value>,
 }
 
+/// Read-only delivery evidence. These rows never confer execution authority.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlanningSyncStatus {
+    pub connected: bool,
+    pub changes: Vec<PlanningSyncChange>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlanningSyncChange {
+    pub id: String,
+    pub field: String,
+    pub state: PlanningSyncState,
+    pub local_value: serde_json::Value,
+    pub linear_value: Option<serde_json::Value>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum PlanningSyncState {
+    Pending,
+    Uncertain,
+    AdoptedLinear,
+}
+
+impl PlanningSyncStatus {
+    pub fn lines(&self) -> Vec<String> {
+        self.changes
+            .iter()
+            .map(|change| {
+                let label = match change.state {
+                    PlanningSyncState::Pending => "Saved locally; pending Linear sync",
+                    PlanningSyncState::Uncertain => "Awaiting Linear confirmation",
+                    PlanningSyncState::AdoptedLinear => "Adopted Linear change",
+                };
+                let mut line = format!("{label} · {}", change.field);
+                if change.state == PlanningSyncState::AdoptedLinear {
+                    let value = change
+                        .linear_value
+                        .as_ref()
+                        .unwrap_or(&serde_json::Value::Null);
+                    line.push_str(&format!(
+                        " · saved: {} · Linear: {value}",
+                        change.local_value
+                    ));
+                }
+                if let Some(error) = &change.error {
+                    line.push_str(&format!(" · {error}"));
+                }
+                line
+            })
+            .collect()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PlanningError {
     #[error("invalid Linear id: {0}")]

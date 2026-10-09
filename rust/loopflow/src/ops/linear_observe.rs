@@ -15,7 +15,7 @@ use super::{OpsError, OpsResult};
 use crate::store::{SharedStore, Store};
 use crate::work::task::Task;
 
-pub(super) fn connected(repo: &str) -> bool {
+pub(crate) fn connected(repo: &str) -> bool {
     crate::engine::config::load_config_or_default(Some(std::path::Path::new(repo)))
         .pm
         .and_then(|pm| pm.linear_team)

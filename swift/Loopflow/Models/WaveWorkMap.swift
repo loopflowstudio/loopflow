@@ -18,6 +18,7 @@ public enum ProjectStatus: String, Decodable, Sendable, Hashable {
 }
 
 public struct ProjectPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable {
+    public let sync: PlanningSyncStatus?
     public let current: Bool
     public let id: String
     public let workId: String?
@@ -29,7 +30,7 @@ public struct ProjectPlanningSnapshot: Decodable, Sendable, Identifiable, Hashab
     public let krs: [PlanningKeyResult]
 
     enum CodingKeys: String, CodingKey {
-        case id, slug, name, workflow, status, krs, current
+        case id, slug, name, workflow, status, krs, current, sync
         case workId = "work_id"
         case metricTargets = "metric_targets"
     }
@@ -77,6 +78,7 @@ public struct PlanningKeyResult: Decodable, Sendable, Identifiable, Hashable {
 }
 
 public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable {
+    public let sync: PlanningSyncStatus?
     public let id: String
     public let identifier: String
     public let name: String
@@ -88,7 +90,7 @@ public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable 
     public let assignee: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, identifier, name, description, rank, completed, state, assignee
+        case id, identifier, name, description, rank, completed, state, assignee, sync
         case completedAt = "completed_at"
     }
 
@@ -113,7 +115,6 @@ public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
     public let status: TaskState
     /// Linear calls the Task complete while it is active here.
     public let planningConflict: String?
-    public let pendingSync: String?
     public let reason: String
     public let updatedAt: String
     public let provider: String
@@ -124,7 +125,6 @@ public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
         case status, reason, provider, started
         case workId = "work_id"
         case planningConflict = "planning_conflict"
-        case pendingSync = "pending_sync"
         case updatedAt = "updated_at"
     }
 }

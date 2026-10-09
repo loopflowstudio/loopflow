@@ -109,12 +109,22 @@ fn wave_detail_preserves_flow_and_requires_machine() {
         loopflow::store::sqlite::ProjectReadinessState::Ready
     );
     assert!(snapshot.project_readiness.activation.is_none());
+    let Evidence::Ok {
+        items: projects, ..
+    } = &snapshot.projects
+    else {
+        panic!("missing Projects")
+    };
+    assert_eq!(
+        projects[0].sync.as_ref().unwrap().changes[1].field,
+        "task_order"
+    );
     let Evidence::Ok { items: tasks, .. } = &snapshot.tasks else {
         panic!("missing Tasks")
     };
     assert_eq!(
-        tasks[0].runtime.as_ref().unwrap().pending_sync.as_deref(),
-        Some("Saved locally; pending Linear synchronization")
+        tasks[0].task.sync.as_ref().unwrap().changes[0].field,
+        "creation"
     );
     let Evidence::Ok { items: runs, .. } = &snapshot.history else {
         panic!("fixture contains recorded Runs");
@@ -668,4 +678,25 @@ fn desktop_inspection_preserves_exact_windows_hidden_panes_and_stale_reading() {
         .unwrap()
         .remove("reading");
     assert!(serde_json::from_value::<DesktopInspection>(missing).is_err());
+}
+
+#[test]
+fn planning_sync_preserves_delivery_and_losing_values() {
+    let value: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/planning_sync.json"
+    ))
+    .unwrap();
+    let sync: loopflow::planning::PlanningSyncStatus = serde_json::from_value(value.clone()).unwrap();
+    assert!(sync.connected);
+    assert_eq!(
+        sync.changes[1].state,
+        loopflow::planning::PlanningSyncState::Uncertain
+    );
+    assert_eq!(sync.changes[2].local_value, "Local title");
+    assert_eq!(
+        sync.changes[2].linear_value,
+        Some(serde_json::json!("Linear title"))
+    );
+    assert_eq!(serde_json::to_value(&sync).unwrap(), value);
+    assert!(sync.lines()[3].contains("Linear: null"));
 }

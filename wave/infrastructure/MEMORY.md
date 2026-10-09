@@ -37,15 +37,17 @@ can proceed now; integration consumes a coherent committed writer cut, never dir
 code or duplicated planning. Ownership is independently reviewable. Jack invoked ship-decomposed. No competing Flow, machine
 replication here or real plan publication to the public code repo is authorized.
 
-Foreground connections independently acquire comments/inventory and deliver mapped
-Tasks' comments/state plus Task/Project field receipts. Attempted writes retain
-identity and uncertainty. Matching observations acknowledge only that attempt and
-advance later saves' unchanged baselines, preserving newer edits. Linear conflicts
-retain losing values and retire their delivery. Effect locks block neither saves
-nor acquisition. Project ordering now uses one receipt and captured individual moves.
-Complete-list acquisition recognizes partial progress before reconciling later saves;
-detail reads never set rank. Fixtures prove reconnect, lost-reply recovery, late-save
-preservation and Linear conflict adoption, not composed or installed acceptance.
+Foreground connections independently acquire and deliver planning. Matching
+observations settle captured attempts and advance later saves' unchanged baselines;
+retired receipts retain losing values. Effect locks block neither saves nor acquisition.
+`b1f175bbf` delivers Project ordering with captured moves; complete-list acquisition
+recognizes partial progress, while detail reads never set rank.
+`6bb8b935a` adds common CLI/Desktop `PlanningSyncStatus`: creation, fields/order,
+state, comments, errors and losing values. Configuration selects pending display,
+not mappings; compression removes pending-only edit/Project projections, retaining
+baselines. Creation receipts advance planning revision. SQL prepares; Rust/Swift
+retries stall before tests. Native reconnect is unexecuted; public Flow/work-watch
+reconnect and installed acceptance remain unproved.
 
 Jack Heart's `8821db44-0480-4493-8609-953207663f1d` removes public creation tokens.
 Each create generates/saves/returns a distinct ID, even for identical titles;
@@ -59,9 +61,9 @@ settles delivery. Linear's schema at `7d2bc4279f` exposes no expected-revision
 issue update. More reads cannot prove atomic preservation; Linear-wins selects
 precedence, not atomicity. The design retains exact race and schema evidence.
 
-Comments adopt provider body/author/time, retaining the loser without echo.
-`67ee4024a` delivers cancellation. Resolve the issue Team's lowest-position state
-before marking attempted; failed discovery stays retryable.
+Comments retain provider body/author/time and the loser without echo.
+`67ee4024a` delivers cancellation; resolve the Team's lowest-position state
+before marking attempted so failed discovery stays retryable.
 `fc056bb6b` delivers deletion: trash/acknowledgement settles; absence permits no replay.
 A newer explicitly active Linear revision
 restores visibility, retaining the loser. Inventory proves neither trash nor
@@ -72,10 +74,8 @@ Proofs: `bbc6eb8d3:wave/infrastructure/MEMORY.md`, this heading; LOO-412 boundar
 Personal owners and provider-first deletion are removed; execution, PRs, checkouts
 and uncertain effects survive. Exact Project IDs precede slugs; the draft retains
 attempt errors and acknowledged revisions.
-`e68f2a423` exports Task/Project UUIDs through existing creation receipts. Separate
-Project creation/Initiative attachment attempts retain uncertainty without replay.
-Exact ingestion attaches identities before inventory can duplicate them, preserving
-later saves against captured baselines. Operation fixtures prove reconnect and lost-reply
+`e68f2a423` exports Task/Project UUIDs through existing creation receipts. Separate creation/Initiative attachment attempts retain uncertainty without replay.
+Exact ingestion attaches identity before inventory, preserving later saves. Operation fixtures prove reconnect and lost-reply
 recovery; composed CLI/Desktop acceptance remains unproved, per Release's entry-point lesson.
 Installed conversion, historical uncertainty, pending presentation and composed reconnect remain unfinished.
 
@@ -273,10 +273,8 @@ unread legacy `traces`, `backups`, `lfd.db*`, `logs`; LOO-304's 40 GiB of
 `/private/tmp` fixtures. Unknown ownership is not permission to delete. Test
 `session_record` with `LF_*` cleared.
 
-## Retained capture storage and autonomous cleanup (2026-10-05)
-
-LOO-370's current decision is under Capture cutover. PR #1450 is integrated;
-exact earlier delegation/steer: `2d333d18c:wave/infrastructure/MEMORY.md`, this heading.
+Earlier cleanup history: `66da3fdf7:wave/infrastructure/MEMORY.md` under
+“Retained capture storage and autonomous cleanup.” Current direction is under Capture cutover.
 
 ## Project configuration and review direction (2026-10-05)
 

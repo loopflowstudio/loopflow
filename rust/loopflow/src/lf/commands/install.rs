@@ -1431,7 +1431,7 @@ fn process_executables() -> Result<Vec<(libc::pid_t, String, Option<PathBuf>)>> 
     use std::ffi::CStr;
 
     let output = Command::new("/bin/ps")
-        .args(["-axo", "pid=,comm="])
+        .args(["-wwaxo", "pid=,comm="])
         .output()
         .context("enumerate macOS processes")?;
     if !output.status.success() {
@@ -1495,14 +1495,21 @@ fn running_app_processes(paths: &[PathBuf]) -> Result<Vec<(libc::pid_t, PathBuf)
     let mut matches = Vec::new();
     for (pid, command, executable) in process_executables()? {
         let Some(executable) = executable else {
-            // `comm` is only a hint when the kernel refuses the executable path;
-            // exact path identity still has to be checked for every live process.
-            if Path::new(&command)
-                .file_name()
-                .is_some_and(|name| names.contains(name))
-            {
+            // Deleted development binaries can keep running after proc_pidpath
+            // loses their path. An unrelated absolute launch path is not an app
+            // helper merely because it shares the name `lf`. Never signal a
+            // process from this hint alone.
+            let launched = Path::new(&command);
+            let could_be_app = if launched.is_absolute() {
+                paths.iter().any(|path| path == launched)
+            } else {
+                launched
+                    .file_name()
+                    .is_some_and(|name| names.contains(name))
+            };
+            if could_be_app {
                 return Err(anyhow!(
-                    "cannot prove executable identity for live app/helper process {pid}"
+                    "cannot prove executable identity for live app/helper process {pid} ({command})"
                 ));
             }
             continue;
@@ -1512,6 +1519,67 @@ fn running_app_processes(paths: &[PathBuf]) -> Result<Vec<(libc::pid_t, PathBuf)
         }
     }
     Ok(matches)
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod app_process_tests {
+    use super::running_app_processes;
+    use std::fs;
+    use std::process::{Child, Command, Stdio};
+    use std::time::Duration;
+
+    struct TestProcess(Child);
+
+    impl Drop for TestProcess {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    #[test]
+    #[ignore = "entry point for the process-discovery fixture"]
+    fn app_process_fixture() {
+        std::thread::sleep(Duration::from_secs(60));
+    }
+
+    #[test]
+    fn deleted_cli_does_not_block_app_upgrade() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().canonicalize().unwrap();
+        let cli = root.join("lf");
+        // A copied Apple platform binary is killed under the network sandbox.
+        // Use this test executable so the fixture also runs in isolated CI.
+        fs::copy(std::env::current_exe().unwrap(), &cli).unwrap();
+        let mut child = TestProcess(
+            Command::new(&cli)
+                .args([
+                    "--ignored",
+                    "--exact",
+                    "lf::commands::install::app_process_tests::app_process_fixture",
+                ])
+                .stdout(Stdio::null())
+                .spawn()
+                .unwrap(),
+        );
+        let pid = child.0.id() as libc::pid_t;
+        let app_helper = root.join("Loopflow.app/Contents/MacOS/lf");
+
+        // A known helper must still be found by its exact executable path.
+        assert!(running_app_processes(std::slice::from_ref(&cli))
+            .unwrap()
+            .contains(&(pid, cli.clone())));
+        fs::remove_file(&cli).unwrap();
+
+        assert!(running_app_processes(&[app_helper]).unwrap().is_empty());
+        // An unresolved process launched from the actual target still blocks;
+        // its launch name alone never grants permission to signal it.
+        assert!(running_app_processes(&[cli])
+            .unwrap_err()
+            .to_string()
+            .contains(&pid.to_string()));
+        assert!(child.0.try_wait().unwrap().is_none());
+    }
 }
 
 #[cfg(not(target_os = "macos"))]

@@ -56,38 +56,38 @@ proof remains.
 
 ### Committed exchange update — October 9
 
-LOO-412 through `cdec83fe8` was inspected through Git, not integrated. Creation
-acquisition precedes projection (`270019c8d`); `a002e4060` supplies foreground
-creation discovery and mapped uncertainty through `planning_exports`, without
-allocating placement. The earlier unprepared-import recovery gap is superseded.
-Its Linux synthetic-HTTPS work-watch fixture covers lost creation/link replies
-and later saves, but only six unrun execution tables; revised `sync.changes`
-assertions (`098de8033`) still await gate.
+LOO-412 through `fcd64901f` was inspected through Git, not integrated.
+Creation discovery and common deletion receipts remain implemented; earlier evidence
+and the rejected-projection gap survive at `af34dd20c:scratch/findings.md`, this
+heading. That was a source gap, not an observed production duplicate.
 
-`84f8fb9d8`/`97bba1869` add common deletion receipts, preserving original save time,
-attempts and acknowledgement instead of treating local sequence as recency.
-The dependency records focused seven-table equality including populated Processes,
-Sessions and Workflows, not running-provider control or public mixed-provider proof.
-Provider-only removal and ordering receipts remain separate work.
+`08a285872` now calls `require_projected_effects` inside common field/deletion,
+creation/link, state and ordering attempt transactions. Active object projection
+conflicts defer effects; saves, pending reads and acquisition remain independent.
+Sharing-held objects retain conflicts even after selection until successful import
+projects their receipts. The dependency records storage/public regression passes
+for rejected stale deletion history, independent title/comment acquisition and
+populated execution. `30b476328` changed the public snapshot reader; its revised
+Linux run remains with gate. Direct import before connecting a synthetic provider
+is not mixed-provider Git transport or running-control proof.
 
-Source review confirms the dependency's new gap: `insert_and_project` imports
-creation/deletion receipts inside the object savepoint before
-`acquire_linear_frontier`; rejection rolls them back while the journal/conflict
-survives. Common pending/attempt readers do not consult that peer conflict.
-Retained uncertainty must constrain effects even when projection fails. Required
-proof: a rejected stale entity with an uncertain deletion cannot issue a second
-public mutation, while independent acquisition and populated execution survive.
-This is a source gap, not an observed production duplicate.
+`fcd64901f` adds ordering receipt transport to `planning_order.rs` and the existing
+peer draft. `planning_order_current` selects intentions by their first mutation
+clock and receipt ID; `planning_order_deliveries` retains unresolved losing effects,
+not settled superseded partial moves. Import preserves baseline, desired list,
+effects, acknowledgement and conflicts; complete-list acquisition alone recognizes
+progress. Malformed effects abort import; competing effect chains isolate the
+object. Historical order lists participate in private-history sharing holds.
+The dependency records six focused storage/migration/common-delivery tests, build
+and Clippy passes, not public mixed-provider activation.
 
-`ops/planning_peer.rs` still refuses connected Linear exchange. Remaining ordering
-receipt transport, alternate/relationship acquisition, legacy association and
-unplaced-Wave/Desktop presentation belong to the common owners, not a parallel
-planner. User/shared refs and per-Wave destinations are not repository identity;
-joining publishes nothing. Local placement is not peer-exclusive admission.
-Dependency detail: `cdec83fe8:scratch/work-on-another-machine-name.md`,
-**Remaining integration**, and its Infrastructure memory, **Tasks across machines**.
+`ops/planning_peer.rs` still refuses connected Linear exchange; the plan retains
+remaining composition and preservation limits. Dependency plan and Infrastructure
+memory inspected at `fcd64901f`, **Remaining integration** and **Tasks across machines**.
 
-Dependency memory coverage: through `cdec83fe8`; Product has no child memories.
+Coverage: Product has no child directories/memories. Related Infrastructure planning,
+peer and Intelligence context/check-ownership sections were read; unrelated sibling
+history was not re-audited.
 
 ## Arrangement evidence — October 8
 

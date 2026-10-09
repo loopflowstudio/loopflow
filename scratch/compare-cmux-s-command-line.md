@@ -8,9 +8,9 @@ lf2 cannot extract bounded text; the verified native artifact remains required.
 Focused local Rust and model evidence establish neither native acceptance nor delivery.
 
 LOO-406 is integrated through main’s `d20c56daf` (#1503). LOO-412 through
-`cdec83fe8` was inspected, not integrated: creation recovery and deletion receipts
-exist, but retained uncertainty does not yet constrain every delivery path.
-Mixed Linear/Git stays disabled pending composition.
+`fcd64901f` was inspected, not integrated: retained-effect deferral and ordering
+receipt transport now join creation/deletion recovery in the common owners.
+Mixed Linear/Git stays disabled pending the remaining composition.
 Local Task/Session-plus-Changes opening follows request-scoped readiness; native proof remains.
 Remaining implementation: Wave-owned planning,
 remote/Flow input and broader explanation, shared identity/exchange and first-start
@@ -401,23 +401,28 @@ Pending data is not remotely durable until published. Existing execution keeps
 its own lifecycle; no automatic turn/Flow retry is introduced. Online comments
 and completion propagate semi-live through the active sync owner. Main's LOO-406
 `d20c56daf` is integrated, retaining repository-scoped foreground Linear sync.
-Readback cannot exclude unseen Linear reopening. LOO-412 through `cdec83fe8` is
-inspected, not integrated. Creation discovery uses one pending-export view;
-deletion receipts preserve attempts and settlement through the common writer.
-Rejection of an object's provider frontier can still roll back imported uncertain
-receipts while retaining its journal/conflict; ordinary delivery ignores that
-conflict. Retention alone therefore cannot prevent another effect. This source
-gap is not an observed duplicate write. Mixed Linear/Git stays disabled until
-retained effects constrain delivery without blocking independent acquisition.
-Ordering receipts (not scalar ranks), alternate/relationship acquisition, legacy
-association and unplaced-Wave/Desktop remain. Deletion fixtures compare seven
-populated execution tables including Processes; the earlier creation fixture
-compares six unrun tables and its revised status assertions await gate. Neither
-proves live controls, mixed-provider lifetime behavior or peer-exclusive admission.
-[Findings](findings.md#committed-exchange-update--october-9) retains exact revisions,
-the superseded discovery failure and dependency proof limits.
-LOO-427 consumes the repaired common path rather than bypassing its
-limitation or narrowing acceptance to disconnected repositories. Import uses the
+Readback cannot exclude unseen Linear reopening. LOO-412 through `fcd64901f` is
+inspected, not integrated. `08a285872` repairs the previously observed source gap:
+common attempt transactions defer effects while rejected or sharing-held projections
+retain receipts only in journals. Saves and independent acquisition continue;
+selection alone cannot release the hold before successful import.
+`fcd64901f` transports captured Project move receipts through the common ordering
+owner. Original save clocks select intentions; later effect/readback clocks cannot
+revive losing orders. Unresolved losing effects still prevent another write, and
+only complete-list acquisition recognizes progress. Import and detail reads settle
+nothing. These mechanisms replace the earlier outstanding implementation items,
+not the mixed-operation acceptance below.
+
+Alternate/relationship acquisition, legacy association and unplaced-Wave/Desktop
+presentation remain before mixed activation. The dependency records focused storage,
+migration and common-delivery passes; revised Linux public reconnect and combined
+acceptance remain with gate. Deletion/retained-effect fixtures compare seven
+populated execution tables, while creation's retained-ID list is empty. Neither
+proves live controls, mixed-provider Git transport or peer-exclusive admission.
+[Findings](findings.md#committed-exchange-update--october-9) retains revisions,
+superseded failures and proof limits.
+LOO-427 consumes the repaired common path rather than rebuilding its
+receipt machinery or narrowing acceptance to disconnected repositories. Import uses the
 common local writer, preserves causal reopening and conflicts, and avoids echoes
 with optional Linear sync. Receiving a comment is not a command to start a Flow.
 
@@ -576,4 +581,4 @@ original input target and draft survive. Demo owns native usability; preserve co
 Earlier failed attempts and check archives: [findings](findings.md) and
 `f48d84511:scratch/compare-cmux-s-command-line.md`.
 
-Check (October 9): `cargo build -p loopflow --bin lf`, `cargo clippy --all-targets -- -D warnings`, fmt/diff and network-isolated binary tests (`lf tests::`, `global_commands invocation_previews…`, `global_commands desktop_open`: 26 tests) PASS; an initial unqualified exact filter ran zero tests, then was corrected. Linux gate/CI, native usability demo; prior checks: `0f3b44bdb:scratch/compare-cmux-s-command-line.md`.
+Check (October 9 realign): `git diff --check` PASS; `lf context --skill realign` confirms authored memory/scratch fit; generated goal remains about 7.5k tokens over. No code changed; prior build/Clippy/26 focused tests: `af34dd20c:scratch/compare-cmux-s-command-line.md`. Combined verification: gate/CI; native usability: demo.

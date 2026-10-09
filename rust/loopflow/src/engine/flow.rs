@@ -121,9 +121,24 @@ impl Command {
         {
             self.command = self.args.remove(0);
         }
+        // Captured commands keep their arguments, but use the current owner.
+        if self.command == "monitor"
+            && self
+                .args
+                .first()
+                .is_some_and(|name| matches!(name.as_str(), "list" | "show" | "usage" | "activity"))
+        {
+            self.command = "history".into();
+            if self.args.first().is_some_and(|name| name == "activity") {
+                self.args.remove(0);
+            }
+        } else if self.command == "activity" {
+            self.command = "history".into();
+        }
         let owner = match self.command.as_str() {
             "doctor" | "install" => Some("self"),
-            "usage" | "ps" | "top" | "activity" => Some("monitor"),
+            "ps" | "top" => Some("monitor"),
+            "usage" | "replay" => Some("history"),
             "release" | "tokens" | "ci" => Some("repo"),
             "cron" => Some("wave"),
             _ => None,

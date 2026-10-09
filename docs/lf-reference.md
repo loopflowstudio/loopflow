@@ -311,7 +311,7 @@ Show waiting, blocked, active, and finished work with next actions
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
-## lf monitor list
+## lf history list
 
 List a bounded page of recorded commands, newest first
 
@@ -330,7 +330,7 @@ List a bounded page of recorded commands, newest first
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
-## lf monitor show
+## lf history show
 
 Inspect a process or Session by identity
 
@@ -368,7 +368,7 @@ Stream planning and activity for the selected Work, each part again only when it
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
-## lf monitor usage
+## lf history usage
 
 Show direct provider-authored usage from recorded Session inputs
 
@@ -417,9 +417,9 @@ Reap registered orphan providers and remove dead process receipts
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
-## lf monitor activity
+## lf history
 
-Show one ordered record of durable Work, Session, PR, and Steer facts
+Read durable Work history, recorded commands and provider usage
 
 | Argument | What it does |
 |---|---|
@@ -1873,9 +1873,9 @@ Show the current repository's roadmap: every open Task across the repo's Waves, 
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
-## lf replay
+## lf history replay
 
-Launch the immutable provider request retained for a captured input
+Launch a new execution from an immutable captured provider request
 
 | Argument | What it does |
 |---|---|

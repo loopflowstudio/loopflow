@@ -834,7 +834,7 @@ private actor ReadingSource {
         case "roadmap": return roadmap
         case "session": return #"{"entries":\#(sessions),"next":null}"#
         case "wave" where args.dropFirst().first == "list": return "[]"
-        case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
+        case "history": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
         default: throw RegistryQueryError("unexpected command")
         }
     }

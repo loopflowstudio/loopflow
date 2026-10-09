@@ -1,4 +1,4 @@
-//! `lf monitor usage` — direct provider-authored usage from recorded Session inputs.
+//! `lf history usage` — direct provider-authored usage from recorded Session inputs.
 
 use anyhow::Result;
 use time::OffsetDateTime;

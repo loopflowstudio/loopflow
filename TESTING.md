@@ -854,7 +854,7 @@ When changing harness event mapping, run the recorded-trace conformance tests
 alongside the provider's unit tests. Keep trace expectations aligned with the
 event contract, including durable final-answer receipts and usage checkpoints.
 
-After Session-history or schema changes, run `lf monitor list --json`, `lf usage --json`, and
+After Session-history or schema changes, run `lf history list --json`, `lf usage --json`, and
 `lf doctor --json` against a disposable Machine with inherited `LF_*` and
 `LOOPFLOW_*` authority removed and `LF_BIN` pinned to the compiled source CLI.
 Never use the installed store to prove a draft migration.

@@ -1,4 +1,4 @@
-//! `lf activity` — one ordered record of durable Work facts.
+//! `lf history` — one ordered record of durable Work facts.
 
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};

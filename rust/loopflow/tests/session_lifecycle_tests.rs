@@ -769,7 +769,7 @@ fn public_history_discovers_unlinked_native_receipts_without_borrowing_a_later_b
     }
     let captures = fixture.count("agent_sessions");
     {
-        let command = vec!["monitor", "usage", "--days", "0", "--json"];
+        let command = vec!["history", "usage", "--days", "0", "--json"];
         let rows = fixture.json(&command);
         let recovered = rows
             .as_array()
@@ -834,7 +834,7 @@ fn binding_starts_the_task_once_without_reattributing_prior_work() {
     };
     let task_runs = |issue: &str| -> Vec<String> {
         fixture
-            .json(&["monitor", "usage", "--days", "0", "--task", issue, "--json"])
+            .json(&["history", "usage", "--days", "0", "--task", issue, "--json"])
             .as_array()
             .unwrap()
             .iter()
@@ -1476,12 +1476,12 @@ fn headless_history_is_discoverable_without_entering_the_interactive_list() {
     assert_eq!(sessions.as_array().unwrap().len(), 1);
     let session = &sessions[0]["id"];
     {
-        let rows = fixture.json(&["monitor", "usage", "--wave", "task-pr-tests", "--json"]);
+        let rows = fixture.json(&["history", "usage", "--wave", "task-pr-tests", "--json"]);
         assert_eq!(rows.as_array().unwrap().len(), 1);
         assert_eq!(&rows[0]["session_id"], session);
         assert_eq!(rows[0]["recorded_outcome"], "completed");
     }
-    let activity = fixture.json(&["monitor", "activity", "--wave", "task-pr-tests", "--json"]);
+    let activity = fixture.json(&["history", "--wave", "task-pr-tests", "--json"]);
     let captures = activity["items"]
         .as_array()
         .unwrap()
@@ -1789,7 +1789,7 @@ fn opencode_automatic_retry_keeps_conversation_and_rejects_failed_turn_output() 
         )
         .unwrap();
     assert_eq!((threads, starts, done), (2, 3, 3));
-    let usage = fixture.json(&["monitor", "usage", "--json"]);
+    let usage = fixture.json(&["history", "usage", "--json"]);
     assert_eq!(usage.as_array().unwrap().len(), 2);
     let launches = fixture.launches();
     assert_eq!(launches.len(), 3);
@@ -1806,7 +1806,7 @@ fn opencode_automatic_retry_keeps_conversation_and_rejects_failed_turn_output() 
     assert_eq!(retried["usage"]["input_tokens"], 40);
     assert_eq!(retried["usage"]["output_tokens"], 10);
     let answer = fixture.run(&[
-        "monitor",
+        "history",
         "show",
         retried["session_id"].as_str().unwrap(),
         "--input",

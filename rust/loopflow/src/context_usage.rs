@@ -615,7 +615,7 @@ pub fn render_report(report: &ContextReport) -> String {
         .count();
     if gaps > 0 {
         lines.push(format!(
-            "{gaps} steps have unavailable evidence; `lf monitor show <input> --context` names it."
+            "{gaps} steps have unavailable evidence; `lf history show <input> --context` names it."
         ));
     }
     lines.join("\n")

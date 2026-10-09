@@ -60,8 +60,8 @@ peer composition and packaged acceptance remain unfinished. Read grants no input
 Jack queued the API (October 8): `--context` previews input without launch;
 `--explain` is broader; `--chrome` controls execution. Source removes root `run`,
 `--max-turns` and `--no-loopflow`, preserving Task skill/Flow selection and steer
-filtering; Rust execution remains unverified. Pending: Wave-owned planning,
-monitor ps/top, combined history/activity and `history usage`, Desktop open/list.
+filtering; Rust execution remains unverified. History now owns the activity feed, Process pages, show/replay and usage;
+Desktop uses it. Rust execution remains unverified. Pending: Wave planning and Desktop open/list.
 Repository lookup defaults to configurable `~/src`; remembered names remain open.
 Discord stays unchanged. `--steers-after` filters repeated nodes, not across restarts.
 

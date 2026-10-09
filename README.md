@@ -140,7 +140,7 @@ lf user           # read config: display name from Git or a personal override
 lf roadmap             # every open Task across this repository's Waves
 lf roadmap --all       # every repository on this machine
 lf wave status designer     # one Wave's current chapter and Tasks
-lf activity            # durable work, delivery and steering history
+lf history             # durable work, delivery and steering history
 lf session list --json # conversations on this Machine
 lf context             # context budgets, configuration sources and current usage
 lf usage --days 30      # recorded provider usage

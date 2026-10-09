@@ -2762,7 +2762,7 @@ mod tests {
             ["inspect the failing test", "preserve the public behavior"]
         );
 
-        // The cross-Work `lf activity` timeline reads the same comments through
+        // The cross-Work `lf history` timeline reads the same comments through
         // `steers_since`, attributed to their Work and ordered by time. Stamp the
         // two events so the `since` filter has something to bite on.
         let conn = rusqlite::Connection::open(&database_path).unwrap();

@@ -1,4 +1,4 @@
-//! `lf monitor usage --binds` — what binding a Session to a Task does to usage totals.
+//! `lf history usage --binds` — what binding a Session to a Task does to usage totals.
 //!
 //! Prospective attribution leaves usage with the owner recorded when it was
 //! spent. Post-hoc would give a bound Session's whole history to its Task.

@@ -215,7 +215,7 @@ private actor HistorySource {
         switch (args.first, args.dropFirst().first) {
         case ("roadmap", _): return roadmap
         case ("wave", "list"): return "[]"
-        case ("activity", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
+        case ("history", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
         case ("session", "list"): return #"{"entries":\#(session),"next":null}"#
         case ("flow", "list"): return "[]"
         case ("task", "comment"):

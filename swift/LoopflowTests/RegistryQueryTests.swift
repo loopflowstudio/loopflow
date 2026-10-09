@@ -328,12 +328,12 @@ struct RegistryQueryTests {
         #expect(result.waves.isEmpty)
     }
 
-    @Test("lf activity composes Work filters before the bounded result")
+    @Test("lf history composes Work filters before the bounded result")
     func workActivityUsesOneFilteredQuery() async throws {
         let json = try String(contentsOf: workActivityFixtureURL(), encoding: .utf8)
         let query = RegistryQuery { args, cwd in
             #expect(args == [
-                "activity", "--since", "7d", "--limit", "50",
+                "history", "--since", "7d", "--limit", "50",
                 "--wave", "product", "--project", "mac-surface-ux",
                 "--task", "W2-144", "--json",
             ])

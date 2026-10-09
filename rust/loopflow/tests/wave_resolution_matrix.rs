@@ -72,11 +72,11 @@ const REPOSITORY_DEFAULT: &[&[&str]] = &[&["session", "ensure"]];
 /// selecting ambient Wave context. These must not inherit `LF_WAVE_ID`.
 /// Typed historical filters may resolve an explicit name to its stored ID.
 const FILTER_ONLY: &[&[&str]] = &[
-    &["monitor", "activity"],
+    &["history"],
     &["repo", "ci"],
     &["wave", "cron", "list"],
-    &["monitor", "list"],
-    &["monitor", "usage"],
+    &["history", "list"],
+    &["history", "usage"],
 ];
 
 /// Commands that require a Wave on the command line and therefore never

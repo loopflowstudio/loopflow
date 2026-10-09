@@ -53,11 +53,11 @@ need an explicit add before they can receive a login.
 ## Local by default
 
 ```bash
-lf mon list                                # Processes recorded on this Machine
+lf history list                                # Processes recorded on this Machine
 lf ps --json                           # OS-live processes on this Machine
 lf wave status product                 # current plan, Task conditions and Session evidence
 
-lf --machine build-home mon list   # run the same reader on build-home
+lf --machine build-home history list   # run the same reader on build-home
 lf --machine build-home --wave product wave/operate
 ```
 

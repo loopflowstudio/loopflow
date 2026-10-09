@@ -74,7 +74,7 @@ Flows may invoke the named internal operations that own their exact boundary.
 | `lf wave`, `repo`, `task` | planning and Work coordination |
 | `lf session` | durable Sessions and resolution |
 | `lf wt`, `commit`, `sync`, `pr`, `ci` | worktree and delivery operations |
-| `lf mon show`, `usage`, `activity` | durable execution/history projections |
+| `lf history`, `history show`, `usage` | durable execution/history projections |
 | `lf ps`, `top`, `prune`, `doctor` | local OS and command-journal observation |
 | `lf machine`, `lf --machine` | Machine identity, placement, command routing |
 | `lf account` | provider credential and account authority |

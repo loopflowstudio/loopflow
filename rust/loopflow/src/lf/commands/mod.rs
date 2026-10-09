@@ -10,6 +10,7 @@ pub mod discord;
 pub mod doctor;
 pub mod flow;
 pub mod flow_inventory;
+pub mod history;
 pub mod install;
 pub mod list;
 pub mod machine;

@@ -176,7 +176,7 @@ pub struct Steer {
     pub text: String,
 }
 
-/// A steer comment surfaced for the cross-Work `lf activity` timeline: the read
+/// A steer comment surfaced for the cross-Work `lf history` timeline: the read
 /// model plus the Work it targets and when it was issued.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SteerComment {

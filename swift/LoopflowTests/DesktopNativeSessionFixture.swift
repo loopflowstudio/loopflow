@@ -42,7 +42,7 @@ struct DesktopNativeSessionFixture: Decodable, Sendable {
             record["open_argv"] = isolatedCommand(argv)
             return String(decoding: try JSONSerialization.data(withJSONObject: record), as: UTF8.self)
         }
-        guard ["roadmap", "activity"].contains(args.first ?? "") || ["wave list", "machine id", "session list", "session history", "task status", "task files", "task file", "task diff", "flow list"].contains(args.prefix(2).joined(separator: " ")) else {
+        guard ["roadmap", "history"].contains(args.first ?? "") || ["wave list", "machine id", "session list", "session history", "task status", "task files", "task file", "task diff", "flow list"].contains(args.prefix(2).joined(separator: " ")) else {
             throw RegistryQueryError("Fixture does not execute this command")
         }
         return try await Task.detached { try capture([cli] + args) }.value
@@ -86,7 +86,7 @@ struct DesktopNativeSessionFixture: Decodable, Sendable {
         // Exact Task destinations resolve within the Wave's repository. The
         // owned checkout remains the cwd for native execution. File commands use
         // the Task’s recorded checkout through the shared CLI reader.
-        process.currentDirectoryURL = URL(fileURLWithPath: ["roadmap", "activity", "task", "flow", "wave"].contains(argv.dropFirst().first ?? "") ? repo : checkout)
+        process.currentDirectoryURL = URL(fileURLWithPath: ["roadmap", "history", "task", "flow", "wave"].contains(argv.dropFirst().first ?? "") ? repo : checkout)
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = handle
         process.standardError = errorHandle
@@ -193,7 +193,7 @@ struct DesktopNativeSessionTests {
         let copiedRecords = try JSONDecoder().decode([SessionRecord].self, from: Data(copied.utf8))
         let copiedRecord = try #require(copiedRecords.first)
         let activityJSON = try await reads.read(binary: fixture.cli, home: snapshot,
-            args: ["activity", "--since", "7d", "--limit", "50", "--json"], cwd: fixture.repo).get()
+            args: ["history", "--since", "7d", "--limit", "50", "--json"], cwd: fixture.repo).get()
         let activity = try JSONDecoder().decode(WorkActivitySnapshot.self, from: Data(activityJSON.utf8))
         #expect(activity.items.contains { $0.work == copiedRecord.work })
         await #expect(throws: (any Error).self) { try await query.openSession(id: copiedRecord.id) }

@@ -523,7 +523,7 @@ fn help_preserves_location_without_promoting_query_filters() {
             Some("LOO-123"),
         ),
         (
-            vec!["lf", "monitor", "list", "--task", "LOO-123", "--help"],
+            vec!["lf", "history", "list", "--task", "LOO-123", "--help"],
             None,
         ),
     ] {
@@ -533,6 +533,98 @@ fn help_preserves_location_without_promoting_query_filters() {
         .unwrap();
         assert_eq!(cli.task.as_deref(), task);
         assert!(matches!(cli.command, Some(Commands::Help { .. })));
+    }
+}
+
+#[test]
+fn history_owns_recorded_reads_and_replay_without_changing_live_monitoring() {
+    let parse = |args: &[&str]| {
+        Cli::try_parse_from(normalize_args(args.iter().map(|s| s.to_string()).collect()).unwrap())
+            .unwrap()
+    };
+    let cli = parse(&[
+        "lf", "history", "--task", "LOO-123", "--since", "24h", "--json",
+    ]);
+    assert!(
+        cli.task.is_none(),
+        "history filters must not launch Task work"
+    );
+    let Some(Commands::History { feed, cmd: None }) = cli.command else {
+        panic!("expected the default history feed");
+    };
+    assert_eq!(feed.task.as_deref(), Some("LOO-123"));
+    assert_eq!(feed.since, "24h");
+    assert!(feed.json);
+
+    for verb in ["list", "show", "usage", "replay"] {
+        let mut args = vec!["lf", "history", verb];
+        if matches!(verb, "show" | "replay") {
+            args.push("exact-capture");
+        }
+        assert!(matches!(
+            parse(&args).command,
+            Some(Commands::History { cmd: Some(_), .. })
+        ));
+        assert!(Cli::try_parse_from(["lf", "monitor", verb]).is_err());
+    }
+    for verb in ["usage", "replay"] {
+        let mut args = vec!["lf", verb];
+        if verb == "replay" {
+            args.push("exact-capture");
+        }
+        assert!(matches!(
+            parse(&args).command,
+            Some(Commands::History { cmd: Some(_), .. })
+        ));
+    }
+    for verb in ["ps", "top", "active"] {
+        assert!(matches!(
+            parse(&["lf", verb]).command,
+            Some(Commands::Monitor { .. })
+        ));
+    }
+    assert!(Cli::try_parse_from(["lf", "monitor", "activity"]).is_err());
+    assert!(Cli::command().find_subcommand("replay").is_none());
+}
+
+#[test]
+fn history_help_is_passive_and_saved_commands_keep_their_evidence_selectors() {
+    let repo = fixture();
+    let home = tempfile::tempdir().unwrap();
+    for verb in ["list", "show", "usage", "replay"] {
+        let help = success(run(repo.path(), home.path(), &["history", verb, "--help"]));
+        assert_eq!(
+            help,
+            success(run(repo.path(), home.path(), &["help", "history", verb]))
+        );
+    }
+    let retired = run(repo.path(), home.path(), &["help", "activity"]);
+    assert_eq!(retired.status.code(), Some(2));
+    assert!(!home.path().join(".lf").exists());
+
+    for (command, args, expected) in [
+        (
+            "monitor",
+            vec!["show", "session-id", "--input", "capture-id"],
+            vec!["show", "session-id", "--input", "capture-id"],
+        ),
+        (
+            "monitor",
+            vec!["activity", "--since", "24h"],
+            vec!["--since", "24h"],
+        ),
+        (
+            "activity",
+            vec!["--task", "LOO-123"],
+            vec!["--task", "LOO-123"],
+        ),
+        ("replay", vec!["capture-id"], vec!["replay", "capture-id"]),
+        ("usage", vec!["--days", "0"], vec!["usage", "--days", "0"]),
+    ] {
+        let saved = serde_json::json!({"command": command, "args": args});
+        let restored: loopflow::engine::flow::Command = serde_json::from_value(saved).unwrap();
+        assert_eq!(restored.command, "history");
+        assert_eq!(restored.args, expected);
     }
 }
 

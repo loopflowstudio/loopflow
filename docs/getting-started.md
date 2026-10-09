@@ -225,7 +225,7 @@ lf --machine mini --wave shipper wave/operate
 The target Machine proves its identity before running the command and keeps the
 resulting execution locally.
 
-Reads follow the same rule: `lf mon list`, `lf usage`, `lf wave list`, and `lf wave status`
+Reads follow the same rule: `lf history list`, `lf usage`, `lf wave list`, and `lf wave status`
 read the executing Machine. Prefix the command with `lf --machine <machine-id>` to read
 another Machine. Loopflow does not silently aggregate or replicate execution records.
 

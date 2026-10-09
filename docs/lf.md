@@ -251,12 +251,13 @@ Project have Linear mappings. The same active connection exports unmapped record
 ```bash
 lf ps                              # one live process snapshot
 lf top                             # refresh on a terminal
-lf mon list --json                 # bounded Process history with a next cursor
+lf history                         # durable Work, delivery and steering facts
+lf history list --json              # bounded Process history with a next cursor
 lf mon active --watch --json        # NDJSON until stdin closes
-lf mon show SESSION --final         # provider conclusion
+lf history show SESSION --final     # provider conclusion
 lf usage --days 30                  # measured consumption and missing evidence
 lf usage --task LOO-265 --context   # each step's input by source, flagged over budget
-lf mon show SESSION --context       # one step: instructions, memory, scratch, goal, steers, carried, tools
+lf history show SESSION --context   # one step: instructions, memory, scratch, goal, steers, carried, tools
 lf session ensure                   # this repository's one ongoing conversation
 lf session ensure -w growth         # a Wave's one ongoing conversation
 lf session ensure --task EXP-12     # a Task's primary conversation
@@ -442,7 +443,7 @@ lf help feature
 lf list skill
 ```
 
-Use shortcuts: `lf land`, `lf ps`, and `lf mon list`.
+Use shortcuts: `lf land`, `lf ps`, and `lf history list`.
 Omit owners or abbreviate command names when the result is unique. Ambiguous
 shortcuts list their matching command paths. Exact commands take precedence
 over authored definitions; `lf skill NAME` and `lf flow NAME` select a kind.

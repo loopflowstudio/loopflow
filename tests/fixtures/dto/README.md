@@ -39,7 +39,7 @@ missing capture/start membership, stream finality and evidence gaps stay explici
 The optional `task_pr_id` retains the PR captured by the managed Flow;
 `first_provider_attempt_at` differs from capture/import observation time.
 
-`work_activity_snapshot.json` pins `lf activity --json`: durable Work creation,
+`work_activity_snapshot.json` pins `lf history --json`: durable Work creation,
 Session capture/provider history, PR and Steer facts retain their original
 identities. Rust and Swift round-trip this shared history.
 

@@ -323,21 +323,21 @@ struct WorkModelTests {
         model.select(.wave(id: "wave-1"))
         await model.refreshWorkActivity()
         #expect(await fixture.activityArguments.last == [
-            "activity", "--since", "7d", "--limit", "50",
+            "history", "--since", "7d", "--limit", "50",
             "--wave", "product", "--json",
         ])
 
         model.select(.project(id: "project-1"))
         await model.refreshWorkActivity()
         #expect(await fixture.activityArguments.last == [
-            "activity", "--since", "7d", "--limit", "50",
+            "history", "--since", "7d", "--limit", "50",
             "--wave", "product", "--json",
         ])
 
         model.select(.task(id: "issue-now"))
         await model.refreshWorkActivity()
         #expect(await fixture.activityArguments.last == [
-            "activity", "--since", "7d", "--limit", "50",
+            "history", "--since", "7d", "--limit", "50",
             "--wave", "product",
             "--task", "W2-144", "--json",
         ])
@@ -350,7 +350,7 @@ struct WorkModelTests {
         let selectedJSON = try fixture.workActivityJSON(replacingFirstSubjectWith: "W2-144")
         let deferred = DeferredActivityResponse()
         let query = RegistryQuery { args, _ in
-            guard args.first == "activity" else {
+            guard args.first == "history" else {
                 throw RegistryQueryError("unexpected command \(args.joined(separator: " "))")
             }
             if args.contains("W2-144") { return selectedJSON }
@@ -698,7 +698,7 @@ private struct WorkTestFixture {
             case "roadmap": return roadmapJSON
             case "wave" where args.dropFirst().first == "list": return wavesJSON
             case "session": return #"{"entries":[],"next":null}"#
-            case "activity":
+            case "history":
                 await activityArguments.record(args)
                 return workActivityJSON
             default: throw RegistryQueryError("unexpected command \(args.joined(separator: " "))")

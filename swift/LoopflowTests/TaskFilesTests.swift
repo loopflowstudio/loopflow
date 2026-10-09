@@ -280,7 +280,7 @@ struct TaskFilesTests {
             switch args.first {
             case "roadmap": return roadmap
             case "ls", "session": return "[]"
-            case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
+            case "history": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("Unexpected file/launch request")
             }
         }

@@ -158,7 +158,7 @@ fn default_and_nested_commands_use_the_installed_cli_and_main_home() {
     let files = tempfile::tempdir().unwrap();
     let cli = files.path().join("lf");
     // Simulate only the installed boundary; both incoming processes are the real source CLI.
-    fs::write(&cli, "#!/bin/sh\nif [ \"$1\" = machine ]; then exec \"$SOURCE_CLI\" monitor list --json; fi\nprintf '%s\\n' \"$LF_HOME\" \"$LF_BIN\" \"$*\"\n").unwrap();
+    fs::write(&cli, "#!/bin/sh\nif [ \"$1\" = machine ]; then exec \"$SOURCE_CLI\" history list --json; fi\nprintf '%s\\n' \"$LF_HOME\" \"$LF_BIN\" \"$*\"\n").unwrap();
     fs::set_permissions(&cli, fs::Permissions::from_mode(0o755)).unwrap();
     let artifact = ArtifactIdentity::capture(ArtifactRole::Cli, &cli).unwrap();
     let set = ArtifactSet {
@@ -199,7 +199,7 @@ fn default_and_nested_commands_use_the_installed_cli_and_main_home() {
     assert_eq!(
         String::from_utf8(output.stdout).unwrap(),
         format!(
-            "{}\n{}\nmonitor list --json\n",
+            "{}\n{}\nhistory list --json\n",
             main.display(),
             cli.display()
         )

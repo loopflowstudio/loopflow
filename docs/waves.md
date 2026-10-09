@@ -287,7 +287,7 @@ The cursor exists only in memory. Every start skips existing channel history;
 restarting after a failure does not replay missed messages. The bridge uses the
 channel binding; `guild_id` is configuration metadata, not a process owner. Run a single bridge per channel to avoid duplicate replies.
 There is no local Wave transcript, inbox, listener or automatic service startup.
-Use Sessions for native conversations and `lf mon show --wave product` for historical launch inspection.
+Use Sessions for native conversations and `lf history list --wave product` for historical launch inspection.
 
 ### Memory
 

@@ -467,10 +467,13 @@ pub enum Commands {
         #[arg(long)]
         all: bool,
     },
-    /// Launch the immutable provider request retained for a captured input.
-    Replay {
-        /// Captured input identity or an unambiguous displayed prefix
-        run: String,
+    /// Read durable Work history, recorded commands and provider usage
+    #[command(args_conflicts_with_subcommands = true)]
+    History {
+        #[command(flatten)]
+        feed: commands::history::HistoryFeed,
+        #[command(subcommand)]
+        cmd: Option<commands::history::HistoryCommand>,
     },
     /// Run or inspect authored flows
     Flow {

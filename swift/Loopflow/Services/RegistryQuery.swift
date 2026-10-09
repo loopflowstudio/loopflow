@@ -156,7 +156,7 @@ public struct RegistryQuery: Sendable {
         project: String? = nil,
         task: String? = nil
     ) async throws -> WorkActivitySnapshot {
-        var args = ["activity", "--since", since, "--limit", String(limit)]
+        var args = ["history", "--since", since, "--limit", String(limit)]
         if let wave { args.append(contentsOf: ["--wave", wave]) }
         if let project { args.append(contentsOf: ["--project", project]) }
         if let task { args.append(contentsOf: ["--task", task]) }

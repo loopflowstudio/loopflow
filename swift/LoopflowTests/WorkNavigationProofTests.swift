@@ -46,7 +46,7 @@ struct WorkNavigationProofTests {
             case "roadmap": return roadmap
             case "wave" where args.dropFirst().first == "list": return "[]"
             case "session": return #"{"entries":[],"next":null}"#
-            case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
+            case "history": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("Unexpected operation in navigator proof")
             }
         }
@@ -164,7 +164,7 @@ struct WorkNavigationProofTests {
             case "roadmap": return roadmap
             case "wave" where args.dropFirst().first == "list": return "[]"
             case "session": return #"{"entries":\#(await source.list()),"next":null}"#
-            case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
+            case "history": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("Unexpected operation in sidebar density proof")
             }
         }
@@ -292,7 +292,7 @@ struct WorkNavigationProofTests {
             switch (args.first, args.dropFirst().first) {
             case ("roadmap", _): return await planning.list()
             case ("wave", "list"): return "[]"
-            case ("activity", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
+            case ("history", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             case ("session", "list"): return try await named.page(args)
             case ("session", "rename"): return try await named.rename(args)
             case ("session", "bind"): return try await named.bind(args, task: task)
@@ -760,7 +760,7 @@ struct WorkNavigationProofTests {
             case "wave" where args.dropFirst().first == "list": return "[]"
             case "session" where args.dropFirst().first == "list":
                 return #"{"entries":\#(cwd == "/src/context" ? otherRecords : records),"next":null}"#
-            case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
+            case "history": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("Unexpected operation in navigation proof")
             }
         }

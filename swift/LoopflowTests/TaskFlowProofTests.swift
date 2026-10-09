@@ -666,7 +666,7 @@ private actor FlowSource {
         case ("roadmap", _):
             return String(decoding: try JSONSerialization.data(withJSONObject: roadmap), as: UTF8.self)
         case ("wave", "list"): return "[]"
-        case ("activity", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
+        case ("history", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
         case ("session", "list"): return #"{"entries":\#(session),"next":null}"#
         case ("flow", "list"): return catalog
         case ("-b", "task") where args.dropFirst(2).first == "run":

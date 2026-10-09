@@ -265,7 +265,7 @@ impl SqliteStore {
     }
 
     /// Steer comments across every Work, issued at or after `since` (unix
-    /// seconds) — the cross-Work `lf activity` timeline. Scans the Task and
+    /// seconds) — the cross-Work `lf history` timeline. Scans the Task and
     /// Project event streams for the `Steer` comment; there is no steers table.
     pub fn steers_since(&self, since: i64) -> StoreResult<Vec<SteerComment>> {
         let conn = self.conn.lock().expect("store mutex poisoned");

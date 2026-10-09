@@ -1106,7 +1106,7 @@ struct DesktopPerformanceTests {
                 return #"{"path":"","entries":[{"path":"notes.txt","kind":"file"}],"next_cursor":null}"#
             case "task" where args.dropFirst().first == "file":
                 return #"{"issue_identifier":"PERF-0","task_id":"perf-work-0","path":"notes.txt","content":"Original notes","state":"text","revision":"fixed","size_bytes":14,"recoveries":[],"read_only_reason":null}"#
-            case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
+            case "history": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("Benchmark does not launch providers or mutate planning")
             }
         }
@@ -1576,7 +1576,7 @@ private func snapshotRead(binary: String, home: String, args: [String], cwd: Str
     // Copied launch authority is never exercised. This transport permits only local
     // reads; no network, Session connection, watcher, worker or provider can start.
     let verb = args.prefix(2).joined(separator: " ")
-    guard ["roadmap", "activity"].contains(args.first ?? "") || ["wave list", "wave status", "session list", "session history", "machine id", "task status", "task files", "task diff", "flow list"].contains(verb) else {
+    guard ["roadmap", "history"].contains(args.first ?? "") || ["wave list", "wave status", "session list", "session history", "machine id", "task status", "task files", "task diff", "flow list"].contains(verb) else {
         throw RegistryQueryError("Snapshot does not execute \(verb)")
     }
     let process = Foundation.Process()

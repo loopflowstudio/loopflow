@@ -42,7 +42,7 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
         result.stdout
     };
     let first: ProcessPage = serde_json::from_slice(&invoke(&[
-        "monitor",
+        "history",
         "list",
         "--all",
         "--parent",
@@ -62,7 +62,7 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
     assert_eq!(first.entries[0].outcome, None);
     let cursor = serde_json::to_string(first.next.as_ref().unwrap()).unwrap();
     let second: ProcessPage = serde_json::from_slice(&invoke(&[
-        "monitor",
+        "history",
         "list",
         "--all",
         "--parent",
@@ -85,7 +85,7 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
     );
     assert_eq!(second.next, None);
     let detail: Process = serde_json::from_slice(&invoke(&[
-        "monitor",
+        "history",
         "show",
         &ids[1].as_str()[..20],
         "--json",
@@ -93,7 +93,7 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
     .unwrap();
     assert_eq!(detail, second.entries[0]);
     let caller: ProcessPage = serde_json::from_slice(&invoke(&[
-        "monitor",
+        "history",
         "list",
         "--all",
         "--caller",
@@ -127,16 +127,16 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
         VALUES('caller-session','thread','turn','started','',?1,?2,?3,1,'unreadable history')",
         rusqlite::params![ids[1],task.as_str(),wave]).unwrap();
     for args in [
-        vec!["monitor", "list", "--all", "--task", "PROOF-1", "--json"],
+        vec!["history", "list", "--all", "--task", "PROOF-1", "--json"],
         vec![
-            "monitor",
+            "history",
             "list",
             "--all",
             "--task",
             task.as_str(),
             "--json",
         ],
-        vec!["monitor", "list", "--all", "--wave", "historical", "--json"],
+        vec!["history", "list", "--all", "--wave", "historical", "--json"],
     ] {
         let page: ProcessPage = serde_json::from_slice(&invoke(&args)).unwrap();
         assert_eq!(
@@ -190,7 +190,7 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
         let result = command(
             home.path(),
             repo.path(),
-            &["monitor", "list", "--wave", "historical", "--json"],
+            &["history", "list", "--wave", "historical", "--json"],
         )
         .output()
         .unwrap();
@@ -207,14 +207,14 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
     let ambiguous = command(
         home.path(),
         repos[0].path(),
-        &["monitor", "list", "--all", "--wave", "historical", "--json"],
+        &["history", "list", "--all", "--wave", "historical", "--json"],
     )
     .output()
     .unwrap();
     assert!(!ambiguous.status.success());
     assert!(String::from_utf8_lossy(&ambiguous.stderr).contains("Ambiguous Work selector"));
     let explicit: ProcessPage = serde_json::from_slice(&invoke(&[
-        "monitor",
+        "history",
         "list",
         "--all",
         "--wave",
@@ -226,7 +226,7 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
     let zero = command(
         home.path(),
         home.path(),
-        &["monitor", "list", "--limit", "0"],
+        &["history", "list", "--limit", "0"],
     )
     .output()
     .unwrap();

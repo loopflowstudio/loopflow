@@ -175,9 +175,9 @@ Every read the conducting surfaces offer is `--json`:
 lf wave list --json                    # every durable Wave and its Machine/runtime evidence
 lf wave status <wave> --json           # hierarchy plus one Rust-derived metric_portfolio
 lf roadmap --json                      # every Wave repeats that required portfolio envelope
-lf activity --task INF-123 --json
-lf mon show --project parser --json
-lf mon show --task INF-123 --json
+lf history --task INF-123 --json
+lf usage --project parser --json
+lf history list --task INF-123 --json
 lf usage --days 30 --json   # recorded provider usage, newest first
 lf usage --task INF-123 --json # the same evidence drilled to one Task
 lf usage --weekly --json   # context cost and turn time by week since 2026-09-30
@@ -187,12 +187,12 @@ lf ps --json                # one OS-live process frame
 
 `lf wave list` is the registry plane, `lf wave status` is the focused operational view,
 and `lf roadmap` joins the current Linear plan to that runtime truth.
-`lf activity` is the ordered durable history; each item reuses `WorkRef` and
+`lf history` is the ordered durable history; each item reuses `WorkRef` and
 carries one typed fact with its execution, Task PR, or Steer evidence. Agents consume
 those projections; they do not rebuild the joins.
 
 All of these reads are local to the executing Machine. Use `lf --machine <machine-id> ...`
-to execute the same read remotely. The historical `lf mon show` interface and `lf usage` read that Machine's evidence;
+to execute the same read remotely. The historical `lf history show` interface and `lf usage` read that Machine's evidence;
 their transitional wire shape is recorded in the cutover status. They do not
 query a central execution service.
 

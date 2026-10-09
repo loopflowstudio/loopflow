@@ -982,7 +982,7 @@ fn authored_flow_records_each_skill_as_one_session() {
     let output = run_lf(
         repo.path(),
         home.path(),
-        &["monitor", "usage", "--days", "7", "--json"],
+        &["history", "usage", "--days", "7", "--json"],
         None,
     );
     assert!(
@@ -1236,7 +1236,7 @@ fn observing_and_preparing_a_task_are_not_execution() {
     for args in [
         vec!["monitor", "active", "--task", "INF-123", "--json"],
         vec!["session", "list", "--task", "INF-123", "--json"],
-        vec!["monitor", "usage", "--task", "INF-123", "--json"],
+        vec!["history", "usage", "--task", "INF-123", "--json"],
     ] {
         let read = run_lf(repo.path(), home.path(), &args, None);
         assert!(read.status.success(), "{read:?}");
@@ -1297,7 +1297,7 @@ fn task_run_history_reads_only_that_tasks_runs_without_starting_it() {
             repo.path(),
             home.path(),
             &[
-                "monitor", "usage", "--days", "0", "--task", selector, "--json",
+                "history", "usage", "--days", "0", "--task", selector, "--json",
             ],
             None,
         );
@@ -1427,7 +1427,7 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
     };
     let task_runs = |identifier: &str| -> Vec<String> {
         json(&[
-            "monitor", "usage", "--days", "0", "--task", identifier, "--json",
+            "history", "usage", "--days", "0", "--task", identifier, "--json",
         ])
         .as_array()
         .unwrap()
@@ -1525,7 +1525,7 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
     let settled = events();
     let _ = json(&["session", "list", "--all", "--json"]);
     let _ = json(&[
-        "monitor", "usage", "--days", "0", "--task", "INF-123", "--json",
+        "history", "usage", "--days", "0", "--task", "INF-123", "--json",
     ]);
     let _ = json(&["monitor", "active", "--task", "INF-123", "--json"]);
     assert_eq!(events(), settled, "reads write no Task event");
@@ -1674,7 +1674,7 @@ fn bound_flows_keep_task_context_and_leave_other_flows_and_shared_edits_alone() 
     let output = run_lf(
         repo.path(),
         home.path(),
-        &["monitor", "usage", "--days", "7", "--json"],
+        &["history", "usage", "--days", "7", "--json"],
         None,
     );
     assert!(output.status.success());

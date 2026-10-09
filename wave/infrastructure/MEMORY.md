@@ -630,10 +630,11 @@ settlement. Competing effects retain both histories. One common view exposes unp
 sync/status. Only readback acknowledges creation/attachment, never mapping alone.
 Settled receipts reject late errors.
 
-Linux public work-watch proves creation/link response-loss recovery, later saves
-and execution preservation after import, not mixed-provider Git exchange.
-It exposed acquisition-side Project placement; that call is removed. Wave status still rejects
-unplaced Waves: Rust/Swift must represent absent Machine placement. Full gate, mixed-provider, SSH and installation remain.
+Linux work-watch and CLI sync receipts prove creation/link response-loss
+recovery, later saves and execution preservation after import, not mixed-provider
+Git exchange. Acquisition-side Project placement is removed. Wave status still
+rejects unplaced Waves: Rust/Swift must represent absent Machine placement.
+Gate, mixed-provider, SSH and installation remain.
 
 Acquisition preserves provider age; entity revisions never order relationships.
 Missing inventory is not negative membership; archive, unresolved membership and

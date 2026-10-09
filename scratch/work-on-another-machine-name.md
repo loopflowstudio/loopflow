@@ -137,9 +137,12 @@ this heading. Keep these replacements deleted:
   view carries winning mutations and eligible provider observations, prepared once
   for unheld objects. Original history stays in the immutable snapshot; latest
   revision groups retain contradictions and acquisition ages.
-- Raw Project Markdown mutations, duplicate workflow representation and a SQL
-  content parser. `project_content.rs` owns semantic workflow/KR/target capture,
-  persistence and populated migration; existing list receipt granularity stays.
+- Raw Project Markdown mutations, duplicate workflow representation, a SQL
+  content parser and the `project_content::capture_content` forwarding wrapper.
+  `project_content.rs` owns parsing/persistence; `planning_peers::capture_project_content`
+  reads that canonical content and only its three field heads. Import returns before
+  reading it, suppressing echo without a redundant Markdown round trip. Migration
+  and common writers call the same capture owner; list receipt granularity stays.
 - Peer-only scalar/state/comment receipt writers, reconstructed comment provenance,
   identical-body acquisition bypasses and replay of superseded provider revisions.
   Common acquisition owns validation; savepoints isolate valid contradictions and
@@ -258,26 +261,14 @@ Review kept the strict reader and portable-field exclusion rather than adding
 fallback values or exporting placement. Prior global Rust-unavailability claims
 are superseded by the focused results below, not by full composed acceptance.
 
-The earlier October 9 cut implemented Task creation **readback**, before the prepared-receipt composition above.
-Accepted peer provider bodies now reconcile the original `planning_export.rs` receipt even when
-an earlier mapping-only import already attached the identity. Mapping alone retains
-uncertainty; the captured save boundary limits acknowledgement. Later losing saves,
-creation attempts and their identities survive. Review rejected an added check
-freezing Project membership to its creation snapshot: a later accepted move must
-remain possible. That cut left Project/link readback with its existing owner; the prepared-receipt
-composition above extends it. The focused regression covers mapping-only
-import, lost creation reply, later save, selected Linear winner and idempotent readback.
-
-Executable foreground feedback exposed missing acquisition ages and a readiness
-check that equated absent list inventory with invalid membership. Import retains
-the accepted provider age, without synthesizing membership-list evidence. Positive
-archive, membership and configured-Initiative contradictions still block readiness.
-Imported planning remains unplaced; a later common placement operation selects the
-local machine only when neither this Work nor its parent has a placement. Existing
-placements survive. The public work-watch regression now covers cold creation on
-both stores, offline comments/edits/completion, reconnect and retained execution
-including Machine placement. It uses synthetic provider facts without a connected
-Linear service; it does not establish mixed-provider delivery or real SSH.
+Earlier October 9 readback, acquisition-age and readiness findings are now
+part of the creation composition above. Exact intermediate evidence remains at
+`a002e4060:scratch/work-on-another-machine-name.md`, **Remaining integration**.
+The public two-store work-watch proof covers cold creation, offline edits/comments/
+completion, reconnect and retained execution with synthetic provider facts, not a
+connected Linear service, mixed-provider delivery or real SSH. The connected-provider
+creation fixture is separate and retains the full execution-table comparison that
+exposed acquisition-side placement.
 
 The earlier October 8 sync integrated parent `ffe986160`, including
 `078a6642e`'s gate fixture/DTO repairs and reported Linux migration, native/public
@@ -568,13 +559,13 @@ Those operation-entry and result-accounting lessons remain in parent memory.
 7. Replace PR copy and create a walkthrough of final behavior and evidence;
    publish #1491 for Jack Heart's review and stop without landing.
 
-The compression check exposed an inherited storage fixture that expected
-`select_project_workflow` to parse malformed YAML. `ops::project::workflow` owns
-that parse before saving; storage owns name validation and atomic persistence.
-The fixture now rejects an invalid Workflow name and verifies the stored definition
-and selection survive. No duplicate YAML parser was added. Earlier passing
-comment/import/setup proofs remain at
-`3bebc219d:scratch/work-on-another-machine-name.md`, this heading.
+The integrated Store now validates Workflow source as well as its name. The
+preservation fixture covers both failures; the earlier claim that parsing belonged
+only to `ops::project::workflow` is superseded. Creation-status checks read the
+public `sync.changes` field directly on Task status and Project workflow show,
+without recursive JSON searching or guessing whether stdout contains JSON.
+Earlier fixture evidence: `a002e4060:scratch/work-on-another-machine-name.md`,
+**Acceptance for review**.
 
 Compression review repaired fixture setup, not production guards: Session insertion
 already records Started, so fixtures no longer overwrite it; absence uses the optional
@@ -592,7 +583,9 @@ sync-status proof is at `5ebcc877e:scratch/work-on-another-machine-name.md`,
 establish the dependency-updated candidate, provider-lifetime, cold-worker or
 mixed-provider acceptance.
 
-Check (October 9 implement): network-isolated Rust `planning_export_` (4), `peer_creation` (4), `peer_project_creation` (1), populated peer migration (1), and Linux `planning_reconnect_tests public_watch_exports` (1) pass; fmt, all-target Clippy, Ruff, diff and context checks pass; gate retains broader combined-candidate/Wave/Desktop acceptance.
+Prior creation/export and Linux public recovery results: `a002e4060:scratch/work-on-another-machine-name.md`, **Acceptance for review**.
+
+Check (October 9 compress): `cargo test -p loopflow --lib --no-run` builds; network-isolated Project-content (5) and populated peer migration (1) pass; fmt, all-target Clippy, Ruff, diff and context pass. Linux-only `planning_reconnect_tests public_watch_exports` and broader combined-candidate/Wave/Desktop verification remain with gate.
 
 Earlier SQL proofs, macOS startup limitations and the retained historical Flow
 without a recorded exit remain at

@@ -509,12 +509,12 @@ def _exercise_exports(fixture: dict, env: dict, server: ThreadingHTTPServer) -> 
     peer = fixture["peer"]
     db = sqlite3.connect(root / "loopflow.db", timeout=5)
 
-    def run(*args: str) -> dict:
+    def run(*args: str) -> str:
         result = subprocess.run(
             [fixture["lf"], *args], cwd=repo, env=env, capture_output=True, text=True, timeout=30
         )
         assert result.returncode == 0, result.stderr
-        return json.loads(result.stdout) if result.stdout.strip().startswith("{") else {}
+        return result.stdout
 
     def acknowledged(table: str, key: str, identity: str) -> bool:
         return db.execute(
@@ -522,24 +522,12 @@ def _exercise_exports(fixture: dict, env: dict, server: ThreadingHTTPServer) -> 
         ).fetchone() == (1,)
 
     def uncertain(kind: str, identity: str) -> bool:
-        value = (
-            run("project", "workflow", "show", identity, "--json")
-            if kind == "project"
-            else run("task", "status", identity, "--json")
+        command = ("project", "workflow", "show") if kind == "project" else ("task", "status")
+        changes = json.loads(run(*command, identity, "--json"))["sync"]["changes"]
+        return any(
+            c["field"] == "creation" and c["id"] == identity and c["state"] == "uncertain"
+            for c in changes
         )
-
-        # Status nesting differs for Project and Task; inspect the actual receipt.
-        def changes(value):
-            if isinstance(value, dict):
-                if value.get("field") == "creation":
-                    yield value
-                for child in value.values():
-                    yield from changes(child)
-            elif isinstance(value, list):
-                for child in value:
-                    yield from changes(child)
-
-        return any(c["id"] == identity and c["state"] == "uncertain" for c in changes(value))
 
     def execution() -> dict:
         return {

@@ -81,11 +81,7 @@ fn invalid(error: impl std::fmt::Display) -> StoreError {
 /// Content is parsed by its common owner, not by a second SQL Markdown parser.
 /// Capture in the caller's transaction, using the same journal and causal heads
 /// as scalar triggers. Import suppresses echo; readback only adds missing facts.
-pub(super) fn capture_project_content(
-    conn: &Connection,
-    project: &ProjectId,
-    content: &crate::pm::ProjectContent,
-) -> StoreResult<()> {
+pub(super) fn capture_project_content(conn: &Connection, project: &ProjectId) -> StoreResult<()> {
     let (importing, observation, observed): (bool, Option<String>, Option<String>) = conn
         .query_row(
             "SELECT importing,observation,fields FROM planning_peer_context WHERE singleton=1",
@@ -104,7 +100,8 @@ pub(super) fn capture_project_content(
     let mut query = conn.prepare(
         "SELECT c.kind,c.object_id,c.field,c.value,c.clock,c.linear,c.parents,c.id
         FROM planning_peer_changes c JOIN planning_peer_heads h ON h.id=c.id
-        WHERE c.kind='project' AND c.object_id=?1",
+        WHERE c.kind='project' AND c.object_id=?1
+            AND c.field IN ('workflow','krs','metric_targets')",
     )?;
     let mut heads = PlanningSnapshot::default();
     let mut rows = query.query([project.as_str()])?;
@@ -115,7 +112,9 @@ pub(super) fn capture_project_content(
         .winners()
         .map(|(_, c)| (c.field.as_str(), c))
         .collect();
-    let fields = serde_json::to_value(content)?;
+    // Journal the saved canonical representation, not the caller's untrimmed
+    // Markdown inputs. Import has already returned without parsing or echoing it.
+    let fields = serde_json::to_value(super::project_content::read_content(conn, project)?)?;
     for (field, value) in fields.as_object().expect("Project content is an object") {
         let linear = observation
             .as_ref()
@@ -1664,7 +1663,7 @@ mod tests {
             VALUES(?1,?2,1,1,'chapter','Chapter','')", params![project.as_str(),wave.id()]).unwrap();
         conn.execute("INSERT INTO tasks(id,project_id,issue_identifier,issue_title,issue_description,created_at,updated_at,workspace_slug)
             VALUES(?1,?2,'FIX-1','Original','Brief',1,1,'')",params![task.as_str(),project.as_str()]).unwrap();
-        super::super::project_content::capture_content(&conn, &project).unwrap();
+        super::capture_project_content(&conn, &project).unwrap();
         drop(conn);
         store
             .select_peer_waves("/source", &destination(), std::slice::from_ref(wave.id()))
@@ -2317,10 +2316,12 @@ mod tests {
                     .unwrap();
             let mut left = baseline.clone();
             left.krs = vec![crate::pm::PmKr {
-                text: "Keep the independent KR".into(),
+                text: "  Keep the independent KR  ".into(),
                 holds: false,
             }];
             source.update_project_content(project, &left).unwrap();
+            // Exchange follows the canonical saved Markdown, not caller whitespace.
+            left.krs[0].text = "Keep the independent KR".into();
             let mut right = baseline.clone();
             right.workflow = "peer-review".into();
             right.metric_targets = vec![crate::pm::ChapterMetricTarget {
@@ -4004,7 +4005,7 @@ mod tests {
                 params![private_project.as_str(), private.id()],
             )
             .unwrap();
-            super::super::project_content::capture_content(&conn, &private_project).unwrap();
+            super::capture_project_content(&conn, &private_project).unwrap();
             conn.execute(
                 "UPDATE waves SET current_project_id=?2 WHERE id=?1",
                 params![private.id(), private_project.as_str()],
@@ -4213,7 +4214,7 @@ mod tests {
         {
             let conn = store.conn.lock().unwrap();
             conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at,project_slug,project_name,project_prompt_context) VALUES(?1,?2,?3,1,'fixture','Fixture','')", params![private_id.as_str(),private_wave.id(),project.id]).unwrap();
-            super::super::project_content::capture_content(&conn, &private_id).unwrap();
+            super::capture_project_content(&conn, &private_id).unwrap();
             conn.execute(
                 "UPDATE projects SET wave_id=?2 WHERE id=?1",
                 params![private_id.as_str(), wave.id()],
@@ -4352,7 +4353,7 @@ mod tests {
                 params![private_project.as_str(), private.id()],
             )
             .unwrap();
-            super::super::project_content::capture_content(&conn, &private_project).unwrap();
+            super::capture_project_content(&conn, &private_project).unwrap();
             conn.execute("INSERT INTO tasks(id,project_id,issue_identifier,issue_title,created_at,worktree,updated_at,workspace_slug,issue_description) VALUES(?1,?2,'PRIVATE-1','Private draft',1,'/retained/private',1,'','')", params![private_task.as_str(),private_project.as_str()]).unwrap();
         }
         right.bind_peer_planning("/target", &destination).unwrap();
@@ -4393,7 +4394,7 @@ mod tests {
                 params![project.as_str(), shared.id()],
             )
             .unwrap();
-            super::super::project_content::capture_content(&conn, &project).unwrap();
+            super::capture_project_content(&conn, &project).unwrap();
             conn.execute("INSERT INTO tasks(id,project_id,issue_identifier,issue_title,created_at,updated_at,workspace_slug,issue_description) VALUES(?1,?2,'SHARED-1','Shared work',1,1,'','')", params![task.as_str(),project.as_str()]).unwrap();
             conn.execute(
                 "UPDATE tasks SET issue_title='Still private' WHERE id=?1",
@@ -5133,7 +5134,7 @@ mod tests {
                 params![moved_project.as_str(), moved_wave.id()],
             )
             .unwrap();
-            super::super::project_content::capture_content(&conn, &moved_project).unwrap();
+            super::capture_project_content(&conn, &moved_project).unwrap();
             conn.execute(
                 "UPDATE tasks SET project_id=?2 WHERE id=?1",
                 params![task.as_str(), moved_project.as_str()],

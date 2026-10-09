@@ -180,8 +180,7 @@ pub(super) fn save_content(
             now_unix()
         ],
     )?;
-    capture_content(conn, project)?;
-    Ok(())
+    super::planning_peers::capture_project_content(conn, project)
 }
 
 pub(super) fn read_content(conn: &Connection, project: &ProjectId) -> StoreResult<ProjectContent> {
@@ -197,10 +196,6 @@ pub(super) fn read_content(conn: &Connection, project: &ProjectId) -> StoreResul
     Ok(content)
 }
 
-pub(super) fn capture_content(conn: &Connection, project: &ProjectId) -> StoreResult<()> {
-    super::planning_peers::capture_project_content(conn, project, &read_content(conn, project)?)
-}
-
 /// Released-frontier backfill, called by the same migration transaction as SQL.
 pub(crate) fn seed_peer_content(conn: &Connection) -> StoreResult<()> {
     let mut query = conn.prepare("SELECT id FROM projects ORDER BY id")?;
@@ -208,7 +203,7 @@ pub(crate) fn seed_peer_content(conn: &Connection) -> StoreResult<()> {
         .query_map([], |row| row.get::<_, String>(0))?
         .collect::<Result<Vec<_>, _>>()?;
     for id in ids {
-        capture_content(conn, &ProjectId::from_raw(id))?;
+        super::planning_peers::capture_project_content(conn, &ProjectId::from_raw(id))?;
     }
     Ok(())
 }
@@ -310,11 +305,11 @@ mod tests {
                 store.project(&project).unwrap().unwrap().plan.workflow,
                 "review"
             );
-            // Source parsing belongs to ops::project::workflow; the Store owns
-            // name validation and transactional preservation, not a second parser.
-            assert!(store
-                .select_project_workflow(&project, "invalid/review", definition)
-                .is_err());
+            for (name, source) in [("invalid/review", definition), ("review", "changed")] {
+                assert!(store
+                    .select_project_workflow(&project, name, source)
+                    .is_err());
+            }
             assert_eq!(
                 store.wave_workflow(&wave, "review").unwrap().as_deref(),
                 Some(definition)

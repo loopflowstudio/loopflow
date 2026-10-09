@@ -174,7 +174,7 @@ impl SqliteStore {
                     VALUES(?1,?2,?3,?3,?4,?4,'','started','')",
                     params![id.as_str(), wave, now, name],
                 )?;
-                super::project_content::capture_content(&tx, &id)?;
+                super::planning_peers::capture_project_content(&tx, &id)?;
                 super::durable::inherit_project_placement(&tx, &id)?;
                 if pending.is_none() {
                     tx.execute("INSERT INTO project_transitions(wave_id,successor_id,created_at,local_plan_json)

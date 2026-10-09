@@ -342,6 +342,9 @@ pub(crate) async fn sync_task_state(store: &Store, task: &Task) -> OpsResult<()>
         {
             return Ok(());
         }
+        // Linear has no expected-revision guard here. A reopening between the
+        // observation and this mutation can be overwritten; matching readback
+        // settles observed state, not the absence of an intervening edit.
         client
             .set_item_state(issue.as_str(), &state_id)
             .await

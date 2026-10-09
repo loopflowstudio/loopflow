@@ -46,10 +46,13 @@ acquisition recognizes partial progress, never detail reads.
 projections, retaining baselines. Configuration selects pending display; creation
 receipts advance revision. `29777b8cb` scopes sync to repositories;
 `b6f34a6f8` separates Linux reconnect and portable abandonment fixtures.
-`078a6642e` repairs gate fixtures/DTOs/docs. LOO-406's Linux migration,
-native/public Flow/work-watch reconnect and adoption pass, not peer acceptance.
-Swift remains unavailable. Jack requires queue before landing; no waiver or
-landing authority here. #1503's scratch skips product CI; installation is unproved.
+`078a6642e`'s LOO-406 Linux migration, native/public Flow/work-watch reconnect
+and adoption passed after fixture/DTO repairs, not peer acceptance.
+`ffe986160` removes synthetic settlement; queue gate's 15-second lock refusal
+leaves receipt verification open. Swift/full matrix need CI. After queue,
+Jack Heart authorized LOO-406 landing and CI checks; this does not extend
+LOO-412's publication-only boundary. PR #1503's classifier proves no acceptance;
+installation remains unproved.
 
 Jack Heart's `8821db44-0480-4493-8609-953207663f1d` removes public creation tokens.
 Each create generates/saves/returns a distinct ID, even for identical titles;
@@ -57,13 +60,12 @@ internal delivery retains it. His `34c1739a-8831-4578-96c9-797aeaa87743` propose
 complete Task/Project planning with machine-local execution linked by Task ID.
 No rewrite is authorized; Linear Done beside a running Flow remains unanswered.
 
-The enabled `task_completion_preserves_linear_reopening_during_delivery` regression
-still fails: an unseen reopening is overwritten and matching readback falsely
-settles delivery. Its atomic-preservation/pending-retention assertion exceeds accepted
-observed Linear-wins with retired losing intentions; it stays enabled, not waived.
-Linear's schema at `7d2bc4279f` exposes no expected-revision issue update. More reads
-cannot prove atomic preservation. State settlement now has no test-only success
-shortcut: observations settle; failures retain uncertainty. The design retains evidence.
+Jack Heart authorized this regression repair. Tests distinguish observed reopening
+(adopt Linear, retain both values, retire delivery, preserve execution) from unseen
+reopening (unconditional writes can overwrite it). This supersedes frozen test
+disposition. Readback settles state, not atomicity; `7d2bc4279f`'s Linear schema
+has no expected-revision update. [Rationale](../../docs/architecture/planning.md).
+Linux: 54 tests, fmt/Clippy pass; CI remains open.
 
 Comments retain provider authorship and losing edits without echo. Cancellation
 resolves the Team's lowest-position state before attempting; failed discovery stays

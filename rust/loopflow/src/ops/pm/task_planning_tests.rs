@@ -392,12 +392,13 @@ async fn planning_graphql(
             return axum::Json(json!({"errors":[{"message":"completion unavailable"}]}));
         }
         state.completion_writes += 1;
-        let outcome = state
-            .completion_state
-            .take()
-            .unwrap_or_else(|| vars["stateId"].as_str().unwrap().to_string());
-        state.issues[0]["state"] = json!({"type":outcome});
+        state.issues[0]["state"] = json!({"type":vars["stateId"]});
         mark_issue_updated(&mut state.issues[0]);
+        if let Some(outcome) = state.completion_state.take() {
+            // A separate Linear edit after our mutation, visible to readback.
+            state.issues[0]["state"] = json!({"type":outcome});
+            mark_issue_updated(&mut state.issues[0]);
+        }
         if state.lose_completion {
             state.lose_completion = false;
             return axum::Json(json!({"errors":[{"message":"lost completion response"}]}));
@@ -1918,6 +1919,151 @@ exit 0
 
 #[test]
 fn task_completion_preserves_linear_reopening_during_delivery() {
+    assert_completion_adopts_reopening(true);
+}
+
+#[test]
+fn task_completion_preserves_linear_reopening_before_delivery() {
+    assert_completion_adopts_reopening(false);
+}
+
+fn assert_completion_adopts_reopening(during_delivery: bool) {
+    with_planning_task(|runtime, fixture, repo, task, state| {
+        if !during_delivery {
+            runtime.block_on(async {
+                let mut provider = state.lock().await;
+                provider.issues[0]["state"] = json!({"type":"started"});
+                mark_issue_updated(&mut provider.issues[0]);
+                drop(provider);
+                super::load_show_snapshot(repo, "product", PmRefresh::Force, &NullProgress)
+                    .await
+                    .unwrap();
+            });
+        }
+        crate::ops::task::task_end(
+            repo,
+            task.id.as_str(),
+            Some("Delivered locally"),
+            &Default::default(),
+        )
+        .unwrap();
+        let original = fixture
+            .store
+            .sqlite
+            .pending_task_state(&task.id)
+            .unwrap()
+            .unwrap();
+        assert!(!original.attempted);
+        let planning = || {
+            fixture
+                .store
+                .sqlite
+                .planning_task(&task.id)
+                .unwrap()
+                .record
+                .unwrap()
+                .item
+        };
+        assert!(
+            planning().completed,
+            "local completion saves before delivery"
+        );
+        let conn = rusqlite::Connection::open(&fixture.database).unwrap();
+        let execution = || {
+            [
+                "processes",
+                "agent_sessions",
+                "task_prs",
+                "task_workflows",
+                "task_workflow_moves",
+            ]
+            .iter()
+            .map(|table| {
+                let mut query = conn
+                    .prepare(&format!("SELECT * FROM {table} ORDER BY rowid"))
+                    .unwrap();
+                let columns = query.column_count();
+                query
+                    .query_map([], |row| {
+                        (0..columns)
+                            .map(|i| row.get::<_, rusqlite::types::Value>(i))
+                            .collect::<rusqlite::Result<Vec<_>>>()
+                    })
+                    .unwrap()
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .unwrap()
+            })
+            .collect::<Vec<_>>()
+        };
+        let before = execution();
+        runtime.block_on(async {
+            let mut provider = state.lock().await;
+            assert_eq!(provider.completion_writes, 0);
+            if during_delivery {
+                // Return to the original state, but at a new provider revision
+                // after our attempted write: readback must still adopt it.
+                provider.completion_state = Some("unstarted".into());
+            } else {
+                provider.issues[0]["state"] = json!({"type":"unstarted"});
+                mark_issue_updated(&mut provider.issues[0]);
+            }
+            drop(provider);
+            crate::ops::linear_observe::sync_task_state(&fixture.store, task)
+                .await
+                .unwrap();
+            assert!(fixture
+                .store
+                .sqlite
+                .pending_task_state(&task.id)
+                .unwrap()
+                .is_none());
+            // A retired loser must not overwrite Linear on a subsequent connection.
+            crate::ops::linear_observe::sync_task_state(&fixture.store, task)
+                .await
+                .unwrap();
+            let provider = state.lock().await;
+            assert_eq!(provider.issues[0]["state"]["type"], "unstarted");
+            assert_eq!(provider.completion_writes, usize::from(during_delivery));
+        });
+        assert_eq!(planning().state.as_deref(), Some("unstarted"));
+        assert!(!planning().completed);
+        assert_eq!(
+            execution(),
+            before,
+            "planning adoption has no execution authority"
+        );
+        let sync = fixture.store.sqlite.task_planning_sync(&task.id).unwrap();
+        let retained = sync
+            .changes
+            .iter()
+            .find(|change| change.id == original.id)
+            .unwrap();
+        assert_eq!(
+            retained.state,
+            crate::planning::PlanningSyncState::AdoptedLinear
+        );
+        assert_eq!(retained.local_value, json!("completed"));
+        assert_eq!(retained.linear_value, Some(json!("unstarted")));
+        assert!(retained.error.is_none());
+        assert!(!fixture.store.sqlite.attempt_task_state(&original).unwrap());
+        let receipt: (bool, bool, String, String) = conn.query_row(
+            "SELECT attempted,settled,target,conflict_json FROM task_state_deliveries WHERE id=?1",
+            [&original.id],
+            |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?)),
+        ).unwrap();
+        assert_eq!(
+            (receipt.0, receipt.1, receipt.2.as_str()),
+            (during_delivery, true, "completed")
+        );
+        let conflict: crate::pm::PmItem = serde_json::from_str(&receipt.3).unwrap();
+        assert_eq!(conflict.state.as_deref(), Some("unstarted"));
+    });
+}
+
+#[test]
+fn task_completion_unseen_reopening_can_be_overwritten_by_unconditional_delivery() {
+    // Jack Heart selected observed Linear-wins, not unseen-write atomicity.
+    // Keep the original counterexample: no ownership read sees this reopening.
     with_planning_task(|runtime, fixture, repo, task, state| {
         crate::ops::task::task_end(
             repo,
@@ -1926,6 +2072,13 @@ fn task_completion_preserves_linear_reopening_during_delivery() {
             &Default::default(),
         )
         .unwrap();
+        let original = fixture
+            .store
+            .sqlite
+            .pending_task_state(&task.id)
+            .unwrap()
+            .unwrap();
+        let workflow = fixture.store.sqlite.workflow(&task.id).unwrap();
         runtime.block_on(async {
             state.lock().await.reopen_during_completion = true;
             crate::ops::linear_observe::sync_task_state(&fixture.store, task)
@@ -1933,13 +2086,35 @@ fn task_completion_preserves_linear_reopening_during_delivery() {
                 .unwrap();
             let provider = state.lock().await;
             assert!(!provider.reopen_during_completion);
-            let retained = fixture.store.sqlite.pending_task_state(&task.id).unwrap();
             assert_eq!(
-                (&provider.issues[0]["state"]["type"], retained.is_some()),
-                (&json!("unstarted"), true),
-                "preserve Linear reopening and retain the concurrent local decision"
+                provider.issues[0]["state"]["type"], "completed",
+                "the unconditional write overwrites the unobserved reopening"
             );
+            assert_eq!(provider.completion_writes, 1);
+            drop(provider);
+            assert!(fixture
+                .store
+                .sqlite
+                .pending_task_state(&task.id)
+                .unwrap()
+                .is_none());
+            crate::ops::linear_observe::sync_task_state(&fixture.store, task)
+                .await
+                .unwrap();
+            assert_eq!(state.lock().await.completion_writes, 1);
         });
+        assert_eq!(fixture.store.sqlite.workflow(&task.id).unwrap(), workflow);
+        // Matching readback settles only the observed state. It cannot record a
+        // conflict it never saw or certify that no intermediate edit was lost.
+        let conn = rusqlite::Connection::open(&fixture.database).unwrap();
+        let receipt: (bool, bool, Option<String>) = conn
+            .query_row(
+                "SELECT attempted,settled,conflict_json FROM task_state_deliveries WHERE id=?1",
+                [&original.id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(receipt, (true, true, None));
     });
 }
 

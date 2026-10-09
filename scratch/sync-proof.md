@@ -1,0 +1,1 @@
+Sync proof: `cargo test -p loopflow --lib task_decision_preserves_unknown_history_and_live_process_protection -- --exact ops::task::tests::task_decision_preserves_unknown_history_and_live_process_protection` — passed (1 test); broader verification remains with gate/CI.

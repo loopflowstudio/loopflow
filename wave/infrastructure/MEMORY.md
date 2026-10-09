@@ -631,14 +631,14 @@ Ordering, causal freshness, private-history holds and unknown-journal proofs:
 convergence. Desktop keeps last-good scoped status. Mixed exchange stays disabled;
 sharing/recovery and public composition remain unfinished.
 
-Legacy association remains unfinished. Clearing mappings creates provider-creation
-candidates; issue-name fallback persists no association. Projection and cross-ID
-deferral share retained claims, including losers; nulling a mapping hides no claim.
-`5e5786bff` separates creation origins from projection and removes synthetic requests.
-Production import still uses incoming IDs. Direct receipt fixtures prove no
-correspondence, cross-origin winners or public recovery; prior passes predate this
-reduction. Preserve IDs, execution, private selection and uncertain effects;
-repeat association and order-independent projection remain unproved.
+Legacy association remains unfinished. Explicit correspondence resolves incoming
+full Task/Project IDs to local owners; IDs, execution and selection stay unchanged. It retains projection/effect holds, not
+joint winners or completed recovery. Ordinary import still cannot project across
+origins; common capture and causal validation currently require same-ID parents.
+Grouping winners alone cannot acknowledge an observed peer Linear head before a
+later local save. Mixed exchange stays disabled. Receipt-origin and earlier refusal
+proofs: `bf4c39b2e`, this heading. Public origin settlement and order-independent
+projection remain unproved; lookup is not effect authority.
 Plan: `scratch/work-on-another-machine-name.md`.
 
 ## Driver recovery

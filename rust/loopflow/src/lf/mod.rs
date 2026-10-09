@@ -1449,6 +1449,14 @@ pub enum PlanningCommand {
         #[arg(long = "wave", required = true, num_args = 1..)]
         waves: Vec<String>,
     },
+    /// Associate an incoming full Work ID with existing local Work; never merge execution or share it
+    Associate {
+        incoming: String,
+        #[arg(long = "with", value_name = "LOCAL_ID")]
+        local: String,
+        #[arg(long, value_name = "PROVIDER_ID")]
+        linear: String,
+    },
     /// Show selection, retained imports and held records without contacting Git
     Status {
         #[arg(long)]

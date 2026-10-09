@@ -30,6 +30,22 @@ SELECT kind,object_id,
 FROM planning_peer_changes
 WHERE (kind='task' AND field IN ('external_issue_id','creation'))
    OR (kind='project' AND field IN ('external_project_id','creation'));
+-- Explicit local correspondence never merges Work or shares private selection.
+-- An incoming journal identity resolves to an existing local execution owner.
+CREATE TABLE planning_associations (
+    kind TEXT NOT NULL CHECK(kind IN ('task','project')),
+    origin_id TEXT NOT NULL,
+    repo TEXT NOT NULL,
+    provider_id TEXT NOT NULL,
+    task_id TEXT REFERENCES tasks(id),
+    project_id TEXT REFERENCES projects(id),
+    PRIMARY KEY(kind,origin_id),
+    CHECK((kind='task' AND task_id IS NOT NULL AND project_id IS NULL)
+       OR (kind='project' AND project_id IS NOT NULL AND task_id IS NULL)),
+    CHECK(origin_id != COALESCE(task_id,project_id))
+);
+CREATE TRIGGER store_revision_planning_associations_insert AFTER INSERT ON planning_associations
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
 CREATE TABLE planning_peer_heads (
     id TEXT PRIMARY KEY REFERENCES planning_peer_changes(id),
     kind TEXT NOT NULL,

@@ -5,6 +5,7 @@ use std::path::Path;
 
 use anyhow::{anyhow, Result};
 
+use crate::engine::planning_exchange::{PlanningKind, PlanningObject};
 use crate::engine::planning_git::PlanningDestination;
 use crate::id::WaveId;
 use crate::lf::PlanningCommand;
@@ -82,6 +83,34 @@ async fn run_async(repo: &Path, cmd: &PlanningCommand) -> Result<()> {
                 .select_peer_waves(&repo_key, destination, &waves)
                 .await?;
             println!("Selected {} Wave(s) and descendants. Retained history may now be shared; nothing published by this command.", waves.len());
+        }
+        PlanningCommand::Associate {
+            incoming,
+            local,
+            linear,
+        } => {
+            let kind = if incoming.starts_with("task_") {
+                PlanningKind::Task
+            } else if incoming.starts_with("proj_") {
+                PlanningKind::Project
+            } else {
+                return Err(anyhow!(
+                    "Use a full incoming Task or Project ID, not an issue name or prefix."
+                ));
+            };
+            store
+                .associate_peer_planning(
+                    &repo_key,
+                    &PlanningObject {
+                        kind,
+                        id: incoming.clone(),
+                    },
+                    local,
+                    linear,
+                )
+                .await?;
+            println!("{incoming} resolves to local {local}. Neither identity, execution nor sharing selection changed.");
+            eprintln!("Joint planning projection remains unfinished and held. No provider effect or Git publication was issued.");
         }
         PlanningCommand::Status { json } => print_status(&store, &repo_key, *json).await?,
     }

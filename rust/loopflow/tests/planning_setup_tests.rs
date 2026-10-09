@@ -8,6 +8,10 @@ use loopflow_test_support::TestRepo;
 use serde_json::Value;
 
 fn invoke(repo: &Path, home: &Path, args: &[&str]) -> Output {
+    invoke_lf(repo, home, &[&["repo", "planning"][..], args].concat())
+}
+
+fn invoke_lf(repo: &Path, home: &Path, args: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
     for (name, _) in std::env::vars_os() {
         let name = name.to_string_lossy();
@@ -17,7 +21,6 @@ fn invoke(repo: &Path, home: &Path, args: &[&str]) -> Output {
     }
     command
         .current_dir(repo)
-        .args(["repo", "planning"])
         .args(args)
         .env("HOME", home)
         .env("LF_HOME", home)
@@ -292,4 +295,132 @@ fn public_status_keeps_healthy_plans_and_receipts_visible_beside_a_damaged_journ
     assert_eq!(recovered["pending_local"], true);
     assert!(recovered["local_error"].is_null());
     assert_eq!(recovered["publication_state"], "unconfirmed");
+}
+
+#[test]
+fn public_association_preserves_ids_and_reports_unfinished_projection() {
+    use loopflow::engine::planning_git::PlanningDestination;
+    use loopflow::store::sqlite::SqliteStore;
+
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let source_home = tempfile::tempdir().unwrap();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    for directory in [home.path(), source_home.path()] {
+        runtime
+            .block_on(open_ephemeral_store(&StorageConfig::sqlite(
+                directory.join("loopflow.db"),
+            )))
+            .unwrap();
+    }
+    let target = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let source = SqliteStore::new(&source_home.path().join("loopflow.db")).unwrap();
+    let repo_path = repo.path().canonicalize().unwrap();
+    let scope = repo_path.to_str().unwrap();
+    let destination =
+        PlanningDestination::new("/synthetic/absent", "refs/loopflow/planning/shared/fixture")
+            .unwrap();
+    for store in [&source, &target] {
+        store.bind_peer_planning(scope, &destination).unwrap();
+    }
+    let peer_wave = Wave::new(WaveId::new(), "incoming".into(), scope.into());
+    let private_wave = Wave::new(WaveId::new(), "private".into(), scope.into());
+    source.create_wave(&peer_wave).unwrap();
+    target.create_wave(&private_wave).unwrap();
+    let mut snapshot: loopflow::pm::PmSnapshot = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/task_history_planning.json"
+    ))
+    .unwrap();
+    snapshot.items.truncate(1);
+    for (store, wave) in [(&source, &peer_wave), (&target, &private_wave)] {
+        store
+            .put_pm_snapshot(&loopflow::store::PmSnapshotRow {
+                wave_id: wave.id().clone(),
+                provider: "linear".into(),
+                initiative: "initiative".into(),
+                synced_at: 42,
+                snapshot: snapshot.clone(),
+            })
+            .unwrap();
+    }
+    source
+        .select_peer_waves(scope, &destination.id(), &[peer_wave.id().clone()])
+        .unwrap();
+    let incoming = source
+        .task_by_issue(&snapshot.items[0].id)
+        .unwrap()
+        .unwrap();
+    let local = target
+        .task_by_issue(&snapshot.items[0].id)
+        .unwrap()
+        .unwrap();
+    let journal = source
+        .export_peer_planning(scope, &destination.id())
+        .unwrap();
+    target
+        .import_peer_planning(scope, &destination.id(), "fixture", &journal)
+        .unwrap();
+    for (origin, local_id, provider) in [
+        (
+            incoming.id.as_str(),
+            local.id.as_str(),
+            snapshot.items[0].id.as_str(),
+        ),
+        (
+            incoming.project_id.as_str(),
+            local.project_id.as_str(),
+            snapshot.projects[0].id.as_str(),
+        ),
+    ] {
+        for _ in 0..2 {
+            let reply = invoke(
+                repo.path(),
+                home.path(),
+                &[
+                    "associate",
+                    origin,
+                    "--with",
+                    local_id,
+                    "--linear",
+                    provider,
+                ],
+            );
+            assert!(
+                reply.status.success(),
+                "{}",
+                String::from_utf8_lossy(&reply.stderr)
+            );
+            assert!(String::from_utf8_lossy(&reply.stdout).contains(local_id));
+            assert!(String::from_utf8_lossy(&reply.stderr).contains("unfinished"));
+        }
+    }
+    let reply = invoke_lf(
+        repo.path(),
+        home.path(),
+        &["task", "status", incoming.id.as_str(), "--json"],
+    );
+    assert!(
+        reply.status.success(),
+        "{}",
+        String::from_utf8_lossy(&reply.stderr)
+    );
+    let status: Value = serde_json::from_slice(&reply.stdout).unwrap();
+    assert_eq!(status["execution"]["task_id"], local.id.as_str());
+    assert!(target.task(&incoming.id).unwrap().is_none());
+    assert!(target.project(&incoming.project_id).unwrap().is_none());
+    assert_eq!(
+        target.task_by_issue(local.id.as_str()).unwrap().unwrap().id,
+        local.id
+    );
+    let exported = target
+        .export_peer_planning(scope, &destination.id())
+        .unwrap();
+    assert!(exported.changes.values().all(|change| ![
+        incoming.id.as_str(),
+        incoming.project_id.as_str(),
+        local.id.as_str(),
+        local.project_id.as_str(),
+    ]
+    .contains(&change.object.id.as_str())));
+    assert!(run(repo.path(), home.path(), &["status"]).contains("joint planning projection"));
 }

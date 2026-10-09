@@ -136,14 +136,18 @@ replace or clear an existing Task/Project mapping. Contradictions retain the
 journal and isolate that object while independent plans advance. Clearing a legacy
 mapping is not identity association: it makes the retained Work a provider-creation
 candidate and leaves its old selectors and effect receipts behind. Explicit legacy
-association remains unfinished; neither IDs nor execution histories are merged.
+association recovery remains unfinished. `planning associate` records exact local
+correspondence and enables full-ID lookup without merging IDs or execution histories.
+The incoming scalar journal must retain one provider mapping matching the existing
+local Work. Names, titles and attempted creation inputs do not establish it.
+Physical rows remain their own owners; lookup rechecks mapping and repository.
+Association changes no sharing membership and leaves joint projection/effects held.
 Replacing a rejected mapping with null cannot hide its earlier claim against
 another local owner. Creation receipts also retain their original Work-derived
 provider UUID and captured model identity: a lookup alias cannot rekey them.
 Common `planning_creations` separates the original Work ID from its local
 Task/Project projection, retaining each origin's input and uncertain attempts.
-This storage boundary does not implement correspondence or cross-origin field
-projection. Exact readback never replaces an existing different provider mapping;
+Receipt-origin storage does not implement cross-origin field projection. Exact readback never replaces an existing different provider mapping;
 those effects remain uncertain pending association recovery.
 
 `ops/planning_delivery.rs` consumes mapped Task titles, descriptions, nullable

@@ -68,25 +68,10 @@ remain separate. No new product decision is selected.
   receive Linear priority. Common acquisition, independent evidence and savepoints
   remain the owners. Storage proof is not mixed-provider acceptance.
 
-- October 8 foreground safety choice: until all provider paths are composed and
-  verified, Linear-connected repositories retain plans and report the gap instead
-  of activating unsafe peer exchange. This is an internal incomplete boundary, not
-  Jack Heart's final product policy. Publication always fetches/imports first and
-  persists uncertainty before pushing; independent acquisition bypasses its effect
-  lock. Current eligible-export digests distinguish later saves from confirmation
-  of an earlier revision. Provider launch now owns the lifetime independently of Task attribution;
-  short Task saves and Project edits attempt exchange after committing. Desktop
-  destination status is implemented; per-Work sharing/recovery presentation remains. Review caught two issues repaired inline:
-  cancellation/status writes must retain the worker's lock, and target-only machine
-  dispatch must not require a repository on the initiating machine.
-
-- October 8 short-command choice: save locally first, release planning locks, then
-  await one bounded Git publication attempt (including acquisition). Failure reports
-  pending sync without reversing the save. No detached worker or command retry is
-  added. An active provider/work-watch connection handles later reconnect; with no
-  connection, the next mutation or foreground connection supplies another attempt.
-  Explicit setup still performs no exchange. Existing branch selectors survive
-  lifecycle lookup; the foreground loop observes destinations added after launch.
+- Foreground/short-command ownership and October 8 review findings remain at
+  `bf4c39b2e:scratch/questions.md`, the foreground and short-command entries.
+  Saves commit first; bounded worker-owned attempts retain locks through cancellation.
+  Active connections supply reconnect; setup never publishes or retries a turn.
 
 - October 8 conflict classification: valid contradictory/unordered Task/Project
   provider observations use `ProviderObservationConflict`, not malformed-input
@@ -189,15 +174,19 @@ remain separate. No new product decision is selected.
 
 - October 9 association finding and representation boundary are consolidated in
   the design, **Remaining integration**, item 3. Original rationale and refusal
-  proofs: `63d292896:scratch/questions.md`, final entry. No correspondence is
-  implemented or new product decision selected. Compression shares retained
+  proofs: `63d292896:scratch/questions.md`, final entry. That refusal cut implemented no correspondence or new product decision. Compression shares retained
   mapping/creation claims through a derived view; it neither rewrites attempts
   nor changes private selection. Mixed-provider exchange remains disabled.
 
-- October 9 receipt-origin implementation choice: one common `planning_creations`
-  table replaces provider-effect columns on Task creation requests and Project rows.
-  `(kind, origin_id)` identifies the captured operation; exclusive Task/Project foreign
-  keys select its local projection. Capture and status retain origin IDs; repeated
-  import merges monotonic attempt/readback evidence without replacing either origin.
-  Request idempotence remains on `task_creation_intents`; no second delivery queue
-  is added. Correspondence and cross-origin field winners remain unfinished.
+- Receipt-origin representation and removal of synthetic creation requests:
+  `bf4c39b2e:scratch/questions.md`, final entry. The design owns the remaining
+  composition; one common receipt table retains every captured origin.
+
+- October 9 correspondence choice: explicit local `planning associate <incoming-id>
+  --with <local-id> --linear <provider-id>` uses retained scalar mapping evidence,
+  not names or creation inputs. Exact local rows retain execution ownership; an
+  absent incoming full ID can resolve to that owner. Correspondence never enrolls
+  either side or clears projection/effect conflicts. Joint projection remains
+  held pending cross-origin causal and receipt composition, not a new product
+  policy. Review found that lookup must recheck the local mapping and repository;
+  changed routing cannot silently reuse a stale association.

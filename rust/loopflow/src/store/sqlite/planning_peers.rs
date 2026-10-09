@@ -19,6 +19,8 @@ use super::planning::ProviderEvidence;
 use super::planning_changes::PlanningChanges;
 use super::SqliteStore;
 
+const ASSOCIATION_PROJECTION_PENDING: &str = "correspondence retained; joint planning projection is unfinished; selection and effects remain held";
+
 const SHARING_PROJECTION_PENDING: &str = "peer projection skipped by sharing hold; import required";
 
 // Projection and delivery share the same field-keyed winners, including the
@@ -85,6 +87,8 @@ pub(super) fn require_projected_effects(
             &format!(
                 "SELECT c.object_id FROM planning_peer_conflicts c
              WHERE c.kind=?1 AND c.active=1 AND (c.object_id=?2 OR EXISTS(
+                 SELECT 1 FROM planning_associations a WHERE a.kind=c.kind AND a.origin_id=c.object_id
+                 AND COALESCE(a.task_id,a.project_id)=?2) OR EXISTS(
                  SELECT 1 FROM planning_peer_provider_claims h JOIN {} local
                  ON local.id=?2 AND local.{mapping}=h.provider_id
                  WHERE h.kind=c.kind AND h.object_id=c.object_id))
@@ -321,6 +325,98 @@ pub(super) fn clear_observation(conn: &Connection) -> StoreResult<()> {
 }
 
 impl SqliteStore {
+    /// Record exact provider correspondence without moving either identity,
+    /// execution, receipts or sharing selection. Repeat calls are idempotent.
+    pub fn associate_peer_planning(
+        &self,
+        repo: &str,
+        origin: &PlanningObject,
+        local_id: &str,
+        provider_id: &str,
+    ) -> StoreResult<()> {
+        let (_, mapping) = provider_schema(origin.kind)
+            .ok_or_else(|| invalid("only Tasks and Projects can be associated"))?;
+        match origin.kind {
+            PlanningKind::Task => {
+                TaskId::parse(&origin.id).map_err(invalid)?;
+                TaskId::parse(local_id).map_err(invalid)?;
+            }
+            PlanningKind::Project => {
+                ProjectId::parse(&origin.id).map_err(invalid)?;
+                ProjectId::parse(local_id).map_err(invalid)?;
+            }
+            _ => unreachable!("provider schema restricts association kinds"),
+        }
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let local = PlanningObject {
+            kind: origin.kind,
+            id: local_id.into(),
+        };
+        require_repository(&tx, &local, repo)?;
+        // Local rows always own their own execution. Association cannot redirect
+        // a second existing row, nor reinterpret an issue name as an identity.
+        if exists(&tx, origin)? {
+            return Err(invalid("incoming Work already exists locally; its identity and execution cannot be redirected"));
+        }
+        let mapped: Option<String> = tx
+            .query_row(
+                &format!("SELECT {mapping} FROM {} WHERE id=?1", table(origin.kind)),
+                [local_id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten();
+        if provider_id.is_empty() || mapped.as_deref() != Some(provider_id) {
+            return Err(invalid(
+                "local Work does not map to the supplied Linear identity",
+            ));
+        }
+        let retained: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM planning_members WHERE kind=?1 AND object_id=?2 AND repo=?3)",
+            params![origin.kind.as_str(), origin.id, repo], |row| row.get(0),
+        )?;
+        let mut query = tx.prepare(
+            "SELECT DISTINCT json_extract(value,'$') FROM planning_peer_changes
+             WHERE kind=?1 AND object_id=?2 AND field=?3 AND json_type(value)='text'",
+        )?;
+        let claims = query
+            .query_map(params![origin.kind.as_str(), origin.id, mapping], |row| {
+                row.get::<_, String>(0)
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        if !retained || claims != [provider_id] {
+            return Err(invalid("incoming Work lacks one unambiguous retained Linear mapping; creation inputs and names are not correspondence"));
+        }
+        drop(query);
+        let saved: Option<(String, String, String)> = tx.query_row(
+            "SELECT repo,provider_id,COALESCE(task_id,project_id) FROM planning_associations WHERE kind=?1 AND origin_id=?2",
+            params![origin.kind.as_str(),origin.id], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
+        ).optional()?;
+        if let Some(saved) = saved {
+            if saved != (repo.into(), provider_id.into(), local_id.into()) {
+                return Err(invalid(
+                    "correspondence is already recorded for a different local Work or provider",
+                ));
+            }
+        } else {
+            tx.execute(
+                "INSERT INTO planning_associations(kind,origin_id,repo,provider_id,task_id,project_id)
+                 VALUES(?1,?2,?3,?4,CASE WHEN ?1='task' THEN ?5 END,CASE WHEN ?1='project' THEN ?5 END)",
+                params![origin.kind.as_str(),origin.id,repo,provider_id,local_id],
+            )?;
+        }
+        // Correspondence enables lookup, not joint projection. Keep incomplete
+        // receipt composition visibly held instead of clearing mapping conflicts.
+        tx.execute(
+            "INSERT INTO planning_peer_conflicts(repo,kind,object_id,reason,active) VALUES(?1,?2,?3,?4,1)
+             ON CONFLICT(kind,object_id,reason) DO UPDATE SET active=1 WHERE active=0",
+            params![repo,origin.kind.as_str(),origin.id,ASSOCIATION_PROJECTION_PENDING],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Select routing for future root Waves only. Existing membership and all
     /// descendant routing survive a switch, including a return to local-only.
     pub fn use_peer_planning(&self, repo: &str, destination: Option<&str>) -> StoreResult<()> {
@@ -768,10 +864,14 @@ impl SqliteStore {
         // A skipped projection may retain new effects only in the journal.
         // Selection can later release a sharing hold without importing again;
         // keep the projection conflict until those receipts actually project.
-        conflicts.extend(
-            held.into_keys()
-                .map(|object| (object, SHARING_PROJECTION_PENDING.into())),
-        );
+        conflicts.extend(held.into_iter().map(|(object, reason)| {
+            let reason = if reason == ASSOCIATION_PROJECTION_PENDING {
+                reason
+            } else {
+                SHARING_PROJECTION_PENDING.into()
+            };
+            (object, reason)
+        }));
         reconcile_conflicts(&tx, repo, destination, &conflicts)?;
         tx.execute("UPDATE planning_peer_context SET importing=0", [])?;
         tx.execute(
@@ -792,6 +892,37 @@ impl SqliteStore {
             .flat_map(|status| status.conflicts)
             .collect())
     }
+}
+
+/// Resolve only explicitly associated full IDs. Physical rows are resolved by
+/// callers first; this does not rename durable IDs or grant execution authority.
+pub(super) fn associated_local_id(
+    conn: &Connection,
+    kind: PlanningKind,
+    origin: &str,
+    repo: Option<&str>,
+) -> StoreResult<Option<String>> {
+    let Some((_, mapping)) = provider_schema(kind) else {
+        return Ok(None);
+    };
+    let ancestry = match kind {
+        PlanningKind::Task => {
+            "JOIN projects p ON p.id=local.project_id JOIN waves w ON w.id=p.wave_id"
+        }
+        PlanningKind::Project => "JOIN waves w ON w.id=local.wave_id",
+        _ => unreachable!("provider schema restricts association kinds"),
+    };
+    let mut query = conn.prepare(&format!(
+        "SELECT local.id FROM planning_associations a JOIN {} local
+         ON local.id=COALESCE(a.task_id,a.project_id) AND local.{mapping}=a.provider_id
+         {ancestry}
+         WHERE a.kind=?1 AND a.origin_id=?2 AND w.repo=a.repo AND (?3 IS NULL OR a.repo=?3)",
+        table(kind)
+    ))?;
+    query
+        .query_row(params![kind.as_str(), origin, repo], |row| row.get(0))
+        .optional()
+        .map_err(StoreError::from)
 }
 
 fn planning_digest(snapshot: &PlanningSnapshot) -> StoreResult<String> {
@@ -986,6 +1117,18 @@ fn selection_conflicts(
     for object in snapshot.objects() {
         if belongs_elsewhere(conn, object, repo)? {
             held.insert(object.clone(), "planning exchange held: record moved outside this repository; local work and peer history are retained".into());
+            pending.insert(object.clone());
+        }
+    }
+    for object in snapshot.objects() {
+        let associated: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM planning_associations WHERE kind=?1 AND repo=?2
+             AND (origin_id=?3 OR COALESCE(task_id,project_id)=?3))",
+            params![object.kind.as_str(), repo, object.id],
+            |row| row.get(0),
+        )?;
+        if associated {
+            held.insert(object.clone(), ASSOCIATION_PROJECTION_PENDING.into());
             pending.insert(object.clone());
         }
     }
@@ -6983,6 +7126,180 @@ mod tests {
                 }
             )
             .unwrap());
+        }
+    }
+
+    #[test]
+    fn explicit_correspondence_resolves_local_work_but_retains_projection_holds() {
+        use super::super::planning_changes::PlanningChanges;
+        use crate::engine::planning_exchange::{PlanningKind, PlanningObject};
+
+        let (_home, source) = store();
+        let (_, row, incoming_task) = linear_seed(&source);
+        let incoming_project = source.task(&incoming_task).unwrap().unwrap().project_id;
+        let first = export(&source, "/source");
+        edit_title(&source, &incoming_task, "Peer later title");
+        source
+            .edit_project(&incoming_project, Some("Peer later Project"), None)
+            .unwrap();
+        let later = export(&source, "/source");
+
+        for reverse in [false, true] {
+            let (_home, target) = store();
+            let private = Wave::new(WaveId::new(), "private".into(), "/target".into());
+            target.create_wave(&private).unwrap();
+            let mut local_row = row.clone();
+            local_row.wave_id = private.id().clone();
+            target.put_pm_snapshot(&local_row).unwrap();
+            let local = target
+                .task_by_issue(&row.snapshot.items[0].id)
+                .unwrap()
+                .unwrap();
+            preserve_execution(&target, private.id(), &local.id);
+            let execution = execution_rows(&target);
+            edit_title(&target, &local.id, "Private Task save");
+            target
+                .edit_project(&local.project_id, Some("Private Project save"), None)
+                .unwrap();
+            let task_change = target.pending_task_changes(&local.id).unwrap().remove(0);
+            let project_change = target
+                .pending_project_changes(&local.project_id)
+                .unwrap()
+                .remove(0);
+            for (owner, change) in [
+                (PlanningChanges::Task(&local.id), &task_change),
+                (PlanningChanges::Project(&local.project_id), &project_change),
+            ] {
+                assert!(target
+                    .attempt_planning_field(
+                        owner,
+                        change,
+                        change
+                            .base
+                            .as_ref()
+                            .and_then(|base| base["revision"].as_str())
+                    )
+                    .unwrap());
+                target
+                    .planning_field_error(owner, change, "lost reply")
+                    .unwrap();
+            }
+            let retained_task = target.planning_task(&local.id).unwrap();
+            let retained_project = target.planning_project(&local.project_id).unwrap();
+            let task_receipts = target.pending_task_changes(&local.id).unwrap();
+            let project_receipts = target.pending_project_changes(&local.project_id).unwrap();
+            let task = PlanningObject {
+                kind: PlanningKind::Task,
+                id: incoming_task.to_string(),
+            };
+            let project = PlanningObject {
+                kind: PlanningKind::Project,
+                id: incoming_project.to_string(),
+            };
+            // Neither names nor provider IDs implicitly redirect a full Work ID.
+            assert!(target.task_by_issue(&task.id).unwrap().is_none());
+            assert!(target.project_by_project(&project.id).unwrap().is_none());
+            assert!(target
+                .associate_peer_planning(
+                    "/target",
+                    &task,
+                    local.id.as_str(),
+                    &row.snapshot.items[0].id
+                )
+                .is_err());
+            let snapshots = if reverse {
+                [&later, &first]
+            } else {
+                [&first, &later]
+            };
+            import(&target, "/target", "first", snapshots[0]);
+            for (origin, local_id, provider) in [
+                (&task, local.id.as_str(), row.snapshot.items[0].id.as_str()),
+                (
+                    &project,
+                    local.project_id.as_str(),
+                    row.snapshot.projects[0].id.as_str(),
+                ),
+            ] {
+                assert!(target
+                    .associate_peer_planning("/target", origin, local_id, "unrelated-provider")
+                    .is_err());
+                assert!(target
+                    .associate_peer_planning("/source", origin, local_id, provider)
+                    .is_err());
+                target
+                    .associate_peer_planning("/target", origin, local_id, provider)
+                    .unwrap();
+                let revision = target.revisions().unwrap();
+                target
+                    .associate_peer_planning("/target", origin, local_id, provider)
+                    .unwrap();
+                assert_eq!(target.revisions().unwrap(), revision);
+            }
+            import(&target, "/target", "second", snapshots[1]);
+            import(&target, "/target", "repeat", snapshots[1]);
+            assert_eq!(
+                target.task_by_issue(&task.id).unwrap().unwrap().id,
+                local.id
+            );
+            assert_eq!(
+                target.task_by_issue(local.id.as_str()).unwrap().unwrap().id,
+                local.id
+            );
+            assert_eq!(
+                target.project_by_project(&project.id).unwrap().unwrap().id,
+                local.project_id
+            );
+            assert_eq!(
+                target
+                    .project_by_project(local.project_id.as_str())
+                    .unwrap()
+                    .unwrap()
+                    .id,
+                local.project_id
+            );
+            assert_eq!(
+                target.resolve_task_id(&task.id, Some("/source")).unwrap(),
+                None
+            );
+            assert!(target.task(&incoming_task).unwrap().is_none());
+            assert!(target.project(&incoming_project).unwrap().is_none());
+            assert_eq!(target.planning_task(&local.id).unwrap(), retained_task);
+            assert_eq!(
+                target.planning_project(&local.project_id).unwrap(),
+                retained_project
+            );
+            assert_eq!(
+                target.pending_task_changes(&local.id).unwrap(),
+                task_receipts
+            );
+            assert_eq!(
+                target.pending_project_changes(&local.project_id).unwrap(),
+                project_receipts
+            );
+            assert_eq!(execution_rows(&target), execution);
+            let retained =
+                super::export_in(&target.conn.lock().unwrap(), "/target", &destination()).unwrap();
+            assert_eq!(retained, later);
+            assert!(!export(&target, "/target")
+                .objects()
+                .iter()
+                .any(|o| o == &&task
+                    || o == &&project
+                    || o.id == local.id.as_str()
+                    || o.id == local.project_id.as_str()));
+            let status = target.peer_planning_status("/target").unwrap();
+            assert!(status
+                .iter()
+                .flat_map(|d| &d.conflicts)
+                .any(|c| c.object == task && c.reason.contains("joint planning projection")));
+            // Further local saves remain possible; correspondence grants no effect.
+            edit_title(&target, &local.id, "Next private save");
+            let pending = target.pending_task_changes(&local.id).unwrap();
+            let next = pending.iter().find(|c| c.id != task_change.id).unwrap();
+            assert!(target
+                .attempt_planning_field(PlanningChanges::Task(&local.id), next, None)
+                .is_err());
         }
     }
 

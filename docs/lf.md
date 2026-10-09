@@ -234,6 +234,16 @@ lf planning select <destination-id> --wave <wave-uuid>
 lf planning status --json
 ```
 
+For retained duplicate provider identities, associate exact full IDs locally:
+
+```bash
+lf planning associate <incoming-work-id> --with <local-work-id> --linear <provider-id>
+```
+
+Both IDs remain intact. The incoming full ID resolves to existing local Work;
+no execution or private history moves. **Joint planning projection is unfinished:**
+association retains sharing/effect holds visible in status, not convergence.
+
 Setup is local: these commands neither fetch nor publish planning. In local-only
 repositories, interactive and headless sessions exchange selected planning, even
 without a Task. Desktop's work connection does the same. Task saves and Project

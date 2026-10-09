@@ -7318,6 +7318,104 @@ mod tests {
     }
 
     #[test]
+    fn correspondence_lookup_keeps_one_snapshot_during_mapping_changes() {
+        use std::cell::RefCell;
+
+        use rusqlite::trace::{TraceEvent, TraceEventCodes};
+
+        use crate::engine::planning_exchange::{PlanningKind, PlanningObject};
+
+        thread_local! {
+            static WRITER: RefCell<Option<rusqlite::Connection>> = const { RefCell::new(None) };
+        }
+        fn change_mapping(event: TraceEvent<'_>) {
+            if matches!(event, TraceEvent::Stmt(_, sql) if sql.contains("FROM planning_associations a JOIN"))
+            {
+                if let Some(writer) = WRITER.with_borrow_mut(Option::take) {
+                    writer
+                        .execute_batch(
+                            "UPDATE tasks SET external_issue_id=NULL;
+                         UPDATE projects SET external_project_id=NULL;",
+                        )
+                        .unwrap();
+                }
+            }
+        }
+
+        let (_source_home, source) = store();
+        let (_, row, incoming_task) = linear_seed(&source);
+        let incoming_project = source.task(&incoming_task).unwrap().unwrap().project_id;
+        let journal = export(&source, "/source");
+        for project in [false, true] {
+            let (home, target) = store();
+            let (_, _, local_task) = linear_seed(&target);
+            let local_project = target.task(&local_task).unwrap().unwrap().project_id;
+            import(&target, "/source", "fixture", &journal);
+            let (origin, local, provider) = if project {
+                (
+                    PlanningObject {
+                        kind: PlanningKind::Project,
+                        id: incoming_project.to_string(),
+                    },
+                    local_project.as_str(),
+                    row.snapshot.projects[0].id.as_str(),
+                )
+            } else {
+                (
+                    PlanningObject {
+                        kind: PlanningKind::Task,
+                        id: incoming_task.to_string(),
+                    },
+                    local_task.as_str(),
+                    row.snapshot.items[0].id.as_str(),
+                )
+            };
+            target
+                .associate_peer_planning("/source", &origin, local, provider)
+                .unwrap();
+            let read = || {
+                if project {
+                    serde_json::to_value(target.project_by_project(&origin.id).unwrap()).unwrap()
+                } else {
+                    serde_json::to_value(target.task_by_issue(&origin.id).unwrap()).unwrap()
+                }
+            };
+            let before = read();
+            assert!(!before.is_null());
+            // Commit on another real WAL connection between physical lookup and
+            // correspondence resolution. No timing sleeps or production hook.
+            WRITER.with_borrow_mut(|writer| {
+                *writer = Some(rusqlite::Connection::open(home.path().join("store.db")).unwrap());
+            });
+            target
+                .conn
+                .lock()
+                .unwrap()
+                .trace_v2(TraceEventCodes::SQLITE_TRACE_STMT, Some(change_mapping));
+            assert_eq!(read(), before, "lookup must return one complete snapshot");
+            assert!(WRITER.with_borrow(Option::is_none));
+            assert!(
+                read().is_null(),
+                "the next lookup must recheck the changed mapping"
+            );
+            assert!(target
+                .task(&local_task)
+                .unwrap()
+                .unwrap()
+                .plan
+                .linear_id
+                .is_none());
+            assert!(target
+                .project(&local_project)
+                .unwrap()
+                .unwrap()
+                .plan
+                .linear_id
+                .is_none());
+        }
+    }
+
+    #[test]
     fn explicit_correspondence_resolves_local_work_but_retains_projection_holds() {
         use super::super::planning_changes::PlanningChanges;
         use crate::engine::planning_exchange::{PlanningKind, PlanningObject};

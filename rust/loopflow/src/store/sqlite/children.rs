@@ -286,8 +286,10 @@ impl SqliteStore {
     }
 
     pub fn task_by_issue(&self, issue: &str) -> StoreResult<Option<Task>> {
-        match self.resolve_task_id(issue, None)? {
-            Some(id) => self.task(&id),
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let snapshot = conn.unchecked_transaction()?;
+        match resolve_task_id_in(&snapshot, issue, None)? {
+            Some(id) => task_on(&snapshot, &id),
             None => Ok(None),
         }
     }
@@ -298,49 +300,9 @@ impl SqliteStore {
         issue: &str,
         repo: Option<&str>,
     ) -> StoreResult<Option<TaskId>> {
-        let prefix = issue
-            .strip_prefix("lf-")
-            .or_else(|| issue.strip_prefix("task_"))
-            .unwrap_or(issue);
-        let local_prefix = ((4..=32).contains(&prefix.len())
-            && prefix.bytes().all(|byte| byte.is_ascii_hexdigit()))
-        .then(|| prefix.to_ascii_lowercase());
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(
-            "SELECT t.id, COALESCE(t.issue_title, t.issue_identifier, t.id) FROM tasks t
-             LEFT JOIN projects p ON p.id=t.project_id LEFT JOIN waves w ON w.id=p.wave_id
-             WHERE (t.id=?1 OR t.external_issue_id=?1 OR t.issue_identifier=?1
-                OR substr(lower(t.id), 6, length(?2))=?2) AND (?3 IS NULL OR w.repo=?3)
-             ORDER BY t.id",
-        )?;
-        let mut tasks = statement
-            .query_map(params![issue, local_prefix, repo], |row| {
-                Ok((
-                    TaskId::from_raw(row.get::<_, String>(0)?),
-                    row.get::<_, String>(1)?,
-                ))
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        if tasks.len() > 1 {
-            let candidates = tasks
-                .iter()
-                .map(|(id, title)| format!("  {id} ({title})"))
-                .collect::<Vec<_>>()
-                .join("\n");
-            return Err(StoreError::InvalidData(format!(
-                "multiple stable Tasks resolve to {issue:?}; use a longer Task ID:\n{candidates}"
-            )));
-        }
-        if let Some((id, _)) = tasks.pop() {
-            return Ok(Some(id));
-        }
-        super::planning_peers::associated_local_id(
-            &conn,
-            crate::engine::planning_exchange::PlanningKind::Task,
-            issue,
-            repo,
-        )
-        .map(|id| id.map(TaskId::from_raw))
+        let snapshot = conn.unchecked_transaction()?;
+        resolve_task_id_in(&snapshot, issue, repo)
     }
 
     pub fn task_by_branch(&self, branch: &str) -> StoreResult<Option<Task>> {
@@ -879,39 +841,35 @@ impl SqliteStore {
 
     pub fn project(&self, project_id: &ProjectId) -> StoreResult<Option<Project>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.query_row(
-            PROJECT_SELECT,
-            params![project_id.as_str()],
-            map_project_row,
-        )
-        .optional()
-        .map_err(StoreError::from)
+        project_on(&conn, project_id)
     }
 
     pub fn project_by_project(&self, project: &str) -> StoreResult<Option<Project>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let snapshot = conn.unchecked_transaction()?;
         if let Ok(project_id) = ProjectId::parse(project) {
-            if let Some(project) = self.project(&project_id)? {
+            if let Some(project) = project_on(&snapshot, &project_id)? {
                 return Ok(Some(project));
             }
             let local = super::planning_peers::associated_local_id(
-                &self.conn.lock().expect("store mutex poisoned"),
+                &snapshot,
                 crate::engine::planning_exchange::PlanningKind::Project,
                 project,
                 None,
             )?;
             return match local {
-                Some(id) => self.project(&ProjectId::from_raw(id)),
+                Some(id) => project_on(&snapshot, &ProjectId::from_raw(id)),
                 None => Ok(None),
             };
         }
-        let conn = self.conn.lock().expect("store mutex poisoned");
         let query = format!(
             "{PROJECT_COLUMNS}
              WHERE external_project_id=?1 OR project_slug=?1
              ORDER BY (external_project_id=?1) DESC, created_at DESC, id DESC
              LIMIT 1"
         );
-        conn.query_row(&query, params![project], map_project_row)
+        snapshot
+            .query_row(&query, params![project], map_project_row)
             .optional()
             .map_err(StoreError::from)
     }
@@ -1494,6 +1452,63 @@ fn task_pr_github_observation_json(pr: &TaskPr) -> StoreResult<Option<String>> {
         .as_ref()
         .map(serde_json::to_string)
         .transpose()
+        .map_err(StoreError::from)
+}
+
+// Keep physical lookup, correspondence validation and record hydration in the
+// caller's read snapshot. A concurrent mapping change cannot mix generations.
+fn resolve_task_id_in(
+    conn: &Connection,
+    issue: &str,
+    repo: Option<&str>,
+) -> StoreResult<Option<TaskId>> {
+    let prefix = issue
+        .strip_prefix("lf-")
+        .or_else(|| issue.strip_prefix("task_"))
+        .unwrap_or(issue);
+    let local_prefix = ((4..=32).contains(&prefix.len())
+        && prefix.bytes().all(|byte| byte.is_ascii_hexdigit()))
+    .then(|| prefix.to_ascii_lowercase());
+    let mut statement = conn.prepare(
+        "SELECT t.id, COALESCE(t.issue_title, t.issue_identifier, t.id) FROM tasks t
+         LEFT JOIN projects p ON p.id=t.project_id LEFT JOIN waves w ON w.id=p.wave_id
+         WHERE (t.id=?1 OR t.external_issue_id=?1 OR t.issue_identifier=?1
+            OR substr(lower(t.id), 6, length(?2))=?2) AND (?3 IS NULL OR w.repo=?3)
+         ORDER BY t.id",
+    )?;
+    let mut tasks = statement
+        .query_map(params![issue, local_prefix, repo], |row| {
+            Ok((
+                TaskId::from_raw(row.get::<_, String>(0)?),
+                row.get::<_, String>(1)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    if tasks.len() > 1 {
+        let candidates = tasks
+            .iter()
+            .map(|(id, title)| format!("  {id} ({title})"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        return Err(StoreError::InvalidData(format!(
+            "multiple stable Tasks resolve to {issue:?}; use a longer Task ID:\n{candidates}"
+        )));
+    }
+    if let Some((id, _)) = tasks.pop() {
+        return Ok(Some(id));
+    }
+    super::planning_peers::associated_local_id(
+        conn,
+        crate::engine::planning_exchange::PlanningKind::Task,
+        issue,
+        repo,
+    )
+    .map(|id| id.map(TaskId::from_raw))
+}
+
+fn project_on(conn: &Connection, project_id: &ProjectId) -> StoreResult<Option<Project>> {
+    conn.query_row(PROJECT_SELECT, [project_id.as_str()], map_project_row)
+        .optional()
         .map_err(StoreError::from)
 }
 

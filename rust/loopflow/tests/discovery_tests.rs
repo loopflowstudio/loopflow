@@ -15,6 +15,7 @@ static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 struct HomeGuard {
     _lock: std::sync::MutexGuard<'static, ()>,
     previous_home: Option<String>,
+    provider_homes: Vec<(&'static str, Option<std::ffi::OsString>)>,
     _temp: TempDir,
 }
 
@@ -27,7 +28,16 @@ impl HomeGuard {
         let temp = TempDir::new().expect("temp home");
         let previous_home = env::var("HOME").ok();
         env::set_var("HOME", temp.path());
+        let provider_homes = ["CODEX_HOME", "CLAUDE_CONFIG_DIR"]
+            .into_iter()
+            .map(|name| {
+                let previous = env::var_os(name);
+                env::remove_var(name);
+                (name, previous)
+            })
+            .collect();
         Self {
+            provider_homes,
             _lock: lock,
             previous_home,
             _temp: temp,
@@ -37,6 +47,12 @@ impl HomeGuard {
 
 impl Drop for HomeGuard {
     fn drop(&mut self) {
+        for (name, previous) in &self.provider_homes {
+            match previous {
+                Some(value) => env::set_var(name, value),
+                None => env::remove_var(name),
+            }
+        }
         if let Some(prev) = &self.previous_home {
             env::set_var("HOME", prev);
         } else {
@@ -147,11 +163,11 @@ fn discover_namespaced_flows_with_slash_names_and_authored_branch_summaries() {
         loopflow::lf::commands::list::list_children(&["flow".to_string()], repo.path()).unwrap();
     let flow = flows
         .iter()
-        .find(|f| f.name == "gstack-sprint")
+        .find(|f| f.name == "gstack/sprint")
         .expect("flow");
     assert_eq!(
         flow.description,
-        "gstack-office-hours → xor[gstack-office-hours]{autoplan: gstack-autoplan | manual: gstack-plan-manual} → implement → gstack-pr-review"
+        "gstack/office-hours → xor[gstack/office-hours]{autoplan: gstack/autoplan | manual: gstack/plan-manual} → implement → gstack/pr-review"
     );
 }
 

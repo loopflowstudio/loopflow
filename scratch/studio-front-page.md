@@ -322,3 +322,8 @@ page drawn as a Loopflow window whose goal is the rotating headline, his
 paragraph under it, "You need", the eight `x4` items as its tasks, download;
 then the real capture and a three-item plain list. The "ship to users" line is
 out of `x5`; it is still the headline on the real `/`.
+
+Jack Heart: "i like the way the ticker is now skills/flows". The `x5` ticker
+now cycles four built-in names in the order a Task meets them: `design`,
+`implement`, `demo` (Skills) and `ship` (a Flow). "build" and "review" were
+not names of anything.

@@ -132,11 +132,13 @@ readers and suppresses fallback Process writes. Parsed transport retains scoped 
 Checkpoint both stores: an effect-free receiver cannot undo a sender's write.
 Two-CLI fixtures cover routing/Flow previews, not configured SSH or exclusive start.
 
-Identity is not action validation. Previews share validators; writes revalidate. Refile reads Wave/Project/placement without locks; resolve destination
-IDs before initialization. Save shares pinned-path/revision/draft checks, never
-recovery writes. Creation stays unplaced; provenance follows selection. Refresh
-stays in execution; initialization/authorship unavailable. Checkout/abandon/delete/
-interrupt remain identity-only. No Session endpoint probes, takeover or end-intent completion/cleanup. Native proof remains.
+Identity is not action validation. Shared validators recheck writes; `--context`
+rejects non-agent commands before stdin. Refile resolves IDs before initialization;
+preview never locks. Save shares pinned-path/revision/draft checks, not recovery
+writes. Creation stays unplaced; provenance follows selection. Refresh stays in
+execution; initialization/authorship remain unavailable. Checkout/abandon/delete/
+interrupt remain identity-only. No Session endpoint probes, takeover or end-intent
+completion/cleanup. Native proof remains.
 
 ## Terminal-host adoption (2026-10-07)
 

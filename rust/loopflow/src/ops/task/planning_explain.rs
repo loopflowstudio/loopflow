@@ -229,11 +229,6 @@ async fn read_planning(
             content,
         } => {
             let task = read_saved_task(store, cwd, selection.wave, &report.resolution).await?;
-            report.action = Some(TaskPlanningAction::Save {
-                path: (*path).into(),
-                revision: (*revision).into(),
-                draft_bytes: content.len(),
-            });
             let validation =
                 super::file_context(&store.sqlite, task.id.as_str()).and_then(|checkout| {
                     super::file_save::validate_save(
@@ -243,16 +238,18 @@ async fn read_planning(
                         content,
                     )
                 });
-            match validation {
-                Ok(path) => {
-                    if let Some(TaskPlanningAction::Save { path: selected, .. }) =
-                        &mut report.action
-                    {
-                        *selected = path;
-                    }
+            let path = match validation {
+                Ok(path) => path,
+                Err(error) => {
+                    report.impediments.push(error.to_string());
+                    (*path).into()
                 }
-                Err(error) => report.impediments.push(error.to_string()),
-            }
+            };
+            report.action = Some(TaskPlanningAction::Save {
+                path,
+                revision: (*revision).into(),
+                draft_bytes: content.len(),
+            });
             report.effects.push("Retain the submitted draft, receipt and displaced file under Git metadata, then atomically exchange the file. Planning and execution stay unchanged".into());
             report.unavailable.push("File permissions at publication and concurrent filesystem changes are not reserved; execution revalidates before exchange".into());
         }

@@ -74,16 +74,15 @@ and DTO/headless checks are not mounted-surface or complete-path acceptance.
 
 ## Scoped dispatch and preview — October 9
 
-Repository validation had discarded its resolved ID, and command dispatch reparsed
-raw argv, losing any correction. Both paths are replaced by carrying the selected
-ID. The launch and explanation readers now share checkout-before-declaration
-selection. Preview also exposed two hidden writes: opening an “existing” store can
-migrate it, and bounding input wrote full-source files. Preview uses the shared
-read-only registry; prompt assembly returns complete sources for launch to persist.
-Fake-provider parity proves neither real-provider nor remote behavior.
-Bound-snapshot failures required registering the canonical Wave, not a production
-workaround. `e3d5d46df` shares Task selection before dispatch; generic explanations
-still do not validate mutation arguments. The plan owns coverage.
+`42a6cb7f7:scratch/findings.md`, this heading, retains discarded-ID/reparsed-argv
+findings, migration/excerpt writes and canonical-Wave fixture repairs. Shared
+selection, read-only storage and launch-only excerpt persistence survive.
+Compression centralizes non-agent `--context` rejection before stdin, replacing
+per-action checks; invalid UTF-8 input exercises that boundary. Save constructs
+one action after validation, preserving normalized paths and refused input.
+The focused check exposed a stale expectation that Flow context must fail; deleted
+it because Flow preview is implemented (failure: `/tmp/loo427-compress-checks.log`).
+Generic action gaps and provider/remote proof limits remain in the plan.
 
 ## Composed-opening review — October 9
 

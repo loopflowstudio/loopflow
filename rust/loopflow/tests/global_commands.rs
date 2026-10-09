@@ -859,7 +859,6 @@ fn invocation_previews_preserve_absent_storage_and_reject_unsupported_commands()
     assert!(!home.path().join(".lf").exists());
     for args in [
         vec!["--context", "task", "create", "--title", "Never created"],
-        vec!["--context", "flow", "pursue"],
         vec!["--explain", "skill", ":"],
         vec!["--explain", "commit", "-m", "Never committed"],
         vec![
@@ -873,6 +872,32 @@ fn invocation_previews_preserve_absent_storage_and_reject_unsupported_commands()
     ] {
         let result = command(home.path(), repo.path(), &args).output().unwrap();
         assert!(!result.status.success(), "{args:?}");
+    }
+    assert!(!home.path().join(".lf").exists());
+    assert!(!repo.path().join(".lf/tmp").exists());
+}
+
+#[test]
+fn non_agent_context_previews_reject_before_reading_stdin() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    let input = tempfile::NamedTempFile::new().unwrap();
+    fs::write(input.path(), [0xff]).unwrap();
+    for args in [
+        vec!["task", "create", "--title", "Never created"],
+        vec!["task", "save", "unknown", "note.md", "--revision", "old"],
+        vec!["task", "run", "unknown"],
+        vec!["desktop", "open"],
+        vec!["session", "connect", "unknown"],
+    ] {
+        let output = command(home.path(), repo.path(), &args)
+            .arg("--context")
+            .stdin(fs::File::open(input.path()).unwrap())
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "{args:?}");
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(error.contains("--context requires"), "{args:?}: {error}");
     }
     assert!(!home.path().join(".lf").exists());
     assert!(!repo.path().join(".lf/tmp").exists());
@@ -2720,7 +2745,7 @@ fn task_planning_explain_save_validates_draft_without_changing_files_or_storage(
         )
     };
     let report: serde_json::Value =
-        serde_json::from_str(&read("note.md", revision, "New 🦀\r\n", true)).unwrap();
+        serde_json::from_str(&read("./note.md", revision, "New 🦀\r\n", true)).unwrap();
     assert_eq!(
         report["resolution"]["task"]["value"],
         registered.task.id.as_str()

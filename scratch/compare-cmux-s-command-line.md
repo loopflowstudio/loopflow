@@ -242,9 +242,10 @@ Task lookup plus `read_local_execution` wrapper for run/move explanations. It
 retains unavailable location and remote refusals before reading Workflow intent;
 no preparation or admission is added.
 
-Create/edit/comment share input/scope/store validators; transaction-time checks
-survive. Creation parses once and derives provenance from resolved selection, not
-empty declarations. Refile/save replace identity-only previews: the store owns
+Preview classifies agent input once, before stdin; per-action `--context` guards
+are deleted. Save constructs its action once from the validated path or refused
+input. Shared validators and transaction-time checks survive. Creation provenance
+follows resolved selection. Refile/save replace identity-only previews: the store owns
 refile validation in both read snapshots and write transactions; file-save owns
 read-only pinned preparation and effectful exchange. Delete the name-only refile
 initialization before durable-ID resolution. No preview acquires locks or writes.
@@ -533,4 +534,4 @@ identity/delegation, open them, add shell/Files panes, retain an unfinished draf
 change focus, target a harmless command, read output, hide/restore, and verify the
 original input target and draft survive. Demo owns native usability; preserve comparison evidence and use no real accounts or live user terminals.
 
-Check: build/fmt/Clippy PASS; isolated `global_commands task_planning_explain_{refile,save}`, `task_files_save`, Rust/Swift planning DTO filters PASS (7 tests); full suites/installation: gate/CI; native: demo.
+Check: `cargo build -p loopflow --bin lf`, fmt, Clippy and isolated `global_commands {previews_,task_planning_explain_}` / `context_launch_tests flow_context_preview_` PASS (10 tests); broader suites: gate/CI; native: demo.

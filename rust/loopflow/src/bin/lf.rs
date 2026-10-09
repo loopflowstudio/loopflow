@@ -1712,6 +1712,14 @@ fn run() -> anyhow::Result<()> {
 /// Preview stops before process admission, installation dispatch, Work preparation,
 /// automatic routing or provider discovery. Unsupported shapes never fall through.
 fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
+    let invocation = definition_invocation(cli)?;
+    let message = match &cli.command {
+        Some(Commands::Inline { prompt }) => Some(prompt.join(" ")),
+        _ => None,
+    };
+    // Reject non-agent context previews before any branch can consume stdin.
+    anyhow::ensure!(!cli.context || invocation.is_some() || message.is_some(),
+        "--context requires a skill, Flow or inline agent request; use --explain to inspect Work without launch");
     let _cwd = cli
         .wt
         .as_deref()
@@ -1748,10 +1756,6 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
         cmd: loopflow::lf::DesktopCommand::Open { session, diff, .. },
     }) = &cli.command
     {
-        anyhow::ensure!(
-            !cli.context,
-            "--context requires an agent invocation; nothing was executed"
-        );
         let report = loopflow::lf::commands::desktop::explain_open(cli, session.as_deref(), *diff);
         if json {
             println!("{}", serde_json::to_string_pretty(&report)?);
@@ -1773,10 +1777,6 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
             },
     }) = &cli.command
     {
-        anyhow::ensure!(
-            !cli.context,
-            "--context requires a skill, Flow or inline agent request; nothing was executed"
-        );
         let report = loopflow::lf::commands::context::explain_task_run(
             task,
             &loopflow::ops::task::TaskProcessOptions {
@@ -1805,10 +1805,6 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
                 title, notes, wave, ..
             },
         }) => {
-            anyhow::ensure!(
-                !cli.context,
-                "--context requires an agent invocation; nothing was executed"
-            );
             piped_notes = if notes.is_none() {
                 piped_task_report()?
             } else {
@@ -1863,10 +1859,6 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
         Some(Commands::Task {
             cmd: TaskCommand::Save { path, revision, .. },
         }) => {
-            anyhow::ensure!(
-                !cli.context,
-                "--context requires an agent invocation; nothing was executed"
-            );
             file_draft = read_task_draft()?;
             Some((
                 cli.wave.as_deref(),
@@ -1880,10 +1872,6 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
         _ => None,
     };
     if let Some((wave, request)) = planning {
-        anyhow::ensure!(
-            !cli.context,
-            "--context requires an agent invocation; nothing was executed"
-        );
         let report = loopflow::lf::commands::context::explain_task_planning(task, wave, &request)?;
         if json {
             println!("{}", serde_json::to_string_pretty(&report)?);
@@ -1911,10 +1899,6 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
         _ => None,
     };
     if let Some((task, node, reason, force)) = movement {
-        anyhow::ensure!(
-            !cli.context,
-            "--context requires an agent invocation; nothing was executed"
-        );
         let report = loopflow::lf::commands::context::explain_task_move(
             task,
             cli.wave.as_deref(),
@@ -1946,10 +1930,6 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
     };
     if let Some((id, replace, try_open, prepare_only)) = connection {
         anyhow::ensure!(
-            !cli.context,
-            "--context requires an agent invocation; nothing was executed"
-        );
-        anyhow::ensure!(
             cli.task.is_none() && cli.wave.is_none(),
             "select Work or a Session, not several independent targets"
         );
@@ -1968,24 +1948,17 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
     }
     let wave = cli.wave.as_deref();
     let mut process = None;
-    let invocation = definition_invocation(cli)?;
-    let mut message = None;
     match &cli.command {
-        Some(Commands::Task { .. }) | None => {}
+        Some(Commands::Task { .. } | Commands::Inline { .. }) | None => {}
         Some(Commands::History {
             cmd: Some(loopflow::lf::commands::history::HistoryCommand::Show { id, .. }),
             ..
         }) => process = Some(id.as_str()),
-        Some(Commands::Inline { prompt }) => {
-            message = Some(prompt.join(" "));
-        }
         _ if invocation.is_some() => {}
         _ => anyhow::bail!(
             "invocation preview is not supported for this command (nothing was executed)"
         ),
     }
-    anyhow::ensure!(!cli.context || invocation.is_some() || message.is_some(),
-        "--context requires a skill, Flow or inline agent request; use --explain to inspect Work without launch");
     let explanation = cli
         .explain
         .then(|| loopflow::lf::commands::context::explain(wave, task, None, process))

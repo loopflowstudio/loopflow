@@ -63,10 +63,7 @@ impl SqliteStore {
         // A membership save/deletion can race the read without changing the
         // provider observation. Never send an order across that local change.
         for id in &effect.before {
-            let available: bool = tx.query_row(
-                "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND project_id=?2 AND planning_deleted_at IS NULL)",
-                params![id, project.as_str()], |row| row.get(0))?;
-            if !available {
+            if project_membership(&tx, project, id)? != Some(true) {
                 return Ok(false);
             }
         }
@@ -114,7 +111,6 @@ pub(super) fn observed_order(
 }
 
 fn deliveries(conn: &Connection, project: &ProjectId) -> StoreResult<Vec<OrderDelivery>> {
-    let members = project_members(conn, project)?;
     let mut query = conn.prepare("SELECT id,value_json,json_extract(base_json,'$.value'),order_effects_json FROM project_changes
         WHERE project_id=?1 AND id IN (SELECT id FROM planning_order_deliveries) ORDER BY id")?;
     let rows = query.query_and_then([project.as_str()], |row| -> StoreResult<_> {
@@ -123,14 +119,9 @@ fn deliveries(conn: &Connection, project: &ProjectId) -> StoreResult<Vec<OrderDe
         let effects: String = row.get(3)?;
         let mut desired = Vec::new();
         for id in resolved_order(conn, &serde_json::from_str::<Vec<String>>(&value)?)? {
-            let known: bool = conn.query_row(
-                "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1)",
-                [&id],
-                |r| r.get(0),
-            )?;
             // An unprojected alias is not evidence of a removed member. Retain
             // it so delivery waits for correspondence rather than dropping it.
-            if members.contains(&id) || !known {
+            if project_membership(conn, project, &id)? != Some(false) {
                 desired.push(id);
             }
         }
@@ -232,12 +223,7 @@ pub(super) fn observe_in(
     let previous = observed_order(conn, &project)?;
     let pending = deliveries(conn, &project)?;
     for id in pending.iter().flat_map(|delivery| &delivery.desired) {
-        let known: bool = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1)",
-            [id],
-            |r| r.get(0),
-        )?;
-        if !known {
+        if project_membership(conn, &project, id)?.is_none() {
             return Ok(false);
         }
     }
@@ -250,8 +236,6 @@ pub(super) fn observe_in(
     }
     // A cold peer may have captured attempts but no local list inventory. Their
     // known members still prevent an empty/partial read from settling the move.
-    let mut membership = conn
-        .prepare("SELECT project_id=?2 AND planning_deleted_at IS NULL FROM tasks WHERE id=?1")?;
     let retained = retained_lists
         .into_iter()
         .flatten()
@@ -261,10 +245,7 @@ pub(super) fn observe_in(
         .iter()
         .filter(|id| !observed.contains(id))
     {
-        let retained: Option<bool> = membership
-            .query_row(params![id, project.as_str()], |row| row.get(0))
-            .optional()?;
-        if retained != Some(false) {
+        if project_membership(conn, &project, id)? != Some(false) {
             return Ok(false);
         }
     }
@@ -273,33 +254,39 @@ pub(super) fn observe_in(
         params![repo, provider, external, serde_json::to_string(&observed)?],
     )?;
     let observation = json!({"value":observed}).to_string();
-    for mut delivery in pending {
-        if let Some(last) = delivery.effects.last_mut() {
-            if !last.settled && same_projected_order(conn, &observed, &last.after)? {
-                last.settled = true;
-                // Every unattempted save against this baseline retains its value.
-                // Arrival sequence on another machine cannot order these intentions.
-                for later in deliveries(conn, &project)? {
-                    if later.effects.is_empty()
-                        && later
-                            .baseline
-                            .as_ref()
-                            .map(|base| same_projected_order(conn, base, &last.before))
-                            .transpose()?
-                            .unwrap_or(true)
-                    {
-                        conn.execute(
-                            "UPDATE project_changes SET base_json=?2 WHERE id=?1",
-                            params![later.id, observation],
-                        )?;
-                    }
-                }
+    let (attempted, mut unattempted): (Vec<_>, Vec<_>) = pending
+        .into_iter()
+        .partition(|delivery| !delivery.effects.is_empty());
+    for mut delivery in attempted {
+        let last = delivery
+            .effects
+            .last_mut()
+            .expect("attempted delivery has an effect");
+        if last.settled || !same_projected_order(conn, &observed, &last.after)? {
+            continue;
+        }
+        last.settled = true;
+        // Every unattempted save against this baseline retains its value.
+        // Arrival sequence on another machine cannot order these intentions.
+        for later in &mut unattempted {
+            if later
+                .baseline
+                .as_ref()
+                .map(|base| same_projected_order(conn, base, &last.before))
+                .transpose()?
+                .unwrap_or(true)
+            {
                 conn.execute(
-                    "UPDATE project_changes SET order_effects_json=?2,error=NULL WHERE id=?1",
-                    params![delivery.id, serde_json::to_string(&delivery.effects)?],
+                    "UPDATE project_changes SET base_json=?2 WHERE id=?1",
+                    params![later.id, observation],
                 )?;
+                later.baseline = Some(observed.clone());
             }
         }
+        conn.execute(
+            "UPDATE project_changes SET order_effects_json=?2,error=NULL WHERE id=?1",
+            params![delivery.id, serde_json::to_string(&delivery.effects)?],
+        )?;
     }
     for delivery in deliveries(conn, &project)? {
         let last = delivery.effects.last();
@@ -366,6 +353,21 @@ fn next_delivery(conn: &Connection, project: &ProjectId) -> StoreResult<Option<O
     Ok(deliveries(conn, project)?
         .into_iter()
         .min_by_key(|delivery| delivery.effects.last().is_none_or(|effect| effect.settled)))
+}
+
+// None is an unresolved identity, not a confirmed membership removal. Callers
+// require positive membership before effects and retain unknowns during readback.
+fn project_membership(
+    conn: &Connection,
+    project: &ProjectId,
+    task: &str,
+) -> StoreResult<Option<bool>> {
+    conn.prepare_cached(
+        "SELECT project_id=?2 AND planning_deleted_at IS NULL FROM tasks WHERE id=?1",
+    )?
+    .query_row(params![task, project.as_str()], |row| row.get(0))
+    .optional()
+    .map_err(Into::into)
 }
 
 fn project_members(conn: &Connection, project: &ProjectId) -> StoreResult<Vec<String>> {

@@ -32,6 +32,15 @@ final class SessionsWorkspace {
         multiplexer.setCollapsed(paneId: paneId, collapsed: collapsed)
     }
 
+    /// One mapping for retained pane observation; never follows focus or allocates a surface.
+    func terminal(for pane: PaneState) -> TerminalIdentity? {
+        switch pane.content {
+        case .shell: .shell(pane.id, machineId: identity.machineId)
+        case .session(let id): .session(id, machineId: identity.machineId)
+        case .empty, .files, .flowLog: nil
+        }
+    }
+
     let identity: WorkspaceIdentity
     let multiplexer = MultiplexerStore()
     let hover = PaneHover()
@@ -116,13 +125,7 @@ final class SessionsWorkspaceRegistry {
             let panes = workspace.multiplexer
             return DesktopWorkspaceInspection(machineId: identity.machineId, worktree: identity.worktree,
                 layout: DesktopLayoutInspection(panes.layout) { pane in
-                    let terminal: TerminalIdentity
-                    switch pane.content {
-                    case .shell: terminal = .shell(pane.id, machineId: identity.machineId)
-                    case .session(let id): terminal = .session(id, machineId: identity.machineId)
-                    case .empty, .files, .flowLog: return nil
-                    }
-                    return surfaces.surfaceIncarnation(for: terminal)
+                    workspace.terminal(for: pane).flatMap { surfaces.surfaceIncarnation(for: $0) }
                 }, focusedPane: panes.focusedPaneId,
                 zoomedPane: panes.zoomedPaneId, hiddenPanes: panes.collapsedPaneIds.sorted())
         }
@@ -132,12 +135,9 @@ final class SessionsWorkspaceRegistry {
         let (workspace, pane) = try retainedPane(for: request.target)
         let store = workspace.multiplexer
         let result: DesktopTextResult
-        switch pane.content {
-        case .shell:
-            result = try surfaces.readText(request, terminal: .shell(pane.id, machineId: request.target.machineId))
-        case .session(let id):
-            result = try surfaces.readText(request, terminal: .session(id, machineId: request.target.machineId))
-        case .empty, .files, .flowLog:
+        if let terminal = workspace.terminal(for: pane) {
+            result = try surfaces.readText(request, terminal: terminal)
+        } else {
             result = .unavailable(reason: .notTerminal)
         }
         return DesktopTextReading(request: request, observedAt: Int64(Date().timeIntervalSince1970),
@@ -973,12 +973,7 @@ struct SessionsContentView: View {
     }
 
     private var focusedProgramStatusSurface: ProgramStatusSurface? {
-        let pane = multiplexer.focusedPane
-        switch pane.content {
-        case .session(let id): return store.surfaces.programStatus(for: .session(id, machineId: workspace.identity.machineId))
-        case .shell: return store.surfaces.programStatus(for: .shell(pane.id, machineId: workspace.identity.machineId))
-        case .empty, .flowLog, .files: return nil
-        }
+        workspace.terminal(for: multiplexer.focusedPane).flatMap { store.surfaces.programStatus(for: $0) }
     }
 
     private var focusedProgramStatus: ProgramStatusRecords? {

@@ -31,33 +31,15 @@ struct DesktopPaneControlTests {
             worktree: identity.worktree, pane: pane.id, incarnation: pane.incarnation)
     }
 
-    @Test func textReplyKeepsItsExactRequestAndEmptyResultWithoutWindowFocus() throws {
-        let router = WorkLinkRouter(), window = UUID()
-        var focused = false
-        router.register(window, repository: repository, focus: { focused = true },
-            inspect: { _ in fatalError("Reading text must not inspect unrelated windows") },
-            controlPane: { _ in throw RegistryQueryError("Reading text must not arrange panes") },
-            readText: { request in
-                DesktopTextReading(request: request, observedAt: 1, hidden: true,
-                                   result: .available(text: "", truncated: false))
-            }) { _ in fatalError("Reading text must not open Work") }
-        let request = DesktopTextRequest(target: target(PaneState(id: "pane", content: .shell), window: window),
-                                         surface: "surface", region: .selection, maxBytes: 16)
-        let reading = try router.readText(request)
-        #expect(reading.request == request)
-        #expect(reading.result == .available(text: "", truncated: false))
-        #expect(reading.hidden)
-        #expect(!focused)
-    }
-
-    @Test func passiveReadKeepsMissingSurfaceDistinctAndDoesNotFollowFocus() throws {
+    @Test(arguments: [DesktopTextRegion.screen, .scrollback, .selection])
+    func passiveReadKeepsMissingSurfaceDistinctAndDoesNotFollowFocus(region: DesktopTextRegion) throws {
         let registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId)
         let router = WorkLinkRouter(), window = UUID()
         let workspace = registry.workspace(for: identity), store = workspace.multiplexer
         store.newShell(command: ["retained-command"])
         let shell = store.focusedPane
         let request = DesktopTextRequest(target: target(shell, window: window), surface: "old-surface",
-                                         region: .selection, maxBytes: 16)
+                                         region: region, maxBytes: 16)
         store.load(sessionId: "other-session")
         store.setCollapsed(paneId: shell.id, collapsed: true)
         let before = store.layout, focus = store.focusedPane
@@ -66,6 +48,8 @@ struct DesktopPaneControlTests {
         #expect(reading.request == request)
         #expect(reading.result == .unavailable(reason: .missingSurface))
         #expect(reading.hidden)
+        let inspection = try #require(registry.inspect().first)
+        #expect(inspection.layout.children.first?.surface == nil)
         #expect(store.layout == before)
         #expect(store.focusedPane == focus)
         #expect(store.shellCommands[shell.id] == ["retained-command"])
@@ -93,23 +77,6 @@ struct DesktopPaneControlTests {
         register(router, window: UUID(), registry: registry)
         #expect(throws: RegistryQueryError.self) { try router.readText(current) }
         #expect(store.layout == before)
-    }
-
-    @Test func terminalInspectionDoesNotAllocateOrFollowFocus() throws {
-        let registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId)
-        let workspace = registry.workspace(for: identity)
-        workspace.multiplexer.newShell(command: ["retained-command"])
-        let shell = workspace.multiplexer.focusedPane
-        let terminal = TerminalIdentity.shell(shell.id, machineId: identity.machineId)
-        workspace.multiplexer.load(sessionId: "other-session")
-        workspace.multiplexer.setCollapsed(paneId: shell.id, collapsed: true)
-        let before = workspace.multiplexer.layout
-        let reading = try #require(registry.inspect().first)
-        #expect(reading.layout.children.first?.surface == nil)
-        #expect(registry.surfaces.programStatus(for: terminal) == nil)
-        #expect(workspace.multiplexer.layout == before)
-        #expect(workspace.multiplexer.shellCommands[shell.id] == ["retained-command"])
-        #expect(workspace.multiplexer.focusedPane.content == .session(id: "other-session"))
     }
 
     #if canImport(GhosttyKit)

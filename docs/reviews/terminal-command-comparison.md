@@ -47,44 +47,26 @@ installed help or reviewed Desktop code, not proof that no external tool exists.
   one saved repository; it does not establish cross-machine correspondence or
   route arbitrary repository locations. Earlier installed spellings below remain
   baseline evidence.
-- **October 8 source delta (`b64924447`):** `lf context --explain` now shares
-  recorded-checkout resolution with launch/status/PR reads; `lf desktop inspect`
-  projects registered plan-keyed windows and retained layouts without focus or
-  client acquisition. Cancellation-safe per-plan queues replace the single link.
-  Headless router smoke and Ghostty-disabled typechecking are recorded, not native
-  convergence or usable Session/diff proof. Rust/configured SwiftPM remain
-  unverified. The command tables preserve October 7's baseline and judgments;
-  these two read surfaces are now partial implementations of their **want** rows.
-  The later `a629e512a` cut forwards Task run control and Session actions with
-  independent reading availability and retained Task dates; Session observation
-  time remains unavailable. Complete legal actions/freshness, composed opening,
-  remaining pane control and terminal I/O remain unfinished. `940e0e078` adds
-  exact-target hide/restore through retained panes, without closing clients;
-  Undo cannot revive an old content target. Native/composed proof remains absent.
-  `d9fa2b829` adds exact-target focus, empty split, move, resize and explicit zoom;
-  `df3e43fb3` shares retained-pane pruning and reveal-through-focus. Move keeps
-  the original leaf; zoom does not select it. Direct model smoke/typechecking
-  passed, but packaged test attempts timed out without results. The companion cut
-  adds local Shell and Task Files/Flow-log through the same exact-target path,
-  retaining selection and drafts and reusing existing Task companions.
-  `caa48b5c1` shares pane insertion and publishes command/focus/Undo together;
-  isolated production smoke passed, packaged execution still timed out.
-  `13cf98bf5` qualifies terminal/Session-reading keys by Machine and exposes an
-  existing native surface lifetime without allocation or exit cleanup; `6fec74d2d`
-  removes dormant Session-list cleanup. Membership moves prune panes/Undo without
-  releasing surfaces or touching another Machine's same-ID Session. Focused fixtures
-  typecheck; native exited/replaced-surface reads remain unproved. `3321ff419` adds
-  a local Ghostty patch for caller-bounded extraction. `d30198ccb` records Linux
-  formatter tests and embedded C compilation/export, not native surface reads.
-  The framework remains unbuilt/unpublished;
-  packaged lf2 still allocates the full result. Swift truncation is no fallback.
-  The exact-target `desktop read` request now reaches passive surface validation,
-  without allocating or cleaning up on exit. Missing surfaces differ from empty
-  text in the wire contract; stale windows/content/surfaces reject the request.
-  Existing surfaces report `bounded_reader_unavailable` until artifact composition;
-  native extraction/input, peer composition and native acceptance remain unfinished.
-  The command tables still describe October 7's baseline.
-  No cmux/herdr behavior was re-exercised for these deltas.
+- **October 8 source delta (through `a342d6870`):** context explanation shares
+  recorded-checkout resolution; Desktop inspection reads plan-keyed windows,
+  cancellation-safe queues and retained layouts. Task control and Session actions
+  keep independent availability and Task dates; Session observation time stays
+  unavailable. Exact-target focus, split, move, resize, zoom, hide/restore and local
+  Shell/Files/Flow-log companions reuse the retained owners. Move preserves the
+  leaf; zoom grants no focus; Undo renews closed content tokens. Pane insertion
+  publishes command/focus/Undo together. Machine-qualified terminal and Session
+  reading keys keep same-ID peers separate; membership pruning releases no surface.
+  `desktop read` validates pane and native surface incarnations without allocation
+  or exit cleanup. Missing differs from empty; existing surfaces explicitly report
+  `bounded_reader_unavailable` under pinned lf2. The bounded Ghostty patch passed
+  Linux formatter checks and embedded C compilation/export, not native extraction.
+  The framework remains unbuilt/unpublished; Swift truncation is no fallback.
+  Direct model smoke/typechecking passed; packaged attempts timed out without
+  results. Native extraction/input, peer composition, complete opening and native
+  acceptance remain unfinished. Detailed implementation and contrary check evidence:
+  `a342d6870:docs/reviews/terminal-command-comparison.md`, this section.
+  The tables retain October 7's baseline judgments; no cmux/herdr behavior was
+  re-exercised for these deltas.
 - Public [cmux API](https://cmux.com/docs/api) and
   [concepts](https://cmux.com/docs/concepts) provide context, but the tables below
   use the installed command discovery and our local observations. The public API

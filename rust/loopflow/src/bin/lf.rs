@@ -895,10 +895,10 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
         TaskCommand::Reconcile { json } => {
             // The schedule runs this check every minute; an AgentProcess whose attached lf
             // was killed is reaped here before delivery is observed.
-            let engines = loopflow::harness::agent_process::reap_agent_processes(false);
+            let agents = loopflow::harness::agent_process::reap_agent_processes(false);
             let mut result = loopflow::ops::pr_landing::reconcile_repository(repo)?;
-            match engines {
-                Ok(engines) => result.errors.extend(engines.errors),
+            match agents {
+                Ok(agents) => result.errors.extend(agents.errors),
                 Err(error) => result
                     .errors
                     .push(format!("AgentProcess settlement: {error}")),

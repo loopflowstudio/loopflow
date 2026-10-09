@@ -836,12 +836,12 @@ async fn retained_native_client_loses_writes_but_keeps_display_after_transfer() 
         store: store.clone(),
         session_id: session.into(),
         thread_id: engine["thread"].as_str().unwrap().into(),
-        driver: Some(first.clone()),
+        attachment: Some(first.clone()),
     };
     let endpoint = Path::new(engine["endpoint"].as_str().unwrap());
     let old = serve_gate(&control.join("old.sock"), endpoint, connection.clone());
     let mut passive = connection.clone();
-    passive.driver = None;
+    passive.attachment = None;
     let observer = serve_gate(&control.join("observer.sock"), endpoint, passive);
     std::fs::write(control.join("sockets.go"), "").unwrap();
     wait_file(&control.join("attached.done"), &mut probe);
@@ -854,7 +854,7 @@ async fn retained_native_client_loses_writes_but_keeps_display_after_transfer() 
         .claim_session_attachment(session, Some(&first), &replacement.id, false)
         .unwrap();
     let mut current = connection;
-    current.driver = Some(second.clone());
+    current.attachment = Some(second.clone());
     let current = serve_gate(&control.join("current.sock"), endpoint, current);
     std::fs::write(control.join("transfer.go"), "").unwrap();
     assert!(probe.wait().unwrap().success());

@@ -770,7 +770,7 @@ async fn connect_live_codex(
         let remote = directory.path().join("client.sock");
         let listener = tokio::net::UnixListener::bind(&remote)?;
         let connection = crate::harness::codex_connection::CodexConnection {
-            store: store.sqlite.clone(), session_id: session.id.clone(), thread_id: thread, driver: Some(driver.clone()),
+            store: store.sqlite.clone(), session_id: session.id.clone(), thread_id: thread, attachment: Some(driver.clone()),
         };
         connection.recover_history(Path::new(&endpoint)).await?;
         let relay = tokio::spawn(async move {

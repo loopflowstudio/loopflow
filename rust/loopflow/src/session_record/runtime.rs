@@ -1,6 +1,5 @@
-//! The current driver closes its runtime on exit. A transferred driver can
-//! settle its own capture but cannot close the new owner's provider. A driver
-//! that died without closing leaves its engine to whoever replaces it.
+//! Only the current attachment may close an AgentProcess. A replaced lf
+//! invocation may settle its own capture, not stop the new owner's provider.
 
 use crate::process::SessionAttachment;
 use crate::store::sqlite::SqliteStore;
@@ -9,15 +8,15 @@ use crate::store::{StoreError, StoreResult};
 pub(crate) fn finish_session_attachment(
     store: &SqliteStore,
     session: &str,
-    driver: &SessionAttachment,
+    attachment: &SessionAttachment,
     outcome: &str,
 ) -> StoreResult<()> {
     let connection = store.session_connection(session)?;
     let process = store.session_provider_process(session)?;
     let provider = store.session(session)?.and_then(|session| session.provider);
-    store.finish_session_attachment(session, driver, outcome, || {
+    store.finish_session_attachment(session, attachment, outcome, || {
         // Native terminal providers own their own teardown. Codex app-server
-        // runs in its own group so a connecting driver can take it over live.
+        // runs in its own group so another lf invocation can attach live.
         #[cfg(unix)]
         if provider.as_deref() == Some("codex") {
             if let (Some((endpoint, thread)), Some((pid, started))) = (connection, process) {
@@ -35,11 +34,9 @@ pub(crate) fn finish_session_attachment(
     })
 }
 
-/// End the engine a provably dead driver left behind, so its replacement never
-/// runs beside it. Signals only the recorded PID and start time, under the
-/// Session driver lock: a concurrent connect either holds the engine already,
-/// which fails this, or finds it gone. An engine that cannot be ended refuses
-/// the replacement and leaves the Session as it was.
+/// End the AgentProcess a provably dead lf invocation left behind. The Session
+/// lock excludes takeover while the recorded PID/birth is checked and signalled.
+/// Failed termination leaves the Session unchanged and refuses replacement.
 pub(super) fn end_abandoned_agent_process(
     store: &SqliteStore,
     session: &str,
@@ -53,14 +50,14 @@ pub(super) fn end_abandoned_agent_process(
         let codex = store
             .session(session)?
             .is_some_and(|session| session.provider.as_deref() == Some("codex"));
-        // Only Codex answers the inspection that spares a shared engine.
+        // Only Codex answers the inspection that spares a shared AgentProcess.
         let serving = connection
             .as_ref()
             .filter(|_| codex)
             .map(|(endpoint, thread)| (endpoint.as_str(), thread.as_str()));
         crate::harness::codex_connection::close_agent_process(serving, pid, started).map_err(|error| {
             StoreError::InvalidAuthority(format!(
-                "Conversation's previous engine (process {pid}) is still running and was not ended: {error}"
+                "Conversation's previous AgentProcess (PID {pid}) is still running and was not ended: {error}"
             ))
         })
     })

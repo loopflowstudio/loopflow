@@ -22,7 +22,7 @@ argv -> Process admission -> Skill discovery -> prompt -> provider route
                                      AgentSession reservation + input capture
                                                         |
                                                         v
-                                        native engine and conversation
+                                      AgentProcess and native conversation
                                                         |
                                      provider outcomes / retries / usage
                                                         |
@@ -77,16 +77,17 @@ The source cut is incomplete: optional/unattributed launches still need conversi
 Captured Claude and native restarts reserve a fresh AgentProcess and update the
 capture's attachment; pending operations retain their old snapshots. Owned native
 launches record before exec without changing their terminal or process group.
-These source paths still need runtime verification. Generation-based caller/status
-wires remain until that lifecycle cut. These are publication blockers.
+Focused admission, replacement and cleanup fixtures pass; public-reader agreement
+and installed acceptance remain unproved. Generation-based caller/status wires and
+optional launches remain publication blockers.
 
 ## Publish before spawn
 
 1. Resolve one Machine for the store and payload root; validate typed ancestry.
 2. Reserve the conversation, history/capture reference and exact driver together.
 3. Publish immutable launch input and record publication before spawning.
-4. Start or connect the native provider and retain exact engine/thread/client
-   evidence, distinct from the conversation driver.
+4. Start or connect the native provider and retain exact AgentProcess/thread/client
+   evidence, distinct from the attached lf invocation.
 5. Append correlated provider outcomes and usage; settle command completion
    under its Process lifetime.
 
@@ -115,8 +116,8 @@ OpenCode serve groups. Claude and native foreground coverage remain unfinished;
 recording them alone does not establish orphan cleanup. Unknown identities and
 duplicate PID/birth records remain non-signallable.
 
-Prepared rows without publication are recoverable preparation failures. A missing
-spawn receipt is uncertainty, not permission to duplicate a possibly live engine.
+Prepared rows without publication are recoverable preparation failures. Missing
+spawn evidence is uncertainty, not permission to duplicate a possibly live AgentProcess.
 Recovery preserves recorded inputs and exact native evidence. File publication
 and SQLite settlement have an explicit recoverable boundary; neither alone is a
 claim of successful execution.
@@ -142,9 +143,10 @@ correlation carry that snapshot. Broadcast-only starts retain unknown attributio
 late correlated replies can fill it, but cannot borrow a newer capture or bind.
 The snapshot supplies history only and never authorizes dispatch.
 
-The continuing engine retains its provider generation while the new attachment receives a fresh opaque token, including reattachment of the same
-lf Process. Release revokes that token as well. The token is a compare-and-swap
-witness, not another process identity or lifecycle owner. The AgentProcess
+The continuing AgentProcess retains its provider generation while each attachment
+receives a fresh opaque token, including reattachment of the same lf Process.
+Release revokes that token as well. The token is a compare-and-swap witness,
+not another process identity or lifecycle owner. The AgentProcess
 launch cutover remains unfinished; caller/status wires still use provider generation.
 
 Attachment exit retains an exact history-event reference rather than deriving a
@@ -152,10 +154,10 @@ receipt from counter arithmetic. Migration preserves old event keys and payloads
 including captured input, native identity and historical outcomes.
 
 `session connect --replace` stops the exact owned clients and reconnects to the
-live engine, preserving the active turn and sibling conversations.
-There is no separate Session engine-restart operation. Mere process silence,
+live AgentProcess, preserving the active turn and sibling conversations.
+There is no separate Session AgentProcess-restart operation. Mere process silence,
 tmux visibility, causal ancestry or a stored active label grants no termination
-authority, and recovery never authorizes killing a shared engine for one thread.
+authority, and recovery never authorizes killing a shared AgentProcess for one thread.
 
 ## Outcomes, retries and usage
 

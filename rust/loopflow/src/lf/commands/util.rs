@@ -736,21 +736,16 @@ fn session_command_status_with_env(
         })?;
 
     drop(activation);
-    let client = match ProviderClientGuard::publish(capture_dir.as_deref(), child.id()) {
-        Ok(client) => client,
-        Err(error) => {
-            if let Err(cleanup) =
-                crate::harness::agent_process::stop_native(&mut child, owned.as_ref())
-            {
-                tracing::warn!(%cleanup, "native client publication cleanup remains unresolved");
-            }
-            return Err(error);
-        }
-    };
-    if let Err(error) = record_interactive_opened(environment) {
+    // Retain a published client through cleanup if recording the opening fails.
+    let mut client = None;
+    let setup = (|| {
+        client = ProviderClientGuard::publish(capture_dir.as_deref(), child.id())?;
+        record_interactive_opened(environment)
+    })();
+    if let Err(error) = setup {
         if let Err(cleanup) = crate::harness::agent_process::stop_native(&mut child, owned.as_ref())
         {
-            tracing::warn!(%cleanup, "native opening cleanup remains unresolved");
+            tracing::warn!(%cleanup, "native setup cleanup remains unresolved");
         }
         return Err(error);
     }

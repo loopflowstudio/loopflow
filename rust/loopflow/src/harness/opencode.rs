@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -32,9 +32,6 @@ pub struct OpenCodeHarness {
     turn_in_progress: Arc<AtomicBool>,
     shutdown_requested: Arc<AtomicBool>,
     child: Option<Child>,
-    /// The spawned server's process-group id (== its pid under
-    /// `process_group(0)`). 0 while no server is running.
-    child_group: Arc<AtomicU32>,
     stderr_task: Option<JoinHandle<()>>,
     sse_task: Option<JoinHandle<()>>,
     server_base_url: Option<String>,
@@ -62,7 +59,6 @@ impl OpenCodeHarness {
             turn_in_progress: Arc::new(AtomicBool::new(false)),
             shutdown_requested: Arc::new(AtomicBool::new(false)),
             child: None,
-            child_group: Arc::new(AtomicU32::new(0)),
             stderr_task: None,
             sse_task: None,
             server_base_url: None,
@@ -356,11 +352,6 @@ impl OpenCodeHarness {
 
         let stderr_task = spawn_stderr_logger(stderr, "harness::opencode");
 
-        let opencode_pid = child.id();
-        if let Some(pid) = opencode_pid {
-            self.child_group.store(pid, Ordering::Release);
-        }
-
         self.child = Some(child);
         self.stderr_task = Some(stderr_task);
         self.sse_task = Some(sse_task);
@@ -543,7 +534,6 @@ impl Harness for OpenCodeHarness {
             shutdown_child(child).await;
         }
         self.child = None;
-        self.child_group.store(0, Ordering::Release);
 
         if let Some(task) = self.sse_task.take() {
             task.abort();
@@ -567,8 +557,8 @@ impl Harness for OpenCodeHarness {
     }
 
     fn process_group_id(&self) -> Option<u32> {
-        let group = self.child_group.load(Ordering::Acquire);
-        (group > 1).then_some(group)
+        // Admission makes this child the leader of its own group.
+        self.process_id().filter(|pid| *pid > 1)
     }
 
     fn set_provider_session_id(&mut self, provider_session_id: Option<String>) {
@@ -882,6 +872,29 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    #[tokio::test]
+    async fn stop_clears_the_child_and_its_group() {
+        let child = Command::new("/bin/sleep")
+            .env_clear()
+            .arg("60")
+            .process_group(0)
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let pid = child.id().unwrap();
+        let birth = crate::journal::process_started_at(pid).unwrap().unwrap();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mut harness = OpenCodeHarness::new(tx, ApprovalPolicy::AutoApprove);
+        harness.child = Some(child);
+        assert_eq!(harness.process_group_id(), Some(pid));
+        harness.stop().await.unwrap();
+        assert_eq!(harness.process_id(), None);
+        assert_eq!(harness.process_group_id(), None);
+        assert_eq!(
+            crate::journal::process_identity_evidence(pid, birth),
+            crate::journal::ProcessIdentityEvidence::Dead
+        );
+    }
     #[test]
     fn sanitize_error_message_redacts_credentials() {
         let input = "request to https://api.example.com/v1/chat?api_key=sk-secret123 failed: \

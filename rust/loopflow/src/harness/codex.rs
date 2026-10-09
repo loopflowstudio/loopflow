@@ -1,4 +1,4 @@
-//! Codex app-server driver, targeting the codex-cli 0.142.5 protocol.
+//! Codex app-server harness, targeting the codex-cli 0.142.5 protocol.
 //!
 //! Protocol shapes verified live (hand-driven session + probes) and against
 //! `codex app-server generate-json-schema` (v2 bundle):
@@ -14,8 +14,7 @@
 //!   `turn/completed` status "interrupted" (probed live).
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -591,12 +590,10 @@ pub struct CodexHarness {
     thread_start_request_id: Arc<AtomicI64>,
     launch: Option<AgentConfig>,
     should_seed_prompt: bool,
-    /// Pid of the live child's process group; 0 = none. `stop()` kills it;
-    /// every other way this process can end is covered by the driver
-    /// lifeline bound at spawn.
-    child_group: Arc<AtomicU32>,
-    engine_directory: Option<tempfile::TempDir>,
-    endpoint: Option<PathBuf>,
+    /// Retain the group from spawn through failed startup, before `child` is
+    /// installed. The harness alone mutates it; the lifeline covers lf death.
+    child_group: Option<u32>,
+    agent_directory: Option<tempfile::TempDir>,
     session_attachment: Option<(
         crate::store::sqlite::SqliteStore,
         String,
@@ -635,9 +632,8 @@ impl CodexHarness {
             thread_start_request_id: Arc::new(AtomicI64::new(0)),
             launch: None,
             should_seed_prompt: true,
-            child_group: Arc::new(AtomicU32::new(0)),
-            engine_directory: None,
-            endpoint: None,
+            child_group: None,
+            agent_directory: None,
             session_attachment: None,
         }
     }
@@ -761,8 +757,7 @@ impl Harness for CodexHarness {
     }
 
     fn process_group_id(&self) -> Option<u32> {
-        let group = self.child_group.load(Ordering::SeqCst);
-        (group > 1).then_some(group)
+        self.child_group.filter(|pid| *pid > 1)
     }
 
     async fn start(&mut self, config: &AgentConfig) -> Result<()> {
@@ -930,8 +925,8 @@ impl Harness for CodexHarness {
             // during settlement, without holding SQLite across provider I/O.
             // Harness teardown only drops this connection after takeover.
             self.child.take();
-            self.child_group.store(0, Ordering::Release);
-            if let Some(directory) = self.engine_directory.take() {
+            self.child_group = None;
+            if let Some(directory) = self.agent_directory.take() {
                 let _ = directory.keep();
             }
             self.shutdown_tasks().await;
@@ -940,10 +935,8 @@ impl Harness for CodexHarness {
 
         let _ = self.interrupt().await;
 
-        let group = self.child_group.clone();
-        let terminate = || {
-            let pid = group.swap(0, Ordering::AcqRel);
-            if pid != 0 {
+        let mut terminate = || {
+            if let Some(pid) = self.child_group.take() {
                 kill_process_group(pid);
             }
             Ok(())
@@ -954,7 +947,7 @@ impl Harness for CodexHarness {
                 .is_err()
             {
                 self.child.take();
-                if let Some(directory) = self.engine_directory.take() {
+                if let Some(directory) = self.agent_directory.take() {
                     let _ = directory.keep();
                 }
                 self.shutdown_tasks().await;
@@ -967,11 +960,11 @@ impl Harness for CodexHarness {
             let _ = child.wait().await;
         }
         self.child = None;
-        self.child_group.store(0, Ordering::Release);
+        self.child_group = None;
         self.turn_in_progress.store(false, Ordering::Relaxed);
 
         self.shutdown_tasks().await;
-        self.engine_directory.take();
+        self.agent_directory.take();
 
         Ok(())
     }
@@ -1033,7 +1026,7 @@ impl CodexHarness {
             .unwrap_or_else(|| {
                 directory
                     .as_ref()
-                    .expect("new engine owns a directory")
+                    .expect("new AgentProcess owns a directory")
                     .path()
                     .join("engine.sock")
             });
@@ -1056,7 +1049,7 @@ impl CodexHarness {
         if let Some(cwd) = &launch.cwd {
             command.current_dir(cwd);
         }
-        // Held until the engine has spawned, so a concurrent switch cannot
+        // Held until the AgentProcess has spawned, so a concurrent switch cannot
         // replace the native login between activation and startup.
         let activation = match &self.account_route {
             Some(route) => route.launch_as(command.as_std_mut()).await?,
@@ -1072,13 +1065,13 @@ impl CodexHarness {
             "features.shell_snapshot=false",
         ]);
 
-        // Codex's shell policy need not inherit arbitrary engine environment.
+        // Codex's shell policy need not inherit arbitrary app-server environment.
         // Tool authority belongs to this conversation, including when another
-        // conversation later shares its engine. Pass only explicit launch and
+        // conversation later shares its app-server. Pass only explicit launch and
         // freshly resolved lf executable/Machine values as thread configuration.
         let tool_environment = super::conversation_environment(command.as_std(), launch);
-        // The engine can host another conversation. Only this thread receives
-        // its caller/capture provenance; engine defaults must not lend it to a
+        // The app-server can host another conversation. Only this thread receives
+        // its caller/capture provenance; app-server defaults must not lend it to a
         // newly admitted sibling.
         for name in crate::engine::agent::EXECUTION_IDENTITY_ENV {
             command.env_remove(name);
@@ -1096,14 +1089,14 @@ impl CodexHarness {
         };
         drop(activation);
 
-        // The engine runs in its own group and deliberately survives this
+        // The AgentProcess runs in its own group and deliberately survives this
         // harness, so no destructor or signal hook can be what stops it. The
         // lifeline ties it to the processes that drive it: when the last one
         // ends, by return, signal, panic or SIGKILL, the group is terminated.
         if let Some(pid) = child.as_ref().and_then(tokio::process::Child::id) {
-            self.child_group.store(pid, Ordering::Release);
+            self.child_group = Some(pid);
         } else {
-            // Reconnecting adopts the engine; one that predates lifelines has none.
+            // Reconnecting adopts the AgentProcess; one that predates lifelines has none.
             hold_agent_process_lifeline(&lifeline).map_err(|error| {
                 anyhow!(
                     "Codex AgentProcess is stopping after its attached lf exited ({error}); retry"
@@ -1111,8 +1104,7 @@ impl CodexHarness {
             })?;
         }
 
-        self.endpoint = Some(endpoint.clone());
-        self.engine_directory = directory;
+        self.agent_directory = directory;
         let socket = tokio::time::timeout(Duration::from_secs(15), async {
             loop {
                 if let Some(child) = &mut child {
@@ -1502,6 +1494,29 @@ impl CodexHarness {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn failed_startup_retains_the_group_until_stop() {
+        let mut child = Command::new("/bin/sleep")
+            .env_clear()
+            .arg("60")
+            .process_group(0)
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mut harness = CodexHarness::new(tx, ApprovalPolicy::AutoApprove);
+        // Startup can fail before installing the child handle in the harness.
+        harness.child_group = child.id();
+        assert_eq!(harness.process_group_id(), child.id());
+        harness.stop().await.unwrap();
+        let status = tokio::time::timeout(Duration::from_secs(2), child.wait())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!status.success());
+        assert_eq!(harness.process_group_id(), None);
+    }
 
     #[test]
     fn saved_thread_rejection_precedes_spawn_and_leaves_the_conversation_resumable() {

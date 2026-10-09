@@ -80,106 +80,56 @@ attribution survive.
   admission. Both use one parent-side pre-exec recording channel. Shared
   `open_owner` replaces three harness-local store-opening sequences without
   refreshing their attachment snapshots.
-- Remaining provider-engine close names and messages, including `close_engine`.
+- Remaining provider-engine close names and messages (`close_engine` is removed).
   `bind_group_to_driver`, `prepare_lifeline` and the exposed prepare/retain
   lifeline type are deleted. Keep `engine/` as Loopflow machinery and the
-  surviving launch-path proofs.
+  surviving launch-path proofs. Codex's write-only `endpoint` and OpenCode's
+  mirrored `child_group` are removed; Codex retains its pre-handle group slot.
 
 ## Current implementation boundary (reconciled 2026-10-09)
 
-`446cfb2b5` supplies records and shared readers; `ea205e3d0` simplifies observation.
-Captured Claude replacement (`6fe75717f`) advances the owner's snapshot without
-refreshing stale operations; `a81397932` shares fenced headless admission.
-`4f7d21ff7` replaces owned native post-spawn recording with pre-exec admission and
-immutable wait snapshots. `961677e04` shares owner lookup and releases SQLite during
-attachment close. Focused admission, native replacement and cleanup proofs now run; unconditional
-recording, full takeover and public-entry acceptance remain open. Local main remains `3e1e6245c`
-(#1512); LOO-441 is not integrated, and no remote dependency state was inspected.
+`446cfb2b5` supplies one `processes` table (`lf` / `agent`), attachment tokens,
+and shared record readers; `ea205e3d0` removes inferred discovery. The single
+Task draft backfills parent, PID/birth, endpoint, attachment and available
+spawn/exit evidence before dropping Session process columns. Duplicate PID/birth
+rows stay separate and non-signallable. Native thread/history stay on the Session;
+provider generation still survives in records and caller/status/history wires.
 
-`446cfb2b5` uses `processes.kind` (`lf` / `agent`). The Task's one draft
-backfills directly from the released Session shape, including original parent,
-PID/birth, endpoint, attachment token, attachment-exit reference and available
-spawn/exit evidence. It drops the Session process columns. Native thread and
-immutable history stay on the Session/history owners. Duplicate historical
-PID/birth observations remain separate, not signal permission. No installed
-store was opened with the branch binary.
+Top, active Sessions, Task membership and scheduled orphan settlement read
+unfinished AgentProcesses, including detached/replaced rows. Settlement rechecks
+attachment under the Session lock without holding SQLite across OS I/O. It still
+excludes interactive agents and recognizes only Codex app-server/OpenCode serve
+for live-orphan termination. Only Codex supplies a named FIFO for reconnect;
+Claude/OpenCode anonymous lifelines do not establish takeover coverage.
 
-Claims, transfer, release, connection publication and observed identity now write
-the AgentProcess row. Native launch receipts become its lifecycle fields; old
-payloads remain history. Actual argv is saved before spawn. A different PID/birth
-cannot overwrite a record. The common Process wire projection includes kind,
-served Session and OS birth; Rust/Swift mirrors and fixtures changed together.
-Provider-generation values still survive on records and caller/status/history
-wires: their removal is not implemented.
+Shared headless and owned native admission record argv and OS identity before
+exec, under the attachment lock. Native admission preserves foreground groups,
+TTY and stdio. Synchronous admission cannot lose an admitted child to cancellation
+before returning it. Admission consumes each reservation once; a duplicate cannot
+mark a running row spawn-failed. Optional paths still launch without records.
 
-Top and active-Session views now read recorded AgentProcesses, including detached
-and replaced rows, rather than inferring ownership from process trees, native
-client receipts or the OpenCode JSON registry. Task membership includes served
-Sessions independently of attachment presence; process liveness reads agent
-PID/birth. The two orphan modules, ownership projection types, registry and
-exclusive directory-watcher/attribution fixtures are deleted. Their required
-preservation and public-entry coverage is not all replaced yet. Scheduled
-settlement consumes these same rows, rechecks attachment under its lock, refuses
-duplicate/unknown signal authority and retains PID/birth after terminal evidence.
-It releases SQLite before OS termination and nested evidence reads.
+Captured Claude and native retries reserve a fresh AgentProcess only after exact
+exit/spawn failure, advancing capture settlement and the next launch together.
+Dispatch/history/waits retain immutable snapshots; old waits cannot end a
+replacement. Only newly constructed harnesses refresh from the capture owner.
+Claude dispatch uses bounded writes on blocking workers, not the sole reactor.
+Native setup cleanup records successful waits, retains failed-wait uncertainty,
+refuses stale cleanup and never settles a remote client's provider. Settlement
+holds the Session lock, not SQLite, across provider close.
 
-That common inventory does not yet imply common coverage: `reap_in` excludes
-interactive agents from live-orphan termination, and `is_agent_process` recognizes
-only Codex app-server and OpenCode serve. Claude and OpenCode pre-exec launches
-pass no FIFO path; only Codex has a named-lifeline reconnect handoff. These are source
-observations, not evidence that orphan termination or takeover works for Claude
-or native foreground launches. No broadened signaling rule is accepted merely
-because a row exists.
+The current reduction removes Codex's write-only endpoint and replaces its
+unshared atomic group slot with an owned optional PID. It retains that slot
+through failed startup before the child handle is installed. OpenCode derives
+the group from its child instead of mirroring it. Native publication/opening
+failures share one cleanup path; a published client guard survives through
+cleanup. Codex relay and close terminology now uses attachment/AgentProcess;
+retained socket/FIFO names remain unchanged. This does not complete the broader
+vocabulary or optional-launch cut.
 
-The shared headless launch holds the attachment fence through the parent-side
-pre-exec handshake and records failed attempts for Claude, Codex and OpenCode.
-Admission remains synchronous: an async cancellation cannot detach an admitted
-child before its harness receives it. Owned native launches now hold the same
-attachment lock through pre-exec recording, without changing process groups,
-controlling terminals or stdio. The headless watchdog setup remains separate from
-that shared recording channel; native foreground orphan cleanup is not implemented.
-Optional attachment branches still permit unrecorded launches; deleting inferred
-discovery does **not** prove those paths are covered. This internal cut must not
-publish before they are converted.
-
-Captured native retries prepare a fresh record only after observed exit or spawn
-failure and advance capture settlement together. Waits retain their own attachment
-snapshot; delayed exit reporting refuses a replacement. A settled capture cannot
-spawn again. Child caller provenance uses the newly admitted snapshot. Terminal
-reconnect's remote client remains distinct from its already-running provider.
-Native error cleanup now holds the attachment lock across signal/wait, records
-successful waits and preserves the original publication/opening error. Failed waits
-remain unknown; remote-client cleanup records no provider exit. Stale cleanup cannot
-kill either a replacement or the same AgentProcess after takeover. Admission consumes
-only an unused reservation: duplicate launch refusal happens before fork and cannot
-mark an existing provider as spawn-failed. Focused fixtures cover these boundaries
-and captured native replacement. Native PTY and Claude replacement checks are below;
-full public-reader and installed acceptance remain open.
-
-### Claude replacement snapshots (2026-10-09)
-
-Claude interrupt previously reused a cloned attachment for its next OS process.
-The capture owner now prepares each captured Claude spawn: an unused reservation
-stays unchanged; observed exit or spawn failure creates a fresh AgentProcess.
-Unknown spawn state refuses replacement without overwriting its identity. The
-capture's settlement snapshot and the new harness/config snapshot advance
-together; old dispatch and history snapshots never refresh from that owner.
-A newly constructed retry harness explicitly takes the owner's current snapshot.
-
-Claude spawn holds the attachment fence through pre-exec recording. Interrupt
-signals under that same fence and records exit only after waiting for its child.
-Seed and steer pipe writes now use bounded fenced dispatch on a blocking thread,
-leaving the current-thread runtime free to drive pipe readiness. Replacement
-refreshes the child caller environment and preserves the native resume token.
-This is an implementation choice under the accepted Task, not new approval.
-
-Added fixtures cover two retained identities, native resume arguments, stale
-pipe-write/signal/connection refusal, current-capture settlement, and refusal to
-replace an uncertain spawn. The first runtime check exposed a fixture race: pipe acceptance preceded the
-first provider script instruction. The fixture now waits for provider-written input
-before interruption, rather than treating a successful write as provider readiness.
-Uncaptured/optional launches and other providers still need the same admission;
-this internal slice is not complete Task acceptance or permission to publish.
+Local base remains `3e1e6245c` (#1512); LOO-441 is not integrated. No remote
+freshness, publication, installed-store migration or installed acceptance is claimed.
+Earlier implementation/review detail and contrary evidence:
+`e0d360e6a:scratch/introduce-agentprocess-record-the-provider.md`.
 
 ## Remaining implementation
 
@@ -241,74 +191,17 @@ lifeline writer or hold provider stdout/stderr open.
 
 ## Implementation review
 
-The record cut removes inferred provider ownership rather than adding another
-inventory. Review found and corrected two preservation defects: migration must
-insert AgentProcesses before setting the Session foreign key, and provider name/
-interactive launch mode belong to the process snapshot rather than mutable
-next-launch Session settings. Orphan settlement cannot hold the SQLite mutex
-while its callback reads attached-process evidence. The Claude respawn ownership
-counterexample is addressed by the replacement slice above; its focused runtime
-fixture now waits for provider readiness.
+Prior review corrected migration insert/FK order, mutable next-launch settings
+leaking into process snapshots, SQLite held across close, stale retry/wait
+snapshots and duplicate launch settlement. The exact findings, fixture fixes,
+checks and source references remain at `e0d360e6a`, this plan. Release's
+operation-entry lesson still applies: internal helpers do not prove public
+top/Task-status/scheduled agreement or installed settlement.
 
-Earlier origin, token and pre-exec decisions remain in `a55f5345b` and its
-references. The record cut is checkpointed at `446cfb2b5`, local and unpublished.
+This reduction retains Codex's pre-handle group slot: deriving it from `child`
+would lose failed-startup cleanup. OpenCode installs its child before exposing
+the group, so no second slot is needed. Combining native setup errors must not
+drop the published client guard before cleanup; it remains in the outer scope.
+No new signal authority, attachment refresh or lifecycle owner is introduced.
 
-Compression removed the empty reader lifecycle, unused OS ancestry/command sampling
-and repeated attachment-validation branches. Malformed elapsed-time samples remain
-unknown rather than becoming a zero-age birth. Review corrected stale schema claims
-in the architecture docs and stale Session-column SQL in CLI/watch fixtures.
-Earlier focused passes are recorded at `76ea312a3`, this plan; they do not verify
-the subsequent reductions.
-
-Release's child memory was read through October 6: operation-entry tests exposed
-recovery gaps that internal helpers missed. Here, public top/Task-status/scheduled
-entry agreement remains required even after record fixtures pass. No child files
-or configured release state changed. Review of the replacement slice caught two
-operational defects before verification: blocking pipe readiness on the sole
-runtime thread, and retry harnesses retaining the initial launch snapshot.
-Dispatch now uses a blocking worker; only a new harness takes the current owner
-snapshot. Compression now removes the three harness-local launch sequences,
-reuses Claude's owner lookup, and removes settlement's one-read transaction while
-keeping the Session lock. Review rejected an async spawn wrapper because dropping
-its waiter could detach a successfully admitted child. The throwaway-child fixture
-now passes shared admission, stale-launch refusal and recoverable spawn failure.
-Historical capacity evidence remains at `ea205e3d0`, this plan.
-
-October 9 reconciliation corrected the architecture diagram's obsolete direct
-Session-to-driver generation fence: the AgentProcess owns attachment/token, and
-the accepted LfProcess/LfSession names remain an unintegrated dependency. Local
-`main` and `origin/main` still name `3e1e6245c`; no remote freshness is claimed.
-Request correlation exists already; its AgentProcess identity conversion does not.
-Native failure-cleanup settlement is implemented in the current slice.
-
-Earlier reconciliation corrected dispatch's stale lock documentation: native
-writes retain a per-Session OS lock, not SQLite's mutex/transaction. The store
-releases SQLite after validating attachment. `off_reactor` yields multithreaded
-workers but runs inline on a current-thread runtime; synchronous admission must
-not require that reactor. This comment correction changes no runtime behavior.
-
-Review caught a late-wait counterexample: reading the capture's current attachment
-at exit could end a replacement. Native launch returns its immutable attachment
-to the waiter; the capture rejects late exit reports. Sharing the pre-exec channel
-keeps the parent's recording endpoint closed before the watchdog forks.
-
-Compression also removes SQLite's mutex/transaction from provider close in
-`finish_session_attachment`: the existing Session lock excludes takeover, then
-terminal writes commit together after close. Failure retains the attachment and
-history; nested reads and unrelated saves no longer block behind provider I/O.
-The focused close fixture checks those boundaries and lock release. This follows
-the orphan-settlement boundary rather than adding an owner.
-A proposed eager typed-row conversion was discarded: parsing historical parent
-IDs before checking for an attachment token would change unclaimed-row reads.
-
-Review found a repeated-launch counterexample and two fixture defects. Reusing an attachment for
-another spawn could overwrite its command and mark its existing process as failed
-when pre-exec PID recording refused; admission now consumes the reserved state once.
-The captured Claude fixture interrupted immediately after pipe acceptance, before its
-script necessarily wrote launch evidence; provider-written input now establishes
-readiness. The attachment-close fixture now scrubs inherited capture authority
-before local rename checks. Native launch setup fixtures exercise both publication and opening errors
-through `session_command_status_with_env`, not only the cleanup helper. This proves
-neither the public top/Task-status/scheduled agreement nor installed settlement.
-
-Check: `cargo fmt --all -- --check`, `cargo clippy -p loopflow --all-targets -- -D warnings` and 13 focused lib tests pass (AgentProcess; native setup/capture/pre-exec; Claude replacement; attachment close/respawn). Full Rust/Swift/DTO/materialized and Linux matrix remain gate/CI-owned.
+Check: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test -p loopflow --lib --no-run` pass; network-isolated lib filters `native_launch_setup_errors`, `native_cleanup`, `failed_startup_retains_the_group_until_stop`, `stop_clears_the_child_and_its_group`, `saved_thread_rejection_precedes_spawn` pass (7 tests). Full Rust/Swift/DTO/materialized and Linux matrix remain gate/CI-owned.

@@ -89,10 +89,10 @@ LOO-412 through `7f206cd0e` is inspected, not integrated; mixed Linear/Git stays
 disabled. **Retained uncertainty constrains effects.** Journal-only conflicts defer
 attempts, not saves/acquisition; selection cannot release them (`08a285872`). Save
 clocks order intentions; unresolved losing effects hold delivery. Only complete
-lists settle order progress. `357090d4b` preserves valid primary-only moves.
+lists settle order progress. `357090d4b` preserves primary-only moves.
 
-**Independent facts need independent rollback.** `358f7fa08`/`25cbc0a09` acquire
-removal/archive/Teams through common writers with separate savepoints, original
+**Independent facts need separate rollback.** `358f7fa08`/`25cbc0a09` acquire
+removal/archive/Teams through common writers with savepoints, original
 ages and Team baselines. Contradictory Teams cannot erase an archive. Entity
 revisions cannot order relationships; old evidence cannot clear membership
 uncertainty. Partial-list composition is unproved. Replay-safe invalidation, legacy

@@ -1547,7 +1547,12 @@ mod attachment_tests {
             )
             .unwrap();
         store
-            .record_session_connection("conversation", &first, "/fixture.sock", "original-thread")
+            .record_session_connection(
+                "conversation",
+                &first,
+                "/fixture.sock",
+                &"original-thread".into(),
+            )
             .unwrap();
         let original = store.process(&first.agent_process_lfid).unwrap().unwrap();
         for closed in [
@@ -1562,8 +1567,8 @@ mod attachment_tests {
                 Some(original.clone())
             );
             assert_eq!(
-                store.session_thread("conversation").unwrap().as_deref(),
-                Some("original-thread")
+                store.session_thread("conversation").unwrap(),
+                Some("original-thread".into())
             );
             assert_eq!(
                 store.session_attachment("conversation").unwrap(),
@@ -1675,7 +1680,7 @@ mod attachment_tests {
             .claim_session_attachment("conversation", None, &a, true)
             .unwrap();
         store
-            .record_session_connection("conversation", &first, "endpoint", "native-history")
+            .record_session_connection("conversation", &first, "endpoint", &"native-history".into())
             .unwrap();
         let second = store
             .claim_session_attachment("conversation", Some(&first), &b, false)

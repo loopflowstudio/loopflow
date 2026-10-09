@@ -133,12 +133,7 @@ impl OpenCodeHarness {
         {
             let history = self.history.lock().expect("OpenCode history lock poisoned");
             if let Some((store, session, driver)) = &history.owner {
-                store.record_session_connection(
-                    session,
-                    driver,
-                    &base_url,
-                    &agent_session,
-                )?;
+                store.record_session_connection(session, driver, &base_url, &agent_session)?;
             }
         }
 

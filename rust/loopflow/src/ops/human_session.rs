@@ -1541,7 +1541,7 @@ mod tests {
                         &session.id,
                         &original,
                         endpoint.to_str().unwrap(),
-                        "saved-thread",
+                        &"saved-thread".into(),
                     )?;
                     let listener = tokio::net::UnixListener::bind(&endpoint)?;
                     let sqlite = store.sqlite.clone();
@@ -1603,7 +1603,7 @@ mod tests {
                     ));
                     crate::session_record::write_provider_session(
                         &capture.artifact_dir(),
-                        "saved-thread",
+                        &"saved-thread".into(),
                         None,
                     )?;
                     let native =

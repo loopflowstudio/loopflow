@@ -788,7 +788,7 @@ mod tests {
                 observed_input(home, "first request").await;
                 let first_pid = harness.process_id().unwrap();
                 // The native conversation survives the OS process's interruption.
-                harness.set_provider_session_id(Some("native-conversation".into()));
+                harness.set_agent_session(Some("native-conversation".into()));
                 harness.interrupt().await.unwrap();
                 let ended = store.process(&first.agent_process_lfid).unwrap().unwrap();
                 assert_eq!(ended.pid, Some(first_pid));
@@ -808,7 +808,7 @@ mod tests {
                 );
                 assert!(capture.prepare_agent_process(&session, &first).is_err());
                 assert!(store
-                    .record_session_connection(&session, &first, "stale", "stale")
+                    .record_session_connection(&session, &first, "stale", &"stale".into())
                     .is_err());
 
                 // Pending operations retain the old snapshot, not the capture's

@@ -274,10 +274,11 @@ sole unfinished interactive conversation, else the most recently used by
 `lf resume`'s ranking, and creates one only when the Task has none.
 
 AgentSessionId preserves the provider's exact id, including non-UUID ids. The
-selected AgentSession belongs to the LfSession row; its endpoint belongs to the AgentProcess; captured provider observations
-also retain native resume references. A replacement preserves LfSession identity. Immutable turn/capture history keeps
+selected AgentSession belongs to the LfSession row; the provider endpoint belongs
+to the AgentProcess. Captured provider observations retain native resume references.
+A replacement preserves LfSession identity. Immutable turn/capture history keeps
 earlier AgentSessions and their account attribution: replacement does not
-reassign old usage. A new agent process resumes the selected AgentSession.
+reassign old usage. A new AgentProcess resumes the selected AgentSession.
 No reader needs an independent provider-conversation table.
 
 SQL columns and captured JSON retain `provider_thread` / `provider_session_id`;

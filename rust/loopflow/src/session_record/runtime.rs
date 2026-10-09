@@ -131,7 +131,7 @@ mod tests {
                 "resume",
                 &attached,
                 home.path().join("absent.sock").to_str().unwrap(),
-                "saved-thread",
+                &"saved-thread".into(),
             )
             .unwrap();
         store
@@ -163,8 +163,8 @@ mod tests {
         assert!(ended.outcome.is_none());
         assert_eq!(ended.pid, Some(pid));
         assert_eq!(
-            store.session_thread("resume").unwrap().as_deref(),
-            Some("saved-thread")
+            store.session_thread("resume").unwrap(),
+            Some("saved-thread".into())
         );
         assert!(store.session_connection("resume").unwrap().is_none());
     }
@@ -227,7 +227,7 @@ mod tests {
                 "resume",
                 &attached,
                 home.path().join("absent.sock").to_str().unwrap(),
-                "saved",
+                &"saved".into(),
             )
             .unwrap();
         let detached = store
@@ -404,7 +404,7 @@ mod tests {
                 "retry",
                 &attachment,
                 home.path().join("absent.sock").to_str().unwrap(),
-                "retained-thread",
+                &"retained-thread".into(),
             )
             .unwrap();
         // Later launch settings do not change which kind of process was launched.
@@ -414,9 +414,12 @@ mod tests {
         )
         .unwrap();
         let next = store
-            .replace_session_agent_process("retry", &attachment, Some("retained-thread"), || {
-                super::close_session_agent_process(&store, "retry")
-            })
+            .replace_session_agent_process(
+                "retry",
+                &attachment,
+                Some(&"retained-thread".into()),
+                || super::close_session_agent_process(&store, "retry"),
+            )
             .unwrap();
         assert_ne!(next.agent_process_lfid, attachment.agent_process_lfid);
         assert_eq!(
@@ -436,8 +439,8 @@ mod tests {
             .pid
             .is_none());
         assert_eq!(
-            store.session_thread("retry").unwrap().as_deref(),
-            Some("retained-thread")
+            store.session_thread("retry").unwrap(),
+            Some("retained-thread".into())
         );
     }
 }

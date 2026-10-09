@@ -34,7 +34,12 @@ struct Turn {
 }
 
 impl Turn {
-    fn correlate(&mut self, store: &SqliteStore, thread: &AgentSessionId, turn: &str) -> StoreResult<()> {
+    fn correlate(
+        &mut self,
+        store: &SqliteStore,
+        thread: &AgentSessionId,
+        turn: &str,
+    ) -> StoreResult<()> {
         if self.started && !self.attributed {
             if let Some(origin) = &self.origin {
                 store.record_session_turn_origin(thread, turn, origin)?;
@@ -298,7 +303,13 @@ mod tests {
             };
             for message in messages {
                 history
-                    .record(&store, &original.id, Some(&first), Some("thread"), message)
+                    .record(
+                        &store,
+                        &original.id,
+                        Some(&first),
+                        Some(&"thread".into()),
+                        message,
+                    )
                     .unwrap();
                 assert_eq!(sql.query_row("SELECT count(*) FROM session_events WHERE kind='started' AND captured_event=?1", [next.captured], |row| row.get::<_,i64>(0)).unwrap(),0);
             }
@@ -309,15 +320,15 @@ mod tests {
                         &store,
                         &original.id,
                         Some(&current),
-                        Some("thread"),
+                        Some(&"thread".into()),
                         message,
                     )
                     .unwrap();
             }
             assert_eq!(store.session_history(&original.id, 0, 0).unwrap(), before);
-            history.record(&store,&original.id,Some(&first),Some("thread"),
+            history.record(&store,&original.id,Some(&first),Some(&"thread".into()),
                 &json!({"method":"thread/tokenUsage/updated","params":{"threadId":"thread","turnId":"late","tokenUsage":{"total":{"inputTokens":12},"last":{"inputTokens":12}}}})).unwrap();
-            history.record(&store,&original.id,Some(&first),Some("thread"),
+            history.record(&store,&original.id,Some(&first),Some(&"thread".into()),
                 &json!({"method":"turn/completed","params":{"threadId":"thread","turn":{"id":"late","status":"completed"}}})).unwrap();
             let retained = store
                 .session_history(&original.id, 0, 0)

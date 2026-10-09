@@ -335,7 +335,10 @@ mod tests {
         assert!(!history.admitted(&request));
         for (index, input) in [20, 40, 30].into_iter().enumerate() {
             let events = history
-                .observe("thread", &[message("assistant-a", input, "tool-calls")])
+                .observe(
+                    &"thread".into(),
+                    &[message("assistant-a", input, "tool-calls")],
+                )
                 .unwrap();
             assert_eq!(
                 events
@@ -369,7 +372,10 @@ mod tests {
         // A reconnect can recover history without claiming these requests or
         // emitting a new local turn boundary.
         let mut reconnected = History::new(history.owner.clone());
-        assert!(reconnected.observe("thread", &messages).unwrap().is_empty());
+        assert!(reconnected
+            .observe(&"thread".into(), &messages)
+            .unwrap()
+            .is_empty());
         assert!(!reconnected.admitted(&request));
         let recovered = store.input_history(input.as_str()).unwrap();
         assert_eq!(recovered.usage.input_tokens, Some(50));

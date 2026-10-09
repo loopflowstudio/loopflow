@@ -200,12 +200,8 @@ pub(crate) fn resume_session_with_env(
     attachment: Option<(String, crate::process::SessionAttachment)>,
 ) -> Result<()> {
     let user_name = crate::engine::config::participant_name()?;
-    let mut command = build_resume_session_command(
-        harness,
-        model,
-        worktree,
-        &provider_session.agent_session,
-    )?;
+    let mut command =
+        build_resume_session_command(harness, model, worktree, &provider_session.agent_session)?;
     command.attachment = attachment;
     command.remote = remote;
     if let Some(remote) = &command.remote {
@@ -2064,7 +2060,7 @@ mod tests {
                 &session.id,
                 &original,
                 endpoint.to_str().unwrap(),
-                "thread",
+                &"thread".into(),
             )?;
             let attached = store.claim_session_attachment(
                 &session.id,
@@ -2413,7 +2409,7 @@ mod tests {
             temp.path(),
             "review it",
             &BTreeMap::new(),
-            Some("existing-codex-thread"),
+            Some(&"existing-codex-thread".into()),
             &[],
             None,
             None,

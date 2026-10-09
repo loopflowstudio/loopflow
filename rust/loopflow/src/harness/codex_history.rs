@@ -263,8 +263,11 @@ mod tests {
                 .unwrap();
             let mut next = original.clone();
             next.artifact_key = crate::session_record::new_artifact_key();
-            let (next, current) = store
-                .claim_session_input(next, Some(&middle), &a, false)
+            let next = store
+                .replace_session_input(original.captured, next)
+                .unwrap();
+            let current = store
+                .claim_session_attachment(&original.id, Some(&middle), &a, false)
                 .unwrap();
             assert_ne!(first.token, current.token);
             assert!(store.session_turn_origin(&original.id, &first).is_err());

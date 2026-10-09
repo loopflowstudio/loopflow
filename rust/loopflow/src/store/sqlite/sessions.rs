@@ -956,35 +956,33 @@ impl SqliteStore {
         Ok(session)
     }
 
-    /// Reserve the next input and its driver together; a losing claimant changes neither.
+    /// Reserve the next input and its attachment together; a losing claimant changes neither.
     pub(crate) fn claim_session_input(
         &self,
         mut next: LfSession,
-        expected_driver: Option<&crate::process::SessionAttachment>,
+        expected: Option<&crate::process::SessionAttachment>,
         process: &crate::id::ProcessLfid,
-        replace_provider: bool,
+        close: impl FnOnce() -> StoreResult<bool>,
     ) -> StoreResult<(LfSession, crate::process::SessionAttachment)> {
         let _admission = self.lock_session_checkouts(&next)?;
-        let _dispatch = self.lock_session_attachment(&next.id)?;
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let previous = session_in(&tx, &next.id)?.ok_or(StoreError::NotFound)?;
-        if previous.captured != next.captured
-            || previous.completed_at.is_some()
-            || previous.cwd != next.cwd
-            || previous.task_id != next.task_id
-            || previous.wave_id != next.wave_id
-        {
-            return Err(StoreError::InvalidAuthority(
-                "conversation changed before input admission".into(),
-            ));
-        }
-        replace_input_in(&tx, &mut next, Some(process))?;
-        let driver =
-            super::processes::attach_in(&tx, &next.id, expected_driver, process, replace_provider)?;
-        let next = session_in(&tx, &next.id)?.ok_or(StoreError::NotFound)?;
-        tx.commit()?;
-        Ok((next, driver))
+        let session = next.id.clone();
+        self.with_session_resume(&session, expected, close, |tx| {
+            let previous = session_in(tx, &next.id)?.ok_or(StoreError::NotFound)?;
+            if previous.captured != next.captured
+                || previous.completed_at.is_some()
+                || previous.cwd != next.cwd
+                || previous.task_id != next.task_id
+                || previous.wave_id != next.wave_id
+            {
+                return Err(StoreError::InvalidAuthority(
+                    "conversation changed before input admission".into(),
+                ));
+            }
+            replace_input_in(tx, &mut next, Some(process))?;
+            let driver = super::processes::attach_in(tx, &next.id, expected, process, true)?;
+            let next = session_in(tx, &next.id)?.ok_or(StoreError::NotFound)?;
+            Ok((next, driver))
+        })
     }
 
     /// Choose the agent of an unpublished capture. A published capture keeps

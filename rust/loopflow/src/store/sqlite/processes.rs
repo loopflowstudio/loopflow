@@ -685,6 +685,83 @@ impl SqliteStore {
         Ok(driver)
     }
 
+    /// Resume excludes takeover from observation through settlement and claim.
+    /// The close callback runs without SQLite held; its positive death evidence
+    /// commits with the caller's reservation, never as a successful agent outcome.
+    pub(super) fn with_session_resume<T>(
+        &self,
+        session: &str,
+        expected: Option<&SessionAttachment>,
+        close: impl FnOnce() -> StoreResult<bool>,
+        claim: impl FnOnce(&rusqlite::Transaction<'_>) -> StoreResult<T>,
+    ) -> StoreResult<T> {
+        let _dispatch = self.lock_session_attachment(session)?;
+        if self.session_attachment(session)?.as_ref() != expected {
+            return Err(StoreError::InvalidAuthority(
+                "Session attachment changed".into(),
+            ));
+        }
+        if let Some(attached) = expected.and_then(|attachment| attachment.process_lfid.as_ref()) {
+            if crate::journal::process_evidence(self, attached)
+                != crate::journal::ProcessIdentityEvidence::Dead
+            {
+                return Err(StoreError::InvalidAuthority(
+                    "Conversation already has an attached LfProcess; connect to it".into(),
+                ));
+            }
+        }
+        let mut closed = false;
+        if let Some(previous) = expected {
+            let replaceable: bool = {
+                let conn = self.conn.lock().expect("store mutex poisoned");
+                conn.query_row(
+                    "SELECT completed_at IS NOT NULL OR (spawn_state='reserved' AND pid IS NULL)
+                     FROM processes WHERE lfid=?1",
+                    [&previous.agent_process_lfid],
+                    |row| row.get(0),
+                )?
+            };
+            if !replaceable {
+                closed = close()?;
+                if !closed {
+                    return Err(StoreError::InvalidAuthority(
+                        "Previous AgentProcess has no observed exit".into(),
+                    ));
+                }
+            }
+        }
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if let Some(previous) = expected {
+            // A never-launched reservation is retired without inventing OS exit.
+            tx.execute(
+                "UPDATE processes SET completed_at=COALESCE(completed_at,?2),
+                    spawn_state=CASE WHEN ?3 THEN 'exited' ELSE spawn_state END
+                 WHERE lfid=?1",
+                params![
+                    previous.agent_process_lfid,
+                    time::OffsetDateTime::now_utc().unix_timestamp(),
+                    closed
+                ],
+            )?;
+        }
+        let result = claim(&tx)?;
+        tx.commit()?;
+        Ok(result)
+    }
+
+    pub(crate) fn resume_session_attachment(
+        &self,
+        session: &str,
+        expected: Option<&SessionAttachment>,
+        process: &ProcessLfid,
+        close: impl FnOnce() -> StoreResult<bool>,
+    ) -> StoreResult<SessionAttachment> {
+        self.with_session_resume(session, expected, close, |tx| {
+            attach_in(tx, session, expected, process, true)
+        })
+    }
+
     /// Reserve the next OS process for the same invocation after an observed
     /// exit. An uncertain spawn cannot be retried by overwriting its identity.
     pub(crate) fn prepare_session_agent_process(
@@ -939,7 +1016,9 @@ mod discovery_tests {
         next.input_published = false;
         let before = store.session_history(&session.id, 0, 0).unwrap();
         assert!(store
-            .claim_session_input(next.clone(), None, &second, true)
+            .claim_session_input(next.clone(), None, &second, || panic!(
+                "reserved process needs no close"
+            ))
             .is_err());
         assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
         assert_eq!(
@@ -953,7 +1032,9 @@ mod discovery_tests {
             .is_none());
 
         let (admitted, claimed) = store
-            .claim_session_input(next.clone(), Some(&driver), &second, true)
+            .claim_session_input(next.clone(), Some(&driver), &second, || {
+                panic!("reserved process needs no close")
+            })
             .unwrap();
         assert_eq!(admitted.artifact_key, next.artifact_key);
         assert_ne!(admitted.captured, session.captured);
@@ -968,7 +1049,9 @@ mod discovery_tests {
         assert!(reserved.completed_at.is_none());
         next.artifact_key = crate::session_record::new_artifact_key();
         assert!(store
-            .claim_session_input(next, Some(&claimed), &first, true)
+            .claim_session_input(next, Some(&claimed), &first, || panic!(
+                "reserved process needs no close"
+            ))
             .is_err());
         assert_eq!(store.session_history(&session.id, 0, 0).unwrap(), history);
     }

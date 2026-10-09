@@ -227,8 +227,9 @@ Invocation retry preserves account/native history and exact settlement; failover
 selects a fresh thread. Native admission requires attachment, headless remains optional.
 Remote clients never settle providers; generic stop preserves takeover.
 
-Resume bypasses detached settlement, uses mutable Session settings and lacks
-duplicate-identity refusal; close/claim lock separately. Retry proves no resume safety.
+Resume now fences settlement/claim together, using recorded settings and shared
+identity judgment; detached-live and duplicate ownership cannot bypass close.
+Configured resume remains unproved.
 Codex alone has FIFO handoff; live reaping covers noninteractive Codex/OpenCode.
 Generations, foreground cleanup, death orders, public status/scheduled agreement,
 two-second removal and installed settlement remain open.

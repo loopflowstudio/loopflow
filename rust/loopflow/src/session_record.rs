@@ -2095,11 +2095,13 @@ impl CaptureHandle {
                 "session {session:?} is already complete"
             )));
         }
-        let expected = replaceable_driver(&store, session)?;
+        let expected = store.session_attachment(session)?;
         next.artifact_key = new_artifact_key();
         next.input_published = false;
         let (next, driver) =
-            store.claim_session_input(next, expected.as_ref(), &process_lfid, true)?;
+            store.claim_session_input(next, expected.as_ref(), &process_lfid, || {
+                runtime::close_session_agent_process(&store, session)
+            })?;
         // Continue the Session's attribution; the manifest still describes the
         // actual process cwd supplied by the caller.
         spec.subjects = crate::ops::human_session::capture_subjects(&next);
@@ -2316,7 +2318,7 @@ impl CaptureHandle {
                     "AgentProcess requires an admitted conversation".into(),
                 )
             })?;
-        let driver = claim_provider_driver(&store, &session.id, &process_lfid)?;
+        let driver = resume_session_agent_process(&store, &session.id, &process_lfid)?;
         capture.driver = Some((session.id, driver));
         drop(capture);
         self.register_interrupt();
@@ -2940,53 +2942,16 @@ impl SessionCapture {
     }
 }
 
-/// Admit a driver once the previous one is absent or provably dead. The new
-/// driver always starts its own engine and resumes the saved provider thread.
-/// Only a live driver hands over a live engine, and it does so by connecting.
-pub(crate) fn claim_provider_driver(
+/// Resume the saved conversation after settling its exact former AgentProcess.
+pub(crate) fn resume_session_agent_process(
     store: &crate::store::sqlite::SqliteStore,
     session: &str,
     process_lfid: &crate::id::ProcessLfid,
 ) -> StoreResult<crate::process::SessionAttachment> {
-    let expected = replaceable_driver(store, session)?;
-    store.claim_session_attachment(session, expected.as_ref(), process_lfid, true)
-}
-
-/// The driver a new one may replace, after ending any engine it left behind.
-fn replaceable_driver(
-    store: &crate::store::sqlite::SqliteStore,
-    session: &str,
-) -> StoreResult<Option<crate::process::SessionAttachment>> {
     let expected = store.session_attachment(session)?;
-    let Some((previous, process)) = expected
-        .as_ref()
-        .and_then(|driver| Some((driver, driver.process_lfid.as_ref()?)))
-    else {
-        // A driver that finished closed its own engine in the same step.
-        return Ok(expected);
-    };
-    let receipt = crate::journal::read_process_receipts_at(&crate::store::lf_home_dir())
-        .ok()
-        .and_then(|receipts| {
-            receipts
-                .into_iter()
-                .find(|receipt| receipt.process_lfid == process.as_str())
-        });
-    let is_dead =
-        receipt.is_some_and(
-            |receipt| match crate::journal::process_started_at(receipt.pid) {
-                Ok(Some(current)) => (current - receipt.started_at).abs() > 3,
-                Ok(None) => true,
-                Err(_) => false,
-            },
-        );
-    if !is_dead {
-        return Err(StoreError::InvalidAuthority(
-            "Conversation already has a driver; connect to it".into(),
-        ));
-    }
-    runtime::end_abandoned_agent_process(store, session, previous)?;
-    Ok(expected)
+    store.resume_session_attachment(session, expected.as_ref(), process_lfid, || {
+        runtime::close_session_agent_process(store, session)
+    })
 }
 
 /// The store that holds the conversation for the capture recorded at `dir`.
@@ -4347,15 +4312,19 @@ mod tests {
         let first = crate::id::ProcessLfid::new();
         let second = crate::id::ProcessLfid::new();
         let sql = rusqlite::Connection::open(&path).unwrap();
+        let trace = crate::id::TraceId::new();
         for process in [&first, &second] {
             sql.execute(
-                "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
-                [process.as_str()],
+                "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,?2,1)",
+                rusqlite::params![process, trace],
             )
             .unwrap();
         }
-        sql.execute("UPDATE agent_sessions SET provider='codex'", [])
-            .unwrap();
+        sql.execute(
+            "UPDATE agent_sessions SET provider='codex',interactive=0",
+            [],
+        )
+        .unwrap();
         let process = std::process::Command::new("sleep")
             .arg("30")
             .spawn()
@@ -4366,7 +4335,7 @@ mod tests {
             receipts.join(format!("{first}.json")),
             serde_json::to_vec(&crate::journal::ProcessReceipt {
                 schema_version: 1,
-                trace_id: "fixture".into(),
+                trace_id: trace.to_string(),
                 process_lfid: first.to_string(),
                 pid: process.id(),
                 started_at: crate::journal::process_started_at(process.id())
@@ -4384,7 +4353,7 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
-    fn replacing_a_dead_driver_ends_its_engine_before_starting_another() {
+    fn resume_dead_attachment_ends_its_agent_before_starting_another() {
         use std::os::unix::process::CommandExt;
 
         let ledger = crate::journal::TestLedgerGuard::new();
@@ -4411,21 +4380,23 @@ mod tests {
             .unwrap();
 
         // A live driver keeps both the conversation and its engine.
-        let error = super::claim_provider_driver(&store, "conversation", &next).unwrap_err();
+        let error = super::resume_session_agent_process(&store, "conversation", &next).unwrap_err();
         assert!(
             error
                 .to_string()
-                .contains("Conversation already has a driver; connect to it"),
+                .contains("Conversation already has an attached LfProcess; connect to it"),
             "{error}"
         );
         assert!(engine.try_wait().unwrap().is_none());
 
         process.kill().unwrap();
         process.wait().unwrap();
-        let replacement = super::claim_provider_driver(&store, "conversation", &next).unwrap();
-        assert!(crate::journal::process_started_at(engine.id())
-            .unwrap()
-            .is_none());
+        let replacement =
+            super::resume_session_agent_process(&store, "conversation", &next).unwrap();
+        assert_eq!(
+            crate::journal::process_identity_evidence(engine.id(), started),
+            crate::journal::ProcessIdentityEvidence::Dead,
+        );
         // Ending the engine may already have reaped this exact child.
         let _ = engine.wait();
         assert_eq!(
@@ -4446,7 +4417,7 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
-    fn a_dead_driver_is_not_replaced_beside_an_engine_that_cannot_be_ended() {
+    fn resume_refuses_live_agent_that_cannot_be_ended() {
         let ledger = crate::journal::TestLedgerGuard::new();
         let (store, driver, mut process, next) = driven_session(&ledger);
         // A provider outside a group of its own is never signalled.
@@ -4463,8 +4434,11 @@ mod tests {
         process.kill().unwrap();
         process.wait().unwrap();
 
-        let error = super::claim_provider_driver(&store, "conversation", &next).unwrap_err();
-        assert!(error.to_string().contains("is still running"), "{error}");
+        let error = super::resume_session_agent_process(&store, "conversation", &next).unwrap_err();
+        assert!(
+            error.to_string().contains("has no observed exit"),
+            "{error}"
+        );
         assert!(provider.try_wait().unwrap().is_none());
         assert_eq!(
             store.session_attachment("conversation").unwrap(),
@@ -4473,7 +4447,8 @@ mod tests {
 
         provider.kill().unwrap();
         provider.wait().unwrap();
-        let replacement = super::claim_provider_driver(&store, "conversation", &next).unwrap();
+        let replacement =
+            super::resume_session_agent_process(&store, "conversation", &next).unwrap();
         assert_eq!(
             replacement.provider_generation,
             driver.provider_generation + 1

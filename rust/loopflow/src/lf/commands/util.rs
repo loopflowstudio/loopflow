@@ -220,7 +220,7 @@ pub(crate) fn resume_session_with_env(
                 .session_for_artifact(artifact_key)?
                 .ok_or_else(|| anyhow!("Session input {artifact_key} is not recorded"))?;
             let driver =
-                crate::session_record::claim_provider_driver(&store, &session.id, &process)?;
+                crate::session_record::resume_session_agent_process(&store, &session.id, &process)?;
             environment.insert(
                 crate::process::AGENT_CALLER_ENV.into(),
                 serde_json::to_string(&driver.caller(session.id.clone()))?,
@@ -663,7 +663,7 @@ fn session_command_status_with_env(
             let process = crate::journal::current_process_lfid()
                 .ok_or_else(|| anyhow!("Native launch has no admitted invocation"))?;
             let attachment =
-                crate::session_record::claim_provider_driver(&store, &session.id, &process)?;
+                crate::session_record::resume_session_agent_process(&store, &session.id, &process)?;
             environment.insert(
                 crate::process::AGENT_CALLER_ENV.into(),
                 serde_json::to_string(&attachment.caller(session.id.clone()))?,

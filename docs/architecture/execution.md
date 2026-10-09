@@ -131,12 +131,15 @@ Recovery preserves recorded inputs and exact native evidence. File publication
 and SQLite settlement have an explicit recoverable boundary; neither alone is a
 claim of successful execution.
 
-Resume admission has not yet converged on that same settlement path.
-`replaceable_driver` still treats detached attachment as replaceable and samples
-attached lf receipts separately; abandoned-process cleanup reads the Session's
-mutable provider without the retry path's duplicate-identity check. Close and
-claim use separate lock acquisitions. Consolidating these boundaries remains
-part of the cutover; invocation-owned retry tests do not establish resume safety.
+Resume checks the attached LfProcess through the shared record/OS judgment.
+One attachment lock spans observation, exact AgentProcess close and replacement;
+SQLite is released during provider I/O. Detached does not imply dead. Resume and
+invocation retry use the recorded provider/interactivity and refuse duplicate
+live PID/birth ownership. Unknown spawn remains unresolved; never-launched
+reservations can retire without claiming OS exit. Death and the new attachment
+commit together, preserving native history and without inventing an outcome.
+Native foreground and non-Codex live close still require their own lifecycle
+coverage; this source path does not establish configured resume acceptance.
 
 ## Connect and transfer attachment
 

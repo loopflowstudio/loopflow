@@ -597,7 +597,10 @@ fn headless_resume_preserves_a_held_owners_capture_on_both_harnesses() {
         .unwrap();
         assert!(!output.status.success());
         let error = String::from_utf8_lossy(&output.stderr);
-        assert!(error.contains("already has a driver"), "{harness}: {error}");
+        assert!(
+            error.contains("already has an attached LfProcess"),
+            "{harness}: {error}"
+        );
         assert!(!error.contains("unexpected-provider-launch"), "{error}");
         assert_eq!(store.session(&id).unwrap().unwrap(), before);
         assert_eq!(store.session_attachment(&id).unwrap(), Some(driver));

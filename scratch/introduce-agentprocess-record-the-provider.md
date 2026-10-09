@@ -81,6 +81,10 @@ attribution survive.
   admission. Both use one parent-side pre-exec recording channel. Shared
   `open_owner` replaces three harness-local store-opening sequences without
   refreshing their attachment snapshots.
+- `replaceable_driver`, `end_abandoned_agent_process` and `claim_provider_driver`
+  are removed. Resume uses the shared record judgment and invocation-owned close
+  beneath one attachment fence, including input admission. No detached shortcut,
+  direct receipt sampler or mutable-Session provider selector remains there.
 - Metadata-only `CaptureHandle::fail_and_begin_attempt` is removed; invocation
   retry settles/replaces the record before advancing capture metadata. The private
   metadata reducer remains for history/usage projection.
@@ -211,16 +215,14 @@ invisible-blocker implementation finding, not public Task-status/scheduled proof
    Codex/OpenCode-only, noninteractive selection without applying headless group
    control to a foreground TTY. `HELD_LIFELINES` still retains superseded writers
    until lf exit. No current live attachment means orphan settlement, not invented exit;
-   unknown attachment liveness stays unknown. Resume still has a separate path:
-   `replaceable_driver` returns immediately when no LfProcess is attached and
-   otherwise checks a receipt's PID/start directly, not the shared record judgment.
-   `end_abandoned_agent_process` reads the mutable Session provider and lacks the
-   invocation-retry path's duplicate PID/birth check. Its close and subsequent claim
-   also acquire separate attachment locks. Consolidate this path around the exact
-   AgentProcess and one fenced settlement/replacement, preserving unknown spawn,
-   detached-live, zombie, duplicate-identity and changed-launch-setting cases.
-   Invocation-retry repair does not establish resume safety. No configured orphan
-   was signaled and OS death supplies no successful outcome.
+   unknown attachment liveness stays unknown. Resume now holds one attachment
+   fence through shared LfProcess observation, recorded-provider close and atomic
+   settlement/claim. Detached-live, unknown-spawn, duplicate live identity,
+   zombie and changed-settings cases have focused source fixtures. Live close
+   still supports only noninteractive Codex with a saved connection; native
+   foreground and other-provider cleanup remain in this lifecycle cut.
+   Source resume proofs do not establish configured-provider acceptance.
+   No configured orphan was signaled; OS death supplies no successful outcome.
 4. Complete public Task-status and scheduled-entry agreement, caller-lineage
    exclusion, native-history coverage and two-second removal. The inventory repair
    above supplies source evidence, not those entry-point proofs. Prune still stops
@@ -259,12 +261,25 @@ the group, so no second slot is needed. Combining native setup errors must not
 drop the published client guard before cleanup; it remains in the outer scope.
 No new signal authority, attachment refresh or lifecycle owner is introduced.
 
-October 9 realignment read Release's GOAL and full MEMORY, the only immediate
-child scope found here, including directories without a registered Wave. Its
-operation-entry lesson also applies to resume: invocation-retry fixtures do not
-prove the separate admission/abandonment path. Source review found the bypasses
-in item 3; these need implementation, not a new product decision or relaxed
-acceptance. The account-daemon merge is integrated, not installed acceptance.
+October 9 resume implementation removes the realignment's separate admission
+bypasses. The shared close retains duplicate-identity refusal, recorded settings
+and foreground exclusion. The store holds one attachment fence through close and
+claim, but no SQLite lock over OS I/O. An uncertain spawn changes neither input
+nor attachment; a never-launched reservation retires without invented OS exit.
+Ending the former record and reserving the next commit together. An intervening
+claim loses without touching the replacement. Tests use throwaway children only.
+The live-takeover history fixture now reserves its input and transfers attachment
+explicitly rather than using the fresh-provider resume API. Review corrected the
+older close fixture's default interactive setting: headless group close must not
+be applied to a foreground provider. Shared LfProcess judgment also exposed its
+invalid trace string; the fixture now seeds one valid trace in row and receipt
+rather than bypassing the record reader. Its old “PID absent” assertion also
+excluded zombies; death now uses the same record/OS judgment as production.
+
+Release's GOAL/full MEMORY remain the only immediate child scope here. Its
+operation-entry lesson still applies: focused store/runtime resume fixtures do
+not establish public Task-status/scheduled or installed acceptance. The account-
+daemon merge is integrated, not installed acceptance.
 
 Review caught two boundary errors and repaired them: native clients must hold the
 attachment fence at spawn, and a helper-created capture must finish with the
@@ -291,4 +306,4 @@ records fmt/Clippy, focused compilation, 21 top/active/journal cases, public ps,
 Rust DTO filters and a Swift ActivitySnapshot round-trip; invocation replacement
 checks remain at `397b2ee59`, this plan. They predate the account-daemon sync.
 
-Check: `git diff --check` and migration-excluded deletion audit pass; `lf context --skill realign --json` fits; prose-only reconciliation, runtime suites deferred to gate/CI.
+Check: `cargo test -p loopflow --lib --no-run` builds; network-isolated `resume_`, `losing_input_claim` and `delayed_start_keeps_request_capture` filters pass after fixture repairs (nine affected cases); `cargo fmt --check`, all-target Clippy, `git diff --check` and context budgets pass; full Rust/Swift/materialized matrix and public/configured acceptance remain gate/CI-owned.

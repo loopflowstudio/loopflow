@@ -80,6 +80,15 @@ installed help or reviewed Desktop code, not proof that no external tool exists.
   input parity and absent-storage checks passed. Remote/Flow-wide preview, broader
   action explanation, Wave planning and composed opening remain incomplete.
   This updates source capability, not the installed baseline or host judgments.
+- **October 9 opening delta (`ef179762d`):** `desktop open --session ID --diff`
+  resolves Task-associated Work without CLI checkout preparation or automatic
+  execution-Machine routing. One Task link carries Session and Changes intent to
+  the repository-keyed window; delayed preparation is fenced and retained panes
+  are reused. Lookup failures and `opening` are observable; `usable` is not emitted.
+  Downstream Session/surface/comparison outcomes, pre-registration failures and
+  remote composition remain unfinished. Focused Rust and interpreted Swift-model
+  checks are not native endpoint or installed proof. The historical tables and
+  cmux/herdr judgments below are unchanged.
 - Public [cmux API](https://cmux.com/docs/api) and
   [concepts](https://cmux.com/docs/concepts) provide context, but the tables below
   use the installed command discovery and our local observations. The public API

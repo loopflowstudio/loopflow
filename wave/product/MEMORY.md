@@ -50,20 +50,19 @@ without rewriting Machine defaults. Inheritance is unapproved; placement suites 
 Neither negative peer observation nor local SQLite reserves first start; runtime
 must not synchronize. Seeded IDs prove routing, not exchange/admission.
 
-LOO-427's window/arrangement/I/O proof is partial (`scratch/findings.md`);
-native artifact, peer composition and packaged acceptance remain. `desktop text/key` reuse pane/surface owners. Jack selected
-insertion into existing drafts, with Enter separate. Control-text rejection and
-finishing IME first are reversible; native draft/cursor/replacement fixtures are
-unexecuted. Passive reading grants no input authority.
+`desktop text/key` reuse existing owners. Jack selected insertion into existing
+drafts with Enter separate; control-text/IME restrictions are reversible. Native
+cursor/replacement fixtures remain unexecuted; passive reads grant no input authority.
 
 Jack's October 8 API: `--context` previews input, `--explain` is broader,
 `--chrome` controls execution. Root `run`, `--max-turns` and `--no-loopflow` are
 removed; Task skill/Flow selection survives. History owns activity, Process pages,
 show/replay and usage; Desktop owns open/list. Bare `open` conflicts with PR opening;
 Sessions use `connect`. October 9 local Task/Session-plus-Changes opening bypasses
-execution routing and CLI preparation. Session/companion intent travels together;
-`opening` never proves usable. Native readiness/downstream failures, Wave planning,
-remote/Flow input and full action explanation remain. Discord is unchanged;
+execution routing and CLI preparation. Session/companion intent travels together; a partial Session inventory must not
+retire other panes. `opening` stops before native readiness or downstream failures;
+those outcomes must retain their originating request. Wave planning, remote/Flow
+input and full action explanation remain. Discord is unchanged;
 `--steers-after` filters nodes, not restarts.
 `repo_root` (default `~/src`) and paths resolve on the selected Machine, never as
 portable identity; remembered names remain open. Scoped IDs survive dispatch.
@@ -87,14 +86,15 @@ Multiple destinations must not split the repository window.
 Private-ancestry holds retain journals/dependents and local moves;
 peers keep old values, so omission is not convergence.
 
-Mixed Linear/Git stays disabled. Unintegrated LOO-412 `88cd47572`
+Mixed Linear/Git stays disabled. Unintegrated LOO-412 through `a67c7f7cb`
 acquires before projection, rolls rejected objects back and retains typed conflicts;
-malformed imports abort. Common disposition, comment, Project-content and
-creation/link receipts have focused Linux proof.
-Captured parents/save IDs and uncertain effects travel; mapping settles nothing.
-Project effects import no chapter transition. Foreground creation, order/deletion,
-alternate acquisition, relationship ordering, legacy association and Desktop remain.
-Storage proof is not mixed-provider acceptance.
+malformed imports abort. `88cd47572` transports prepared creation/link receipts,
+captured parents/save IDs and uncertain effects, without chapter transitions.
+Storage proof misses public recovery:
+unprepared peer creations lack export eligibility, and mapped-record filters hide
+uncertain receipts from acquisition/status. Mapping settles nothing; storage
+readback cannot prove foreground recovery. Ordering/deletion, alternate acquisition,
+relationship ordering, legacy association and Desktop remain.
 
 ## Terminal-host adoption (2026-10-07)
 

@@ -92,7 +92,7 @@ settle order progress; primary-only moves retain exact input. Selection cannot
 release projection conflicts. Independent provider facts retain separate savepoints,
 original ages/baselines and causal frontiers. Entity revisions cannot order
 relationships; scalar/list replay cannot clear freshness. Retain revision floors and
-unseen concurrent notices. Earlier mechanisms/proofs: `2c23acbb8`, this section.
+unseen concurrent notices. Prior proof: `2c23acbb8`.
 
 Unplaced-Wave reads and destination-level Desktop receipts/holds now exist in the
 dependency (`60d113a70`, `c20e4ad13`); reuse its repository Work stream, not another
@@ -1012,7 +1012,7 @@ LOO-293's bounded history, passive native output and configured proof remain;
 use current Task panes, not the deleted Watch/Monitor view. Join history by exact
 captured step, never skill name or current YAML. Earlier scope and retired
 FlowPosition mechanism: `2c23acbb8:wave/product/MEMORY.md`, **Task observation and
-Watch**. Primitive integration does not settle that Task.
+Watch**. Integration is not acceptance.
 
 ### Terminal ownership and input (branch evidence, 2026-09-22)
 

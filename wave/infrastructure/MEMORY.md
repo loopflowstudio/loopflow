@@ -631,13 +631,12 @@ scalar receipts retain revisions and losers. Task/Project regressions are unexec
 the design distinguishes coverage. Grouped receipts, alternate acquisition, legacy
 association and Desktop remain.
 
-October 8 source repairs `ce740b028`'s acquisition findings: reject projection
-with removal/archive evidence; retain typed membership disputes outside the object
-savepoint. Identical bodies cannot bypass rejection. Superseded revisions stay in
-history; unchanged readbacks issue no writes. Entity revisions cannot order
-relationships. Regressions preserve journals, independent imports and execution;
-SQL passes, Rust is unexecuted. Grouped receipts, alternate paths, legacy association
-and Desktop remain. Design: `scratch/work-on-another-machine-name.md`.
+`c6f55719d` fences projection with removal/archive evidence and retains typed
+membership disputes outside savepoints. Identical bodies cannot bypass rejection;
+entity revisions cannot order relationships. Regressions preserve journals,
+independent imports and execution; SQL passes, Rust is unexecuted. Grouped receipts,
+alternate paths, legacy association and Desktop remain.
+Design: `scratch/work-on-another-machine-name.md`.
 
 Joining publishes nothing. Mixed Linear exchange stays disabled pending composition,
 not by product policy. Fetch/import/publication stay separate; readback settles

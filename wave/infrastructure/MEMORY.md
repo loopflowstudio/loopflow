@@ -221,19 +221,18 @@ unpublished code retained, without deletion or delivery authorization.
 
 ## AgentProcess (LOO-443, 2026-10-09)
 
-Jack Heart requested one process inventory, deleting Session columns and duplicate
-owners. #1512 is `3e1e6245c`. Jack authorized parallel LOO-441 work and rename
-integration before publication. AgentProcess records remain absent.
-Pre-exec lifeline and attachment proofs: `6f96a964c`, this heading.
+Jack Heart requested one inventory, deleting Session columns/duplicate owners.
+#1512 is `3e1e6245c`; Jack authorized parallel LOO-441 work, integrated before
+publication. Rename and records remain absent. Prior proofs: `6f96a964c`, this heading.
 
-Fresh tokens fence A → B → A; takeover retains provider identity/parent and
-exact exit history. Freeze Work/capture before each native request, not its delayed
-start. Neither the current Session nor AgentProcess's original capture identifies
-later turns. Correlation retains late history without current control; unknown
-broadcasts cannot borrow newer input. Source fixtures prove no installed outcome.
-FIFO holders survive transfer until OS exit; both takeover death orders still
-need record-based proof. Close inherited writers before exec; preserve native
-terminals, dash-compatible signals and throwaway-only signaling.
+Fresh tokens fence A → B → A; preserve provider identity/parent and exact exits.
+Freeze request Work/capture before sending, never from delayed start or launch
+capture. `a563794b7`: matching origins are no-ops; conflicts retain the first. Late history grants no
+control; broadcasts cannot borrow newer input. FIFO holders survive transfer
+until OS exit; both takeover death orders need record-based proof. Current SQL
+omits detached providers: inventory must not depend on attachment presence.
+Close inherited writers before exec; retain native terminals, dash-compatible
+signals and throwaway-only tests. Fixtures prove no installed outcome.
 
 ## Process vocabulary (LOO-400, curated 2026-10-09)
 

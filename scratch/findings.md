@@ -178,22 +178,31 @@ forever on the worktree URL after canonical-root rewriting; sampling exposed the
 fixture error. Corrected expected URLs pass. Initial Swift/Rust compilation failures
 were stale constructor/scalar assumptions and were repaired.
 
-Merge `d378f31ae` composes `63d292896`/`19dab80dd` provider claims and
-`19e31f64d` origin-keyed creation receipts. The deleted source-transfer resolver
-conflicted with a dependency comment edit; it stayed deleted. The common peer
-owner keeps immutable import preparation and per-field savepoints. Dependency
-scratch remains in its commit, not ambient here. Origin preservation is not legacy
-correspondence; mixed-provider exchange and peer-first-start refusals remain.
+`d378f31ae` composes common provider claims and origin-keyed creation receipts;
+its resolver conflict kept TaskSource deleted. Merge detail: `28fc5274a`, this
+heading. Mixed-provider and first-start refusals remain.
 
 Prior cross-Wave/dependency inspection and pre-edit evidence:
 `b83d3e2a9:scratch/findings.md`, this heading. Product still has no child memories.
 Delegation exchange, exclusive admission and remote/native composition remain;
 Jack Heart's inheritance choice is unresolved and cursor insertion is settled.
 
-Compression exposed a second stale-observation case: the router compared selected
-plans with scene equality. A restored alias could roll back A→B→A because the final
-ID looked unchanged. Router-owned readings now retain observation identity, separate
-from the scene key; opening/restoration share retention. The headless regression
-covers both reserved and registered scenes. Earlier failed builds and fixture URL
-errors remain above; this establishes no native usability. The generated Work seed
-still exceeds its independent 16,000-token limit; authored notes cannot shrink it.
+Compression repaired restored-alias A→B→A rollback (`28fc5274a`), but realignment
+found ordinary opens still fenced only their input path. A delayed open through a
+symlinked parent rolled the selected plan and input token back after another locator
+completed association. Cold opens also missed the new scene when only its newer
+reading retained the old locator. Opening/restoration now share the observation
+check, match either reading’s retained locators, and deliver through the same scene. The first fixture used
+a leaf symlink that RepoScanner does not recognize as a directory and was stopped;
+a parent-symlink fixture reproduced identity/token rollback and cold-open divergence.
+The failed cold case was stopped with delivery pending; a required scene assertion
+now ends that failure. Registration receipts also needed the fixture’s request IDs.
+This is headless router evidence, not native acceptance.
+
+LOO-412 through `de3c84b08` was inspected, not merged. Its explicit correspondence
+and full-ID lookup advance the dependency beyond the integrated `19e31f64d`, but
+cross-origin causal/relationship projection and origin settlement remain held.
+The plan records composition and corrected checks still deferred by that owner.
+Product has no child Markdown/memories in this checkout. Main remains `3e1e6245c`.
+The generated Work seed exceeds its independent 16,000-token limit; authored-note
+curation cannot shrink it.

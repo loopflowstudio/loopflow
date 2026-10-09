@@ -10,12 +10,12 @@ Focused local Rust and model evidence establish neither native acceptance nor de
 LOO-406 is integrated through main’s `d20c56daf` (#1503). LOO-412 through
 `19e31f64d` is composed locally: common receipts, unplaced-Wave reads and
 destination-level Desktop status survive. Established repository roots can now be
-explicitly associated; divergent Task/Project provider identities remain unresolved.
+explicitly associated. Newer LOO-412 correspondence APIs are not yet composed;
+joint provider projection remains unfinished there too.
 Mixed Linear/Git stays disabled pending the remaining composition.
 Local Task/Session-plus-Changes opening follows request-scoped readiness; native proof remains.
 Remaining implementation: broader explanation, delegation
-exchange, first-start admission and remote opening. Provider-effect repairs are
-composed; divergent provider correspondence and full-path/native proof remain.
+exchange, first-start admission and remote opening. Integrated provider-effect repairs do not establish correspondence or native proof.
 [Findings](findings.md), [questions](questions.md) and the
 [comparison](../docs/reviews/terminal-command-comparison.md) retain evidence and open choices.
 
@@ -204,7 +204,7 @@ synchronization. Its started-Task transfer is excluded; remote launch compositio
 remains in LOO-427, using existing Task preparation. Ordinary operations remain local.
 LOO-426 owns Work opening; LOO-416 saved panes; LOO-387 draft preparation; LOO-415/424 relay/resume;
 LOO-422 host status; LOO-402/403 Waiting/shortcuts; LOO-397 command discovery.
-These boundaries are integration constraints, not separate replacement projects.
+Reuse these owners.
 
 ## Delete — do not maintain
 
@@ -263,36 +263,23 @@ native/artifact evidence and the plan below retains incomplete composition.
 
 ### Completed local command/opening slices — October 9
 
-Local opening and preview mechanisms, failed attempts and limits:
-`3f143cd65:scratch/compare-cmux-s-command-line.md`, this heading. Only initial Flow
-input is available; previews remain read-only. Request-scoped readiness, simulated
-SSH and model callbacks prove neither exclusive start, configured transport nor
-native usability/provider continuation.
+Local opening/preview proof and failures: `3f143cd65`, this heading.
+Read-only previews expose initial Flow input only; native/remote acceptance remains.
 
 ### 2. Shared Work identity, delegation and routing
 
-**Locally composed, incomplete.** The branch includes LOO-406's common writer
-and LOO-412's `19e31f64d` exchange, journal, foreground sync and repository Work-stream
-receipts. Wave commands retain their shared readers and separate writes. The
-Desktop peer cache reuses Machine/repository keys, not path-only readings. `repository_plans` supplies local plan
-identity even without Tasks; explicit binding can associate a peer path with that
-ID. Known started Tasks route via recorded checkout Machine; locally unstarted
-Tasks use effective delegation. Neither rewrites Machine defaults. Explicit
-`repo identity --bind ID` uses the existing owner even after a peer creates Work.
-Binding neither selects nor publishes a destination. Imported Waves establish a
-local repository identity when none exists, without allocating placement.
-The independent-root fixture creates distinct IDs and Work before binding,
-then exchanges common-writer journals while retaining local execution. A separate
-provider fixture preserves lookup and attempted edits through binding. Neither
-proves running controls, configured transport or exclusive admission.
+**Locally composed, incomplete.** LOO-406's common writer and LOO-412 through
+`19e31f64d` supply exchange, foreground sync and repository Work-stream receipts.
+Peers use Machine/repository keys. `repo identity --bind ID` associates established
+roots, preserving prior local locators, Work, mappings, effects and execution;
+it selects/publishes nothing. Imported Waves remain unplaced. Independent-root
+and provider fixtures prove retained identity/lookup, not running controls or
+exclusive start. Earlier details: `28fc5274a`, this section.
 
-The merge exposed an incompatible source-side transfer path: LOO-412's
-`TaskSource` could carry a started Task's branch to another Machine and its binding
-resolver could prepare Work. This cut excludes that path and its transfer-only
-fixtures, preserving LOO-427's read-only selection and recorded-Machine routing.
-Cold planning acquisition and common Git exchange remain; code preparation uses
-the existing Task owner. Remote first start needs its own accepted admission,
-not the removed source envelope or an implicit provider-alias association.
+Known started Tasks route by recorded checkout Machine; locally unstarted Tasks
+use effective delegation. Neither changes Machine defaults. LOO-412's TaskSource
+transfer/preparing selector stays excluded: cold planning acquisition and ordinary
+Task preparation survive, but remote first start still needs exclusive admission.
 
 First-start admission remains unresolved. Git-selected Tasks (including user-keyed
 refs) without a retained local checkout refuse start through the common planning/
@@ -305,8 +292,9 @@ Delegation inheritance remains proposed, not accepted from source code alone.
 `a73198197` address the previous iteration's divergent-root request: existing roots
 select one repository ID, retain old locators and resolve Task prefixes within that
 repository. They do not associate two Task/Project IDs for the same Linear object.
-The provider fixture preserves one existing mapping and its attempted edit; it
-does not test that divergent-Work recovery. LOO-412 retains that outcome.
+The provider fixture preserves one mapping and attempted edit, not divergent-Work
+recovery. LOO-412 now has explicit correspondence/full-ID lookup; its joint
+projection and recovery remain unfinished, and this branch has not consumed it.
 
 **Remaining identity/routing composition (October 9).**
 `PlanningKind::fields()` carries neither RepositoryId nor authored delegation.
@@ -380,26 +368,30 @@ Wave-owned planning and repository-keyed windows; do not add another poller or i
 repository identity from a destination. Per-Work sharing/authorship/assignee and
 losing-edit recovery presentation remain, distinct from implemented destination status.
 
-`d378f31ae` composes LOO-412 through `19e31f64d`: common provider claims defer
-effects across divergent Work IDs; creation receipts retain origin UUIDs, inputs
-and attempts independently of projection ownership. The merge discarded the
-dependency's modified transfer/preparing resolver rather than restoring TaskSource.
-Common receipt/migration owners survive. This does not implement correspondence,
-lookup or deterministic projection for divergent provider identities; mixed
-Linear/Git remains disabled. No automatic rekeying or start authority follows.
+`d378f31ae` composes LOO-412 through `19e31f64d`: cross-ID provider claims
+hold effects; origin-keyed creation receipts preserve UUIDs, inputs and attempts.
+Transfer/preparing selection stays deleted. Mapping preservation is not association:
+raw unmapping would make legacy Work eligible for duplicate creation. Earlier
+counterexamples: `28fc5274a:scratch/findings.md`, **Shared planning composition**.
+Main's `3e1e6245c` is integrated: live connect hands off; dead-driver resume starts
+an engine on native history. Import must never trigger that legitimate local action.
 
-`7260e4602` also protects provider mappings before scalar and evidence projection.
-Clearing a legacy mapping would make retained Work eligible for provider creation;
-the former raw-SQL fixture was not association recovery. Explicit association must
-preserve IDs, issue lookup, uncertain effects and execution. Mixed Linear/Git remains
-disabled; combined partial-list/public acquisition, live controls and peer-exclusive
-start remain unproved. Main `3e1e6245c` is integrated: live connect hands off an engine,
-whereas dead-driver resume starts a fresh engine on the saved thread. Combined peer
-proof must distinguish legitimate local resume from a provider launch caused by import.
-LOO-427 consumes the repaired common path rather than rebuilding its
-receipt machinery or narrowing acceptance to disconnected repositories. Import uses the
-common local writer, preserves causal reopening and conflicts, and avoids echoes
-with optional Linear sync. Receiving a comment is not a command to start a Flow.
+**New committed dependency, inspected October 9; not integrated:** LOO-412 through
+`de3c84b08` includes `5e5786bff` (provider receipt import no longer manufactures
+local Task-creation requests), `b414e8cce` (explicit provider correspondence/full-ID
+lookup) and `381c88fec` (one skipped-projection hold). Composition belongs in the
+common receipt, resolver and migration owners, without restoring TaskSource.
+The new lookup rechecks repository/provider mappings and preserves physical IDs,
+execution and private selection; it does not resolve joint projection or effects.
+Its CLI fixture seeds import through Store APIs, not Git acquisition. Corrected
+CLI/Store checks remain deferred in the dependency's plan.
+
+LOO-412's remaining recovery must resolve cross-origin causal parents/capture,
+project Task membership, comments and order through local planning owners, and
+settle each exact creation origin without changing captured inputs or enrolling
+private Work. Grouping winners alone cannot make a later local save acknowledge
+an observed peer Linear head. Mixed exchange and shared first-start refusals stay;
+lookup is not permission to activate either. Combined peer/Desktop proof remains.
 
 **Required mixed-operation proofs:** local `task run` writes its own Workflow and
 runs locally while Task comments/follow-ups/completion synchronize to a second
@@ -528,8 +520,7 @@ app/provider/Work effect. Use owned fixture terminals and fake providers only.
 
 ### 5. Complete-path verification and demo
 
-**Depends on 1–4.** No partial slice ships separately. Gate owns affected Rust
-behavior/migration suites and
+**Depends on 1–4.** One PR. Gate owns affected Rust suites and
 `cargo test -p loopflow --test dto_fixtures` for Rust wire fixtures, plus
 `cargo test -p loopflow --test documented_commands` for command ambiguity only.
 Headless Desktop coverage uses `scripts/test_desktop.sh -Xswiftc -gnone --no-parallel`.
@@ -546,4 +537,4 @@ identity/delegation, open them, add shell/Files panes, retain an unfinished draf
 change focus, target a harmless command, read output, hide/restore, and verify the
 original input target and draft survive. Demo owns native usability; preserve comparison evidence and use no real accounts or live user terminals.
 
-Check: `cargo fmt --check`/Clippy PASS; network-isolated `cargo test -p loopflow --lib lf::commands::desktop::tests` PASS (2); `scripts/test_desktop.sh` repository/association/restoration filters build/PASS (12); prior slice checks: `b83d3e2a9`, this line; affected suites: gate; native usability: demo.
+Check: `scripts/test_desktop.sh -Xswiftc -gnone --filter 'WorkDestinationTests/(delayedLocatorOpen|restoredAlias|repositoryAssociation|associationBefore|obsoleteRepository|obsoleteScene|plainRepository)'` PASS (7 tests; new regression failed before repair); `git diff --check` PASS; prior Rust checks: `28fc5274a`; full suites: gate; native usability: demo.

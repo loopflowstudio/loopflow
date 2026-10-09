@@ -235,8 +235,9 @@ each Task/Project after reversed and repeated imports.
 ## Remaining integration — October 9
 
 Receipt origins (`19e31f64d`/`5e5786bff`) and explicit correspondence/full-ID lookup
-exist; **joint projection and association recovery remain unfinished**. Item 3
-owns the implementation boundary, preservation constraints and evidence.
+(`b414e8cce`) exist. `381c88fec` unifies skipped-projection holds, not projection.
+**Joint projection and association recovery remain unfinished**; item 3 owns
+the causal, relationship and receipt composition before lifting those holds.
 
 Destination-level Desktop status has focused headless proof; per-Work membership,
 authorship/assignees and losing-edit recovery remain unfinished. Public Git/Linear
@@ -480,11 +481,13 @@ invalidation) remain. The diagnostic is temporary, not product policy.
    explicit projection hold rather than enabling partial effects. This temporary
    hold is incomplete implementation, not Jack Heart's final policy.
 
-   New focused fixtures enter the correspondence operation and ordinary import/
-   lookup. Reversed import order retains both journals, private planning, uncertain
-   local field receipts and populated execution. Public CLI coverage is written;
-   its corrected status assertion awaits rerun. These prove lookup plus refusal,
-   not cross-origin winners or exact-origin readback. Those remain below.
+   The Store correspondence fixture imports older/newer snapshots in both orders,
+   repeats association and resolves both IDs. It asserts unchanged private planning,
+   local uncertain field receipts and populated execution; it does not project a
+   cross-origin winner. The CLI fixture seeds/imports through Store APIs, then runs
+   public association and Task status (not Git acquisition or provider readback).
+   Its corrected `execution.task_id` assertion awaits rerun; `381c88fec`'s revised
+   Store hold assertions remain gate-deferred.
 
    Remaining association composes this owner with:
    - Replace `insert_and_project`'s incoming-ID-only projection with deterministic
@@ -495,6 +498,13 @@ invalidation) remain. The diagnostic is temporary, not product policy.
      ID's heads. Grouping current winners alone would keep an observed peer Linear
      head concurrent with a later local save. Resolve cross-origin observation in
      the journal before enabling projection; a higher local clock alone is wrong.
+   - Resolve planning references as well as the object being projected. Current
+     `insert_and_project`/`project_comment` and post-pass Wave selection/order
+     projection use incoming IDs directly. Associated parents may have no physical
+     incoming row: Task membership, comment ownership and order members must resolve
+     to the local planning owner without rewriting journal values, captured effect
+     inputs or execution foreign keys. Association alone changes no Wave selection.
+     Import coverage must include relationships, not only full-ID lookup.
    - Explicit receipt projection reassignment, if needed by correspondence, without
      rewriting captured inputs or treating a different provider object as the
      associated identity. Every origin still requires exact readback.
@@ -509,22 +519,12 @@ invalidation) remain. The diagnostic is temporary, not product policy.
    and private-selection holds. Public provider readback must settle only its exact
    origin; lookup by either associated ID must preserve local execution ownership.
 
-   The earlier refusal fixture has distinct local Task/Project IDs,
-   a private legacy Wave, populated Session/Process/Workflow/PR history, uncertain
-   peer deletion and local scalar effects, later saves, repeated import, common
-   acquisition and issue/full-local-ID lookup. It checks that nulling the incoming
-   mappings cannot release deferral, private history stays out of export and an
-   unrelated provider object's effect still proceeds. It proves refusal, not
-   successful association, incoming-full-ID lookup or running-control continuity.
-   Successful association and repeat projection with uncertain effects under both
-   IDs remain required before mixed-provider activation. No merge of Work,
-   execution transfer or real-plan publication is inferred.
-
-   The earlier 68-test storage suite covers mapping refusal, cross-kind isolation and
-   re-keyed creation rejection; it proves no successful association. Cross-ID
-   fixtures exercise scalar attempts while production field/deletion, creation/link,
-   state and ordering paths share `require_projected_effects`. Successful readback
-   and uncertain attempts across both origins still need composed proof.
+   Earlier refusal/68-test coverage and limits:
+   `381c88fec:scratch/work-on-another-machine-name.md`, item 3. Private ancestry,
+   populated execution and uncertainty survive rejected mappings; no joint
+   projection or running-control proof follows.
+   Field/deletion, creation/link, state and ordering attempts share
+   `require_projected_effects`; composed exact-origin readback remains required.
 
    CLI/Desktop share destination-scoped conflicts. Malformed journals report
    `pending_local: null` and a sanitized error while preserving receipts and healthy
@@ -665,7 +665,7 @@ and limitations: `9b59e9b71:scratch/work-on-another-machine-name.md`,
 **Acceptance for review**. They do not establish this ordering cut, public
 combined behavior or Desktop acceptance.
 
-Check: `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` pass; build and focused correspondence/private-history tests are gate-deferred at 31.5 GiB free after supported recovery (32 GiB reserve); earlier correspondence pass and corrected public `execution.task_id` assertion/rerun limit remain at `1fe416837:scratch/work-on-another-machine-name.md`, **Acceptance for review**.
+Check: `git diff --check` passes (prose only); prior fmt/Clippy and resource-deferred build/correspondence checks: `381c88fec:scratch/work-on-another-machine-name.md`, **Acceptance for review**. Capable gate owns those checks and combined public acceptance.
 
 Earlier SQL proofs, macOS startup limitations and the retained historical Flow
 without a recorded exit remain at

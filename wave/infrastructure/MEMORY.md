@@ -627,18 +627,19 @@ contradictions defer effects, never saves/acquisition. Retain baselines, uncerta
 and losers. Readback settles effects, not mappings/errors or removal via creation.
 
 Ordering, causal freshness, private-history holds and unknown-journal proofs:
-`9dfb95451`, this heading. Retain ages, baselines and losers; omission is not
-convergence. Desktop keeps last-good scoped status. Mixed exchange stays disabled;
+`9dfb95451`, this heading. Omission is not convergence. Desktop keeps last-good
+scoped status. Mixed exchange stays disabled;
 sharing/recovery and public composition remain unfinished.
 
-Legacy association remains unfinished. Explicit correspondence resolves incoming
-full Task/Project IDs without changing IDs, execution or selection. Lookup grants
-no joint projection or effect authority. Association and import retain the same
-skipped-projection receipt; status derives current hold reasons, not permission.
-Common capture/validation still require same-ID parents: grouping winners cannot
-acknowledge a peer Linear head before a later local save. Mixed exchange stays
-disabled. Receipt-origin/refusal proofs: `bf4c39b2e`, this heading. Public origin
-settlement and order-independent projection remain unproved.
+Legacy association remains unfinished. `b414e8cce` resolves incoming full
+Task/Project IDs without changing execution or selection; `381c88fec` unifies
+skipped-projection receipts. Status explains holds, never grants authority.
+Lookup neither projects relationships nor settles origins. Capture/validation
+require same-ID parents; grouping winners cannot acknowledge a peer Linear
+head before a later local save. Planning references also need local projection
+without rewriting original IDs or captured inputs. Receipt-origin/refusal proofs:
+`bf4c39b2e`, this heading. The CLI fixture seeds import directly, proving
+no Git acquisition, joint winners or public origin settlement.
 Plan: `scratch/work-on-another-machine-name.md`.
 
 ## Driver recovery

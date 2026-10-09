@@ -153,8 +153,7 @@ and a local fake API. All argv entries remain small. Saves exact requests,
 terminal output and exit/timeout evidence. A nonzero result means at least one
 surface did not deliver the full turn; it is not a passing transport check.
 
-Codex 0.161.0 exec delivered the exact user message on October 9. The TUI exited
-1 with `stdin is not a terminal`, without a model request. Thus exec's stdin
-support cannot be used as proof for interactive launches. This rejects that
-transport only; it neither tests PTY input injection nor proves no native
-alternative exists. No Loopflow launch consumer is changed by the probe.
+Codex 0.161.0 (October 9): exec delivered exact user text; TUI exited 1 with
+`stdin is not a terminal`, without a request. This rejects file-backed stdin
+only. PTY injection and other native transports remain untested; production is
+unchanged.

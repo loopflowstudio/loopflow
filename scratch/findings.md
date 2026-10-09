@@ -15,12 +15,8 @@ storage findings**. Historical assignment provenance remains unknown.
 - Removing the former SSH `--repo` option did not ban Work-directed routing.
 - Matching a parent's Machine is not evidence that a historical assignment was
   inherited. Migration must preserve the observed meaning rather than invent it.
-- Exact pane/content identity prevents redirection, not destructive changes to
-  an existing unsent draft. Session input needs the LOO-387 interaction contract.
 - A successful command receipt does not prove usable rendering. The cmux
   disposable-window probe is evidence only for that host, not Desktop parity.
-- `documented_commands` tests ambiguity; `dto_fixtures` tests wire shape. Neither
-  replaces behavioral storage/routing/native-model tests.
 
 Current alternatives rejected by the accepted direction: repository-pairing
 registry; independent per-machine planning trees merged by Desktop; clone-name
@@ -100,13 +96,16 @@ they typecheck, while packaged execution remains unavailable.
 Inspection exposes `ProgramStatusSurface.incarnation` without allocation or
 child-exit cleanup. Released views cannot create another surface under that token.
 
-Bounded extraction details and failed native builds remain at
-`565dc0fbb:scratch/findings.md`, **Terminal identity and extraction boundary**.
-The fixed-buffer formatter preserves complete UTF-8 prefixes and selection without
-allocating the whole result or cleaning stale pins. Linux primitive/library checks
-passed; native helpers stalled before main. No lf3 framework was built or published;
-lf2 still cannot extract bounded text. Exact-target read/input transport does not
-supply native composition or draft-retention proof.
+Bounded extraction and failed native builds: `565dc0fbb:scratch/findings.md`,
+**Terminal identity and extraction boundary**. Linux primitive/library checks pass;
+lf2 still lacks bounded extraction; that checkpoint had no lf3 framework or native
+composition proof. The later build below supersedes only framework availability.
+
+October 9: pinned Zig 0.16 runs again (default 0.15 failed). Reset now releases
+its command-block pin: 270 native tests pass, four skip; one failed before the fix.
+The ReleaseFast lf3 framework builds and exports the bounded reader on arm64/x86_64.
+Zip/checksum in `result.json`; unpublished, with no native-surface proof:
+`/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo427-native-build-pu4xqwri/`.
 
 ### Exact-target read boundary — October 8
 
@@ -164,16 +163,10 @@ Pre-edit conflicted notes and checks: `/tmp/loo427-desktop-explain/`.
 
 ## Remote preview — October 9
 
-Original fixture corrections (`LF_HOME`, system input, simulated login cwd):
-`31dbb3a68:scratch/findings.md`, this heading; logs: `/tmp/loo427-remote-preview/`.
-Two real CLIs with simulated SSH prove no configured SSH/provider or peer admission.
-
-Entry-level identity validation replaces three dispatch checks and the shell's
-`machine id` call. Early planning reads had bypassed the old check; refusals now
-suppress fallback Process writes too. Transport consumes the parsed CLI, preserving
-scoped selection. Launch retains sender probes/credentials; previews skip them.
-Populated-store coverage includes rejected reads, writes, help and forwarding.
-Executable quoting/effect tests replace the removed shell-check fixture.
+Entry identity validation and parsed transport supersede shell/dispatch checks;
+preview skips sender probes/credentials and fallback writes. Populated-store and
+simulated-SSH evidence, including failed attempts: `c106dc719:scratch/findings.md`,
+this heading. Configured SSH and exclusive admission remain unproved.
 
 ## Flow context preview — October 9
 

@@ -234,6 +234,12 @@ only on launch; standalone budget reporting's final home remains open. Existing
 planning/history/prompt owners survive. Removal history:
 `82f9ed087:scratch/compare-cmux-s-command-line.md`, this heading.
 
+Session explanation replaces identity-only connection preview. It uses the shared
+state/action rules and one client observation, not a full UI record, launch argv
+or workspace association. Resume reuses its selection store when opening. Removed
+unreachable remote-Session workspace branches and `human_open_argv`'s unused
+Machine parameter; `workspace::associate` remains the location owner.
+
 Removed: copied inheritance; duplicate window/opening paths; unqualified terminal
 keys; duplicate visibility/pruning/insertion paths; root `run` and `open`;
 `MonitorCommand::{List,Show,Usage,Activity}` and root Replay; `DesktopCommand::Inspect`;
@@ -279,15 +285,19 @@ unavailable in text/JSON. Authentication is outside preview preparation.
 Two real CLIs with simulated SSH cover this, not configured SSH or exclusive start.
 Entry-level identity validation also protects ordinary commands and early reads.
 
-### Flow context preview — October 9
+### Session connection explanation — October 9
 
-`49effe9bf`/`82f9ed087` complete Flow preview through shared definition, graph and
-prompt owners in `context/preview.rs`. Only initial skill/router input is assembled;
-future/loop input stays unavailable and commands never run. Resolved `operator_scope`
-covers aliases/captures without checkout preparation. Native arguments stay separate
-from router instructions. Presentation remains reversible.
-Fixtures cover branches/loops, command-first Flows and unchanged stores,
-not configured transport/native invocation.
+Implemented through the Session opening owner: explicit/native IDs and inferred
+interactive resume share selection and active-client refusal. Explanation reports
+start/resume/possible live connection, replacement/try intent, shared legal actions
+and unavailable evidence. It admits nothing, prepares no workspace, probes no
+socket and acquires/signals no client. JSON preparation stays distinct from takeover.
+Checkpointed-store, owned-client and listening-socket fixtures prove these boundaries;
+Rust/Swift fixtures preserve wire shape. Native use remains with demo.
+
+Completed Flow-preview mechanism and evidence: `c106dc719`, this file,
+**Flow context preview**. Initial inputs only; no command execution or invented
+future/repeat inputs. Shared definition, graph and prompt owners remain.
 
 ### Local composed opening — October 9
 
@@ -406,25 +416,13 @@ unresolved losing effects hold delivery, and complete-list acquisition alone set
 progress. `357090d4b` accepts valid primary-only moves. Earlier mechanism/evidence:
 `942dab5d8:scratch/compare-cmux-s-command-line.md`, **Mixed command**.
 
-`358f7fa08`/`25cbc0a09` now acquire removal, archive and Team evidence through
-common writers, with independent savepoints, original ages and Team baselines.
-Rejected scalar or Team projection cannot erase independent negative facts. This
-supersedes implementing those paths, not their composed acceptance. Entity revisions
-still cannot order relationships; imported Team evidence cannot clear retained
-membership uncertainty. `4acd37ec8`/`6ccbbabe3` add causal invalidation acknowledgement: detail retires
-observed notices, never unseen ones; replay retains the greatest revision floor.
-Freshness clears only beside an accepted entity frontier, not scalar/list replay
-or a cache-only acknowledgement against an older body. Legacy association,
-unplaced-Wave/Desktop and public invalidation verification remain.
-
-The dependency records 63 earlier peer-storage passes and four focused invalidation/negative-evidence checks, not mixed-provider activation.
-Its Team fixture preserves uncertain order without list acquisition; the separate
-cold empty-list rejection proves no composed partial-list behavior. Revised Linux
-public reconnect, mixed transport and live-control preservation remain with gate.
-Deletion/retained-effect fixtures compare seven populated execution tables;
-creation's retained Process-ID list is empty. Neither proves peer-exclusive start.
-[Findings](findings.md#committed-exchange-update--october-9) preserves source revisions
-and superseded failures.
+The dependency's independent rollback and causal invalidation mechanisms, failed
+attempts and focused evidence are retained at
+`6c1bc2029:scratch/compare-cmux-s-command-line.md`, **Mixed command** and
+[findings](findings.md#committed-exchange-update--october-9). Legacy association,
+unplaced-Wave/Desktop, partial-list/public composition and live-control preservation
+remain unproved; connected Linear exchange stays disabled. Seeded execution and
+routing fixtures do not prove peer-exclusive start.
 LOO-427 consumes the repaired common path rather than rebuilding its
 receipt machinery or narrowing acceptance to disconnected repositories. Import uses the
 common local writer, preserves causal reopening and conflicts, and avoids echoes
@@ -444,7 +442,8 @@ Workflow write, remote arrival acknowledgement or host-failure gate remains.
 ### 3. One repository window and command explanation
 
 **Local mechanics implemented; broader explanation and peer composition remain.**
-`desktop open/list` own launch/inspection; `--explain` reads local Work selection plus Task-run actions/impediments. Startup,
+`desktop open/list` own launch/inspection; `--explain` reads local Work selection,
+Task-run actions/impediments and Session connection intent. Startup,
 restoration, menu opening and Task links use repository-keyed windows. Per-repository
 queues and delivery tokens preserve cold-open destinations and fence canceled
 completions. Utility windows and retained surfaces keep their own lifetimes.
@@ -503,10 +502,11 @@ Review removed stale command-block pin cleanup from its getter; selection change
 reset and teardown retain that ownership. Clipboard/Quick Look keep their existing
 unbounded APIs and viewport metadata, not a fallback for this read.
 
-The next artifact remains `a60e9e2-lf3`; `Package.swift` still pins verified lf2.
-Linux extraction tests/libraries pass but supply no native framework. Native helpers
-stalled before main; no framework was built or published. [Findings](findings.md)
-and `0cb4ff2c5:scratch/compare-cmux-s-command-line.md` retain failed attempts.
+The artifact remains `a60e9e2-lf3`; `Package.swift` still pins verified lf2.
+`f3dce9aaf` records a successful ReleaseFast framework build for arm64/x86_64
+and 270 primitive tests passing (four skipped), after a reset-pin regression
+was repaired. It is unpublished and uncomposed; native-surface proof remains.
+[Findings](findings.md) retain the build output and earlier pre-main stalls.
 Jack Heart's October 6 authorization covers future artifacts after relevant checks
 and download checksum verification, not real planning-data publication.
 
@@ -523,12 +523,11 @@ The pinned lf2 reader returns `bounded_reader_unavailable` for an existing exact
 surface, `missing_surface` for absence and `not_terminal` for companion panes.
 This is not native extraction or a complete read capability; inspection does not
 advertise it as supported. No new symbol, dynamic lookup or unbounded fallback was
-added. Remaining native composition is a verified lf3 build/publication via
+added. Remaining native composition is lf3 publication/download verification via
 [the patch workflow](../swift/GhosttyKitPatches/README.md), manifest/checksum
 selection, then fixed-buffer C extraction and bounded Swift copying at this
-existing boundary. A capable build executor is required; repeating unchanged
-pre-main stalls, importing the unavailable symbol or using unbounded reads
-does not complete it.
+existing boundary. The unpublished framework alone supplies no native acceptance; importing an
+unavailable symbol or using unbounded reads does not complete it.
 
 Fixtures cover the wire contract, missing/nonterminal surfaces, limits, stale
 window/content and focus-independent targeting. A display-gated fixture covers
@@ -582,4 +581,4 @@ identity/delegation, open them, add shell/Files panes, retain an unfinished draf
 change focus, target a harmless command, read output, hide/restore, and verify the
 original input target and draft survive. Demo owns native usability; preserve comparison evidence and use no real accounts or live user terminals.
 
-Check (October 9 realign): `git diff --check` PASS; source/fixture review reuses `82f9ed087` build, Clippy and focused context-preview passes (4 local, 1 simulated SSH), without rerunning unchanged code; combined verification: gate, native usability: demo.
+Check (October 9 compress): `cargo build -p loopflow --bin lf`, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` PASS; network-isolated `cargo test -p loopflow --test global_commands session_connect_explain` (4) and `--test session_cli_tests session_cli_uses_one_truthful_resolution_contract` (1) PASS; unchanged DTO/Swift proof: `d9840c81b`; affected suites: gate, native usability: demo. Sync: `cargo test -p loopflow --lib task_decision_preserves_unknown_history_and_live_process_protection -- --test-threads=1` PASS (1).

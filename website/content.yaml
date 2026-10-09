@@ -89,7 +89,11 @@ studio:
 # List copy is draft.
 cli:
   hero:
-    heading: Loopflow is the CLI for software engineering.
+    title: The CLI for agent workflows
+    heading:
+      before: lf is the CLI for
+      verbs: [writing, running, sharing, studying]
+      after: agent workflows.
     cost: >-
       Free and open source. The coding agent it drives (Claude Code, Codex, or OpenCode) runs on
       your own account and has its own cost.

@@ -263,6 +263,12 @@ engineering," argued through the data model and commands. There Loopflow does
 not compete on the Mac app: "we work wherever you work. Use as much as you
 want. Change whatever you want." This supersedes both headline candidates above.
 
+On October 9 he rewrote `/cli` for people who already use a terminal such as
+cmux: plain lists, sessions first ("an agent launcher and session manager"),
+then project manager, then Flows; no Mac app on that page. Its headline became
+"lf is the CLI for [writing, running, sharing, studying] agent workflows," with
+the one word cycling, replacing "the CLI for software engineering."
+
 ## Earlier copy decisions (2026-09-26)
 
 Word for word: "AI can build a lot of software fast. It can also spend all

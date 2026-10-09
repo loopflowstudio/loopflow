@@ -1036,14 +1036,31 @@ def _plain_list(items: list) -> FT:
     return Ul(*[Li(B(item["name"]), " ", *_inline_code(item["text"])) for item in items], cls="plain")
 
 
+def _rotating_heading(heading: dict) -> FT:
+    """A headline whose one word cycles; read aloud once, with every word."""
+    verbs = heading["verbs"]
+    spoken = f"{heading['before']} {', '.join(verbs[:-1])} and {verbs[-1]} {heading['after']}"
+    return H1(
+        Span(
+            heading["before"],
+            " ",
+            Span(*[Span(verb) for verb in verbs], cls="rotating"),
+            " ",
+            heading["after"],
+            aria_hidden="true",
+        ),
+        aria_label=spoken,
+    )
+
+
 def build_cli_page() -> tuple:
     hero, agents, where = CLI_CONTENT["hero"], CLI_CONTENT["agents"], CLI_CONTENT["where"]
     flows = CLI_CONTENT["flows"]
     return _product_page(
-        "Loopflow — " + hero["heading"],
+        "Loopflow — " + hero["title"],
         "/cli",
         Section(
-            H1(hero["heading"]),
+            _rotating_heading(hero["heading"]),
             _install_row(),
             P(hero["cost"], cls="cost"),
             cls="home-hero",

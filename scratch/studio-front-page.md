@@ -223,3 +223,6 @@ Jack Heart's Flows copy for `/cli`: "lf allows you to run flows. flows are (loop
 Jack Heart: "lf is the CLI for defining workflows with coding agents." Placed as the `/cli` lede under the headline; whether it replaces the headline is open.
 Revised by Jack Heart to: "lf is the CLI for coding agent workflows."
 Jack Heart: "wait thats just redundant with header". Lede removed from `/cli`; the headline stands alone.
+
+`/cli` headline, from Jack Heart: "ok make that the header and cut the other part", then "no make the CLI for [writing, running, sharing, studying] <- these move coding agent workflows", "needs some bakground color and then like shadow or gradient or some other visual polish to make it feel smotoh", "also wants to be one lien", "maybe cut coding".
+Built: "lf is the CLI for [writing | running | sharing | studying] agent workflows." on one line at desktop width; the cycling word sits in a tinted chip and slides in. "Loopflow is the CLI for software engineering." is gone from the page.

@@ -31,7 +31,11 @@ def test_hero_leads_with_the_mac_app(homepage: Page) -> None:
 
 def test_cli_page_makes_the_case_for_engineers(page: Page, base_url: str) -> None:
     page.goto(f"{base_url}/cli")
-    expect(page.locator("h1")).to_have_text("Loopflow is the CLI for software engineering.")
+    expect(page.locator("h1")).to_have_attribute(
+        "aria-label",
+        "lf is the CLI for writing, running, sharing and studying agent workflows.",
+    )
+    expect(page.locator("h1 .rotating span")).to_have_count(4)
     assert page.locator("main > section[id]").evaluate_all(
         "sections => sections.map(section => section.id)"
     ) == ["flows", "flow-files", "where", "start"]

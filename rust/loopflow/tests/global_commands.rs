@@ -837,11 +837,30 @@ fn invocation_previews_preserve_absent_storage_and_reject_unsupported_commands()
         .unwrap()
         .contains("Inspect preview marker."));
     assert_eq!(input["unwritten_sources"][0]["content"], message);
+    for args in [
+        vec!["probe", &message, "--context", "--json"],
+        vec!["probe:", &message, "--context", "--json"],
+        vec!["skill", "probe:", &message, "--context", "--json"],
+    ] {
+        let equivalent: serde_json::Value = serde_json::from_str(&success(
+            command(home.path(), repo.path(), &args).output().unwrap(),
+        ))
+        .unwrap();
+        for field in [
+            "system_prompt",
+            "task_prompt",
+            "skill_invocation",
+            "unwritten_sources",
+        ] {
+            assert_eq!(input[field], equivalent[field], "{args:?}: {field}");
+        }
+    }
     assert!(!repo.path().join(".lf/tmp").exists());
     assert!(!home.path().join(".lf").exists());
     for args in [
         vec!["--context", "task", "create", "--title", "Never created"],
         vec!["--context", "flow", "pursue"],
+        vec!["--explain", "skill", ":"],
         vec!["--explain", "commit", "-m", "Never committed"],
         vec![
             "--machine",

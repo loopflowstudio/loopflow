@@ -413,12 +413,15 @@ fn with_skill_runtime<T>(
     result
 }
 
-fn resolve_cli_target(
-    cli: &mut Cli,
-    args: &[String],
-) -> anyhow::Result<Option<(loopflow::engine::target::Target, Option<String>)>> {
-    use loopflow::engine::target::Target;
+#[derive(Debug)]
+struct DefinitionInvocation<'a> {
+    name: &'a str,
+    kind: Option<DefinitionKind>,
+    message: Option<String>,
+}
 
+/// Read invocation syntax once for launch and preview, without loading definitions.
+fn definition_invocation(cli: &Cli) -> anyhow::Result<Option<DefinitionInvocation<'_>>> {
     let (rest, kind) = match &cli.command {
         Some(Commands::Flow {
             cmd: FlowCommand::External(rest),
@@ -427,24 +430,31 @@ fn resolve_cli_target(
             cmd: SkillCommand::External(rest),
         }) => (rest, Some(DefinitionKind::Skill)),
         Some(Commands::External(rest)) => (rest, None),
-        Some(_) => {
-            let index =
-                first_target_index(&args[1..]).expect("parsed builtin has a command token") + 1;
-            return Ok(Some((
-                Target::Command(loopflow::engine::Command {
-                    command: args[index].clone(),
-                    args: args[index + 1..].to_vec(),
-                }),
-                None,
-            )));
-        }
-        None => return Ok(None),
+        _ => return Ok(None),
     };
     let (name, messages) = rest.split_first().context("no skill specified")?;
-    // A trailing colon separates the definition name from its message.
     let name = name.strip_suffix(':').unwrap_or(name);
     anyhow::ensure!(!name.is_empty(), "no skill specified");
-    let message = join_args(messages);
+    Ok(Some(DefinitionInvocation {
+        name,
+        kind,
+        message: join_args(messages),
+    }))
+}
+
+fn resolve_cli_target(
+    cli: &mut Cli,
+) -> anyhow::Result<Option<(loopflow::engine::target::Target, Option<String>)>> {
+    use loopflow::engine::target::Target;
+
+    let Some(DefinitionInvocation {
+        name,
+        kind,
+        message,
+    }) = definition_invocation(cli)?
+    else {
+        return Ok(None);
+    };
     let repo = loopflow::repo::working_directory()?;
     if let Some(path) = &cli.skill_input {
         let invocation = loopflow::engine::skill_invocation::SkillInvocation::read(path)?;
@@ -470,7 +480,6 @@ fn execute_target(
     use loopflow::engine::target::Target;
 
     match target {
-        Target::Command(_) => execute_command(cli, args, binding),
         Target::Skill(skill) => {
             let repo_root = loopflow::repo::working_directory()?;
             let name = skill.name.as_str();
@@ -1437,7 +1446,16 @@ fn run() -> anyhow::Result<()> {
         journal::mark_effect_free_preview();
     }
     init_tracing(cli.verbose);
-    if matches!(cli.command, Some(Commands::Desktop { .. })) {
+    // Opening previews report the platform impediment without attempting control.
+    // Actual Desktop commands still refuse before repository lookup or preparation.
+    let opening_preview = cli.explain
+        && matches!(
+            cli.command,
+            Some(Commands::Desktop {
+                cmd: loopflow::lf::DesktopCommand::Open { .. }
+            })
+        );
+    if matches!(cli.command, Some(Commands::Desktop { .. })) && !opening_preview {
         loopflow::lf::commands::desktop::require_supported()?;
     }
     let _selected_repo_cwd = cli
@@ -1658,10 +1676,8 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
     let wave = cli.wave.as_deref();
     let mut session = None;
     let mut process = None;
-    let mut skill = None;
-    let mut kind = None;
+    let invocation = definition_invocation(cli)?;
     let mut message = None;
-    let mut agent_invocation = false;
     match &cli.command {
         Some(Commands::Task { cmd }) => {
             if let (Some(global), Some(subject)) = (task, cmd.selector()) {
@@ -1681,31 +1697,14 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
             ..
         }) => process = Some(id.as_str()),
         Some(Commands::Inline { prompt }) => {
-            agent_invocation = true;
             message = Some(prompt.join(" "));
         }
-        Some(Commands::Skill {
-            cmd: SkillCommand::External(rest),
-        })
-        | Some(Commands::Flow {
-            cmd: FlowCommand::External(rest),
-        })
-        | Some(Commands::External(rest)) => {
-            agent_invocation = true;
-            let (name, messages) = rest.split_first().context("no skill specified")?;
-            skill = Some(name.strip_suffix(':').unwrap_or(name));
-            message = join_args(messages);
-            kind = match &cli.command {
-                Some(Commands::Skill { .. }) => Some(DefinitionKind::Skill),
-                Some(Commands::Flow { .. }) => Some(DefinitionKind::Flow),
-                _ => None,
-            };
-        }
+        _ if invocation.is_some() => {}
         _ => anyhow::bail!(
             "invocation preview is not supported for this command (nothing was executed)"
         ),
     }
-    anyhow::ensure!(!cli.context || agent_invocation,
+    anyhow::ensure!(!cli.context || invocation.is_some() || message.is_some(),
         "--context requires a skill or inline agent request; use --explain to inspect Work without launch");
     let explanation = cli
         .explain
@@ -1716,9 +1715,12 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
         .then(|| {
             loopflow::lf::commands::run::preview(
                 &std::env::current_dir()?,
-                skill,
-                kind,
-                message.as_deref(),
+                invocation.as_ref().map(|invocation| invocation.name),
+                invocation.as_ref().and_then(|invocation| invocation.kind),
+                invocation
+                    .as_ref()
+                    .and_then(|invocation| invocation.message.as_deref())
+                    .or(message.as_deref()),
                 cli,
             )
         })
@@ -1923,7 +1925,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
         return finish_command(result);
     }
 
-    let result = resolve_cli_target(&mut cli, args).and_then(|selected| match selected {
+    let result = resolve_cli_target(&mut cli).and_then(|selected| match selected {
         Some((target, message)) => execute_target(
             target,
             message.as_deref(),
@@ -1931,6 +1933,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             args,
             direct_binding.as_ref(),
         ),
+        None if cli.command.is_some() => execute_command(&cli, args, direct_binding.as_ref()),
         None => {
             cli.interactive = !cli.batch;
             match direct_binding.as_ref() {
@@ -2319,7 +2322,7 @@ mod tests {
     static PROCESS_STATE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
-    fn command_targets_keep_arguments_and_definition_execution_stays_explicit() {
+    fn definition_execution_stays_explicit() {
         use loopflow::engine::target::Target;
 
         let _lock = PROCESS_STATE_LOCK.lock().unwrap();
@@ -2336,26 +2339,9 @@ mod tests {
             .unwrap();
             let args = reorder_args(args);
             let mut cli = Cli::try_parse_from(&args).unwrap();
-            super::resolve_cli_target(&mut cli, &args).unwrap().unwrap()
+            super::resolve_cli_target(&mut cli).unwrap().unwrap()
         };
 
-        let (target, message) = resolve(&[
-            "lf",
-            "-a",
-            "codex",
-            "pr",
-            "land",
-            "--message",
-            "Keep this together",
-        ]);
-        let Target::Command(command) = target else {
-            panic!("expected command")
-        };
-        assert_eq!(
-            command.argv(),
-            ["lf", "pr", "land", "--message", "Keep this together"]
-        );
-        assert!(message.is_none());
         for args in [
             vec!["lf", "flow", "land", "keep", "together"],
             vec!["lf", "flow", "land:", "keep", "together"],

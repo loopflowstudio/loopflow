@@ -100,11 +100,12 @@ Router receipts expose pre-registration failures; plain Task links await mounted
 content. Validated request IDs fence registration, never URLs or later arrivals.
 Headless callbacks prove neither compositor usability nor native Session readiness.
 
-October 9 previews share Task admission/Workflow and Desktop Session/diff URL
-validation. Only launch prepares/moves Work. Opening proposals report impediments,
-not native readiness. Routing carries provenance; delegation grants no peer start.
-Checkpointing WAL exposed fallback Process writes missed by main-file comparisons;
-parsed previews suppress them. Native/remote acceptance remains unproved.
+October 9 previews share Task admission/Workflow, Desktop URL validation and
+skill/Flow syntax with launch. Builtins dispatch parsed commands.
+Only launch prepares Work; proposals grant neither native readiness nor peer start.
+Checkpointed WAL exposed fallback Process writes missed by main-file comparisons;
+parsed previews suppress them. Linux opening previews report platform impediments;
+Linux/native/remote acceptance remains unproved.
 
 ## Terminal-host adoption (2026-10-07)
 

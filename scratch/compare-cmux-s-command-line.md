@@ -226,14 +226,14 @@ Repository resolution and restored-scene validation now share the router;
 pre-registration failures are inspectable. Mounted Task content, not selection,
 settles the request generation.
 
-Removed in the invocation cut: Workflow choice embedded in `traverse_workflow`,
-caller-supplied Project selection, duplicate preview option validation and route
-provenance inference, and fallback Process observation after parsed previews.
-Selection reads the Project only when taking up its default; routing returns its
-source in the same transaction. Launch and preview share Task option checks.
-Ordinary command observation survives; no second dry-run planner exists.
-Desktop opening's identity-only explanation is removed; its ordinary URL owner
-validates both preview and launch, including `--diff`.
+Removed in the invocation cut: embedded Workflow choice, caller-supplied Project
+selection, duplicate option/provenance checks and fallback Process writes after previews.
+Launch/preview share selection, admission and opening-URL validation. CLI builtins
+now dispatch the parsed command directly: the discarded `Target::Command` copy and
+its exclusive reconstruction assertion are gone. Definition syntax has one reader
+for launch/preview; preview no longer tracks separate mutable name/kind/agent flags.
+Opening explanation reports platform impediments; actual Desktop control still
+refuses before repository lookup. Linux execution remains with gate/CI.
 
 Remaining removals are `Commands::Project` and `Commands::Roadmap`, with consumer
 cutover to Wave planning. `Context { explain }`, validation-only scope checks,
@@ -576,4 +576,4 @@ original input target and draft survive. Demo owns native usability; preserve co
 Earlier failed attempts and check archives: [findings](findings.md) and
 `f48d84511:scratch/compare-cmux-s-command-line.md`.
 
-Check (October 9): Rust build, network-isolated `global_commands desktop_open` (3) and `dto_fixtures desktop_open_explanations` (1), direct Swift DTO round-trip/missing-field check, Clippy, fmt/diff PASS; packaged suites/Linux gate/CI, native usability demo. Prior checks: `0625dfb60:scratch/compare-cmux-s-command-line.md`.
+Check (October 9): `cargo build -p loopflow --bin lf`, `cargo clippy --all-targets -- -D warnings`, fmt/diff and network-isolated binary tests (`lf tests::`, `global_commands invocation_previews…`, `global_commands desktop_open`: 26 tests) PASS; an initial unqualified exact filter ran zero tests, then was corrected. Linux gate/CI, native usability demo; prior checks: `0f3b44bdb:scratch/compare-cmux-s-command-line.md`.

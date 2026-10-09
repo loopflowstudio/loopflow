@@ -100,10 +100,16 @@ impl TaskInput {
         );
     }
 
-    pub(crate) fn start_planning_sync(
-        &self,
-    ) -> std::io::Result<crate::ops::linear_observe::PlanningSync> {
-        crate::ops::linear_observe::PlanningSync::start(self.store.clone(), self.task.clone())
+    pub(crate) fn start_planning_sync(&self) -> Result<crate::ops::linear_observe::PlanningSync> {
+        let wave = self
+            .store
+            .sqlite
+            .get_wave(&self.task.wave_id)?
+            .ok_or_else(|| anyhow!("Task Wave is missing"))?;
+        Ok(crate::ops::linear_observe::PlanningSync::start(
+            self.store.clone(),
+            wave.repo().to_owned(),
+        )?)
     }
 
     pub(crate) async fn poll(

@@ -11,7 +11,6 @@ use crate::planning::PlanningChange;
 use crate::pm::linear::LinearClient;
 use crate::store::sqlite::planning_changes::PlanningChanges;
 use crate::store::{PmTaskRecord, Store};
-use crate::work::task::Task;
 
 use super::{OpsError, OpsResult};
 
@@ -19,23 +18,15 @@ fn message(error: impl std::fmt::Display) -> OpsError {
     OpsError::Message(error.to_string())
 }
 
-pub(crate) async fn sync_repository_fields(store: &Store, task: &Task) -> OpsResult<()> {
-    let wave = store
-        .get_wave(&task.wave_id)
-        .await
-        .map_err(message)?
-        .ok_or_else(|| message("Task Wave is missing"))?;
-    if !super::linear_observe::connected(wave.repo()) {
+pub(crate) async fn sync_repository_fields(store: &Store, repo: &str) -> OpsResult<()> {
+    if !super::linear_observe::connected(repo) {
         return Ok(());
     }
-    let owners = store
-        .sqlite
-        .planning_field_owners(wave.repo())
-        .map_err(message)?;
+    let owners = store.sqlite.planning_field_owners(repo).map_err(message)?;
     let results = futures_util::future::join_all(
         owners
             .iter()
-            .map(|owner| sync_fields(store, Path::new(wave.repo()), owner)),
+            .map(|owner| sync_fields(store, Path::new(repo), owner)),
     )
     .await;
     for result in results {

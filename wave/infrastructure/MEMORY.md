@@ -37,17 +37,19 @@ can proceed now; integration consumes a coherent committed writer cut, never dir
 code or duplicated planning. Ownership is independently reviewable. Jack invoked ship-decomposed. No competing Flow, machine
 replication here or real plan publication to the public code repo is authorized.
 
-Foreground connections independently acquire and deliver planning. Matching
-observations settle captured attempts and advance later saves' unchanged baselines;
-retired receipts retain losing values. Effect locks block neither saves nor acquisition.
-`b1f175bbf` delivers Project ordering with captured moves; complete-list acquisition
-recognizes partial progress, while detail reads never set rank.
-`6bb8b935a` adds common CLI/Desktop `PlanningSyncStatus`: creation, fields/order,
-state, comments, errors and losing values. Configuration selects pending display,
-not mappings; compression removes pending-only edit/Project projections, retaining
-baselines. Creation receipts advance planning revision. SQL prepares; Rust/Swift
-retries stall before tests. Native reconnect is unexecuted; public Flow/work-watch
-reconnect and installed acceptance remain unproved.
+Foreground acquisition and delivery are independent; effect locks block neither
+saves nor acquisition. Matching observations settle captured attempts and advance
+later saves' unchanged baselines; retired receipts retain losing values.
+`b1f175bbf` delivers Project ordering with captured moves; only complete-list
+acquisition recognizes partial progress, never detail reads.
+`6bb8b935a` adds common CLI/Desktop `PlanningSyncStatus` for creation, fields/order,
+state, comments, errors and losing values; `086d3560c` removes pending-only
+projections, retaining baselines. Configuration, not mapping, selects pending display.
+Creation receipts advance planning revision. SQL prepares; Rust/Swift stalled
+before tests. Native reconnect is unexecuted.
+Foreground sync follows the repository, not Desktop Task selection. Work-watch/Flow reconnect tests remain
+unexecuted; builds stall at `_dyld_start`. Helper proofs establish
+neither composed nor installed acceptance.
 
 Jack Heart's `8821db44-0480-4493-8609-953207663f1d` removes public creation tokens.
 Each create generates/saves/returns a distinct ID, even for identical titles;
@@ -69,15 +71,14 @@ A newer explicitly active Linear revision
 restores visibility, retaining the loser. Inventory proves neither trash nor
 restoration. Fixtures preserve execution/history; composed/installed acceptance is unproved.
 
-Proofs: `bbc6eb8d3:wave/infrastructure/MEMORY.md`, this heading; LOO-412 boundary:
-`84664e661`. SQLite owns Wave documents/relocation; ingestion preserves IDs/files.
-Personal owners and provider-first deletion are removed; execution, PRs, checkouts
-and uncertain effects survive. Exact Project IDs precede slugs; the draft retains
-attempt errors and acknowledged revisions.
-`e68f2a423` exports Task/Project UUIDs through existing creation receipts. Separate creation/Initiative attachment attempts retain uncertainty without replay.
-Exact ingestion attaches identity before inventory, preserving later saves. Operation fixtures prove reconnect and lost-reply
-recovery; composed CLI/Desktop acceptance remains unproved, per Release's entry-point lesson.
-Installed conversion, historical uncertainty, pending presentation and composed reconnect remain unfinished.
+Ownership/cutover proofs: `bbc6eb8d3:wave/infrastructure/MEMORY.md`, this heading;
+LOO-412 boundary: `84664e661`. SQLite owns Wave documents/relocation, preserving
+IDs/files, execution, PRs, checkouts and uncertain effects. Personal owners and
+provider-first deletion stay removed. Exact Project IDs precede slugs.
+`e68f2a423` exports saved UUIDs through creation receipts; separate creation/link
+attempts retain uncertainty without replay. Identity attachment precedes inventory
+and preserves later saves. Operation reconnect/lost-reply proofs establish no
+composed CLI/Desktop or installed acceptance; historical uncertainty remains.
 
 Jack selected Git-like Task prefixes: four or more hex digits, bare or prefixed;
 reject ambiguity, retain full IDs and lengthen display abbreviations as needed.

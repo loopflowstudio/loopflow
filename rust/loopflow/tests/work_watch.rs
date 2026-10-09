@@ -52,6 +52,7 @@ fn lf(home: &Path, args: &[&str]) -> Command {
         .args(args)
         .current_dir(home)
         .env("LF_HOME", home)
+        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
         .env("HOME", home)
         .stderr(Stdio::inherit());
     command
@@ -821,7 +822,7 @@ fn offline_cli_completion_and_reopening_reach_desktop_without_refresh() {
     home.plan(1);
     let mut watch = home.watch();
     let scope = serde_json::json!({"action":"scope", "id":1, "repo":home.wave.repo(),
-        "headless":false, "task":"FIX-1", "wave":null, "activity":null});
+        "headless":false, "task":null, "wave":null, "activity":null});
     watch.request(scope.clone());
     let await_state = |watch: &Watch, expected| {
         let deadline = Instant::now() + Duration::from_secs(10);
@@ -836,7 +837,9 @@ fn offline_cli_completion_and_reopening_reach_desktop_without_refresh() {
                             if let Some(runtime) = task.runtime {
                                 if runtime.status == expected
                                     && task.task.sync.as_ref().is_some_and(|sync| {
-                                        sync.changes.iter().any(|change| change.field == "state")
+                                        sync.changes.iter().any(|change| {
+                                            change.field == "state" && change.error.is_some()
+                                        })
                                     })
                                 {
                                     assert_eq!(

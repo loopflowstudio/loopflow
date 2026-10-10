@@ -236,7 +236,7 @@ pub(crate) fn canonicalize_with_missing_tail(path: &Path) -> Result<PathBuf, std
     };
     let mut existing = absolute.as_path();
     let mut missing = Vec::new();
-    while !existing.exists() {
+    while !existing.try_exists()? {
         let name = existing.file_name().ok_or_else(|| {
             std::io::Error::new(
                 std::io::ErrorKind::NotFound,
@@ -1303,6 +1303,24 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::Arc;
     use time::OffsetDateTime;
+
+    #[test]
+    fn canonicalize_missing_tail_preserves_resolution_errors() {
+        let directory = tempfile::tempdir().unwrap();
+        let missing = directory.path().join("missing/child");
+        assert_eq!(
+            super::canonicalize_with_missing_tail(&missing).unwrap(),
+            directory
+                .path()
+                .canonicalize()
+                .unwrap()
+                .join("missing/child")
+        );
+        let cycle = directory.path().join("cycle");
+        std::os::unix::fs::symlink(&cycle, &cycle).unwrap();
+        assert!(super::canonicalize_with_missing_tail(&cycle).is_err());
+        assert!(super::canonicalize_with_missing_tail(&cycle.join("child")).is_err());
+    }
 
     #[test]
     fn development_production_gate_has_no_override() {

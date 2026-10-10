@@ -1,7 +1,10 @@
-//! Setup workers have no checkout admission, Git lease, or removal capability.
-//! Reads may be killed. Scheduling writes are atomic retry hints, not authority:
-//! interruption may commit a hint/receipt or leave a temporary file, never a
-//! partially published record. The owner must receive success before proceeding.
+//! Workers never acquire checkout admission, Git leases, or removal authority.
+//! Reads may be killed. Scheduling hints and history-projection pages retain
+//! their owners' atomic publication. File openers transfer unlocked descriptors
+//! and exit before parent admission; canceled workers cannot continue to deletion.
+mod descriptor;
+
+use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 use std::time::Duration;
@@ -13,20 +16,48 @@ use crate::ops::OpsResult;
 
 const WORKER_FLAG: &str = "--cleanup-io-worker";
 const RESPONSE: &str = "loopflow-cleanup-io:";
+static WORKER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 const TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) enum Read {
+    Normalize(PathBuf),
+    Admission {
+        database: PathBuf,
+        path: PathBuf,
+    },
+    Lease {
+        repo: PathBuf,
+        path: PathBuf,
+    },
+    RunningPaths,
+    ReleaseRegistry,
+    ReceiptContext(PathBuf),
+    Observation {
+        database: PathBuf,
+        repo: PathBuf,
+        decision: Box<super::CleanupDecision>,
+        external: Result<std::collections::HashSet<PathBuf>, String>,
+        validate_registration: bool,
+    },
     Registrations(PathBuf),
     Checkouts(PathBuf),
     Checkout(PathBuf),
-    Settled(PathBuf),
+    Settled {
+        database: PathBuf,
+        path: PathBuf,
+    },
     Attempt(PathBuf),
-    Receipts { root: PathBuf, flow: String },
+    Receipts {
+        root: PathBuf,
+        flow: String,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) enum Schedule {
+    ProjectEvidence(PathBuf),
     Attempt {
         marker: PathBuf,
         at: i64,
@@ -46,6 +77,7 @@ pub(crate) enum Schedule {
 enum Request {
     Read(Read),
     Schedule(Schedule),
+    OpenLock { path: PathBuf, socket: i32 },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -57,19 +89,59 @@ pub(crate) struct Attempt {
 }
 
 pub(crate) fn read<T: DeserializeOwned>(request: Read) -> OpsResult<T> {
+    if WORKER.load(std::sync::atomic::Ordering::Relaxed) {
+        return serde_json::from_value(execute(Request::Read(request))?).map_err(super::error);
+    }
     request_worker(Request::Read(request))
+}
+
+pub(crate) fn open_lock(path: PathBuf) -> OpsResult<std::fs::File> {
+    let (receiver, sender) = std::os::unix::net::UnixDatagram::pair()?;
+    request_worker::<()>(Request::OpenLock {
+        path,
+        socket: sender.as_raw_fd(),
+    })?;
+    // bounded_output has reaped the sender. Only this parent may acquire locks.
+    drop(sender);
+    descriptor::receive(&receiver).map_err(Into::into)
 }
 
 pub(crate) fn schedule(request: Schedule) -> OpsResult<()> {
     request_worker(Request::Schedule(request))
 }
 
+pub(super) fn output(command: &mut Command, timeout: Duration) -> OpsResult<std::process::Output> {
+    if !WORKER.load(std::sync::atomic::Ordering::Relaxed) {
+        return crate::ops::read_retry::bounded_output(command, timeout);
+    }
+    // A setup worker's descendants must stay in its cancellable process group.
+    let output = command.output()?;
+    if !output.status.success() {
+        return Err(super::error("cleanup observation command failed"));
+    }
+    Ok(output)
+}
+
 fn request_worker<T: DeserializeOwned>(request: Request) -> OpsResult<T> {
     let mut command = Command::new(std::env::current_exe()?);
     exclude_inherited_descriptors(&mut command)?;
-    let request = serde_json::to_string(&request).map_err(super::error)?;
+    if let Request::OpenLock { socket, .. } = &request {
+        use std::os::unix::process::CommandExt;
+        let socket = *socket;
+        // SAFETY: this socket remains owned by open_lock until the child exits.
+        // Only the transfer socket, never checkout locks, survives exec.
+        unsafe {
+            command.pre_exec(move || {
+                if libc::fcntl(socket, libc::F_SETFD, 0) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+    }
+    let encoded = serde_json::to_string(&request).map_err(super::error)?;
     #[cfg(not(test))]
-    command.arg(WORKER_FLAG).arg(request);
+    command.arg(WORKER_FLAG).arg(encoded);
     #[cfg(test)]
     command
         .args([
@@ -78,8 +150,13 @@ fn request_worker<T: DeserializeOwned>(request: Request) -> OpsResult<T> {
             "--ignored",
             "--nocapture",
         ])
-        .env("LF_TEST_CLEANUP_IO", request);
-    let output = crate::ops::read_retry::bounded_output(&mut command, TIMEOUT)?;
+        .env("LF_TEST_CLEANUP_IO", encoded);
+    let timeout = if matches!(&request, Request::Read(Read::RunningPaths)) {
+        Duration::from_secs(5)
+    } else {
+        TIMEOUT
+    };
+    let output = crate::ops::read_retry::bounded_output(&mut command, timeout)?;
     let output = std::str::from_utf8(&output.stdout).map_err(super::error)?;
     let response = output
         .lines()
@@ -128,6 +205,7 @@ pub fn worker_entry() -> Option<ExitCode> {
     if args.next().as_deref() != Some(std::ffi::OsStr::new(WORKER_FLAG)) {
         return None;
     }
+    WORKER.store(true, std::sync::atomic::Ordering::Relaxed);
     let result = args
         .next()
         .ok_or_else(|| super::error("missing cleanup I/O request"))
@@ -155,6 +233,65 @@ fn checkout_path(admin: &Path) -> OpsResult<PathBuf> {
 
 fn execute(request: Request) -> OpsResult<serde_json::Value> {
     match request {
+        Request::OpenLock { path, socket } => {
+            let file = crate::store::sqlite::SqliteStore::open_checkout_lock(&path)
+                .map_err(super::error)?;
+            descriptor::send(socket, &file)?;
+            Ok(serde_json::Value::Null)
+        }
+        Request::Read(Read::Admission { database, path }) => {
+            let store = crate::store::sqlite::SqliteStore::open_read_only(&database)
+                .map_err(super::error)?;
+            serde_json::to_value(
+                store
+                    .checkout_lock_paths(&[&path], &[])
+                    .map_err(super::error)?,
+            )
+            .map_err(super::error)
+        }
+        Request::Read(Read::Lease { repo, path }) => serde_json::to_value(
+            crate::engine::git::PreparedWorktreeLease::discover(&repo, &path)?,
+        )
+        .map_err(super::error),
+        Request::Read(Read::Normalize(path)) => {
+            serde_json::to_value(crate::store::canonicalize_with_missing_tail(&path)?)
+                .map_err(super::error)
+        }
+        Request::Read(Read::ReceiptContext(database)) => {
+            let store = crate::store::sqlite::SqliteStore::open_read_only(&database)
+                .map_err(super::error)?;
+            let machine = store.local_machine().map_err(super::error)?;
+            let home = store.home_dir().map_err(super::error)?;
+            serde_json::to_value((machine.id, home)).map_err(super::error)
+        }
+        Request::Read(Read::ReleaseRegistry) => {
+            let path = super::release_registry()?
+                .map(|store| store.path())
+                .transpose()
+                .map_err(super::error)?;
+            serde_json::to_value(path).map_err(super::error)
+        }
+        Request::Read(Read::RunningPaths) => {
+            serde_json::to_value(super::read_running_paths()?).map_err(super::error)
+        }
+        Request::Read(Read::Observation {
+            database,
+            repo,
+            mut decision,
+            external,
+            validate_registration,
+        }) => {
+            let store = crate::store::sqlite::SqliteStore::open_read_only(&database)
+                .map_err(super::error)?;
+            super::observe_source(
+                &store,
+                &repo,
+                &mut decision,
+                &external.map_err(super::error),
+                validate_registration,
+            )?;
+            serde_json::to_value(decision).map_err(super::error)
+        }
         Request::Read(Read::Checkout(admin)) => {
             serde_json::to_value(checkout_path(&admin)?).map_err(super::error)
         }
@@ -180,18 +317,11 @@ fn execute(request: Request) -> OpsResult<serde_json::Value> {
                 .collect::<OpsResult<Vec<_>>>()?;
             serde_json::to_value(registered).map_err(super::error)
         }
-        Request::Read(Read::Settled(database)) => {
+        Request::Read(Read::Settled { database, path }) => {
             let store = crate::store::sqlite::SqliteStore::open_read_only(&database)
                 .map_err(super::error)?;
-            let paths = store
-                .settled_checkout_paths()
-                .map_err(super::error)?
-                .into_iter()
-                .map(|path| {
-                    crate::store::canonicalize_with_missing_tail(&path).map_err(super::error)
-                })
-                .collect::<OpsResult<Vec<_>>>()?;
-            serde_json::to_value(paths).map_err(super::error)
+            serde_json::to_value(store.has_settled_checkout(&path).map_err(super::error)?)
+                .map_err(super::error)
         }
         Request::Read(Read::Registrations(common)) => {
             let mut admins = Vec::new();
@@ -237,6 +367,14 @@ fn execute(request: Request) -> OpsResult<serde_json::Value> {
         }
         Request::Read(Read::Receipts { root, flow }) => {
             serde_json::to_value(cron::read_receipts(&root, "", Some(&flow))?).map_err(super::error)
+        }
+        Request::Schedule(Schedule::ProjectEvidence(database)) => {
+            // Existing compatible store only: no initialization or migrations.
+            // The history owner commits the page and cursor in one transaction.
+            let store = crate::store::sqlite::SqliteStore::open_existing_processes(&database)
+                .map_err(super::error)?;
+            store.advance_session_evidence().map_err(super::error)?;
+            Ok(serde_json::Value::Null)
         }
         Request::Schedule(Schedule::Attempt { marker, at }) => {
             // A killed worker cannot share a temporary inode with its successor.
@@ -324,6 +462,7 @@ mod tests {
     #[test]
     #[ignore = "subprocess entry point for the real cleanup I/O protocol"]
     fn worker() {
+        super::WORKER.store(true, std::sync::atomic::Ordering::Relaxed);
         let request = std::env::var("LF_TEST_CLEANUP_IO").expect("worker request");
         let request: super::Request = serde_json::from_str(&request).unwrap();
         if let super::Request::Schedule(super::Schedule::Attempt { marker, .. }) = &request {
@@ -338,11 +477,33 @@ mod tests {
                     .success());
             }
         }
+        if let super::Request::Read(super::Read::Settled { path, .. }) = &request {
+            if std::env::var_os("LF_TEST_CLEANUP_STALL_SETTLED")
+                .is_some_and(|value| std::path::Path::new(&value) == path)
+            {
+                let _ =
+                    std::fs::read(std::env::var_os("LF_TEST_CLEANUP_STALL_SETTLED_FIFO").unwrap());
+            }
+        }
+        let stalled_lock = match &request {
+            super::Request::OpenLock { path, .. } => std::env::var_os("LF_TEST_CLEANUP_STALL_LOCK")
+                .is_some_and(|value| std::path::Path::new(&value) == path),
+            _ => false,
+        };
+        let stall_lock = |phase| {
+            if stalled_lock
+                && std::env::var("LF_TEST_CLEANUP_STALL_LOCK_PHASE").as_deref() == Ok(phase)
+            {
+                let _ = std::fs::read(std::env::var_os("LF_TEST_CLEANUP_STALL_LOCK_FIFO").unwrap());
+            }
+        };
+        stall_lock("before");
         let receipt = matches!(
             &request,
             super::Request::Schedule(super::Schedule::Receipt { .. })
         );
         let result = super::execute(request);
+        stall_lock("after");
         if receipt && result.is_ok() {
             if let Some(fifo) = std::env::var_os("LF_TEST_CLEANUP_STALL_RECEIPT") {
                 // Interrupt after atomic publication but before acknowledgment.

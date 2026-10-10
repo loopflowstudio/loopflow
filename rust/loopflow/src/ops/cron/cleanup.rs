@@ -18,24 +18,18 @@ pub(crate) struct CleanupReceipt {
 
 impl CleanupReceipt {
     pub(crate) fn begin(store: &SqliteStore, repo: &Path) -> OpsResult<Self> {
-        let store = store
-            .bounded_reader(std::time::Duration::from_secs(2))
-            .map_err(|e| OpsError::Message(e.to_string()))?;
-        let machine = store
-            .local_machine()
-            .map_err(|e| OpsError::Message(e.to_string()))?;
-        let home = store
-            .home_dir()
-            .map_err(|e| OpsError::Message(e.to_string()))?;
+        let (machine_id, home): (crate::durable::MachineId, PathBuf) = io::read(
+            io::Read::ReceiptContext(store.path().map_err(|e| OpsError::Message(e.to_string()))?),
+        )?;
         let spec = CronSpec {
             wave: String::new(),
-            flow: format!("{}-cleanup", super::repository_cron_key(repo, &machine.id)),
+            flow: format!("{}-cleanup", super::repository_cron_key(repo, &machine_id)),
             target_kind: CronTargetKind::Repository,
             schedule: parse_schedule("every-minute")?,
             working_directory: repo.to_path_buf(),
             lf_path: std::env::current_exe()?,
             host: CronHost {
-                machine_id: machine.id,
+                machine_id,
                 lf_home: home,
                 path_env: String::new(),
             },

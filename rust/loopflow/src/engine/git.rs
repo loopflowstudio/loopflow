@@ -9,7 +9,7 @@ use std::sync::{Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::engine::error::GitError;
@@ -45,6 +45,31 @@ pub struct LandResult {
 pub(crate) struct WorktreeLease {
     path: PathBuf,
     file: File,
+}
+
+/// Discovery does not acquire the lease. Cleanup may isolate it and open the
+/// file in a worker, then take the lock only after that worker has exited.
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) struct PreparedWorktreeLease {
+    path: PathBuf,
+    pub(crate) lock_path: PathBuf,
+}
+
+impl PreparedWorktreeLease {
+    pub(crate) fn discover(repo: &Path, path: &Path) -> Result<Self, GitError> {
+        Ok(Self {
+            lock_path: worktree_lease_path(repo, path)?,
+            path: normalized_worktree_path(repo, path),
+        })
+    }
+
+    pub(crate) fn acquire(self, file: File) -> Result<WorktreeLease, GitError> {
+        fs2::FileExt::try_lock_exclusive(&file)?;
+        Ok(WorktreeLease {
+            path: self.path,
+            file,
+        })
+    }
 }
 
 impl WorktreeLease {
@@ -929,13 +954,14 @@ pub(crate) fn acquire_worktree_lease_wait(
     owner: &str,
     timeout: Duration,
 ) -> Result<WorktreeLease, GitError> {
-    let lock_path = worktree_lease_path(repo, path)?;
+    let prepared = PreparedWorktreeLease::discover(repo, path)?;
+    let lock_path = &prepared.lock_path;
     let mut file = OpenOptions::new()
         .create(true)
         .read(true)
         .write(true)
         .truncate(false)
-        .open(&lock_path)?;
+        .open(lock_path)?;
     let deadline = Instant::now() + timeout;
     while let Err(error) = fs2::FileExt::try_lock_exclusive(&file) {
         if error.kind() == std::io::ErrorKind::WouldBlock {
@@ -943,7 +969,7 @@ pub(crate) fn acquire_worktree_lease_wait(
                 thread::sleep(Duration::from_millis(25));
                 continue;
             }
-            let active_owner = fs::read_to_string(&lock_path)
+            let active_owner = fs::read_to_string(lock_path)
                 .ok()
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty())
@@ -963,7 +989,7 @@ pub(crate) fn acquire_worktree_lease_wait(
     file.write_all(b"\n")?;
     file.flush()?;
     Ok(WorktreeLease {
-        path: normalized_worktree_path(repo, path),
+        path: prepared.path,
         file,
     })
 }

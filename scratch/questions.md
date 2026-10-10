@@ -32,16 +32,13 @@
   never on prune previews. Unsupported hosts have no idle-time guarantee until
   they provide an OS scheduler; the fallback reports that limitation. Experiments
   neither install services nor activate fallback work automatically.
-- Implementation choice, 2026-10-09: admission starts after setup. Git observation
-  subprocesses and independent registry SQL readers have two-second deadlines;
-  candidate registry filesystem I/O, lease discovery and aggregate locked
-  observation remain unbounded. Hint/receipt requests use isolated children
-  with two-second deadlines plus bounded reaping; descriptor enumeration and spawn
-  precede that clock. Per-registration setup now has its own 32-entry window,
-  capped at five seconds admitting work and durably resumed before each read.
-  Background setup now uses registration-local reads; manual listing/normalization
-  is isolated. Remaining admission preparation is outside that bound. An admitted destructive
-  removal is never canceled by these budgets.
+- Implementation choice, 2026-10-09: source, registration, registry, receipt and
+  lock-file preparation run in isolated workers. Two-second request deadlines
+  exclude descriptor enumeration/process launch and can add one second reaping;
+  external execution retains its existing five-second budget. Workers transfer
+  unlocked descriptors and exit before parent-owned nonblocking admission. No
+  timed-out worker may acquire a checkout lock or continue into removal. Final
+  history remains at its mechanism-review boundary; admitted removal is uncanceled.
 - Implementation choice, 2026-10-09: candidate continuation is carried by at most
   32 pending administrative paths in the existing cron receipt, consumed before
   publication and drained before another setup window. Resuming that continuation
@@ -70,22 +67,17 @@
   negative filesystem results as authority. Final observation needs design review
   of workload-sized bounded observation plus isolated I/O, or a history-owner fresh
   view. Neither is selected here; no preservation constraint has been relaxed.
-- Implementation choice, 2026-10-09: read-only registration/hint/receipt requests
-  and atomic scheduling writes use distinct subprocess operations, with neither
-  checkout admission nor source-removal capability. Two-second request timeouts
-  do not bound parent-side admission preparation. Lost receipt-write acknowledgments end that receipt's
-  writer; later passes resume published progress under a new receipt. This does not
-  select a final-history mechanism, cancel admitted removal, or bound inline lock
-  discovery. Interrupted writes may leave administrative temporaries; retained-root
-  artifact reclamation remains a follow-up.
-
-- Implementation choice, 2026-10-09: background and locked observations no longer
-  require the aggregate Git worktree listing; registration-local reads validate
-  reciprocal administrative paths. Manual listings and settled-path discovery run
-  in read-only workers, including path normalization. Remaining inline admission
-  preparation and final evidence are named in the design. A stalled-gitdir fixture
-  proves setup isolation and recovery, not Git removal through a stalled sibling.
-  The isolated settled-path worker still normalizes the registry-wide result as one
-  request; an unrelated stalled path can repeatedly defer all candidate admission.
-  Item 1 retains failure-local discovery as well as remaining inline I/O isolation.
-  Item 2's final-history mechanism remains unselected.
+- Implementation choice, 2026-10-09: candidate-local positive settlement queries
+  replace the registry-wide normalizing inventory. Historical aliases can miss
+  minute selection but remain in hourly registration scans. Lookup failures yield
+  one candidate and retry on the next sweep, not an incomplete complete set.
+  This is scheduling only; fresh source/history checks retain disposal authority.
+  Interrupted hint writes can leave small administrative temporaries; reclamation
+  in retained roots remains an artifact follow-up. Preparation isolation does not
+  solve final evidence progress or promise bounded destructive Git I/O.
+- Review finding, 2026-10-09: isolating source observation bounds its I/O but
+  still resolves the registry's complete Task checkout set and relevant Process
+  cwd aliases. A stalled/unknown alias can retain unrelated candidates. The
+  landing-path discovery fix does not prove this broader source-veto locality.
+  Skipping unknown aliases is unsafe; a disjointness/ownership contract remains
+  unselected. Dependent progress work stops with the existing mechanism review.

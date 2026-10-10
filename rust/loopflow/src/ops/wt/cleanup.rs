@@ -3,7 +3,6 @@ pub(crate) mod io;
 #[doc(hidden)]
 pub use io::worker_entry;
 use std::collections::HashSet;
-use std::fs::OpenOptions;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -12,7 +11,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 use crate::durable::{WorkRef, WorkStatus};
-use crate::engine::git::{acquire_worktree_lease, worktree_remove_owned, WorktreeRemoval};
+use crate::engine::git::{worktree_remove_owned, PreparedWorktreeLease, WorktreeRemoval};
 use crate::journal::{process_evidence_at, ProcessIdentityEvidence};
 use crate::ops::{OpsError, OpsResult};
 use crate::store::{sqlite::SqliteStore, SharedStore};
@@ -115,26 +114,30 @@ fn error(error: impl std::fmt::Display) -> OpsError {
     OpsError::Message(error.to_string())
 }
 
-fn normalized(path: &Path) -> PathBuf {
-    crate::store::canonicalize_with_missing_tail(path).unwrap_or_else(|_| path.to_path_buf())
+fn normalized(path: &Path) -> OpsResult<PathBuf> {
+    crate::store::canonicalize_with_missing_tail(path).map_err(error)
 }
 
 /// Failure to inspect external execution is unknown, not an empty process set.
 fn running_paths() -> OpsResult<HashSet<PathBuf>> {
-    let output = crate::ops::read_retry::bounded_output(
+    io::read(io::Read::RunningPaths)
+}
+
+fn read_running_paths() -> OpsResult<HashSet<PathBuf>> {
+    let output = io::output(
         Command::new("lsof").args(["-d", "cwd", "-Fn"]),
         Duration::from_secs(5),
     )?;
     if !output.stderr.is_empty() {
         return Err(error("external process inspection unavailable"));
     }
-    Ok(String::from_utf8_lossy(&output.stdout)
+    String::from_utf8_lossy(&output.stdout)
         .lines()
         .filter_map(|line| line.strip_prefix('n'))
         .map(PathBuf::from)
         .filter(|path| path.is_absolute())
         .map(|path| normalized(&path))
-        .collect())
+        .collect()
 }
 
 fn retain(decision: &mut CleanupDecision, reason: impl Into<String>) {
@@ -237,7 +240,7 @@ impl RegistryObservations {
             .map_err(error)?;
         let mut tasks = store.task_checkouts().map_err(error)?;
         for task in &mut tasks {
-            task.worktree = normalized(&task.worktree);
+            task.worktree = normalized(&task.worktree)?;
         }
         Ok(Self {
             home: store.home_dir().map_err(error)?,
@@ -289,17 +292,15 @@ impl RegistryObservations {
                 return Ok(Some("Task has live or unknown execution".into()));
             }
         }
-        if let Some(process) = self.open.all.iter().find(|process| {
-            process
-                .cwd
-                .as_deref()
-                .is_some_and(|cwd| normalized(Path::new(cwd)).starts_with(path))
-                && self.execution_blocks(process)
-        }) {
-            return Ok(Some(format!(
-                "Process {} has live or unknown execution",
-                process.lfid
-            )));
+        for process in &self.open.all {
+            if let Some(cwd) = &process.cwd {
+                if normalized(Path::new(cwd))?.starts_with(path) && self.execution_blocks(process) {
+                    return Ok(Some(format!(
+                        "Process {} has live or unknown execution",
+                        process.lfid
+                    )));
+                }
+            }
         }
 
         Ok(None)
@@ -313,10 +314,46 @@ fn observe(
     external: &OpsResult<HashSet<PathBuf>>,
     validate_removal: bool,
 ) -> OpsResult<()> {
+    *decision = io::read(io::Read::Observation {
+        database: store.sqlite.path().map_err(error)?,
+        repo: repo.to_path_buf(),
+        decision: Box::new(decision.clone()),
+        external: external.as_ref().map_err(ToString::to_string).cloned(),
+        validate_registration: validate_removal,
+    })?;
+    if validate_removal && decision.action == CleanupAction::ValidateCheckout {
+        // Final history observation retains its separate mechanism-review boundary.
+        // No worker result caches negative history or authorizes removal.
+        let local = store
+            .sqlite
+            .bounded_reader(Duration::from_secs(2))
+            .map_err(error)?;
+        let release = release_registry()?
+            .map(|store| store.bounded_reader(Duration::from_secs(2)))
+            .transpose()
+            .map_err(error)?;
+        for registry in std::iter::once(&local).chain(release.as_ref()) {
+            if evidence_blocks_checkout(registry, &decision.path)? {
+                retain(decision, "local Session evidence");
+                return Ok(());
+            }
+        }
+        decision.action = CleanupAction::RemoveCheckout;
+    }
+    Ok(())
+}
+
+fn observe_source(
+    store: &SqliteStore,
+    repo: &Path,
+    decision: &mut CleanupDecision,
+    external: &OpsResult<HashSet<PathBuf>>,
+    validate_registration: bool,
+) -> OpsResult<()> {
     // Each observation stands alone, including a recheck after planning.
     decision.evidence.clear();
     let path = &decision.path;
-    if normalized(path) == normalized(repo) {
+    if normalized(path)? == normalized(repo)? {
         retain(decision, "primary checkout");
         return Ok(());
     }
@@ -354,12 +391,12 @@ fn observe(
         decision.observed_head = started.observed_head;
         admin
     } else {
-        if normalized(&main_repo_root(path)?) != normalized(repo) {
+        if normalized(&main_repo_root(path)?)? != normalized(repo)? {
             retain(decision, "checkout registration changed");
             return Ok(());
         }
         let admin = git_directory(path, "--absolute-git-dir")?;
-        if validate_removal {
+        if validate_registration {
             // Locked observation validates this registration, not a sibling-wide
             // inventory. A preview's registration cannot authorize removal.
             let common = git_directory(repo, "--git-common-dir")?;
@@ -409,7 +446,7 @@ fn observe(
     }
     // Cheap checkout protections need no registry or history scan. Each candidate
     // gets fresh bounded readers here, including the locked removal recheck.
-    let local = RegistryObservations::read(&store.sqlite)?;
+    let local = RegistryObservations::read(store)?;
     let mut owned = admin.join("lf-created").is_file();
     if let Some(reason) = local.blocker(path)? {
         retain(decision, reason);
@@ -491,26 +528,12 @@ fn observe(
             }
         }
     }
-    if !validate_removal {
-        // A preview is not deletion authority. Do not walk native history or
-        // resolve the complete Session reference set on the foreground path.
-        decision.action = CleanupAction::ValidateCheckout;
-        return Ok(());
-    }
-    // History can be much larger than the checkout registry. Read it only for
-    // otherwise removable candidates; incomplete coverage never authorizes removal.
-    for registry in std::iter::once(&local).chain(release.as_ref()) {
-        if evidence_blocks_checkout(&registry.store, path)? {
-            retain(decision, "local Session evidence");
-            return Ok(());
-        }
-    }
     if missing {
         decision
             .evidence
             .push("interrupted cleanup: exact administrative HEAD".into());
     }
-    decision.action = CleanupAction::RemoveCheckout;
+    decision.action = CleanupAction::ValidateCheckout;
     Ok(())
 }
 
@@ -529,7 +552,7 @@ fn interrupted_removal(repo: &Path, path: &Path) -> OpsResult<Option<(PathBuf, C
         }
         if normalized(Path::new(
             std::fs::read_to_string(admin.join("gitdir"))?.trim(),
-        )) != path.join(".git")
+        ))? != path.join(".git")
         {
             continue;
         }
@@ -576,13 +599,12 @@ fn list_porcelain(repo: &Path) -> OpsResult<Vec<(PathBuf, Option<String>)>> {
 
 // Filesystem-sensitive Git reads must not hold up every later candidate.
 fn read_git(path: &Path, args: &[&str]) -> OpsResult<String> {
-    let output = crate::ops::read_retry::bounded_output(
-        Command::new("git")
-            .current_dir(path)
-            .args(args)
-            .env("GIT_OPTIONAL_LOCKS", "0"),
-        Duration::from_secs(2),
-    )?;
+    let mut command = Command::new("git");
+    command
+        .current_dir(path)
+        .args(args)
+        .env("GIT_OPTIONAL_LOCKS", "0");
+    let output = io::output(&mut command, Duration::from_secs(2))?;
     // NUL-delimited filenames may start with whitespace. Only scalar readers
     // may trim their output; artifact classification must preserve exact paths.
     String::from_utf8(output.stdout).map_err(error)
@@ -684,7 +706,9 @@ fn plan_selected(
     selected: Option<&Path>,
 ) -> OpsResult<Vec<CleanupDecision>> {
     let repo = main_repo_root(repo)?;
-    let selected = selected.map(normalized);
+    let selected = selected
+        .map(|path| io::read::<PathBuf>(io::Read::Normalize(path.to_path_buf())))
+        .transpose()?;
     let external = running_paths();
     let registered = list_porcelain(&repo)?;
     let mut plan = Vec::new();
@@ -757,17 +781,40 @@ fn apply_checkout(
         return;
     }
     let admission = (|| {
-        let local = store.sqlite.lock_checkout(&decision.path).map_err(error)?;
-        let release = release_registry()?;
-        let release = release
-            .as_ref()
-            .map(|release| release.lock_checkout(&decision.path))
-            .transpose()
-            .map_err(error)?;
-        let lease = acquire_worktree_lease(repo, &decision.path, "checkout cleanup")?;
-        Ok::<_, OpsError>((local, release, lease))
+        let database = store.sqlite.path().map_err(error)?;
+        let mut paths: Vec<(PathBuf, bool)> = io::read(io::Read::Admission {
+            database,
+            path: decision.path.clone(),
+        })?;
+        let release: Option<PathBuf> = io::read(io::Read::ReleaseRegistry)?;
+        if let Some(database) = release {
+            paths.extend(io::read::<Vec<(PathBuf, bool)>>(io::Read::Admission {
+                database,
+                path: decision.path.clone(),
+            })?);
+        }
+        let prepared: PreparedWorktreeLease = io::read(io::Read::Lease {
+            repo: repo.to_path_buf(),
+            path: decision.path.clone(),
+        })?;
+        // Open every file before taking any lock. Workers exit before transfer
+        // acknowledgment; a canceled opener cannot later acquire admission.
+        let files = paths
+            .into_iter()
+            .map(|(path, exclusive)| io::open_lock(path).map(|file| (file, exclusive)))
+            .collect::<OpsResult<Vec<_>>>()?;
+        let lease_file = io::open_lock(prepared.lock_path.clone())?;
+        let mut locks = Vec::new();
+        for (file, exclusive) in files {
+            locks.push(
+                SqliteStore::acquire_checkout_lock(file, exclusive, Duration::ZERO)
+                    .map_err(error)?,
+            );
+        }
+        let lease = prepared.acquire(lease_file)?;
+        Ok::<_, OpsError>((locks, lease))
     })();
-    let (_admission, _release_admission, lease) = match admission {
+    let (_admission, lease) = match admission {
         Ok(locks) => locks,
         Err(error) => {
             retain(
@@ -837,13 +884,7 @@ pub fn run_cleanup_pass(
             .expect("database has a parent")
             .to_path_buf()
     };
-    std::fs::create_dir_all(&home)?;
-    let lock = OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(home.join("checkout-cleanup.lock"))?;
+    let lock = io::open_lock(home.join("checkout-cleanup.lock"))?;
     match fs2::FileExt::try_lock_exclusive(&lock) {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
@@ -866,7 +907,9 @@ pub fn run_cleanup_pass(
     let repo = main_repo_root(repo)?;
     // A failed/partial page cannot authorize removal; the history reader below
     // reports incomplete coverage. Do not make unrelated checkout facts disappear.
-    if let Err(error) = store.sqlite.advance_session_evidence() {
+    if let Err(error) = io::schedule(io::Schedule::ProjectEvidence(
+        store.sqlite.path().map_err(error)?,
+    )) {
         tracing::warn!(%error, "cleanup history backfill deferred");
     }
     let mut receipt = crate::ops::cron::cleanup::CleanupReceipt::begin(&store.sqlite, &repo)?;
@@ -1028,20 +1071,9 @@ fn collect_pass(
         progress.full_scan_started = Some(chrono::Utc::now().timestamp_micros());
         save(progress)?;
     }
-    let settled: HashSet<PathBuf> =
-        io::read(io::Read::Settled(store.sqlite.path().map_err(error)?))?;
     let cutoff = progress.full_scan_started;
     let in_scan = |attempt: &CheckoutAttempt| cutoff.is_some_and(|cutoff| attempt.at <= cutoff);
     let mut pending_scan = attempts.iter().filter(|attempt| in_scan(attempt)).count();
-    attempts.retain(|attempt| {
-        let eligible = in_scan(attempt) || settled.contains(&attempt.path);
-        if !eligible {
-            progress
-                .pending_registrations
-                .retain(|admin| admin != &attempt.admin);
-        }
-        eligible
-    });
     // Within this setup window, persisted last-attempt times put old deferrals
     // ahead of arrivals. The registration cursor covers the other windows;
     // neither that cursor nor these hints can authorize removal.
@@ -1081,6 +1113,30 @@ fn collect_pass(
         progress.full_scan_pending = pending;
         if in_scan(attempt) {
             pending_scan -= 1;
+        }
+        if !in_scan(attempt) {
+            // This positive-only fast lane uses stored checkout keys, not a
+            // filesystem walk of every settled owner. Aliases and missed rows
+            // remain covered by the hourly registration scan. A failed lookup
+            // yields this candidate, never certifies discovery complete.
+            let settled = store.sqlite.path().map_err(error).and_then(|database| {
+                io::read::<bool>(io::Read::Settled {
+                    database,
+                    path: path.clone(),
+                })
+            });
+            match settled {
+                Ok(true) => {}
+                Ok(false) => continue,
+                Err(error) => {
+                    progress.full_scan_pending = true;
+                    report.failed.push(CleanupFailure {
+                        path: path.clone(),
+                        error: format!("cleanup settlement discovery unavailable: {error}"),
+                    });
+                    continue;
+                }
+            }
         }
         if let Err(error) = write_attempt(
             &admin.join("lf-cleanup-attempt"),
@@ -1135,7 +1191,9 @@ fn collect_pass(
 pub(crate) async fn cleanup_path(store: &SharedStore, repo: &Path, path: &Path) -> OpsResult<()> {
     let (store, repo, path) = (store.clone(), repo.to_path_buf(), path.to_path_buf());
     tokio::task::spawn_blocking(move || {
-        if let Err(error) = store.sqlite.advance_session_evidence() {
+        if let Err(error) = io::schedule(io::Schedule::ProjectEvidence(
+            store.sqlite.path().map_err(error)?,
+        )) {
             tracing::warn!(%error, "cleanup history backfill deferred");
         }
         let plan = plan_selected(&store, &repo, Some(&path))?;
@@ -1299,17 +1357,21 @@ mod tests {
         assert_eq!(removed.len(), eligible.len());
         assert!(slow.join("unfinished").exists());
         assert!(unowned.exists());
-        // Finish the full scan, then cheap ticks inspect settled owners only.
+        // Drain the saved window, finish discovery, then complete a fresh
+        // reconciliation sweep. Short earlier ticks may have stopped in any of
+        // those phases; a single pass is not a full-scan completion contract.
         let mut receipt = begin_receipt(&store, &repo);
         let mut progress = receipt.progress();
-        super::collect_pass(
-            &store,
-            repo.path(),
-            CleanupBudget::default(),
-            &mut progress,
-            |_| Ok(()),
-        )
-        .unwrap();
+        for _ in 0..4 {
+            super::collect_pass(
+                &store,
+                repo.path(),
+                CleanupBudget::default(),
+                &mut progress,
+                |_| Ok(()),
+            )
+            .unwrap();
+        }
         assert!(progress.full_scan_at.is_some());
         let cheap = super::collect_pass(
             &store,
@@ -1908,6 +1970,121 @@ mod tests {
             }
         }
         assert!(!recovered.exists(), "a repaired hint must allow collection");
+    }
+
+    #[tokio::test]
+    async fn cleanup_setup_stalled_settled_path_does_not_defer_healthy_collection() {
+        let _guard = crate::journal::TestLedgerGuard::new();
+        let external = ExternalInspection::idle();
+        for hourly in [false, true] {
+            let (repo, directory, store, healthy) = fixture().await;
+            let stalled = add_settled(&repo, &directory, "aaa-stalled");
+            let fifo_path = directory.path().join("stalled-status");
+            fifo(&fifo_path);
+            external.wrap_git(&format!(
+                "if [ \"$PWD\" = '{}' ] && [ \"$1\" = status ]; then cat '{}'; fi",
+                stalled.display(),
+                fifo_path.display()
+            ));
+            // A historical settled owner outside this repository cannot be
+            // normalized. It must not participate in this candidate's lookup.
+            let alias = directory.path().join("unresolvable-owner");
+            std::os::unix::fs::symlink(&alias, &alias).unwrap();
+            let conn = rusqlite::Connection::open(directory.path().join("loopflow.db")).unwrap();
+            conn.execute("INSERT INTO pr_landings(id,repo,pr_number,worktree,branch,requested_head_sha,observed_head_sha,merge_commit,state,generation,created_at,updated_at)
+                VALUES('unrelated','other/repo',3,?1,'other','head','head','head','merged',1,1,1)", [alias.to_str().unwrap()]).unwrap();
+            let mut receipt = begin_receipt(&store, &repo);
+            let mut progress = receipt.progress();
+            if !hourly {
+                progress.full_scan_at = Some(chrono::Utc::now().timestamp());
+            }
+            receipt.save(progress).unwrap();
+            let report =
+                super::run_cleanup_pass(&store, repo.path(), CleanupBudget::default()).unwrap();
+            assert_eq!(report.removed, vec![healthy], "{report:?}");
+            retained(
+                report
+                    .deferred
+                    .iter()
+                    .find(|item| item.path == stalled)
+                    .unwrap(),
+                "observation unavailable",
+            );
+            assert!(stalled.exists());
+            assert_no_fifo_reader(&fifo_path);
+            drop(store.sqlite.lock_checkout(&stalled).unwrap());
+            external.wrap_git("");
+            let report =
+                super::run_cleanup_pass(&store, repo.path(), CleanupBudget::default()).unwrap();
+            assert_eq!(report.removed, vec![stalled]);
+        }
+    }
+
+    #[tokio::test]
+    async fn cleanup_setup_settlement_lookup_failure_is_candidate_local() {
+        let _guard = crate::journal::TestLedgerGuard::new();
+        let _external = ExternalInspection::idle();
+        let (repo, directory, store, path) = fixture().await;
+        let neighbor = add_settled(&repo, &directory, "healthy-neighbor");
+        let mut receipt = begin_receipt(&store, &repo);
+        let mut progress = receipt.progress();
+        progress.full_scan_at = Some(chrono::Utc::now().timestamp());
+        receipt.save(progress).unwrap();
+        let fifo_path = directory.path().join("settlement-read");
+        fifo(&fifo_path);
+        std::env::set_var("LF_TEST_CLEANUP_STALL_SETTLED", &path);
+        std::env::set_var("LF_TEST_CLEANUP_STALL_SETTLED_FIFO", &fifo_path);
+        let result = super::run_cleanup_pass(&store, repo.path(), CleanupBudget::default());
+        std::env::remove_var("LF_TEST_CLEANUP_STALL_SETTLED");
+        std::env::remove_var("LF_TEST_CLEANUP_STALL_SETTLED_FIFO");
+        let report = result.unwrap();
+        assert_eq!(report.removed, vec![neighbor]);
+        assert!(report.failed.iter().any(|failure| failure.path == path
+            && failure.error.contains("settlement discovery unavailable")));
+        assert!(path.exists());
+        assert_no_fifo_reader(&fifo_path);
+        let report =
+            super::run_cleanup_pass(&store, repo.path(), CleanupBudget::default()).unwrap();
+        assert_eq!(report.removed, vec![path]);
+    }
+
+    #[tokio::test]
+    async fn cleanup_setup_lock_preparation_timeout_never_owns_admission() {
+        let _guard = crate::journal::TestLedgerGuard::new();
+        let _external = ExternalInspection::idle();
+        let (repo, directory, store, path) = fixture().await;
+        let neighbor = add_settled(&repo, &directory, "healthy-neighbor");
+        let lease =
+            crate::engine::git::PreparedWorktreeLease::discover(repo.path(), &path).unwrap();
+        let fifo_path = directory.path().join("lock-ack");
+        fifo(&fifo_path);
+        // Interrupt both before file preparation and after descriptor transfer.
+        for phase in ["before", "after"] {
+            std::env::set_var("LF_TEST_CLEANUP_STALL_LOCK", &lease.lock_path);
+            std::env::set_var("LF_TEST_CLEANUP_STALL_LOCK_FIFO", &fifo_path);
+            std::env::set_var("LF_TEST_CLEANUP_STALL_LOCK_PHASE", phase);
+            let result = super::run_cleanup_pass(&store, repo.path(), CleanupBudget::default());
+            std::env::remove_var("LF_TEST_CLEANUP_STALL_LOCK");
+            std::env::remove_var("LF_TEST_CLEANUP_STALL_LOCK_FIFO");
+            std::env::remove_var("LF_TEST_CLEANUP_STALL_LOCK_PHASE");
+            let report = result.unwrap();
+            assert!(path.exists());
+            assert!(!neighbor.exists());
+            retained(
+                report
+                    .deferred
+                    .iter()
+                    .find(|item| item.path == path)
+                    .unwrap(),
+                "admission unavailable",
+            );
+            assert_no_fifo_reader(&fifo_path);
+            drop(store.sqlite.lock_checkout(&path).unwrap());
+            drop(acquire_worktree_lease(repo.path(), &path, "after canceled opener").unwrap());
+        }
+        let report =
+            super::run_cleanup_pass(&store, repo.path(), CleanupBudget::default()).unwrap();
+        assert_eq!(report.removed, vec![path]);
     }
 
     #[tokio::test]

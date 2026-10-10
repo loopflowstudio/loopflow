@@ -167,6 +167,10 @@ Removed the shared candidate fairness lane, background/locked aggregate listing,
 `observe_registered` wrapper, candidate-membership sets and stored derived hint paths.
 One observation reads each selected registration once; locked application validates
 its reciprocal backlink. Saved candidate windows resume without rediscovery.
+This pass also removes the repository-wide `Read::Settled` /
+`settled_checkout_paths` normalizing inventory and parent-side cleanup lock-file
+opens. Candidate-local positive lookups replace discovery; shared admission and
+lease discovery now separate file preparation from acquisition.
 No known deletion targets remain. Explicit abandonment and persistent-branch
 restart retain their separate authority; missing-registration repair never
 justifies broad metadata pruning. Admitted destructive removal is never canceled.
@@ -244,10 +248,11 @@ directory, instead of consulting a sibling-wide listing. Exact-head and ownershi
 checks still run freshly; registration observation alone never permits removal.
 
 Manual previews retain Git's complete listing, now with Git and normalization in
-one bounded read-only process group. Settled-path discovery also opens SQLite and
-normalizes its results in a read-only worker. Neither operation receives admission
-locks or has a deletion continuation. The Git child stays in its worker's process
-group rather than escaping through a nested timeout wrapper.
+one bounded read-only process group. Settlement discovery now reads only the
+selected checkout's stored keys, without normalizing unrelated historical owners.
+Neither operation receives admission locks or has a deletion continuation. The
+Git child stays in its worker's process group rather than escaping through a nested
+timeout wrapper.
 
 The new fixtures cover collection without a working aggregate Git listing, preview
 listing timeout, per-registration gitdir FIFO failure beside an observable dirty
@@ -324,47 +329,70 @@ fixture passes with that shared key.
 
 ### Remaining in this PR
 
-Reconciled 2026-10-09 against `9ca8c3c5f`: `54e59469a` replaces shared-cursor
-scheduling with bounded receipt continuation; the cross-window counterexample has
-a composed regression. `9ca8c3c5f` removes rediscovery from continuation and validates
-registration backlinks locally. Preparatory isolation remains incomplete; the
-new settled-path worker also retains a repository-wide progress failure below.
-Exact-head settlement and fail-closed history checks are unchanged. Item 2 remains
-a mechanism-review boundary.
+Reconciled 2026-10-09 after the preparatory-isolation implementation. Durable
+continuation and fixed sweep endpoints remain intact. Exact-head settlement,
+completed-Task delivery and fail-closed history remain mandatory. Item 2 remains
+a mechanism-review boundary; neither this isolation cut nor passing tests make
+the full PR ready to ship.
 
-1. **Finish preparatory I/O isolation.** Candidate continuation, finite-tail sweep
-   resumption, registration-local setup and isolated settled-path discovery are
-   implemented. The 65-registration fixture composes failed publications that
-   exhaust candidate time, interruption and arrivals. This is finite-workload
-   evidence, not an arbitrary-arrival-rate or whole-pass timing guarantee.
+1. **Preparatory isolation implemented; source progress still has a review gap.**
+   Minute selection now asks a candidate-local positive SQL question using stored
+   checkout keys. It neither loads nor normalizes every settled owner's path.
+   A lookup failure consumes that candidate's continuation slot and reports failure;
+   the next registration sweep retries it. It cannot abort healthy neighbors or
+   certify incomplete discovery. Hourly scans do not require the lookup. Aliased historical
+   keys can miss the minute fast lane; the complete registration sweep still
+   observes them. These queries never authorize removal.
 
-   Machine lock-file creation, registry opens/normalization during candidate
-   planning and locked observation, external-cwd normalization, cache-tag reads,
-   checkout/Git lease discovery, missing-checkout repair lookup and aggregate final
-   evidence still run inline. Registry receipt
-   setup and history backfill also retain their existing inline store access.
-   Administrative-name enumeration remains repository-wide, although cancellable;
-   failure defers the repository. Worker descriptor enumeration and process launch
-   precede the child deadline; timeout permits up to one additional second of
-   synchronous reaping. These are not end-to-end two-second guarantees.
+   Source observation (including registry opens, Task/Process path normalization,
+   cache-tag reads, reciprocal registration validation and missing-checkout lookup)
+   now runs in a read-only worker. External-cwd normalization stays inside its
+   existing five-second inspection budget. Source workers have a two-second
+   request deadline and keep Git descendants in their own process group. The
+   parent repeats source observation under admission, then performs the unchanged
+   final evidence checks. A worker returns at most `validate_checkout`, never
+   deletion authority. Review also found the common missing-tail resolver used
+   `exists()`, swallowing access/symlink errors as absence. It now propagates those
+   errors with `try_exists()`; source normalization no longer falls back to raw
+   paths. Unknown resolution retains instead of becoming a negative overlap. History projection pages and receipt-context reads also
+   use isolated requests; projection transactions retain their existing owner.
 
-   **Source-derived progress gap:** `Read::Settled` reads all settled paths across
-   the registry and normalizes them in one two-second worker. `collect_pass`
-   propagates any worker failure before candidate admission, even during an hourly
-   scan. A stalled unrelated path can therefore defer every healthy candidate on
-   every tick. Isolation bounds the request, not the failure's scope or eventual
-   progress. Candidate-local discovery or a bounded resumable alternative remains
-   to be implemented and proved with healthy collection beside a stalled settled
-   path; treating an incomplete set as complete is not an acceptable repair.
+   Admission and Git lease owners expose discovery separately from acquisition.
+   Cleanup workers prepare directories and open files, transfer **unlocked** file
+   descriptors over a private Unix socket, and exit before the parent acquires
+   anything. Cleanup opens every admission/lease file before taking any checkout
+   lock. Machine-lock file preparation uses the same path. Lost acknowledgment
+   drops queued descriptors; an interrupted worker owns no checkout lock and has
+   no deletion continuation. Existing writers use the same lock paths and modes.
+   Lock acquisition remains parent-owned and nonblocking; admitted artifact/Git
+   removal is never canceled. Cleanup does not rewrite the lease's diagnostic
+   owner text, avoiding new parent-side file writes during admission.
 
-   Isolate the remaining preparatory I/O without giving canceled workers checkout
-   locks or a continuation into deletion. In particular, moving lock discovery alone
-   would leave parent-side file opens unbounded; lock-file preparation needs a safe
-   parent-owned admission boundary, not a timed-out lock holder. Git's admitted
-   non-forced removal may itself inspect siblings; the new gitdir fixture proves
-   setup isolation and recovery, not deletion through a permanently stalled sibling.
-   Destructive removal remains outside cancellation. Final-history changes still
-   require item 2's mechanism review; no replacement is selected here.
+   New composed fixtures cover minute and hourly healthy collection beside a
+   settled candidate stalled in a real FIFO-backed Git read, with an unresolvable
+   unrelated historical settled path in the registry. A separate interrupted
+   candidate settlement lookup proves failure-local retry. They also cover lock-file
+   preparation interruption before open and after descriptor transfer, available
+   admission afterward, neighbor collection and retry. Evidence is finite-workload
+   isolation, not an arbitrary-arrival-rate or whole-pass timing guarantee.
+
+   Remaining limits: administrative-name enumeration is repository-wide, although
+   cancellable; worker descriptor enumeration and process launch precede the child
+   deadline; reaping can add one second. Parent-owned nonblocking lock syscalls
+   cannot promise an OS/filesystem wall-time bound. Large source-observation sets
+   may exhaust the worker budget and retain; no partial negative observation is
+   reused. In particular, `RegistryObservations::read` still resolves every Task
+   checkout, and `blocker` may resolve unrelated open-Process cwd paths. An
+   unresolved/stalled Task or Process alias can therefore retain every candidate
+   even though the worker's failure is reported per candidate. The new healthy
+   collection proof covers unrelated **landing** paths and candidate-local reads,
+   not that broader source-veto set. Discarding an unresolved alias would weaken
+   preservation; locality needs an ownership/path contract that proves disjointness,
+   not an incomplete scan labeled complete. No such replacement is selected here.
+   This source-derived progress gap remains for mechanism review alongside item 2.
+   Aggregate final history, its connection opens/path resolution, and native
+   traversal remain item 2. Git's admitted removal may inspect siblings;
+   setup isolation does not prove deletion through a permanently stalled sibling.
 2. **Revise final evidence observation before dependent implementation.** The
    opt-in `cleanup_evidence_cost_probe` measures already-complete raw projection,
    fresh path resolution and native traversal separately—no backfill is timed.
@@ -472,4 +500,4 @@ allocated bytes by category; observed free-space delta after collection; oldest
 eligible retention age. APFS sharing, hardlinks and concurrent writers mean
 directory sums are estimates, not guaranteed reclaimed bytes.
 
-Check: `git diff --check` — passed (realign, prose only); recorded focused 21-test/fmt/Clippy passes at `9ca8c3c5f` not rerun; full acceptance/provider resume: gate; installed scheduler/upgrade: demo.
+Check: `cargo test -p loopflow --lib` with filters `cleanup_setup_`, `cleanup_apply_`, `cleanup_collection_passes_advance_past_slow_candidates_and_reconcile_hourly`, `cleanup_history_pages_eventually_collect_and_resolve_retargeted_paths`, `canonicalize_missing_tail_preserves_resolution_errors`, and `waiting_for_worktree_lease_never_displaces_its_owner` — 23 passed; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` — passed; full acceptance/provider resume: gate; installed scheduler/upgrade: demo.

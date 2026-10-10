@@ -77,7 +77,8 @@
   solve final evidence progress or promise bounded destructive Git I/O.
 - Review finding, 2026-10-09: isolating source observation bounds its I/O but
   still resolves the registry's complete Task checkout set and relevant Process
-  cwd aliases. A stalled/unknown alias can retain unrelated candidates. The
-  landing-path discovery fix does not prove this broader source-veto locality.
+  cwd aliases. External cwd inspection also fails closed for its complete set
+  when any path cannot resolve. A stalled/unknown alias can retain unrelated
+  candidates. The landing-path discovery fix does not prove this broader source-veto locality.
   Skipping unknown aliases is unsafe; a disjointness/ownership contract remains
   unselected. Dependent progress work stops with the existing mechanism review.

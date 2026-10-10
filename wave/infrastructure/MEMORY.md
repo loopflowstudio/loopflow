@@ -288,25 +288,28 @@ never settle source. History overrides cache tags; compare-and-delete refs.
 Repair schedules before pruning binaries; preserve disable. Release's lesson:
 generated schedules/manual recovery prove no unattended firing.
 
-`54e59469a` replaces the shared cursor's cross-window starvation with at most 32
-pending registrations in the existing receipt. Consume candidates durably before
-publication; drain continuation before rediscovery. `9ca8c3c5f` resumes without an
-aggregate Git listing and validates reciprocal registration paths under admission.
-The 65-registration proof composes deadline-exhausting failed writes, interruption
-and arrivals; it proves original-candidate coverage and healthy collection, not
-arbitrary arrival rates or repeated attempts of every failed publisher.
+Consume the receipt's ≤32 registrations before publication; drain before
+rediscovery. The 65-registration fixture proves finite coverage, not arbitrary
+arrivals or retry frequency.
 
-Workers inherit no locks/removal authority; lost acknowledgments end the writer.
-Never cancel admitted removal. Admission preparation/final evidence remain unbounded.
-Source inspection finds one settled-path failure aborts the entire pass despite
-worker isolation; no new fixture. Localize failures without treating unknown as empty.
+At `7e1a51086`, settlement discovery uses candidate-local
+positive queries; aliases remain in hourly scans. Workers isolate source reads and
+lock-file preparation, transfer unlocked descriptors and exit before parent-owned
+admission. Never cancel admitted removal. FIFO fixtures prove healthy collection
+beside stalled source reads, unrelated landing aliases and interrupted openers.
+This proves no whole-pass bound or removal through a stalled Git sibling.
+
+Failure-local reporting is not failure-local progress: source vetoes still resolve
+all Task paths and open-Process aliases; one unknown can retain every candidate.
+External cwd inspection likewise fails closed as a set. Isolation alone cannot
+prove disjointness. No replacement ownership/path contract is selected.
 
 Previews defer history; removal needs complete coverage and fresh destinations.
 The final read timed out at 65,536 projected synthetic rows; unchanged retries
 cannot progress. Cached negatives fail on retargeting. Workload-sized isolated
 observation versus a history-owner fresh view remains unselected; larger constant
 timeouts do not resolve it. Gate owns provider resume/second release writer;
-demo owns installed schedule/upgrade. Earlier proofs: `f800facfa:wave/infrastructure/MEMORY.md`,
+demo owns installed schedule/upgrade. Earlier proofs: `340db4227:wave/infrastructure/MEMORY.md`.
 Plan: `scratch/clean-up.md`.
 
 ## Project configuration and review direction (2026-10-05)

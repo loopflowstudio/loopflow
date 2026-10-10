@@ -335,7 +335,8 @@ fixture passes with that shared key.
 
 ### Remaining in this PR
 
-Reconciled 2026-10-09 after the preparatory-isolation implementation. Durable
+Reconciled 2026-10-09 against `6cd3c7594` and `7e1a51086`. The requested
+aggregate-settlement discovery repair and preparatory isolation exist. Durable
 continuation and fixed sweep endpoints remain intact. Exact-head settlement,
 completed-Task delivery and fail-closed history remain mandatory. Item 2 remains
 a mechanism-review boundary; neither this isolation cut nor passing tests make
@@ -390,12 +391,21 @@ the full PR ready to ship.
    reused. In particular, `RegistryObservations::read` still resolves every Task
    checkout, and `blocker` may resolve unrelated open-Process cwd paths. An
    unresolved/stalled Task or Process alias can therefore retain every candidate
-   even though the worker's failure is reported per candidate. The new healthy
+   even though the worker's failure is reported per candidate. `read_running_paths`
+   also normalizes the complete external cwd set; a single resolution failure
+   makes external execution unknown for every candidate. The new healthy
    collection proof covers unrelated **landing** paths and candidate-local reads,
    not that broader source-veto set. Discarding an unresolved alias would weaken
    preservation; locality needs an ownership/path contract that proves disjointness,
    not an incomplete scan labeled complete. No such replacement is selected here.
    This source-derived progress gap remains for mechanism review alongside item 2.
+   The unresolved choice is how the source owner can prove candidate disjointness
+   despite an unreadable alias, or supply a complete fresh view without restarting
+   every unrelated lookup. Any replacement needs composed healthy-collection proofs
+   beside unknown Task, registered Process and external cwd paths, while retaining
+   aliases that can reach the candidate and preserving fresh retargeting vetoes.
+   The current fixtures do not establish these cases; skipping unknown paths or
+   increasing a fixed timeout is not a selected solution.
    Aggregate final history, its connection opens/path resolution, and native
    traversal remain item 2. Git's admitted removal may inspect siblings;
    setup isolation does not prove deletion through a permanently stalled sibling.
@@ -506,4 +516,4 @@ allocated bytes by category; observed free-space delta after collection; oldest
 eligible retention age. APFS sharing, hardlinks and concurrent writers mean
 directory sums are estimates, not guaranteed reclaimed bytes.
 
-Check: `cargo test -p loopflow --lib` with filters `cleanup_setup_` and `cleanup_apply_` — 19 passed; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` — passed; full acceptance/provider resume: gate; installed scheduler/upgrade: demo.
+Check: recorded at `7e1a51086`: `cargo test -p loopflow --lib` with filters `cleanup_setup_` and `cleanup_apply_` — 19 passed; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` — passed (unchanged code, not rerun); prose reconciliation: `git diff --check` — passed; full acceptance/provider resume: gate; installed scheduler/upgrade: demo.

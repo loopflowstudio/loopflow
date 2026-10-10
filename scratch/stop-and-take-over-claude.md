@@ -20,12 +20,17 @@ shippable or Task completion.
 
 ## Implemented boundary
 
-Runtime settlement and Claude stop/interrupt share exact-identity group close
-under the attachment fence, recording death before releasing it. Unknown identity
+Runtime settlement, Claude stop/interrupt and OpenCode stop share exact-identity
+group close under the attachment fence, recording death before releasing it. Unknown identity
 and duplicate ownership refuse; Codex also refuses unrelated conversations.
 Identity is rechecked after Codex I/O. Leader death alone grants neither group
-settlement nor authority to signal surviving helpers. Claude drops its child
-handle only after common close succeeds.
+settlement nor authority to signal surviving helpers. Both harnesses drop their
+child handles only after common close succeeds.
+OpenCode prompt, abort and stop share history's frozen attachment; config changes
+cannot refresh control authority. Abort uses the bounded fenced HTTP writer without retries. Failed startup
+retains the admitted child for common cleanup; cleanup refusal remains in the error.
+Dropping OpenCode no longer signals its child. Its existing lifeline retains
+lifetime custody until lf exit; the shared named-custody replacement remains open.
 
 Fixtures cover current/stale settlement and foreground exclusion for all providers,
 Claude harness stop fencing, and helpers surviving leader exit. They prove neither
@@ -34,11 +39,7 @@ in Claude fixtures were repaired; production schema and installed data are uncha
 
 ## Remaining implementation — Delete, do not maintain
 
-1. **Replace OpenCode's unfenced stop/abort/drop paths.** Put stop, HTTP abort and
-   failed-start cleanup under the saved attachment. Remove `kill_on_drop(true)`
-   only with replacement lifetime ownership, so dropping a stale harness cannot
-   kill the current attachment's provider.
-2. **Replace launcher-owned-only Claude transport.** Its anonymous stdin/stdout/
+1. **Replace launcher-owned-only Claude transport.** Its anonymous stdin/stdout/
    stderr and pending correlation die with the launcher; a named watchdog FIFO
    cannot preserve communication. Give the existing stream reader a per-AgentProcess
    transport process owning all three pipes and native-history correlation, rather
@@ -46,14 +47,14 @@ in Claude fixtures were repaired; production schema and installed data are uncha
    private Unix endpoint before takeover; validate frozen attachments at this owner
    before writes. Lost responses or transport death retain uncertain inputs, never
    replay them. This proposal is unimplemented, not an accepted relay design.
-3. **Replace OpenCode's unconditional server spawn on reconnect.** Reuse its saved
+2. **Replace OpenCode's unconditional server spawn on reconnect.** Reuse its saved
    server URL and native Session. Public attachment and harness takeover must use
    the same connection/claim path, with fenced writes and no raw endpoint bypass.
    `ops/human_session.rs::open` currently dispatches live connection only for
    Codex; other providers fall through to native resume. Generalizing harness
    startup alone cannot satisfy the public demo. Preserve client-only settlement
    when replacing `connect_live_codex`, rather than closing the surviving provider.
-4. **Delete anonymous lifelines and `HELD_LIFELINES`.** One per-AgentProcess named
+3. **Delete anonymous lifelines and `HELD_LIFELINES`.** One per-AgentProcess named
    lifeline replaces both providers' anonymous paths and optional `open_lifeline`.
    Acquire custody before committing transfer; failed claims release only their
    own holder. Current `connect_live_codex` claims first and holds the FIFO later;
@@ -65,7 +66,7 @@ in Claude fixtures were repaired; production schema and installed data are uncha
    would kill its provider if the attacher dies first. Custody never restores stale
    write authority. Prove both death orders and failed claims before deleting the
    old mechanisms and their exclusive fixtures.
-5. **Prove the public path.** Both death orders, AgentProcess identity and pending
+4. **Prove the public path.** Both death orders, AgentProcess identity and pending
    turns, A → B → A stale-token rejection, current stop, foreground exclusion,
    missing identity and no retained dead-provider lifelines. Linux CI owns platform
    acceptance. The demo attaches a second lf, SIGKILLs the launcher, checks `lf top`,
@@ -74,7 +75,8 @@ in Claude fixtures were repaired; production schema and installed data are uncha
 Neither current transport gap proves takeover impossible or authorizes a refusal.
 These are implementation choices, not missing human input or waived acceptance.
 Removed already: Codex-only signaling, runtime live-close dispatch and Claude's
-direct-child stop. The shared close and Codex unrelated-thread inspection survive.
+direct-child stop, OpenCode's direct-child/group shutdown and retrying abort.
+The shared close and Codex unrelated-thread inspection survive.
 
 ## Related work and review
 
@@ -86,11 +88,17 @@ and correction turns. Its Flow fixture proves no launcher-independent transport.
 Source reconciliation (2026-10-10): local main remains `be4a2b2af`; the
 LOO-450 dependency observation above is unchanged. Release is the only immediate
 child Wave here; its complete goal and memory were read. Its entry-point lesson applies: runtime close tests cannot establish public
-handoff. Architecture docs name the remaining unfenced OpenCode paths. Compression
+handoff. Architecture docs retain the remaining public transport gaps. Compression
 keeps the low-level close private, removes the inspector's tuple argument and
 checks Claude's saved identity at launch rather than carrying optional evidence
 through shutdown. Earlier review details: `5ea5cf5d6:scratch/stop-and-take-over-claude.md`.
 
+The OpenCode regression enters real harness startup with a throwaway stand-in,
+cancels after admission, transfers the attachment, rejects stale stop/abort even
+after config changes,
+drops the old harness without killing the provider, and closes from the current
+attachment without a local child handle. This is not a public takeover proof.
+
 ## Checks
 
-`cargo test -p loopflow --lib --no-run` plus network-isolated test-binary filters `harness::claude::tests::`, `harness::agent_process::close_tests`, `session_record::runtime::tests` (serial): 15 passed, 2 configured-provider tests intentionally ignored; `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check`: pass (prior implementation); realign source inspection and `git diff --check`: pass, no executable changes; public takeover and Linux acceptance remain with implementation/CI.
+`cargo test -p loopflow --lib --no-run`, network-isolated `harness::opencode::tests::stop_and_drop` (1 passed), `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and `git diff --check`: pass; prior shared-close checks remain at `6c5a4505a:scratch/stop-and-take-over-claude.md`; public takeover and Linux acceptance remain implementation/CI work.

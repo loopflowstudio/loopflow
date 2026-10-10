@@ -177,6 +177,11 @@ AgentProcess records, not the deleted `provider:<n>` receipts. A third product
 defect surfaced in the CLI suite: passive Program Status joined the AgentProcess
 and recorded nothing for a native conversation Loopflow never attached to; a
 missing AgentProcess now reads as generation 0 in the writer and both readers.
+Integration fixtures followed the deleted mechanisms: the active-Session watch
+records an AgentProcess and its exit instead of a client receipt and the OpenCode
+registry lock; the landing query selects `kind='lf'` children. A background run
+with an open stdin made `lf task create` wait for a piped report; that was the
+shell, not the product.
 `migration_preserves_planning_identity_and_removes_snapshot_storage`
 still fails on a missing `task_state_deliveries` table from main's `local_planning`
 draft; this branch touches neither file and main's result was not reproduced here.
@@ -374,4 +379,4 @@ LfSession's selected AgentSession. Branch-only fixtures use the typed identity.
 Earlier native-util/planning-reconnect, 16-test isolated lifecycle and typed-identity
 sync checks are retained at `e87e9d643`, this plan.
 
-Check: `cargo test -p loopflow --lib` with inherited `LF_*` cleared: CHECK_RESULT; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `--test process_ownership_tests --test agent_tests` pass. Full Rust integration/Swift/DTO/materialized/Linux verification remains gate/CI-owned. Earlier focused results: `16415389c`, this plan.
+Check: `cargo test -p loopflow --no-fail-fast` with inherited `LF_*` cleared and stdin closed: library 1766 passed, 4 failed (three pass alone; one is main's planning-migration fixture above); every integration target passes after repair; `cargo fmt --all --check` and `cargo clippy --all-targets -- -D warnings` pass. Swift, draft materialization, Linux lifeline and live-provider smokes remain gate/CI-owned. Earlier focused results: `16415389c`, this plan.

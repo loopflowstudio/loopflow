@@ -84,6 +84,7 @@ fn watch_updates_and_releases_only_its_reader_on_eof_or_closed_stdout() {
             .spawn()
             .unwrap(),
     );
+    let client_started = time::OffsetDateTime::now_utc().unix_timestamp();
     let id = "run_00000000000000000000000000000001";
     let dir = home.path().join("runs/00").join(id);
     fs::create_dir_all(dir.join("provider-clients")).unwrap();
@@ -119,10 +120,20 @@ fn watch_updates_and_releases_only_its_reader_on_eof_or_closed_stdout() {
         rusqlite::params![id, db.last_insert_rowid()],
     )
     .unwrap();
-    fs::create_dir_all(home.path().join("runtime")).unwrap();
-    let registry_lock =
-        fs::File::create(home.path().join("runtime/opencode-servers.json.lock")).unwrap();
-    fs2::FileExt::lock_exclusive(&registry_lock).unwrap();
+    // Membership comes from the recorded AgentProcess, not the client receipt.
+    let agent = loopflow::id::ProcessLfid::new();
+    db.execute(
+        "INSERT INTO processes(lfid,trace_id,kind,agent_session_id,started_at,pid,os_started_at,
+            agent_provider,agent_interactive,provider_generation,spawn_state)
+         VALUES(?1,?1,'agent',?2,?3,?4,?3,'cat',1,1,'spawn_requested')",
+        rusqlite::params![agent, id, client_started, client.0.id()],
+    )
+    .unwrap();
+    db.execute(
+        "UPDATE agent_sessions SET agent_process_lfid=?2 WHERE id=?1",
+        rusqlite::params![id, agent],
+    )
+    .unwrap();
     let mut watch = Owned(
         command(home.path(), &["monitor", "active", "--watch", "--json"])
             .spawn()
@@ -138,17 +149,15 @@ fn watch_updates_and_releases_only_its_reader_on_eof_or_closed_stdout() {
             }
         }
     });
-    // The existing registry lock holds the real cold read. Progress frames must
-    // continue while no completed observation can be produced.
-    for _ in 0..2 {
-        let scanning = frames.recv_timeout(Duration::from_secs(8)).unwrap();
-        assert_eq!(scanning.discovery, DiscoveryState::Scanning);
-    }
-    fs2::FileExt::unlock(&registry_lock).unwrap();
+    // The first read comes from process records, with no registry to wait on.
     let snapshot = next_ready(&frames, 1);
     assert_eq!(snapshot.sessions[0].id.as_str(), id);
-    fs::remove_file(&receipt).unwrap();
-    // The ordinary cadence must observe exit/removal without a UI request.
+    db.execute(
+        "UPDATE processes SET completed_at=?2,spawn_state='exited' WHERE lfid=?1",
+        rusqlite::params![agent, client_started],
+    )
+    .unwrap();
+    // The ordinary cadence must observe the recorded exit without a UI request.
     next_ready(&frames, 0);
     watch
         .0

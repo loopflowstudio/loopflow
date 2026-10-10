@@ -1952,7 +1952,8 @@ fi"#;
             );
             let via_agent: bool = conn
                 .query_row(
-                    "SELECT via_agent FROM processes WHERE parent_process_lfid=?1",
+                    // The repair agent's own AgentProcess shares this parent.
+                    "SELECT via_agent FROM processes WHERE parent_process_lfid=?1 AND kind='lf'",
                     [&owner],
                     |row| row.get(0),
                 )

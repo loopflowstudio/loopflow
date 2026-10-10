@@ -175,6 +175,7 @@ When editing Rust tests:
 - Integration tests go in `tests/` directory
 - Mock via closures or `#[cfg(test)]`, not factory traits or extra abstractions
 - Pin fixture `LF_BIN` inside the network boundary; the runner clears inherited `LF_*`. Never let an installed provider outrank a stand-in.
+- From an lf-launched shell, run `cargo test` with inherited `LF_*` unset and `< /dev/null`: capture fixtures follow `LF_HOME`, and `lf task create` reads a piped report from open stdin.
 - Native library fixtures use `TestLedgerGuard` so invocation and capture share a store. Pin blocking workers with `journal::with_test_ledger`; thread-local fixture selection does not follow `LF_HOME`.
 
 # Goals

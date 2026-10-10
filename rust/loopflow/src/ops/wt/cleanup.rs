@@ -524,8 +524,6 @@ mod tests {
                 branch: "landed".into(),
                 task_id: None,
                 requested_head_sha: head.clone(),
-                after_merge: None,
-                next_slug: None,
             },
             OffsetDateTime::now_utc(),
         )

@@ -264,6 +264,104 @@ pub(super) async fn read_messages(
         .await?)
 }
 
+/// Pending native permissions own reply eligibility. SSE only wakes this read:
+/// duplicate edges and reconnect cannot repeat an already attempted reply.
+pub(super) async fn reply_pending_permissions(
+    client: &reqwest::Client,
+    endpoint: &str,
+    thread: &AgentSessionId,
+    history: &std::sync::Mutex<History>,
+) -> Result<()> {
+    let pending: Vec<Value> = client
+        .get(format!("{endpoint}/permission"))
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    let messages = if pending
+        .iter()
+        .any(|permission| permission["sessionID"] == thread.as_str())
+    {
+        read_messages(client, endpoint, thread).await?
+    } else {
+        Vec::new()
+    };
+    for permission in pending
+        .iter()
+        .filter(|permission| permission["sessionID"] == thread.as_str())
+    {
+        let id = permission["id"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("OpenCode permission has no identity"))?;
+        let assistant = permission["tool"]["messageID"].as_str().ok_or_else(|| {
+            anyhow::anyhow!("OpenCode permission has no originating assistant message")
+        })?;
+        let request = messages
+            .iter()
+            .find(|message| message["info"]["id"] == assistant)
+            .and_then(|message| message["info"]["parentID"].as_str())
+            .ok_or_else(|| anyhow::anyhow!("OpenCode permission has no originating request"))?;
+        let owner = history
+            .lock()
+            .expect("OpenCode history lock poisoned")
+            .owner()?;
+        let (store, session, attachment) = &owner;
+        if !store
+            .session_request(session, thread, request)?
+            .is_some_and(|(origin, _)| origin.agent_process_id == attachment.agent_process_id)
+        {
+            return Err(anyhow::anyhow!(
+                "OpenCode permission belongs to an unselected request"
+            ));
+        }
+        let endpoint = endpoint.to_string();
+        let thread = thread.clone();
+        let id = id.to_string();
+        let request = request.to_string();
+        tokio::task::spawn_blocking(move || {
+            let (store, session, attachment) = owner;
+            store.with_session_attachment(&session, &attachment, || {
+                let error = |message: String| crate::store::StoreError::InvalidData(message);
+                let first_attempt =
+                    store.record_session_permission_reply(&session, &thread, &id, &request)?;
+                let client = reqwest::blocking::Client::new();
+                if first_attempt {
+                    let response = client
+                        .post(format!("{endpoint}/permission/{id}/reply"))
+                        .timeout(std::time::Duration::from_secs(10))
+                        .json(&json!({"reply":"once"}))
+                        .send()
+                        .and_then(reqwest::blocking::Response::error_for_status);
+                    if response.is_ok() {
+                        return Ok(());
+                    }
+                }
+                // A lost response can follow acceptance. Readback may settle
+                // absence, but a still-pending permission never permits replay.
+                let pending = client
+                    .get(format!("{endpoint}/permission"))
+                    .timeout(std::time::Duration::from_secs(10))
+                    .send()
+                    .and_then(reqwest::blocking::Response::error_for_status)
+                    .and_then(|response| response.json::<Vec<Value>>())
+                    .map_err(|err| error(format!("OpenCode permission reply readback: {err}")))?;
+                if pending.iter().any(|permission| {
+                    permission["sessionID"] == thread.as_str() && permission["id"] == id
+                }) {
+                    return Err(error(format!(
+                        "OpenCode permission {id} reply is uncertain; not replaying"
+                    )));
+                }
+                Ok(())
+            })
+        })
+        .await??;
+    }
+    Ok(())
+}
+
 // Native submission is bounded and serialized with attachment handoff. An
 // uncertain HTTP result is retained as uncertain; never submit it twice here.
 pub(super) async fn post(
@@ -299,6 +397,114 @@ mod tests {
     use crate::session::SessionEventKind;
     use crate::store::sqlite::SqliteStore;
     use serde_json::json;
+
+    #[tokio::test]
+    async fn permission_recovery_never_replays_an_uncertain_reply() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        use std::sync::{Arc, Mutex};
+        use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+
+        for accepted in [true, false] {
+            let home = tempfile::tempdir().unwrap();
+            let path = home.path().join("store.db");
+            let store = SqliteStore::open_ephemeral(&path).unwrap();
+            let process = LfProcessId::new();
+            rusqlite::Connection::open(&path)
+                .unwrap()
+                .execute(
+                    "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+                    [process.as_str()],
+                )
+                .unwrap();
+            store.test_session("session", &crate::session_record::new_artifact_key());
+            let first = store
+                .claim_session_attachment("session", None, &process, false)
+                .unwrap();
+            let thread = "thread".into();
+            let mut history = History::new(Some((store.clone(), "session".into(), first.clone())));
+            let request = history.request(&thread).unwrap();
+            let messages = vec![json!({"info":{"id":"assistant","sessionID":"thread",
+                "parentID":request,"role":"assistant","time":{"created":1}},"parts":[]})];
+            history.observe(&thread, &messages).unwrap();
+            let history = Mutex::new(history);
+            let pending = Arc::new(AtomicBool::new(true));
+            let replies = Arc::new(AtomicUsize::new(0));
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let endpoint = format!("http://{}", listener.local_addr().unwrap());
+            let server = {
+                let pending = pending.clone();
+                let replies = replies.clone();
+                let messages = messages.clone();
+                tokio::spawn(async move {
+                    loop {
+                        let (socket, _) = listener.accept().await.unwrap();
+                        let mut socket = BufReader::new(socket);
+                        let mut line = String::new();
+                        socket.read_line(&mut line).await.unwrap();
+                        let post = line.starts_with("POST /permission/permission/reply ");
+                        let read_messages = line.starts_with("GET /session/thread/message ");
+                        assert!(post || read_messages || line.starts_with("GET /permission "));
+                        let mut length = 0;
+                        loop {
+                            line.clear();
+                            socket.read_line(&mut line).await.unwrap();
+                            if line == "\r\n" {
+                                break;
+                            }
+                            if let Some(value) = line.to_lowercase().strip_prefix("content-length:")
+                            {
+                                length = value.trim().parse::<usize>().unwrap();
+                            }
+                        }
+                        if post {
+                            let mut body = vec![0; length];
+                            socket.read_exact(&mut body).await.unwrap();
+                            assert_eq!(
+                                serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
+                                json!({"reply":"once"})
+                            );
+                            replies.fetch_add(1, Ordering::SeqCst);
+                            if accepted {
+                                pending.store(false, Ordering::SeqCst);
+                            }
+                            // Lose the response after the provider may have applied it.
+                            continue;
+                        }
+                        let body = if read_messages { json!(messages) } else if pending.load(Ordering::SeqCst) {
+                            json!([{"id":"permission","sessionID":"thread","tool":{"messageID":"assistant"}}])
+                        } else { json!([]) }.to_string();
+                        socket.get_mut().write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+                    }
+                })
+            };
+            let client = reqwest::Client::new();
+            let result =
+                super::reply_pending_permissions(&client, &endpoint, &thread, &history).await;
+            assert_eq!(result.is_ok(), accepted);
+            assert_eq!(replies.load(Ordering::SeqCst), 1);
+            let current = store
+                .claim_session_attachment("session", Some(&first), &process, false)
+                .unwrap();
+            // Reopen the store and reconstruct the reader: no in-memory dedup state.
+            let reopened = SqliteStore::open_ephemeral(&path).unwrap();
+            let mut recovered = History::new(Some((reopened, "session".into(), current)));
+            recovered.observe(&thread, &messages).unwrap();
+            let recovered = Mutex::new(recovered);
+            let result =
+                super::reply_pending_permissions(&client, &endpoint, &thread, &recovered).await;
+            assert_eq!(result.is_ok(), accepted);
+            assert_eq!(replies.load(Ordering::SeqCst), 1);
+            // Even a newly pending observation cannot grant a stale reader writes.
+            pending.store(true, Ordering::SeqCst);
+            assert!(
+                super::reply_pending_permissions(&client, &endpoint, &thread, &history)
+                    .await
+                    .is_err()
+            );
+            assert_eq!(replies.load(Ordering::SeqCst), 1);
+            server.abort();
+        }
+    }
 
     #[test]
     fn pending_request_survives_launcher_loss_without_replay_or_reassigned_usage() {

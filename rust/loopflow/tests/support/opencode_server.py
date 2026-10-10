@@ -15,6 +15,7 @@ HOME = Path(__file__).resolve().parent.parent
 SESSIONS = HOME / "native-sessions.json"
 EVENTS = queue.Queue()
 REPLIES = {}
+PERMISSIONS = {}
 LOCK = threading.Lock()
 
 
@@ -85,8 +86,11 @@ def _launch(session, request, prompt):
         permission = "per_" + uuid.uuid4().hex
         reply = threading.Event()
         REPLIES[permission] = reply
-        _event("permission.asked", sessionID=session, id=permission,
-               tool={"messageID": assistant, "callID": "call_fixture"})
+        pending = dict(sessionID=session, id=permission,
+                       tool={"messageID": assistant, "callID": "call_fixture"})
+        with LOCK:
+            PERMISSIONS[permission] = pending
+        _event("permission.asked", **pending)
         if not reply.wait(15):
             info["error"] = {
                 "name": "APIError", "data": {"message": "fixture permission unanswered"}
@@ -157,6 +161,9 @@ class Server(BaseHTTPRequestHandler):
                     return
                 self.wfile.write(("data: " + json.dumps(event) + "\n\n").encode())
                 self.wfile.flush()
+        elif self.path == "/permission":
+            with LOCK:
+                self._json(list(PERMISSIONS.values()))
         elif self.path.startswith("/session/"):
             session = self.path.split("/")[2]
             with LOCK:
@@ -196,7 +203,10 @@ class Server(BaseHTTPRequestHandler):
             ).start()
         elif self.path.startswith("/permission/"):
             assert body == {"reply": "once"}
-            REPLIES[self.path.split("/")[2]].set()
+            permission = self.path.split("/")[2]
+            with LOCK:
+                PERMISSIONS.pop(permission)
+            REPLIES[permission].set()
             self._json({})
         else:
             self._json({})

@@ -203,6 +203,39 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// Save a permission reply before HTTP. Existing attempts are uncertain, not
+    /// permission to send again. The caller holds the attachment fence.
+    pub(crate) fn record_session_permission_reply(
+        &self,
+        session: &str,
+        thread: &AgentSessionId,
+        permission: &str,
+        request: &str,
+    ) -> StoreResult<bool> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let turn = format!("permission:{permission}");
+        let exists: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM session_events WHERE session_id=?1
+             AND provider_thread=?2 AND provider_turn=?3 AND kind='observed')",
+            params![session, thread, turn],
+            |row| row.get(0),
+        )?;
+        if exists {
+            return Ok(false);
+        }
+        record_event_in(
+            &tx,
+            session,
+            thread,
+            &turn,
+            SessionEventKind::Observed,
+            &serde_json::json!({"permission_reply":{"id":permission,"request":request,"reply":"once"}}),
+        )?;
+        tx.commit()?;
+        Ok(true)
+    }
+
     /// Recover original attribution, never the replacement attachment's input.
     pub(crate) fn session_request(
         &self,

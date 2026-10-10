@@ -221,24 +221,23 @@ unpublished code retained, without deletion or delivery authorization.
 
 ## AgentProcess (LOO-443/447, 2026-10-10)
 
-Jack Heart accepted #1519 (`71741bd4`); unknown stays visible, retry retains history.
+Jack Heart accepted #1519 (`71741bd4`); unknown stays visible; retries retain history.
 LOO-447 owns Claude/OpenCode takeover/stop; two-second removal, three orphans
 and configured-provider runs are accepted unproven.
 
-Headless launch requires an attachment. AgentProcess identity replaces generation;
+Headless launch requires attachment. AgentProcess identity replaces generation;
 released counters stay unread, pre-upgrade callers stale. Client exit proves no
 provider death; provider death proves no unknown attachment's exit. Group death
 requires more than leader death; failed descendant inventory refuses signaling.
 `82b5d90d5` proves A → B → A rejection with stand-ins, not configured relay.
-Draft ordering and scratch-blocked CI evidence remain at
-`be4a2b2af:wave/infrastructure/MEMORY.md`, this heading.
+Draft/CI: `be4a2b2af:wave/infrastructure/MEMORY.md`, this heading.
 
-LOO-447: fenced stop/abort; drop never signals. Custody precedes public Codex
-claims; standby cannot write. Group death releases custody; watchdog stays outside.
-OpenCode saves origins before HTTP; reuses endpoints/readback/stderr.
+LOO-447: fenced stop/abort; drop never signals. Codex acquires custody before
+claiming. Standby cannot write; group death releases custody; watchdog stays outside.
+OpenCode saves origins/permission attempts before HTTP; readback never replays
+uncertain replies. Endpoint/stderr reuse remains harness-only.
 `642e6cbf9` removes creation retries; lost identity remains unresolved.
-Claude pipes remain launcher-owned. Public takeover, permission recovery and
-both death orders remain unfinished. Plan: `scratch/stop-and-take-over-claude.md`.
+Claude pipes remain launcher-owned; public takeover and both death orders unfinished. Plan: `scratch/stop-and-take-over-claude.md`.
 
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)
 

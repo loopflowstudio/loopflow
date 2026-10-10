@@ -162,7 +162,6 @@ struct ToolLifecycle {
 #[derive(Debug, Default)]
 pub(super) struct MappedEvent {
     pub(super) events: Vec<ConversationEvent>,
-    pub(super) permission_requests: Vec<String>,
 }
 
 pub(super) fn map_event(raw: &Value, state: &mut ReaderState) -> MappedEvent {
@@ -207,7 +206,6 @@ pub(super) fn map_event(raw: &Value, state: &mut ReaderState) -> MappedEvent {
                 }
             }
         }
-        "permission.asked" => map_permission(properties, &mut mapped),
         "session.diff" => map_diff(properties, state, &mut mapped),
         "session.error" => map_error(properties, state, &mut mapped),
         _ => {}
@@ -289,17 +287,6 @@ fn map_tool_part(part: &Value, state: &mut ReaderState, mapped: &mut MappedEvent
             turn_id,
             item: build_tool_item(part, &tool_id, status, true),
         });
-    }
-}
-
-fn map_permission(properties: &Value, mapped: &mut MappedEvent) {
-    if let Some(request_id) = properties.get("id").and_then(Value::as_str) {
-        mapped.permission_requests.push(request_id.to_string());
-    } else {
-        tracing::debug!(
-            properties = ?properties,
-            "opencode permission event missing canonical id"
-        );
     }
 }
 
@@ -546,11 +533,6 @@ mod tests {
             delta.events.is_empty(),
             "snapshot already delivered this delta"
         );
-        let permission = map_event(
-            &json!({"type":"permission.asked","properties":{"sessionID":"session","id":"per_1","tool":{"messageID":"assistant","callID":"call"}}}),
-            &mut state,
-        );
-        assert_eq!(permission.permission_requests, ["per_1"]);
         for status in ["busy", "idle"] {
             assert!(map_event(&json!({"type":"session.status","properties":{"sessionID":"session","status":{"type":status}}}), &mut state).events.is_empty());
         }

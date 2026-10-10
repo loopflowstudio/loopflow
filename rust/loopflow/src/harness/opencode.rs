@@ -299,22 +299,16 @@ impl OpenCodeHarness {
                                 | "message.part.updated"
                         )
                     ) {
-                        let observation = async {
-                            let messages = observe_native_messages(&client, &reader_base_url, &reader_session_id, &history, &mut state, &event_tx, &turn_in_progress).await?;
-                            for request_id in &mapped.permission_requests {
-                                let assistant = raw["properties"]["tool"]["messageID"].as_str()
-                                    .ok_or_else(|| anyhow!("OpenCode permission has no originating assistant message"))?;
-                                let request = messages.iter().find(|message| message["info"]["id"] == assistant)
-                                    .and_then(|message| message["info"]["parentID"].as_str())
-                                    .ok_or_else(|| anyhow!("OpenCode permission has no originating request"))?;
-                                if !history.lock().expect("OpenCode history lock poisoned").admitted(request) {
-                                    return Err(anyhow!("OpenCode permission belongs to an unselected request"));
-                                }
-                                let owner = history.lock().expect("OpenCode history lock poisoned").owner()?;
-                                opencode_history::post(owner, format!("{reader_base_url}/permission/{request_id}/reply"), json!({"reply":"once"})).await?;
-                            }
-                            Ok::<_, anyhow::Error>(())
-                        }.await;
+                        let observation = observe_native_messages(
+                            &client,
+                            &reader_base_url,
+                            &reader_session_id,
+                            &history,
+                            &mut state,
+                            &event_tx,
+                            &turn_in_progress,
+                        )
+                        .await;
                         if let Err(error) = observation {
                             send_disconnect_error(
                                 &event_tx,
@@ -383,7 +377,7 @@ async fn observe_native_messages(
     state: &mut opencode_mapping::ReaderState,
     event_tx: &mpsc::UnboundedSender<ConversationEvent>,
     turn_in_progress: &AtomicBool,
-) -> Result<Vec<Value>> {
+) -> Result<()> {
     let messages = opencode_history::read_messages(client, base_url, session).await?;
     let (events, current_messages) = {
         let mut history = history.lock().expect("OpenCode history lock poisoned");
@@ -420,7 +414,7 @@ async fn observe_native_messages(
         }
         let _ = event_tx.send(event);
     }
-    Ok(messages)
+    opencode_history::reply_pending_permissions(client, base_url, session, history).await
 }
 
 #[async_trait]
@@ -982,10 +976,12 @@ mod tests {
         let subscribed = Arc::new(AtomicBool::new(false));
         let requests = Arc::new(Mutex::new(Vec::new()));
         let fail_readback = Arc::new(AtomicBool::new(true));
+        let permission_pending = Arc::new(AtomicBool::new(true));
         let server = {
             let subscribed = subscribed.clone();
             let requests = requests.clone();
             let fail_readback = fail_readback.clone();
+            let permission_pending = permission_pending.clone();
             tokio::spawn(async move {
                 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
                 let mut clients = tokio::task::JoinSet::new();
@@ -995,6 +991,7 @@ mod tests {
                     let requests = requests.clone();
                     let messages = messages.clone();
                     let fail_readback = fail_readback.clone();
+                    let permission_pending = permission_pending.clone();
                     clients.spawn(async move {
                         let mut socket = BufReader::new(socket);
                         let mut line = String::new();
@@ -1006,7 +1003,17 @@ mod tests {
                             std::future::pending::<()>().await;
                         } else {
                             assert!(subscribed.load(Ordering::SeqCst));
-                            assert!(line.starts_with("GET /session/native/message "));
+                            if line.starts_with("POST /permission/pending/reply ") {
+                                assert!(permission_pending.swap(false, Ordering::SeqCst));
+                                socket.get_mut().write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\ntrue").await.unwrap();
+                                return;
+                            }
+                            assert!(line.starts_with("GET /session/native/message ") || line.starts_with("GET /permission "));
+                            let messages = if line.starts_with("GET /permission ") {
+                                if permission_pending.load(Ordering::SeqCst) {
+                                    json!([{"id":"pending","sessionID":"native","tool":{"messageID":"assistant"}}]).to_string()
+                                } else { "[]".to_string() }
+                            } else { messages };
                             let status = if fail_readback.load(Ordering::SeqCst) { "503 Unavailable" } else { "200 OK" };
                             socket.get_mut().write_all(format!("HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", messages.len(), messages).as_bytes()).await.unwrap();
                         }
@@ -1108,9 +1115,11 @@ mod tests {
                 .lock()
                 .unwrap()
                 .iter()
-                .all(|request| request.starts_with("GET ")),
-            "recovery must not replay or reconfigure the server"
+                .all(|request| request.starts_with("GET ")
+                    || request.starts_with("POST /permission/pending/reply ")),
+            "recovery must not replay input or reconfigure the server"
         );
+        assert!(!permission_pending.load(Ordering::SeqCst));
         assert_eq!(
             store.agent_process_identity("opencode").unwrap(),
             Some((pid, birth))

@@ -133,8 +133,11 @@ submission evidence alone proves neither admission nor completion. Harness recon
 reuses the saved server/native Session, subscribes before message readback and
 never replays an uncertain request. Reader setup failure and drop leave that
 provider running. New OpenCode servers own a private stderr file beside their
-lifeline FIFO instead of a launcher-owned pipe. Public connection and initial
-pending-permission acquisition remain unfinished.
+lifeline FIFO instead of a launcher-owned pipe. Pending permissions are acquired
+at reader startup and on native wake edges. Replies select saved request origins
+and retain attempts in Session observations before fenced HTTP. Lost responses
+read back pending permissions; unresolved attempts never replay after reconnect.
+Public connection and recovery before native identity is saved remain unfinished.
 
 Owned native launches use the same pre-exec recording channel under the attachment
 lock, but no headless group/watchdog setup. Failed recording prevents provider code

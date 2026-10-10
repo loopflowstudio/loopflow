@@ -435,3 +435,5 @@ to define task or proejct to you, you said dont define our noun: wave)
 loopflow does it for you but does it in a language you can understand and
 mutate and trust captures what matters". Figure 2 is now "The work, written
 down": Loopflow writes the Tasks, in plain words, and you can change them.
+Jack Heart on figure 3: "review the design is not quite right. \"jam\"?"
+Figure 3 is now "You jam on the design."

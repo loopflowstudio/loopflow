@@ -252,7 +252,9 @@ No fence reacquisition or permanent custody;
 EOF/history/write errors grant no settlement or teardown.
 Foreground exclusion precedes death inspection: an exited terminal provider
 still cannot be settled by headless close.
-Plan: `scratch/stop-and-take-over-claude.md`.
+Claude’s draft lacks a native-client bridge; `attach` targets background, not
+stream-json sessions. Supervisor adoption is unselected. Revise the design,
+not the outcome. Plan: `scratch/stop-and-take-over-claude.md`.
 
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)
 

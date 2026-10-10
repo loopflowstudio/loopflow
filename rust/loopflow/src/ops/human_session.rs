@@ -894,12 +894,11 @@ async fn connect_opencode_client(
     endpoint: String,
     thread: Option<crate::id::AgentSessionId>,
 ) -> Result<()> {
-    use crate::harness::{ApprovalPolicy, Harness};
+    use crate::harness::Harness;
     // Native UI renders output; the reader still records history and permissions.
     // Dropping the receiver avoids a task whose only job was discarding events.
     let (events, _) = tokio::sync::mpsc::unbounded_channel();
-    let mut harness =
-        crate::harness::opencode::OpenCodeHarness::new(events, ApprovalPolicy::AutoApprove);
+    let mut harness = crate::harness::opencode::OpenCodeHarness::new(events);
     harness.use_native_permissions();
     harness.set_agent_session(thread);
     let config = crate::agent::AgentConfig {

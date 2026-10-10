@@ -340,7 +340,7 @@ impl HarnessKind {
             // Claude approvals ride the per-turn CLI flags built from
             // AgentConfig, not a runtime channel; no policy to thread.
             Self::Claude => Box::new(claude::ClaudeHarness::new(event_tx)),
-            Self::OpenCode => Box::new(opencode::OpenCodeHarness::new(event_tx, approval)),
+            Self::OpenCode => Box::new(opencode::OpenCodeHarness::new(event_tx)),
         }
     }
 }

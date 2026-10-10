@@ -96,7 +96,7 @@ death orders. Preserve frozen authority for prompts, replies, abort and stop.
 ## Remaining implementation
 
 1. **Replace launcher-owned-only Claude transport.** Its anonymous stdin/stdout/
-   stderr and pending correlation die with the launcher; a named watchdog FIFO
+   stderr die with the launcher; saved correlation cannot recover unread output. A named watchdog FIFO
    cannot preserve communication. Give the existing stream reader a per-AgentProcess
    transport process owning all three pipes and native-history correlation, rather
    than adding another answer parser. Drain output without a client. Publish a
@@ -160,51 +160,29 @@ The shared close and Codex unrelated-thread inspection survive.
 
 ## Delete — do not maintain
 
-Removed: Claude's launcher-local request map and pre-fence origin capture;
-Session history owns request intent before native identity and admission order.
 Remaining: launcher-owned Claude pipe transport and its exclusive fixtures;
-Claude's native-resume fallback for a live headless provider. Codex-only public
-connection dispatch is removed; native remote endpoints now carry strings
-rather than misrepresenting OpenCode HTTP addresses as filesystem paths. Preserve the existing stream/history
-parsers, exact request origins, native history, permissions and stale-write fences.
-Removed: OpenCode SSE-only permission replies, mapping-side reply requests and
-their now-single-field `MappedEvent` wrapper;
-OpenCode creation retry (`send_request_with_retry`), unconditional
-reconnect spawn and launcher-local stderr logger;
-anonymous/optional lifelines, endpoint-derived FIFO location,
-`HELD_LIFELINES`, and claim-before-custody in public Codex connection;
-`open_agent_session`'s unfenced startup HTTP and its helper-only creation fixtures,
-replaced by persisted startup attempts, readback and attachment-transfer proofs.
-Removed in the protocol correction: unsupported permission PATCH and its
-exclusive fixtures; saved native permissions survive on creation/reconnect.
-The shared public attachment path owns custody, claims and client-only settlement.
-Codex and OpenCode retain separate transport setup; `run_native_client` owns their
-common frozen caller environment and native launch. Provider setup returns success
-or failure, not an always-true connection flag; only live-provider discovery can
-report no connection. This removes duplicate launch/attribution code without
-changing either provider's transport or permission policy. OpenCode's discard-only
-event-drain task is deleted: its native UI renders output while the reader retains
-history and permission recovery. The native relay's response-header fence is
-deleted: GET responses retain reqwest streaming; input/abort responses use Hyper
-after fenced socket dispatch, preserving HTTP responses outside the fence.
-Permission replies instead return a boolean after the receipt writer confirms
-HTTP success or pending-list readback; they do not forward the upstream body.
-The native permission path reuses the existing reply writer. Its retained response
-is now the exact HTTP payload, including rejection explanations: review found
-the predecessor receipt hardcoded `once` even for native rejection. Repeated
-choices preserve the first intent and never replay it. Relay mutations share
-one bounded body decoder; permission and prompt dispatch remain separate. Automatic replies are removed from native
-attachment readers; headless readers retain recovery.
-Duplicated OpenCode blocking-worker/fence/client setup is replaced by
-`with_attached_http`; creation, replies, prompts and abort retain
-one timeout and cancellation boundary. Native receipt grouping borrows messages
-from the readback snapshot instead of cloning their full JSON on every wake.
-Output and permission recovery now share one ordered Snapshot (permissions,
-then messages), deleting the second message acquisition per pending reply batch.
-The reconnect fixture publishes an assistant during permission acquisition and
-requires that same startup read to recover its pending turn without an SSE edge.
-This preserves output-before-reply handling and frozen, no-replay writes; it
-proves no public takeover.
+Claude's native-resume fallback for a live headless provider. Preserve the existing
+stream/history parsers, exact request origins, native history, permissions and
+stale-write fences while replacing those paths in one cut.
+
+Deleted predecessors and their exact replacement evidence are retained at
+`4834c18f4c70d10315e768648e5a40b1cd2f2580:scratch/stop-and-take-over-claude.md`,
+this heading. Do not restore anonymous lifelines, `HELD_LIFELINES`, provider-specific
+signaling, creation retries, permission PATCH, launcher-local request maps, or
+SSE-only permission replies.
+
+The surviving owners are common group close/custody, `run_native_client`, saved
+request/reply receipts, and one ordered permission/message Snapshot. Preserve
+output-before-reply ordering and exact native choices, including rejection text;
+the predecessor incorrectly saved `once` for every choice. Creation and bounded
+reply acknowledgements use `with_attached_http`; streaming command/prompt dispatch
+ends its fence at the last socket byte. These transports must stay distinct.
+
+OpenCode's ignored constructor `ApprovalPolicy` argument is removed with its
+callers. Creation owns native rules; the headless reader replies through saved
+receipts, while the native client owns manual choices. Removing the unused argument
+changes neither policy nor permissions. Earlier snapshot, cancellation and reply
+proofs remain applicable; none proves public takeover.
 
 ## Related work and review
 
@@ -265,4 +243,4 @@ response collection must not poll an already-completed connection again.
 
 ## Checks
 
-Checks: `cargo check -p loopflow`, `cargo test -p loopflow --lib` filtered to Claude history (2) and OpenCode pending-request recovery (1), `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check` pass; public death orders unfinished, Linux acceptance CI-owned.
+Checks: `cargo check -p loopflow`, network-isolated `cargo test -p loopflow --lib reconnect_recovers_pending_input_without_spawning_or_replaying` (1), `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check` pass; public death orders unfinished, Linux acceptance CI-owned.

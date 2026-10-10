@@ -14,8 +14,7 @@ use crate::chat::types::{ConversationEvent, FailureEvidence};
 use crate::config::parse_agent;
 use crate::harness::common::TurnInProgressGuard;
 use crate::harness::{
-    opencode_history, opencode_mapping, ApprovalPolicy, Harness, HarnessError, RawProviderEvent,
-    SendCurrentOutcome,
+    opencode_history, opencode_mapping, Harness, HarnessError, RawProviderEvent, SendCurrentOutcome,
 };
 use crate::id::AgentSessionId;
 
@@ -43,10 +42,7 @@ impl std::fmt::Debug for OpenCodeHarness {
 }
 
 impl OpenCodeHarness {
-    pub fn new(
-        events: mpsc::UnboundedSender<ConversationEvent>,
-        _approval: ApprovalPolicy,
-    ) -> Self {
+    pub fn new(events: mpsc::UnboundedSender<ConversationEvent>) -> Self {
         Self {
             events,
             raw_provider: None,
@@ -1157,7 +1153,7 @@ mod tests {
             .claim_session_attachment("opencode", None, &process, true)
             .unwrap();
         let (tx, _rx) = mpsc::unbounded_channel();
-        let mut harness = OpenCodeHarness::new(tx, ApprovalPolicy::AutoApprove);
+        let mut harness = OpenCodeHarness::new(tx);
         let config = AgentConfig {
             session_attachment: Some(("opencode".into(), first.clone())),
             ..Default::default()
@@ -1299,7 +1295,7 @@ mod tests {
         .await
         .unwrap();
         let (tx, mut rx) = mpsc::unbounded_channel();
-        let mut current = OpenCodeHarness::new(tx, ApprovalPolicy::AutoApprove);
+        let mut current = OpenCodeHarness::new(tx);
         if native_permissions {
             current.use_native_permissions();
         }
@@ -1562,7 +1558,7 @@ mod tests {
     #[ignore = "drives the real opencode serve; needs opencode CLI + credentials"]
     async fn live_basic_turn_completes() {
         let (tx, mut rx) = mpsc::unbounded_channel();
-        let mut harness = OpenCodeHarness::new(tx, ApprovalPolicy::AutoApprove);
+        let mut harness = OpenCodeHarness::new(tx);
         let mut config = live_config();
         let _ledger = super::super::admit_for_test(&mut config);
         harness.start(&config).await.expect("start");
@@ -1582,7 +1578,7 @@ mod tests {
     #[ignore = "drives the real opencode serve; needs opencode CLI + credentials"]
     async fn live_send_current_coalesces_into_one_boundary() {
         let (tx, mut rx) = mpsc::unbounded_channel();
-        let mut harness = OpenCodeHarness::new(tx, ApprovalPolicy::AutoApprove);
+        let mut harness = OpenCodeHarness::new(tx);
         let mut config = live_config();
         let _ledger = super::super::admit_for_test(&mut config);
         harness.start(&config).await.expect("start");

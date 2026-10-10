@@ -39,8 +39,10 @@ attachment; the optional config field remains because configs are prepared befor
 admission. Moving the attachment into the start signature stays open.
 
 2026-10-09 assumption: Jack Heart's steer to publish supersedes the plan's earlier
-"no partial publication" note. The PR is published for review with the remaining
+"no partial publication" note. #1519 is published for review with the remaining
 lifecycle cuts listed in the plan; it is not presented as complete or landable.
+Whether those cuts land in #1519 or a following PR of this Task is Jack's choice
+and is not decided here.
 
 2026-10-09 implementation choice: native commands carry the owner's exact
 attachment in memory, never serialized into stable tool provenance. The client

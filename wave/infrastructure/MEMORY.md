@@ -231,28 +231,27 @@ Reaper and Codex close share group judgment: leader death is insufficient;
 failed descendant inventory refuses before signaling.
 
 Headless launch refuses a missing attachment. Jack's steer `0aa2c34c` requested
-publication without merge. Generations, foreground cleanup, takeover death
-orders, public Task agreement, two-second removal, installed settlement stay
-open. FIFO is Codex-only; reaping noninteractive Codex/OpenCode.
+publication without merge: #1519 is open at `8b18110cf`, incomplete. Generations,
+foreground cleanup, takeover death orders, public Task agreement, two-second
+removal, installed settlement stay open; whether they join #1519 is undecided.
+FIFO is Codex-only; reaping noninteractive Codex/OpenCode. Focused filters hid
+30 whole-library failures. PR CI ran only `scratch-clear`; its green proves no
+build or test.
 
 ## Execution ownership names (LOO-441, 2026-10-09)
 
-Jack Heart selected LfSession/LfProcess; provider names remain LOO-442. He approved
-#1516 landing. The rename preserves wire/storage/fixtures, ProcessLfid,
-variants and product Session/Process; SQL/profiling retain historical names.
-`2b183c547` implements Rust/Swift/docs. Gate: fmt/Clippy pass; disk-blocked suites
-defer to CI. Installation unproved.
-LFID durable; PID reusable. LOO-400 history, mapping, placement and proofs:
-`6130a4eed:wave/infrastructure/MEMORY.md`, “Process vocabulary.”
+Jack Heart selected LfSession/LfProcess; #1516 merged. The rename preserves
+wire/storage/fixtures, ProcessLfid, variants and product Session/Process;
+SQL/profiling retain historical names. Installation unproved.
+LFID durable; PID reusable. Gate detail, LOO-400 history, mapping and proofs:
+`8b18110cf:wave/infrastructure/MEMORY.md`, this heading and “Process vocabulary” reference.
 
 ## Provider conversations (LOO-442, 2026-10-09)
 
-Jack approved #1517 landing October 9; `adf3f9e4b` integrates merged #1516.
-AgentSessionId has no table; retain history/account attribution, SQL/JSON bytes
-and Swift ids. LOO-443 owns engine/driver. Identity, Clippy, DTO and headless Swift
-checks pass. Gate fails: copied-shell retention exits -9; checkout-watch times out.
-Canonical TMPDIR resolves three fixture failures.
-Installation unproved.
+Jack approved #1517 landing October 9; it merged. AgentSessionId has no table;
+retain history/account attribution, SQL/JSON bytes and Swift ids. LOO-443 owns
+engine/driver. Gate failures (copied-shell retention -9, checkout-watch timeout)
+stay unexplained; canonical TMPDIR resolved three fixtures. Installation unproved.
 
 ## Terminal conversation recovery (LOO-409, 2026-10-07)
 

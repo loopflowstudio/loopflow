@@ -59,11 +59,11 @@ Each executed Flow step has its own child lf Process. Multiple provider turns ma
 belong to that Process; their results remain distinct in LfSession history.
 A provider may succeed before its command fails later.
 
-LfSession identity, name and feedback survive driver replacement. Its current
-driver is a nullable Process reference with a generation fence. The native engine
-has separate identity and generation: a driver can die while the engine continues.
-History retains the original Process and provider generation when a later driver
-recovers a missed native completion. Missing command outcome, usage or process
+LfSession identity, name and feedback survive attachment replacement. The
+attached LfProcess is a nullable reference on the AgentProcess record, fenced by a
+fresh token per claim. The AgentProcess has separate identity: its attached
+LfProcess can die while it continues. History retains the original Process and
+provider generation when a later attachment recovers a missed native completion. Missing command outcome, usage or process
 evidence stays unknown.
 
 A capture's `events.jsonl` holds every provider event verbatim. SQLite history

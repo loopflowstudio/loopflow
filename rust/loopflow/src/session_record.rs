@@ -4203,7 +4203,7 @@ mod tests {
                 next.conversation_resume_token()?,
                 Some("native-thread".into())
             );
-            // The finished driver's engine is never adopted.
+            // The finished attachment's AgentProcess is never adopted.
             assert_eq!(
                 next_driver.provider_generation,
                 driver.provider_generation + 1
@@ -4386,7 +4386,7 @@ mod tests {
             )
             .unwrap();
 
-        // A live driver keeps both the conversation and its engine.
+        // A live attachment keeps both the conversation and its AgentProcess.
         let error = super::resume_session_agent_process(&store, "conversation", &next).unwrap_err();
         assert!(
             error
@@ -4404,7 +4404,7 @@ mod tests {
             crate::journal::process_identity_evidence(engine.id(), started),
             crate::journal::ProcessIdentityEvidence::Dead,
         );
-        // Ending the engine may already have reaped this exact child.
+        // Ending the AgentProcess may already have reaped this exact child.
         let _ = engine.wait();
         assert_eq!(
             replacement.provider_generation,

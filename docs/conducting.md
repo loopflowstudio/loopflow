@@ -81,7 +81,7 @@ filters inventory; it cannot opt a new Session out of Task membership.
 
 Use Session identity to return to a conversation and its native history. A
 successful provider turn, the command's outcome and the Flow's progress can
-differ: the engine can finish after its driver dies, and a finished Flow
+differ: the agent's process can finish after the `lf` process that started it dies, and a finished Flow
 leaves its Task at a workflow node, waiting on you.
 
 `lf mon show` and `lf replay` retain their historical selectors during the conversion.

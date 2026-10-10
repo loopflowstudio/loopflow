@@ -3,8 +3,11 @@
 Jack Heart requested this cutover on 2026-10-09. The Task directive is accepted;
 the implementation choices below are a draft based on the source inventory at
 `3e1e6245c`. Jack authorized parallel work with LOO-441, followed by integration
-of its LfProcess/LfSession rename before publication. One architectural PR; no
-partial publication or installed-store migration.
+of its LfProcess/LfSession rename before publication. His steer `0aa2c34c`
+then requested publication without merge, superseding the earlier no-partial-
+publication note: #1519 is open for review at `8b18110cf` on main `906576f39`
+with the remaining cuts below, not as complete or landable. No installed-store
+migration.
 
 ## Intended outcome
 
@@ -90,9 +93,10 @@ attribution survive.
   saved captures survive. Exact connection admission is described below.
   Intentional client moves remain successful command exits, including their
   attachment outcome.
-- Metadata-only `CaptureHandle::fail_and_begin_attempt` is removed; invocation
-  retry settles/replaces the record before advancing capture metadata. The private
-  metadata reducer remains for history/usage projection.
+- The metadata-only retry entry is removed: `fail_and_begin_attempt` is now a
+  private reducer with one production caller, which runs only after invocation
+  retry has settled and replaced the record. In-module fixtures still call it
+  directly for history/usage projection.
 - Native `spawn_native(None)`, capture launch without an attachment, and
   `native_provider_driver`'s missing-provenance-as-client inference are removed.
   Native admission no longer reconstructs authority from `AgentCaller`; the
@@ -329,8 +333,15 @@ checks do not establish configured-provider or foreground cleanup.
 5. LOO-441's LfProcess/LfSession rename is integrated from #1516. Update the final
    model/API docs and all wire fixtures after the generation cut. The common
    LfProcess projection still carries both kinds during this draft cutover.
+   Provider-"engine" and driver-noun prose is replaced in the architecture
+   reference, overview (and its rendered HTML), data, machines and conducting
+   docs; the lifeline paragraph now states that only Codex takeover holds a named
+   lifeline. Retained on purpose: the `engine.sock` socket filename, fixture
+   locals named `engine`, and generation wording that leaves with item 2.
 6. Gate owns affected Rust/Swift/DTO and materialized-migration verification plus
-   Linux lifeline checks. Demo still requires exact SIGKILL removal within two
+   Linux lifeline checks. Hosted CI on #1519 ran only `scratch-clear`; every
+   build, lint, test, migration and Swift job reports skipped at `8b18110cf`,
+   so no hosted result exists for this head. Demo still requires exact SIGKILL removal within two
    seconds and no invisible Task blocker. Only the installed scheduled path may
    settle Jack Heart's three pre-#1512 orphaned Codex processes. Branch fixtures
    never signal them or migrate that store.
@@ -388,5 +399,7 @@ Earlier native-util/planning-reconnect, 16-test isolated lifecycle and typed-ide
 sync checks are retained at `e87e9d643`, this plan.
 
 Compress check: `cargo clippy -p loopflow --all-targets -- -D warnings` passes; `cargo test -p loopflow --lib` for `harness::agent_process`, `store::sqlite::processes`, `session_record::runtime`: 27 passed. Wider suites stay with gate.
+
+Realign check (2026-10-09): the Task's `rg -i 'provider_pid|driver_generation|SessionDriver|engine_orphans' rust/loopflow/src` returns nothing outside migrations; `render_architecture_html.py --check` and `cargo fmt --all --check` pass after the prose repair. No suite rerun; gate owns it.
 
 Check: `cargo test -p loopflow --no-fail-fast` with inherited `LF_*` cleared and stdin closed: library 1766 passed, 4 failed (three pass alone; one is main's planning-migration fixture above); every integration target passes after repair; `cargo fmt --all --check` and `cargo clippy --all-targets -- -D warnings` pass. Swift, draft materialization, Linux lifeline and live-provider smokes remain gate/CI-owned. Earlier focused results: `16415389c`, this plan.

@@ -230,8 +230,8 @@ unpublished code retained, without deletion or delivery authorization.
 ## AgentProcess (LOO-443/447, 2026-10-10)
 
 Jack Heart accepted #1519 (`71741bd4`).
-LOO-447 owns Claude/OpenCode takeover/stop. Jack excluded the two-second removal demo,
-three historical orphans and configured-provider runs.
+LOO-447 owns Claude/OpenCode takeover/stop; Jack excluded removal timing,
+historical orphans and configured-provider runs.
 
 Headless launch requires attachment. AgentProcess replaces generation;
 released counters stay unread, old callers stale. Client/provider death differs;
@@ -241,19 +241,19 @@ CI: `be4a2b2af:wave/infrastructure/MEMORY.md`, this heading.
 
 LOO-447: fenced stop/abort, signal-free drop, custody until group death; external
 watchdog. OpenCode saves endpoint/attempts before effects; creation carries rules/title,
-not PATCH. Its reader owns History; writers save origins in SQLite, not shared
-reader state. Unknown identity stays uncertain; shell lacks IDs. Prior proofs:
+not PATCH. History owns reading; SQLite retains origins. Shell lacks IDs. Prior proofs:
 `7fec3b53f:wave/infrastructure/MEMORY.md`, this heading.
-`4834c18f4` retains origins, not pipes. Display follows the current attachment;
-caller authority stays frozen. Atomic UUID receipts retain uncorrelated output and original replay disposition.
-Client counters ignore them; rate-limit completion bypasses History. Ordered
-transport, receipt-based projection and public death orders remain unfinished.
+Display follows current attachment; caller authority stays frozen. Atomic UUID receipts retain uncorrelated output and original replay disposition.
+Client counters ignore them; rate-limit completion bypasses History.
+`f43f18afa` replaces idle-coalescing tests with per-request completion proof;
+one failed request cannot complete a queued one. Ordered transport, receipt-based
+projection and public death orders remain unfinished.
 No fence reacquisition or permanent custody;
 EOF/history/write errors grant no settlement or teardown.
 Foreground exclusion precedes death inspection: an exited terminal provider
 still cannot be settled by headless close.
-Claude lacks a native-client bridge for stream-json; background-supervisor
-adoption is unselected. Revise the design, preserving takeover. Plan: `scratch/stop-and-take-over-claude.md`.
+Claude lacks a demonstrated native-client bridge for stream-json. Endpoints prove no client bridge; supervisor adoption remains unselected.
+Preserve takeover. Plan: `scratch/stop-and-take-over-claude.md`.
 
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)
 

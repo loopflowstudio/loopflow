@@ -5,8 +5,8 @@ use crate::engine::config::{default_agent, parse_agent, Config};
 use crate::engine::error::CoreError;
 use crate::engine::flow::Skill;
 use crate::engine::prompt::{
-    drop_duplicate_docs, format_first_turn, format_prompt, gather_context, Document,
-    DocumentSource, GatherContextOpts, PromptComponents, RelatedRepoContext, Surface,
+    drop_duplicate_docs, format_first_turn, gather_context, Document, DocumentSource,
+    GatherContextOpts, PromptComponents, RelatedRepoContext, Surface,
 };
 use crate::engine::structured_reply::{structured_replies_for_context, ClientContext};
 
@@ -28,7 +28,7 @@ pub struct ProcessPromptInput {
     pub docs: Vec<String>,
     pub wave: Option<String>,
     pub message: Option<String>,
-    /// Exact invocation arguments; Work direction stays in `message`.
+    /// Exact invocation arguments; captured Work direction stays in `references`.
     pub skill_arguments: String,
     pub no_loopflow: bool,
     pub agent: Option<String>,
@@ -50,7 +50,6 @@ pub struct PreparedProcessPrompt {
     pub config: AgentConfig,
     pub components: PromptComponents,
     pub deduplication_decisions: Vec<crate::trace::ContextDecision>,
-    pub prompt: String,
 }
 
 /// Build context + Process config from canonical Process preparation input.
@@ -125,7 +124,6 @@ pub fn prepare_process_prompt(
             content,
             source: DocumentSource::Summary,
         }));
-    let prompt = format_prompt(&components);
 
     let agent = resolve_agent(agent.as_deref(), components.skill.as_ref(), config);
     validate_agent_policy(&agent)?;
@@ -189,7 +187,6 @@ pub fn prepare_process_prompt(
         config: launch,
         components,
         deduplication_decisions,
-        prompt,
     })
 }
 
@@ -309,7 +306,10 @@ Test skill body.
             },
         )
         .unwrap();
-        assert!(!prepared.prompt.contains("Provider-owned instructions."));
+        assert!(!prepared
+            .config
+            .system_prompt
+            .contains("Provider-owned instructions."));
         assert_eq!(
             conversation(&prepared)
                 .matches("A shared document.")
@@ -553,7 +553,6 @@ Test skill body.
                 )
                 .unwrap();
                 assert_eq!(prepared.components.user_name.as_deref(), Some("Jack"));
-                assert!(prepared.prompt.contains("display name is \"Jack\""));
                 assert!(prepared
                     .config
                     .system_prompt
@@ -628,7 +627,7 @@ Test skill body.
             },
         )
         .expect("prepare prompt");
-        assert!(prepared.prompt.contains("<lf:loopflow>"));
+        assert!(prepared.config.system_prompt.contains("<lf:loopflow>"));
         assert!(prepared
             .config
             .system_prompt
@@ -651,7 +650,7 @@ Test skill body.
             },
         )
         .expect("prepare prompt");
-        assert!(!prepared.prompt.contains("<lf:loopflow>"));
+        assert!(!prepared.config.system_prompt.contains("<lf:loopflow>"));
         assert!(!prepared
             .config
             .system_prompt

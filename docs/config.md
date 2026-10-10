@@ -119,32 +119,20 @@ message streams have no terminal-argument cap.
 
 ## Context Assembly
 
-Every skill gets context assembled automatically. Run any command to see the breakdown:
+Launch headers inventory gathered sources; those counts are not the bytes sent
+in a provider request. The harness loads its repo guide natively.
 
-```
-Tokens: 12,847
+| Content | Delivery | Selection |
+|---------|----------|-----------|
+| Operating and surface instructions, participant, reply guidance | Fixed added-instructions slot | `--no-loopflow` omits the operating guide |
+| Skill and request | First turn | Selected skill and launch message |
+| Scratch and stored Wave/ancestor documents | Refreshed conversation block; whole files or a complete listing | Current checkout and selected Wave |
+| Explicit docs | File paths in the listing | `docs:` or `--docs` |
+| Branch changes | Git inspection commands and changed paths | `--diff patch`, `diff_files: true` |
+| Codebase summaries and clipboard | Complete private reference files | `summaries:`, `-c` |
 
-docs           3,842 ███
-  README.md      988 █
-scratch        3,050 ██
-clipboard      1,234 █
-```
-
-The provider loads `AGENTS.md` natively; Loopflow excludes it from injected files.
-The token breakdown shows what's included:
-
-| Section | What it contains | Config |
-|---------|------------------|--------|
-| **files** | `LOOPFLOW.md`, `scratch/`, `wave/` | always on; `--no-loopflow` drops `LOOPFLOW.md` |
-| **scratch** | `scratch/` design artifacts | always included |
-| **wave** | `wave/` docs | always included |
-| **docs** | Explicit docs files, globs, and directory markdown walks | `docs:` |
-| **diff** | Branch diff when requested | `--diff patch` |
-| **diff_files** | Files changed on this branch when requested | `diff_files: true` |
-| **summary** | Token-limited codebase overviews | `summaries:` in config |
-| **clipboard** | Pasted content (errors, context) | `-c` flag |
-
-Defaults work well for most repos. Summaries require configuration.
+The block refreshes at startup and after compaction. After compaction it also
+includes the saved active skill. Overflow points to complete files, never excerpts.
 
 ## Config Files
 

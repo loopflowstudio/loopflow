@@ -108,12 +108,10 @@ impl OpenCodeHarness {
             command.env("OPENCODE_CONFIG_CONTENT", opencode_worktree_config());
         }
         if let Some(context) = &config.conversation_context {
-            super::context::merge_opencode_config(
+            super::context::configure_opencode(
                 command.as_std_mut(),
-                super::context::opencode_config(
-                    context,
-                    &crate::engine::agent::system_prompt_with_structured_replies(config),
-                )?,
+                context,
+                &crate::engine::agent::system_prompt_with_structured_replies(config),
             )?;
         }
         // Own process group so `stop()` and the driver lifeline can kill the

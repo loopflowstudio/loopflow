@@ -105,35 +105,28 @@ impl ContextDelivery {
     }
 
     pub fn block(&self, moment: ContextMoment) -> Result<ContextBlock, CoreError> {
-        let wave = self
-            .wave_id
-            .as_ref()
-            .map(|id| {
-                let store = crate::store::sqlite::SqliteStore::open_read_only(
-                    &crate::store::database_path_from_env()?,
-                )
-                .map_err(|error| CoreError::IoError(error.to_string()))?;
-                store
-                    .get_wave(id)
-                    .map_err(|error| CoreError::IoError(error.to_string()))?
-                    .ok_or_else(|| {
-                        CoreError::IoError(format!("Saved context Wave {id} is missing"))
-                    })
-            })
-            .transpose()?;
         // A Wave may move while its conversation and checkout stay put. Follow
         // its durable identity for memory, but keep scratch in this checkout.
         let mut documents = gather_documents(&GatherSpec {
             repo_root: self.repo.clone(),
             ..Default::default()
         })?;
-        if let Some(wave) = &wave {
+        let wave = if let Some(id) = &self.wave_id {
             let store = crate::store::sqlite::SqliteStore::open_read_only(
                 &crate::store::database_path_from_env()?,
             )
             .map_err(|error| CoreError::IoError(error.to_string()))?;
-            documents.extend(crate::engine::prompt::gather_saved_wave_docs(&store, wave)?);
-        }
+            let wave = store
+                .get_wave(id)
+                .map_err(|error| CoreError::IoError(error.to_string()))?
+                .ok_or_else(|| CoreError::IoError(format!("Saved context Wave {id} is missing")))?;
+            documents.extend(crate::engine::prompt::gather_saved_wave_docs(
+                &store, &wave,
+            )?);
+            Some(wave)
+        } else {
+            None
+        };
         let wave = wave.as_ref().map(|wave| wave.slug());
         let branch = crate::engine::git::current_branch(&self.repo)
             .ok()
@@ -186,30 +179,6 @@ struct ContextFile {
 pub struct ContextBlock {
     pub text: String,
     pub manifest_path: PathBuf,
-}
-
-/// Read current scratch and SQLite-owned Wave/ancestor documents on every call.
-/// `skill_file` contains the saved active skill, not a newly resolved definition.
-/// `references` point to complete saved briefs, steers, clipboard or summaries.
-/// They are listed, not preloaded. This function never changes source documents.
-pub fn build_context_block(
-    repo_root: &Path,
-    wave: Option<&str>,
-    moment: ContextMoment,
-    skill_file: Option<&Path>,
-    references: &[PathBuf],
-) -> Result<ContextBlock, CoreError> {
-    let repo_root = fs::canonicalize(repo_root)?;
-    let mut documents = gather_documents(&GatherSpec {
-        repo_root: repo_root.clone(),
-        wave: wave.map(str::to_owned),
-        ..Default::default()
-    })?;
-    let branch = crate::engine::git::current_branch(&repo_root)
-        .ok()
-        .flatten();
-    order_documents(&mut documents, wave, branch.as_deref());
-    render_block(&repo_root, wave, moment, skill_file, references, documents)
 }
 
 fn order_documents(documents: &mut [Document], wave: Option<&str>, branch: Option<&str>) {
@@ -337,14 +306,25 @@ fn append_whole(text: &mut String, section: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::path::Path;
 
     use serde_json::Value;
     use tempfile::tempdir;
 
     use super::{
-        build_context_block, order_documents, render_block, ContextMoment, HOOK_CONTEXT_BYTES,
+        order_documents, render_block, ContextDelivery, ContextMoment, HOOK_CONTEXT_BYTES,
     };
     use crate::engine::prompt::{render_reference, Document, DocumentSource};
+
+    fn delivery(repo: &Path) -> ContextDelivery {
+        ContextDelivery {
+            repo: repo.canonicalize().unwrap(),
+            wave_id: None,
+            skill_file: None,
+            references: Vec::new(),
+            home: repo.join("machine"),
+        }
+    }
 
     fn document(path: &str, content: &str, source: DocumentSource) -> Document {
         Document {
@@ -408,8 +388,7 @@ mod tests {
         let large = format!("WHOLE_START{}WHOLE_END", "🦀".repeat(50_000));
         fs::write(repo.path().join("scratch/large.md"), &large).unwrap();
         fs::write(repo.path().join("scratch/small.md"), "fresh one").unwrap();
-        let first =
-            build_context_block(repo.path(), None, ContextMoment::Start, None, &[]).unwrap();
+        let first = delivery(repo.path()).block(ContextMoment::Start).unwrap();
         assert!(first.text.len() <= HOOK_CONTEXT_BYTES);
         assert!(first.text.contains("fresh one"));
         assert!(!first.text.contains("WHOLE_START"));
@@ -429,8 +408,7 @@ mod tests {
         );
 
         fs::write(repo.path().join("scratch/small.md"), "fresh two").unwrap();
-        let compact =
-            build_context_block(repo.path(), None, ContextMoment::Compact, None, &[]).unwrap();
+        let compact = delivery(repo.path()).block(ContextMoment::Compact).unwrap();
         assert!(compact.text.contains("fresh two"));
         assert!(!compact.text.contains("fresh one"));
     }
@@ -440,8 +418,9 @@ mod tests {
         let repo = tempdir().unwrap();
         fs::create_dir(repo.path().join("scratch")).unwrap();
         fs::write(repo.path().join("scratch/invalid.md"), [0xff, 0xfe]).unwrap();
-        let error =
-            build_context_block(repo.path(), None, ContextMoment::Start, None, &[]).unwrap_err();
+        let error = delivery(repo.path())
+            .block(ContextMoment::Start)
+            .unwrap_err();
         assert!(error.to_string().contains("scratch/invalid.md"));
     }
 
@@ -534,13 +513,11 @@ mod tests {
         let skill = "ACTIVE_START\n".to_owned() + &"saved skill\n".repeat(2_000) + "ACTIVE_END";
         let skill_path = repo.path().join("active-skill.md");
         fs::write(&skill_path, &skill).unwrap();
-        let block = build_context_block(
-            repo.path(),
-            None,
-            ContextMoment::Compact,
-            Some(&skill_path),
-            &[],
-        )
+        let block = ContextDelivery {
+            skill_file: Some(skill_path.clone()),
+            ..delivery(repo.path())
+        }
+        .block(ContextMoment::Compact)
         .unwrap();
         assert!(block.text.len() <= HOOK_CONTEXT_BYTES);
         assert!(!block.text.contains("Complete file listing (UTF-8 bytes)"));
@@ -573,13 +550,12 @@ mod tests {
         let skill_path = repo.path().join("skill.md");
         let skill = "s".repeat(7_000);
         fs::write(&skill_path, &skill).unwrap();
-        let block = build_context_block(
-            repo.path(),
-            None,
-            ContextMoment::Compact,
-            Some(&skill_path),
-            &references,
-        )
+        let block = ContextDelivery {
+            skill_file: Some(skill_path),
+            references,
+            ..delivery(repo.path())
+        }
+        .block(ContextMoment::Compact)
         .unwrap();
         let manifest = fs::read_to_string(block.manifest_path).unwrap();
         assert!(manifest.len() < HOOK_CONTEXT_BYTES);
@@ -602,8 +578,12 @@ mod tests {
             (ContextMoment::Start, false),
             (ContextMoment::Compact, true),
         ] {
-            let block =
-                build_context_block(repo.path(), None, moment, Some(&skill_path), &[]).unwrap();
+            let block = ContextDelivery {
+                skill_file: Some(skill_path.clone()),
+                ..delivery(repo.path())
+            }
+            .block(moment)
+            .unwrap();
             assert_eq!(block.text.contains(skill), included);
             assert!(block.text.len() <= HOOK_CONTEXT_BYTES);
         }

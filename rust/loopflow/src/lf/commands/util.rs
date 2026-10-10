@@ -78,23 +78,18 @@ pub(crate) fn launch_session(
     command.context = context.cloned();
     let mut environment = environment.clone();
     if let Some(context) = context.filter(|_| harness == "opencode") {
-        let mut provider = Command::new(harness);
-        provider.envs(&environment);
-        crate::harness::context::merge_opencode_config(
-            &mut provider,
-            crate::harness::context::opencode_config(
-                context,
-                &crate::harness::context::read_instructions(context_file)?,
-            )?,
+        let instructions = context_file
+            .map(std::fs::read_to_string)
+            .transpose()?
+            .unwrap_or_default();
+        let config = crate::harness::context::opencode_config(
+            context,
+            &instructions,
+            environment
+                .get("OPENCODE_CONFIG_CONTENT")
+                .map(String::as_str),
         )?;
-        environment.extend(provider.get_envs().filter_map(|(key, value)| {
-            value.map(|value| {
-                (
-                    key.to_string_lossy().into_owned(),
-                    value.to_string_lossy().into_owned(),
-                )
-            })
-        }));
+        environment.insert("OPENCODE_CONFIG_CONTENT".into(), config);
     }
     spawn_session_command_with_env(&command, &environment, agent_session, None, None)
 }
@@ -224,6 +219,7 @@ pub(crate) fn resume_session_with_env(
         crate::session_record::CAPTURE_KEY_ENV.to_string(),
         artifact_key.to_string(),
     )]);
+    environment.extend(extra_environment.clone());
     let (_, saved) =
         crate::session_record::resolve_manifest(&crate::store::lf_home_dir(), artifact_key)?;
     if let Some(request) = saved.process {
@@ -255,23 +251,17 @@ pub(crate) fn resume_session_with_env(
             );
         } else if harness == "opencode" {
             if let Some(context) = request.conversation_context.as_ref() {
-                let mut provider = Command::new(harness);
-                crate::harness::context::merge_opencode_config(
-                    &mut provider,
-                    crate::harness::context::opencode_config(context, &request.system_prompt)?,
+                let config = crate::harness::context::opencode_config(
+                    context,
+                    &request.system_prompt,
+                    extra_environment
+                        .get("OPENCODE_CONFIG_CONTENT")
+                        .map(String::as_str),
                 )?;
-                environment.extend(provider.get_envs().filter_map(|(key, value)| {
-                    value.map(|value| {
-                        (
-                            key.to_string_lossy().into_owned(),
-                            value.to_string_lossy().into_owned(),
-                        )
-                    })
-                }));
+                environment.insert("OPENCODE_CONFIG_CONTENT".into(), config);
             }
         }
     }
-    environment.extend(extra_environment.clone());
     environment.insert(
         crate::engine::config::USER_NAME_ENV.to_string(),
         user_name.unwrap_or_default(),

@@ -75,26 +75,12 @@ pub fn run(json: bool, wave: Option<&str>, task: Option<&str>) -> Result<()> {
 
 /// A hook emits only the provider's JSON envelope; no launch or store mutation.
 pub fn emit_block(
-    repo: Option<&std::path::Path>,
-    delivery: Option<&std::path::Path>,
-    wave: Option<&str>,
+    delivery: &std::path::Path,
     moment: crate::engine::context_block::ContextMoment,
-    skill_file: Option<&std::path::Path>,
-    references: &[std::path::PathBuf],
 ) -> Result<()> {
-    let block = if let Some(path) = delivery {
-        let delivery: crate::engine::context_block::ContextDelivery =
-            serde_json::from_slice(&std::fs::read(path)?)?;
-        delivery.block(moment)?
-    } else {
-        crate::engine::context_block::build_context_block(
-            repo.ok_or_else(|| anyhow::anyhow!("context callback needs --repo or --delivery"))?,
-            wave,
-            moment,
-            skill_file,
-            references,
-        )?
-    };
+    let delivery: crate::engine::context_block::ContextDelivery =
+        serde_json::from_slice(&std::fs::read(delivery)?)?;
+    let block = delivery.block(moment)?;
     println!(
         "{}",
         serde_json::json!({"hookSpecificOutput": {

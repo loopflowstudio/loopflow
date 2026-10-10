@@ -73,10 +73,10 @@ and the compact-only saved active skill. Native delivery is connected; its full 
 
 ## Key functions
 
-- `build_context_block(repo_root, wave, moment) -> ContextBlock` — reads the
-  folders at call time; `moment` is start or after-compaction.
-- `lf __context-block --moment <start|compact>` — hidden command the hooks run,
-  beside the existing `lf __provider-session`.
+- `ContextDelivery::block(moment) -> ContextBlock` rereads the captured checkout
+  and the saved Machine's SQLite Wave ID; `moment` is start or after-compaction.
+- `lf __context-block --delivery <saved-file> --moment <start|compact>` is the
+  single hidden callback used by launchers and CLI fixtures. No ad-hoc source mode.
 - Claude/Codex: `SessionStart` with startup and compact sources. Codex
   `PostCompact` is not a context-delivery hook.
 - Codex app-server: additive `developerInstructions`, with session-scoped hook
@@ -210,7 +210,7 @@ follow IDs rather than reacquiring a potentially reused name. No installation, p
 The pre-cut implementation plan and complete older checks remain at
 `6149952c8:scratch/what-goes-in-system-prompt.md`.
 
-Checks: `cargo fmt --all`, offline all-target Clippy, `--lib process_prompt` (24), `--lib saved_context_follows_wave_identity_after_rename` (1), diagnostic tests (9), Node plugin behavior and native Codex trust (3 hooks) pass; `--test context_launch_tests` (3) passes; gate owns the native matrix and demo owns presentation.
+Checks: `cargo fmt --all`, `cargo clippy --offline --all-targets -- -D warnings`, and `cargo test --offline -p loopflow` with `--lib context_block` (9), `--lib harness::context::tests` (1), `--lib process_prompt` (24), and `--test context_block_tests --test context_launch_tests` (4) pass; `lf context` fits. Gate owns native acceptance; demo owns presentation. Earlier checks: `494210e37:scratch/what-goes-in-system-prompt.md`.
 
 ### Integrated upstream boundary
 
@@ -239,6 +239,16 @@ all three Codex instruction writers and actual lf launch/resume paths need
 coverage; provider-only passes cannot stand in for that integration.
 
 ## Delete — do not maintain
+
+Compression removes the prototype callback's `--repo`, `--skill-file` and
+`--reference` mode plus `build_context_block`; all refreshes use saved
+`ContextDelivery`. Wave lookup and document reads share one store open.
+`PreparedProcessPrompt.prompt` is removed: diagnostics still use `format_prompt`
+on demand, not a second string assembled for every launch. OpenCode config
+composition appends its plugin directly to existing settings, without temporary
+Command objects or a generic config merge; resume applies caller settings before
+appending the plugin so those settings cannot overwrite it. These are source
+reductions, not native acceptance.
 
 The whole channel cut remains one PR; source implementation is not native acceptance. The rejected transport runner `first_turn_transport.py` and its exclusive
 `test_first_turn_transport.py` are deleted. Their complete editor evidence/code is

@@ -5,6 +5,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+use loopflow::engine::context_block::ContextDelivery;
 use loopflow::store::sqlite::SqliteStore;
 use loopflow_test_support::TestRepo;
 use serde_json::Value;
@@ -17,9 +18,9 @@ fn hook(repo: &Path, home: &Path, moment: &str) -> String {
         .env("LF_HOME", home.join("machine"))
         .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
         .current_dir(repo)
-        .args(["--wave", "parent/child", "__context-block", "--repo"])
-        .arg(repo)
-        .args(["--moment", moment, "--skill-file", "active.md"])
+        .args(["__context-block", "--delivery"])
+        .arg(repo.join("delivery.json"))
+        .args(["--moment", moment])
         .output()
         .unwrap();
     assert!(
@@ -68,6 +69,18 @@ fn hook_refreshes_sqlite_ancestors_and_scratch_without_replaying_the_request() {
     fs::create_dir(repo.path().join("scratch")).unwrap();
     fs::write(repo.path().join("scratch/plan.md"), "CURRENT_SCRATCH").unwrap();
     fs::write(repo.path().join("active.md"), "Saved active skill\n").unwrap();
+    let delivery = ContextDelivery {
+        repo: repo_path,
+        wave_id: Some(child.clone()),
+        skill_file: Some(repo.path().join("active.md")),
+        references: Vec::new(),
+        home: home.path().join("machine"),
+    };
+    fs::write(
+        repo.path().join("delivery.json"),
+        serde_json::to_vec(&delivery).unwrap(),
+    )
+    .unwrap();
     let start = hook(repo.path(), home.path(), "start");
     assert!(start.contains("Inherited saved direction"));
     assert!(start.contains("Current saved memory"));

@@ -345,15 +345,9 @@ pub enum Commands {
     #[command(name = "__context-block", hide = true)]
     ContextBlock {
         #[arg(long)]
-        repo: Option<std::path::PathBuf>,
-        #[arg(long, required_unless_present = "repo", conflicts_with = "repo")]
-        delivery: Option<std::path::PathBuf>,
+        delivery: std::path::PathBuf,
         #[arg(long, value_enum)]
         moment: crate::engine::context_block::ContextMoment,
-        #[arg(long)]
-        skill_file: Option<std::path::PathBuf>,
-        #[arg(long)]
-        reference: Vec<std::path::PathBuf>,
     },
     /// Native provider naming callback.
     #[command(name = "__session-title", hide = true)]

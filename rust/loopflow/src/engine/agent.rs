@@ -1867,13 +1867,12 @@ fn _run_agent_once(
         .as_ref()
         .filter(|_| harness == "opencode")
     {
-        let config = crate::harness::context::opencode_config(
+        crate::harness::context::configure_opencode(
+            &mut cmd,
             context,
             &system_prompt_with_structured_replies(launch),
         )
         .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
-        crate::harness::context::merge_opencode_config(&mut cmd, config)
-            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     }
     let title = if process.auto {
         None

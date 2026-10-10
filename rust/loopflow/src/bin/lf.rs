@@ -1742,20 +1742,9 @@ fn execute_command(
         Some(Commands::ProviderSession) => {
             loopflow::lf::commands::session_history::observe_provider_session()
         }
-        Some(Commands::ContextBlock {
-            repo,
-            delivery,
-            moment,
-            skill_file,
-            reference,
-        }) => loopflow::lf::commands::context::emit_block(
-            repo.as_deref(),
-            delivery.as_deref(),
-            cli.wave.as_deref(),
-            *moment,
-            skill_file.as_deref(),
-            reference,
-        ),
+        Some(Commands::ContextBlock { delivery, moment }) => {
+            loopflow::lf::commands::context::emit_block(delivery, *moment)
+        }
         Some(Commands::SessionTitle { provider }) => {
             loopflow::lf::commands::session_history::name_native_session(provider)
         }

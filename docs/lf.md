@@ -539,7 +539,7 @@ workspace; enter its printed path before editing.
 Primary conversations reuse their respective worktrees, including after replacement.
 They display a workspace without gaining Task membership. Moved checkouts are
 rediscovered; missing checkouts recover committed branch state. Live conversations
-keep their placement until an idle driver boundary.
+keep their placement until their attached invocation is idle.
 
 Persistent workspaces retain scratch locally through commit, sync, publication and
 landing. Selected-path commits preserve unrelated staged edits. Publication pushes

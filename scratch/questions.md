@@ -40,8 +40,9 @@ admission. Moving the attachment into the start signature stays open.
 2026-10-09 assumption: Jack Heart's steer to publish supersedes the plan's earlier
 "no partial publication" note. #1519 is published for review with the remaining
 lifecycle cuts listed in the plan; it is not presented as complete or landable.
-Whether those cuts land in #1519 or a following PR of this Task is Jack's choice
-and is not decided here.
+Resolved by Jack Heart's comment `71741bd4`: #1519 is accepted as it stands; the
+Claude/OpenCode takeover and stop work is LOO-447, and the two-second SIGKILL demo,
+the three orphaned Codex processes and live-provider runs are accepted as unproven.
 
 2026-10-09 implementation choice: native commands carry the owner's exact
 attachment in memory, never serialized into stable tool provenance. The client
@@ -70,3 +71,9 @@ Interactive providers stay excluded.
 checkout is held prints "canceled; PRs and branches removed" on stdout while
 stderr reports the retained checkout and its blocker. The cancellation is
 intended (LOO-408); the stdout wording contradicts the retention.
+
+2026-10-09 gate choice: the draft declares `-- depends_on: optional_task_pr`.
+Without it the release batch ordered `agent_process` by name ahead of main's
+planning drafts, so their released-frontier fixtures met a schema this draft had
+already changed. The draft neither reads nor alters what those drafts create;
+the edge records landing order, not a data dependency.

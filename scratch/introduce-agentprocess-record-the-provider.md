@@ -462,3 +462,10 @@ Check (generation cut, 2026-10-09): `cargo test -p loopflow --no-fail-fast --lib
 Realign check (attachment naming, 2026-10-09): PR #1519 head and main `906576f39` unchanged, hosted jobs still skipped by `scratch-clear`; `check_architecture.py` zero drift; the Task's `rg` is clean outside applied migrations and the draft. `cargo test -p loopflow --lib -- harness::attention engine::terminal_title` 12 passed after the rename; `cargo fmt --all`. Clippy and wider suites stay with gate.
 
 Compress check (required history owners, 2026-10-09): `cargo clippy -p loopflow --all-targets -- -D warnings` passes; `cargo test -p loopflow --lib harness::` 120 passed, 4 ignored. Wider suites stay with gate.
+
+**Accepted scope (2026-10-09):** Jack Heart's comment `71741bd4` accepts #1519 as
+it stands. Remaining items 1, 3 and 4 above are LOO-447 (Claude/OpenCode takeover
+and stop) or accepted as unproven (two-second SIGKILL removal, the three orphaned
+Codex processes, live-provider runs); they do not extend this PR.
+
+Gate (2026-10-09): `uv run python scripts/test.py --reuse-passing`, `LF_*` cleared, stdin closed: architecture, fmt, clippy `--all-targets -D warnings`, materialized `cargo nextest run --all` (2403 passed, 18 skipped), website, Swift app/model/view tests (410) and multiplatform boundaries pass. The first run failed three tests, repaired before the passing run: the draft sorted ahead of main's `local_planning`/`optional_task_pr` in the release batch (now `-- depends_on: optional_task_pr`), and `provider_parentage_does_not_assign_work_outside_its_checkout` chose its origin by random-ID tie-break once agent rows shared the table. Linux lifeline, e2e, Loopflow UI compile and live-provider smokes are deferred to hosted CI, which runs only after scratch clears.

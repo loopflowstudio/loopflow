@@ -1120,7 +1120,7 @@ fn provider_parentage_does_not_assign_work_outside_its_checkout() {
     let origin: String = fixture
         .db()
         .query_row(
-            "SELECT lfid FROM processes ORDER BY started_at,lfid LIMIT 1",
+            "SELECT lfid FROM processes WHERE kind='lf' ORDER BY rowid LIMIT 1",
             [],
             |row| row.get(0),
         )

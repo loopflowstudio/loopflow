@@ -1,3 +1,4 @@
+-- depends_on: optional_task_pr
 -- One process inventory. Backfill directly from the released Session shape;
 -- history payloads and native thread identity remain unchanged.
 ALTER TABLE processes ADD COLUMN kind TEXT NOT NULL DEFAULT 'lf' CHECK(kind IN ('lf','agent'));

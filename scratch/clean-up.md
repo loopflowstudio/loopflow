@@ -75,30 +75,29 @@ Evidence records exact-head settlement, not merely a branch's old PR state.
 These are transient projections, not another SQLite authority. No schema
 migration is proposed for the keystone.
 
-## Key functions
+## Implementation shape
 
-In `ops/wt.rs`, shared by CLI, lifecycle and maintenance:
+`ops/wt/cleanup.rs` is the shared owner:
 
-- `plan_cleanup(store, repo, observations) -> CleanupPlan`: classify all
-  registered checkouts, including previously settled owners.
-- `apply_cleanup(store, plan, budget) -> CleanupReport`: acquire existing
-  checkout admission and Git leases, re-observe, then remove eligible paths.
-- `run_cleanup_pass(store, repo, budget) -> CleanupReport`: bounded collection
-  for the scheduled repository. No home-directory crawl, PM fetch or agent.
+- `plan_cleanup(store, repo) -> Vec<CleanupDecision>` supplies the non-mutating
+  manual preview. Targeted lifecycle attempts use `plan_selected`.
+- `apply_cleanup(store, repo, plan, budget) -> CleanupReport` admits manual and
+  lifecycle attempts; `apply_checkout` refreshes evidence under checkout admission
+  and the Git lease before removal.
+- `run_cleanup_pass(store, repo, budget) -> CleanupReport` takes the nonblocking
+  machine lock and resumes bounded cron receipts. `collect_pass` observes and
+  applies each candidate together, rather than materializing a background plan.
 
-Lifecycle events attempt targeted cleanup. Extend the existing repository tick
-with cleanup independent of delivery/network success. Cheap settled-owner checks
-run each tick; a full reconciliation scan runs hourly. Ensure that schedule when
-lf first creates work in a repository, including taskless work; repair its
-executable on upgrade and remove it through explicit repository-tick disable.
-CLI-only installs get the same
-behavior. Unsupported scheduling remains explicit; a throttled ordinary-command
-trigger is fallback, not an agent conversation. Proposed bound: eight removals
-and 30 seconds admitting new work per pass; a started removal finishes. Oldest
-deferred candidates go first. A nonblocking machine lock prevents overlapping
-passes; misses retry next pass. Reuse bounded cron receipts for reports and scan
-timestamps, not a new durable cleanup queue. Measure candidate sizes off the
-interactive path; a scan deadline yields unknown bytes, not a foreground stall.
+The existing repository tick runs collection independently of delivery/network
+success. Minute passes select settled owners; hourly reconciliation resumes across
+passes. First-work activation, upgrade executable repair, explicit disable and
+unsupported-host foreground-triggered fallback are implemented; installed behavior
+still needs demo. No home crawl, PM fetch, agent or new cleanup queue is involved.
+Current local defaults are eight removals, 32 observations and 30 seconds admitting
+new candidates; an admitted attempt finishes. Size estimates are background-only
+and unknown on timeout. These are implementation choices, not accepted machine-wide
+budgets or a whole-pass time guarantee. Oldest-deferred ordering remains an intended
+outcome: path cursors currently prove rotation only for a stable candidate set.
 
 ## Constraints
 
@@ -149,9 +148,18 @@ fixture; and separate `release_blocker` policy. Shared registry observations use
 serves cleanup (`Clean`) and explicit discard/release teardown (`Force`), using the
 lease's path rather than a second path argument. Process receipts reuse the existing
 PID/start-time classifier. Cleanup derives settlement from its exact-head evidence
-instead of maintaining a parallel boolean. No known deletion targets remain.
-Explicit abandonment and persistent-branch restart retain their separate authority;
-missing-registration repair does not justify restoring broad metadata pruning.
+instead of maintaining a parallel boolean. The background batch planner/deadline
+branch, its exclusive budget fixture and the one-item batch wrapper are removed.
+Manual prune and maintenance share one checkout attempt; only their callers own
+admission budgets, so an admitted observation finishes its locked application.
+They also share observation-error handling and one bounded persistent-branch read
+for present or interrupted checkouts. Git filename output is no longer trimmed:
+an ignored ` target` directory must not borrow the declaration of `target`.
+A regression preserves that unclassified content through plan and apply. Cleanup
+receipts retain their output root, not an unused schedule specification. Foreground previews remain non-mutating.
+No known deletion targets remain. Explicit abandonment and persistent-branch
+restart retain their separate authority; missing-registration repair does not
+justify restoring broad metadata pruning.
 
 ## Forbidden outcomes
 
@@ -164,8 +172,9 @@ another machine's state; moving junk to an unlimited trash directory.
 
 The shared collector in `ops/wt/cleanup.rs` serves manual prune, completed Tasks,
 taskless landings and repository reconciliation before network delivery observation.
-Every tick currently scans all registrations. Targeted lifecycle calls filter before
-candidate observation. Both registries share checkout, delivery, Process and evidence
+Minute ticks select settled Task/landing paths; an hourly full reconciliation
+continues across passes until its cursor reaches the end. Targeted lifecycle calls
+filter before candidate observation. Both registries share checkout, delivery, Process and evidence
 retention policy; release facts can veto, never settle experimental source. Removal
 refreshes facts under selected/release checkout admission and a Git lease. Contention
 defers rather than failing the tick. The pass lock uses the account's production home.
@@ -209,31 +218,75 @@ retrying. It does not launch a second release CLI writer. The interruption fixtu
 covers artifact deletion before Git removal, with the tag and registration surviving.
 
 Earlier implementation details and evidence limits are preserved at
-`f4cfefd0d:scratch/clean-up.md`; the latest implementation slice is `c99c18972`.
+`f4cfefd0d:scratch/clean-up.md`. `c99c18972` adds historical evidence, schedule
+repair and composed retry coverage; `b998379c7` consolidates lease-owned removal
+and Process identity checks. The earlier iteration feedback's simulated-execution
+limit is superseded by the real-child fixture, not by a native provider proof.
 This remains an internal checkpoint, not a shipping boundary.
 
-### Remaining in this PR
+Collection now applies each admitted candidate before observing another, so a slow
+observation or size estimate cannot consume the application budget of a whole
+planned batch. Constant-size cursors and attempt/removal/deferred/failure counts
+use the existing bounded CronReceipt writer and retention policy. The cursor is
+saved before observation, including failed/slow observations. Cheap retries rotate
+past the last attempted path; full scans resume in registration-path order. Each
+pass admits at most 32 observations and eight removals. Filesystem-sensitive Git
+status, index, ignored-content and persistent-config reads have two-second subprocess
+limits. Other layout/ref reads remain unbounded. History is read lazily only after ownership,
+settlement and execution checks; incomplete history still retains affected settled
+candidates without replacing unrelated ownership/primary-checkout explanations.
 
-1. **Session evidence and recovery:** retained capture/manifest/legacy-row payload
-   references and provider homes are protected in both registries, including the
-   locked recheck. Add native reader/resume proof for historical referenced files
-   and symlinked captures; audit any other historical payload owners. The
-   interruption fixture covers artifact contents removed while the cache tag and
-   checkout registration survive, not interruption during Git removal. Finish
-   targeted missing-registration repair without broad metadata pruning. Missing
-   paths still retain registration; abandoned PRs without exact-head disposition
-   remain retained. No new discard authority is implied.
-2. **Whole-pass timing and fairness:** the admission deadline stops starting
-   candidate observations/removals, but initial registry/Git snapshots, filesystem
-   normalization and started reads can overrun it. `lsof`, history SQL and size
-   subprocesses are bounded; other Git/SQL reads are not. Add hourly full
-   reconciliation and cheap settled-owner ticks, then oldest-deferred ordering.
-   Git registration order still restarts each pass, so slow early candidates can
-   starve later ones. Historical evidence scans must also make progress on stores
-   larger than one observation budget without treating partial facts as complete.
-   Persist scan timestamps/summary fields in bounded cron receipts. Estimated
-   bytes now populate eligible background decisions only; no foreground scan.
-3. **Composed acceptance:** the disposable-account fixture exercises experimental
+Removal writes its exact decision inside Git's administrative registration before
+touching declared artifacts. An absent checkout can be unregistered only when that
+record, administrative HEAD and local ref still agree, followed by fresh delivery,
+execution and evidence checks under both admissions and the Git lease. There is no
+broad metadata prune. Tests cover missing unmarked neighbors, new commits after
+the removal record, non-mutating preview and absent-checkout recovery through Git's
+non-forced removal. The interruption is simulated between checkout deletion and
+unregistration, not a killed Git child at an injected syscall boundary.
+
+Historical coverage now follows a symlinked old capture payload, reads its retained
+provider reference and resolves the native resume identifier to the original
+Session after a newer capture. It does not launch a provider or prove a provider
+reads the resumed transcript. Repeated-pass coverage uses a real delayed Git
+subprocess, a dirty first candidate and four eligible checkouts with a one-removal
+pass cap; one eligible observation also outlasts admission and still completes.
+Manual batch coverage preserves the original plan while deferring checkouts beyond
+the removal cap. It also proves hourly discovery, cheap-tick filtering, bounded receipts,
+zero-budget deferral and rejection of partially readable history.
+
+### Remaining in this PR — reconciled 2026-10-09
+
+`fae554e2a` and `000811423` supersede the iteration feedback's batch-planning and
+registration-order starvation findings for the tested stable set. They also supply
+cheap/hourly scans, bounded receipts and narrowly marked absent-registration repair.
+Those mechanisms do not need reimplementation. Safe large-history progress and
+bounded observation remain the main unfinished behavior, not gate-only checks.
+
+1. **Bound observation and preserve fairness.** Initial Git registration snapshots,
+   filesystem normalization, receipt reads and non-history SQL can exhaust admission
+   before a cursor advances. Layout/ref reads and the aggregate locked recheck also
+   lack a bound. Bound read work without canceling an admitted destructive removal
+   or skipping its fresh evidence. Prove progress with slow initial reads as well as
+   slow candidates. Preserve the intended oldest-deferred behavior under arrivals;
+   current path rotation supplies neither retained-age ordering nor that proof.
+2. **Safe progress through large history.** The two-second reader restarts the
+   whole reference projection each time; timeout retains every otherwise eligible
+   candidate. It does not paginate. Settle the history owner's observation contract
+   before adding incremental state: preserve raw references, identify complete
+   coverage, include appended observations and revalidate current filesystem
+   destinations under removal admission. A saved negative result plus SQL cursor
+   is unsafe when an earlier symlink or ancestor changes between pages. A cache
+   must remain a rebuildable projection, not another deletion authority. No cache
+   or schema migration has been introduced. Prove eventual collection beyond one
+   read budget and retention after symlink retargeting, new references, malformed
+   pages and interruption; partial pages must never authorize removal.
+3. **Historical evidence and composed acceptance.** Audit other historical payload
+   owners and exercise the native transcript reader/provider-resume path. The old
+   capture fixture preserves bytes and resolves a native identifier; its payload is
+   fixture text, not a native transcript, and it launches no provider. Abandoned PRs
+   without exact-head disposition remain retained; no new discard authority is implied.
+   The disposable-account fixture exercises experimental
    CLI discovery of release admission, but directly holds the admission file; it
    does not launch a second release CLI writer. The scheduled fixture exercises a
    real child exiting, seeded Process identity, completed merged Task delivery and
@@ -293,4 +346,4 @@ allocated bytes by category; observed free-space delta after collection; oldest
 eligible retention age. APFS sharing, hardlinks and concurrent writers mean
 directory sums are estimates, not guaranteed reclaimed bytes.
 
-Check: `cargo test -p loopflow --lib` with filters `cleanup`, `worktree_removal_keeps_dirty_files_unless_explicitly_forced`, `ops::wt::tests`, `ops::read_retry::tests`, and `unfinished_process_retains_identity_across_terminal_failure_interrupt_and_pid_reuse` passed (29 tests); `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check` passed. Full acceptance remains with gate; loaded-scheduler/upgrade experience remains with demo.
+Check: `git diff --check` — passed (prose-only realign); prior 24 cleanup tests/fmt/Clippy recorded in the supplied pre-realign notes, not rerun; full acceptance: gate; loaded-scheduler/upgrade experience: demo.

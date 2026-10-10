@@ -32,7 +32,18 @@
   never on prune previews. Unsupported hosts have no idle-time guarantee until
   they provide an OS scheduler; the fallback reports that limitation. Experiments
   neither install services nor activate fallback work automatically.
-- The 30-second budget currently bounds admission of candidate observations and
-  removals, not initial snapshots or a Git/SQL call already in progress. History SQL and size scans now have individual deadlines; other hard read
-  deadlines, hourly scans and fair ordering remain internal work in this PR. These are implementation gaps, not a proposed relaxation of
-  bounded maintenance.
+- The 30-second budget bounds admission, not initial snapshots or every started
+  Git/SQL read. Each admitted candidate now reaches its locked application before
+  another is admitted. Hourly scans, rotating retries and bounded receipt cursors
+  are implemented; initial snapshots/receipt reads can still consume admission
+  before any cursor advances. Bounding observation must not cancel an admitted
+  destructive removal or omit its fresh locked evidence.
+- Implementation choice, 2026-10-09: at most 32 candidate observations per pass;
+  constant-size path cursors rotate retries and resume hourly reconciliation. This
+  proves fair progress for a stable set, not strict wall-clock oldest-retention
+  ordering under continual arrivals. These are scheduling hints, never authority.
+- Incremental history requires design work: a partial negative scan cannot survive
+  changing symlink destinations merely by carrying its SQL cursor across ticks.
+  Preserve raw historical references and revalidate their destinations, plus newly
+  appended evidence, before using a completed scan. The existing reader remains
+  fail-closed on timeout; large-store progress is not claimed by this checkpoint.

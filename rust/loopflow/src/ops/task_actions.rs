@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::durable::WorkStatus;
 use crate::ops::task_execution::{TaskExecutionSnapshot, TaskExecutionState};
-use crate::work::task::{AfterMerge, CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase};
+use crate::work::task::{CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -12,7 +12,6 @@ use crate::work::task::{AfterMerge, CiObservation, CiState, PrMergeMode, PrMerge
 pub enum TaskAction {
     Resume,
     OpenPr,
-    StartNextPr,
     NoAction,
 }
 
@@ -21,7 +20,6 @@ impl TaskAction {
         match self {
             Self::Resume => "resume",
             Self::OpenPr => "open_pr",
-            Self::StartNextPr => "start_next_pr",
             Self::NoAction => "no_action",
         }
     }
@@ -38,7 +36,6 @@ pub struct TaskActionEvidence<'a> {
     pub status: WorkStatus,
     pub execution: Option<&'a TaskExecutionSnapshot>,
     pub latest_pr_phase: Option<PrPhase>,
-    pub latest_pr_after_merge: Option<AfterMerge>,
     pub latest_pr_merge_request: Option<&'a PrMergeRequest>,
     pub latest_pr_presentation_current: Option<bool>,
     pub completion_refusal: Option<&'a str>,
@@ -55,12 +52,6 @@ pub fn derive_task_actions(evidence: &TaskActionEvidence) -> TaskActionModel {
     }
     if evidence.abandon_intent {
         return action(TaskAction::NoAction, "Task is being abandoned");
-    }
-    if let Some(remaining) = evidence
-        .completion_refusal
-        .filter(|reason| reason.contains("Remaining work:"))
-    {
-        return action(TaskAction::NoAction, remaining);
     }
     if evidence.latest_pr_phase != Some(PrPhase::Merged) {
         if let Some(execution) = evidence
@@ -116,7 +107,7 @@ fn phase_action(evidence: &TaskActionEvidence) -> TaskActionModel {
         Some(PrPhase::Publishing) => action(TaskAction::Resume, "retry publication"),
         Some(PrPhase::Merged) => merged_action(evidence),
         Some(PrPhase::Abandoned) => {
-            action(TaskAction::StartNextPr, "PR abandoned; start the next PR")
+            action(TaskAction::NoAction, "PR closed without merge; reopen the same PR or abandon the Task")
         }
         Some(PrPhase::Working) | None => action(
             TaskAction::Resume,
@@ -129,19 +120,10 @@ fn merged_action(evidence: &TaskActionEvidence) -> TaskActionModel {
     if let Some(refusal) = evidence.completion_refusal {
         return action(TaskAction::NoAction, refusal);
     }
-    match evidence
-        .latest_pr_after_merge
-        .expect("a merged Task PR has an after-merge disposition")
-    {
-        AfterMerge::ContinueTask => match evidence.latest_pr_merge_request.and_then(|request| request.next_slug.as_deref()) {
-            Some(next) => action(TaskAction::StartNextPr, format!("PR merged; remaining PR work: {next}")),
-            None => action(TaskAction::NoAction, "PR merged; earlier delivery kept the Task open without a recorded remaining outcome. Inspect accepted scope, then record `lf task follow-up` or move it to `end`"),
-        },
-        AfterMerge::CompleteTask => action(
-            TaskAction::NoAction,
-            "PR merged; delivery reconciliation completes the Task",
-        ),
-    }
+    action(
+        TaskAction::NoAction,
+        "Merged; complete the Task after recording follow-through",
+    )
 }
 
 fn apply_predecessor(model: TaskActionModel, predecessor: Option<PrPhase>) -> TaskActionModel {
@@ -150,11 +132,7 @@ fn apply_predecessor(model: TaskActionModel, predecessor: Option<PrPhase>) -> Ta
             TaskAction::Resume,
             "parent PR was abandoned; sync or abandon this stack",
         ),
-        Some(PrPhase::Merged) | None => model,
-        Some(_) if matches!(model.recommended, Some(TaskAction::StartNextPr)) => {
-            action(TaskAction::NoAction, "waiting for parent PR to merge")
-        }
-        Some(_) => model,
+        _ => model,
     }
 }
 
@@ -195,20 +173,13 @@ mod tests {
     use super::{derive_task_actions, TaskAction, TaskActionEvidence};
     use crate::durable::WorkStatus;
     use crate::ops::task_execution::{TaskExecutionSnapshot, TaskExecutionState};
-    use crate::work::task::{
-        AfterMerge, CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase,
-    };
+    use crate::work::task::{CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase};
 
-    fn evidence<'a>(
-        phase: PrPhase,
-        after_merge: Option<AfterMerge>,
-        ci: Option<&'a CiObservation>,
-    ) -> TaskActionEvidence<'a> {
+    fn evidence<'a>(phase: PrPhase, ci: Option<&'a CiObservation>) -> TaskActionEvidence<'a> {
         TaskActionEvidence {
             status: WorkStatus::Ready,
             execution: None,
             latest_pr_phase: Some(phase),
-            latest_pr_after_merge: after_merge,
             latest_pr_merge_request: None,
             latest_pr_presentation_current: Some(true),
             completion_refusal: None,
@@ -227,7 +198,7 @@ mod tests {
             (WorkStatus::Abandoned, false, "Task is terminal"),
             (WorkStatus::Ready, true, "Task is being abandoned"),
         ] {
-            let mut evidence = evidence(PrPhase::Working, None, None);
+            let mut evidence = evidence(PrPhase::Working, None);
             evidence.status = status;
             evidence.abandon_intent = abandon_intent;
             evidence.predecessor_phase = Some(PrPhase::Abandoned);
@@ -251,7 +222,7 @@ mod tests {
                 step: None,
                 captured: None,
             };
-            let mut evidence = evidence(PrPhase::Open, None, None);
+            let mut evidence = evidence(PrPhase::Open, None);
             evidence.execution = Some(&execution);
             evidence.launch_refusal = Some("next launch configuration is invalid");
             evidence.latest_pr_presentation_current = Some(false);
@@ -263,27 +234,8 @@ mod tests {
     }
 
     #[test]
-    fn historical_continuation_needs_a_specific_remaining_outcome() {
-        let mut evidence = evidence(PrPhase::Merged, Some(AfterMerge::ContinueTask), None);
-        let model = derive_task_actions(&evidence);
-        assert_eq!(model.recommended, Some(TaskAction::NoAction));
-        assert!(model.reason.contains("recorded remaining outcome"));
-        let request = PrMergeRequest {
-            mode: PrMergeMode::Auto,
-            requested_at: OffsetDateTime::now_utc(),
-            head_sha: "delivered-head".into(),
-            after_merge: AfterMerge::ContinueTask,
-            next_slug: Some("second-part".into()),
-        };
-        evidence.latest_pr_merge_request = Some(&request);
-        let model = derive_task_actions(&evidence);
-        assert_eq!(model.recommended, Some(TaskAction::StartNextPr));
-        assert!(model.reason.contains("second-part"));
-    }
-
-    #[test]
     fn nonresumable_execution_blocker_names_the_user_as_next_owner() {
-        let mut evidence = evidence(PrPhase::Working, None, None);
+        let mut evidence = evidence(PrPhase::Working, None);
         evidence.launch_refusal = Some(
             "Task execution boundary is blocked: linked Git index.lock is not writable; correct the filesystem capability before starting a new Session",
         );
@@ -305,7 +257,7 @@ mod tests {
             failing_checks: Vec::new(),
             observed_at: OffsetDateTime::now_utc(),
         };
-        let evidence = evidence(PrPhase::Open, Some(AfterMerge::ContinueTask), Some(&ci));
+        let evidence = evidence(PrPhase::Open, Some(&ci));
 
         let model = derive_task_actions(&evidence);
 
@@ -318,7 +270,7 @@ mod tests {
 
     #[test]
     fn stale_or_missing_pr_copy_is_actionable_before_merge_state() {
-        let mut evidence = evidence(PrPhase::Open, Some(AfterMerge::CompleteTask), None);
+        let mut evidence = evidence(PrPhase::Open, None);
         evidence.latest_pr_presentation_current = Some(false);
 
         let model = derive_task_actions(&evidence);
@@ -329,7 +281,7 @@ mod tests {
 
     #[test]
     fn resume_refusal_suppresses_resume_during_a_working_pr() {
-        let mut evidence = evidence(PrPhase::Working, None, None);
+        let mut evidence = evidence(PrPhase::Working, None);
         evidence.resume_refusal = Some("Task worktree is still initializing");
 
         let model = derive_task_actions(&evidence);
@@ -350,10 +302,8 @@ mod tests {
             mode: PrMergeMode::User,
             requested_at: OffsetDateTime::now_utc(),
             head_sha: ci.head_sha.clone(),
-            after_merge: AfterMerge::ContinueTask,
-            next_slug: None,
         };
-        let mut evidence = evidence(PrPhase::Open, Some(AfterMerge::ContinueTask), Some(&ci));
+        let mut evidence = evidence(PrPhase::Open, Some(&ci));
         evidence.latest_pr_merge_request = Some(&request);
 
         let model = derive_task_actions(&evidence);
@@ -374,10 +324,8 @@ mod tests {
             mode: PrMergeMode::Auto,
             requested_at: OffsetDateTime::now_utc(),
             head_sha: ci.head_sha.clone(),
-            after_merge: AfterMerge::ContinueTask,
-            next_slug: None,
         };
-        let mut evidence = evidence(PrPhase::Open, Some(AfterMerge::ContinueTask), Some(&ci));
+        let mut evidence = evidence(PrPhase::Open, Some(&ci));
         evidence.latest_pr_merge_request = Some(&request);
 
         let model = derive_task_actions(&evidence);
@@ -401,10 +349,8 @@ mod tests {
             mode: PrMergeMode::User,
             requested_at: OffsetDateTime::now_utc(),
             head_sha: ci.head_sha.clone(),
-            after_merge: AfterMerge::CompleteTask,
-            next_slug: None,
         };
-        let mut evidence = evidence(PrPhase::Open, Some(AfterMerge::CompleteTask), Some(&ci));
+        let mut evidence = evidence(PrPhase::Open, Some(&ci));
         evidence.latest_pr_merge_request = Some(&request);
 
         let model = derive_task_actions(&evidence);

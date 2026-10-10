@@ -36,7 +36,7 @@ pub(crate) fn name_native_session(provider: &str, input: &Value) -> anyhow::Resu
         let database = crate::store::database_path_from_env()?;
         if database.exists()
             && !SqliteStore::open_processes_read_only(&database)?
-                .sessions_for_provider_thread(thread)?
+                .sessions_for_agent_session(&thread.into())?
                 .is_empty()
         {
             return Ok(None);

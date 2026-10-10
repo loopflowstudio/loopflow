@@ -18,7 +18,7 @@ PROOFS = {
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--image", default="rust:bookworm")
+    parser.add_argument("--image", default="public.ecr.aws/docker/library/rust:trixie")
     parser.add_argument("--test", nargs="+", choices=PROOFS, help="run selected named proofs")
     parser.add_argument(
         "--native-titles", action="store_true", help="prove published title hook installation"
@@ -73,7 +73,7 @@ def main() -> None:
         targets = " ".join(f"--test {target}" for target in sorted(set(selected.values())))
         checks = "\n".join(
             f"timeout 180 cargo test -p loopflow --test {target} {name} "
-            "-- --exact --ignored --nocapture"
+            "-- --exact --include-ignored --nocapture"
             for name, target in selected.items()
         )
         command = r"""
@@ -116,6 +116,8 @@ runuser -u lf-task-proof -- env HOME=/home/lf-task-proof GIT_ALLOW_PROTOCOL=file
         PYTHONPATH=scripts python3 -c "from test_network import _probe; _probe()"
         timeout 180 cargo test -p loopflow --lib \
             migration_preserves_planning_identity_and_removes_snapshot_storage
+        timeout 180 cargo test -p loopflow --lib \
+            optional_task_pr_preserves_placement_and_freezes_prior_delivery
         CHECKS'
 """.replace("CHECKS", checks)
         if args.native_titles:

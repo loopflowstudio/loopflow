@@ -13,6 +13,7 @@
 //! - `turn/interrupt {threadId, turnId}` -> `{}`; the turn then ends with
 //!   `turn/completed` status "interrupted" (probed live).
 
+use crate::id::AgentSessionId;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, Ordering};
@@ -46,10 +47,10 @@ use crate::store::ProviderAccountId;
 
 fn build_thread_request(
     launch: &AgentConfig,
-    resume_provider_session_id: Option<&str>,
+    resume_agent_session: Option<&AgentSessionId>,
 ) -> (&'static str, serde_json::Map<String, Value>) {
     let mut params = build_codex_thread_start_params(launch);
-    match resume_provider_session_id {
+    match resume_agent_session {
         Some(session_id) => {
             params.insert(
                 "threadId".to_string(),
@@ -141,10 +142,10 @@ fn classify_steer_rejection(error: String) -> SendCurrentOutcome {
 /// Reader-local state threaded through `process_notification`.
 pub(super) struct NotificationState {
     turn_in_progress: Arc<AtomicBool>,
-    provider_session_id: Arc<Mutex<Option<String>>>,
+    agent_session: Arc<Mutex<Option<AgentSessionId>>>,
     /// Shared with the harness so steer/interrupt can address the live turn.
     current_turn_id: Arc<Mutex<Option<String>>>,
-    thread_id_tx: Option<oneshot::Sender<String>>,
+    thread_id_tx: Option<oneshot::Sender<AgentSessionId>>,
     /// Latest thread/tokenUsage/updated snapshot, reported at turn/completed.
     pending_usage: Option<TurnUsage>,
     /// Cumulative thread totals already attributed to completed turns. Codex
@@ -164,13 +165,13 @@ pub(super) struct NotificationState {
 impl NotificationState {
     pub(super) fn new(
         turn_in_progress: Arc<AtomicBool>,
-        provider_session_id: Arc<Mutex<Option<String>>>,
+        agent_session: Arc<Mutex<Option<AgentSessionId>>>,
         current_turn_id: Arc<Mutex<Option<String>>>,
-        thread_id_tx: Option<oneshot::Sender<String>>,
+        thread_id_tx: Option<oneshot::Sender<AgentSessionId>>,
     ) -> Self {
         Self {
             turn_in_progress,
-            provider_session_id,
+            agent_session,
             current_turn_id,
             thread_id_tx,
             pending_usage: None,
@@ -283,9 +284,9 @@ impl NotificationState {
             .expect("codex turn id lock poisoned") = turn_id;
     }
 
-    fn record_thread_id(&mut self, thread_id: String) {
+    fn record_thread_id(&mut self, thread_id: AgentSessionId) {
         *self
-            .provider_session_id
+            .agent_session
             .lock()
             .expect("codex provider session id lock poisoned") = Some(thread_id.clone());
         if let Some(tx) = self.thread_id_tx.take() {
@@ -576,8 +577,8 @@ pub struct CodexHarness {
     next_request_id: i64,
     turn_in_progress: Arc<AtomicBool>,
     shutdown_requested: Arc<AtomicBool>,
-    provider_session_id: Arc<Mutex<Option<String>>>,
-    resume_provider_session_id: Option<String>,
+    agent_session: Arc<Mutex<Option<AgentSessionId>>>,
+    resume_agent_session: Option<AgentSessionId>,
     account_route: Option<ProviderAccountRoute>,
     requested_account_id: Option<ProviderAccountId>,
     /// Live turn id (from turn/started, cleared at turn/completed); steer and
@@ -626,8 +627,8 @@ impl CodexHarness {
             next_request_id: 1,
             turn_in_progress: Arc::new(AtomicBool::new(false)),
             shutdown_requested: Arc::new(AtomicBool::new(false)),
-            provider_session_id: Arc::new(Mutex::new(None)),
-            resume_provider_session_id: None,
+            agent_session: Arc::new(Mutex::new(None)),
+            resume_agent_session: None,
             account_route: None,
             requested_account_id: None,
             current_turn_id: Arc::new(Mutex::new(None)),
@@ -702,13 +703,6 @@ impl CodexHarness {
         Ok(())
     }
 
-    fn thread_id(&self) -> Option<String> {
-        self.provider_session_id
-            .lock()
-            .expect("codex provider session id lock poisoned")
-            .clone()
-    }
-
     fn turn_id(&self) -> Option<String> {
         self.current_turn_id
             .lock()
@@ -772,21 +766,21 @@ impl Harness for CodexHarness {
         self.shutdown_requested.store(false, Ordering::Relaxed);
         self.launch = Some(config.clone());
         self.should_seed_prompt = true;
-        let requested_session = self.resume_provider_session_id.clone();
+        let requested_session = self.resume_agent_session.clone();
         let account_route = resolve_provider_account_exact(
             Provider::Codex,
-            requested_session.as_deref(),
+            requested_session.as_ref(),
             self.requested_account_id.as_ref(),
         )
         .await?;
-        self.resume_provider_session_id = match &account_route {
+        self.resume_agent_session = match &account_route {
             Some(route) if route.resume_requested_session() => requested_session,
             Some(_) => None,
             None => requested_session,
         };
         self.account_route = account_route;
         *self
-            .provider_session_id
+            .agent_session
             .lock()
             .expect("codex provider session id lock poisoned") = None;
         *self
@@ -835,7 +829,7 @@ impl Harness for CodexHarness {
         };
 
         let thread_id = self
-            .thread_id()
+            .agent_session()
             .ok_or_else(|| anyhow!("codex thread not started"))?;
         let mut input = vec![json!({ "type": "text", "text": turn_text })];
         if let Some(invocation) = invocation {
@@ -857,7 +851,7 @@ impl Harness for CodexHarness {
         if !self.turn_in_progress.load(Ordering::Relaxed) {
             return SendCurrentOutcome::NotSteerable;
         }
-        let (Some(thread_id), Some(turn_id)) = (self.thread_id(), self.turn_id()) else {
+        let (Some(thread_id), Some(turn_id)) = (self.agent_session(), self.turn_id()) else {
             return SendCurrentOutcome::NotSteerable;
         };
         let input = json!([{ "type": "text", "text": text }]);
@@ -911,7 +905,7 @@ impl Harness for CodexHarness {
         if !self.turn_in_progress.load(Ordering::Relaxed) {
             return Ok(());
         }
-        let (Some(thread_id), Some(turn_id)) = (self.thread_id(), self.turn_id()) else {
+        let (Some(thread_id), Some(turn_id)) = (self.agent_session(), self.turn_id()) else {
             return Ok(());
         };
         self.send_request(
@@ -925,7 +919,7 @@ impl Harness for CodexHarness {
     async fn stop(&mut self) -> Result<()> {
         self.shutdown_requested.store(true, Ordering::Relaxed);
 
-        if self.session_driver.is_some() && self.thread_id().is_some() {
+        if self.session_driver.is_some() && self.agent_session().is_some() {
             // Managed engines close when the invocation settles its driver, under
             // the same ownership transaction as takeover. Harness teardown
             // only drops this connection; a replaced driver cannot stop work.
@@ -976,12 +970,15 @@ impl Harness for CodexHarness {
         Ok(())
     }
 
-    fn provider_session_id(&self) -> Option<String> {
-        self.thread_id()
+    fn agent_session(&self) -> Option<AgentSessionId> {
+        self.agent_session
+            .lock()
+            .expect("codex provider session id lock poisoned")
+            .clone()
     }
 
-    fn set_provider_session_id(&mut self, provider_session_id: Option<String>) {
-        self.resume_provider_session_id = provider_session_id;
+    fn set_agent_session(&mut self, agent_session: Option<AgentSessionId>) {
+        self.resume_agent_session = agent_session;
     }
 
     fn set_provider_account_id(&mut self, account_id: Option<ProviderAccountId>) {
@@ -1022,7 +1019,7 @@ impl CodexHarness {
             .transpose()?
             .flatten();
         if let Some(thread) = &saved_thread {
-            if self.resume_provider_session_id.as_ref() != Some(thread) {
+            if self.resume_agent_session.as_ref() != Some(thread) {
                 anyhow::bail!(
                     "Saved conversation thread differs; reconnect with its recorded provider"
                 );
@@ -1223,14 +1220,14 @@ impl CodexHarness {
         });
 
         let (initialized_tx, initialized_rx) = oneshot::channel::<()>();
-        let (thread_id_tx, thread_id_rx) = oneshot::channel::<String>();
+        let (thread_id_tx, thread_id_rx) = oneshot::channel::<AgentSessionId>();
         let turn_in_progress = self.turn_in_progress.clone();
         let shutdown_requested = self.shutdown_requested.clone();
         let event_tx = self.events.clone();
         let raw_provider = self.raw_provider.clone();
         let approval_tx = outbound_tx.clone();
         let approval = self.approval;
-        let provider_session_id = self.provider_session_id.clone();
+        let agent_session = self.agent_session.clone();
         let current_turn_id = self.current_turn_id.clone();
         let initialize_request_id = self.initialize_request_id.clone();
         let thread_start_request_id = self.thread_start_request_id.clone();
@@ -1242,7 +1239,7 @@ impl CodexHarness {
             let mut initialized_tx = Some(initialized_tx);
             let mut state = NotificationState::new(
                 turn_in_progress.clone(),
-                provider_session_id,
+                agent_session,
                 current_turn_id,
                 Some(thread_id_tx),
             );
@@ -1394,19 +1391,19 @@ impl CodexHarness {
                 }
 
                 let previous_session = state
-                    .provider_session_id
+                    .agent_session
                     .lock()
                     .expect("codex provider session id lock poisoned")
                     .clone();
                 process_notification(method, &params, &mut state, &event_tx);
                 let current_session = state
-                    .provider_session_id
+                    .agent_session
                     .lock()
                     .expect("codex provider session id lock poisoned")
                     .clone();
                 if current_session != previous_session {
                     if let (Some(route), Some(session_id)) =
-                        (account_route.as_ref(), current_session.as_deref())
+                        (account_route.as_ref(), current_session.as_ref())
                     {
                         if let Err(error) = route.pin_session(session_id).await {
                             tracing::warn!(%error, "failed to pin Codex provider session account");
@@ -1461,7 +1458,7 @@ impl CodexHarness {
         self.send_notification("initialized").await?;
 
         let (thread_method, mut thread_params) =
-            build_thread_request(launch, self.resume_provider_session_id.as_deref());
+            build_thread_request(launch, self.resume_agent_session.as_ref());
         let config = json!({
             "shell_environment_policy.set": tool_environment,
             "allow_login_shell": false,
@@ -1481,7 +1478,7 @@ impl CodexHarness {
 
         // The vendor thread id arrives either in the thread/start response or
         // a thread/started notification. Wait briefly so callers can persist
-        // it before the first turn; a miss degrades to provider_session_id()
+        // it before the first turn; a miss degrades to agent_session()
         // returning None rather than failing startup.
         match tokio::time::timeout(Duration::from_secs(10), thread_id_rx).await {
             Ok(Ok(thread_id)) => {
@@ -1499,9 +1496,7 @@ impl CodexHarness {
                 tracing::warn!("codex reader ended before announcing a thread id");
             }
             Err(_) => {
-                tracing::warn!(
-                    "timed out waiting for codex thread id; provider_session_id unavailable"
-                );
+                tracing::warn!("timed out waiting for codex thread id; agent_session unavailable");
             }
         }
 
@@ -1534,7 +1529,7 @@ mod tests {
             .claim_session_driver("saved", None, &process, true)
             .unwrap();
         store
-            .record_session_connection("saved", &old, "/missing.sock", "saved-thread")
+            .record_session_connection("saved", &old, "/missing.sock", &"saved-thread".into())
             .unwrap();
         let driver = store
             .claim_session_driver("saved", Some(&old), &process, true)
@@ -1559,7 +1554,7 @@ mod tests {
         let retry = store
             .claim_session_driver("saved", Some(&released), &process, true)
             .unwrap();
-        harness.resume_provider_session_id = Some("saved-thread".into());
+        harness.resume_agent_session = Some("saved-thread".into());
         let config = AgentConfig {
             session_driver: Some(("saved".into(), retry)),
             ..config
@@ -1572,8 +1567,8 @@ mod tests {
             "{error}"
         );
         assert_eq!(
-            store.session_thread("saved").unwrap().as_deref(),
-            Some("saved-thread")
+            store.session_thread("saved").unwrap(),
+            Some("saved-thread".into())
         );
         assert!(store
             .session_history("saved", 0, 100)
@@ -1582,7 +1577,7 @@ mod tests {
             .all(|event| event.kind != crate::session::SessionEventKind::Completed));
     }
 
-    fn replay_state() -> (NotificationState, Arc<Mutex<Option<String>>>) {
+    fn replay_state() -> (NotificationState, Arc<Mutex<Option<AgentSessionId>>>) {
         let slot = Arc::new(Mutex::new(None));
         let state = NotificationState::new(
             Arc::new(AtomicBool::new(false)),
@@ -1662,7 +1657,8 @@ mod tests {
             system_prompt: "Fixed additions.".into(),
             ..Default::default()
         };
-        for session in [None, Some("saved-native-thread")] {
+        let saved_session = AgentSessionId::from("saved-native-thread");
+        for session in [None, Some(&saved_session)] {
             let (_, params) = build_thread_request(&config, session);
             assert_eq!(params["developerInstructions"], "Fixed additions.");
             assert!(!params.contains_key("baseInstructions"));
@@ -1676,7 +1672,7 @@ mod tests {
             cwd: Some("/tmp/project".into()),
             ..AgentConfig::default()
         };
-        let (method, params) = build_thread_request(&launch, Some("thread_abc"));
+        let (method, params) = build_thread_request(&launch, Some(&"thread_abc".into()));
 
         assert_eq!(method, "thread/resume");
         assert_eq!(
@@ -1697,7 +1693,7 @@ mod tests {
     }
 
     #[test]
-    fn thread_started_notification_records_provider_session_id() {
+    fn thread_started_notification_records_agent_session() {
         let (tx, _rx) = mpsc::unbounded_channel();
         let (mut state, slot) = replay_state();
 
@@ -1708,7 +1704,7 @@ mod tests {
             &tx,
         );
 
-        assert_eq!(slot.lock().unwrap().as_deref(), Some("thread_abc"));
+        assert_eq!(*slot.lock().unwrap(), Some("thread_abc".into()));
     }
 
     #[test]
@@ -1757,7 +1753,7 @@ mod tests {
     ) {
         let (events, event_rx) = mpsc::unbounded_channel();
         let mut harness = CodexHarness::new(events, ApprovalPolicy::AutoApprove);
-        *harness.provider_session_id.lock().expect("thread id lock") = Some("thread_1".to_string());
+        *harness.agent_session.lock().expect("thread id lock") = Some("thread_1".into());
         *harness.current_turn_id.lock().expect("turn id lock") = Some("turn_1".to_string());
         harness.turn_in_progress.store(true, Ordering::Relaxed);
         let (outbound, outbound_rx) = mpsc::channel(1);
@@ -1944,7 +1940,7 @@ mod tests {
     async fn current_send_names_the_exact_codex_turn() {
         let (events, _event_rx) = mpsc::unbounded_channel();
         let mut harness = CodexHarness::new(events, ApprovalPolicy::AutoApprove);
-        *harness.provider_session_id.lock().expect("thread id lock") = Some("thread_1".to_string());
+        *harness.agent_session.lock().expect("thread id lock") = Some("thread_1".into());
         *harness.current_turn_id.lock().expect("turn id lock") = Some("turn_1".to_string());
         harness.turn_in_progress.store(true, Ordering::Relaxed);
         let (outbound, mut outbound_rx) = mpsc::channel(1);

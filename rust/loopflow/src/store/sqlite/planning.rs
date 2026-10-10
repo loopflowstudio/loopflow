@@ -642,13 +642,13 @@ fn project_accepted_planning(
                  planning_completed=CASE WHEN id IN (SELECT task_id FROM pending) THEN planning_completed ELSE ?6 END,
                  planning_completed_at=CASE WHEN id IN (SELECT task_id FROM pending) THEN planning_completed_at ELSE ?7 END,
                  planning_provider_revision=?8,planning_url=?9,planning_branch_name=?10,
-                 planning_team_id=?11,planning_assignee=?12,
+                 planning_team_id=?11,planning_assignee=?12,planning_due_date=?15,
                  pm_snapshot_synced_at=?13,project_id=?14,
                  planning_revision=planning_revision+CASE WHEN issue_title IS NOT ?3 OR issue_description IS NOT ?4
                      OR planning_assignee IS NOT ?12 OR project_id IS NOT ?14 THEN 1 ELSE 0 END
              WHERE id=?1",
             params![id,item.identifier,item.name,item.description,item.state,item.completed,item.completed_at,
-                item.revision,item.url,item.branch_name,item.team_id,item.assignee,observed_at,project],
+                item.revision,item.url,item.branch_name,item.team_id,item.assignee,observed_at,project,item.due_date],
         )?;
     }
     let mut query = tx.prepare(&format!(
@@ -686,10 +686,10 @@ fn project_accepted_planning(
         tx.execute(
             "INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,issue_title,
              issue_description,pm_snapshot_synced_at,created_at,updated_at,planning_rank,workspace_slug,planning_state,planning_completed,
-             planning_completed_at,planning_provider_revision,planning_url,planning_branch_name,planning_team_id,planning_assignee)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?8,?9,'',?10,?11,?12,?13,?14,?15,?16,?17)",
+             planning_completed_at,planning_provider_revision,planning_url,planning_branch_name,planning_team_id,planning_assignee,planning_due_date)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?8,?9,'',?10,?11,?12,?13,?14,?15,?16,?17,?18)",
             params![crate::durable::TaskId::new().as_str(),project,item.id,item.identifier,
-                item.name,item.description,observed_at,super::super::rows::now_unix(),item.rank,item.state,item.completed,item.completed_at,item.revision,item.url,item.branch_name,item.team_id,item.assignee],
+                item.name,item.description,observed_at,super::super::rows::now_unix(),item.rank,item.state,item.completed,item.completed_at,item.revision,item.url,item.branch_name,item.team_id,item.assignee,item.due_date],
         )?;
     }
     Ok(())
@@ -894,9 +894,11 @@ pub(super) fn put_item(
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()?;
+    let mut status_changed = previous.is_none();
     if let Some((previous, acquired)) = previous {
         let previous_json: serde_json::Value = serde_json::from_str(&previous)?;
         let has_completed_at = previous_json.get("completed_at").is_some();
+        let has_due_date = previous_json.get("due_date").is_some();
         let previous: PmItem = serde_json::from_value(previous_json)?;
         let previous_revision = revision_nanos(previous.revision.as_deref())?;
         if revision < previous_revision {
@@ -916,12 +918,17 @@ pub(super) fn put_item(
             if !has_completed_at {
                 comparable.completed_at = None;
             }
+            if !has_due_date {
+                comparable.due_date = None;
+            }
             if comparable != previous {
                 return Err(StoreError::InvalidData(format!(
                     "conflicting planning facts at the same provider revision for {}; refresh planning", item.identifier
                 )));
             }
         }
+        status_changed = revision > previous_revision
+            && (item.state != previous.state || item.completed != previous.completed);
         // For equal revisions, keep the later acquisition's list rank and freshness.
         if revision == previous_revision && observed_at < acquired {
             return Ok(false);
@@ -933,6 +940,24 @@ pub(super) fn put_item(
          project_id=excluded.project_id,observed_at=excluded.observed_at,body=excluded.body",
         params![repo,provider,item.id,item.identifier,item.project_id,observed_at,serde_json::to_string(item)?],
     )?;
+    if status_changed {
+        // A newer authored status supersedes an old end trigger or writeback.
+        // Execution and delivery evidence are deliberately untouched.
+        if item.is_complete() {
+            conn.execute(
+                "INSERT INTO task_events(task_id,kind_json,created_at)
+                 SELECT t.id,json_object('kind','completed','summary','Completion observed in Linear'),?3
+                 FROM tasks t JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id
+                 WHERE t.external_issue_id=?1 AND w.repo=?2 AND t.planning_completed=0",
+                params![item.id,repo,observed_at])?;
+        }
+        conn.execute(
+            "UPDATE tasks SET completion_request=NULL,completion_error=NULL
+             WHERE external_issue_id=?1 AND project_id IN
+             (SELECT p.id FROM projects p JOIN waves w ON w.id=p.wave_id WHERE w.repo=?2)",
+            params![item.id, repo],
+        )?;
+    }
     Ok(true)
 }
 
@@ -1126,6 +1151,42 @@ mod tests {
         assert!(super::put_item(&conn, "/repo", "linear", 5, &item).unwrap());
         item.completed_at = Some("2026-10-01T12:00:00Z".into());
         assert!(super::put_item(&conn, "/repo", "linear", 6, &item).is_err());
+    }
+
+    #[test]
+    fn due_dates_enrich_absent_history_but_preserve_observed_null_at_equal_revision() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE pm_items(repo TEXT,provider TEXT,id TEXT,identifier TEXT,project_id TEXT,observed_at INTEGER,body TEXT,PRIMARY KEY(repo,provider,id)); CREATE TABLE pm_issue_changes(issue_id TEXT,revision_ns INTEGER,removed INTEGER);").unwrap();
+        conn.execute_batch("CREATE TABLE tasks(id TEXT,external_issue_id TEXT,project_id TEXT,planning_completed INTEGER,completion_request INTEGER,completion_error TEXT); CREATE TABLE projects(id TEXT,wave_id TEXT); CREATE TABLE waves(id TEXT,repo TEXT); CREATE TABLE task_events(task_id TEXT,kind_json TEXT,created_at INTEGER);").unwrap();
+        let planning: crate::pm::PmSnapshot = serde_json::from_str(include_str!(
+            "../../../../../tests/fixtures/dto/task_history_planning.json"
+        ))
+        .unwrap();
+        let mut item = planning.items[0].clone();
+        let mut old = serde_json::to_value(&item).unwrap();
+        old.as_object_mut().unwrap().remove("due_date");
+        conn.execute(
+            "INSERT INTO pm_items VALUES('/repo','linear',?1,?2,?3,1,?4)",
+            params![item.id, item.identifier, item.project_id, old.to_string()],
+        )
+        .unwrap();
+        item.due_date = Some("2026-10-08".into());
+        assert!(super::put_item(&conn, "/repo", "linear", 2, &item).unwrap());
+        let observed: String = conn
+            .query_row("SELECT body FROM pm_items", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<crate::pm::PmItem>(&observed)
+                .unwrap()
+                .due_date,
+            item.due_date
+        );
+        item.due_date = None;
+        assert!(super::put_item(&conn, "/repo", "linear", 3, &item).is_err());
+        item.id = "observed-null".into();
+        assert!(super::put_item(&conn, "/repo", "linear", 4, &item).unwrap());
+        item.due_date = Some("2026-10-09".into());
+        assert!(super::put_item(&conn, "/repo", "linear", 5, &item).is_err());
     }
 
     #[tokio::test]

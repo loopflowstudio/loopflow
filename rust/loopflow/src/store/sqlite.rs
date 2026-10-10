@@ -5,7 +5,7 @@ use std::time::Duration;
 use rusqlite::{params, Connection, OptionalExtension, ToSql, TransactionBehavior};
 
 use crate::durable::{ProjectId, TaskId, WorkRef};
-use crate::id::WaveId;
+use crate::id::{AgentSessionId, WaveId};
 use crate::profile::{
     AccessProfile, AuthBrowserBinding, EmailAddress, ProfileId, ProviderRoute, RouteScope,
 };
@@ -45,12 +45,11 @@ mod session_events;
 pub(crate) mod sessions;
 mod task_comments;
 mod task_content;
+mod task_follow_through;
 pub(crate) mod task_state_delivery;
 mod task_work;
 pub(crate) mod wave_documents;
 
-#[cfg(test)]
-pub(crate) use durable::task_state_sql;
 pub use project_selection::{ProjectActivation, ProjectReadiness, ProjectReadinessState};
 pub use revisions::StoreRevisions;
 pub(crate) use task_work::EndMove;
@@ -1518,7 +1517,7 @@ impl SqliteStore {
     pub fn pin_provider_session_route(
         &self,
         provider: Provider,
-        provider_session_id: &str,
+        agent_session: &AgentSessionId,
         account_id: &ProviderAccountId,
         isolated: bool,
     ) -> StoreResult<()> {
@@ -1533,7 +1532,7 @@ impl SqliteStore {
                 isolated = excluded.isolated",
             params![
                 provider.as_str(),
-                provider_session_id,
+                agent_session,
                 account_id.as_str(),
                 now_unix(),
                 isolated,
@@ -1547,14 +1546,14 @@ impl SqliteStore {
     pub fn provider_session_isolated(
         &self,
         provider: Provider,
-        provider_session_id: &str,
+        agent_session: &AgentSessionId,
     ) -> StoreResult<Option<bool>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
                 "SELECT isolated FROM provider_session_accounts
                  WHERE provider = ?1 AND provider_session_id = ?2",
-                params![provider.as_str(), provider_session_id],
+                params![provider.as_str(), agent_session],
                 |row| row.get(0),
             )
             .optional()?)
@@ -1601,13 +1600,13 @@ impl SqliteStore {
     pub fn provider_session_account(
         &self,
         provider: Provider,
-        provider_session_id: &str,
+        agent_session: &AgentSessionId,
     ) -> StoreResult<Option<ProviderAccountId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
             "SELECT account_id FROM provider_session_accounts
              WHERE provider = ?1 AND provider_session_id = ?2 AND isolated = 1",
-            params![provider.as_str(), provider_session_id],
+            params![provider.as_str(), agent_session],
             |row| row.get::<_, String>(0),
         )
         .optional()?
@@ -1621,7 +1620,7 @@ impl SqliteStore {
         &self,
         provider: Provider,
         candidates: &[ProviderAccountId],
-        provider_session_id: Option<&str>,
+        agent_session: Option<&AgentSessionId>,
     ) -> StoreResult<Option<ProviderAccountSelection>> {
         if candidates.is_empty() {
             return Ok(None);
@@ -1636,7 +1635,7 @@ impl SqliteStore {
             |row| row.get::<_, i64>(0),
         )?;
         let selection_time = now.max(newest_selection + 1);
-        let requested = match provider_session_id {
+        let requested = match agent_session {
             Some(session_id) => transaction
                 .query_row(
                     "SELECT account_id FROM provider_session_accounts
@@ -2075,7 +2074,7 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn record_process(&self, process: &crate::process::Process) -> StoreResult<()> {
+    pub fn record_process(&self, process: &crate::process::LfProcess) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "INSERT INTO processes(lfid,trace_id,parent_process_lfid,command,repo,cwd,started_at,
@@ -2095,7 +2094,7 @@ impl SqliteStore {
     /// is one attempt.
     pub(crate) fn record_process_within(
         &self,
-        process: &crate::process::Process,
+        process: &crate::process::LfProcess,
         wait: Duration,
     ) -> StoreResult<()> {
         let previous: u32 = {

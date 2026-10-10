@@ -13,12 +13,7 @@ pub(crate) fn read_wave_document(
     document: &str,
 ) -> std::io::Result<String> {
     let database = crate::store::database_path_from_env()?;
-    if !database.exists() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "Wave not found",
-        ));
-    }
+    std::fs::metadata(&database)?;
     let store = crate::store::sqlite::SqliteStore::open_read_only(&database)
         .map_err(std::io::Error::other)?;
     let locator = super::WaveLocator::discover(repo, name).map_err(std::io::Error::other)?;

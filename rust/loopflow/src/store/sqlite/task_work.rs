@@ -9,7 +9,7 @@ use crate::id::ProcessLfid;
 use crate::ops::workflow::{
     Workflow, WorkflowActor, WorkflowMove, WorkflowMoveKind, WorkflowPosition,
 };
-use crate::process::Process;
+use crate::process::LfProcess;
 use crate::store::StoreResult;
 use crate::task_work::{TaskSession, TaskWork};
 
@@ -58,6 +58,32 @@ pub(super) fn process_lfids(selector: &str) -> String {
         session_ids(selector), tasks(selector), checkout("ae.cwd"))
 }
 
+/// Prefer the deepest checkout when membership names more than one Task.
+/// Explicit Session bindings use the same association as Task inventory.
+pub(super) fn task_of_process(
+    conn: &rusqlite::Connection,
+    process: &ProcessLfid,
+) -> StoreResult<Option<String>> {
+    use rusqlite::OptionalExtension;
+    Ok(conn
+        .query_row(
+            &format!(
+                "WITH members AS MATERIALIZED (
+                    SELECT session_id AS id FROM session_events INDEXED BY session_process_membership
+                        WHERE process_lfid=?1
+                    UNION SELECT id FROM agent_sessions WHERE driver_process_lfid=?1)
+                 SELECT tw.id FROM tasks tw JOIN processes e ON e.lfid=?1
+                 WHERE ({}) OR EXISTS(SELECT 1 FROM agent_sessions a
+                    WHERE a.id IN (SELECT id FROM members) AND ({}))
+                 ORDER BY length(tw.worktree) DESC, tw.id LIMIT 1",
+                checkout("e.cwd"), session_membership("a")
+            ),
+            [process],
+            |row| row.get(0),
+        )
+        .optional()?)
+}
+
 pub(super) fn flows_of_task(
     conn: &rusqlite::Connection,
     task: &TaskId,
@@ -71,7 +97,7 @@ pub(super) fn flows_of_task(
 
 /// The Task's workflow row: its definition, the node it waits at or left,
 /// and the edge it is on with the Process carrying it.
-type WorkflowRow = (WorkflowDefinition, String, Option<(u32, Process)>);
+type WorkflowRow = (WorkflowDefinition, String, Option<(u32, LfProcess)>);
 
 fn workflow_row(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Option<WorkflowRow>> {
     use rusqlite::OptionalExtension;
@@ -273,9 +299,6 @@ fn set_node_in(
         by,
         note,
     )?;
-    if from == END && node != END {
-        super::task_state_delivery::queue_in(tx, task, "unstarted")?;
-    }
     Ok(true)
 }
 
@@ -333,7 +356,11 @@ pub(super) fn reach_end_in(
             }
         }
     }
-    stands_at_end(tx, task)
+    let arrived = stands_at_end(tx, task)?;
+    if arrived {
+        super::children::request_completion_in(tx, task, note)?;
+    }
+    Ok(arrived)
 }
 
 /// Every unfinished Process paired with each Task it belongs to: the same
@@ -360,7 +387,7 @@ fn open_process_tasks() -> String {
 /// Unfinished Processes are few; a checkout's Process history grows without bound.
 #[derive(Debug)]
 pub(crate) struct OpenProcesses {
-    by_task: HashMap<String, Vec<Process>>,
+    by_task: HashMap<String, Vec<LfProcess>>,
 }
 
 fn members(
@@ -395,6 +422,20 @@ fn members(
 }
 
 impl SqliteStore {
+    pub(crate) fn reach_workflow_end(
+        &self,
+        task: &TaskId,
+        how: &EndMove,
+        note: Option<&str>,
+    ) -> StoreResult<bool> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let by = crate::journal::current_process_lfid();
+        let moved = reach_end_in(&tx, task, how, by.as_ref(), note)?;
+        tx.commit()?;
+        Ok(moved)
+    }
+
     pub(crate) fn session_task_ids(&self, session: &str) -> StoreResult<Vec<TaskId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!(
@@ -455,7 +496,7 @@ impl SqliteStore {
         drop(rows);
         drop(query);
         tx.commit()?;
-        let mut by_task: HashMap<String, Vec<Process>> = HashMap::new();
+        let mut by_task: HashMap<String, Vec<LfProcess>> = HashMap::new();
         // Each Task's Processes keep the newest-first order they were read in.
         for process in processes {
             for task in tasks.remove(&process.lfid).unwrap_or_default() {
@@ -490,7 +531,7 @@ impl SqliteStore {
 
     /// Whether a command with no recorded exit may still be running.
     /// Unknown is not stopped.
-    pub(crate) fn process_may_run(&self, process: &crate::process::Process) -> bool {
+    pub(crate) fn process_may_run(&self, process: &crate::process::LfProcess) -> bool {
         crate::journal::process_evidence(self, &process.lfid)
             != crate::journal::ProcessIdentityEvidence::Dead
     }
@@ -633,10 +674,72 @@ mod tests {
 
     use crate::durable::{FlowProcessFilter, ProjectId, TaskId};
     use crate::id::{ProcessLfid, TraceId, WaveId};
-    use crate::process::{ProcessFilter, ProcessWorkFilter};
+    use crate::process::{LfProcessFilter, LfProcessWorkFilter};
     use crate::session::SessionFilter;
     use crate::store::sqlite::SqliteStore;
     use crate::task_work::TaskWork;
+
+    #[test]
+    fn end_request_is_atomic_and_survives_reopening_the_store() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("db");
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let task = TaskId::new();
+        let wave = WaveId::new();
+        let project = ProjectId::new();
+        {
+            let mut conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'proof','/repo',1)",
+                [&wave],
+            )
+            .unwrap();
+            conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)",params![project.as_str(),wave]).unwrap();
+            conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,workspace_slug,branch,base_commit,created_at,updated_at,issue_title,issue_description,pm_snapshot_synced_at) VALUES(?1,?2,'issue','PROOF-1','/repo','proof','proof','head',1,1,'Findings','Accepted findings',1)",params![task.as_str(),project.as_str()]).unwrap();
+            conn.execute_batch("CREATE TRIGGER refuse_request BEFORE INSERT ON task_events WHEN json_extract(NEW.kind_json,'$.kind')='completion_requested' BEGIN SELECT RAISE(ABORT,'unavailable'); END").unwrap();
+            {
+                let tx = conn.transaction().unwrap();
+                assert!(super::reach_end_in(&tx, &task, &super::EndMove::Set, None, None).is_err());
+            }
+            assert!(!super::stands_at_end(&conn, &task).unwrap());
+            conn.execute_batch("DROP TRIGGER refuse_request").unwrap();
+            let tx = conn.transaction().unwrap();
+            assert!(super::reach_end_in(&tx, &task, &super::EndMove::Set, None, None).unwrap());
+            tx.commit().unwrap();
+        }
+        let (request, _) = store.task_completion_pending(&task).unwrap().unwrap();
+        store
+            .fail_task_completion(&task, request, "provider unavailable")
+            .unwrap();
+        let workflow = store.workflow(&task).unwrap();
+        drop(store);
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        assert_eq!(
+            store.task_completion_pending(&task).unwrap(),
+            Some((request, "provider unavailable".into()))
+        );
+        let retained = store.task(&task).unwrap().unwrap();
+        assert!(store.complete_task(&retained, request).unwrap());
+        assert!(store.complete_task(&retained, request).unwrap());
+        assert!(store.task_completion_pending(&task).unwrap().is_none());
+        assert_eq!(store.workflow(&task).unwrap(), workflow);
+        let conn = store.conn.lock().unwrap();
+        assert_eq!(
+            super::super::durable::task_state_in(&conn, &task).unwrap(),
+            crate::durable::TaskState::Done
+        );
+        let completed: i64 = conn.query_row("SELECT count(*) FROM task_events WHERE task_id=?1 AND json_extract(kind_json,'$.kind')='completed'",[task.as_str()],|row| row.get(0)).unwrap();
+        assert_eq!(completed, 1);
+        drop(conn);
+        store.reopen_task(&task, Some("Continue findings")).unwrap();
+        assert!(!store.complete_task(&retained, request).unwrap());
+        assert!(store.task_completion_pending(&task).unwrap().is_none());
+        assert_eq!(store.workflow(&task).unwrap(), workflow);
+        assert_ne!(
+            store.task_state(&task).unwrap(),
+            crate::durable::TaskState::Done
+        );
+    }
 
     #[test]
     fn process_membership_does_not_read_events_that_name_no_process() {
@@ -735,7 +838,7 @@ mod tests {
             )
             .unwrap();
             conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", params![project.as_str(),wave]).unwrap();
-            conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at) VALUES(?1,?2,'issue','PROOF-1',?3,1)",params![task.as_str(),project.as_str(),repo.path().to_str().unwrap()]).unwrap();
+            conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,issue_title,worktree,created_at) VALUES(?1,?2,'issue','PROOF-1','Alias membership',?3,1)",params![task.as_str(),project.as_str(),repo.path().to_str().unwrap()]).unwrap();
             conn.execute(
                 "INSERT INTO work_placements(task_id,machine_id,placed_at) VALUES(?1,?2,1)",
                 params![task.as_str(), home.as_str()],
@@ -1030,8 +1133,8 @@ mod tests {
         // The Flow's step is the only work performed in the checkout.
         let performed = store
             .processes(
-                &ProcessFilter {
-                    performed_work: Some(ProcessWorkFilter::Task(task.clone())),
+                &LfProcessFilter {
+                    performed_work: Some(LfProcessWorkFilter::Task(task.clone())),
                     ..Default::default()
                 },
                 None,
@@ -1086,5 +1189,20 @@ mod tests {
             ["history"]
         );
         assert!(work.flow_processes.is_empty());
+
+        // A Flow explicitly bound through a Session remains visible after the
+        // checkout disappears. Inventory and Task status use the same rule.
+        let bound_flow = store.test_flow("bound", "/elsewhere", &[], None);
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,process_lfid,observed_at,payload) VALUES('history','started','bound-flow',?1,3,'{}')", [&bound_flow]).unwrap();
+        }
+        let work = store.task_work(&task).unwrap();
+        assert_eq!(work.flow_processes.len(), 1);
+        assert_eq!(work.flow_processes[0].summary.id, bound_flow.as_str());
+        assert_eq!(work.flow_processes[0].summary.task_id.as_ref(), Some(&task));
+        let (_, entry) = store.flow_process(bound_flow.as_str()).unwrap().unwrap();
+        assert_eq!(entry.summary.task_id.as_ref(), Some(&task));
+        assert_eq!(entry.summary.wave_id.as_ref(), Some(&wave));
     }
 }

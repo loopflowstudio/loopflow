@@ -16,19 +16,16 @@ use loopflow::ops::task::task_stack;
 use loopflow::ops::{
     arm as land, create_or_update_pr, submit, LandOptions, NullProgress, PrOptions,
 };
-use loopflow::work::task::{
-    AfterMerge, GithubPr, PrMergeMode, PrMergeRequest, PrPresentation, PrPublication,
-};
+use loopflow::work::task::{GithubPr, PrMergeMode, PrMergeRequest, PrPresentation, PrPublication};
 use loopflow_test_support::TestRepo;
-use support::{register_task, EnvGuard};
+use support::{register_task_with_pr, EnvGuard};
 
 fn land_options(create_pr: bool, pr_title: &str) -> LandOptions {
     LandOptions {
         strict: true,
         local: false,
         create_pr,
-        complete: false,
-        next_slug: None,
+        wait_and_fix: false,
         worktree: None,
         commit_message: None,
         pr_title: Some(pr_title.to_string()),
@@ -158,7 +155,12 @@ fn publish_refuses_when_registry_inaccessible_before_any_push() {
     repo.stage_all();
     repo.commit("task commit");
 
-    drop(register_task(home.path(), repo.path(), branch, &base));
+    drop(register_task_with_pr(
+        home.path(),
+        repo.path(),
+        branch,
+        &base,
+    ));
 
     // Close the fixture connection before making the registry unreadable.
     make_registry_inaccessible(&home.path().join("loopflow.db"));
@@ -213,7 +215,12 @@ fn land_refuses_when_registry_inaccessible_before_any_push() {
     repo.stage_all();
     repo.commit("task commit");
 
-    drop(register_task(home.path(), repo.path(), branch, &base));
+    drop(register_task_with_pr(
+        home.path(),
+        repo.path(),
+        branch,
+        &base,
+    ));
 
     make_registry_inaccessible(&home.path().join("loopflow.db"));
 
@@ -254,7 +261,12 @@ fn task_stack_refuses_when_registry_inaccessible() {
     repo.stage_all();
     repo.commit("task commit");
 
-    drop(register_task(home.path(), repo.path(), branch, &base));
+    drop(register_task_with_pr(
+        home.path(),
+        repo.path(),
+        branch,
+        &base,
+    ));
 
     make_registry_inaccessible(&home.path().join("loopflow.db"));
 
@@ -290,7 +302,7 @@ fn publish_refuses_when_registry_schema_incompatible_before_any_push() {
     repo.stage_all();
     repo.commit("task commit");
 
-    let _task = register_task(home.path(), repo.path(), branch, &base);
+    let _task = register_task_with_pr(home.path(), repo.path(), branch, &base);
 
     let db = home.path().join("loopflow.db");
     // Drop the WAL sidecars so SQLite cannot recover a valid database from them
@@ -351,7 +363,15 @@ fn valid_authority_publishes_and_records_the_pr() {
     repo.commit("task commit");
     repo.push_new_branch(branch);
 
-    let task = register_task(home.path(), repo.path(), branch, &base);
+    let task = register_task_with_pr(home.path(), repo.path(), branch, &base);
+    // Start with placement only, as a newly checked-out Task does.
+    rusqlite::Connection::open(home.path().join("loopflow.db"))
+        .unwrap()
+        .execute(
+            "DELETE FROM task_prs WHERE task_id=?1",
+            [task.task.id.as_str()],
+        )
+        .unwrap();
 
     create_or_update_pr(
         repo.path(),
@@ -389,6 +409,13 @@ fn valid_authority_publishes_and_records_the_pr() {
         .github()
         .expect("GitHub PR must be attached under valid authority");
     assert_eq!(github.number, 1, "the published PR number must be attached");
+    assert_eq!(
+        runtime
+            .block_on(task.store.task_prs(&task.task.id))
+            .unwrap()
+            .len(),
+        1
+    );
 }
 
 fn gh_publication_script(home: &std::path::Path) -> String {
@@ -439,7 +466,7 @@ fn acknowledged_creation_survives_failed_read_and_retries_without_duplicate() {
     repo.stage_all();
     repo.commit("task commit");
     repo.push_new_branch(branch);
-    let task = register_task(home.path(), repo.path(), branch, &base);
+    let task = register_task_with_pr(home.path(), repo.path(), branch, &base);
     let head = repo.head_sha();
     fs::write(
         home.path().join("pr.json"),
@@ -514,7 +541,7 @@ fn existing_pr_identity_survives_readiness_failure() {
     repo.stage_all();
     repo.commit("task commit");
     repo.push_new_branch(branch);
-    let task = register_task(home.path(), repo.path(), branch, &base);
+    let task = register_task_with_pr(home.path(), repo.path(), branch, &base);
     let head = repo.head_sha();
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let now = time::OffsetDateTime::now_utc();
@@ -535,8 +562,6 @@ fn existing_pr_identity_survives_readiness_failure() {
             mode: PrMergeMode::User,
             requested_at: now,
             head_sha: base.clone(),
-            after_merge: AfterMerge::CompleteTask,
-            next_slug: None,
         }),
     });
     runtime
@@ -606,7 +631,7 @@ fn ordinary_pr_publishes_when_worktree_is_not_a_task_worktree() {
     // A healthy registry exists, but its one Task claims a different
     // worktree — this checkout is provably not a Task worktree.
     let elsewhere = tempfile::TempDir::new().expect("unrelated worktree");
-    let _unrelated = register_task(home.path(), elsewhere.path(), "jack/elsewhere", &base);
+    let _unrelated = register_task_with_pr(home.path(), elsewhere.path(), "jack/elsewhere", &base);
 
     let branch = "jack/ordinary-pr";
     repo.create_branch(branch);
@@ -646,7 +671,7 @@ fn ordinary_pr_publishes_when_no_registry_exists() {
         &[("gh", script.as_str()), ("open", noop_open_script())],
         home.path(),
     );
-    // No register_task, no ambient id, no registry file.
+    // No register_task_with_pr, no ambient id, no registry file.
 
     let branch = "jack/ordinary-no-registry";
     repo.create_branch(branch);
@@ -696,7 +721,7 @@ fn managed_task_submit_assigns_for_human_review() {
     repo.commit("task commit");
     // Deliberately not pushed: submit owns integration and publication.
 
-    let _task = register_task(home.path(), repo.path(), branch, &base);
+    let _task = register_task_with_pr(home.path(), repo.path(), branch, &base);
 
     submit(
         repo.path(),
@@ -736,7 +761,7 @@ fn ordinary_submit_still_assigns_for_review() {
     // A healthy registry exists, but its one Task claims a different worktree —
     // this checkout is provably not a Task worktree, so submit is unaffected.
     let elsewhere = tempfile::TempDir::new().expect("unrelated worktree");
-    let _unrelated = register_task(home.path(), elsewhere.path(), "jack/elsewhere", &base);
+    let _unrelated = register_task_with_pr(home.path(), elsewhere.path(), "jack/elsewhere", &base);
 
     let branch = "jack/ordinary-submit";
     repo.create_branch(branch);

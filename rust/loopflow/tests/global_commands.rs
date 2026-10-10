@@ -158,7 +158,7 @@ fn installation_uses_candidate_authority_from_any_checkout() {
     let home = tempfile::tempdir().unwrap();
     let repo = TestRepo::new();
     repo.create_branch("install-task");
-    let task = support::register_unrun_task(
+    let task = support::register_task_with_pr(
         &home.path().join(".lf"),
         repo.path(),
         "install-task",

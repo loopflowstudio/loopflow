@@ -5,7 +5,7 @@
 //! the Flow or a step is running, finished or failed is read from their Processes.
 use crate::engine::flow_graph::FlowGraph;
 use crate::id::ProcessLfid;
-use crate::process::Process;
+use crate::process::LfProcess;
 
 /// A step's agent sees which Flow started it: the driver Process's id. Steps of
 /// one Flow can share notes under it. It configures nothing in lf.
@@ -14,7 +14,7 @@ pub(crate) const FLOW_ID_ENV: &str = "LF_FLOW_ID";
 /// One step its driver started.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FlowProcessStep {
-    pub process: Process,
+    pub process: LfProcess,
     /// The step's node in the Flow's graph, counted in preorder.
     pub key: u32,
     /// Returns taken on each loop edge, per nesting level, outermost first.
@@ -24,7 +24,7 @@ pub(crate) struct FlowProcessStep {
 /// One Flow process as its driver recorded it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FlowProcess {
-    pub driver: Process,
+    pub driver: LfProcess,
     pub name: String,
     pub graph: FlowGraph,
     /// Steps in launch order. A repeated or corrected step is another entry.

@@ -61,7 +61,7 @@ impl SqliteStore {
         generation: u64,
         process: &ProcessLfid,
         retry: bool,
-        session: crate::session::AgentSession,
+        session: crate::session::LfSession,
     ) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;

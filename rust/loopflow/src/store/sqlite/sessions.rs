@@ -1,11 +1,12 @@
 //! Session transactions share the invocation's SQLite transaction and fences.
 
+use crate::id::AgentSessionId;
 use std::fs::File;
 
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 
 use crate::durable::TaskId;
-use crate::session::{AgentSession, PrimaryScope, TitleSource};
+use crate::session::{LfSession, PrimaryScope, TitleSource};
 use crate::store::{StoreError, StoreResult};
 
 use super::SqliteStore;
@@ -30,9 +31,9 @@ const SESSION_SELECT: &str = concat!("SELECT s.id,COALESCE(c.receipt_key,'') AS 
     s.task_id,s.wave_id,", session_flow!(), ",s.work_source,s.bound_at,
     s.input_published,s.cwd,s.skill,s.provider,s.model,", session_step!("node"), ",", session_step!("iterations"), ",json_extract(c.payload,'$.caller_key'),s.current_capture FROM agent_sessions s LEFT JOIN session_events c ON c.seq=s.current_capture");
 
-fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<AgentSession>> {
+fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<LfSession>> {
     Ok((|| {
-        Ok(AgentSession {
+        Ok(LfSession {
             captured: row.get(23)?,
             caller_artifact_key: row
                 .get::<_, Option<String>>(22)?
@@ -91,7 +92,7 @@ fn title_source(source: TitleSource) -> &'static str {
     }
 }
 
-pub(super) fn session_in(conn: &Connection, id: &str) -> StoreResult<Option<AgentSession>> {
+pub(super) fn session_in(conn: &Connection, id: &str) -> StoreResult<Option<LfSession>> {
     conn.query_row(
         &format!("{SESSION_SELECT} WHERE s.id=?1"),
         [id],
@@ -308,7 +309,7 @@ fn interactive_sessions_in<P: rusqlite::Params>(
     conn: &Connection,
     selection: &str,
     params: P,
-) -> StoreResult<Vec<(AgentSession, Option<i64>)>> {
+) -> StoreResult<Vec<(LfSession, Option<i64>)>> {
     let mut query = conn.prepare(&format!(
         "SELECT candidates.*, (
             SELECT MAX(json_extract(payload,'$.opened_at_ms'))
@@ -327,7 +328,7 @@ fn interactive_sessions_in<P: rusqlite::Params>(
     .collect()
 }
 
-fn task_primary_in(conn: &Connection, task: &TaskId) -> StoreResult<Option<AgentSession>> {
+fn task_primary_in(conn: &Connection, task: &TaskId) -> StoreResult<Option<LfSession>> {
     conn.query_row(
         &format!(
             "{SESSION_SELECT} WHERE s.id=(SELECT primary_session_id FROM tasks WHERE id=?1)
@@ -341,7 +342,7 @@ fn task_primary_in(conn: &Connection, task: &TaskId) -> StoreResult<Option<Agent
 }
 
 impl SqliteStore {
-    pub(crate) fn resume_candidates(&self) -> StoreResult<Vec<(AgentSession, Option<i64>)>> {
+    pub(crate) fn resume_candidates(&self) -> StoreResult<Vec<(LfSession, Option<i64>)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         interactive_sessions_in(&conn, "", [])
     }
@@ -350,7 +351,7 @@ impl SqliteStore {
     pub(crate) fn task_conversations(
         &self,
         task: &TaskId,
-    ) -> StoreResult<Vec<(AgentSession, Option<i64>)>> {
+    ) -> StoreResult<Vec<(LfSession, Option<i64>)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         interactive_sessions_in(
             &conn,
@@ -363,7 +364,7 @@ impl SqliteStore {
     }
 
     /// The conversation a Task's primary pointer names, while it is unfinished.
-    pub(crate) fn task_primary(&self, task: &TaskId) -> StoreResult<Option<AgentSession>> {
+    pub(crate) fn task_primary(&self, task: &TaskId) -> StoreResult<Option<LfSession>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         task_primary_in(&conn, task)
     }
@@ -374,7 +375,7 @@ impl SqliteStore {
         &self,
         task: &TaskId,
         session: &str,
-    ) -> StoreResult<AgentSession> {
+    ) -> StoreResult<LfSession> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let chosen = conn.execute(
             &format!(
@@ -447,7 +448,10 @@ impl SqliteStore {
     }
 
     /// Sessions that recorded `thread` as their provider's own conversation id.
-    pub(crate) fn sessions_for_provider_thread(&self, thread: &str) -> StoreResult<Vec<String>> {
+    pub(crate) fn sessions_for_agent_session(
+        &self,
+        thread: &AgentSessionId,
+    ) -> StoreResult<Vec<String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(
             "SELECT id FROM agent_sessions WHERE provider_thread=?1
@@ -631,7 +635,7 @@ impl SqliteStore {
                         row.get::<_, Option<bool>>(15)?.unwrap_or(false),
                         row.get::<_, Option<String>>(16)?,
                         row.get::<_, Option<i64>>(17)?,
-                        row.get::<_, Option<String>>(18)?,
+                        row.get::<_, Option<AgentSessionId>>(18)?,
                         row.get::<_, Option<String>>(19)?,
                     ))
                 },
@@ -706,7 +710,7 @@ impl SqliteStore {
                         None => self.orphaned_native_history(
                             &session_id,
                             scope,
-                            thread.as_deref(),
+                            thread.as_ref(),
                             turn.as_deref(),
                         )?,
                     };
@@ -724,7 +728,7 @@ impl SqliteStore {
         Ok((histories, truncated))
     }
 
-    pub fn session(&self, id: &str) -> StoreResult<Option<AgentSession>> {
+    pub fn session(&self, id: &str) -> StoreResult<Option<LfSession>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         session_in(&conn, id)
     }
@@ -752,7 +756,7 @@ impl SqliteStore {
             .optional()?)
     }
 
-    pub fn session_for_artifact(&self, artifact_key: &str) -> StoreResult<Option<AgentSession>> {
+    pub fn session_for_artifact(&self, artifact_key: &str) -> StoreResult<Option<LfSession>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
             &format!("{SESSION_SELECT} WHERE s.id=(SELECT session_id FROM session_events WHERE kind='captured' AND receipt_key=?1)"),
@@ -763,16 +767,16 @@ impl SqliteStore {
         .transpose()
     }
 
-    fn lock_session_checkouts(&self, session: &AgentSession) -> StoreResult<Vec<File>> {
+    fn lock_session_checkouts(&self, session: &LfSession) -> StoreResult<Vec<File>> {
         self.lock_task_checkouts(&[session.cwd.as_path()], session.task_id.as_ref())
     }
 
     /// Admit the conversation and its captured input before provider effects.
     pub fn create_session(
         &self,
-        session: AgentSession,
+        session: LfSession,
         caller_process: Option<&crate::id::ProcessLfid>,
-    ) -> StoreResult<AgentSession> {
+    ) -> StoreResult<LfSession> {
         let _admission = self.lock_session_checkouts(&session)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -792,9 +796,9 @@ impl SqliteStore {
         &self,
         scope: &PrimaryScope,
         replacing: Option<&str>,
-        session: AgentSession,
+        session: LfSession,
         caller_process: Option<&crate::id::ProcessLfid>,
-    ) -> StoreResult<AgentSession> {
+    ) -> StoreResult<LfSession> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let marked = |kind: &str, column: &str, id: String| {
@@ -848,7 +852,7 @@ impl SqliteStore {
     /// Called under the Session launch lock after proving there is no live client.
     pub(crate) fn move_primary_workspace(
         &self,
-        session: &AgentSession,
+        session: &LfSession,
         cwd: &std::path::Path,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -924,8 +928,8 @@ impl SqliteStore {
     pub fn replace_session_input(
         &self,
         expected_input: Option<i64>,
-        mut session: AgentSession,
-    ) -> StoreResult<AgentSession> {
+        mut session: LfSession,
+    ) -> StoreResult<LfSession> {
         let stored = self.session(&session.id)?.ok_or(StoreError::NotFound)?;
         let _admission = self.lock_session_checkouts(&stored)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
@@ -953,11 +957,11 @@ impl SqliteStore {
     /// Reserve the next input and its driver together; a losing claimant changes neither.
     pub(crate) fn claim_session_input(
         &self,
-        mut next: AgentSession,
+        mut next: LfSession,
         expected_driver: Option<&crate::process::SessionDriver>,
         process: &crate::id::ProcessLfid,
         replace_provider: bool,
-    ) -> StoreResult<(AgentSession, crate::process::SessionDriver)> {
+    ) -> StoreResult<(LfSession, crate::process::SessionDriver)> {
         let _admission = self.lock_session_checkouts(&next)?;
         let _dispatch = self.lock_session_driver(&next.id)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
@@ -1008,7 +1012,7 @@ impl SqliteStore {
         id: &str,
         expected_capture: Option<i64>,
         task: &TaskId,
-    ) -> StoreResult<AgentSession> {
+    ) -> StoreResult<LfSession> {
         let before = self.session(id)?.ok_or(StoreError::NotFound)?;
         let _admission = self.lock_task_checkouts(&[&before.cwd], Some(task))?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
@@ -1076,10 +1080,7 @@ impl SqliteStore {
     }
 
     /// Every open Session.
-    pub fn sessions(
-        &self,
-        filter: &crate::session::SessionFilter,
-    ) -> StoreResult<Vec<AgentSession>> {
+    pub fn sessions(&self, filter: &crate::session::SessionFilter) -> StoreResult<Vec<LfSession>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
         let (sql, values) = inventory_query(filter, SESSION_SELECT, now)?;
@@ -1118,7 +1119,7 @@ impl SqliteStore {
 
 pub(super) fn retain_history_in(
     conn: &Connection,
-    session: &AgentSession,
+    session: &LfSession,
     history: &[crate::session::SessionObservation],
 ) -> StoreResult<bool> {
     let mut changed = false;
@@ -1156,19 +1157,19 @@ pub(super) fn retain_history_in(
 /// Resolve ancestry and captured location on the conversation's admission transaction.
 pub(super) fn reserve_session_in(
     conn: &Transaction<'_>,
-    mut session: AgentSession,
+    mut session: LfSession,
     caller: Option<&crate::id::ProcessLfid>,
-) -> StoreResult<AgentSession> {
+) -> StoreResult<LfSession> {
     resolve_ancestry_in(conn, &mut session)?;
     insert_session_in(conn, &mut session, caller)?;
     Ok(session)
 }
 
-fn resolve_ancestry_in(conn: &Connection, session: &mut AgentSession) -> StoreResult<()> {
+fn resolve_ancestry_in(conn: &Connection, session: &mut LfSession) -> StoreResult<()> {
     if let Some(task) = &session.task_id {
         let wave = super::durable::task_wave_in(conn, task)?;
         if session.wave_id.as_ref().is_some_and(|given| given != &wave) {
-            return Err(invalid("AgentSession Task and Wave disagree"));
+            return Err(invalid("Session Task and Wave disagree"));
         }
         session.wave_id = Some(wave);
     }
@@ -1244,7 +1245,7 @@ pub(super) fn capture_seq_in(conn: &Connection, artifact: &str) -> StoreResult<i
 
 fn capture_in(
     conn: &Connection,
-    session: &AgentSession,
+    session: &LfSession,
     observed_at: i64,
     process: Option<&crate::id::ProcessLfid>,
 ) -> StoreResult<i64> {
@@ -1276,7 +1277,7 @@ fn capture_in(
 
 fn insert_session_in(
     conn: &Connection,
-    session: &mut AgentSession,
+    session: &mut LfSession,
     process: Option<&crate::id::ProcessLfid>,
 ) -> StoreResult<()> {
     conn.execute(
@@ -1327,7 +1328,7 @@ fn insert_session_in(
 
 pub(super) fn replace_input_in(
     conn: &Transaction<'_>,
-    session: &mut AgentSession,
+    session: &mut LfSession,
     process: Option<&crate::id::ProcessLfid>,
 ) -> StoreResult<()> {
     // Workspace admission owns location; replacing input cannot move Task membership.
@@ -1377,9 +1378,9 @@ pub(crate) fn test_capture(conn: &Connection, session: &str, artifact: &str) {
 
 #[cfg(test)]
 impl SqliteStore {
-    pub(crate) fn test_session(&self, id: &str, artifact: &str) -> AgentSession {
+    pub(crate) fn test_session(&self, id: &str, artifact: &str) -> LfSession {
         self.create_session(
-            AgentSession {
+            LfSession {
                 captured: None,
                 id: id.into(),
                 artifact_key: artifact.into(),

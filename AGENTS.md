@@ -10,7 +10,7 @@ This is the governing document of the loopflow codebase. Contributors and agents
 - Project = one Wave's Linear plan: status, Tasks, KRs, targets, and the workflow its Tasks take up
 - A Task's work is every Session, Flow and Process in its checkout, plus explicit binds; no Flow is selected over another
 - Workflow = a Task's nodes (a person, in its conversation) joined by edges (Flows), with its stored position; `lf task run` chooses an edge, `lf task move` sets a node
-- A Task's state is its Workflow position: ready at `start`, active between, done at `end`; reaching `end` is completion, abandoned is its own mark
+- Task completion, Workflow position and Process liveness are independent; reaching `end` requests completion, and a failed request retries without replaying the edge
 - Started unfinished Tasks move with identity, worktree, PR, and invocation intact
 - Unreviewed backlog stays in its Project until explicit disposition; uncertain evidence never auto-closes work
 - Current navigation is Wave → Task; chapter history retains each Wave's past plan
@@ -249,12 +249,16 @@ competing plans remain unresolved. Preserve active Task identity, worktree, PR
 and execution. Preserve unreviewed backlog until explicit disposition; missing evidence is unknown.
 Current navigation stays Wave → Task and Linear retains past Projects.
 
-Process is one actual lf process, including direct and agent-issued nested commands.
+LfProcess is one actual lf process, including direct and agent-issued nested commands.
 Its `lfid` is durable Loopflow identity; `pid` is the optional Unix PID and may
 collide across history. References use `process_lfid` and `parent_process_lfid`.
-AgentSession is one durable agent conversation, interactive or headless; identity,
+LfSession is one Loopflow-owned durable conversation, interactive or headless; identity,
 name, feedback and native history survive driver replacement. Product text says
-Session for interactive and Run for headless work. Waiting is the one attention
+Session for interactive and Run for headless work. AgentSession is the provider-owned
+conversation, represented by an opaque AgentSessionId used for resume, native
+turn keys and account attribution. An LfSession selects one AgentSession at a
+time; replacement preserves earlier selections in immutable history. It is not
+an OS process and has no separate table. Waiting is the one attention
 state, judged in Rust from owned provider streams and validated terminal reports. A step's result
 is how its process exited; a deciding or routing step also answers through the
 Session turn its Process captured. Agent outcomes and retries belong in Session

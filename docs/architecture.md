@@ -6,7 +6,7 @@ title: Architecture
 # Architecture
 
 Loopflow records commands, preserves agent conversations, and drives Flows.
-Process records an lf command and its outcome; AgentSession records a conversation; a Flow is one lf process
+Process records an lf command and its outcome; LfSession records a conversation; a Flow is one lf process
 and the step processes it starts.
 
 This guide specifies the accepted model. The reference owns
@@ -25,9 +25,9 @@ lf implement
 ```
 
 That command discovers `implement`, assembles its context, chooses a provider,
-records its Process, reserves an AgentSession, captures the input, then launches the
+records its Process, reserves an LfSession, captures the input, then launches the
 provider. It needs no Wave, Project, Task, or daemon. The conversation persists
-after that command exits; a later command can connect to the same AgentSession.
+after that command exits; a later command can connect to the same LfSession.
 
 ```text
 request
@@ -36,7 +36,7 @@ request
 lf CLI --> Skill discovery --> prompt --> provider route --> harness
                                                           |
                                                           v
-                                               AgentSession history
+                                               LfSession history
                                                + immutable input/output artifacts
 ```
 
@@ -47,7 +47,7 @@ Admission failure stops before provider launch. General command logging has a
 different boundary: unavailable/bootstrap stores leave explicitly unrecorded
 Processes rather than bypassing installation authority to create a receipt.
 
-AgentSession history records provider outcomes, retries and usage. Process records
+LfSession history records provider outcomes, retries and usage. Process records
 the command's outcome. A provider can finish successfully before a later command
 operation fails; neither result overwrites the other. Missing telemetry stays
 missing. The [execution contract](architecture-reference.md#core-models-and-apis)
@@ -62,7 +62,7 @@ The implementation follows the same order as the diagram:
 | Assemble context | [`engine/prompt.rs`](../rust/loopflow/src/engine/prompt.rs) | System and task prompts |
 | Select credentials and route | [`provider_account.rs`](../rust/loopflow/src/provider_account.rs) | Harness, account, model, credential |
 | Launch and normalize | [`harness/`](../rust/loopflow/src/harness/) | Provider output and usage events |
-| Record command and conversation evidence | [`journal/`](../rust/loopflow/src/journal/) and the store | Process completion, AgentSession history and immutable payloads |
+| Record command and conversation evidence | [`journal/`](../rust/loopflow/src/journal/) and the store | Process completion, LfSession history and immutable payloads |
 
 [Follow the complete execution path →](architecture/execution.md)
 
@@ -167,7 +167,7 @@ user / agent --> lf CLI --------+----------+-----------+
               discovery / prompt / route / harness
                               |
                               v
-                        Process / AgentSession
+                        Process / LfSession
                               |
                               v
                   status / roadmap / usage / app
@@ -190,7 +190,7 @@ Repository
               `-- Task        identity, worktree, PR and every Flow process for it
 
 Process                          one actual lf process; immutable causal parent
-AgentSession                  one conversation; nullable current driver Process
+LfSession                  one conversation; nullable current driver Process
   `-- history                 provider starts, outcomes, retries and usage
 Flow                          one lf process; cursor in its memory, graph in FlowProcess
   `-- step processes              plain commands; the driver records each one's node
@@ -201,7 +201,7 @@ Flow                          one lf process; cursor in its memory, graph in Flo
 | Skill | Reusable instructions and declared context | Repository, builtin or installed Markdown |
 | Flow | Reusable graph of agent, mechanical and routing steps | Repository or builtin YAML |
 | Process | One actual lf process, its caller and command completion | `processes` |
-| AgentSession | An interactive or headless conversation across drivers and native reconnection | `agent_sessions`, subordinate history and provider-native conversation |
+| LfSession | An interactive or headless conversation across drivers and native reconnection | `agent_sessions`, subordinate history and provider-native conversation |
 | Running Flow | One driver process and the steps it starts, including taskless execution | The driver Process and its child step processes in `processes` |
 | Wave | Enduring objective, memory, cadence, budget and metric instruments | Wave files, local Wave identity and Linear Initiative membership |
 | Chapter | Shared name of each Wave's In Progress Project | Linear Project statuses; no Chapter row or packet |
@@ -211,7 +211,7 @@ Flow                          one lf process; cursor in its memory, graph in Flo
 | Machine | A machine's store, credentials and exact process authority | Machine identity and observed route |
 | Placement | Where a Work executes | `(WorkRef, MachineId)` |
 
-An AgentSession keeps its ID, name, feedback and native conversation when its
+An LfSession keeps its ID, name, feedback and native conversation when its
 command process changes. Its `interactive` field is independent of purpose,
 Flow membership and completion. Default conversation views show interactive
 Sessions; explicit filters expose headless and completed history. Large captured
@@ -225,7 +225,7 @@ leaves the engine alive and never authorizes killing a shared engine
 for one thread. Engine PID, client PID and conversation driver are distinct.
 
 Process ancestry records the actual lf caller. A direct child names its parent's
-Process; an agent-issued child also records `via_agent` and AgentSession provenance.
+Process; an agent-issued child also records `via_agent` and LfSession provenance.
 The provider's generation resolves to the current driver at child admission.
 A delayed command from a replaced provider retains historical provenance; old
 Process parents are never rewritten. Causal ancestry grants no control authority.
@@ -256,7 +256,7 @@ explicit target name and stable Project identities. A partially rotated reposito
 must be retryable; unrelated competing plans remain unresolved.
 
 The [reference](architecture-reference.md#core-models-and-apis) owns the field and
-write contracts and the current-state conversion boundary. Process and AgentSession
+write contracts and the current-state conversion boundary. Process and LfSession
 are the execution owners; Run has no separate lifecycle.
 
 ## Follow the common paths
@@ -283,12 +283,12 @@ lf submit
 lf task status INF-123 --json
 ```
 
-`prepare` creates or reuses tracked Task Work, its one worktree, and the active
-serial PR identity. It starts no Task execution. Each `--task` command
-starts an independent AgentSession in that worktree; several may overlap and write distinct
+`checkout` creates or reuses tracked Task Work and its checkout placement
+without starting execution. Publication creates its optional, sole PR. Each `--task` command
+starts an independent LfSession in that worktree; several may overlap and write distinct
 scratch paths. Any caller may then use the ordinary Work and delivery commands.
 Those commands act on delivery facts, not on Flow-driving authority. `submit` and `land` therefore work the same whether the Task was pursued by a
-Task Flow, piecemeal helper AgentSessions, or another system.
+Task Flow, piecemeal helper LfSessions, or another system.
 
 ### Task Flows
 
@@ -303,7 +303,7 @@ lf wave status product
 `lf --task ISSUE run FLOW` does, returning when the Flow ends; it never
 continues an earlier one. Repository rotation converges every Wave on the
 requested Project name, preserving active Task identity and execution. Direct
-questions and helpers use attributed AgentSessions without gaining Flow
+questions and helpers use attributed LfSessions without gaining Flow
 authority. Flows hold autonomous steps only; review happens in the Task
 conversation.
 

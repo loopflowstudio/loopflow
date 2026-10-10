@@ -6,7 +6,7 @@ those so placement, release state, and execution authority stay consistent.
 Read-only inspection and ordinary edits/tests run directly here.
 
 - **Wave**: a durable objective with its memory and current plan of Tasks.
-- **Task**: one intended outcome with its brief, checkout and PR chain.
+- **Task**: one intended outcome with its brief, checkout and optional pull request.
 - **Session**: one agent conversation, interactive or headless.
 - **Flow**: a Task's authored sequence of steps and reviews.
 - **Process**: one actual `lf` process.
@@ -36,9 +36,11 @@ lf pr reconcile                      # check delivery once; settle a verified me
 
 Publish makes a PR ready for review; it does not sync. Submit is
 for a reviewer to land; arm/land request auto-merge and return. Later reconciliation
-settles verified merges and normally completes the Task. Record accepted remaining
-work with `lf task follow-up` (outcome, evidence and next check); `--next <slug>`
-keeps additional PR work open and rotates its chain. Use the
+records verified merges. A merged Task completes after follow-through files
+accepted remaining obligations as linked Tasks or records none needed. `ship`
+waits with `lf land --wait-and-fix`, then performs that check; stopped finishing work is
+recovered by the next Task/Wave operation. A Task has zero or one PR; additional
+PRs belong to separate, optionally stacked Tasks. Use the
 selected delivery skill for preparation and recovery. `lf pr open` creates or
 updates a draft and opens its page; use it when the user asks to see the PR.
 It preserves an existing PR's readiness. Publish/submit/arm/land make drafts ready.

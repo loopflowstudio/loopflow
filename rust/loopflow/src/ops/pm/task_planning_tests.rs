@@ -12,9 +12,8 @@ use super::{PmRefresh, PM_TEST_CONTEXT};
 use crate::durable::WorkStatus;
 use crate::ops::NullProgress;
 use crate::work::task::{
-    AfterMerge, GithubObservation, GithubObservationResult, GithubPr, Observation,
-    PmWritebackState, PrMergeMode, PrMergeRequest, PrPhase, PrPresentation, PrPublication, Task,
-    TaskEventKind, TaskPr, TaskPrId,
+    GithubPr, Observation, PmWritebackState, PrMergeMode, PrMergeRequest, PrPhase, PrPresentation,
+    PrPublication, Task, TaskEventKind, TaskPr, TaskPrId,
 };
 
 async fn planning_repo(fixture: &Fixture) -> (PathBuf, crate::work::wave::Wave) {
@@ -230,7 +229,7 @@ async fn planning_graphql(
         } else {
             let mut issue = json!({"id":input["id"],"identifier":format!("FIX-{}",state.issues.len()+1),
                 "title":input["title"],"description":input["description"],"url":"https://fixture.invalid/task",
-                "branchName":null,"completedAt":null,"trashed":null,"prioritySortOrder":0.0,"sortOrder":0.0,"state":{"type":input["stateId"]},
+                "branchName":null,"completedAt":null,"dueDate":input["dueDate"],"trashed":null,"prioritySortOrder":0.0,"sortOrder":0.0,"state":{"type":input["stateId"]},
                 "assignee":null,"team":{"id":input["teamId"]},"project":{"id":input["projectId"],"name":"Local chapter"}});
             mark_issue_updated(&mut issue);
             state.issues.push(issue);
@@ -544,7 +543,7 @@ fn seed_provider_task(
         let id = format!("issue-{index}");
         state.issues.push(json!({
             "id":id,"identifier":format!("FIX-{index}"),"url":null,
-            "title":title,"description":description,"completedAt":null,
+            "title":title,"description":description,"completedAt":null,"dueDate":null,
             "prioritySortOrder":0.0,"sortOrder":index as f64,"assignee":null,"trashed":null,
             "updatedAt":"2026-09-29T12:00:00.123Z","state":{"type":"unstarted"},
             "team":{"id":"team-1"},"project":{"id":project,"name":"Chapter"}
@@ -599,7 +598,7 @@ fn task_deletion_active_sync_reconnect_retains_execution_and_history() {
         let conn = rusqlite::Connection::open(&fixture.database).unwrap();
         conn.execute_batch("PRAGMA foreign_keys=ON").unwrap();
         conn.execute(
-            "UPDATE tasks SET worktree=?2 WHERE id=?1",
+            "UPDATE tasks SET worktree=?2,branch='retain/branch',base_commit='retained-base' WHERE id=?1",
             rusqlite::params![task.id.as_str(), repo.to_str().unwrap()],
         )
         .unwrap();
@@ -1211,7 +1210,7 @@ fn task_abandonment_rolls_back_if_delivery_cannot_commit() {
 }
 
 #[test]
-fn task_completion_rolls_back_reason_and_decision_if_delivery_cannot_commit() {
+fn task_completion_retains_request_but_rolls_back_status_if_delivery_cannot_commit() {
     with_planning_task(|runtime, fixture, repo, task, state| {
         let conn = rusqlite::Connection::open(&fixture.database).unwrap();
         conn.execute_batch(
@@ -1222,13 +1221,9 @@ fn task_completion_rolls_back_reason_and_decision_if_delivery_cannot_commit() {
         let before = runtime
             .block_on(fixture.store.task_events_after(&task.id, 0))
             .unwrap();
-        let error = crate::ops::task::task_end(
-            repo,
-            task.id.as_str(),
-            Some("No partial decision"),
-            &Default::default(),
-        )
-        .unwrap_err();
+        let error =
+            crate::ops::task::task_complete(repo, task.id.as_str(), Some("No partial decision"))
+                .unwrap_err();
         assert!(error
             .to_string()
             .contains("fixture delivery storage failed"));
@@ -1242,12 +1237,19 @@ fn task_completion_rolls_back_reason_and_decision_if_delivery_cannot_commit() {
                 .unwrap(),
             WorkStatus::Ready
         );
-        assert_eq!(
-            runtime
-                .block_on(fixture.store.task_events_after(&task.id, 0))
-                .unwrap(),
-            before
-        );
+        let events = runtime
+            .block_on(fixture.store.task_events_after(&task.id, 0))
+            .unwrap();
+        assert_eq!(&events[..before.len()], before.as_slice());
+        assert_eq!(events.len(), before.len() + 1);
+        assert!(matches!(&events.last().unwrap().kind,
+            TaskEventKind::CompletionRequested { reason } if reason.as_deref() == Some("No partial decision")));
+        assert!(fixture
+            .store
+            .sqlite
+            .task_completion_pending(&task.id)
+            .unwrap()
+            .is_some());
         assert!(fixture.store.sqlite.workflow(&task.id).unwrap().is_none());
         assert!(fixture
             .store
@@ -1259,6 +1261,20 @@ fn task_completion_rolls_back_reason_and_decision_if_delivery_cannot_commit() {
             runtime.block_on(async { state.lock().await.completion_writes }),
             0
         );
+        conn.execute_batch("DROP TRIGGER fail_delivery").unwrap();
+        crate::ops::task::task_complete(repo, task.id.as_str(), None).unwrap();
+        assert!(fixture
+            .store
+            .sqlite
+            .task_completion_pending(&task.id)
+            .unwrap()
+            .is_none());
+        assert!(fixture
+            .store
+            .sqlite
+            .pending_task_state(&task.id)
+            .unwrap()
+            .is_some());
     });
 }
 
@@ -1272,13 +1288,7 @@ fn task_completion_ingestion_preserves_baseline_and_atomically_adopts_linear() {
             .unwrap()
             .record
             .unwrap();
-        crate::ops::task::task_end(
-            repo,
-            task.id.as_str(),
-            Some("Saved offline"),
-            &Default::default(),
-        )
-        .unwrap();
+        crate::ops::task::task_complete(repo, task.id.as_str(), Some("Saved offline")).unwrap();
         let delivery = fixture
             .store
             .sqlite
@@ -1395,7 +1405,7 @@ fn task_completion_ingestion_preserves_baseline_and_atomically_adopts_linear() {
                         .work_status(&crate::durable::WorkRef::Task(task.id.clone()))
                 )
                 .unwrap(),
-            WorkStatus::Done
+            WorkStatus::Ready
         );
         let conflict: String = conn
             .query_row(
@@ -1414,13 +1424,7 @@ fn task_completion_ingestion_preserves_baseline_and_atomically_adopts_linear() {
 #[test]
 fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
     with_planning_task(|runtime, fixture, repo, task, _state| {
-        crate::ops::task::task_end(
-            repo,
-            task.id.as_str(),
-            Some("Delivered"),
-            &Default::default(),
-        )
-        .unwrap();
+        crate::ops::task::task_complete(repo, task.id.as_str(), Some("Delivered")).unwrap();
         let completed = fixture
             .store
             .sqlite
@@ -1428,7 +1432,7 @@ fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
             .unwrap()
             .unwrap();
         assert!(fixture.store.sqlite.attempt_task_state(&completed).unwrap());
-        let process = crate::process::Process {
+        let process = crate::process::LfProcess {
             lfid: crate::id::ProcessLfid::new(),
             pid: None,
             trace_id: crate::id::TraceId::new(),
@@ -1452,6 +1456,17 @@ fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
             .sqlite
             .set_workflow_node(&task.id, "start", &process.lfid, Some("New scope"))
             .unwrap();
+        assert_eq!(
+            fixture
+                .store
+                .sqlite
+                .pending_task_state(&task.id)
+                .unwrap()
+                .unwrap()
+                .id,
+            completed.id
+        );
+        crate::ops::task::task_reopen(task.id.as_str(), Some("New scope")).unwrap();
         let reopened = fixture
             .store
             .sqlite
@@ -1538,13 +1553,8 @@ fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
 #[test]
 fn task_completion_active_sync_acquires_membership_while_delivery_is_pending() {
     with_planning_task(|runtime, fixture, repo, task, state| {
-        crate::ops::task::task_end(
-            repo,
-            task.id.as_str(),
-            Some("Saved during outage"),
-            &Default::default(),
-        )
-        .unwrap();
+        crate::ops::task::task_complete(repo, task.id.as_str(), Some("Saved during outage"))
+            .unwrap();
         runtime.block_on(async {
             let mut provider = state.lock().await;
             provider.issues[0]["state"] = json!({"type":"canceled"});
@@ -1585,7 +1595,7 @@ fn task_completion_active_sync_acquires_membership_while_delivery_is_pending() {
                                     .work_status(&crate::durable::WorkRef::Task(added.id.clone()))
                                     .await
                                     .unwrap(),
-                                WorkStatus::Ready
+                                WorkStatus::Done
                             );
                             assert!(fixture.store.sqlite.workflow(&added.id).unwrap().is_none());
                             break;
@@ -1603,7 +1613,7 @@ fn task_completion_active_sync_acquires_membership_while_delivery_is_pending() {
                     .work_status(&crate::durable::WorkRef::Task(task.id.clone()))
                     .await
                     .unwrap(),
-                WorkStatus::Done
+                WorkStatus::Ready
             );
         });
         drop(sync);
@@ -1765,13 +1775,7 @@ exit 0
                     },
                 )
                 .unwrap();
-            crate::ops::task::task_end(
-                repo,
-                task.id.as_str(),
-                Some("Saved offline"),
-                &Default::default(),
-            )
-            .unwrap();
+            crate::ops::task::task_complete(repo, task.id.as_str(), Some("Saved offline")).unwrap();
             let comment =
                 crate::ops::task::append_task_comment(&fixture.store, task, "Saved offline", true)
                     .unwrap();
@@ -1940,7 +1944,7 @@ exit 0
                             .work_status(&crate::durable::WorkRef::Task(other.id.clone()))
                     )
                     .unwrap(),
-                WorkStatus::Ready
+                WorkStatus::Done
             );
             assert!(fixture
                 .store
@@ -1977,13 +1981,7 @@ fn assert_completion_adopts_reopening(during_delivery: bool) {
                     .unwrap();
             });
         }
-        crate::ops::task::task_end(
-            repo,
-            task.id.as_str(),
-            Some("Delivered locally"),
-            &Default::default(),
-        )
-        .unwrap();
+        crate::ops::task::task_complete(repo, task.id.as_str(), Some("Delivered locally")).unwrap();
         let original = fixture
             .store
             .sqlite
@@ -2102,13 +2100,7 @@ fn task_completion_unseen_reopening_can_be_overwritten_by_unconditional_delivery
     // Jack Heart selected observed Linear-wins, not unseen-write atomicity.
     // Keep the original counterexample: no ownership read sees this reopening.
     with_planning_task(|runtime, fixture, repo, task, state| {
-        crate::ops::task::task_end(
-            repo,
-            task.id.as_str(),
-            Some("Delivered locally"),
-            &Default::default(),
-        )
-        .unwrap();
+        crate::ops::task::task_complete(repo, task.id.as_str(), Some("Delivered locally")).unwrap();
         let original = fixture
             .store
             .sqlite
@@ -2158,13 +2150,7 @@ fn task_completion_unseen_reopening_can_be_overwritten_by_unconditional_delivery
 #[test]
 fn task_completion_lost_reply_adopts_linear_reopening() {
     with_planning_task(|runtime, fixture, repo, task, state| {
-        crate::ops::task::task_end(
-            repo,
-            task.id.as_str(),
-            Some("Delivered"),
-            &Default::default(),
-        )
-        .unwrap();
+        crate::ops::task::task_complete(repo, task.id.as_str(), Some("Delivered")).unwrap();
         let original = fixture
             .store
             .sqlite
@@ -2207,6 +2193,13 @@ fn task_completion_lost_reply_adopts_linear_reopening() {
             .item;
         assert_eq!(adopted.state.as_deref(), Some("unstarted"));
         assert!(!adopted.completed);
+        assert!(fixture.store.sqlite.workflow(&task.id).unwrap().is_none());
+        assert!(fixture
+            .store
+            .sqlite
+            .task_completion_pending(&task.id)
+            .unwrap()
+            .is_none());
         assert_eq!(
             runtime
                 .block_on(
@@ -2215,7 +2208,7 @@ fn task_completion_lost_reply_adopts_linear_reopening() {
                         .work_status(&crate::durable::WorkRef::Task(task.id.clone()))
                 )
                 .unwrap(),
-            WorkStatus::Done
+            WorkStatus::Ready
         );
         // A delayed matching readback cannot erase an already observed collision.
         let mut late = adopted.clone();
@@ -2315,7 +2308,7 @@ fn assert_unplaced_completion_retry(lose_response: bool, uncached: bool) {
                 state.lock().await.issues.push(json!({
                     "id":"issue-1", "identifier":"FIX-1", "url":null,
                     "title":"Finish without checkout", "description":"Retain the completion",
-                    "completedAt":null, "prioritySortOrder":0.0, "sortOrder":0.0,
+                    "completedAt":null,"dueDate":null, "prioritySortOrder":0.0, "sortOrder":0.0,
                     "updatedAt":"2026-09-29T12:00:00.123Z", "assignee":null,
                     "state":{"type":"unstarted"}, "team":{"id":"team-1"},
                     "project":{"id":"project-1","name":"Chapter"}
@@ -2334,12 +2327,10 @@ fn assert_unplaced_completion_retry(lose_response: bool, uncached: bool) {
             provider.lose_completion = lose_response;
         });
         let complete = || {
-            crate::ops::task::workflow_set(
+            crate::ops::task::task_complete(
                 &repo,
                 &identifier,
-                "end",
                 Some("Delivered the requested outcome"),
-                &Default::default(),
             )
         };
         complete().unwrap();
@@ -2379,7 +2370,7 @@ fn assert_unplaced_completion_retry(lose_response: bool, uncached: bool) {
             1
         );
         assert_eq!(
-            events.iter().filter(|event| matches!(&event.kind, TaskEventKind::Progress { summary } if summary == "Delivered the requested outcome")).count(),
+            events.iter().filter(|event| matches!(&event.kind, TaskEventKind::CompletionRequested { reason } if reason.as_deref() == Some("Delivered the requested outcome"))).count(),
             1
         );
         assert_eq!(runtime.block_on(fixture.store.list_tasks(None)).unwrap().len(), 1);
@@ -2445,7 +2436,7 @@ fi
                 .block_on(fixture.store.get_project_by_project("project-1"))
                 .unwrap()
                 .unwrap();
-            let task = Task {
+            let mut task = Task {
                 id: runtime
                     .block_on(fixture.store.get_task_by_issue(&item.id))
                     .unwrap()
@@ -2464,6 +2455,9 @@ fi
                 project_id: project.id,
                 worktree: Some(repo.clone()),
                 workspace_slug: "completion".into(),
+                branch: crate::engine::git::current_branch(&repo).unwrap().unwrap(),
+                base_commit: crate::engine::git::rev_parse(&repo, "HEAD").unwrap(),
+                parent_pr_id: None,
                 abandon_intent: None,
                 created_at: timestamp,
                 updated_at: timestamp,
@@ -2489,10 +2483,15 @@ fi
                 created_at: timestamp,
                 updated_at: timestamp,
             };
-            runtime
-                .block_on(fixture.store.seed_task(&task, &pr))
+            task = runtime
+                .block_on(fixture.store.place_task(
+                    &task.id,
+                    &repo,
+                    &task.workspace_slug,
+                    &pr,
+                    None,
+                ))
                 .unwrap();
-            pr.abandoned_at = merge.is_none().then_some(timestamp);
             pr.publication = Some(PrPublication {
                 requested_at: timestamp,
                 presentation: merge.map(|_| PrPresentation {
@@ -2509,45 +2508,57 @@ fi
                     mode,
                     requested_at: timestamp,
                     head_sha: pr.base_commit.clone(),
-                    after_merge: AfterMerge::CompleteTask,
-                    next_slug: None,
                 }),
             });
-            pr.github_observation = merge.is_none().then_some(GithubObservation {
-                checked_at: timestamp,
-                result: GithubObservationResult::Fresh,
-            });
-            runtime.block_on(fixture.store.update_task_pr(&pr)).unwrap();
+            if merge.is_some() {
+                runtime.block_on(fixture.store.insert_task_pr(&pr)).unwrap();
+                // Observe the merge before recording the accepted disposition.
+                // Provider completion itself is the operation exercised below.
+                runtime
+                    .block_on(crate::ops::task::reconcile_delivered_task(
+                        &fixture.store,
+                        &mut task,
+                    ))
+                    .unwrap();
+                fixture
+                    .store
+                    .sqlite
+                    .finish_follow_through(
+                        &task.id,
+                        "Accepted checks complete; no later obligation",
+                        true,
+                    )
+                    .unwrap();
+            }
             task
         };
         let selector = task.id.as_str();
         let complete = |summary: &str| match merge {
             None | Some(PrMergeMode::User) => {
-                crate::ops::task::task_end(&repo, selector, Some(summary), &Default::default())
+                crate::ops::task::task_complete(&repo, selector, Some(summary))
             }
-            Some(PrMergeMode::Auto) => runtime.block_on(async {
-                let task = &task;
-                let pr = fixture.store.task_prs(&task.id).await.unwrap().remove(0);
-                let landing = crate::pr_landing::PrLanding::new(
-                    crate::pr_landing::NewPrLanding {
-                        repo: "loopflowstudio/fixture".into(),
-                        pr_number: 42,
-                        worktree: repo.clone(),
-                        branch: pr.branch,
-                        task_id: Some(task.id.clone()),
-                        requested_head_sha: pr.base_commit,
-                        after_merge: Some(AfterMerge::CompleteTask),
-                        next_slug: None,
-                    },
-                    time::OffsetDateTime::now_utc(),
-                )
-                .unwrap();
-                let settlement =
-                    crate::ops::task::settle_task_landing(&fixture.store, &landing).await;
-                let retained = fixture.store.get_task(&task.id).await.unwrap().unwrap();
-                settlement?;
-                Ok(retained)
-            }),
+            Some(PrMergeMode::Auto) => runtime
+                .block_on(async {
+                    let task = &task;
+                    let pr = fixture.store.task_prs(&task.id).await.unwrap().remove(0);
+                    let landing = crate::pr_landing::PrLanding::new(
+                        crate::pr_landing::NewPrLanding {
+                            repo: "loopflowstudio/fixture".into(),
+                            pr_number: 42,
+                            worktree: repo.clone(),
+                            branch: pr.branch,
+                            task_id: Some(task.id.clone()),
+                            requested_head_sha: pr.base_commit,
+                        },
+                        time::OffsetDateTime::now_utc(),
+                    )
+                    .unwrap();
+                    let settlement =
+                        crate::ops::task::settle_task_landing(&fixture.store, &landing).await;
+                    settlement?;
+                    Ok(())
+                })
+                .and_then(|()| crate::ops::task::task_complete(&repo, selector, Some(summary))),
         };
 
         let first = complete("Delivered the requested outcome").unwrap();
@@ -2705,6 +2716,9 @@ esac
                 project_id: project.id,
                 worktree: Some(checkout.clone()),
                 workspace_slug: "cancel-me".into(),
+                branch: "cancel-me".into(),
+                base_commit: git(&repo, &["rev-parse", "HEAD"]).trim().into(),
+                parent_pr_id: None,
                 abandon_intent: None,
                 created_at: timestamp,
                 updated_at: timestamp,
@@ -3758,6 +3772,7 @@ fn with_export_plan(
         .store
         .sqlite
         .create_task(&crate::planning::NewTask {
+            due_date: None,
             id: crate::durable::TaskId::new(),
             project_id: project,
             title: "Same title".into(),
@@ -3783,6 +3798,7 @@ fn planning_export_foreground_reconnect_keeps_distinct_saved_identities() {
             .store
             .sqlite
             .create_task(&crate::planning::NewTask {
+                due_date: None,
                 id: crate::durable::TaskId::new(),
                 project_id: task.project_id.clone(),
                 title: task.plan.title.clone(),
@@ -4155,6 +4171,7 @@ fn planning_export_removal_during_uncertain_creation_retains_identity() {
             .store
             .sqlite
             .create_task(&crate::planning::NewTask {
+                due_date: None,
                 id: crate::durable::TaskId::new(),
                 project_id: task.project_id.clone(),
                 title: "Remove offline".into(),

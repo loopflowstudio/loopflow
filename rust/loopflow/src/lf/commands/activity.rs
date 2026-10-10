@@ -466,8 +466,7 @@ fn print_snapshot(snapshot: &WorkActivitySnapshot) {
 mod tests {
     use super::*;
     use crate::work::task::{
-        AfterMerge, GithubPr, PrMergeMode, PrMergeRequest, PrPresentation, PrPublication, TaskId,
-        TaskPrId,
+        GithubPr, PrMergeMode, PrMergeRequest, PrPresentation, PrPublication, TaskId, TaskPrId,
     };
 
     #[test]
@@ -682,8 +681,6 @@ mod tests {
                     mode: PrMergeMode::Auto,
                     requested_at: OffsetDateTime::from_unix_timestamp(30).unwrap(),
                     head_sha: "head".to_string(),
-                    after_merge: AfterMerge::ContinueTask,
-                    next_slug: None,
                 }),
             }),
             merge_commit: Some("merge".to_string()),

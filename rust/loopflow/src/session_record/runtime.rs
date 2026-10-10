@@ -21,7 +21,7 @@ pub(crate) fn finish_session_driver(
         #[cfg(unix)]
         if provider.as_deref() == Some("codex") {
             if let (Some((endpoint, thread)), Some((pid, started))) = (connection, process) {
-                let serving = Some((endpoint.as_str(), thread.as_str()));
+                let serving = Some((endpoint.as_str(), &thread));
                 crate::harness::codex_connection::close_engine(serving, pid, started).map_err(
                     |error| {
                         StoreError::InvalidData(format!(
@@ -58,7 +58,7 @@ pub(super) fn end_abandoned_engine(
         let serving = connection
             .as_ref()
             .filter(|_| codex)
-            .map(|(endpoint, thread)| (endpoint.as_str(), thread.as_str()));
+            .map(|(endpoint, thread)| (endpoint.as_str(), thread));
         crate::harness::codex_connection::close_engine(serving, pid, started).map_err(|error| {
             StoreError::InvalidAuthority(format!(
                 "Conversation's previous engine (process {pid}) is still running and was not ended: {error}"

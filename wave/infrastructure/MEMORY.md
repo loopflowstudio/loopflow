@@ -219,14 +219,24 @@ Process `ef54b06d-9896-467f-a920-f8d4648f9d8b`, and interrupted research Process
 closure is not yet observed. LOO-378 is explicitly paused with substantial
 unpublished code retained, without deletion or delivery authorization.
 
-## Process vocabulary (LOO-400, 2026-10-07)
+## Execution ownership names (LOO-441, 2026-10-09)
 
-Jack Heart approved Process, LFID/PID and PR #1483 landing
-(`32c00054-4c60-4b96-bdf4-4d5f142ab881`). `process.lfid` is durable identity;
-optional `pid` is reusable. One draft preserves identities, parents, outcomes,
-unknown PIDs and historical JSON. Sequencer wire `process_id` still maps to Rust
-`process_lfid`. Fixtures establish no installed control authority; LOO-397 owns
-command placement. Exact evidence: `cbdb9a43b:wave/infrastructure/MEMORY.md`.
+Jack Heart selected LfSession/LfProcess; provider names remain LOO-442. He approved
+#1516 landing. The rename preserves wire/storage/fixtures, ProcessLfid,
+variants and product Session/Process; SQL/profiling retain historical names.
+`2b183c547` implements Rust/Swift/docs. Gate: fmt/Clippy pass; disk-blocked suites
+defer to CI. Installation unproved.
+LFID durable; PID reusable. LOO-400 history, mapping, placement and proofs:
+`6130a4eed:wave/infrastructure/MEMORY.md`, “Process vocabulary.”
+
+## Provider conversations (LOO-442, 2026-10-09)
+
+Jack approved #1517 landing October 9; `adf3f9e4b` integrates merged #1516.
+AgentSessionId has no table; retain history/account attribution, SQL/JSON bytes
+and Swift ids. LOO-443 owns engine/driver. Identity, Clippy, DTO and headless Swift
+checks pass. Gate fails: copied-shell retention exits -9; checkout-watch times out.
+Canonical TMPDIR resolves three fixture failures.
+Installation unproved.
 
 ## Terminal conversation recovery (LOO-409, 2026-10-07)
 
@@ -745,8 +755,8 @@ captures and manually transferred Tasks; import neither old turns nor driver aut
 
 September 29–30's detailed owner/compilation decisions and superseded schema
 proofs remain at `fe07245a3614334aea71dc40e802b54b47ccaf17:wave/infrastructure/MEMORY.md`
-under this heading. Current Process vocabulary supersedes Exec/FlowSession names:
-one actual lf Process, one durable AgentSession conversation and one compiled
+under this heading. Current vocabulary supersedes Exec/FlowSession names:
+one LfProcess, one durable LfSession conversation and one compiled
 Flow graph with step Processes. History has no independent lifecycle. Skill steps
 use ordinary `lf skill`; operations use their own commands. Parent means Process
 ancestry, matched to Session/provider generation and origin, never Task or Flow
@@ -903,20 +913,18 @@ unselected; a phase alone is not durable advancement evidence.
 
 ## Installation and checkout closure (LOO-292, 2026-10-04)
 
-Jack Heart closed LOO-292 on machine evidence; exact proofs and cadence:
-`86d0e5e6a2:wave/infrastructure/MEMORY.md`, this heading. Install owns artifacts,
-sync owns checkouts. Monday firing, coalesced wake and app acceptance remain
-unproved. Redundant download under load remains unexplained; reload stopped it
-without damage. Reinstall does not heal a truncated entry gate.
+Jack Heart closed LOO-292 on machine evidence; proofs and unresolved cadence/app
+checks: `86d0e5e6a2:wave/infrastructure/MEMORY.md`, this heading. Install owns
+artifacts, sync owns checkouts. Reload stopped unexplained redundant downloads;
+reinstall does not heal a truncated entry gate.
 
 ## Shipped history
 
-Historical installation, rebase/placement, PM, OAuth and cron delivery records
-remain in [main's preserved memory](https://github.com/loopflowstudio/loopflow/blob/52ab4a4a5cf1ec3c24b019d5cee3a1c782a30d9b/wave/infrastructure/MEMORY.md#shipped).
-Current command, Task ownership and installation contracts above supersede their
-old names and execution models. Cron continuity judges each latest due interval
-against an exact scheduled receipt; manual receipts do not prove firing, while
-failed scheduled targets do. Historical gap days do not keep later telemetry red.
+Historical delivery records:
+`4b4ad05186e85ba8a48924a6294ba9ec2e6df65f:wave/infrastructure/MEMORY.md`,
+this heading and its archive link. Current contracts supersede history.
+Cron continuity judges the latest due against exact scheduled receipts; manual
+runs prove no firing, and old gaps do not keep later telemetry red.
 
 ## Gotchas
 
@@ -992,11 +1000,9 @@ invented completion date. No fourth user-facing planning noun was selected.
 
 ## Earlier follow-ups (reselect through the accepted chapter)
 
-Historical suggestions remain at
-`d281370191844294ce0ad877752f2aa6a6402282:wave/infrastructure/MEMORY.md#earlier-follow-ups-reselect-through-the-accepted-chapter`;
-they authorize no current work or retired owners. PR #818 resolved rebase-efficiency
-follow-ups. Measure command drift, avoidable rebases and post-land repairs before
-tuning policy; the synthetic harness remains unbuilt. Jack Heart's July 6
+Unselected suggestions, #818's resolved rebase work and the unbuilt policy
+harness: `adf3f9e4b:wave/infrastructure/MEMORY.md`, this heading. Measure drift
+before tuning; archived notes authorize no work. Jack Heart's July 6
 “up/down 5ths” referent remains unresolved and deferred.
 
 ## Direct invocation and large inputs (curated 2026-10-09)

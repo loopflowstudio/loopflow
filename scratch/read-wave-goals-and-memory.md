@@ -96,3 +96,5 @@ and full memory were read; the operation-entry lesson above remains applicable,
 with release-specific history retained there.
 
 Checks: `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, and `cargo test -p loopflow --lib <filter> -- --test-threads=1` with `work::wave::config::tests` (8) and `wave_summary_sync_reads_committed_default_branch` (1) pass; broader/platform/installed acceptance remains with gate/CI.
+
+Sync check: `cargo test -p loopflow --lib wave_summary_sync_reads_committed_default_branch -- --test-threads=1` (LF_* unset, stdin closed) passes after reconciling main’s Git module move and retaining the revision-file reader; broader checks remain with gate/CI.

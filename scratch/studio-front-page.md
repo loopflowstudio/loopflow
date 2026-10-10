@@ -468,3 +468,21 @@ gone; his rule is that the noun is defined once and not extended.
 Jack Heart on "It doesn't make the software for you; you make the software
 through it.": "I like that yeah". It stays as the first line under the
 subheader.
+
+Jack Heart: "we should compare this to human layer and figure out how to
+collapse what you ve done a little bit and explain how this is totally
+configurable. we are not humanlayer -- they embed one arbitrary process."
+
+HumanLayer's page (humanlayer.dev, read through a summarizer on 2026-10-10):
+"The Multiplayer Coding Agent Workspace"; a team IDE and cloud; a six-phase
+process it names QRSPI (questions, research, design, structure, plan,
+implement) with a few variants picked per task; its FAQ says you cannot yet
+bring your own skills or workflows; not open source; a paid Pro tier. It
+carries the lines "Do not outsource the thinking" and "no more slop", which
+sit close to two of Jack Heart's sentences on our page.
+
+`x8-yours.html` (built by `x8-build.py`): the walk-through is four figures,
+down from six, and a new section follows it, "That was one workflow. It is a
+file.", with Jack Heart's "Every Task ends shipped" sentence, the real
+`feature.yaml`, and the three built-in workflows beside a fourth row for your
+own. HumanLayer is not named on the page. `x7` is kept for comparison.

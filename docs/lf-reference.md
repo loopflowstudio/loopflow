@@ -1188,18 +1188,6 @@ Manage Wave identity, placement and planning
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
-## lf wave edit
-
-Replace stored Wave documents without modifying repository files
-
-| Argument | What it does |
-|---|---|
-| `<wave>` | wave |
-| `--goal` | goal |
-| `--memory` | memory |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
-| `--help / -h` | Print help |
-
 ## lf wave new-chapter
 
 Rotate this Wave using its exact destination in a retained chapter plan
@@ -1463,7 +1451,7 @@ List Workflow definitions, including unavailable local files
 
 | Argument | What it does |
 |---|---|
-| `--project` | Include this Project's stored Wave definitions |
+| `--project` | Include this Project's stored Wave Workflow definitions |
 | `--json` | json Default: false. |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
@@ -1846,7 +1834,7 @@ Show effective context budgets, their sources, and current source usage
 |---|---|
 | `--json` | json Default: false. |
 | `--wave` | Inspect a Wave's local authored context |
-| `--task` | Inspect a Task's checkout and locally stored goal |
+| `--task` | Inspect a Task's checkout and goal files |
 | `--skill` | Skill to include in the launch preview Default: realign. |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |

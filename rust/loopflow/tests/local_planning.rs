@@ -341,7 +341,7 @@ fn stored_rotation_commits_all_waves_and_serializes_new_work() {
         assert!(project == destination || project == &predecessors[0]["id"]);
         assert!(status["execution"]["worktree"].is_null());
     }
-    assert!(!repo.path().join("wave").exists());
+    assert!(repo.path().join("wave").exists());
 }
 
 #[test]
@@ -490,7 +490,7 @@ fn stored_fields_preserve_order_assignment_and_project_summary() {
 }
 
 #[test]
-fn stored_nested_waves_keep_definitions_and_projects_in_the_store() {
+fn nested_waves_create_files_and_store_project_identity() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let created = lf(
@@ -590,7 +590,7 @@ fn stored_nested_waves_keep_definitions_and_projects_in_the_store() {
         ],
     );
     assert!(by_id["id"].as_str().unwrap().starts_with("task_"));
-    assert!(!repo.path().join("wave").exists());
+    assert!(repo.path().join("wave").exists());
     assert!(!repo.path().join(".lf/config.yaml").exists());
     assert!(!repo.path().join(".lf/workflows").exists());
 }
@@ -739,23 +739,10 @@ fn public_local_planning_survives_restart_with_generated_identity() {
     );
     assert_eq!(wave["tasks"]["items"].as_array().unwrap().len(), 2);
     assert_eq!(wave["project_readiness"]["state"], "ready");
-    let goal = home.path().join("goal.md");
-    let memory = home.path().join("memory.md");
+    let goal = repo.path().join("wave/inbox/GOAL.md");
+    let memory = repo.path().join("wave/inbox/MEMORY.md");
     std::fs::write(&goal, "## Objective\n\nKeep private parser work local.\n").unwrap();
     std::fs::write(&memory, "Retain the escaped quote.").unwrap();
-    lf(
-        repo.path(),
-        home.path(),
-        &[
-            "wave",
-            "edit",
-            "inbox",
-            "--goal",
-            goal.to_str().unwrap(),
-            "--memory",
-            memory.to_str().unwrap(),
-        ],
-    );
     let context = lf(
         repo.path(),
         home.path(),
@@ -876,7 +863,7 @@ fn public_local_planning_survives_restart_with_generated_identity() {
     .output()
     .unwrap();
     assert!(!rejected.status.success());
-    assert!(!repo.path().join("wave").exists());
+    assert!(repo.path().join("wave").exists());
     assert!(!repo.path().join(".lf/config.yaml").exists());
     assert!(!repo.path().join(".lf/workflows").exists());
     let changed = Command::new("git")
@@ -1238,7 +1225,7 @@ fn project_creation_binding_and_activation_save_offline() {
             )
             .unwrap()
             .is_none());
-        assert!(!repo.path().join("wave").exists());
+        assert!(repo.path().join("wave").exists());
         assert_eq!(store.list_projects(Some(wave.id())).unwrap().len(), 1);
     }
 }
@@ -2131,7 +2118,7 @@ fn rotation_saves_membership_and_pending_effects_offline() {
                 loopflow::store::PlanningState::Available
             );
         }
-        assert!(!repo.path().join("wave").exists());
+        assert!(repo.path().join("wave").exists());
     }
 }
 
@@ -2325,12 +2312,12 @@ fn refiling_saves_membership_offline_and_retains_inbound_changes() {
             projects[if mapped { 2 } else { 1 }].id
         );
         assert_eq!(store.pending_task_changes(&task.id).unwrap(), pending);
-        assert!(!repo.path().join("wave").exists());
+        assert!(repo.path().join("wave").exists());
     }
 }
 
 #[test]
-fn wave_definitions_import_once_and_relocate_without_rewriting_files() {
+fn wave_documents_follow_files_while_workflows_remain_stored() {
     for connected in [false, true] {
         let repo = TestRepo::new();
         let home = tempfile::tempdir().unwrap();
@@ -2385,32 +2372,7 @@ fn wave_definitions_import_once_and_relocate_without_rewriting_files() {
             home.path(),
             &["project", "workflow", "set", project_id, "finish"],
         );
-        let memory = home.path().join("memory.md");
-        std::fs::write(&memory, "Saved child memory λ.\n").unwrap();
-        lf(
-            repo.path(),
-            home.path(),
-            &[
-                "wave",
-                "edit",
-                "tools/parser",
-                "--memory",
-                memory.to_str().unwrap(),
-            ],
-        );
-        std::fs::write(
-            root.join("parser/MEMORY.md"),
-            "Later file must not replace saved memory.\n",
-        )
-        .unwrap();
-        lf(
-            repo.path(),
-            home.path(),
-            &["wave", "ensure", "tools/parser", "--json"],
-        );
-        assert_eq!(std::fs::read_to_string(root.join("GOAL.md")).unwrap(), goal);
-        std::fs::rename(repo.path().join("wave"), repo.path().join("authored-wave")).unwrap();
-        std::fs::remove_file(repo.path().join(".lf/workflows/finish.yaml")).unwrap();
+        std::fs::write(root.join("parser/MEMORY.md"), "Edited child memory λ.\n").unwrap();
         let context = lf(
             repo.path(),
             home.path(),
@@ -2419,16 +2381,15 @@ fn wave_definitions_import_once_and_relocate_without_rewriting_files() {
         let text = context.to_string();
         assert!(text.contains("wave/tools/MEMORY.md"), "{text}");
         assert!(text.contains("wave/tools/parser/MEMORY.md"), "{text}");
-        let store =
-            loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
-        assert_eq!(
-            store.wave_documents(&wave_id).unwrap()["MEMORY.md"],
-            "Inherited decisions.\n"
+        assert_eq!(std::fs::read_to_string(root.join("GOAL.md")).unwrap(), goal);
+        std::fs::rename(repo.path().join("wave"), repo.path().join("authored-wave")).unwrap();
+        std::fs::remove_file(repo.path().join(".lf/workflows/finish.yaml")).unwrap();
+        let absent = lf(
+            repo.path(),
+            home.path(),
+            &["context", "--wave", "tools/parser", "--json"],
         );
-        let saved = store.task_by_issue(task_id).unwrap().unwrap();
-        let docs = store.wave_documents(&saved.wave_id).unwrap();
-        assert_eq!(docs["MEMORY.md"], "Saved child memory λ.\n");
-        assert_eq!(docs["README.md"], "Additional authored context.\n");
+        assert!(!absent.to_string().contains("wave/tools/parser/MEMORY.md"));
         let source = lf(
             repo.path(),
             home.path(),
@@ -2479,7 +2440,7 @@ fn wave_definitions_import_once_and_relocate_without_rewriting_files() {
             home.path(),
             &["wave", "status", "instruments/parser", "--json"],
         );
-        assert_eq!(status["wave"]["goal"], "Preserve tokens.");
+        assert_eq!(status["wave"]["goal"], "");
         assert_eq!(status["tasks"]["items"][0]["task"]["id"], task_id);
         assert!(!repo.path().join("wave").exists());
         assert_eq!(
@@ -2732,4 +2693,70 @@ fn planning_sync_tracks_creation_errors_uncertainty_conflicts_and_settlement() {
             .unwrap()
             .is_empty()
     );
+}
+
+#[test]
+fn wave_files_are_checkout_local_and_edits_reach_status_without_ensure() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let checkout = repo.create_named_worktree("wave-documents");
+    lf(
+        &checkout,
+        home.path(),
+        &["wave", "ensure", "local", "--json"],
+    );
+    let goal = checkout.join("wave/local/GOAL.md");
+    let memory = checkout.join("wave/local/MEMORY.md");
+    assert!(goal.is_file());
+    assert!(memory.is_file());
+    assert!(
+        !repo.path().join("wave/local").exists(),
+        "creation must not write main"
+    );
+    std::fs::write(&goal, "## Objective\n\nThe checkout objective.\n").unwrap();
+    std::fs::write(&memory, "A freshly edited decision.").unwrap();
+    let status = lf(
+        &checkout,
+        home.path(),
+        &["wave", "status", "local", "--json"],
+    );
+    assert_eq!(status["wave"]["goal"], "The checkout objective.");
+    let listing = lf(&checkout, home.path(), &["wave", "list", "--json"]);
+    assert_eq!(listing[0]["goal"], "The checkout objective.");
+    let main = lf(
+        repo.path(),
+        home.path(),
+        &["wave", "status", "local", "--json"],
+    );
+    assert_eq!(
+        main["wave"]["goal"], "",
+        "no other checkout or stored fallback"
+    );
+    let context = lf(
+        &checkout,
+        home.path(),
+        &["context", "--wave", "local", "--json"],
+    );
+    let usage = context["context"]["usage"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["source"] == "wave/local/MEMORY.md")
+        .unwrap();
+    assert_eq!(usage["original_bytes"], "A freshly edited decision.".len());
+    let removed = command(
+        &checkout,
+        home.path(),
+        &[
+            "wave",
+            "edit",
+            "local",
+            "--memory",
+            memory.to_str().unwrap(),
+        ],
+    )
+    .output()
+    .unwrap();
+    assert!(!removed.status.success());
+    assert!(String::from_utf8_lossy(&removed.stderr).contains("unrecognized subcommand 'edit'"));
 }

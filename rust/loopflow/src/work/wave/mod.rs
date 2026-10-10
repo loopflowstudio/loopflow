@@ -187,7 +187,7 @@ pub async fn ensure_wave_row(
         .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))?;
     let id = store
         .sqlite
-        .ensure_wave(&locator.repo().to_string(), locator.slug())?;
+        .ensure_wave(&repo.to_string_lossy(), locator.slug())?;
     store
         .get_wave(&id)
         .await?

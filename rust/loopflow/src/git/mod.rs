@@ -937,6 +937,17 @@ pub(crate) fn worktree_add_inheriting(
     Ok(())
 }
 
+/// Read a file's contents at a given revision.
+/// Returns `None` if the path does not exist at that revision.
+pub fn show_file(repo: &Path, rev: &str, path: &str) -> Result<Option<String>, GitError> {
+    let output = run_git(repo, &["show", &format!("{rev}:{path}")])?;
+    if output.status.success() {
+        Ok(Some(String::from_utf8_lossy(&output.stdout).into_owned()))
+    } else {
+        Ok(None)
+    }
+}
+
 /// Get the SHA for a ref (branch, tag, HEAD, etc.).
 pub fn rev_parse(repo: &Path, refspec: &str) -> Result<String, GitError> {
     let sha = git_stdout(repo, &["rev-parse", refspec])?

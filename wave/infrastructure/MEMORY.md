@@ -72,13 +72,21 @@ Newer explicitly active Linear evidence restores visibility and retains the lose
 inventory grants neither restoration nor execution authority. Exact slice proofs:
 `078a6642e:wave/infrastructure/MEMORY.md`, this heading; installed acceptance is unproved.
 
-SQLite owns Wave definitions/relocation, preserving IDs, files, execution, PRs,
-checkouts and uncertain effects. Personal owners and provider-first deletion stay
-removed; Project IDs precede slugs. Common-writer boundary: `84664e661`;
-earlier proofs: `bbc6eb8d3:wave/infrastructure/MEMORY.md`, this heading.
-`e68f2a423` exports saved UUIDs. Separate creation/link attempts retain uncertainty
-without replay; identity attachment precedes inventory and preserves later saves.
-Composed/installed export acceptance is unproved.
+Jack Heart's LOO-449 decision makes checkout files own goal, memory and ancestor
+Markdown; edit directly, without a document cache or CLI. Canonical identity
+cannot redirect bytes. SQLite retains identity/execution; `wave_workflows` retains
+Project selection and Task capture. Registry relocation preserves files in place;
+authoring moves them. Gate repaired fixtures assuming automatic document movement
+or registration before reading, plus stale prompt goldens.
+Jack's October 10 decision makes Linear sync pin one committed local default-branch
+revision, never fetch or fall back; local views stay checkout-based. Mocked sync,
+checkout and stand-in launch proofs preserve LOO-444; installed acceptance remains
+unproved. Jack approved #1521 and landing with the default-branch fix (`05b04fa8`).
+Plan: `scratch/read-wave-goals-and-memory.md`.
+
+LOO-406's common writer boundary is `84664e661`; `e68f2a423` exports saved UUIDs.
+Separate creation/link attempts retain uncertainty without replay; identity attachment
+precedes inventory, preserving later saves. Export acceptance remains unproved. Prior proofs: `906576f39:wave/infrastructure/MEMORY.md`, this heading.
 
 Jack selected Git-like Task prefixes: four or more hex digits, bare or prefixed;
 reject ambiguity, retain full IDs and lengthen display abbreviations as needed.
@@ -301,14 +309,10 @@ Earlier cleanup history: `66da3fdf7:wave/infrastructure/MEMORY.md` under
 
 ## Project configuration and review direction (2026-10-05)
 
-LOO-366's October 5 decisions are under Optional chapters and Task workflows;
-source and configured acceptance remain unfinished. Infrastructure recommends
-`code`; KRs and reviews remain. Earlier evidence, including v0.13.3 review:
-`470382987:wave/infrastructure/MEMORY.md` under this heading.
-LOO-326 and LOO-370 completed October 6 under the decisions below. LOO-367's
-retry recorded boot witness 819671 but stopped on that same boot; preserve its
-conversation and saved Flow. A later authorized restart, not unchanged evidence,
-can establish old-provider death. No successful continuation is claimed.
+LOO-366 remains unfinished under Optional chapters below; LOO-326/370 completed.
+LOO-367's retry retained boot witness 819671 and stopped on that boot. Preserve
+its conversation/Flow; only an authorized restart supplies new death evidence.
+Prior recommendations and review: `906576f39:wave/infrastructure/MEMORY.md`, this heading.
 
 ## Release follow-through (reconciled 2026-10-05)
 
@@ -918,9 +922,7 @@ reinstall does not heal a truncated entry gate.
 
 ## Shipped history
 
-Historical delivery records:
-`4b4ad05186e85ba8a48924a6294ba9ec2e6df65f:wave/infrastructure/MEMORY.md`,
-this heading and its archive link. Current contracts supersede history.
+Archive: `c756414c8:wave/infrastructure/MEMORY.md`, this heading.
 Cron continuity judges the latest due against exact scheduled receipts; manual
 runs prove no firing, and old gaps do not keep later telemetry red.
 
@@ -998,10 +1000,9 @@ invented completion date. No fourth user-facing planning noun was selected.
 
 ## Earlier follow-ups (reselect through the accepted chapter)
 
-Unselected suggestions, #818's resolved rebase work and the unbuilt policy
-harness: `adf3f9e4b:wave/infrastructure/MEMORY.md`, this heading. Measure drift
-before tuning; archived notes authorize no work. Jack Heart's July 6
-“up/down 5ths” referent remains unresolved and deferred.
+Unselected suggestions and #818's resolved work: `adf3f9e4b:wave/infrastructure/MEMORY.md`,
+this heading. Archived proposals authorize no work. Jack Heart's July 6 “up/down
+5ths” referent remains unresolved.
 
 ## Direct invocation and large inputs (curated 2026-10-08)
 

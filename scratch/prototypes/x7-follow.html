@@ -49,7 +49,7 @@
 @media (max-width:900px){.x5 .wf{flex-direction:column;align-items:stretch;gap:12px}.x5 .wf .node{flex:none}.x5 .wf .edge i{width:2px;height:22px;margin:0 auto}.x5 .wf .edge i::after{right:-4px;top:auto;bottom:-1px;border-top:8px solid #b9b1a6;border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:0}}
 
 .walk{padding-top:64px}.walk h2{font-size:clamp(30px,3.2vw,42px);margin:0 0 10px}.home-page .walk .say{font-size:18px;line-height:1.6;color:#333;margin:0 0 30px;max-width:720px}
-.walk .figs{list-style:none;margin:0;padding:0;border-top:1px solid var(--border)}
+.home-page .walk .say:not(.lead){margin-bottom:12px}.walk .figs{list-style:none;margin:0;padding:0;border-top:1px solid var(--border)}
 .walk .figs>li{list-style:none;margin:0;display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:24px 56px;align-items:center;padding:34px 0;border-bottom:1px solid var(--border)}
 .walk .capt span{font:500 11px var(--font-mono);text-transform:uppercase;letter-spacing:.1em;color:var(--burgundy)}
 .walk .capt h3{font:400 clamp(26px,2.6vw,34px)/1.12 var(--font-serif);letter-spacing:-.015em;margin:8px 0 10px}
@@ -148,8 +148,9 @@
   </div>
 </section>
 <section class="walk">
-  <h2>From a rambling idea to a set of merged pull requests.</h2>
-  <p class="say">Coding with agents is about empowering people, not delegating the thinking to robots. That is why we call Loopflow a software instrument: you play it, and what comes out is yours. Your agent does the building. You decide what to make, and whether it is right. Here is one Task, followed from start to end.</p>
+  <h2>Loopflow is a software instrument.</h2>
+  <p class="say">Coding with agents is about empowering people, not delegating the thinking to robots. An instrument is something you play, and what comes out is yours. Your agent does the building. You decide what to make, and whether it is right.</p>
+  <p class="say lead">Here is how it goes, from a rambling idea to a set of merged pull requests.</p>
   <ol class="figs">
 <li><div class="capt"><span>Fig. 1</span><h3>A Wave</h3><p>A Wave is a persistent workstream with an objective. Tasks come and go under it, and the Wave keeps its key results, its plan, and its memory.</p></div><div class="card"><p class="wname">Exports</p><p class="wobj">People can get their data out of the app in the form they need it, without asking us.</p><p class="lab">Key results</p><ul class="krs"><li>Half of active accounts export something each month.</li><li>No support request asks us for a data dump.</li></ul></div></li>
 <li><div class="capt"><span>Fig. 2</span><h3>The work, written down</h3><p>Say what you want and Loopflow writes it down as Tasks, in words you already use. Each one states what will be true when it is done. Change it, and that is what your agent works from.</p></div><div class="card"><p class="trow"><b>Add CSV export</b><span class="pos ">start</span><span class="id">EXP-12</span></p><p class="strip"><span class="now">start</span><span class="next">task-design</span><span class="next">design</span><span class="next">pursue</span><span class="next">demo</span><span class="next">ship</span><span class="next">end</span></p><div class="doc"><b>Done when</b><p>Anyone can download the table they are looking at as a CSV file, with their filters applied.</p></div></div></li>

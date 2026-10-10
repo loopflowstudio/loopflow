@@ -74,8 +74,9 @@ main = f'''
   </div>
 </section>
 <section class="walk">
-  <h2>From a rambling idea to a set of merged pull requests.</h2>
-  <p class="say">Coding with agents is about empowering people, not delegating the thinking to robots. That is why we call Loopflow a software instrument: you play it, and what comes out is yours. Your agent does the building. You decide what to make, and whether it is right. Here is one Task, followed from start to end.</p>
+  <h2>Loopflow is a software instrument.</h2>
+  <p class="say">Coding with agents is about empowering people, not delegating the thinking to robots. An instrument is something you play, and what comes out is yours. Your agent does the building. You decide what to make, and whether it is right.</p>
+  <p class="say lead">Here is how it goes, from a rambling idea to a set of merged pull requests.</p>
   <ol class="figs">
 {FIGS}
   </ol>
@@ -105,7 +106,7 @@ main = f'''
 '''
 extra = '''
 .walk{padding-top:64px}.walk h2{font-size:clamp(30px,3.2vw,42px);margin:0 0 10px}.home-page .walk .say{font-size:18px;line-height:1.6;color:#333;margin:0 0 30px;max-width:720px}
-.walk .figs{list-style:none;margin:0;padding:0;border-top:1px solid var(--border)}
+.home-page .walk .say:not(.lead){margin-bottom:12px}.walk .figs{list-style:none;margin:0;padding:0;border-top:1px solid var(--border)}
 .walk .figs>li{list-style:none;margin:0;display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:24px 56px;align-items:center;padding:34px 0;border-bottom:1px solid var(--border)}
 .walk .capt span{font:500 11px var(--font-mono);text-transform:uppercase;letter-spacing:.1em;color:var(--burgundy)}
 .walk .capt h3{font:400 clamp(26px,2.6vw,34px)/1.12 var(--font-serif);letter-spacing:-.015em;margin:8px 0 10px}

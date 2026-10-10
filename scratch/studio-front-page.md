@@ -441,3 +441,8 @@ Jack Heart on the subheader: "From a voice note to a set of merged pull
 requests?" then "From a rambling idea?" The `x7` subheader is "From a rambling
 idea to a set of merged pull requests." No voice input was found in the code,
 so "voice note" would have been a claim the product does not back.
+Jack Heart: "From a rambling idea to a set of merged pull requests. I think
+this should be Loopflow is a software instrment. Then launch into what we mean
+by that". The `x7` subheader is "Loopflow is a software instrument.", the
+thesis under it says what that means, and the rambling-idea line introduces
+the figures.

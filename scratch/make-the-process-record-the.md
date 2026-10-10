@@ -21,6 +21,8 @@ still locate terminals and support exact client controls; only conversations wit
 no AgentProcess use them for Session state. Activity and terminal reports describe
 attention only after positive process liveness. Attachment tokens remain necessary
 for handoff/write fencing; process death does not rotate them.
+AgentProcess evidence no longer reads lf receipt files. Waiting joins its process
+once for completion and attachment fencing; summary decoding uses a direct branch.
 
 Input completion reads its latest recorded turn's LfProcess (the capture owner
 before any turn), not a later attachment's exit. Review found preparation can exit
@@ -43,4 +45,4 @@ an ended record with an answering socket, missing input exit events, handoff fen
 unknown replacement attention and shared state variants. These do not prove installed
 acceptance. Unknown timeout remains unselected; no delivery or installation requested.
 
-Checks: `cargo test -p loopflow --lib` with focused activity/history/connection/state/watch filters (41 tests), `swift test --package-path swift --filter sessionStatesFixture` (1), `cargo fmt` and `cargo clippy --all-targets -- -D warnings` pass; gate/CI own broader composed acceptance.
+Checks: `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and network-isolated `cargo test -p loopflow --lib` filters `program_status` (5) / `uncertain_records_stay_visible_and_share_the_gate_judgment` (1) pass; prior unchanged Swift fixture pass retained, gate/CI own composed acceptance.

@@ -340,3 +340,5 @@ Earlier native-util/planning-reconnect, 16-test isolated lifecycle and typed-ide
 sync checks are retained at `e87e9d643`, this plan.
 
 Check: `cargo test -p loopflow --lib --test process_ownership_tests --no-run`, network-isolated OS/reaper/Codex-close/resume/top and scheduled-entry tests (21), `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and diff checks pass; full Rust/Swift/DTO/materialized/Linux verification remains gate/CI-owned. Earlier focused results: `16415389c`, this plan.
+
+Check: sync with main `906576f39` retained both Swift fixture additions; `scripts/test_desktop.sh --filter 'DTOFixtureTests/(activityFixture|composedTaskLifecycle|taskDeliveryFixture)'` passes (3) after adding AgentProcess-cutover fields to main's new lifecycle fixture; broader verification remains gate/CI-owned.

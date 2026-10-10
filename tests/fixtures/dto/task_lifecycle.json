@@ -825,6 +825,7 @@
           ],
           "processes": [
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"monitor\",\"work\",\"--watch\",\"--json\"]",
@@ -832,7 +833,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": null,
+              "kind": "lf",
               "lfid": "080f4a6a-2f88-4ab2-9d88-224fc175ebfa",
+              "os_started_at": null,
               "outcome": null,
               "parent_process_lfid": null,
               "pid": 718,
@@ -843,6 +846,7 @@
               "via_agent": false
             },
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"task\",\"status\",\"FIX-1\",\"--json\"]",
@@ -850,7 +854,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": null,
+              "kind": "lf",
               "lfid": "0ff0aa7d-45a4-4195-901a-b010753356c4",
+              "os_started_at": null,
               "outcome": null,
               "parent_process_lfid": null,
               "pid": 832,
@@ -861,6 +867,7 @@
               "via_agent": false
             },
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"roadmap\",\"--all\",\"--json\"]",
@@ -868,7 +875,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": 0,
+              "kind": "lf",
               "lfid": "1326759d-5aba-4e42-85fe-4679098be44e",
+              "os_started_at": null,
               "outcome": "succeeded",
               "parent_process_lfid": null,
               "pid": 445,
@@ -879,6 +888,7 @@
               "via_agent": false
             },
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"task\",\"complete\",\"FIX-1\"]",
@@ -886,7 +896,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": 0,
+              "kind": "lf",
               "lfid": "39204cee-2ff2-419c-a846-18a5b1f564b8",
+              "os_started_at": null,
               "outcome": "succeeded",
               "parent_process_lfid": "e96e3d37-09ff-44ed-9145-137cc7ed295a",
               "pid": 769,
@@ -897,6 +909,7 @@
               "via_agent": false
             },
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"monitor\",\"work\",\"--watch\",\"--json\"]",
@@ -904,7 +917,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": null,
+              "kind": "lf",
               "lfid": "3ef9f337-4fa1-43b7-a1fb-989ce3f66b0e",
+              "os_started_at": null,
               "outcome": null,
               "parent_process_lfid": null,
               "pid": 479,
@@ -915,6 +930,7 @@
               "via_agent": false
             },
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
@@ -922,7 +938,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": 0,
+              "kind": "lf",
               "lfid": "71a05586-d662-4271-9da6-d4352ebab200",
+              "os_started_at": null,
               "outcome": "succeeded",
               "parent_process_lfid": null,
               "pid": 243,
@@ -933,6 +951,7 @@
               "via_agent": false
             },
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"__telemetry-scorecard\"]",
@@ -940,7 +959,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": 0,
+              "kind": "lf",
               "lfid": "83496037-a550-44c9-9557-d3f451dc42d8",
+              "os_started_at": null,
               "outcome": "succeeded",
               "parent_process_lfid": "e96e3d37-09ff-44ed-9145-137cc7ed295a",
               "pid": 353,
@@ -951,6 +972,7 @@
               "via_agent": false
             },
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"roadmap\",\"--all\",\"--json\"]",
@@ -958,7 +980,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": 0,
+              "kind": "lf",
               "lfid": "88dcf25c-d928-45d3-b244-979ac3fdfe42",
+              "os_started_at": null,
               "outcome": "succeeded",
               "parent_process_lfid": null,
               "pid": 682,
@@ -969,6 +993,7 @@
               "via_agent": false
             },
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"task\",\"status\",\"FIX-1\",\"--json\"]",
@@ -976,7 +1001,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": 0,
+              "kind": "lf",
               "lfid": "b9540953-38e5-4558-b978-3d534b7d836d",
+              "os_started_at": null,
               "outcome": "succeeded",
               "parent_process_lfid": null,
               "pid": 603,
@@ -987,6 +1014,7 @@
               "via_agent": false
             },
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"task\",\"status\",\"FIX-1\",\"--json\"]",
@@ -994,7 +1022,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": 0,
+              "kind": "lf",
               "lfid": "bf6962d1-c6e8-4059-8da5-873f07969d47",
+              "os_started_at": null,
               "outcome": "succeeded",
               "parent_process_lfid": null,
               "pid": 366,
@@ -1005,6 +1035,7 @@
               "via_agent": false
             },
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"--batch\",\"--task\",\"FIX-1\",\"run\",\"delivery\"]",
@@ -1012,7 +1043,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": 0,
+              "kind": "lf",
               "lfid": "e96e3d37-09ff-44ed-9145-137cc7ed295a",
+              "os_started_at": null,
               "outcome": "succeeded",
               "parent_process_lfid": "71a05586-d662-4271-9da6-d4352ebab200",
               "pid": 307,
@@ -1260,6 +1293,7 @@
           ],
           "processes": [
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"monitor\",\"work\",\"--watch\",\"--json\"]",
@@ -1267,7 +1301,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": null,
+              "kind": "lf",
               "lfid": "080f4a6a-2f88-4ab2-9d88-224fc175ebfa",
+              "os_started_at": null,
               "outcome": null,
               "parent_process_lfid": null,
               "pid": 718,
@@ -1278,6 +1314,7 @@
               "via_agent": false
             },
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"task\",\"status\",\"FIX-1\",\"--json\"]",
@@ -1285,7 +1322,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": 0,
+              "kind": "lf",
               "lfid": "0ff0aa7d-45a4-4195-901a-b010753356c4",
+              "os_started_at": null,
               "outcome": "succeeded",
               "parent_process_lfid": null,
               "pid": 832,
@@ -1296,6 +1335,7 @@
               "via_agent": false
             },
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"roadmap\",\"--all\",\"--json\"]",
@@ -1303,7 +1343,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": 0,
+              "kind": "lf",
               "lfid": "1326759d-5aba-4e42-85fe-4679098be44e",
+              "os_started_at": null,
               "outcome": "succeeded",
               "parent_process_lfid": null,
               "pid": 445,
@@ -1314,6 +1356,7 @@
               "via_agent": false
             },
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"task\",\"complete\",\"FIX-1\"]",
@@ -1321,7 +1364,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": 0,
+              "kind": "lf",
               "lfid": "39204cee-2ff2-419c-a846-18a5b1f564b8",
+              "os_started_at": null,
               "outcome": "succeeded",
               "parent_process_lfid": "e96e3d37-09ff-44ed-9145-137cc7ed295a",
               "pid": 769,
@@ -1332,6 +1377,7 @@
               "via_agent": false
             },
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"monitor\",\"work\",\"--watch\",\"--json\"]",
@@ -1339,7 +1385,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": null,
+              "kind": "lf",
               "lfid": "3ef9f337-4fa1-43b7-a1fb-989ce3f66b0e",
+              "os_started_at": null,
               "outcome": null,
               "parent_process_lfid": null,
               "pid": 479,
@@ -1350,6 +1398,7 @@
               "via_agent": false
             },
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
@@ -1357,7 +1406,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": 0,
+              "kind": "lf",
               "lfid": "71a05586-d662-4271-9da6-d4352ebab200",
+              "os_started_at": null,
               "outcome": "succeeded",
               "parent_process_lfid": null,
               "pid": 243,
@@ -1368,6 +1419,7 @@
               "via_agent": false
             },
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"__telemetry-scorecard\"]",
@@ -1375,7 +1427,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": 0,
+              "kind": "lf",
               "lfid": "83496037-a550-44c9-9557-d3f451dc42d8",
+              "os_started_at": null,
               "outcome": "succeeded",
               "parent_process_lfid": "e96e3d37-09ff-44ed-9145-137cc7ed295a",
               "pid": 353,
@@ -1386,6 +1440,7 @@
               "via_agent": false
             },
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"roadmap\",\"--all\",\"--json\"]",
@@ -1393,7 +1448,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": 0,
+              "kind": "lf",
               "lfid": "88dcf25c-d928-45d3-b244-979ac3fdfe42",
+              "os_started_at": null,
               "outcome": "succeeded",
               "parent_process_lfid": null,
               "pid": 682,
@@ -1404,6 +1461,7 @@
               "via_agent": false
             },
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"task\",\"status\",\"FIX-1\",\"--json\"]",
@@ -1411,7 +1469,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": 0,
+              "kind": "lf",
               "lfid": "b9540953-38e5-4558-b978-3d534b7d836d",
+              "os_started_at": null,
               "outcome": "succeeded",
               "parent_process_lfid": null,
               "pid": 603,
@@ -1422,6 +1482,7 @@
               "via_agent": false
             },
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"task\",\"status\",\"FIX-1\",\"--json\"]",
@@ -1429,7 +1490,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": 0,
+              "kind": "lf",
               "lfid": "bf6962d1-c6e8-4059-8da5-873f07969d47",
+              "os_started_at": null,
               "outcome": "succeeded",
               "parent_process_lfid": null,
               "pid": 366,
@@ -1440,6 +1503,7 @@
               "via_agent": false
             },
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"roadmap\",\"--all\",\"--json\"]",
@@ -1447,7 +1511,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": 0,
+              "kind": "lf",
               "lfid": "c98f66dc-762a-45cb-b26e-6df92eb6ba65",
+              "os_started_at": null,
               "outcome": "succeeded",
               "parent_process_lfid": null,
               "pid": 908,
@@ -1458,6 +1524,7 @@
               "via_agent": false
             },
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"monitor\",\"work\",\"--watch\",\"--json\"]",
@@ -1465,7 +1532,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": null,
+              "kind": "lf",
               "lfid": "d1e1160d-37e7-4152-bcf3-dd94023f59d8",
+              "os_started_at": null,
               "outcome": null,
               "parent_process_lfid": null,
               "pid": 941,
@@ -1476,6 +1545,7 @@
               "via_agent": false
             },
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"--batch\",\"--task\",\"FIX-1\",\"run\",\"delivery\"]",
@@ -1483,7 +1553,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": 0,
+              "kind": "lf",
               "lfid": "e96e3d37-09ff-44ed-9145-137cc7ed295a",
+              "os_started_at": null,
               "outcome": "succeeded",
               "parent_process_lfid": "71a05586-d662-4271-9da6-d4352ebab200",
               "pid": 307,
@@ -2360,6 +2432,7 @@
           ],
           "processes": [
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"roadmap\",\"--all\",\"--json\"]",
@@ -2367,7 +2440,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": 0,
+              "kind": "lf",
               "lfid": "1326759d-5aba-4e42-85fe-4679098be44e",
+              "os_started_at": null,
               "outcome": "succeeded",
               "parent_process_lfid": null,
               "pid": 445,
@@ -2378,6 +2453,7 @@
               "via_agent": false
             },
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"monitor\",\"work\",\"--watch\",\"--json\"]",
@@ -2385,7 +2461,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": null,
+              "kind": "lf",
               "lfid": "3ef9f337-4fa1-43b7-a1fb-989ce3f66b0e",
+              "os_started_at": null,
               "outcome": null,
               "parent_process_lfid": null,
               "pid": 479,
@@ -2396,6 +2474,7 @@
               "via_agent": false
             },
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
@@ -2403,7 +2482,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": null,
+              "kind": "lf",
               "lfid": "71a05586-d662-4271-9da6-d4352ebab200",
+              "os_started_at": null,
               "outcome": null,
               "parent_process_lfid": null,
               "pid": 243,
@@ -2414,6 +2495,7 @@
               "via_agent": false
             },
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"__telemetry-scorecard\"]",
@@ -2421,7 +2503,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": null,
+              "kind": "lf",
               "lfid": "83496037-a550-44c9-9557-d3f451dc42d8",
+              "os_started_at": null,
               "outcome": null,
               "parent_process_lfid": "e96e3d37-09ff-44ed-9145-137cc7ed295a",
               "pid": 353,
@@ -2432,6 +2516,7 @@
               "via_agent": false
             },
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"task\",\"status\",\"FIX-1\",\"--json\"]",
@@ -2439,7 +2524,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": null,
+              "kind": "lf",
               "lfid": "b9540953-38e5-4558-b978-3d534b7d836d",
+              "os_started_at": null,
               "outcome": null,
               "parent_process_lfid": null,
               "pid": 603,
@@ -2450,6 +2537,7 @@
               "via_agent": false
             },
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"task\",\"status\",\"FIX-1\",\"--json\"]",
@@ -2457,7 +2545,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": 0,
+              "kind": "lf",
               "lfid": "bf6962d1-c6e8-4059-8da5-873f07969d47",
+              "os_started_at": null,
               "outcome": "succeeded",
               "parent_process_lfid": null,
               "pid": 366,
@@ -2468,6 +2558,7 @@
               "via_agent": false
             },
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"--batch\",\"--task\",\"FIX-1\",\"run\",\"delivery\"]",
@@ -2475,7 +2566,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": null,
+              "kind": "lf",
               "lfid": "e96e3d37-09ff-44ed-9145-137cc7ed295a",
+              "os_started_at": null,
               "outcome": null,
               "parent_process_lfid": "71a05586-d662-4271-9da6-d4352ebab200",
               "pid": 307,
@@ -2698,6 +2791,7 @@
           ],
           "processes": [
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"monitor\",\"work\",\"--watch\",\"--json\"]",
@@ -2705,7 +2799,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": null,
+              "kind": "lf",
               "lfid": "080f4a6a-2f88-4ab2-9d88-224fc175ebfa",
+              "os_started_at": null,
               "outcome": null,
               "parent_process_lfid": null,
               "pid": 718,
@@ -2716,6 +2812,7 @@
               "via_agent": false
             },
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"roadmap\",\"--all\",\"--json\"]",
@@ -2723,7 +2820,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": 0,
+              "kind": "lf",
               "lfid": "1326759d-5aba-4e42-85fe-4679098be44e",
+              "os_started_at": null,
               "outcome": "succeeded",
               "parent_process_lfid": null,
               "pid": 445,
@@ -2734,6 +2833,7 @@
               "via_agent": false
             },
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"monitor\",\"work\",\"--watch\",\"--json\"]",
@@ -2741,7 +2841,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": null,
+              "kind": "lf",
               "lfid": "3ef9f337-4fa1-43b7-a1fb-989ce3f66b0e",
+              "os_started_at": null,
               "outcome": null,
               "parent_process_lfid": null,
               "pid": 479,
@@ -2752,6 +2854,7 @@
               "via_agent": false
             },
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
@@ -2759,7 +2862,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": null,
+              "kind": "lf",
               "lfid": "71a05586-d662-4271-9da6-d4352ebab200",
+              "os_started_at": null,
               "outcome": null,
               "parent_process_lfid": null,
               "pid": 243,
@@ -2770,6 +2875,7 @@
               "via_agent": false
             },
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"__telemetry-scorecard\"]",
@@ -2777,7 +2883,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": null,
+              "kind": "lf",
               "lfid": "83496037-a550-44c9-9557-d3f451dc42d8",
+              "os_started_at": null,
               "outcome": null,
               "parent_process_lfid": "e96e3d37-09ff-44ed-9145-137cc7ed295a",
               "pid": 353,
@@ -2788,6 +2896,7 @@
               "via_agent": false
             },
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"roadmap\",\"--all\",\"--json\"]",
@@ -2795,7 +2904,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": 0,
+              "kind": "lf",
               "lfid": "88dcf25c-d928-45d3-b244-979ac3fdfe42",
+              "os_started_at": null,
               "outcome": "succeeded",
               "parent_process_lfid": null,
               "pid": 682,
@@ -2806,6 +2917,7 @@
               "via_agent": false
             },
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"task\",\"status\",\"FIX-1\",\"--json\"]",
@@ -2813,7 +2925,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": 0,
+              "kind": "lf",
               "lfid": "b9540953-38e5-4558-b978-3d534b7d836d",
+              "os_started_at": null,
               "outcome": "succeeded",
               "parent_process_lfid": null,
               "pid": 603,
@@ -2824,6 +2938,7 @@
               "via_agent": false
             },
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"task\",\"status\",\"FIX-1\",\"--json\"]",
@@ -2831,7 +2946,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": 0,
+              "kind": "lf",
               "lfid": "bf6962d1-c6e8-4059-8da5-873f07969d47",
+              "os_started_at": null,
               "outcome": "succeeded",
               "parent_process_lfid": null,
               "pid": 366,
@@ -2842,6 +2959,7 @@
               "via_agent": false
             },
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"--batch\",\"--task\",\"FIX-1\",\"run\",\"delivery\"]",
@@ -2849,7 +2967,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": null,
+              "kind": "lf",
               "lfid": "e96e3d37-09ff-44ed-9145-137cc7ed295a",
+              "os_started_at": null,
               "outcome": null,
               "parent_process_lfid": "71a05586-d662-4271-9da6-d4352ebab200",
               "pid": 307,
@@ -2961,7 +3081,7 @@
                 "items": [
                   {
                     "actions": {
-                      "reason": "Task FIX-1 cannot complete until its gates close: Merged · Follow-through pending; file follow-ups or record `lf task follow-up <issue> --none REASON`",
+                      "reason": "Task FIX-1 cannot complete until its gates close: Merged \u00b7 Follow-through pending; file follow-ups or record `lf task follow-up <issue> --none REASON`",
                       "recommended": "no_action"
                     },
                     "condition": {
@@ -3215,7 +3335,7 @@
     },
     "row": {
       "actions": {
-        "reason": "Task FIX-1 cannot complete until its gates close: Merged · Follow-through pending; file follow-ups or record `lf task follow-up <issue> --none REASON`",
+        "reason": "Task FIX-1 cannot complete until its gates close: Merged \u00b7 Follow-through pending; file follow-ups or record `lf task follow-up <issue> --none REASON`",
         "recommended": "no_action"
       },
       "condition": {
@@ -3405,7 +3525,7 @@
     "status": {
       "execution": {
         "actions": {
-          "reason": "Task FIX-1 cannot complete until its gates close: Merged · Follow-through pending; file follow-ups or record `lf task follow-up <issue> --none REASON`",
+          "reason": "Task FIX-1 cannot complete until its gates close: Merged \u00b7 Follow-through pending; file follow-ups or record `lf task follow-up <issue> --none REASON`",
           "recommended": "no_action"
         },
         "agent": null,
@@ -3575,6 +3695,7 @@
           ],
           "processes": [
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
@@ -3582,7 +3703,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": null,
+              "kind": "lf",
               "lfid": "71a05586-d662-4271-9da6-d4352ebab200",
+              "os_started_at": null,
               "outcome": null,
               "parent_process_lfid": null,
               "pid": 243,
@@ -3593,6 +3716,7 @@
               "via_agent": false
             },
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"__telemetry-scorecard\"]",
@@ -3600,7 +3724,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": null,
+              "kind": "lf",
               "lfid": "83496037-a550-44c9-9557-d3f451dc42d8",
+              "os_started_at": null,
               "outcome": null,
               "parent_process_lfid": "e96e3d37-09ff-44ed-9145-137cc7ed295a",
               "pid": 353,
@@ -3611,6 +3737,7 @@
               "via_agent": false
             },
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"task\",\"status\",\"FIX-1\",\"--json\"]",
@@ -3618,7 +3745,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": null,
+              "kind": "lf",
               "lfid": "bf6962d1-c6e8-4059-8da5-873f07969d47",
+              "os_started_at": null,
               "outcome": null,
               "parent_process_lfid": null,
               "pid": 366,
@@ -3629,6 +3758,7 @@
               "via_agent": false
             },
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"--batch\",\"--task\",\"FIX-1\",\"run\",\"delivery\"]",
@@ -3636,7 +3766,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": null,
+              "kind": "lf",
               "lfid": "e96e3d37-09ff-44ed-9145-137cc7ed295a",
+              "os_started_at": null,
               "outcome": null,
               "parent_process_lfid": "71a05586-d662-4271-9da6-d4352ebab200",
               "pid": 307,
@@ -3859,6 +3991,7 @@
           ],
           "processes": [
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"roadmap\",\"--all\",\"--json\"]",
@@ -3866,7 +3999,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": 0,
+              "kind": "lf",
               "lfid": "1326759d-5aba-4e42-85fe-4679098be44e",
+              "os_started_at": null,
               "outcome": "succeeded",
               "parent_process_lfid": null,
               "pid": 445,
@@ -3877,6 +4012,7 @@
               "via_agent": false
             },
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"monitor\",\"work\",\"--watch\",\"--json\"]",
@@ -3884,7 +4020,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": null,
+              "kind": "lf",
               "lfid": "3ef9f337-4fa1-43b7-a1fb-989ce3f66b0e",
+              "os_started_at": null,
               "outcome": null,
               "parent_process_lfid": null,
               "pid": 479,
@@ -3895,6 +4033,7 @@
               "via_agent": false
             },
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
@@ -3902,7 +4041,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": null,
+              "kind": "lf",
               "lfid": "71a05586-d662-4271-9da6-d4352ebab200",
+              "os_started_at": null,
               "outcome": null,
               "parent_process_lfid": null,
               "pid": 243,
@@ -3913,6 +4054,7 @@
               "via_agent": false
             },
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"__telemetry-scorecard\"]",
@@ -3920,7 +4062,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": null,
+              "kind": "lf",
               "lfid": "83496037-a550-44c9-9557-d3f451dc42d8",
+              "os_started_at": null,
               "outcome": null,
               "parent_process_lfid": "e96e3d37-09ff-44ed-9145-137cc7ed295a",
               "pid": 353,
@@ -3931,6 +4075,7 @@
               "via_agent": false
             },
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"task\",\"status\",\"FIX-1\",\"--json\"]",
@@ -3938,7 +4083,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": 0,
+              "kind": "lf",
               "lfid": "bf6962d1-c6e8-4059-8da5-873f07969d47",
+              "os_started_at": null,
               "outcome": "succeeded",
               "parent_process_lfid": null,
               "pid": 366,
@@ -3949,6 +4096,7 @@
               "via_agent": false
             },
             {
+              "agent_session_id": null,
               "caller_provider_generation": null,
               "caller_session_id": null,
               "command": "[\"/source/target/debug/lf\",\"--batch\",\"--task\",\"FIX-1\",\"run\",\"delivery\"]",
@@ -3956,7 +4104,9 @@
               "cwd": "/tmp/.tmp6k7XyI",
               "error": null,
               "exit_code": null,
+              "kind": "lf",
               "lfid": "e96e3d37-09ff-44ed-9145-137cc7ed295a",
+              "os_started_at": null,
               "outcome": null,
               "parent_process_lfid": "71a05586-d662-4271-9da6-d4352ebab200",
               "pid": 307,

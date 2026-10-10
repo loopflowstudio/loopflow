@@ -63,6 +63,25 @@ class Handler(BaseHTTPRequestHandler):
             return {"errors": [{"message": "fixture offline"}]}
         issue = next((i for i in state["issues"] if i["id"] == variables.get("id")), None)
         project = state["project"]
+        if state.get("associated_creations"):
+            if any(
+                name in query
+                for name in (
+                    "mutation DeliverProjectCreation",
+                    "mutation DeliverProjectAttachment",
+                    "mutation DeliverTaskCreation",
+                )
+            ):
+                state["creation_writes"].append(variables)
+                return {"errors": [{"message": "retained creation must not replay"}]}
+            if "query FindExportIssue" in query:
+                return {"data": {"issues": _page([issue] if issue else [])}}
+            if "query FindProject" in query:
+                return {
+                    "data": {
+                        "projects": _page([project] if variables["id"] == project["id"] else [])
+                    }
+                }
         if state.get("associations"):
             if "mutation DeliverTaskField" in query or "mutation DeliverProjectField" in query:
                 target = project if "DeliverProjectField" in query else issue
@@ -944,6 +963,213 @@ def _exercise_effects(fixture: dict, env: dict, server: ThreadingHTTPServer) -> 
         db.close()
 
 
+def _replay_planning_document(fixture: dict, env: dict, reference: str, earlier: str) -> str:
+    git_env = {
+        **env,
+        "GIT_AUTHOR_NAME": "Fixture",
+        "GIT_AUTHOR_EMAIL": "fixture@example.test",
+        "GIT_COMMITTER_NAME": "Fixture",
+        "GIT_COMMITTER_EMAIL": "fixture@example.test",
+    }
+
+    def git(*args: str) -> str:
+        return subprocess.check_output(
+            ["git", "--git-dir", fixture["remote"], *args], env=git_env, text=True
+        ).strip()
+
+    current = git("rev-parse", reference)
+    revision = git(
+        "commit-tree",
+        git("rev-parse", f"{earlier}^{{tree}}"),
+        "-p",
+        current,
+        "-m",
+        "Retained earlier planning document",
+    )
+    git("update-ref", reference, revision, current)
+    return revision
+
+
+def _exercise_associated_creations(fixture: dict, env: dict, server: ThreadingHTTPServer) -> None:
+    peer = {**fixture, **fixture["peer"]}
+    peer_env = {
+        **env,
+        "HOME": peer["home"],
+        "LF_HOME": peer["home"],
+        "CLAUDE_CONFIG_DIR": str(Path(peer["home"]) / "claude"),
+        "CODEX_HOME": str(Path(peer["home"]) / "codex"),
+    }
+    sides = [(fixture, env), (peer, peer_env)]
+    databases = [sqlite3.connect(Path(f["home"]) / "loopflow.db", timeout=5) for f, _ in sides]
+    owners = [(fixture["local_project"], fixture["task"]), (peer["project"], peer["task"])]
+    processes = ("00000000-0000-4000-8000-000000000001",)
+    before = [_execution_rows(db, processes) for db in databases]
+    checkout_sql = "SELECT worktree,workspace_slug,branch,base_commit FROM tasks WHERE id=?"
+    checkouts = [
+        db.execute(checkout_sql, (owners[i][1],)).fetchone() for i, db in enumerate(databases)
+    ]
+    assert all(
+        before[i][table]
+        for i in range(2)
+        for table in (
+            "agent_sessions",
+            "processes",
+            "task_workflows",
+            "task_workflow_moves",
+            "task_prs",
+            "work_placements",
+        )
+    )
+    captured = {
+        (kind, origin): json.loads(body)
+        for db in databases
+        for kind, origin, body in db.execute(
+            "SELECT kind,origin_id,export_json FROM planning_creations"
+        )
+    }
+
+    def run(side: int, *args: str) -> str:
+        return _run(*sides[side], *args, timeout=45)
+
+    def status(side: int) -> dict:
+        return json.loads(run(side, "planning", "status", "--json"))["destinations"][0]
+
+    def exchange(side: int, predicate, *, publish: bool = True) -> None:
+        watch = Watch(*sides[side])
+        try:
+            watch.scope(fixture["repo"])
+            _await(predicate, f"associated creation exchange failed on side {side}")
+            if publish:
+                _await(
+                    lambda: (
+                        status(side)["publication_state"] == "confirmed"
+                        and status(side)["pending_local"] is False
+                    ),
+                    f"side {side} did not publish its retained receipts",
+                )
+        finally:
+            watch.close()
+
+    def receipts(side: int) -> dict:
+        return {
+            (kind, origin): (owner, json.loads(body), attempted, linked, acknowledged)
+            for kind, origin, owner, body, attempted, linked, acknowledged in databases[
+                side
+            ].execute(
+                "SELECT kind,origin_id,COALESCE(task_id,project_id),export_json,"
+                "export_attempted,export_link_attempted,export_acknowledged FROM planning_creations"
+            )
+        }
+
+    def assert_receipts(side: int, settled: bool) -> None:
+        rows = receipts(side)
+        assert rows.keys() == captured.keys(), rows
+        for (kind, origin), body in captured.items():
+            index = 0 if kind == "project" else 1
+            # Only the first origin has affirmative provider evidence. A mapping
+            # cannot confirm the other origin's different attempted UUID.
+            acknowledged = int(settled and origin == owners[0][index])
+            assert rows[kind, origin] == (
+                owners[side][index],
+                body,
+                1,
+                int(kind == "project"),
+                acknowledged,
+            ), rows
+        _assert_execution_unchanged(databases[side], before[side], processes)
+        assert (
+            databases[side].execute(checkout_sql, (owners[side][1],)).fetchone() == checkouts[side]
+        )
+
+    def saved_title(side: int) -> str:
+        return (
+            databases[side]
+            .execute("SELECT issue_title FROM tasks WHERE id=?", (owners[side][1],))
+            .fetchone()[0]
+        )
+
+    try:
+        with server.lock:
+            server.state.update(associated_creations=True, creation_writes=[], offline=True)
+            server.state["issues"] = server.state["issues"][:1]
+        subprocess.run(
+            ["git", "remote", "add", "plans", fixture["remote"]], cwd=fixture["repo"], check=True
+        )
+        for side in range(2):
+            destination = run(
+                side, "planning", "connect", "--remote", "plans", "--shared", "origins"
+            ).strip()
+            run(side, "planning", "select", destination, "--wave", fixture["wave"])
+        exchange(0, lambda: status(0)["publication_state"] == "confirmed")
+        for side in [1, 0]:
+            exchange(side, lambda side=side: bool(status(side)["conflicts"]))
+            for index, provider in enumerate([fixture["project"], fixture["issue"]]):
+                run(
+                    side,
+                    "planning",
+                    "associate",
+                    owners[1 - side][index],
+                    "--with",
+                    owners[side][index],
+                    "--linear",
+                    provider,
+                )
+            exchange(side, lambda side=side: len(receipts(side)) == 4)
+            assert_receipts(side, False)
+        exchange(0, lambda: status(0)["pending_local"] is False)
+        earlier = status(0)["publication_revision"]
+        # A subsequent public save must survive unchanged readback on either
+        # physical owner, including the one that did not capture the matched UUID.
+        run(1, "task", "edit", peer["task"], "--title", "Saved after both attempts")
+        exchange(0, lambda: saved_title(0) == "Saved after both attempts")
+        with server.lock:
+            server.state["offline"] = False
+        for side in [1, 0, 1]:
+            exchange(
+                side,
+                lambda side=side: all(
+                    receipts(side)[kind, owners[0][index]][-1] == 1
+                    for index, kind in enumerate(["project", "task"])
+                ),
+            )
+            assert_receipts(side, True)
+            assert saved_title(side) == "Saved after both attempts"
+            assert databases[side].execute(
+                "SELECT count(*) FROM task_changes WHERE task_id=? AND field='name' "
+                "AND value_json=? AND acknowledged=0 AND conflict_json IS NULL",
+                (owners[side][1], json.dumps("Saved after both attempts")),
+            ).fetchone() == (1,)
+            for task in [fixture["task"], peer["task"]]:
+                assert (
+                    json.loads(run(side, "task", "status", task, "--json"))["execution"]["task_id"]
+                    == owners[side][1]
+                )
+        # Reversed/repeated older receipts cannot revoke exact acknowledgement
+        # or acknowledge the unmatched origin. Acquisition bypasses publication.
+        for side in [1, 0, 1]:
+            revision = _replay_planning_document(
+                fixture, env, "refs/loopflow/planning/shared/origins", earlier
+            )
+            lock = (
+                Path(sides[side][0]["home"]) / "locks/planning-peers" / f"{status(side)['id']}.lock"
+            )
+            with lock.open("a") as handle:
+                fcntl.flock(handle, fcntl.LOCK_EX)
+                exchange(
+                    side,
+                    lambda side=side: status(side)["imported_revision"] == revision,
+                    publish=False,
+                )
+                assert_receipts(side, True)
+                assert saved_title(side) == "Saved after both attempts"
+        with server.lock:
+            assert not server.state["creation_writes"], server.state["creation_writes"]
+            assert not server.state["unexpected"], server.state["unexpected"]
+    finally:
+        for db in databases:
+            db.close()
+
+
 def _exercise_associations(fixture: dict, env: dict, server: ThreadingHTTPServer) -> None:
     repo = Path(fixture["repo"])
     peer = {**fixture, **fixture["peer"]}
@@ -1162,30 +1388,8 @@ def _exercise_associations(fixture: dict, env: dict, server: ThreadingHTTPServer
     # Hold only publication so the ordinary acquisition path cannot replace the
     # checkpoint before it is inspected; provider readback remains independent.
     reference = "refs/loopflow/planning/shared/composition"
-    git_env = {
-        **env,
-        "GIT_AUTHOR_NAME": "Fixture",
-        "GIT_AUTHOR_EMAIL": "fixture@example.test",
-        "GIT_COMMITTER_NAME": "Fixture",
-        "GIT_COMMITTER_EMAIL": "fixture@example.test",
-    }
-
-    def git(*args: str) -> str:
-        return subprocess.check_output(
-            ["git", "--git-dir", fixture["remote"], *args], env=git_env, text=True
-        ).strip()
-
     for side in [1, 0, 1]:
-        current = git("rev-parse", reference)
-        revision = git(
-            "commit-tree",
-            git("rev-parse", f"{earlier}^{{tree}}"),
-            "-p",
-            current,
-            "-m",
-            "Retained earlier planning document",
-        )
-        git("update-ref", reference, revision, current)
+        revision = _replay_planning_document(fixture, env, reference, earlier)
         lock = Path(sides[side][0]["home"]) / "locks/planning-peers" / f"{status(side)['id']}.lock"
         with lock.open("a") as handle:
             fcntl.flock(handle, fcntl.LOCK_EX)
@@ -1297,6 +1501,8 @@ printf '%s\\n' '{"type":"result","subtype":"success","result":"Done"}'
         try:
             if sys.argv[2] in ("associations", "association-private"):
                 _exercise_associations(fixture, env, server)
+            elif sys.argv[2] == "associated-creations":
+                _exercise_associated_creations(fixture, env, server)
             elif sys.argv[2] == "creation-origins":
                 _exercise_creation_origins(fixture, env, server)
             elif sys.argv[2] == "exports":

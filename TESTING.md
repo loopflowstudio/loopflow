@@ -613,6 +613,11 @@ The creation-origin case transfers lost creation/attachment receipts through Git
 retains later saves and execution, and proves changed Linear fields still win.
 The synthetic provider rejects duplicate UUIDs; a request can race peer receipt
 acquisition, but settled reconnect must send no further creation requests.
+The associated-origin case seeds divergent historical Task/Project captures,
+then enters public association, Git exchange and HTTPS readback. It requires only
+the exact provider UUID to settle, retains the other origin's uncertainty and
+later saves, and compares populated execution across repeated older documents.
+This seeds historical attempts; it does not prove their original dispatch.
 Only attempted effects acknowledge; equal-desired provider readback can instead
 retire an unattempted intention without another write. The portable `work_watch` offline-completion test requires a foreground delivery error
 with no Task selected; local frame propagation alone cannot establish sync lifetime.
@@ -934,7 +939,9 @@ cargo test -p loopflow --test planning_reconnect_tests
 Requires `uv`, Python and OpenSSL. The fixture uses an isolated Machine/store and
 local HTTPS proxy with synthetic Linear state and credentials. Its CA is trusted
 only by CLI children through `SSL_CERT_FILE`; macOS platform TLS ignores that
-setting, so reconnect is Linux-only. `task_abandonment` and `local_planning` cover
+setting, so reconnect executes only on Linux. The Rust harness still compiles on
+macOS; its tests are explicitly ignored there, not reported as behavioral passes.
+`task_abandonment` and `local_planning` cover
 portable local decisions and deletion, retry identity and retained execution in
 both connection modes without provider access. No installation or live provider is used.
 
@@ -1091,7 +1098,7 @@ cargo nextest run -p loopflow --test task_github_cache_tests --no-fail-fast
 
 When changing Linear response shapes, run the client tests and PM-operation
 consumers together, including `planning_reconnect_tests` on Linux (a disposable
-container works on macOS). That suite is compiled out on macOS, so a local Rust
+container works on macOS). That suite is explicitly ignored on macOS, so a local Rust
 pass there does not cover its HTTPS fixtures. Keep nullable requested fields,
 including `dueDate`, present in fixture responses. Team migration also reads issue
 comments; its fixtures must include the requested pagination metadata.

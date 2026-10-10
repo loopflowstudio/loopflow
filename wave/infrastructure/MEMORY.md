@@ -639,12 +639,13 @@ Earlier composition proofs:
 `9d3d2ba90:wave/infrastructure/MEMORY.md`, this heading. Due dates synchronize;
 completion requests, placements and execution remain local.
 
-`e37099e50`: same-origin Git/HTTPS recovery repairs unchanged readback defeating
-later saves. Retain captured heads; changed facts win, superseding the wrong
-conflict assertion. `23bb7c2c4` lacks an execution verdict. Attachment
-can race acquisition using one UUID: no exactly-once guarantee. Associated origins,
-negative-evidence/order and native lifetimes need composed cases; installation is
-unproved. `scratch/work-on-another-machine-name.md` owns acceptance.
+`e37099e50` proves same-origin Git/HTTPS recovery: unchanged readback preserves
+later saves; changed facts win. The associated-origin regression now asserts exact
+readback, distinct uncertain captures and old-document replay, but has no execution
+verdict. Historical attempts are seeded. Attachment can race acquisition using one
+UUID: no exactly-once guarantee. Associated private origins, negative-evidence/order
+and native lifetimes remain unproved. Installation is unproved; the design owns
+acceptance.
 
 ## Driver recovery
 

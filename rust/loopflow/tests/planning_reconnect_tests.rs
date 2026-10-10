@@ -1,5 +1,5 @@
 // Linux honors the fixture CA through SSL_CERT_FILE without changing system trust.
-#![cfg(target_os = "linux")]
+#![cfg(unix)]
 
 mod support;
 
@@ -10,36 +10,184 @@ use std::process::Command;
 use support::{register_task_without_pr, EnvGuard};
 
 #[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "fixture TLS requires Linux SSL_CERT_FILE"
+)]
+fn public_associated_creation_readback_settles_only_the_exact_origin() {
+    let home = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let repo = TestRepo::new();
+    support::bind_task_planning(&repo);
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let key = home.path().join("provider.key");
+    std::fs::write(&key, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA").unwrap();
+    let wave = loopflow::work::wave::Wave::new(
+        loopflow::id::WaveId::new(),
+        "task-pr-tests".into(),
+        repo.path().to_str().unwrap().into(),
+    );
+    let tasks = [
+        loopflow::durable::TaskId::new(),
+        loopflow::durable::TaskId::new(),
+    ];
+    let projects = [
+        loopflow::durable::ProjectId::new(),
+        loopflow::durable::ProjectId::new(),
+    ];
+    let provider_id = |id: &str| {
+        uuid::Uuid::parse_str(id.split_once('_').unwrap().1)
+            .unwrap()
+            .to_string()
+    };
+    let issue = provider_id(tasks[0].as_str());
+    let project = provider_id(projects[0].as_str());
+    let peer_home = home.path().join("peer-home");
+    std::fs::create_dir(&peer_home).unwrap();
+    for (side, directory) in [home.path(), peer_home.as_path()].into_iter().enumerate() {
+        let store = runtime
+            .block_on(loopflow::store::open_ephemeral_store(
+                &loopflow::store::StorageConfig::sqlite(directory.join("loopflow.db")),
+            ))
+            .unwrap();
+        runtime.block_on(store.create_wave(&wave)).unwrap();
+        seed_linear_token(&runtime, &store, &key);
+        let db = rusqlite::Connection::open(directory.join("loopflow.db")).unwrap();
+        // Historical divergent Work: both mappings name the same provider object,
+        // but each retained attempted creation has its own UUID and input.
+        db.execute(r#"INSERT INTO projects(id,wave_id,created_at,updated_at,project_slug,project_name,project_prompt_context,workflow,external_project_id,planning_initiatives,planning_teams)
+            VALUES(?1,?2,1,1,'task-pr-tests','Task PR tests','workflow: feature','feature',?3,'["initiative-task-pr-tests"]','["team-task-pr-tests"]')"#,
+            rusqlite::params![projects[side].as_str(),wave.id(),project]).unwrap();
+        db.execute("INSERT INTO tasks(id,project_id,issue_identifier,issue_title,issue_description,created_at,updated_at,workspace_slug,external_issue_id,planning_team_id,planning_state)
+            VALUES(?1,?2,'INF-123','Prove Task PR transitions','Exercise the persisted lifecycle.',1,1,'',?3,'team-task-pr-tests','unstarted')",
+            rusqlite::params![tasks[side].as_str(),projects[side].as_str(),issue]).unwrap();
+        let reader =
+            loopflow::store::sqlite::SqliteStore::new(&directory.join("loopflow.db")).unwrap();
+        reader
+            .update_project_content(
+                &projects[side],
+                &loopflow::pm::ProjectContent {
+                    workflow: "feature".into(),
+                    krs: vec![],
+                    metric_targets: vec![],
+                },
+            )
+            .unwrap();
+        let record = reader.planning_task(&tasks[side]).unwrap().record.unwrap();
+        let mut task_model = record.item;
+        task_model.id = tasks[side].to_string();
+        let mut project_model = record.project.unwrap();
+        project_model.id = projects[side].to_string();
+        let content = loopflow::pm::render_project_content(&loopflow::pm::ProjectContent {
+            workflow: project_model.workflow.clone(),
+            krs: project_model.krs.clone(),
+            metric_targets: project_model.metric_targets.clone(),
+        });
+        for (kind, origin, parent, model, input) in [
+            (
+                "project",
+                projects[side].as_str(),
+                wave.id().as_str(),
+                serde_json::to_value(&project_model).unwrap(),
+                serde_json::json!({"id":provider_id(projects[side].as_str()),"teamIds":["team-task-pr-tests"],"name":project_model.name,"description":project_model.summary,"content":content,"useDefaultTemplate":false}),
+            ),
+            (
+                "task",
+                tasks[side].as_str(),
+                projects[side].as_str(),
+                serde_json::to_value(&task_model).unwrap(),
+                serde_json::json!({"id":provider_id(tasks[side].as_str()),"teamId":"team-task-pr-tests","projectId":project,"title":task_model.name,"description":task_model.description,"assigneeId":null,"dueDate":null}),
+            ),
+        ] {
+            let captured = db.prepare("SELECT 'peer:'||id||':'||CASE field WHEN 'issue_title' THEN 'name' WHEN 'project_name' THEN 'name' WHEN 'project_summary' THEN 'summary' ELSE field END FROM planning_peer_heads WHERE kind=?1 AND object_id=?2 AND field IN ('issue_title','project_name','project_summary','workflow','krs','metric_targets','status') ORDER BY id")
+                .unwrap().query_map(rusqlite::params![kind,origin], |row| row.get::<_,String>(0)).unwrap().collect::<Result<Vec<_>,_>>().unwrap();
+            let export = serde_json::json!({"id":provider_id(origin),"model":model,"parent":parent,"captured":captured,"input":input,"initiative":"initiative-task-pr-tests","link_id":uuid::Uuid::new_v4().to_string()});
+            db.execute("INSERT INTO planning_creations(kind,origin_id,task_id,project_id,export_json,export_attempted,export_link_attempted,export_error)
+                VALUES(?1,?2,CASE WHEN ?1='task' THEN ?2 END,CASE WHEN ?1='project' THEN ?2 END,?3,1,?1='project','lost historical response')",
+                rusqlite::params![kind,origin,export.to_string()]).unwrap();
+        }
+        db.execute("UPDATE tasks SET worktree=?2,workspace_slug='retained',branch='main',base_commit=?3 WHERE id=?1",
+            rusqlite::params![tasks[side].as_str(),repo.path().to_str().unwrap(),repo.head_sha()]).unwrap();
+        db.execute("INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,created_at,updated_at)
+            SELECT ?1,id,1,workspace_slug,branch,base_commit,1,1 FROM tasks WHERE id=?2",
+            rusqlite::params![loopflow::work::task::TaskPrId::new().as_str(),tasks[side].as_str()]).unwrap();
+        db.execute(
+            "INSERT INTO work_placements(task_id,machine_id,placed_at) VALUES(?1,?2,1)",
+            rusqlite::params![
+                tasks[side].as_str(),
+                reader.local_machine().unwrap().id.as_str()
+            ],
+        )
+        .unwrap();
+        retain_execution(directory, repo.path(), &tasks[side], wave.id());
+    }
+    let fixture = serde_json::json!({
+        "lf":env!("CARGO_BIN_EXE_lf"),"repo":repo.path(),"home":home.path(),
+        "issue":issue,"project":project,"task":tasks[0],"local_project":projects[0],"wave":wave.id(),
+        "remote":repo.bare_path(),"peer":{"home":peer_home,"task":tasks[1],"project":projects[1]},
+    });
+    run_reconnect_fixture(home.path(), &fixture, "associated-creations");
+}
+
+#[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "fixture TLS requires Linux SSL_CERT_FILE"
+)]
 fn public_git_linear_creation_origins_recover_without_duplicate_effects() {
     planning_reconnect_fixture("creation-origins");
 }
 
 #[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "fixture TLS requires Linux SSL_CERT_FILE"
+)]
 fn public_git_linear_association_keeps_private_origins_held() {
     planning_reconnect_fixture("association-private");
 }
 
 #[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "fixture TLS requires Linux SSL_CERT_FILE"
+)]
 fn public_git_linear_association_round_trip() {
     planning_reconnect_fixture("associations");
 }
 
 #[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "fixture TLS requires Linux SSL_CERT_FILE"
+)]
 fn public_watch_exports_peer_born_plans_and_recovers_mapped_receipts() {
     planning_reconnect_fixture("exports");
 }
 
 #[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "fixture TLS requires Linux SSL_CERT_FILE"
+)]
 fn public_delivery_defers_rejected_peer_effects_while_acquisition_continues() {
     planning_reconnect_fixture("effects");
 }
 
 #[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "fixture TLS requires Linux SSL_CERT_FILE"
+)]
 fn work_watch_reconnects_repository_planning() {
     planning_reconnect_fixture("watch");
 }
 
 #[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "fixture TLS requires Linux SSL_CERT_FILE"
+)]
 fn public_flow_reconnects_planning_without_another_turn() {
     planning_reconnect_fixture("flow");
 }
@@ -128,8 +276,12 @@ fn planning_reconnect_fixture(mode: &str) {
             retain_execution(directory, repo.path(), task, wave);
         }
     }
-    let input = home.path().join("fixture.json");
-    std::fs::write(&input, serde_json::to_vec(&fixture).unwrap()).unwrap();
+    run_reconnect_fixture(home.path(), &fixture, mode);
+}
+
+fn run_reconnect_fixture(home: &Path, fixture: &serde_json::Value, mode: &str) {
+    let input = home.join("fixture.json");
+    std::fs::write(&input, serde_json::to_vec(fixture).unwrap()).unwrap();
     let output = Command::new("uv")
         .args(["run", "python"])
         .arg(

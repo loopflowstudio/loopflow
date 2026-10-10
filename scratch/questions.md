@@ -15,34 +15,13 @@ The plan owns implementation; delegation exchange has isolated-peer proof, not
 exclusive admission, remote execution or native fidelity.
 Original Q1–Q3 record: `7d5bcf939:scratch/questions.md`, those headings.
 
-## Reversible visibility choice — October 8
+## Retained pane choices — October 8
 
-Hide/restore address an existing retained view through the selected plan/window,
-Machine/checkout and pane/content occurrence. Restore removes collapse without
-selecting Work, focusing a window, changing zoom or acquiring a client. View occurrence tokens grant no
-terminal-surface or composer-input authority.
-
-## Reversible arrangement choices — October 8
-
-An empty split, move and resize leave pane selection and zoom unchanged. Move
-relocates a retained leaf after another exact pane (right for vertical, below for
-horizontal), within one Machine/checkout; it never reassigns Work. Resize names
-two exact panes and the target side's share of their separating divider. Zoom
-changes visibility only; focus explicitly selects/reveals the exact pane in its
-workspace, without switching Work or foregrounding the window. No view operation
-authorizes native input.
-
-## Reversible companion choices — October 8
-
-Companions preserve focus, zoom and Work. Empty targets fill; occupied content is
-never replaced. Files/Flow-log reuse the exact Task checkout; Shell allocates on the recorded owner, rechecking its checkout before launch. lf3 extraction still needs native acceptance.
-
-## Reversible bounded-read choice — October 8
-
-The plan owns the lf3 bounds and extraction contract. Truncation ends on UTF-8
-boundaries; empty selection succeeds, command-block selection participates, and
-`hidden` is pane-local rather than compositor evidence. Reads never authorize input
-or imply semantic completion.
+Visibility, arrangement, companions and bounded-read choices remain in the plan's
+§4. Original details: `e4a324636:scratch/questions.md`, **Reversible visibility
+choice**, **Reversible arrangement choices**, **Reversible companion choices** and
+**Reversible bounded-read choice**. No focus/acquisition authority follows from
+hiding, arranging or reading. Native extraction remains unproved.
 
 ## Command-map review — October 8
 
@@ -61,17 +40,15 @@ are accepted for implementation after Jack's October 8 review; the listed choice
 
 ## CLI deletion assumptions — October 8
 
-Removing `run` preserves existing flow-first untyped lookup; explicit `skill` and
-`flow` keep their own kinds. Task edges retain single-skill support and resolve in
-the prepared Task checkout, not the caller's cwd. This does not settle the broader
-collision-policy question. Historical request turn limits and the internal
-prompt-parity helper remain readable; neither restores a public launch switch.
+Retiring `run` preserves flow-first untyped lookup and explicit skill/Flow kinds;
+Task edges resolve in their prepared checkout. Broader collisions remain open.
+Historical turn-limit records do not restore public switches. Full rationale:
+`e4a324636:scratch/questions.md`, this heading.
 
 ## History command shape — October 8
 
-`history` retains the Work activity feed; `history list` keeps Process pages and
-cursors. Show/replay/usage reuse existing owners. The `list` spelling is reversible,
-not another history store or product decision.
+`history` is activity; list/show/replay/usage reuse recorded owners. `list` is
+reversible spelling, not another history store.
 
 ## Repository selection assumptions — October 9
 
@@ -82,13 +59,11 @@ These lookup choices grant no shared identity or publication.
 Primary and stack-parent Task selectors now carry repository-scoped full IDs through
 dispatch; an unscoped ambiguous prefix still fails.
 
-## Context budget — October 9
+## Context budget
 
-`lf context --skill compress` reports 34,459 generated Work-seed tokens, 18,459
-above the 16,000-token goal limit. The complete launch source
-`.lf/tmp/context/1a1d1aa2d9e3d58f7fd882ca72ac0a3b4e1b55b528f03b726667cb9fb02a92eb.md`
-contains the directive and 266-file committed inventory. Authored-note curation
-cannot remove that generated inventory; limits remain unchanged.
+Generated Work-seed/inventory overflow cannot be repaired by authored-note
+curation; limits remain unchanged. Original diagnosis and source pointer:
+`e4a324636:scratch/questions.md`, **Context budget — October 9**.
 
 ## Admission authority — October 9, unresolved
 
@@ -162,14 +137,10 @@ endpoint definition leaves native usability and remote composition unproved.
 
 ## Reversible Flow preview presentation — October 9
 
-`--context` shows the compiled graph with occurrence keys and one input state per
-node. Only the initial skill/router gets current-snapshot input; later skills,
-branch bodies and repeat passes are unavailable. Commands are labeled not-agent
-and never executed, even when they could launch an agent. This previews a fresh
-Flow, not an existing cursor. Sorted alternatives and backward edges retain the
-shared graph's identity; no predicted routes or synthetic feedback are supplied.
-Native skill arguments retain the original message, separately from router
-instructions. This reversible choice is not Jack Heart's approval or complete-PR acceptance.
+Preview is a fresh graph, not a running cursor: only its initial skill/router
+has current input; future/repeat input is unavailable and commands never execute.
+Native arguments remain separate from router instructions. Original details:
+`e4a324636:scratch/questions.md`, this heading. No complete-PR acceptance follows.
 
 ## Portable assignment choice — October 9
 
@@ -190,3 +161,28 @@ A remote link without `--session` opens its primary Session, rather than present
 local-only execution details. Peer files now consume request-bound filesystem invalidations; disconnects retain drafts. Shell creation rechecks the recorded owner/path. No automatic shell replay on disconnect or Close/Undo is added. No local watcher
 or recovery-folder opener may interpret a peer path. These are reversible presentation
 choices, not native acceptance or a change to first-start admission.
+
+## Work-tab cutover assumptions — October 10
+
+Jack Heart accepted one retained workspace per Work initially, Work-named tabs,
+sidebar organization, conversation-named panes and hide/reopen without ending
+execution. These are accepted direction, not implemented/native acceptance.
+The plan's **Work tabs** section owns the cutover and checks.
+
+Reversible implementation choices: tab selection restores that Work's last pane;
+closing the selected tab selects its left neighbor (otherwise the next), and the
+last tab leaves an empty working area. No tab reordering, duplicate workspaces or
+new keyboard shortcut system is required. Opening bare Work shows retained content
+or details/empty panes without preparing execution. Saved relaunch layout consumes
+LOO-416; in-memory tab retention does not promise provider-draft recovery after quit.
+
+Multiple Session memberships grant no second native client. An ordinary Session
+open reveals its retained occurrence; an explicitly different eligible Work may
+relocate that occurrence, not copy/mount its surface twice or change membership.
+This presentation policy remains reviewable. Unknown Session ancestry stays
+available through diagnostics, not a guessed Task association.
+
+The arbitration binding's establishment, associated identity and recovery remain
+unresolved. They block shared first start, not this UI slice. Rich key chords are
+LOO-452; CLI-build versus running-app capability discovery is LOO-397. No new
+Task filing or claim of their implementation follows from this plan.

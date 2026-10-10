@@ -1,202 +1,57 @@
 # Findings supporting LOO-427
 
-The [plan](compare-cmux-s-command-line.md) owns remaining work. Earlier storage
-findings: `f48d84511:scratch/findings.md`; assignment provenance remains unknown.
+The [plan](compare-cmux-s-command-line.md) owns remaining work. Pre-Work-tab
+findings, failed attempts, log paths and earlier archive links are retained at
+`e4a324636:scratch/findings.md`, under the headings named below. All were committed
+before this compression; no uncommitted evidence was discarded.
 
-October 10 review: preserve PTY validation when inferring a caller; return creation
-IDs without claiming readiness. Fixed a missing Swift bridge return, stale help
-assertions and two retired `run finish-delivery` examples. Failures and passing
-reruns: `/tmp/loo427-rex-*.log`. No native acceptance follows.
+## Retained evidence and limits
 
-## Decisions these findings do not establish
+- **Integration boundary**, **Shared planning composition**, **Task completion
+  integration**, **Delegation exchange**: journals, common receipts, accepted-only
+  frontiers, correspondence, original creation inputs and private holds remain
+  owners. Foreground two-Home/file-Git proofs cover reconnect, causal reopening,
+  delegation/no-echo and lost-publication receipts with seeded execution, not
+  running Flows or exclusive admission. Cached confirmation is not repeat-exchange
+  proof. Git confirmation never acknowledges provider delivery. Connected
+  Linear/Git exchange stays refused; readback cannot exclude unseen reopening.
+- **Scoped dispatch and preview**, **Opening and preview review**, **Workflow
+  movement explanation**, **Planning invocation explanation**, **Refile and
+  file-save explanation**: shared selection/validation, read-only snapshots and
+  launch-only excerpts survive. Preview grants no preparation/control authority.
+  The generic `wave ensure ID` name-first gap remains in the plan; refile was
+  repaired. Earlier WAL, scoped-ID and fixture failures remain in those sections.
+- **Recorded execution-location observation**, **Remote Task opening**, **Remote
+  companions**: nonce-bound owner observations, exact correspondence and pinned
+  SSH/owned-line transport preserve remote Session/Files/shell locations and
+  draft stdin. Positive owners survive other unavailable peers; negative evidence
+  never admits start. Per-peer deadlines are not a global inventory. Headless and
+  simulated-SSH fixtures establish neither configured peers nor native surfaces.
+- **Arrangement and terminal evidence**: one inspection pins exact lifetimes;
+  ambiguity dispatches nothing. lf3 bounded reads and input owners are composed,
+  not natively accepted. October 10's introductory Rex note retains the missing
+  Swift return, obsolete help examples and passing reruns. PTY validation remains;
+  mutation IDs never establish readiness. LOO-397 now owns CLI-build/running-app
+  capability discovery; LOO-452 owns richer key chords, including Ctrl-C.
 
-- Jack Heart's shared-Work/delegated-subtree decision stays accepted. October 8's
-  local-planning/Git-ref choice still needs complete-path proof.
-- Removing the former SSH `--repo` option did not ban Work-directed routing.
-- Matching a parent's Machine is not evidence that a historical assignment was
-  inherited. Migration must preserve the observed meaning rather than invent it.
-- A successful command receipt does not prove usable rendering. The cmux
-  disposable-window probe is evidence only for that host, not Desktop parity.
+Jack Heart's shared-Work/subtree delegation decision remains accepted. Clone names,
+remotes, repository pairing and per-request Machine-default changes are rejected.
+Historical assignment provenance stays unknown. Admission's transport
+counterexamples and unreviewed binding proposal remain in the plan; the accepted
+October 10 UI work does not resolve them.
 
-Rejected: repository pairing, merged per-Machine planning trees, clone/remote-name
-identity, and per-request Machine-default rewrites.
+## Work-tab design review — October 10
 
-Checkout-location review: `f881ae647:scratch/findings.md`, **October 8
-implementation review**. Gate retains migration/Session-lifecycle coverage.
+Source inspection at `e4a324636` found a concrete mismatch: the registry keys inner
+workspaces by Machine/checkout and keeps a second outer worktree layout. Adding a
+tab bar alone would merge repository/Wave contents sharing a checkout. The design
+instead replaces the outer tree and rekeys the existing registry by Work, retaining
+one multiplexer and the window's existing surface pool. Workspace-wide Machine
+state must move to contents; stale targeting and shell-exit lookup change with it.
 
-## Integration boundary — October 8–9
+Review also caught that a multiply associated Session cannot mount its NSView in
+two tabs. The plan records a single retained presentation occurrence, with explicit
+relocation rather than another client or changed membership. Tab closing is hide,
+not process/window shutdown. No code, native demo or new runtime proof is claimed.
 
-Composition uses committed dependencies, never dirty peer checkouts. Receipt ordering,
-provider rollback, acquisition ages and failed attempts remain at
-`a51ec10e7:scratch/findings.md`, this heading. Complete lists alone settle order;
-replay cannot clear freshness. Correspondence supersedes raw-SQL unmapping.
-Connected Linear exchange stays refused. Readback cannot exclude unseen reopening;
-partial-list, foreground-provider, native and exclusive-start proof remain.
-
-## Arrangement and terminal evidence — October 8–9
-
-`96b3217fe:scratch/findings.md` retains arrangement/extraction failures and lf3
-publication. Machine-qualified owners and bounded reads are composed; headless
-checks prove neither mounted surfaces nor native drafts/responders.
-
-October 9 selector cut deletes public JSON targets/surface tokens. One inspection
-pins window/content/surface before dispatch; eligibility never uses focus. The
-resolved pane borrows that window/workspace, removing the second repository/workspace
-lookup for move/resize peers. Opening URLs reuse the validated remote owner/repository
-pair. Ambiguous or missing matches dispatch nothing. Cross-workspace peer rejection
-and remote URL refusals have unit coverage; existing receiver tests reject delayed/replaced
-lifetimes. Earlier selector logs: `/tmp/loo427-selectors-{rust,swift,clippy}.log`. No native proof.
-
-October 9 realign found `docs/architecture/machines.md` still describing the retired
-remote-opening refusal; it now matches the composed Session/Files/shell path.
-`wave/product/` has no child directories or child memories in this checkout.
-
-## Scoped dispatch and preview — October 9
-
-`42a6cb7f7:scratch/findings.md`, this heading, retains discarded-ID/reparsed-argv
-findings, migration/excerpt writes and canonical-Wave fixture repairs. Shared
-selection, read-only storage and launch-only excerpt persistence survive.
-Compression centralizes non-agent `--context` rejection before stdin, replacing
-per-action checks; invalid UTF-8 input exercises that boundary. Save constructs
-one action after validation, preserving normalized paths and refused input.
-Removed the stale Flow-context refusal assertion: Flow preview is implemented
-(failure: `/tmp/loo427-compress-checks.log`).
-Generic action gaps and provider/remote proof limits remain in the plan.
-
-## Opening and preview review — October 9
-
-`a51ec10e7:scratch/findings.md`, “Composed-opening review”, “Invocation-level Task
-run explanation”, “Desktop opening explanation” and “Remote and Flow preview” retain
-failures and repairs: partial inventories, delayed preparation/readiness, hidden
-fallback WAL writes, skipped diff/platform validation, scoped remote arguments and
-shared Flow input. Request generations fence readiness, not native usability.
-A proposed URL is no surface receipt. Preview shares owners without preparation or
-fallback writes; configured transport, admission and native proof remain separate.
-
-## Shared planning composition — October 9
-
-Completed composition and failed attempts: `a4ba465ea:scratch/findings.md`, this
-heading. Existing journals, receipts, transport and Work-stream lifetime remain the
-owners. TaskSource transfer/preparation stays deleted. Retention cannot parent saves;
-accepted-only joint frontiers, original creation inputs, private holds and independent
-provider savepoints survive. Correspondence grants no effect or execution authority.
-
-Foreground two-Home/file-Git proofs cover association, offline edits, reconnect,
-causal reopening and lost-publication receipts with unchanged seeded execution.
-Cached confirmation is not repeat-exchange proof; fresh stream confirmation is required.
-Git confirmation never acknowledges provider delivery. Locator observation fences
-retain scenes/drafts through A→B→A, not mounted native surfaces. Mixed providers,
-running Flows, exclusive admission and configured/native proof remain outstanding.
-
-## Workflow movement explanation — October 9
-
-Run/move readers share Task selection/location; movement/restart retain captured
-graph validation and exact prior edges. End intent does not reconcile or clean up.
-The ID-versus-alias failure and recovery remain at `4688a4d85`, this heading
-(`/tmp/loo427-move-first-failure.log`, `/tmp/loo427-implement-9Chixx/`).
-
-## Planning invocation explanation — October 9
-
-Creation/saved-Task input separation, Wave provenance correction, checkpointed-store
-fixtures and limits: `b2add0cf8:scratch/findings.md`, this heading. Empty/whitespace
-`LF_WAVE_ID` must follow the resolved inbox branch, not environment presence.
-
-## Refile and file-save explanation — October 9
-
-Preview reuses the store's unallocated-work predicate inside a read snapshot; writes
-revalidate inside the immediate transaction. File preview and exchange share pinned
-parent/file reads, text/path validation and both revision checks; only exchange
-creates recovery. Review found execution's name-first initialization could create a
-Wave named after a durable destination ID. Resolution now precedes initialization;
-unknown IDs never authorize creating a named Wave.
-The first refile fixture failed because setup had already created chapter locks
-(`/tmp/loo427-refile.log`); remove owned setup locks before testing preview absence.
-This is no peer admission, synchronization or native acceptance proof.
-
-## Task completion integration — October 9
-
-`7f7a2f03c:scratch/findings.md`, this heading, retains the LOO-418 sync failures
-and repairs: obsolete completion/receipt APIs, historical receipt-ID lookup,
-caller-subdirectory handoff and first-start options. Task-owned placement no longer
-requires a PR; completion requests remain separate from settlement. Historical
-filing uses common creation receipts without changing original input or unknown
-delivery. Failure logs: `/tmp/loo427-integrated-*.log`.
-
-`a44ddcb5f` dispatches run/checkout before ordinary Work binding, preserving scoped
-lookup, admission and the later historical-branch repository check. Its focused
-13-test pass and stale missing-PR/retired-run assertion failures remain there.
-
-`b2add0cf8:scratch/findings.md`, this heading, retains the public completion
-counterexample, title-only Linear regression and failed compile. The two-Home
-public-command/file-Git fixture covers same-value reopening, stale/replayed facts,
-newer failed requests and end retry. Supersession and delivery roll back together;
-Linear still uses status changes. Seeded Workflow/PR/placement, disk drafts and one
-fake provider remain distinct from running-Flow/native acceptance.
-
-## Delegation exchange — October 9
-
-The existing journal carries Machine ID/time/provenance into `work_placements`;
-unknown IDs create no connections. The same draft preserves legacy rows and seeds
-journal values, removing only Placement's connection foreign key. Public Wave saves
-and repository watchers converge after offline conflicts; Task/Project overrides,
-clearing and repeat delivery have Store fixtures; the public fixture covers future
-inheritance and seeded started-checkout retention.
-Execution and credentials never enter the payload; exclusive admission stays refused.
-
-Initial fixture failures: wrong Path assertion,
-missing Started evidence, invalid Wave segment and absent child chapter. The populated
-upgrade also exposed obsolete PR-owned fixture placement; seed Task branch/base first.
-`wave ensure ID` exposed name-first initialization; the fixture uses its name contract,
-while the unresolved ID path remains in the plan. No configured peer or native proof.
-
-## Recorded execution-location observation — October 9
-
-One snapshot reads repository correspondence and the observer's checkout/Started
-record. Existing SSH carries exact identities and a request nonce with a 20-second
-per-peer deadline; added peers are observed sequentially; no credential preparation, retry, cache, placement write or import.
-Positive ownership overrides changed delegation; stale/unreachable/conflicting
-readings cannot select another checkout. Negative readings never admit first start.
-
-The two-CLI/import fixture routes `task checkout` to the retained owner after
-delegation changes, without copying its checkout. Task run/move/Desktop are preview
-comparisons, not remote launches. Checkpointed database bytes prove read-only previews. Seeded history proves neither
-running Flows nor configured SSH; Desktop refused remote opening at that revision
-(superseded by the next section). Initial
-fixtures failed on private APIs and Started lacking recorded work; ordinary retained
-Flow history repairs setup. Logs: `/tmp/loo427-location-*.log`; pre-edit notes:
-`/tmp/loo427-location-before/` and `/tmp/loo427-compress-location-before/`.
-
-One projection replaces parallel Task/Desktop provenance and missing-path handling.
-Started without a path keeps its owner and reports unavailable checkout. Peer replies
-decode exactly one observation; owner selection drops the temporary route inventory.
-The fixture compares run/move/checkout/Desktop facts, removed paths and stale replies.
-Malformed-cardinality proof first assumed Serde's error wording; it now checks the
-operation's diagnostic (`/tmp/loo427-compress-location-test.log`). No admission or
-remote opening added. Native acceptance remains demo work.
-
-## Remote Task opening — October 9
-
-`5387e5220:scratch/findings.md`, this heading, retains the opening/recording
-repairs, failed fixtures and commit attempts. TaskLink keeps the repository scene;
-nonce-bound location and explicit correspondence keep Session/Files on the owner.
-Partial inventories cannot retire local panes. Session-only/Changes links share
-Files preparation with local cache identity and the remote command subject.
-Recording preserves transport classification as well as closures: otherwise peer
-paths regain local affordances. SSH script arguments preserve draft stdin.
-Headless/simulated-SSH checks prove neither configured peers nor mounted surfaces.
-Companions are now composed below; mixed providers and first start remain unfinished.
-
-## Remote companions — October 9
-
-Existing SSH and owned-line transport now carry checkout-pinned shells and filesystem
-invalidations. Full invalidation is deliberately coalesced, not a new contents poller.
-Document reconciliation retains disjoint drafts/selection even while another file is selected;
-pre/post location reads discard replies after owner changes. Stream failure cancels pending
-reads. These checks cannot exclude arbitrary concurrent filesystem replacement or establish
-native usability. Cross-platform notify is used instead of another platform-specific watcher.
-
-The first Swift build exposed nonisolated deinit accessing MainActor state; a small resource
-owner now cancels the stream on release. The shell fixture initially lacked the bundled helper,
-then assumed `/bin/false`; its isolated configured host now owns an executable stub. No user app/helper or provider account changed. Logs: `/tmp/loo427-companions-*.log`.
-Selected-path scratch commits failed empty because that operation excludes scratch; original
-notes remain at `/tmp/loo427-shell-files-before/`. Delivery is not implied by these checks.
+Check: `git diff --check` PASS; prose-only, builds skipped; `lf context` checked (generated goal overflow remains outside authored notes).

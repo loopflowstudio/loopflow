@@ -245,10 +245,10 @@ creation carries rules/title, not PATCH. Unknown identity stays uncertain.
 Creation, relay, native launch, permission and dispatch proofs:
 `7fec3b53f:wave/infrastructure/MEMORY.md`, this heading. Shell lacks IDs.
 `4834c18f4` retains Claude origins, not pipes. Display follows current attachment;
-caller authority stays frozen. SQLite atomically correlates UUID-keyed results,
-rejecting conflicting repeats and rolling back failed receipts. Results without
-admissions lack receipts; replay can consume later work. Transport needs ordering,
-no caller-held fence reacquisition or permanent custody. EOF/history/write errors
+caller authority stays frozen. SQLite atomically correlates results by UUID,
+rejecting conflicts and rolling back failures. Uncorrelated
+results retain evidence; replay cannot consume later work. Transport needs ordered
+draining, without fence reacquisition or permanent custody. EOF/history/write errors
 grant no settlement or teardown. Public death orders remain unproved.
 Plan: `scratch/stop-and-take-over-claude.md`.
 

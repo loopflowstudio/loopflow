@@ -106,7 +106,7 @@ mod tests {
     use crate::store::sqlite::SqliteStore;
     use serde_json::json;
 
-    fn pending_pair(path: &std::path::Path) -> super::super::agent_process::AttachmentOwner {
+    fn session_owner(path: &std::path::Path) -> super::super::agent_process::AttachmentOwner {
         let store = SqliteStore::open_ephemeral(path).unwrap();
         store.test_session("conversation", "run_00000000000000000000000000000001");
         let process = LfProcessId::new();
@@ -120,10 +120,13 @@ mod tests {
         let attachment = store
             .claim_session_attachment("conversation", None, &process, false)
             .unwrap();
-        let owner = (store.clone(), "conversation".into(), attachment.clone());
-        let origin = store
-            .session_turn_origin("conversation", &attachment)
-            .unwrap();
+        (store, "conversation".into(), attachment)
+    }
+
+    fn pending_pair(path: &std::path::Path) -> super::super::agent_process::AttachmentOwner {
+        let owner = session_owner(path);
+        let (store, session, attachment) = &owner;
+        let origin = store.session_turn_origin(session, attachment).unwrap();
         let mut history = History::new(owner.clone());
         for request in ["first", "second"] {
             store
@@ -134,6 +137,94 @@ mod tests {
                 .unwrap();
         }
         owner
+    }
+
+    #[test]
+    fn uncorrelated_result_cannot_complete_later_input_after_reader_restart() {
+        let home = tempfile::tempdir().unwrap();
+        let owner = session_owner(&home.path().join("history.db"));
+        let mut result = json!({"type":"result","uuid":"early-result","session_id":"thread",
+            "subtype":"success","result":"old answer","usage":{"input_tokens":10}});
+        History::new(owner.clone())
+            .record(&result.to_string())
+            .unwrap();
+        let events = owner.0.session_history("conversation", 0, 0).unwrap();
+        let observation = events
+            .iter()
+            .find(|event| event.payload["uncorrelated_result"]["result_id"] == "early-result")
+            .unwrap();
+        assert_eq!(observation.kind, SessionEventKind::Observed);
+        assert_eq!(observation.provider_turn, None);
+        assert_eq!(observation.payload["events"][0][1]["text"], "old answer");
+        assert_eq!(
+            observation.payload["events"][1][1]["usage"]["input_tokens"],
+            10
+        );
+
+        let origin = owner
+            .0
+            .session_turn_origin("conversation", &owner.2)
+            .unwrap();
+        owner
+            .0
+            .record_session_request(None, "later", &origin)
+            .unwrap();
+        let mut reader = History::new(owner.clone());
+        reader
+            .record(&json!({"type":"user","uuid":"later","session_id":"thread"}).to_string())
+            .unwrap();
+        reader.record(&result.to_string()).unwrap();
+        result["usage"]["input_tokens"] = json!(99);
+        assert!(reader.record(&result.to_string()).is_err());
+        result["usage"]["input_tokens"] = json!(10);
+        result["session_id"] = json!("different-thread");
+        assert!(reader.record(&result.to_string()).is_err());
+        let events = owner.0.session_history("conversation", 0, 0).unwrap();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event.payload.get("uncorrelated_result").is_some())
+                .count(),
+            1
+        );
+        assert!(events.iter().all(|event| !matches!(
+            event.kind,
+            SessionEventKind::Output | SessionEventKind::Usage | SessionEventKind::Completed
+        )));
+
+        reader
+            .record(
+                &json!({"type":"result","uuid":"later-result","session_id":"thread",
+            "subtype":"success","result":"new answer"})
+                .to_string(),
+            )
+            .unwrap();
+        let events = owner.0.session_history("conversation", 0, 0).unwrap();
+        let completion = events
+            .iter()
+            .find(|event| event.kind == SessionEventKind::Completed)
+            .unwrap();
+        assert_eq!(completion.provider_turn.as_deref(), Some("later"));
+        assert_eq!(completion.payload["result_id"], "later-result");
+    }
+
+    #[test]
+    fn unidentified_result_refuses_even_without_admissions() {
+        let home = tempfile::tempdir().unwrap();
+        let owner = session_owner(&home.path().join("history.db"));
+        assert!(History::new(owner.clone())
+            .record(
+                &json!({"type":"result",
+            "session_id":"thread","subtype":"success","result":"unkeyed"})
+                .to_string()
+            )
+            .is_err());
+        assert!(owner
+            .0
+            .session_history("conversation", 0, 0)
+            .unwrap()
+            .iter()
+            .all(|event| event.kind == SessionEventKind::Captured));
     }
 
     #[test]
@@ -297,9 +388,14 @@ mod tests {
             .record(&json!({"type":"user","uuid":"request","session_id":"thread"}).to_string())
             .unwrap();
         history.record(&json!({"type":"result","uuid":"duplicate","session_id":"thread","subtype":"success","result":"must not settle another input"}).to_string()).unwrap();
+        let retained = store.session_history("conversation", 0, 0).unwrap();
+        assert_eq!(retained.len(), count + 1);
+        let uncorrelated = retained.last().unwrap();
+        assert_eq!(uncorrelated.kind, SessionEventKind::Observed);
+        assert_eq!(uncorrelated.provider_turn, None);
         assert_eq!(
-            store.session_history("conversation", 0, 0).unwrap().len(),
-            count
+            uncorrelated.payload["uncorrelated_result"]["result_id"],
+            "duplicate"
         );
         assert!(events
             .iter()
@@ -355,7 +451,7 @@ mod tests {
                 .unwrap()
                 .waiting
         };
-        let yielded = json!({"type":"result","subtype":"success"}).to_string();
+        let yielded = json!({"type":"result","uuid":"yielded","subtype":"success"}).to_string();
         reader.record(&yielded).unwrap();
         assert!(waiting());
         let second = store

@@ -129,8 +129,11 @@ Claude persists input UUID origins before pipe writes. Native echoes admit reque
 SQLite selects unfinished turns in observation order for the same AgentProcess.
 Durable result UUID correlation, output, usage and completion commit together.
 Repeated correlated results cannot consume another turn; conflicting payloads
-refuse without changing saved receipts. Results without an admission have no
-receipt yet; replaying them against later admissions is not safe.
+refuse without changing saved receipts. Results without an admission retain
+UUID-keyed `Observed` evidence, including output and usage, but never a synthetic
+turn or completion. Replay preserves that absence of attribution even after later
+admissions. Missing result UUIDs refuse; unread or uncommitted output still requires
+ordered transport recovery.
 Display activity follows that provider's current attachment,
 retaining tools while detached and ignoring replacement providers. Dispatch and
 stop retain frozen caller authority. Saved origins cannot recover unread pipe

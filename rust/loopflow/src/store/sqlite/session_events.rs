@@ -273,7 +273,8 @@ impl SqliteStore {
 
     /// Correlate an ordered, UUID-keyed result with one admission. Selection and
     /// all result receipts commit together, so reopened or concurrent readers
-    /// cannot consume the next admission with the same result.
+    /// cannot consume the next admission with the same result. Results without
+    /// an admission retain that disposition; later input cannot claim old output.
     pub(crate) fn record_ordered_session_result(
         &self,
         session: &str,
@@ -284,7 +285,34 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let result_id = completed["result_id"].as_str().filter(|id| !id.is_empty());
+        let result_id = completed["result_id"]
+            .as_str()
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| StoreError::InvalidData("Ordered result lacks its identity".into()))?;
+        let receipt = format!("uncorrelated-result:{agent_process}:{result_id}");
+        let observation = serde_json::json!({
+            "agent_process_id": agent_process,
+            "uncorrelated_result": completed,
+            "events": events,
+        });
+        let uncorrelated: Option<(Option<AgentSessionId>, String)> = tx
+            .query_row(
+                "SELECT provider_thread,payload FROM session_events
+             WHERE session_id=?1 AND kind='observed' AND receipt_key=?2",
+                params![session, receipt],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        if let Some((saved_thread, payload)) = uncorrelated {
+            if saved_thread.as_ref() != thread
+                || serde_json::from_str::<Value>(&payload)? != observation
+            {
+                return Err(StoreError::InvalidData(
+                    "Conflicting uncorrelated result".into(),
+                ));
+            }
+            return Ok(());
+        }
         let repeated: Option<(AgentSessionId, String)> = tx.query_row(
             "SELECT done.provider_thread,done.provider_turn FROM session_events done
              JOIN session_events start ON start.session_id=done.session_id
@@ -311,9 +339,18 @@ impl SqliteStore {
                 .optional()?,
         };
         let Some((saved_thread, turn)) = selected else {
+            // No synthetic turn or completion: this evidence can never settle
+            // work admitted after it was observed, even after reader restart.
+            tx.execute(
+                "INSERT INTO session_events(session_id,provider_thread,kind,receipt_key,observed_at,payload)
+                 VALUES(?1,?2,'observed',?3,?4,?5)",
+                params![session, thread, receipt, time::OffsetDateTime::now_utc().unix_timestamp(),
+                    serde_json::to_string(&observation)?],
+            )?;
+            tx.commit()?;
             return Ok(());
         };
-        if result_id.is_none() || thread != Some(&saved_thread) {
+        if thread != Some(&saved_thread) {
             return Err(StoreError::InvalidData(
                 "Ordered result lacks its identity or changed conversation".into(),
             ));

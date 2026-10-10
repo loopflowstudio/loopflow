@@ -796,57 +796,33 @@ async fn connect_live_agent(
     });
     let connected = async {
         if replace_clients {
-            NativeSession::of(session)?.stop_clients(crate::session_record::ProviderClientStopReason::Moved)?;
+            NativeSession::of(session)?
+                .stop_clients(crate::session_record::ProviderClientStopReason::Moved)?;
         }
-        store.sqlite.make_session_interactive(&session.id, &attachment)?;
+        store
+            .sqlite
+            .make_session_interactive(&session.id, &attachment)?;
         if native.provider == "opencode" {
-            return connect_opencode_client(store, session, &attachment, endpoint.clone(), thread.clone()).await;
-        }
-        let thread = thread.clone().expect("Codex identity checked before claim");
-        let provider = provider.expect("Codex native history checked before claim");
-        let directory = tempfile::Builder::new().prefix("lf-connect-").tempdir_in("/tmp")?;
-        let remote = directory.path().join("client.sock");
-        let listener = tokio::net::UnixListener::bind(&remote)?;
-        let connection = crate::harness::codex_connection::CodexConnection {
-            store: store.sqlite.clone(), session_id: session.id.clone(), thread_id: thread, attachment: Some(attachment.clone()),
-        };
-        connection.recover_history(Path::new(&endpoint)).await?;
-        let upstream = PathBuf::from(&endpoint);
-        let relay = tokio::spawn(async move {
-            let mut clients = tokio::task::JoinSet::new();
-            loop {
-                tokio::select! {
-                    accepted = listener.accept() => {
-                        let Ok((client, _)) = accepted else { break };
-                        let connection = connection.clone();
-                        let endpoint = endpoint.clone();
-                        clients.spawn(async move { connection.serve(client, Path::new(&endpoint)).await });
-                    }
-                    result = clients.join_next(), if !clients.is_empty() => {
-                        if let Some(Ok(Err(error))) = result { tracing::warn!(%error, "native conversation connection ended"); }
-                    }
-                }
-            }
-        });
-        let session = session.clone();
-        let provider = provider.clone();
-        let launch_attachment = attachment.clone();
-        let environment = BTreeMap::from([(
-            crate::process::AGENT_CALLER_ENV.into(),
-            serde_json::to_string(&launch_attachment.caller(session.id.clone()))?,
-        )]);
-        let result = tokio::task::spawn_blocking(move || {
-            crate::lf::commands::util::resume_session_with_env(
-                "codex", session.model.as_deref(), &session.cwd, &session.artifact_key, &provider,
-                &environment, None, Some(crate::lf::commands::util::NativeConnection { relay: remote.to_string_lossy().into_owned(), upstream: upstream.to_string_lossy().into_owned() }),
-                Some((session.id.clone(), launch_attachment)),
+            return connect_opencode_client(
+                store,
+                session,
+                &attachment,
+                endpoint.clone(),
+                thread.clone(),
             )
-        }).await;
-        relay.abort();
-        let _ = relay.await;
-        result??;
-        Ok::<_, anyhow::Error>(true)
-    }.await;
+            .await;
+        }
+        connect_codex_client(
+            store,
+            session,
+            &attachment,
+            endpoint.clone(),
+            thread.clone().expect("Codex identity checked before claim"),
+            provider.expect("Codex native history checked before claim"),
+        )
+        .await
+    }
+    .await;
     match store.sqlite.finish_session_attachment(
         &session.id,
         &attachment,
@@ -863,6 +839,73 @@ async fn connect_live_agent(
     connected
 }
 
+async fn connect_codex_client(
+    store: &SharedStore,
+    session: &LfSession,
+    attachment: &crate::process::SessionAttachment,
+    endpoint: String,
+    thread: crate::id::AgentSessionId,
+    provider: &crate::session_record::ProviderSessionRef,
+) -> Result<bool> {
+    let directory = tempfile::Builder::new()
+        .prefix("lf-connect-")
+        .tempdir_in("/tmp")?;
+    let remote = directory.path().join("client.sock");
+    let listener = tokio::net::UnixListener::bind(&remote)?;
+    let connection = crate::harness::codex_connection::CodexConnection {
+        store: store.sqlite.clone(),
+        session_id: session.id.clone(),
+        thread_id: thread,
+        attachment: Some(attachment.clone()),
+    };
+    connection.recover_history(Path::new(&endpoint)).await?;
+    let upstream = endpoint.clone();
+    let relay = tokio::spawn(async move {
+        let mut clients = tokio::task::JoinSet::new();
+        loop {
+            tokio::select! {
+                accepted = listener.accept() => {
+                    let Ok((client, _)) = accepted else { break };
+                    let connection = connection.clone();
+                    let endpoint = endpoint.clone();
+                    clients.spawn(async move { connection.serve(client, Path::new(&endpoint)).await });
+                }
+                result = clients.join_next(), if !clients.is_empty() => {
+                    if let Some(Ok(Err(error))) = result { tracing::warn!(%error, "native conversation connection ended"); }
+                }
+            }
+        }
+    });
+    let session = session.clone();
+    let provider = provider.clone();
+    let launch_attachment = attachment.clone();
+    let environment = BTreeMap::from([(
+        crate::process::AGENT_CALLER_ENV.into(),
+        serde_json::to_string(&launch_attachment.caller(session.id.clone()))?,
+    )]);
+    let result = tokio::task::spawn_blocking(move || {
+        crate::lf::commands::util::resume_session_with_env(
+            "codex",
+            session.model.as_deref(),
+            &session.cwd,
+            &session.artifact_key,
+            &provider,
+            &environment,
+            None,
+            Some(crate::lf::commands::util::NativeConnection {
+                relay: remote.to_string_lossy().into_owned(),
+                upstream,
+            }),
+            Some((session.id.clone(), launch_attachment)),
+        )
+    })
+    .await;
+    relay.abort();
+    let _ = relay.await;
+    result??;
+    Ok::<_, anyhow::Error>(true)
+}
+
 /// Reuse the headless reader for native history and permission recovery. The
 /// TUI is only a client; neither reader failure nor client exit stops the server.
 async fn connect_opencode_client(
@@ -873,8 +916,9 @@ async fn connect_opencode_client(
     thread: Option<crate::id::AgentSessionId>,
 ) -> Result<bool> {
     use crate::harness::{ApprovalPolicy, Harness};
-    let (events, mut receiver) = tokio::sync::mpsc::unbounded_channel();
-    let drain = tokio::spawn(async move { while receiver.recv().await.is_some() {} });
+    // Native UI renders output; the reader still records history and permissions.
+    // Dropping the receiver avoids a task whose only job was discarding events.
+    let (events, _) = tokio::sync::mpsc::unbounded_channel();
     let mut harness =
         crate::harness::opencode::OpenCodeHarness::new(events, ApprovalPolicy::AutoApprove);
     harness.set_agent_session(thread);
@@ -886,66 +930,60 @@ async fn connect_opencode_client(
     };
     // start consumes the saved creation attempt when native identity is pending;
     // it cannot create again after an uncertain response.
-    let result = async {
-        harness.start(&config).await?;
-        let thread = harness
-            .agent_session()
-            .ok_or_else(|| anyhow!("OpenCode native identity remains unavailable"))?;
-        let dir = NativeSession::of(session)?.dir;
-        store
-            .sqlite
-            .with_session_attachment(&session.id, attachment, || {
-                crate::session_record::write_provider_session(&dir, &thread, None)
-                    .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))
-            })?;
-        let provider = crate::session_record::read_provider_session(&dir)?
-            .ok_or_else(|| anyhow!("OpenCode native history is unavailable"))?;
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
-        let remote = format!("http://{}", listener.local_addr()?);
-        let password = uuid::Uuid::new_v4().simple().to_string();
-        let connection = crate::harness::opencode_connection::OpenCodeConnection {
-            owner: (store.sqlite.clone(), session.id.clone(), attachment.clone()),
-            thread,
-            endpoint: endpoint.clone(),
-            directory: session.cwd.to_string_lossy().into_owned(),
-            password: password.clone(),
-        };
-        let relay = tokio::spawn(connection.serve(listener));
-        let environment = BTreeMap::from([
-            (
-                crate::process::AGENT_CALLER_ENV.into(),
-                serde_json::to_string(&attachment.caller(session.id.clone()))?,
-            ),
-            ("OPENCODE_SERVER_PASSWORD".into(), password),
-        ]);
-        let session = session.clone();
-        let attachment = attachment.clone();
-        let result = tokio::task::spawn_blocking(move || {
-            crate::lf::commands::util::resume_session_with_env(
-                "opencode",
-                session.model.as_deref(),
-                &session.cwd,
-                &session.artifact_key,
-                &provider,
-                &environment,
-                None,
-                Some(crate::lf::commands::util::NativeConnection {
-                    relay: remote,
-                    upstream: endpoint,
-                }),
-                Some((session.id.clone(), attachment)),
-            )
-        })
-        .await;
-        relay.abort();
-        let _ = relay.await;
-        result??;
-        Ok(true)
-    }
+    harness.start(&config).await?;
+    let thread = harness
+        .agent_session()
+        .ok_or_else(|| anyhow!("OpenCode native identity remains unavailable"))?;
+    let dir = NativeSession::of(session)?.dir;
+    store
+        .sqlite
+        .with_session_attachment(&session.id, attachment, || {
+            crate::session_record::write_provider_session(&dir, &thread, None)
+                .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))
+        })?;
+    let provider = crate::session_record::read_provider_session(&dir)?
+        .ok_or_else(|| anyhow!("OpenCode native history is unavailable"))?;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let remote = format!("http://{}", listener.local_addr()?);
+    let password = uuid::Uuid::new_v4().simple().to_string();
+    let connection = crate::harness::opencode_connection::OpenCodeConnection {
+        owner: (store.sqlite.clone(), session.id.clone(), attachment.clone()),
+        thread,
+        endpoint: endpoint.clone(),
+        directory: session.cwd.to_string_lossy().into_owned(),
+        password: password.clone(),
+    };
+    let relay = tokio::spawn(connection.serve(listener));
+    let environment = BTreeMap::from([
+        (
+            crate::process::AGENT_CALLER_ENV.into(),
+            serde_json::to_string(&attachment.caller(session.id.clone()))?,
+        ),
+        ("OPENCODE_SERVER_PASSWORD".into(), password),
+    ]);
+    let session = session.clone();
+    let attachment = attachment.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        crate::lf::commands::util::resume_session_with_env(
+            "opencode",
+            session.model.as_deref(),
+            &session.cwd,
+            &session.artifact_key,
+            &provider,
+            &environment,
+            None,
+            Some(crate::lf::commands::util::NativeConnection {
+                relay: remote,
+                upstream: endpoint,
+            }),
+            Some((session.id.clone(), attachment)),
+        )
+    })
     .await;
-    drop(harness);
-    drain.abort();
-    result
+    relay.abort();
+    let _ = relay.await;
+    result??;
+    Ok(true)
 }
 
 /// Open a conversation: resume its native history, else

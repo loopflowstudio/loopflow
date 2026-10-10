@@ -236,9 +236,9 @@ Standbys cannot write; group death releases custody; watchdog stays outside.
 OpenCode saves endpoint/attempts before effects. v1.2.0 creation carries rules
 and a correlation title; PATCH fixtures were wrong (`894bc61e5`).
 Missing/ambiguous identity readback stays uncertain.
-`07529ac3d`: creation-worker death/readback without replay, not public takeover.
-Claude pipes/correlation remain launcher-owned. Codex/OpenCode share custody/claim;
-OpenCode handoff recovers identity; death orders unproved.
+`07529ac3d`: creation-worker death/readback without replay.
+`b10b6ff065`: OpenCode identity recovery/fenced relay; answers stream outside
+the fence. Death orders unproved; Claude transport remains launcher-owned.
 Plan: `scratch/stop-and-take-over-claude.md`.
 
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)

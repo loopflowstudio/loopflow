@@ -138,6 +138,11 @@ anonymous/optional lifelines, endpoint-derived FIFO location,
 replaced by persisted startup attempts, readback and attachment-transfer proofs.
 Removed in the protocol correction: unsupported permission PATCH and its
 exclusive fixtures; saved native permissions survive on creation/reconnect.
+The shared public attachment path owns custody, claims and client-only settlement;
+Codex and OpenCode transports have separate client functions. OpenCode's discard-only
+event-drain task is deleted: its native UI renders output while the reader retains
+history and permission recovery. GET and mutation responses share one streaming
+translation, preserving status/content type and leaving answers outside the fence.
 Duplicated OpenCode blocking-worker/fence/client setup is replaced by
 `with_attached_http`; creation, replies, prompts and abort retain
 one timeout and cancellation boundary. Native receipt grouping borrows messages
@@ -177,46 +182,23 @@ and completion. The obsolete reconnect fixture route for the deleted
 `open_agent_session` detail GET is removed; creation readback and pending
 permissions keep their surviving fixtures.
 
-## Startup protocol correction (2026-10-10)
+## Provider protocol evidence (2026-10-10)
 
-The earlier permission PATCH fixture accepted a mutation the pinned provider does
-not support. OpenCode v1.2.0's [Session routes](https://github.com/anomalyco/opencode/blob/v1.2.0/packages/opencode/src/server/routes/session.ts)
-accept only title/time in PATCH; its [creation schema](https://github.com/anomalyco/opencode/blob/v1.2.0/packages/opencode/src/session/index.ts)
-accepts permissions. The separate permission writer, attempt and permissive
-PATCH fixtures are deleted. Creation now persists and sends the rules in its original payload;
-reconnect preserves existing native rules. The same saved payload supplies an exact
-correlation title for lost-response readback, without another schema or lifecycle.
-Missing, renamed or ambiguous native evidence never authorizes replay.
+OpenCode v1.2.0's [Session routes](https://github.com/anomalyco/opencode/blob/v1.2.0/packages/opencode/src/server/routes/session.ts)
+accept title/time in PATCH, permissions only on creation. The pinned
+[native prompt](https://github.com/anomalyco/opencode/blob/v1.2.0/packages/opencode/src/cli/cmd/tui/component/prompt/index.tsx)
+uses the streaming message route; [native attach](https://github.com/anomalyco/opencode/blob/v1.2.0/packages/opencode/src/cli/cmd/tui/attach.ts)
+receives relay authentication through private environment, never argv/debug output.
+These contracts explain the saved creation payload and dispatch-only fence above.
 
-The replaced cancellation/permission evidence and full previous plan are retained
-at `894bc61e5:scratch/stop-and-take-over-claude.md`; those simulated PATCH successes
-establish no provider support. The surviving creation fixture covers cancellation with a
-live blocking writer and SIGKILL of a separate throwaway creation worker before
-its response, plus lost/unapplied/ambiguous/renamed creation evidence. It reopens
-SQLite, transfers ownership, preserves AgentProcess identity and rejects the stale
-owner without creating another conversation. It does not exercise public `open`,
-provider lifeline death orders or launcher-independent Claude transport.
-Release's entry-point lesson still applies. Public transport work remains open.
-
-## Public OpenCode transport (2026-10-10)
-
-The pinned v1.2.0 TUI uses `session.prompt` (`POST /session/:id/message`),
-not just `prompt_async`. Its server streams headers before awaiting generation.
-The relay therefore bounds dispatch under the attachment fence and drains the
-answer afterward; holding the fence through the answer would prevent takeover
-and stop. This reuses the existing real-time dispatch driver. Requests retain
-native message IDs and immutable origins before HTTP; a lost response cannot
-cause relay replay. Loopback authentication is passed in the native client's
-private environment, never its argv or debug output.
-
-Source: [native attach](https://github.com/anomalyco/opencode/blob/v1.2.0/packages/opencode/src/cli/cmd/tui/attach.ts),
-[native prompt](https://github.com/anomalyco/opencode/blob/v1.2.0/packages/opencode/src/cli/cmd/tui/component/prompt/index.tsx),
-[Session routes](https://github.com/anomalyco/opencode/blob/v1.2.0/packages/opencode/src/server/routes/session.ts).
-The fixture withholds an answer across A → B → A, verifies stale-write rejection
-and retained attribution, then drains the original answer. No native/configured
-provider run or both-death-orders acceptance is claimed. Claude transport remains
-unimplemented; this is an internal slice of the same indivisible PR.
+Creation-worker cancellation/SIGKILL fixtures cover applied, unapplied, ambiguous
+and renamed readback without replay. The relay fixture withholds an answer across
+A → B → A, rejects stale writes, preserves attribution, then drains that answer.
+They establish neither public process-death orders nor configured-provider behavior.
+Full protocol correction and replaced PATCH evidence:
+`b10b6ff065:scratch/stop-and-take-over-claude.md`, “Startup protocol correction”
+and “Public OpenCode transport.”
 
 ## Checks
 
-Checks: `cargo check -p loopflow --lib --offline`, `cargo fmt`, `cargo clippy --offline --all-targets -- -D warnings`, and `git diff --check` pass; network-isolated library fixtures for public OpenCode pending-identity open, streamed-prompt/A → B → A fencing, and existing Codex connection pass (3 tests). Linux acceptance remains CI-owned.
+Checks: `cargo test -p loopflow --lib --offline --no-run`, `cargo fmt`, `cargo clippy --offline --all-targets -- -D warnings`, and `git diff --check` pass; network-isolated library fixtures for public OpenCode pending-identity open, streamed-prompt/A → B → A fencing, and existing Codex connection pass (3 tests). Linux acceptance remains CI-owned.

@@ -1,5 +1,6 @@
 //! The native TUI connects through a local HTTP relay, never directly to the
-//! surviving server. Every mutation holds its frozen Session attachment fence.
+//! surviving server. Mutations hold their frozen attachment fence through dispatch,
+//! never through the streamed answer.
 use std::sync::Arc;
 
 use anyhow::{anyhow, ensure, Result};
@@ -78,11 +79,7 @@ impl OpenCodeConnection {
                 .header("x-opencode-directory", &self.directory)
                 .send()
                 .await?;
-            let mut output = Response::builder().status(response.status());
-            if let Some(content_type) = response.headers().get(header::CONTENT_TYPE) {
-                output = output.header(header::CONTENT_TYPE, content_type);
-            }
-            return Ok(output.body(Body::from_stream(response.bytes_stream()))?);
+            return stream_response(response);
         }
         let prefix = format!("/session/{}/", self.thread);
         let operation = path.strip_prefix(&prefix).unwrap_or_default();
@@ -134,12 +131,17 @@ impl OpenCodeConnection {
             })?
         })
         .await??;
-        let mut output = Response::builder().status(response.status());
-        if let Some(content_type) = response.headers().get(header::CONTENT_TYPE) {
-            output = output.header(header::CONTENT_TYPE, content_type);
-        }
-        Ok(output.body(Body::from_stream(response.bytes_stream()))?)
+        stream_response(response)
     }
+}
+
+// Reads and mutations preserve the same status, content type and streaming body.
+fn stream_response(response: reqwest::Response) -> Result<Response> {
+    let mut output = Response::builder().status(response.status());
+    if let Some(content_type) = response.headers().get(header::CONTENT_TYPE) {
+        output = output.header(header::CONTENT_TYPE, content_type);
+    }
+    Ok(output.body(Body::from_stream(response.bytes_stream()))?)
 }
 
 async fn relay(State(connection): State<Arc<OpenCodeConnection>>, request: Request) -> Response {

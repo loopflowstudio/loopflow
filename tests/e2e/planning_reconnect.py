@@ -63,6 +63,40 @@ class Handler(BaseHTTPRequestHandler):
             return {"errors": [{"message": "fixture offline"}]}
         issue = next((i for i in state["issues"] if i["id"] == variables.get("id")), None)
         project = state["project"]
+        if state.get("ordering"):
+            if "query IssueOwnership" in query and state["order_writes"]:
+                moved = state["order_writes"][0]["id"]
+                if variables["id"] == moved and state["list_mode"] == "partial":
+                    state["moved_detail_reads"] += 1
+            if "query ProjectOwnership" in query:
+                project = next(p for p in state["projects"] if p["id"] == variables["id"])
+            if "query ListInitiativeProjects" in query:
+                return {"data": {"initiative": {"projects": _page(state["projects"])}}}
+            if "query IssueTrash" in query:
+                return {"data": {"issue": {**issue, "trashed": issue.get("trashed", False)}}}
+            if "mutation DeliverTaskDeletion" in query:
+                state["delete_writes"] += 1
+                issue["trashed"] = True
+                issue["updatedAt"] = "2026-10-09T12:00:00Z"
+                return {"errors": [{"message": "lost deletion response"}]}
+            if "query ListProjectIssues" in query:
+                state["list_reads"][state["list_mode"]] += 1
+                nodes = [
+                    i
+                    for i in state["issues"]
+                    if i["project"]["id"] == variables["projectId"] and not i.get("trashed", False)
+                ]
+                if state["list_mode"] == "partial" and variables["projectId"] == project["id"]:
+                    nodes = nodes[:-1]
+                return {"data": {"project": {"issues": _page(nodes)}}}
+            if "mutation DeliverTaskField" in query and "prioritySortOrder" in variables["input"]:
+                state["order_writes"].append(copy.deepcopy(variables))
+                issue.update(variables["input"])
+                # Linear can change rank without changing the entity revision.
+                # Lose the reply and withhold a member on subsequent list reads.
+                if len(state["order_writes"]) == 1:
+                    state["list_mode"] = "partial"
+                return {"errors": [{"message": "lost order response"}]}
         if state.get("associated_creations"):
             if any(
                 name in query
@@ -730,6 +764,236 @@ def _exchange(fixture: dict, env: dict, predicate, *, wait_for_publication: bool
         ) from error
     finally:
         watch.close()
+
+
+def _exercise_ordering(fixture: dict, env: dict, server: ThreadingHTTPServer) -> None:
+    sides = _peer_sides(fixture, env)
+    databases = [sqlite3.connect(Path(f["home"]) / "loopflow.db", timeout=5) for f, _ in sides]
+    processes = ("00000000-0000-4000-8000-000000000001",)
+    reference = "refs/loopflow/planning/shared/ordering"
+
+    def run(side: int, *args: str) -> str:
+        return _run(*sides[side], *args, timeout=45)
+
+    def exchange(side: int, predicate=lambda: True) -> None:
+        _exchange(*sides[side], predicate, wait_for_publication=True)
+
+    def receipt(side: int, identity: str) -> tuple | None:
+        return (
+            databases[side]
+            .execute(
+                "SELECT value_json,base_json,order_effects_json,attempted,acknowledged,"
+                "conflict_json "
+                "FROM project_changes WHERE id=?",
+                (identity,),
+            )
+            .fetchone()
+        )
+
+    def removal(side: int) -> tuple | None:
+        return (
+            databases[side]
+            .execute(
+                "SELECT id,value_json,base_json,attempted,acknowledged,conflict_json,"
+                "deletion_saved_at,acknowledged_revision FROM task_changes "
+                "WHERE field='deleted'",  # Only the independent Task is removed.
+            )
+            .fetchone()
+        )
+
+    subprocess.run(
+        ["git", "remote", "add", "plans", fixture["remote"]], cwd=fixture["repo"], check=True
+    )
+    with server.lock:
+        fourth = copy.deepcopy(server.state["issues"][0])
+        fourth.update(id=str(uuid.uuid4()), identifier="INF-126", title="Fourth ordered Task")
+        server.state["issues"].append(fourth)
+        independent_project = copy.deepcopy(server.state["project"])
+        independent_project.update(
+            id=str(uuid.uuid4()), name="Independent removal", status={"type": "planned"}
+        )
+        independent = copy.deepcopy(fourth)
+        independent.update(id=str(uuid.uuid4()), identifier="INF-127", project=independent_project)
+        server.state["projects"] = [server.state["project"], independent_project]
+        server.state["issues"].append(independent)
+        for index, issue in enumerate(server.state["issues"]):
+            issue.update(prioritySortOrder=0, sortOrder=index * 10)
+        server.state.update(
+            ordering=True,
+            list_mode="complete",
+            order_writes=[],
+            moved_detail_reads=0,
+            list_reads={"complete": 0, "partial": 0},
+        )
+    run(0, "repo", "refresh", "--all")
+    for side in range(2):
+        destination = run(
+            side, "planning", "connect", "--remote", "plans", "--shared", "ordering"
+        ).strip()
+        if side == 0:
+            run(side, "planning", "select", destination, "--wave", fixture["wave"])
+    with server.lock:
+        server.state["offline"] = True
+    exchange(0)
+    exchange(1, lambda: databases[1].execute("SELECT count(*) FROM tasks").fetchone() == (5,))
+    # Wave documents remain local. Explicitly ingest the checked-out definition
+    # before expecting this machine to acquire/deliver through its Linear mapping.
+    run(
+        1,
+        "wave",
+        "edit",
+        "task-pr-tests",
+        "--goal",
+        str(Path(fixture["repo"]) / "wave/task-pr-tests/GOAL.md"),
+    )
+    # Populate receiver execution only after cold Git acquisition. This is fixture
+    # history, not transported execution. Neither exchange may change these rows.
+    for table in [
+        "processes",
+        "agent_sessions",
+        "task_workflows",
+        "task_workflow_moves",
+        "task_prs",
+    ]:
+        query = f"SELECT * FROM {table}"
+        if table == "processes":
+            query += " WHERE lfid='00000000-0000-4000-8000-000000000001'"
+        rows = databases[0].execute(query).fetchall()
+        for row in rows:
+            databases[1].execute(f"INSERT INTO {table} VALUES({','.join('?' for _ in row)})", row)
+    databases[1].commit()
+    before = [_execution_rows(db, processes) for db in databases]
+    run(0, "task", "edit", "INF-126", "--rank", "0")
+    run(0, "task", "edit", "INF-125", "--rank", "0")
+    with server.lock:
+        server.state["offline"] = False
+    watch = Watch(*sides[0])
+    try:
+        watch.scope(fixture["repo"])
+        _await(lambda: bool(server.state["order_writes"]), "no public order attempt")
+        _await(lambda: server.state["list_reads"]["partial"] > 0, "no incomplete readback")
+    finally:
+        watch.close()
+    attempted = (
+        databases[0]
+        .execute("SELECT id FROM project_changes WHERE field='task_order' AND attempted=1")
+        .fetchone()[0]
+    )
+    captured = receipt(0, attempted)
+    assert captured[3:5] == (1, 0), captured
+    assert not json.loads(captured[2])[-1]["settled"], captured
+    # Remove unrelated planning through the CLI while the first order move is
+    # uncertain. The provider commits deletion but loses its response; trash
+    # readback, not absence from a list, must confirm the retained receipt.
+    run(0, "task", "delete", "INF-127")
+    exchange(0, lambda: removal(0) is not None and removal(0)[4] == 1)
+    negative = removal(0)
+    with server.lock:
+        server.state["offline"] = True
+    exchange(0)
+    earlier = _planning_status(*sides[0])["publication_revision"]
+    exchange(1, lambda: removal(1) == negative and receipt(1, attempted) == captured)
+    run(1, "task", "edit", "INF-124", "--rank", "0")
+    later = (
+        databases[1]
+        .execute(
+            "SELECT id,value_json FROM project_changes WHERE field='task_order' "
+            "ORDER BY seq DESC LIMIT 1"
+        )
+        .fetchone()
+    )
+    assert later[0] != attempted
+    run(1, "task", "edit", "INF-125", "--title", "Retained independent save")
+    saved = json.loads(
+        run(1, "task", "comment", "INF-124", "Comment during partial order", "--json")
+    )
+    comment = saved["pending_sync"][0]
+    with server.lock:
+        server.state["offline"] = False
+        incoming = _comment("Incoming during partial order", server.state["issues"][1]["id"])
+        server.state["comments"].append(incoming)
+        partial_reads = server.state["list_reads"]["partial"]
+    watch = Watch(*sides[1])
+    try:
+        watch.scope(fixture["repo"])
+        _await(
+            lambda: (
+                server.state["list_reads"]["partial"] > partial_reads
+                and server.state["moved_detail_reads"] > 0
+                and databases[1]
+                .execute(
+                    "SELECT acknowledged FROM task_comment_deliveries WHERE comment_id=?",
+                    (comment,),
+                )
+                .fetchone()
+                == (1,)
+                and databases[1]
+                .execute("SELECT count(*) FROM task_comments WHERE id=?", (incoming["id"],))
+                .fetchone()
+                == (1,)
+            ),
+            "partial ordering blocked independent comments",
+        )
+        assert receipt(1, attempted) == captured
+        assert len(server.state["order_writes"]) == 1
+        assert removal(1) == negative
+    except AssertionError as error:
+        raise AssertionError(
+            {
+                "comment": databases[1]
+                .execute("SELECT * FROM task_comment_deliveries WHERE comment_id=?", (comment,))
+                .fetchall(),
+                "incoming": databases[1].execute("SELECT id,body FROM task_comments").fetchall(),
+                "lists": (partial_reads, server.state["list_reads"]),
+                "details": server.state["moved_detail_reads"],
+                "delivery": databases[1]
+                .execute("SELECT id,field,error FROM project_changes")
+                .fetchall(),
+                "unexpected": server.state["unexpected"],
+                "conflicts": _planning_status(*sides[1])["conflicts"],
+            }
+        ) from error
+    finally:
+        watch.close()
+    # Detail carries the new sort keys at the unchanged entity revision, but
+    # only a complete Project list may settle the order move.
+    assert receipt(1, attempted) == captured
+    with server.lock:
+        server.state["list_mode"] = "complete"
+    exchange(1, lambda: receipt(1, later[0])[4] == 1)
+    with server.lock:
+        server.state["offline"] = True
+    exchange(0, lambda: receipt(0, later[0]) == receipt(1, later[0]))
+    assert receipt(0, attempted) == receipt(1, attempted)
+    assert receipt(0, later[0])[0] == later[1]
+    for side in range(2):
+        assert databases[side].execute(
+            "SELECT issue_title FROM tasks WHERE issue_identifier='INF-125'"
+        ).fetchone() == ("Retained independent save",)
+        assert removal(side) == negative
+    # Earlier Git documents may arrive again without erasing detail, receipts or
+    # authored alternatives. Every effect retains its exact attempted input.
+    settled = [receipt(1, identity) for identity in (attempted, later[0])]
+    for side in [0, 1, 0]:
+        replay = _replay_planning_document(fixture, env, reference, earlier)
+        exchange(
+            side, lambda side=side: _planning_status(*sides[side])["imported_revision"] == replay
+        )
+        assert [receipt(side, identity) for identity in (attempted, later[0])] == settled
+        assert removal(side) == negative
+    for side, db in enumerate(databases):
+        _assert_execution_unchanged(db, before[side], processes)
+        assert not (Path(sides[side][0]["home"]) / "provider-started").exists()
+        db.close()
+    with server.lock:
+        assert not server.state["unexpected"], server.state["unexpected"]
+        assert server.state["delete_writes"] == 1
+        effects = [effect for row in settled for effect in json.loads(row[2])]
+        assert len(server.state["order_writes"]) == len(effects)
+        assert all(effect["settled"] for effect in effects)
+        assert sorted(
+            (w["id"], json.dumps(w["input"], sort_keys=True)) for w in server.state["order_writes"]
+        ) == sorted((e["issue"], json.dumps(e["input"], sort_keys=True)) for e in effects)
 
 
 def _exercise_creation_origins(fixture: dict, env: dict, server: ThreadingHTTPServer) -> None:
@@ -1621,6 +1885,8 @@ printf '%s\\n' '{"type":"result","subtype":"success","result":"Done"}'
                 _exercise_associated_creations(fixture, env, server)
             elif sys.argv[2] == "creation-origins":
                 _exercise_creation_origins(fixture, env, server)
+            elif sys.argv[2] == "ordering":
+                _exercise_ordering(fixture, env, server)
             elif sys.argv[2] == "exports":
                 _exercise_exports(fixture, env, server)
             elif sys.argv[2] == "effects":

@@ -226,6 +226,15 @@ fn public_flow_reconnects_planning_without_another_turn() {
     planning_reconnect_fixture("flow");
 }
 
+#[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "fixture TLS requires Linux SSL_CERT_FILE"
+)]
+fn public_git_linear_removal_preserves_partial_order_and_later_saves() {
+    planning_reconnect_fixture("ordering");
+}
+
 fn planning_reconnect_fixture(mode: &str) {
     let home = tempfile::tempdir().unwrap();
     let _env = EnvGuard::with_lf_home(&[], home.path());
@@ -245,6 +254,25 @@ fn planning_reconnect_fixture(mode: &str) {
         "issue": registered.task.plan.linear_id.as_ref().unwrap().as_str(), "task": registered.task.id.as_str(),
         "project": project.plan.linear_id.as_ref().unwrap().as_str(), "wave": registered.task.wave_id.as_str(),
     });
+    if mode == "ordering" {
+        let peer_home = home.path().join("peer-home");
+        std::fs::create_dir(&peer_home).unwrap();
+        let peer = runtime
+            .block_on(loopflow::store::open_ephemeral_store(
+                &loopflow::store::StorageConfig::sqlite(peer_home.join("loopflow.db")),
+            ))
+            .unwrap();
+        seed_linear_token(&runtime, &peer, &key);
+        fixture["peer"] = serde_json::json!({"home":peer_home});
+        fixture["remote"] = serde_json::json!(repo.bare_path());
+        fixture["local_project"] = serde_json::json!(registered.task.project_id.as_str());
+        retain_execution(
+            home.path(),
+            repo.path(),
+            &registered.task.id,
+            &registered.task.wave_id,
+        );
+    }
     let creation_repo = (mode == "creation-origins").then(TestRepo::new);
     if let Some(creation_repo) = &creation_repo {
         fixture["peer"] = prepare_creation_peer(creation_repo, home.path(), &key);

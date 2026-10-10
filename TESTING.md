@@ -622,6 +622,22 @@ retained origins without publishing private parents, captures or later edits, wh
 independent public Task saves propagate. Freeze exchange comparisons after explicit
 local activation, checking that setup preserves all earlier execution rows. Neither
 variant proves original dispatch of its seeded attempts or native engine continuity.
+The ordering/removal case loses actual order and deletion replies, transports their
+receipts through Git, then interleaves incomplete lists, unchanged-revision detail,
+comments and a later reorder. Only complete lists settle order; only trash readback
+settles deletion. Replayed documents preserve exact inputs, saved times and execution.
+The cold peer explicitly imports its local Wave document before Linear delivery;
+Git planning does not transport Wave documents.
+
+`tests/e2e/codex_connect.py --codex "$(command -v codex)" --lf target/debug/lf
+--planning-peers --output <dir>` composes a real Codex engine with a synthetic
+Responses endpoint and disposable Git planning. It exchanges edits, comments and
+completion during live connect and explicit resume, including after killing the
+fixture's driver. Session/native identity and captured history survive; exchange
+starts no engine or provider turn. The controlled protocol client is headless,
+not a rendered native TUI proof. Prepare the script's uv dependencies before
+running it through `scripts/test_network.py`.
+
 Only attempted effects acknowledge; equal-desired provider readback can instead
 retire an unattempted intention without another write. The portable `work_watch` offline-completion test requires a foreground delivery error
 with no Task selected; local frame propagation alone cannot establish sync lifetime.

@@ -20,6 +20,7 @@ import sys
 import tempfile
 import threading
 import time
+from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -41,6 +42,7 @@ class Responses(ThreadingHTTPServer):
         self.commands: dict[int, str] = {}
         self.invalid_decision_output = False
         self.decision_outputs: list[dict] = []
+        self.hold_seconds = 20
         self.held = threading.Event()
         self.release = threading.Event()
         self.command = (
@@ -77,9 +79,12 @@ class Handler(BaseHTTPRequestHandler):
             for item in request["input"][last_user:]
             if item.get("type") == "function_call_output"
         ]
-        if not outputs and "held" in json.dumps(request["input"][last_user]):
+        prompt = request.get("instructions", "") + json.dumps(request["input"][last_user])
+        if not outputs and "held" in prompt:
             self.server.held.set()
-            assert self.server.release.wait(20), "held response was not released"
+            assert self.server.release.wait(self.server.hold_seconds), (
+                "held response was not released"
+            )
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.end_headers()
@@ -216,10 +221,11 @@ def main() -> None:
     parser.add_argument("--gated", action="store_true")
     parser.add_argument("--launch", action="store_true")
     parser.add_argument("--public-connect", action="store_true")
+    parser.add_argument("--planning-peers", action="store_true")
     parser.add_argument("--flow-decision-retry", choices=("missing", "replace"))
     parser.add_argument("--shared-provider-home", action="store_true")
     args = parser.parse_args()
-    args.launch = args.launch or args.shared_provider_home
+    args.launch = args.launch or args.shared_provider_home or args.planning_peers
     args.output.mkdir(parents=True, exist_ok=True)
     server = Responses()
     if not args.launch:
@@ -296,6 +302,12 @@ enabled = false
                     if args.shared_provider_home:
                         _shared_provider_home_contract(
                             binary, args.codex, root, work, env, server, results
+                        )
+                        return
+                    if args.planning_peers:
+                        server.hold_seconds = 90
+                        results["planning_peers"] = _live_driver_contract(
+                            binary, work, env, server, shared_engine=False, planning_peers=True
                         )
                         return
                     if args.public_connect:
@@ -499,6 +511,7 @@ def _public_connection_contract(
     results: dict,
     headless: subprocess.Popen,
     shared_engine: bool,
+    planning_exchange: Callable[[str, str], None] | None = None,
 ) -> None:
     session = results["session_id"]
     processes = []
@@ -664,6 +677,8 @@ def _public_connection_contract(
         assert observed_generation == generation and interactive == 1
         assert retained_connection == (endpoint, thread, generation)
         assert driver != before_prepare[0]
+        if planning_exchange:
+            planning_exchange("live-connect", session)
         server.release.set()
         engine.wait_turn(active)
         with sqlite3.connect(_database(env)) as database:
@@ -710,6 +725,63 @@ def _public_connection_contract(
             assert closed == (None, thread, None), closed
             assert not Path(endpoint).exists() or not engine.reader.is_alive()
             results["owner_exit_closed_engine"] = True
+            if planning_exchange:
+                # Abruptly kill only this fixture's resumed driver. The next
+                # explicit resume must use the same native thread on a new engine;
+                # peer exchange itself must never retry the interrupted turn.
+                server.held.clear()
+                server.release.clear()
+                resumed = subprocess.Popen(
+                    [str(binary), "-b", "session", "resume", session, "held before driver death"],
+                    cwd=work,
+                    env=env,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                )
+                processes.append(resumed)
+                assert server.held.wait(15), "explicit resume did not reach native provider"
+                planning_exchange("resumed", session)
+                resumed.kill()
+                resumed.communicate(timeout=10)
+                replaced.append(resumed)
+                server.release.set()
+                with sqlite3.connect(_database(env)) as database:
+                    retained_events = database.execute(
+                        "SELECT seq,kind,payload FROM session_events "
+                        "WHERE session_id=? ORDER BY seq",
+                        (session,),
+                    ).fetchall()
+                server.held.clear()
+                server.release.clear()
+                launches = set(Path(env["LF_PROBE_ENGINES"]).glob("*.json"))
+                recovered = subprocess.Popen(
+                    [str(binary), "-b", "session", "resume", session, "held after driver death"],
+                    cwd=work,
+                    env=env,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                )
+                processes.append(recovered)
+                assert server.held.wait(15), "dead-driver resume did not reach native provider"
+                with sqlite3.connect(_database(env)) as database:
+                    selected = database.execute(
+                        "SELECT provider_thread FROM agent_sessions WHERE id=?",
+                        (session,),
+                    ).fetchone()[0]
+                    recovered_events = database.execute(
+                        "SELECT seq,kind,payload FROM session_events "
+                        "WHERE session_id=? ORDER BY seq",
+                        (session,),
+                    ).fetchall()
+                assert selected == thread
+                assert recovered_events[: len(retained_events)] == retained_events
+                assert len(set(Path(env["LF_PROBE_ENGINES"]).glob("*.json")) - launches) == 1
+                planning_exchange("dead-driver-resume", session)
+                server.release.set()
+                _, error = recovered.communicate(timeout=20)
+                assert recovered.returncode == 0, error.decode()
+                results["planning_preserved_native_thread"] = thread
+
         results["history"] = history
         results["public_connect"] = dict(
             provider_generation=generation,
@@ -737,7 +809,12 @@ def _public_connection_contract(
 
 
 def _live_driver_contract(
-    binary: Path, work: Path, env: dict[str, str], server: Responses, shared_engine: bool
+    binary: Path,
+    work: Path,
+    env: dict[str, str],
+    server: Responses,
+    shared_engine: bool,
+    planning_peers: bool = False,
 ) -> dict:
     _init_repo(work, env)
     _command([str(binary), "session", "list", "--json"], work, env, timeout=15)
@@ -771,8 +848,16 @@ def _live_driver_contract(
             ]
         assert len(sessions) == 1, sessions
         result = {"session_id": sessions[0]}
+        exchange = _planning_peer_exchange(binary, work, env, server) if planning_peers else None
         _public_connection_contract(
-            binary, work, env, server, result, headless=child, shared_engine=shared_engine
+            binary,
+            work,
+            env,
+            server,
+            result,
+            headless=child,
+            shared_engine=shared_engine,
+            planning_exchange=exchange,
         )
         return result
     finally:
@@ -785,6 +870,107 @@ def _live_driver_contract(
                 child.kill()
                 child.communicate(timeout=5)
         log.close()
+
+
+def _planning_peer_exchange(
+    binary: Path,
+    work: Path,
+    env: dict[str, str],
+    server: Responses,
+) -> Callable[[str, str], None]:
+    """Join after engine launch; only its foreground lifetime receives peer saves."""
+    root = work.parent
+    remote = root / "planning.git"
+    subprocess.run(["git", "init", "--bare", "--quiet", str(remote)], env=env, check=True)
+    subprocess.run(["git", "remote", "add", "plans", str(remote)], cwd=work, env=env, check=True)
+    peer_home = root / "peer"
+    peer_home.mkdir()
+    peer = {
+        **env,
+        "HOME": str(peer_home),
+        "LF_HOME": str(peer_home / "lf"),
+        "CODEX_HOME": str(peer_home / "codex"),
+    }
+
+    def run(environment: dict[str, str], *args: str) -> str:
+        result = _command([str(binary), *args], work, environment, timeout=30)
+        assert result.returncode == 0, (args, result.stdout, result.stderr)
+        return result.stdout
+
+    task = json.loads(run(env, "task", "create", "--title", "Native peer plan", "--json"))["id"]
+    with sqlite3.connect(_database(env)) as database:
+        wave = database.execute(
+            "SELECT wave_id FROM projects WHERE id=(SELECT project_id FROM tasks WHERE id=?)",
+            (task,),
+        ).fetchone()[0]
+    for environment in (env, peer):
+        destination = run(
+            environment, "planning", "connect", "--remote", "plans", "--shared", "native-lifetime"
+        ).strip()
+        if environment is env:
+            run(environment, "planning", "select", destination, "--wave", wave)
+    run(env, "task", "edit", task, "--title", "Published before handoff")
+    # The cold peer acquires through an ordinary mutation. No monitor/work-watch
+    # runs on the native side, and the two stores share no execution objects.
+    run(peer, "task", "comment", task, "Cold peer joined")
+
+    def exchange(label: str, session: str) -> None:
+        engines = set(Path(env["LF_PROBE_ENGINES"]).glob("*.json"))
+        requests = len(server.requests)
+        with sqlite3.connect(_database(env)) as database:
+            conversation = database.execute(
+                "SELECT * FROM agent_sessions WHERE id=?", (session,)
+            ).fetchone()
+            history = database.execute(
+                "SELECT * FROM session_events WHERE session_id=? ORDER BY seq", (session,)
+            ).fetchall()
+            mutations = set(database.execute("SELECT id FROM planning_peer_changes"))
+        run(peer, "task", "edit", task, "--title", label)
+        run(peer, "task", "comment", task, f"Peer comment {label}")
+        if label == "live-connect":
+            run(
+                peer,
+                "task",
+                "complete",
+                task,
+                "--reason",
+                "Planning only; native turn stays active",
+            )
+        deadline = time.monotonic() + 30
+        with sqlite3.connect(_database(env)) as database:
+            while True:
+                saved = database.execute(
+                    "SELECT issue_title,planning_completed FROM tasks WHERE id=?", (task,)
+                ).fetchone()
+                comments = database.execute(
+                    "SELECT count(*) FROM task_comments WHERE task_id=? AND body LIKE ?",
+                    (task, f"%Peer comment {label}%"),
+                ).fetchone()[0]
+                if saved == (label, 1) and comments == 1:
+                    break
+                assert time.monotonic() < deadline, (label, saved, comments)
+                time.sleep(0.05)
+            assert (
+                database.execute("SELECT * FROM agent_sessions WHERE id=?", (session,)).fetchone()
+                == conversation
+            )
+            after = database.execute(
+                "SELECT * FROM session_events WHERE session_id=? ORDER BY seq",
+                (session,),
+            ).fetchall()
+            # Capture observation can finish after the native request starts;
+            # retain its append-only history instead of freezing ordinary capture.
+            assert after[: len(history)] == history
+            assert mutations <= set(database.execute("SELECT id FROM planning_peer_changes"))
+        with sqlite3.connect(_database(peer)) as database:
+            assert database.execute("SELECT count(*) FROM agent_sessions").fetchone() == (0,)
+            assert database.execute(
+                "SELECT worktree FROM tasks WHERE id=?", (task,)
+            ).fetchone() == (None,)
+        assert set(Path(env["LF_PROBE_ENGINES"]).glob("*.json")) == engines
+        assert len(server.requests) == requests, "planning exchange replayed a provider turn"
+
+    return exchange
 
 
 def _login(name: str, refresh: str = "issued") -> str:

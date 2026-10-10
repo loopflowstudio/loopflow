@@ -25,8 +25,8 @@ position, reservations and checkouts never synchronize. Planning completion gran
 no Workflow movement, Process control or cleanup authority.
 Jack Heart selected user-keyed Git planning by default, with explicit opt-in to
 one shared plan. Sharing a code remote never merges plans implicitly. Selection
-uses the same records/APIs, not personal/shared types. LOO-412 owns stable user
-keys, remote/ref binding and shared ordering. Ref separation is not privacy;
+uses the same records/APIs, not personal/shared types. LOO-412 owns local-only Git routing/order; its October 9 decision below
+replaces Git with Linear for connected plans. Ref separation is not privacy;
 joining must not silently publish existing local plans. Shared UX needs clear
 plan selection, authorship, assignees and sync status; execution stays local.
 Jack Heart selected LOO-412’s custom Git planning ref prototype on October 8
@@ -628,23 +628,24 @@ acceptance remain at
 
 ## Tasks across machines (LOO-412, 2026-10-09)
 
-Jack Heart selected review-only custom-ref sync; no landing/real-plan export.
-Joining publishes nothing; imports stay unplaced. Malformed imports abort;
-contradictions defer effects. Retain execution, uncertain receipts and losers.
-Correspondence grants no authority; private references hold groups. Causality
-precedes ranking; equal revisions can carry different ranks.
-Due dates synchronize; completion requests, placements and execution stay local.
+Jack Heart selected one planning route: Linear replaces the shared Git planning
+ref for connected plans; local-only plans use Git. Each machine retains local
+records/APIs and independently reads/writes Linear. The laptop-offline worker
+counterexample supersedes the single-publisher proposal and mixed Git/Linear
+receipt replication. Linear outages retain pending local saves, never Git fallback.
+Route switching needs preservation design. Sharing-scope reduction is unselected.
 
-`e37099e50`/`231e75898`: unchanged readback preserves saves; changed facts win.
-Private recovery acknowledges selected origins, never divergent UUIDs or private
-export. Seeded attempts prove no dispatch/exactly-once; attachment can race acquisition.
+Delete peer transport/settlement of provider attempts, keeping local Linear
+receipts/readback and Git-only causality, losers and privacy. Execution, completion
+requests and placement stay local. Source reduction remains unimplemented.
+Publication is review-only; no landing, installation or real-plan export.
 
-`6bc57aefc`: Git/HTTPS order/removal and Codex 0.161.0 resume pass. Complete lists
-settle order; trash settles deletion. Native exchange is taskless; populated rows
-prove no running controls. Capture can append: preserve its prefix and count
-requests/engines. Resume launches; exchange does not. Same-Task live controls
-remain unproved, as do UI/account/installation. Linear delivery needs local Wave
-documents.
+Earlier mixed-provider recovery: `e37099e50`/`231e75898`; unchanged readback retains
+saves, seeded attempts prove no original dispatch/exactly-once. Git/HTTPS ordering
+and Codex resume proofs remain historical. Same-Task exchange retained live Session
+controls and a subsequent follow-up; Workflow was seeded, not a running edge.
+Preserve capture prefixes; count native requests/engines. Neither those proofs nor
+release entry-point lessons establish the new route or installed acceptance.
 
 ## Driver recovery
 

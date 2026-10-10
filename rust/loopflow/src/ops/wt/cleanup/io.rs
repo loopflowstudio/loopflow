@@ -147,7 +147,8 @@ fn read_progress(
             return Err(super::error("cleanup evidence stream is malformed"));
         }
         let text = String::from_utf8_lossy(&line);
-        if let Some(value) = text.trim_end().strip_prefix(PROGRESS) {
+        let text = text.trim_end();
+        if let Some(value) = text.strip_prefix(PROGRESS) {
             let next = value.parse::<u64>().map_err(super::error)?;
             if next <= count || response.is_some() {
                 return Err(super::error("cleanup evidence stream did not advance"));
@@ -155,7 +156,7 @@ fn read_progress(
             count = next;
             // The parent keeps only the latest instant; never wait on it.
             let _ = progress.try_send(Instant::now());
-        } else if let Some(value) = text.trim_end().strip_prefix(RESPONSE) {
+        } else if let Some(value) = text.strip_prefix(RESPONSE) {
             if response.replace(value.to_string()).is_some() {
                 return Err(super::error("cleanup evidence stream is malformed"));
             }

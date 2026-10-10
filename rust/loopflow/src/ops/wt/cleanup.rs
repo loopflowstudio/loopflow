@@ -217,15 +217,10 @@ fn evidence_blocks_checkout(
                 .to_path_buf(),
         );
     }
-    // Never traverse history beneath an already protected home.
-    for root in roots {
-        if visit(Some(&root))? {
-            return Ok(true);
-        }
-    }
     let homes = evidence_homes(store)?;
-    for (_, home) in &homes {
-        if visit(Some(home))? {
+    // Never traverse history beneath an already protected home.
+    for root in roots.iter().chain(homes.iter().map(|(_, home)| home)) {
+        if visit(Some(root))? {
             return Ok(true);
         }
     }
@@ -356,8 +351,9 @@ fn observe(
     external: &OpsResult<HashSet<PathBuf>>,
     validate_removal: bool,
 ) -> OpsResult<()> {
+    let local = store.sqlite.path().map_err(error)?;
     *decision = io::read(io::Read::Observation {
-        database: store.sqlite.path().map_err(error)?,
+        database: local.clone(),
         repo: repo.to_path_buf(),
         decision: Box::new(decision.clone()),
         external: external.as_ref().map_err(ToString::to_string).cloned(),
@@ -366,7 +362,6 @@ fn observe(
     if validate_removal && decision.action == CleanupAction::ValidateCheckout {
         // The worker exits before its answer is consumed and holds no locks.
         // Nothing it observed outlives this attempt.
-        let local = store.sqlite.path().map_err(error)?;
         let release: Option<PathBuf> = io::read(io::Read::ReleaseRegistry)?;
         for database in std::iter::once(local).chain(release) {
             if io::observe_evidence(database, decision.path.clone())? {
@@ -1495,6 +1490,17 @@ mod tests {
         .unwrap()
     }
 
+    fn declared_cache(path: &Path) -> PathBuf {
+        let cache = path.join("target");
+        std::fs::create_dir_all(&cache).unwrap();
+        std::fs::write(
+            cache.join("CACHEDIR.TAG"),
+            "Signature: 8a477f597d28d172789f06886806bc55",
+        )
+        .unwrap();
+        cache
+    }
+
     fn fifo(path: &Path) {
         assert!(std::process::Command::new("mkfifo")
             .arg(path)
@@ -2434,12 +2440,7 @@ mod tests {
         let _guard = crate::journal::TestLedgerGuard::new();
         let _external = ExternalInspection::idle();
         let (repo, _directory, store, path) = fixture().await;
-        std::fs::create_dir(path.join("target")).unwrap();
-        std::fs::write(
-            path.join("target/CACHEDIR.TAG"),
-            "Signature: 8a477f597d28d172789f06886806bc55",
-        )
-        .unwrap();
+        declared_cache(&path);
         std::fs::create_dir(path.join(" target")).unwrap();
         std::fs::write(path.join(" target/results"), "irreplaceable").unwrap();
 
@@ -2648,13 +2649,7 @@ mod tests {
         guard.set_db_path(directory.path().join("loopflow.db"));
         std::env::set_var("LF_HOME", directory.path());
         let initial = decision(&store, &repo, &path);
-        let cache = path.join("target");
-        std::fs::create_dir_all(&cache).unwrap();
-        std::fs::write(
-            cache.join("CACHEDIR.TAG"),
-            "Signature: 8a477f597d28d172789f06886806bc55",
-        )
-        .unwrap();
+        let cache = declared_cache(&path);
         let id = "0199a213-81c0-7800-8aa1-bbab2a035a54";
         let payload = cache.join("native.jsonl");
         let transcript = format!(
@@ -2710,13 +2705,7 @@ mod tests {
         let _external = ExternalInspection::idle();
         let (repo, directory, store, path) = fixture().await;
         let initial = decision(&store, &repo, &path);
-        let cache = path.join("target");
-        std::fs::create_dir_all(&cache).unwrap();
-        std::fs::write(
-            cache.join("CACHEDIR.TAG"),
-            "Signature: 8a477f597d28d172789f06886806bc55",
-        )
-        .unwrap();
+        let cache = declared_cache(&path);
         let payload = cache.join("past-conversation.jsonl");
         std::fs::write(&payload, "retained provider history\n").unwrap();
         let conn = rusqlite::Connection::open(directory.path().join("loopflow.db")).unwrap();
@@ -2780,22 +2769,12 @@ mod tests {
         let _external = ExternalInspection::idle();
         let (repo, directory, store, path) = fixture().await;
         let disposable = add_settled(&repo, &directory, "disposable");
-        let cache = path.join("target");
-        std::fs::create_dir_all(&cache).unwrap();
-        std::fs::write(
-            cache.join("CACHEDIR.TAG"),
-            "Signature: 8a477f597d28d172789f06886806bc55",
-        )
-        .unwrap();
+        let cache = declared_cache(&path);
         let payload = cache.join("history.jsonl");
         std::fs::write(&payload, "preserved history").unwrap();
         let alias = directory.path().join("historical-payload");
         std::os::unix::fs::symlink(directory.path().join("outside"), &alias).unwrap();
-        let conn = rusqlite::Connection::open(directory.path().join("loopflow.db")).unwrap();
-        conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd) VALUES('past','past','generated',1,1,'/')", []).unwrap();
-        for index in 0..520 {
-            conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES('past','captured',?1,1,'{}')", [format!("{index:032x}")]).unwrap();
-        }
+        let conn = captures(&directory, 520);
         conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES('past','observed','00000000000000000000000000000000:runs',1,?1)",
             [serde_json::json!({"evidence":{"provider_session_path":alias}}).to_string()]).unwrap();
         // Rebuild the derived projection, as after upgrading a populated store.
@@ -2899,17 +2878,6 @@ mod tests {
         }
     }
 
-    fn declared_cache(path: &Path) -> PathBuf {
-        let cache = path.join("target");
-        std::fs::create_dir_all(&cache).unwrap();
-        std::fs::write(
-            cache.join("CACHEDIR.TAG"),
-            "Signature: 8a477f597d28d172789f06886806bc55",
-        )
-        .unwrap();
-        cache
-    }
-
     fn captures(directory: &tempfile::TempDir, count: usize) -> rusqlite::Connection {
         let conn = rusqlite::Connection::open(directory.path().join("loopflow.db")).unwrap();
         conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd) VALUES('past','past','generated',1,1,'/')", []).unwrap();
@@ -2919,14 +2887,6 @@ mod tests {
         }
         tx.commit().unwrap();
         conn
-    }
-
-    fn mkfifo(path: &Path) {
-        assert!(std::process::Command::new("mkfifo")
-            .arg(path)
-            .status()
-            .unwrap()
-            .success());
     }
 
     #[tokio::test]
@@ -2986,7 +2946,7 @@ mod tests {
         std::fs::write(&payload, "regenerable").unwrap();
         let _history = captures(&directory, 40);
         let gate = directory.path().join("evidence-gate");
-        mkfifo(&gate);
+        fifo(&gate);
         std::env::set_var("LF_TEST_CLEANUP_EVIDENCE_GATE", &gate);
         std::env::set_var("LF_TEST_CLEANUP_EVIDENCE_GATE_AT", "60");
         // A real blocked open after useful work: nothing answers the FIFO.
@@ -3032,7 +2992,7 @@ mod tests {
         // Rebuild the projection so the edited reference leads the stream.
         conn.execute_batch("BEGIN; DELETE FROM session_evidence; INSERT INTO session_evidence(event_seq,capture_key,raw_paths) SELECT seq,capture_key,raw_paths FROM session_evidence_source ORDER BY seq DESC; COMMIT;").unwrap();
         let gate = directory.path().join("evidence-gate");
-        mkfifo(&gate);
+        fifo(&gate);
         std::env::set_var("LF_TEST_CLEANUP_EVIDENCE_GATE", &gate);
         std::env::set_var("LF_TEST_CLEANUP_EVIDENCE_GATE_AT", "120");
         let statements: [(&str, String); 2] = [

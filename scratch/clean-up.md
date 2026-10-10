@@ -516,4 +516,4 @@ allocated bytes by category; observed free-space delta after collection; oldest
 eligible retention age. APFS sharing, hardlinks and concurrent writers mean
 directory sums are estimates, not guaranteed reclaimed bytes.
 
-Check: `cargo test -p loopflow --lib -- cleanup read_retry provider_conversation` — 66 passed, 2 ignored; `--ignored cleanup_evidence_cost_probe` — passed (5.1s observation); `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` — passed; integration suites, full acceptance and provider resume: gate; installed scheduler/upgrade: demo.
+Check: `cargo test -p loopflow --lib -- cleanup read_retry provider_conversation session_evidence` — 66 passed, 2 ignored (rerun after compress); `--ignored cleanup_evidence_cost_probe` — passed (5.1s observation); `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` — passed; integration suites, full acceptance and provider resume: gate; installed scheduler/upgrade: demo.

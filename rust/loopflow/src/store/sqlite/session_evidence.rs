@@ -169,9 +169,9 @@ mod tests {
 
     use super::{SqliteStore, PAGE_SIZE};
 
-    fn paths(store: &SqliteStore) -> crate::store::StoreResult<Vec<PathBuf>> {
+    fn paths(store: &SqliteStore, after: &mut i64) -> crate::store::StoreResult<Vec<PathBuf>> {
         let mut paths = Vec::new();
-        store.visit_session_evidence(&mut 0, |path| {
+        store.visit_session_evidence(after, |path| {
             paths.extend(path.map(Path::to_path_buf));
             Ok(false)
         })?;
@@ -191,7 +191,7 @@ mod tests {
         assert!(result.is_err());
         let session = store.test_session("after-timeout", "00000000000000000000000000000001");
         assert_eq!(session.id, "after-timeout");
-        assert!(!paths(&store).unwrap().is_empty());
+        assert!(!paths(&store, &mut 0).unwrap().is_empty());
         let _busy = store.conn.lock().unwrap();
         assert!(store
             .bounded_reader(std::time::Duration::from_secs(2))
@@ -217,9 +217,9 @@ mod tests {
         let store = SqliteStore {
             conn: Arc::new(Mutex::new(conn)),
         };
-        assert!(paths(&store).is_err());
+        assert!(paths(&store, &mut 0).is_err());
         store.advance_session_evidence().unwrap();
-        assert!(paths(&store).is_err());
+        assert!(paths(&store, &mut 0).is_err());
         {
             let conn = store.conn.lock().unwrap();
             // Arrivals are already projected atomically; they must not extend
@@ -249,17 +249,12 @@ mod tests {
                 .unwrap();
         }
         store.advance_session_evidence().unwrap();
-        assert!(paths(&store).is_err());
+        assert!(paths(&store, &mut 0).is_err());
         store.advance_session_evidence().unwrap();
         let mut consumed = 0;
-        let mut seen = Vec::new();
-        store
-            .visit_session_evidence(&mut consumed, |path| {
-                seen.extend(path.map(Path::to_path_buf));
-                Ok(false)
-            })
-            .unwrap();
-        assert!(seen.contains(&"/before".into()));
+        assert!(paths(&store, &mut consumed)
+            .unwrap()
+            .contains(&"/before".into()));
         {
             let conn = store.conn.lock().unwrap();
             // Old references can change; source triggers invalidate them atomically.
@@ -277,24 +272,11 @@ mod tests {
         }
         // An observation that already passed these rows revalidates exactly
         // what changed behind it, without restarting or trusting its snapshot.
-        let mut changed = Vec::new();
-        store
-            .visit_session_evidence(&mut consumed, |path| {
-                changed.extend(path.map(Path::to_path_buf));
-                Ok(false)
-            })
-            .unwrap();
+        let changed = paths(&store, &mut consumed).unwrap();
         assert!(changed.contains(&"/after".into()) && changed.contains(&"/appended".into()));
         assert!(!changed.contains(&"/before".into()));
-        let mut settled = 0;
-        store
-            .visit_session_evidence(&mut consumed, |_| {
-                settled += 1;
-                Ok(false)
-            })
-            .unwrap();
-        assert_eq!(settled, 0);
-        let current = paths(&store).unwrap();
+        assert!(paths(&store, &mut consumed).unwrap().is_empty());
+        let current = paths(&store, &mut 0).unwrap();
         assert!(!current.contains(&"/before".into()));
         assert!(current.contains(&"/after".into()));
         assert!(current.contains(&"/appended".into()));
@@ -309,6 +291,6 @@ mod tests {
             )
             .unwrap();
         }
-        assert!(paths(&store).is_err());
+        assert!(paths(&store, &mut 0).is_err());
     }
 }

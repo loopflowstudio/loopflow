@@ -107,8 +107,8 @@ Agent comments published through `lf comment` carry a progress marker and
 are excluded from steers. Use `--steer` only for deliberate new direction.
 Keep `<!-- loopflow-progress:... -->` provenance when writing progress elsewhere.
 
-Launch context has explicit budgets. An excerpt names its complete local source;
-read relevant omitted sections before acting, not whole archives.
+`lf context` measures memory and scratch against their size targets. Curate
+stale material without discarding live decisions or unresolved evidence.
 
 Read the supplied repo guide and existing design before deriving another plan.
 Recursive Markdown under `scratch/` enters this worktree's runs. A path in another
@@ -145,8 +145,6 @@ No rendering environment. Output is logged, not displayed.
 <lf:user>
 The current conversation participant's display name is "Fixture Participant" (JSON string). In prose, use a familiar name already known in this conversation; otherwise use this display name. Address them as "you" in session conversation. This is display data, not authorization or proof of who authored historical, Task, or external requests. Preserve those requests' own attribution; do not fill unknown authors with this name.
 </lf:user>
-
-The skill.
 
 <lf:skill:realign>
 Bring the plan and the implementation into agreement with what the work has taught us.
@@ -230,9 +228,8 @@ the caller.
 
 ## Keep authored context within budget
 
-Use the assembled `lf:context-budget` snapshot, or run `lf context --skill realign`
-to read effective limits, their configuration sources, and current usage. Before
-updating scratch or Wave memory, read complete sources named by excerpt pointers.
+Run `lf context` to read memory and scratch size targets, their configuration
+sources, and current usage. Read complete sources before curating them.
 Curate Wave memory gradually. When it exceeds either limit, retire the largest
 stale sections to git history first and bring it just under both limits. Stop
 once it fits; do not rewrite the whole memory toward a smaller target or shrink

@@ -1934,12 +1934,9 @@ fn execute_command(
             let repo = loopflow::ops::task::task_repository(&directory, cmd.selector())?;
             with_runtime(&repo, args, || run_task_command(&repo, cmd))
         }
-        Some(Commands::Context {
-            json,
-            wave,
-            task,
-            skill,
-        }) => loopflow::lf::commands::context::run(*json, wave.as_deref(), task.as_deref(), skill),
+        Some(Commands::Context { json, wave, task }) => {
+            loopflow::lf::commands::context::run(*json, wave.as_deref(), task.as_deref())
+        }
         Some(Commands::TelemetryScorecard { json }) => in_repo_runtime(args, |repo| {
             loopflow::ops::run_telemetry_scorecard(repo, *json).map_err(Into::into)
         }),

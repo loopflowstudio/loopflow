@@ -720,8 +720,6 @@ public struct StepContext: Decodable, Sendable, Hashable {
     public let observedAt: Int
     public let sources: [ContextSourceUsage]
     public let assembledTokens: Int?
-    public let assembledBudgetTokens: Int?
-    public let overAssembledBudget: Bool
     public let firstRequestTokens: Int?
     public let peakRequestTokens: Int?
     public let gaps: [String]
@@ -731,8 +729,6 @@ public struct StepContext: Decodable, Sendable, Hashable {
         case sessionId = "session_id"
         case observedAt = "observed_at"
         case assembledTokens = "assembled_tokens"
-        case assembledBudgetTokens = "assembled_budget_tokens"
-        case overAssembledBudget = "over_assembled_budget"
         case firstRequestTokens = "first_request_tokens"
         case peakRequestTokens = "peak_request_tokens"
     }

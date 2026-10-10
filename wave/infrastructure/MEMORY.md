@@ -1010,14 +1010,15 @@ Fake APIs: Claude 2.1.295/Codex 0.161.0 preserve 10 KB ASCII hooks; truncate
 10,000 emoji scalars. Codex retains markers: compare whole strings and budget
 provider units. SessionStart injects, PostCompact not; native base/guides/additions
 survive; scoped trust.
-Codex editor: exact 285 KB Unicode/CRLF/paste terminators, trailing whitespace lost.
-Exact copy/clean exit prove no exact submission. Jack's October 9 option A
+Jack's October 9 option A
 supersedes the transport blocker: terminal argv, no editor/paste/stdin/envelopes
-or further transport probes; only an oversized first turn may refuse with size/cap.
-Rust removes the trigger and bounding; builtin skill precedes request.
+or further transport probes; the rejected runner/tests are deleted. Only an oversized
+first turn may refuse with size/cap.
+Rust removes the trigger and bounding; builtin skill precedes request. Size-target
+measurement belongs to inspection, not launch; no skill preview or duplicate counts.
 App-server Codex is additive; fixed-slot/context refresh and terminal Codex remain
-unfinished. Unbuilt; unverified. Resume, compaction, OpenCode and cmux
-remain open. Rejected transport detail: `77ec4d000`, this heading;
+unfinished. Focused checks pass; provider/resume/compaction/OpenCode/cmux
+acceptance remains open. Rejected transport detail: `77ec4d000`, this heading;
 [Evidence](../../scripts/benchmarks/skill-invocation/README.md).
 
 Main `3e1e6245c` (#1512): driver lifelines own engines. Replacement resumes native

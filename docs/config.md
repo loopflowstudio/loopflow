@@ -81,8 +81,7 @@ config files.
 ```bash
 lf context                         # size targets, sources and current usage
 lf context --wave intelligence     # local Wave memory and scratch
-lf context --task LOO-303 --json    # Task checkout and locally stored goal
-lf context --skill implement       # preview this skill instead of realign
+lf context --task LOO-303 --json    # Task checkout and stored Wave memory
 ```
 
 Edit the existing repo `.lf/config.yaml`:

@@ -45,7 +45,6 @@ pub struct ProcessPromptInput {
 /// Canonical Process preparation output.
 #[derive(Debug, Clone)]
 pub struct PreparedProcessPrompt {
-    pub budget_report: crate::engine::context_budget::ContextBudgetReport,
     pub config: AgentConfig,
     pub components: PromptComponents,
     pub deduplication_decisions: Vec<crate::trace::ContextDecision>,
@@ -57,11 +56,6 @@ pub fn prepare_process_prompt(
     config: &Config,
     input: ProcessPromptInput,
 ) -> Result<PreparedProcessPrompt, CoreError> {
-    let budgets = crate::engine::context_budget::ContextBudgets::resolve(
-        config,
-        &input.repo_root,
-        input.wave.as_deref(),
-    )?;
     let ProcessPromptInput {
         repo_root,
         skill,
@@ -121,7 +115,6 @@ pub fn prepare_process_prompt(
         });
     }
 
-    let budget_report = crate::engine::context_budget::measure_context(&components, budgets);
     let prompt = format_prompt(&components);
 
     let agent = resolve_agent(agent.as_deref(), components.skill.as_ref(), config);
@@ -188,7 +181,6 @@ pub fn prepare_process_prompt(
         .into(),
     };
     Ok(PreparedProcessPrompt {
-        budget_report,
         config: launch,
         components,
         deduplication_decisions,

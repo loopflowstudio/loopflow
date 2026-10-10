@@ -411,19 +411,16 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: TaskCommand,
     },
-    /// Show effective context budgets, their sources, and current source usage
+    /// Show memory and scratch size targets, their sources, and current usage
     Context {
         #[arg(long)]
         json: bool,
         /// Inspect a Wave's local authored context
         #[arg(long, conflicts_with = "task")]
         wave: Option<String>,
-        /// Inspect a Task's checkout and locally stored goal
+        /// Inspect a Task's checkout and Wave context
         #[arg(long)]
         task: Option<String>,
-        /// Skill to include in the launch preview
-        #[arg(long, default_value = "realign")]
-        skill: String,
     },
     /// Internal: render the repository maintainer scorecard for telemetry-daily
     #[command(name = "__telemetry-scorecard", hide = true)]

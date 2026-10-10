@@ -1,57 +1,38 @@
 //! Inspect memory and scratch size targets without restricting launch input.
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use serde::Serialize;
 
 use crate::engine::config::load_config;
-use crate::engine::context_budget::ContextBudgetReport;
-use crate::engine::process_prompt::{prepare_process_prompt, ProcessPromptInput};
-use crate::engine::prompt::Surface;
+use crate::engine::context_budget::{measure_context, ContextBudgetReport, ContextBudgets};
+use crate::engine::prompt::{gather_documents, GatherSpec};
 
 #[derive(Debug, Serialize)]
 struct ContextReport {
     checkout: std::path::PathBuf,
     wave: Option<String>,
     task: Option<String>,
-    skill: String,
-    goal_status: String,
     context: ContextBudgetReport,
 }
 
-pub fn run(json: bool, wave: Option<&str>, task: Option<&str>, skill: &str) -> Result<()> {
+pub fn run(json: bool, wave: Option<&str>, task: Option<&str>) -> Result<()> {
     let mut repo = crate::repo::require_repo_root(&std::env::current_dir()?, "lf context")?;
     let runtime = tokio::runtime::Runtime::new()?;
-    let (binding, message) = runtime.block_on(async {
+    let binding = runtime.block_on(async {
         let Some(store) = crate::store::open_existing_store().await else {
             anyhow::ensure!(task.is_none(), "Task usage unavailable: no local registry");
-            return Ok::<_, anyhow::Error>((None, None));
+            return Ok::<_, anyhow::Error>(None);
         };
         let store = std::sync::Arc::new(store);
-        let binding = if let Some(task) = task {
-            Some(crate::ops::resolve_work_binding(&store, &repo, &format!("task:{task}")).await?)
+        if let Some(task) = task {
+            Ok(Some(
+                crate::ops::resolve_work_binding(&store, &repo, &format!("task:{task}")).await?,
+            ))
         } else if wave.is_none() {
-            crate::ops::resolve_execution_binding(&store, &repo).await?
+            Ok(crate::ops::resolve_execution_binding(&store, &repo).await?)
         } else {
-            None
-        };
-        let message = if let Some(binding) = &binding {
-            if let crate::durable::WorkRef::Task(id) = &binding.work {
-                let task = store
-                    .get_task(id)
-                    .await?
-                    .ok_or_else(|| anyhow!("Task {id} is missing"))?;
-                Some(
-                    crate::ops::task_input::read_seed(&store, &task, &binding.wave_name, 0)
-                        .await?
-                        .message,
-                )
-            } else {
-                Some(binding.context.clone())
-            }
-        } else {
-            None
-        };
-        Ok((binding, message))
+            Ok(None)
+        }
     })?;
     if let Some(binding) = &binding {
         repo = binding.cwd.clone();
@@ -64,47 +45,28 @@ pub fn run(json: bool, wave: Option<&str>, task: Option<&str>, skill: &str) -> R
         crate::durable::WorkRef::Task(id) => Some(id.to_string()),
         _ => None,
     });
-    let goal_status = if message.is_some() {
-        "local Work seed, including all stored steers"
-    } else {
-        "no Work seed selected; arbitrary launch messages are not included"
-    }
-    .to_string();
     let config = load_config(Some(&repo))?.unwrap_or_default();
-    let prepared = prepare_process_prompt(
-        &config,
-        ProcessPromptInput {
-            repo_root: repo.clone(),
-            wave: wave.clone(),
-            message,
-            skill: Some(skill.to_owned()),
-            surface: Surface::Headless,
-            // A query never reads the desktop clipboard.
-            source_overrides: crate::engine::process_prompt::ContextSourceOverrides {
-                clipboard: Some(false),
-                ..Default::default()
-            },
-            ..Default::default()
-        },
-    )?;
+    let budgets = ContextBudgets::resolve(&config, &repo, wave.as_deref())?;
+    // Size targets concern authored memory and scratch, not a prospective launch.
+    let docs = gather_documents(&GatherSpec {
+        repo_root: repo.clone(),
+        wave: wave.clone(),
+        ..Default::default()
+    })?;
     let report = ContextReport {
         checkout: repo,
         wave,
         task,
-        skill: skill.into(),
-        goal_status,
-        context: prepared.budget_report,
+        context: measure_context(&docs, budgets),
     };
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
         println!(
-            "Checkout: {}\nWave: {}\nTask: {}\nSkill: {}\nGoal: {}\n{}",
+            "Checkout: {}\nWave: {}\nTask: {}\n{}",
             report.checkout.display(),
             report.wave.as_deref().unwrap_or("none"),
             report.task.as_deref().unwrap_or("none"),
-            report.skill,
-            report.goal_status,
             report.context.render()
         );
     }

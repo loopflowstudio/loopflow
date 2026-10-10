@@ -5,7 +5,7 @@ use std::path::Path;
 
 use crate::engine::config::Config;
 use crate::engine::error::CoreError;
-use crate::engine::prompt::{count_tokens, DocumentSource, PromptComponents};
+use crate::engine::prompt::{count_tokens, Document, DocumentSource};
 
 /// Keys in the existing `context_budgets` configuration block.
 #[derive(
@@ -121,10 +121,8 @@ impl ContextBudgets {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ContextUsage {
     pub source: String,
-    pub original_tokens: usize,
-    pub original_bytes: usize,
-    pub submitted_tokens: usize,
-    pub submitted_bytes: usize,
+    pub tokens: usize,
+    pub bytes: usize,
     pub token_limit: usize,
     pub byte_limit: usize,
 }
@@ -158,36 +156,30 @@ impl ContextBudgetReport {
             lines.push(format!(
                 "{}: {}/{} tokens, {}/{} bytes; over by {} tokens, {} bytes",
                 usage.source,
-                usage.original_tokens,
+                usage.tokens,
                 usage.token_limit,
-                usage.original_bytes,
+                usage.bytes,
                 usage.byte_limit,
-                usage.original_tokens.saturating_sub(usage.token_limit),
-                usage.original_bytes.saturating_sub(usage.byte_limit)
+                usage.tokens.saturating_sub(usage.token_limit),
+                usage.bytes.saturating_sub(usage.byte_limit)
             ));
         }
         lines.join("\n")
     }
 }
 
-pub(crate) fn measure_context(
-    components: &PromptComponents,
-    budgets: ContextBudgets,
-) -> ContextBudgetReport {
+pub(crate) fn measure_context(docs: &[Document], budgets: ContextBudgets) -> ContextBudgetReport {
     let mut usage = Vec::new();
-    let mut measure = |source: &str, text: &str, tokens, bytes| {
+    let mut measure = |source: &str, docs: Vec<&Document>, tokens, bytes| {
         usage.push(ContextUsage {
             source: source.into(),
-            original_tokens: tokens_in(text),
-            original_bytes: text.len(),
-            submitted_tokens: tokens_in(text),
-            submitted_bytes: text.len(),
+            tokens: docs.iter().map(|doc| tokens_in(&doc.content)).sum(),
+            bytes: docs.iter().map(|doc| doc.content.len()).sum(),
             token_limit: budgets.limit(tokens),
             byte_limit: budgets.limit(bytes),
         });
     };
-    let memories: Vec<_> = components
-        .docs
+    let memories: Vec<_> = docs
         .iter()
         .filter(|doc| {
             doc.source == DocumentSource::RepoMemory
@@ -200,28 +192,20 @@ pub(crate) fn measure_context(
             .map(|doc| doc.path.as_str())
             .collect::<Vec<_>>()
             .join(", ");
-        let text = memories
-            .iter()
-            .map(|doc| doc.content.as_str())
-            .collect::<Vec<_>>()
-            .join("\n\n");
         measure(
             &paths,
-            &text,
+            memories,
             BudgetKey::MemoryTokens,
             BudgetKey::MemoryBytes,
         );
     }
-    let scratch = components
-        .docs
+    let scratch = docs
         .iter()
         .filter(|doc| doc.source == DocumentSource::Scratch)
-        .map(|doc| doc.content.as_str())
-        .collect::<Vec<_>>()
-        .join("\n\n");
+        .collect();
     measure(
         "scratch/",
-        &scratch,
+        scratch,
         BudgetKey::ScratchTokens,
         BudgetKey::ScratchBytes,
     );
@@ -232,7 +216,7 @@ pub(crate) fn measure_context(
 mod tests {
     use super::{measure_context, BudgetKey, ContextBudgets};
     use crate::engine::config::Config;
-    use crate::engine::prompt::{Document, DocumentSource, PromptComponents};
+    use crate::engine::prompt::{Document, DocumentSource};
 
     #[test]
     fn context_targets_measure_without_changing_sources() {
@@ -241,24 +225,14 @@ mod tests {
             context_budgets: [(BudgetKey::ScratchBytes, 1)].into(),
             ..Default::default()
         };
-        let components = PromptComponents {
-            docs: vec![Document {
-                path: "scratch/plan.md".into(),
-                content: "😀 exact source\r\n".repeat(1000),
-                source: DocumentSource::Scratch,
-            }],
-            ..Default::default()
-        };
+        let docs = vec![Document {
+            path: "scratch/plan.md".into(),
+            content: "😀 exact source\r\n".repeat(1000),
+            source: DocumentSource::Scratch,
+        }];
         let budgets = ContextBudgets::resolve(&config, repo.path(), None).unwrap();
-        let report = measure_context(&components, budgets);
-        assert_eq!(
-            report.usage[0].original_bytes,
-            components.docs[0].content.len()
-        );
-        assert_eq!(
-            report.usage[0].submitted_bytes,
-            report.usage[0].original_bytes
-        );
+        let report = measure_context(&docs, budgets);
+        assert_eq!(report.usage[0].bytes, docs[0].content.len());
         assert!(report.render().contains("over by"));
         assert!(!repo.path().join(".lf").exists());
     }

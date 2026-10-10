@@ -155,36 +155,12 @@ before selecting whole files, not just Unicode scalars; a native spill preview
 is still truncation. These samples prove no Loopflow integration or automatic
 compaction.
 
-### First-turn editor boundary
+### Rejected first-turn transports
 
-```sh
-uv run python scripts/test_network.py uv run --no-sync python \
-  scripts/benchmarks/skill-invocation/first_turn_transport.py \
-  --output /tmp/lf-editor-proof
-# Repeat with --case carriage-return, paste-marker, and trailing-whitespace.
-uv run pytest scripts/benchmarks/skill-invocation/test_first_turn_transport.py -q
-```
-
-Checks exact first-request text, follow-up history and terminal behavior with
-fresh Homes and a fake API. A fixture `VISUAL` copies bytes into the native draft;
-Ctrl-G and Enter remain terminal input. Saves requests, terminal output, argument
-sizes and check results. Nonzero means a failed check, even with a clean client exit.
-
-Codex 0.161.0 (October 9) preserves 285 KB Unicode, embedded CRLF and a literal
-paste terminator. Editor terminal descriptors, raw-mode restoration, no premature
-request, resize, follow-up history and clean exit pass. Maximum observed argument,
-including editor arguments: 86 bytes. Composer echo precedes thread readiness;
-the probe waits for the native session footer before requesting the editor.
-
-Trailing whitespace fails exact equality: 285,027 bytes become 285,023 despite
-successful exit. Codex trims the editor result and submitted text. These
-provider-only results prove neither a lossless transport nor production integration,
-preserved user editor settings, signal/input ownership, resume or cmux acceptance.
-Production is unchanged; normalization and a protective envelope are not selected.
-
-Rejected stdin/paste probes and their invocation examples are preserved at
-`d008a9761:scripts/benchmarks/skill-invocation/first_turn_transport.py` and that
-revision's README. Exec accepted stdin; TUI rejected it before a request.
-Bracketed paste delivered 285,023 Unicode bytes with 86-byte arguments but changed
-CRLF to LF and consumed literal paste terminators. The active probe keeps only the
-editor path; exact-equality tests retain these corruption cases.
+Jack Heart selected terminal argv on October 9, with a size/cap error only for
+an oversized first turn. No editor, paste, stdin or envelope path remains.
+Archived probe and tests: `d81f12c42:scripts/benchmarks/skill-invocation/`.
+Codex 0.161.0 rejected terminal stdin; paste changed CRLF and consumed literal
+paste terminators; the editor preserved 285 KB Unicode/CRLF/terminators but
+trimmed trailing whitespace. Exact-copy receipts and clean exits did not prove
+exact submission. These observations establish no lf, resume or cmux acceptance.

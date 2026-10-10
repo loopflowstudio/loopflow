@@ -28,9 +28,8 @@ Produce a working change, resolve reversible ambiguity, and verify it. Preserve 
 
 ## Keep authored context within budget
 
-Use the assembled `lf:context-budget` snapshot, or run `lf context --skill implement`
-to read effective limits, their configuration sources, and current usage. Before
-updating scratch or Wave memory, read complete sources named by excerpt pointers.
+Run `lf context` to read memory and scratch size targets, their configuration
+sources, and current usage. Read complete sources before curating them.
 Bring over-budget material under both token and byte limits as part of this step.
 Merge duplicates, summarize long evidence, remove obsolete notes inherited from a
 stacked parent, and keep historical detail in git rather than ambient context.

@@ -107,8 +107,8 @@ Agent comments published through `lf comment` carry a progress marker and
 are excluded from steers. Use `--steer` only for deliberate new direction.
 Keep `<!-- loopflow-progress:... -->` provenance when writing progress elsewhere.
 
-Launch context has explicit budgets. An excerpt names its complete local source;
-read relevant omitted sections before acting, not whole archives.
+`lf context` measures memory and scratch against their size targets. Curate
+stale material without discarding live decisions or unresolved evidence.
 
 Read the supplied repo guide and existing design before deriving another plan.
 Recursive Markdown under `scratch/` enters this worktree's runs. A path in another
@@ -191,8 +191,6 @@ Root readme.
 
 </lf:file>
 </lf:files>
-
-The skill.
 
 <lf:skill:test>
 # Test step

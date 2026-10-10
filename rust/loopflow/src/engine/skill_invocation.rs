@@ -234,14 +234,6 @@ impl SkillInvocation {
         )
     }
 
-    pub(crate) fn instruction_text(&self, harness: &str) -> String {
-        if self.native_for(harness) {
-            self.skill.source_text()
-        } else {
-            self.ported_text(harness)
-        }
-    }
-
     fn ported_text(&self, harness: &str) -> String {
         let body = self.skill.content.as_deref().unwrap_or_default();
         let origin = self
@@ -458,7 +450,7 @@ mod tests {
             },
             arguments: "the branch".into(),
         };
-        let text = invocation.instruction_text("codex");
+        let text = invocation.ported_text("codex");
         assert!(text.contains("/skills/audit/reference.md for the branch"));
         assert!(text.contains("allowed-tools: Read\nmodel: sonnet"));
         assert!(text.contains("no automatic cross-harness enforcement"));

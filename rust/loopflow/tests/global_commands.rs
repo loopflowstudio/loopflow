@@ -34,7 +34,7 @@ fn success(output: Output) -> String {
 }
 
 #[test]
-fn context_budget_preview_reads_saved_wave_and_refreshes_local_edits() {
+fn context_targets_read_saved_wave_and_refresh_local_edits() {
     let home = tempfile::tempdir().unwrap();
     let repo = TestRepo::new();
     fs::create_dir_all(home.path().join(".lf")).unwrap();
@@ -48,7 +48,7 @@ fn context_budget_preview_reads_saved_wave_and_refreshes_local_edits() {
     .unwrap();
     fs::write(
         repo.path().join(".lf/config.yaml"),
-        "context_budgets:\n  memory_tokens: 700\n  scratch_bytes: 10000\n",
+        "agent: not-a-launchable-harness\ndocs: [missing.md]\ncontext_budgets:\n  memory_tokens: 700\n  scratch_bytes: 10000\n",
     )
     .unwrap();
     fs::write(
@@ -85,6 +85,7 @@ fn context_budget_preview_reads_saved_wave_and_refreshes_local_edits() {
     };
     let report = query();
     assert_eq!(report["wave"], "local");
+    assert!(report.get("goal_status").is_none());
     let budgets = &report["context"]["budgets"];
     for (key, value, source) in [
         ("memory_tokens", 400, repo.path().join("wave/local/GOAL.md")),
@@ -102,8 +103,7 @@ fn context_budget_preview_reads_saved_wave_and_refreshes_local_edits() {
     let usage = report["context"]["usage"].as_array().unwrap();
     for source in &usage[..2] {
         let limit = source["token_limit"].as_u64().unwrap();
-        assert!(source["original_tokens"].as_u64().unwrap() > limit);
-        assert_eq!(source["submitted_tokens"], source["original_tokens"]);
+        assert!(source["tokens"].as_u64().unwrap() > limit);
     }
     assert!(budgets.get("input_tokens").is_none());
     store
@@ -112,8 +112,7 @@ fn context_budget_preview_reads_saved_wave_and_refreshes_local_edits() {
     fs::write(scratch, "Pending work retained.").unwrap();
     let refreshed = query();
     for source in &refreshed["context"]["usage"].as_array().unwrap()[..2] {
-        assert_eq!(source["original_tokens"], source["submitted_tokens"]);
-        assert!(source["original_tokens"].as_u64().unwrap() < 100);
+        assert!(source["tokens"].as_u64().unwrap() < 100);
     }
 }
 

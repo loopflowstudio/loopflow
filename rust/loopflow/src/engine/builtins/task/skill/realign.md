@@ -85,9 +85,8 @@ the caller.
 
 ## Keep authored context within budget
 
-Use the assembled `lf:context-budget` snapshot, or run `lf context --skill realign`
-to read effective limits, their configuration sources, and current usage. Before
-updating scratch or Wave memory, read complete sources named by excerpt pointers.
+Run `lf context` to read memory and scratch size targets, their configuration
+sources, and current usage. Read complete sources before curating them.
 Curate Wave memory gradually. When it exceeds either limit, retire the largest
 stale sections to git history first and bring it just under both limits. Stop
 once it fits; do not rewrite the whole memory toward a smaller target or shrink

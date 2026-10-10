@@ -136,8 +136,6 @@ pub struct StepContext {
     pub sources: Vec<SourceUsage>,
     /// Everything Loopflow assembled and submitted, in cl100k tokens.
     pub assembled_tokens: Option<u64>,
-    pub assembled_budget_tokens: Option<u64>,
-    pub over_assembled_budget: bool,
     /// Input the provider reported for its first and largest requests.
     pub first_request_tokens: Option<u64>,
     pub peak_request_tokens: Option<u64>,
@@ -480,8 +478,6 @@ impl Measured {
             observed_at: history.observed_at,
             sources,
             assembled_tokens,
-            assembled_budget_tokens: None,
-            over_assembled_budget: false,
             first_request_tokens: self.first_request,
             peak_request_tokens: self.peak_request,
             gaps: self.gaps,
@@ -522,10 +518,8 @@ pub fn render_step(step: &StepContext) -> String {
             detail.join("; ")
         ));
     }
-    let budget =
-        budget_note(step.assembled_budget_tokens, step.over_assembled_budget).unwrap_or_default();
     lines.push(format!(
-        "  {:<14} {:>10}  {budget}",
+        "  {:<14} {:>10}",
         "assembled",
         cell(step.assembled_tokens)
     ));
@@ -577,7 +571,7 @@ pub fn render_report(report: &ContextReport) -> String {
         }
         line.push_str(&format!(
             "  {:>WIDTH$}  {:>WIDTH$}  {}",
-            flagged(step.assembled_tokens, step.over_assembled_budget),
+            cell(step.assembled_tokens),
             cell(step.peak_request_tokens),
             crate::lf::commands::util::short_id(&step.input)
         ));
@@ -836,7 +830,6 @@ mod tests {
         let steers = &step.sources[4];
         assert!(!steers.over_budget);
         assert_eq!(steers.budget_tokens, None);
-        assert!(!step.over_assembled_budget);
         assert!(!step.sources[1].over_budget);
         assert!(step
             .gaps

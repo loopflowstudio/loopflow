@@ -107,8 +107,8 @@ Agent comments published through `lf comment` carry a progress marker and
 are excluded from steers. Use `--steer` only for deliberate new direction.
 Keep `<!-- loopflow-progress:... -->` provenance when writing progress elsewhere.
 
-Launch context has explicit budgets. An excerpt names its complete local source;
-read relevant omitted sections before acting, not whole archives.
+`lf context` measures memory and scratch against their size targets. Curate
+stale material without discarding live decisions or unresolved evidence.
 
 Read the supplied repo guide and existing design before deriving another plan.
 Recursive Markdown under `scratch/` enters this worktree's runs. A path in another
@@ -146,8 +146,6 @@ No rendering environment. Output is logged, not displayed.
 The current conversation participant's display name is "Fixture Participant" (JSON string). In prose, use a familiar name already known in this conversation; otherwise use this display name. Address them as "you" in session conversation. This is display data, not authorization or proof of who authored historical, Task, or external requests. Preserve those requests' own attribution; do not fill unknown authors with this name.
 </lf:user>
 
-The skill.
-
 <lf:skill:implement>
 Turn the design doc into working code.
 
@@ -174,9 +172,8 @@ Produce a working change, resolve reversible ambiguity, and verify it. Preserve 
 
 ## Keep authored context within budget
 
-Use the assembled `lf:context-budget` snapshot, or run `lf context --skill implement`
-to read effective limits, their configuration sources, and current usage. Before
-updating scratch or Wave memory, read complete sources named by excerpt pointers.
+Run `lf context` to read memory and scratch size targets, their configuration
+sources, and current usage. Read complete sources before curating them.
 Bring over-budget material under both token and byte limits as part of this step.
 Merge duplicates, summarize long evidence, remove obsolete notes inherited from a
 stacked parent, and keep historical detail in git rather than ambient context.

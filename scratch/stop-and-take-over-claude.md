@@ -2,8 +2,8 @@
 
 Jack Heart requested provider-independent takeover and stop on 2026-10-09.
 The outcome is accepted; the transport design below remains a draft (2026-10-10).
-Source reconciliation: native command dispatch (2026-10-10), after `ead3fa64a`, including native permission
-choices at `157a29596`, exact reply receipts and shared mutation decoding.
+Source reconciliation: native command dispatch (`773f244b3`, 2026-10-10),
+including exact native permission choices and shared mutation decoding.
 Local main remains `df5169ab9` (#1521). Creation recovery, shared prompt
 submission and ordered readback remain implemented. Earlier iteration feedback's
 manual-permission implementation item is satisfied; rendered UX and public
@@ -157,8 +157,12 @@ anonymous/optional lifelines, endpoint-derived FIFO location,
 replaced by persisted startup attempts, readback and attachment-transfer proofs.
 Removed in the protocol correction: unsupported permission PATCH and its
 exclusive fixtures; saved native permissions survive on creation/reconnect.
-The shared public attachment path owns custody, claims and client-only settlement;
-Codex and OpenCode transports have separate client functions. OpenCode's discard-only
+The shared public attachment path owns custody, claims and client-only settlement.
+Codex and OpenCode retain separate transport setup; `run_native_client` owns their
+common frozen caller environment and native launch. Provider setup returns success
+or failure, not an always-true connection flag; only live-provider discovery can
+report no connection. This removes duplicate launch/attribution code without
+changing either provider's transport or permission policy. OpenCode's discard-only
 event-drain task is deleted: its native UI renders output while the reader retains
 history and permission recovery. The native relay's response-header fence is
 deleted: GET responses retain reqwest streaming; input/abort responses use Hyper
@@ -241,4 +245,4 @@ response collection must not poll an already-completed connection again.
 
 ## Checks
 
-Checks: `cargo check -p loopflow`, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, focused `cargo test -p loopflow --lib harness::opencode_connection::tests` (3) and `harness::opencode_dispatch::tests` (2), and `git diff --check` pass; public death-order acceptance remains unfinished and Linux acceptance CI-owned.
+Checks: `cargo check -p loopflow`, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, network-isolated `cargo test -p loopflow --lib ops::human_session::tests::{opencode_public_open_recovers_pending_identity_without_restarting_provider,codex_connection_launch_preserves_provider_and_rejects_replaced_attachment}` (each separately), and `git diff --check` pass; unchanged dispatch proofs remain at `773f244b3`, public death orders unfinished, Linux acceptance CI-owned.

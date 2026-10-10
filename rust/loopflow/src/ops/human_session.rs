@@ -796,28 +796,20 @@ async fn connect_live_agent(
     });
     let connected = async {
         if replace_clients {
-            NativeSession::of(session)?
-                .stop_clients(crate::session_record::ProviderClientStopReason::Moved)?;
+            native.stop_clients(crate::session_record::ProviderClientStopReason::Moved)?;
         }
         store
             .sqlite
             .make_session_interactive(&session.id, &attachment)?;
         if native.provider == "opencode" {
-            return connect_opencode_client(
-                store,
-                session,
-                &attachment,
-                endpoint.clone(),
-                thread.clone(),
-            )
-            .await;
+            return connect_opencode_client(store, session, &attachment, endpoint, thread).await;
         }
         connect_codex_client(
             store,
             session,
             &attachment,
-            endpoint.clone(),
-            thread.clone().expect("Codex identity checked before claim"),
+            endpoint,
+            thread.expect("Codex identity checked before claim"),
             provider.expect("Codex native history checked before claim"),
         )
         .await
@@ -836,7 +828,7 @@ async fn connect_live_agent(
         Ok(_) | Err(crate::store::StoreError::InvalidAuthority(_)) => {}
         Err(error) => return Err(error.into()),
     }
-    connected
+    connected.map(|()| true)
 }
 
 async fn connect_codex_client(
@@ -846,7 +838,7 @@ async fn connect_codex_client(
     endpoint: String,
     thread: crate::id::AgentSessionId,
     provider: &crate::session_record::ProviderSessionRef,
-) -> Result<bool> {
+) -> Result<()> {
     let directory = tempfile::Builder::new()
         .prefix("lf-connect-")
         .tempdir_in("/tmp")?;
@@ -876,34 +868,21 @@ async fn connect_codex_client(
             }
         }
     });
-    let session = session.clone();
-    let provider = provider.clone();
-    let launch_attachment = attachment.clone();
-    let environment = BTreeMap::from([(
-        crate::process::AGENT_CALLER_ENV.into(),
-        serde_json::to_string(&launch_attachment.caller(session.id.clone()))?,
-    )]);
-    let result = tokio::task::spawn_blocking(move || {
-        crate::lf::commands::util::resume_session_with_env(
-            "codex",
-            session.model.as_deref(),
-            &session.cwd,
-            &session.artifact_key,
-            &provider,
-            &environment,
-            None,
-            Some(crate::lf::commands::util::NativeConnection {
-                relay: remote.to_string_lossy().into_owned(),
-                upstream,
-            }),
-            Some((session.id.clone(), launch_attachment)),
-        )
-    })
+    let result = run_native_client(
+        "codex",
+        session,
+        attachment,
+        provider.clone(),
+        crate::lf::commands::util::NativeConnection {
+            relay: remote.to_string_lossy().into_owned(),
+            upstream,
+        },
+        BTreeMap::new(),
+    )
     .await;
     relay.abort();
     let _ = relay.await;
-    result??;
-    Ok::<_, anyhow::Error>(true)
+    result
 }
 
 /// Reuse the headless reader for native history and permission recovery. The
@@ -914,7 +893,7 @@ async fn connect_opencode_client(
     attachment: &crate::process::SessionAttachment,
     endpoint: String,
     thread: Option<crate::id::AgentSessionId>,
-) -> Result<bool> {
+) -> Result<()> {
     use crate::harness::{ApprovalPolicy, Harness};
     // Native UI renders output; the reader still records history and permissions.
     // Dropping the receiver avoids a task whose only job was discarding events.
@@ -955,36 +934,52 @@ async fn connect_opencode_client(
         password: password.clone(),
     };
     let relay = tokio::spawn(connection.serve(listener));
-    let environment = BTreeMap::from([
-        (
-            crate::process::AGENT_CALLER_ENV.into(),
-            serde_json::to_string(&attachment.caller(session.id.clone()))?,
-        ),
-        ("OPENCODE_SERVER_PASSWORD".into(), password),
-    ]);
+    let result = run_native_client(
+        "opencode",
+        session,
+        attachment,
+        provider,
+        crate::lf::commands::util::NativeConnection {
+            relay: remote,
+            upstream: endpoint,
+        },
+        BTreeMap::from([("OPENCODE_SERVER_PASSWORD".into(), password)]),
+    )
+    .await;
+    relay.abort();
+    let _ = relay.await;
+    result
+}
+
+/// Both native clients carry the same frozen caller and client-only settlement.
+async fn run_native_client(
+    harness: &'static str,
+    session: &LfSession,
+    attachment: &crate::process::SessionAttachment,
+    provider: crate::session_record::ProviderSessionRef,
+    remote: crate::lf::commands::util::NativeConnection,
+    mut environment: BTreeMap<String, String>,
+) -> Result<()> {
+    environment.insert(
+        crate::process::AGENT_CALLER_ENV.into(),
+        serde_json::to_string(&attachment.caller(session.id.clone()))?,
+    );
     let session = session.clone();
     let attachment = attachment.clone();
-    let result = tokio::task::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         crate::lf::commands::util::resume_session_with_env(
-            "opencode",
+            harness,
             session.model.as_deref(),
             &session.cwd,
             &session.artifact_key,
             &provider,
             &environment,
             None,
-            Some(crate::lf::commands::util::NativeConnection {
-                relay: remote,
-                upstream: endpoint,
-            }),
+            Some(remote),
             Some((session.id.clone(), attachment)),
         )
     })
-    .await;
-    relay.abort();
-    let _ = relay.await;
-    result??;
-    Ok(true)
+    .await?
 }
 
 /// Open a conversation: resume its native history, else

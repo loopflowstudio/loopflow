@@ -622,7 +622,6 @@ fn wave_filtering_includes_all_files_in_wave_directory() {
 #[test]
 fn nested_wave_reads_checkout_ancestor_markdown_in_order() {
     let _env = support::EnvGuard::new(&[]);
-    // Import the definition once; context reads the stored hierarchy.
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     for (path, content) in [

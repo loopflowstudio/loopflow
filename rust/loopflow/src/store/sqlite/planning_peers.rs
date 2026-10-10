@@ -372,22 +372,22 @@ fn retain_creation_baselines(
         "SELECT COALESCE(task_id,project_id),export_json FROM planning_creations
          WHERE kind=?1 AND export_attempted=1 AND json_extract(export_json,'$.id')=?2",
     )?;
-    let receipts = query
-        .query_map(
-            params![kind.as_str(), observation.body["id"].as_str()],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-        )?
-        .collect::<Result<Vec<_>, _>>()?;
-    let mut captured = BTreeSet::new();
-    let mut heads = BTreeMap::<String, Vec<(String, Value)>>::new();
-    for (owner, body) in receipts {
+    let receipts = query.query_map(
+        params![kind.as_str(), observation.body["id"].as_str()],
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+    )?;
+    // A head may be captured by any retained origin, but every observed head of
+    // a field must match. Keep that decision once per identity, not copied bodies.
+    let mut heads = BTreeMap::<String, BTreeMap<String, bool>>::new();
+    let mut observed = conn.prepare(
+        "SELECT c.id,c.field,c.value FROM planning_peer_observed o
+         JOIN planning_peer_changes c ON c.id=o.id
+         WHERE o.object_id=?1 AND c.kind=?2",
+    )?;
+    for receipt in receipts {
+        let (owner, body) = receipt?;
         let export: super::planning_export::PlanningExport = serde_json::from_str(&body)?;
-        let mut query = conn.prepare(
-            "SELECT c.id,c.field,c.value FROM planning_peer_observed o
-             JOIN planning_peer_changes c ON c.id=o.id
-             WHERE o.object_id=?1 AND c.kind=?2",
-        )?;
-        for row in query.query_map(params![owner, kind.as_str()], |row| {
+        for row in observed.query_map(params![owner, kind.as_str()], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
@@ -399,27 +399,24 @@ fn retain_creation_baselines(
                 continue;
             };
             let value = serde_json::from_str::<Value>(&value)?;
-            if export.captured.contains(&format!("peer:{id}:{delivery}"))
-                && export
-                    .model
-                    .get(delivery)
-                    .is_some_and(|baseline| baseline == &value)
-            {
-                captured.insert(id.clone());
-            }
-            heads.entry(field).or_default().push((id, value));
+            let captured = export.captured.contains(&format!("peer:{id}:{delivery}"))
+                && export.model.get(delivery) == Some(&value)
+                && fields.get(&field) == Some(&value);
+            heads
+                .entry(field)
+                .or_default()
+                .entry(id)
+                .and_modify(|retained| *retained |= captured)
+                .or_insert(captured);
         }
     }
     let fields = fields
         .as_object_mut()
         .expect("provider fields are an object");
-    fields.retain(|field, value| {
-        !heads.get(field).is_some_and(|heads| {
-            !heads.is_empty()
-                && heads
-                    .iter()
-                    .all(|(id, baseline)| captured.contains(id) && baseline == value)
-        })
+    fields.retain(|field, _| {
+        !heads
+            .get(field)
+            .is_some_and(|heads| heads.values().all(|captured| *captured))
     });
     Ok(())
 }

@@ -5,6 +5,7 @@ mod support;
 
 use loopflow::store::{CredentialType, ProviderToken};
 use loopflow_test_support::TestRepo;
+use std::path::Path;
 use std::process::Command;
 use support::{register_task_without_pr, EnvGuard};
 
@@ -52,24 +53,7 @@ fn planning_reconnect_fixture(mode: &str) {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let key = home.path().join("provider.key");
     std::fs::write(&key, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA").unwrap();
-    let previous_key = std::env::var_os("LF_PROVIDER_TOKEN_KEY_PATH");
-    std::env::set_var("LF_PROVIDER_TOKEN_KEY_PATH", &key);
-    runtime
-        .block_on(registered.store.upsert_provider_token(&ProviderToken {
-            provider: "linear".into(),
-            access_token: "synthetic-planning-token".into(),
-            refresh_token: None,
-            oauth_client_id: None,
-            expires_at: None,
-            login: None,
-            updated_at: 1,
-            credential_type: CredentialType::OAuth,
-        }))
-        .unwrap();
-    match previous_key {
-        Some(value) => std::env::set_var("LF_PROVIDER_TOKEN_KEY_PATH", value),
-        None => std::env::remove_var("LF_PROVIDER_TOKEN_KEY_PATH"),
-    }
+    seed_linear_token(&runtime, &registered.store, &key);
     let project = runtime
         .block_on(registered.store.get_project(&registered.task.project_id))
         .unwrap()
@@ -79,9 +63,9 @@ fn planning_reconnect_fixture(mode: &str) {
         "issue": registered.task.plan.linear_id.as_ref().unwrap().as_str(), "task": registered.task.id.as_str(),
         "project": project.plan.linear_id.as_ref().unwrap().as_str(), "wave": registered.task.wave_id.as_str(),
     });
-    let creation_repo = TestRepo::new();
-    if mode == "creation-origins" {
-        fixture["peer"] = prepare_creation_peer(&creation_repo, home.path(), &key);
+    let creation_repo = (mode == "creation-origins").then(TestRepo::new);
+    if let Some(creation_repo) = &creation_repo {
+        fixture["peer"] = prepare_creation_peer(creation_repo, home.path(), &key);
         fixture["remote"] = serde_json::json!(repo.bare_path());
     }
     if mode == "exports" {
@@ -130,24 +114,7 @@ fn planning_reconnect_fixture(mode: &str) {
         assert_ne!(peer_task.id, registered.task.id);
         assert_ne!(peer_task.project_id, registered.task.project_id);
         // Both stores use a disposable key and a synthetic token; no native login.
-        let previous_key = std::env::var_os("LF_PROVIDER_TOKEN_KEY_PATH");
-        std::env::set_var("LF_PROVIDER_TOKEN_KEY_PATH", &key);
-        runtime
-            .block_on(peer.upsert_provider_token(&ProviderToken {
-                provider: "linear".into(),
-                access_token: "synthetic-planning-token".into(),
-                refresh_token: None,
-                oauth_client_id: None,
-                expires_at: None,
-                login: None,
-                updated_at: 1,
-                credential_type: CredentialType::OAuth,
-            }))
-            .unwrap();
-        match previous_key {
-            Some(value) => std::env::set_var("LF_PROVIDER_TOKEN_KEY_PATH", value),
-            None => std::env::remove_var("LF_PROVIDER_TOKEN_KEY_PATH"),
-        }
+        seed_linear_token(&runtime, &peer, &key);
         fixture["peer"] = serde_json::json!({"home":peer_home,"task":peer_task.id.as_str(),"project":peer_task.project_id.as_str(),"wave":peer_wave.id().as_str()});
         fixture["private"] = serde_json::json!(mode == "association-private");
         fixture["local_project"] = serde_json::json!(registered.task.project_id.as_str());
@@ -158,12 +125,7 @@ fn planning_reconnect_fixture(mode: &str) {
             (home.path(), &registered.task.id, wave.id()),
             (peer_home.as_path(), &peer_task.id, peer_wave.id()),
         ] {
-            let db = rusqlite::Connection::open(directory.join("loopflow.db")).unwrap();
-            db.execute("INSERT INTO processes(lfid,trace_id,started_at) VALUES('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000002',1)", []).unwrap();
-            db.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id) VALUES('retained','Retained','human',1,0,?1,?2,?3)", rusqlite::params![repo.path().to_str().unwrap(),task.as_str(),wave.as_str()]).unwrap();
-            let graph = serde_json::json!({"name":"review","nodes":[{"name":"review","skill":"review","description":null}],"edges":[]});
-            db.execute("INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,?2,'review',1)", rusqlite::params![task.as_str(),graph.to_string()]).unwrap();
-            db.execute("INSERT INTO task_workflow_moves(task_id,workflow,kind,from_node,to_node,at) VALUES(?1,?2,'set','start','review',1)", rusqlite::params![task.as_str(),graph.to_string()]).unwrap();
+            retain_execution(directory, repo.path(), task, wave);
         }
     }
     let input = home.path().join("fixture.json");
@@ -186,13 +148,51 @@ fn planning_reconnect_fixture(mode: &str) {
     );
 }
 
+fn seed_linear_token(
+    runtime: &tokio::runtime::Runtime,
+    store: &loopflow::store::Store,
+    key: &Path,
+) {
+    let previous_key = std::env::var_os("LF_PROVIDER_TOKEN_KEY_PATH");
+    std::env::set_var("LF_PROVIDER_TOKEN_KEY_PATH", key);
+    let result = runtime.block_on(store.upsert_provider_token(&ProviderToken {
+        provider: "linear".into(),
+        access_token: "synthetic-planning-token".into(),
+        refresh_token: None,
+        oauth_client_id: None,
+        expires_at: None,
+        login: None,
+        updated_at: 1,
+        credential_type: CredentialType::OAuth,
+    }));
+    match previous_key {
+        Some(value) => std::env::set_var("LF_PROVIDER_TOKEN_KEY_PATH", value),
+        None => std::env::remove_var("LF_PROVIDER_TOKEN_KEY_PATH"),
+    }
+    result.unwrap();
+}
+
+fn retain_execution(
+    home: &Path,
+    repo: &Path,
+    task: &loopflow::durable::TaskId,
+    wave: &loopflow::id::WaveId,
+) {
+    let db = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
+    db.execute("INSERT INTO processes(lfid,trace_id,started_at) VALUES('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000002',1)", []).unwrap();
+    db.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id) VALUES('retained','Retained','human',1,0,?1,?2,?3)", rusqlite::params![repo.to_str().unwrap(),task.as_str(),wave.as_str()]).unwrap();
+    let graph = serde_json::json!({"name":"review","nodes":[{"name":"review","skill":"review","description":null}],"edges":[]});
+    db.execute(
+        "INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,?2,'review',1)",
+        rusqlite::params![task.as_str(), graph.to_string()],
+    )
+    .unwrap();
+    db.execute("INSERT INTO task_workflow_moves(task_id,workflow,kind,from_node,to_node,at) VALUES(?1,?2,'set','start','review',1)", rusqlite::params![task.as_str(),graph.to_string()]).unwrap();
+}
+
 // Create on the source through the CLI before connecting Linear. The receiver
 // learns these identities only through public Git exchange, never a seeded import.
-fn prepare_creation_peer(
-    repo: &TestRepo,
-    home: &std::path::Path,
-    key: &std::path::Path,
-) -> serde_json::Value {
+fn prepare_creation_peer(repo: &TestRepo, home: &Path, key: &Path) -> serde_json::Value {
     let peer_home = home.join("creation-peer");
     std::fs::create_dir(&peer_home).unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
@@ -225,40 +225,14 @@ fn prepare_creation_peer(
         .block_on(store.get_wave(&saved.wave_id))
         .unwrap()
         .unwrap();
-    let previous = std::env::var_os("LF_PROVIDER_TOKEN_KEY_PATH");
-    std::env::set_var("LF_PROVIDER_TOKEN_KEY_PATH", key);
-    runtime
-        .block_on(store.upsert_provider_token(&ProviderToken {
-            provider: "linear".into(),
-            access_token: "synthetic-planning-token".into(),
-            refresh_token: None,
-            oauth_client_id: None,
-            expires_at: None,
-            login: None,
-            updated_at: 1,
-            credential_type: CredentialType::OAuth,
-        }))
-        .unwrap();
-    match previous {
-        Some(value) => std::env::set_var("LF_PROVIDER_TOKEN_KEY_PATH", value),
-        None => std::env::remove_var("LF_PROVIDER_TOKEN_KEY_PATH"),
-    }
-    let db = rusqlite::Connection::open(peer_home.join("loopflow.db")).unwrap();
-    db.execute("INSERT INTO processes(lfid,trace_id,started_at) VALUES('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000002',1)", []).unwrap();
-    db.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id) VALUES('retained','Retained','human',1,0,?1,?2,?3)", rusqlite::params![repo.path().to_str().unwrap(),saved.id.as_str(),saved.wave_id.as_str()]).unwrap();
-    let graph = serde_json::json!({"name":"review","nodes":[{"name":"review","skill":"review","description":null}],"edges":[]});
-    db.execute(
-        "INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,?2,'review',1)",
-        rusqlite::params![saved.id.as_str(), graph.to_string()],
-    )
-    .unwrap();
-    db.execute("INSERT INTO task_workflow_moves(task_id,workflow,kind,from_node,to_node,at) VALUES(?1,?2,'set','start','review',1)", rusqlite::params![saved.id.as_str(),graph.to_string()]).unwrap();
+    seed_linear_token(&runtime, &store, key);
+    retain_execution(&peer_home, repo.path(), &saved.id, &saved.wave_id);
     serde_json::json!({"home":peer_home,"repo":repo.path(),"task":saved.id.as_str(),"project":saved.project_id.as_str(),"wave":saved.wave_id.as_str(),"wave_name":wave.slug()})
 }
 
 // Import portable plans before connecting Linear. Mixed-provider Git exchange
 // is covered separately; this exercises the common foreground owner after import.
-fn import_unprepared_plans(repo: &std::path::Path, home: &std::path::Path) -> serde_json::Value {
+fn import_unprepared_plans(repo: &Path, home: &Path) -> serde_json::Value {
     use loopflow::engine::planning_git::PlanningDestination;
     use loopflow::store::sqlite::SqliteStore;
 
@@ -349,8 +323,8 @@ fn import_unprepared_plans(repo: &std::path::Path, home: &std::path::Path) -> se
 // importer. The public foreground must not mistake the rolled-back receipt for
 // permission to send another deletion. No mixed-provider transport is enabled.
 fn import_rejected_deletion(
-    repo: &std::path::Path,
-    home: &std::path::Path,
+    repo: &Path,
+    home: &Path,
     task: &loopflow::durable::TaskId,
 ) -> serde_json::Value {
     use loopflow::engine::planning_git::PlanningDestination;

@@ -12,6 +12,7 @@ import sys
 import threading
 import time
 import uuid
+from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -248,6 +249,19 @@ class Handler(BaseHTTPRequestHandler):
         return {"data": data}
 
 
+def _run(fixture: dict, env: dict, *args: str, timeout: int = 30) -> str:
+    result = subprocess.run(
+        [fixture["lf"], *args],
+        cwd=fixture["repo"],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+    assert result.returncode == 0, (args, result.stdout, result.stderr)
+    return result.stdout
+
+
 def _await(check, message: str, seconds: int = 45) -> None:
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
@@ -315,12 +329,7 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
     root, repo = Path(fixture["home"]), Path(fixture["repo"])
     db = sqlite3.connect(root / "loopflow.db", timeout=5)
 
-    def run(*args: str) -> str:
-        result = subprocess.run(
-            [fixture["lf"], *args], cwd=repo, env=env, capture_output=True, text=True, timeout=30
-        )
-        assert result.returncode == 0, result.stderr
-        return result.stdout
+    run = partial(_run, fixture, env)
 
     # Acquire a real baseline before the outage, not an invented provider revision.
     run("repo", "refresh", "--all")
@@ -561,12 +570,7 @@ def _exercise_exports(fixture: dict, env: dict, server: ThreadingHTTPServer) -> 
     peer = fixture["peer"]
     db = sqlite3.connect(root / "loopflow.db", timeout=5)
 
-    def run(*args: str) -> str:
-        result = subprocess.run(
-            [fixture["lf"], *args], cwd=repo, env=env, capture_output=True, text=True, timeout=30
-        )
-        assert result.returncode == 0, result.stderr
-        return result.stdout
+    run = partial(_run, fixture, env)
 
     def acknowledged(kind: str, identity: str) -> bool:
         return db.execute(
@@ -684,16 +688,7 @@ def _exercise_creation_origins(fixture: dict, env: dict, server: ThreadingHTTPSe
     processes = ("00000000-0000-4000-8000-000000000001",)
 
     def run(side: int, *args: str) -> str:
-        result = subprocess.run(
-            [fixture["lf"], *args],
-            cwd=sides[side][0]["repo"],
-            env=sides[side][1],
-            capture_output=True,
-            text=True,
-            timeout=45,
-        )
-        assert result.returncode == 0, (args, result.stdout, result.stderr)
-        return result.stdout
+        return _run(*sides[side], *args, timeout=45)
 
     def receipt(side: int, kind: str) -> tuple | None:
         return (
@@ -883,15 +878,7 @@ def _exercise_effects(fixture: dict, env: dict, server: ThreadingHTTPServer) -> 
     processes = ("00000000-0000-4000-8000-000000000001",)
     before = _execution_rows(db, processes)
     checkout = db.execute("SELECT worktree FROM tasks WHERE id=?", (fixture["task"],)).fetchone()
-    saved = subprocess.run(
-        [fixture["lf"], "task", "delete", fixture["task"]],
-        cwd=fixture["repo"],
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    assert saved.returncode == 0, saved.stderr
+    _run(fixture, env, "task", "delete", fixture["task"])
     watch = Watch(fixture, env)
     try:
         watch.scope(fixture["repo"])
@@ -966,16 +953,7 @@ def _exercise_associations(fixture: dict, env: dict, server: ThreadingHTTPServer
     processes = ("00000000-0000-4000-8000-000000000001",)
 
     def run(side: int, *args: str) -> str:
-        result = subprocess.run(
-            [fixture["lf"], *args],
-            cwd=repo,
-            env=sides[side][1],
-            capture_output=True,
-            text=True,
-            timeout=45,
-        )
-        assert result.returncode == 0, (args, result.stdout, result.stderr)
-        return result.stdout
+        return _run(*sides[side], *args, timeout=45)
 
     def exchange(side: int, predicate) -> None:
         watch = Watch(*sides[side])

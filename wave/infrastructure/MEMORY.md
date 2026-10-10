@@ -639,11 +639,11 @@ Earlier scalar Git/HTTPS association, recovery, ordering and #1499 proofs:
 `9d3d2ba90:wave/infrastructure/MEMORY.md`, this heading. Due dates synchronize;
 completion requests, placements and execution remain local.
 
-Public two-store creation/link recovery exposed an unchanged creation readback
-incorrectly defeating a later peer save. Capture now preserves exact baseline
-heads; changed Linear facts still win. The old storage assertion required the
-wrong conflict. An attachment request can race peer receipt acquisition using the
-same UUID; synthetic rejection proves no exactly-once requests. Associated origins,
+`e37099e50`'s public two-store creation/link recovery exposed unchanged readback
+incorrectly defeating a later peer save. Capture retains exact baseline heads;
+changed Linear facts still win. The previous conflict assertion was wrong.
+Attachment can race peer receipt acquisition with the same UUID;
+synthetic rejection proves no exactly-once requests. Associated origins,
 negative-evidence/order, native lifetimes and installed acceptance remain unproved.
 Plan:
 `scratch/work-on-another-machine-name.md`.

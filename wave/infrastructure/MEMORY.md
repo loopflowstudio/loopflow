@@ -239,14 +239,14 @@ open. FIFO is Codex-only; reaping noninteractive Codex/OpenCode.
 
 Jack Heart selected LfSession/LfProcess (#1516) and AgentSession (#1517), both
 landed on his approval; AgentSessionId has no table. LOO-446 is the cleanup he
-requested, stacked on LOO-443, published and not landed before it: LfProcess
+requested, stacked on LOO-443 and not landed before it (no PR yet): LfProcess
 identity is `id`, references are `<role>_lf_process_id`, and the two retired
 words name nothing. The lf attached to a Session is the attached LfProcess; the
 lf running a Flow is the Flow process; FlowRunner executes it. One draft renames
 released columns and exit receipt keys (`attachment:`); without old-name readers
 an earlier build's live Codex lifeline and journal receipts are not adopted.
-Released-shape SQL stays under `migrations/` paths. LfProcess id is durable; PID
-reusable. Installation unproved. Plan: `scratch/loo-446.md`. Prior proofs,
+Released-shape SQL stays under `migrations/` paths. `processes` holds both
+kinds: filter `kind`. Installation unproved. Plan: `scratch/loo-446.md`. Prior proofs,
 LOO-442's unresolved gate failures and LOO-400 history:
 `585cf52cd:wave/infrastructure/MEMORY.md`, LOO-441 and LOO-442 headings.
 

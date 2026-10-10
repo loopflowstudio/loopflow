@@ -2638,3 +2638,96 @@ fn worktree_selector_uses_the_named_checkout_without_changing_the_caller() {
         assert!(String::from_utf8_lossy(&output.stdout).contains("Inspect the selected checkout."));
     }
 }
+
+#[test]
+fn claude_deciding_step_records_native_answer_and_advances() {
+    for correct_first in [true, false] {
+        let repo = loopflow_test_support::TestRepo::new();
+        let home = TempDir::new().unwrap();
+        let bin = home.path().join("bin");
+        fs::create_dir(&bin).unwrap();
+        for name in ["work-proof", "decide-proof", "publish-proof"] {
+            write_skill(repo.path(), name, "Fixture step.");
+        }
+        write_flow(
+            repo.path(),
+            "claude-decision",
+            "- work-proof\n- loop: work-proof\n  step: decide-proof\n- publish-proof\n",
+        );
+        write_executable(
+            &bin.join("claude"),
+            r#"#!/usr/bin/python3
+import json, os, sys
+if '--version' in sys.argv:
+    print('fixture')
+    sys.exit(0)
+sys.stderr = open(os.path.join(os.environ['LF_HOME'], 'provider-errors'), 'a', buffering=1)
+assert sys.argv[sys.argv.index('--input-format') + 1] == 'stream-json'
+context = open(sys.argv[sys.argv.index('--append-system-prompt-file') + 1]).read()
+deciding = '<lf:skill:decide-proof>' in context or '--resume' in sys.argv
+schema = json.loads(sys.argv[sys.argv.index('--json-schema') + 1]) if '--json-schema' in sys.argv else None
+assert (schema is not None) == deciding, (schema, deciding, sys.argv)
+if deciding:
+    assert schema['properties']['decision']['enum'] == ['advance', 'iterate', 'blocked']
+thread = sys.argv[sys.argv.index('--resume') + 1] if '--resume' in sys.argv else 'fixture-' + str(os.getpid())
+for line in sys.stdin:
+    message = json.loads(line)
+    if message.get('shouldQuery') is False:
+        continue
+    message['session_id'] = thread
+    print(json.dumps(message), flush=True)
+    print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': thread}), flush=True)
+    result = {'type': 'result', 'uuid': 'result', 'session_id': thread, 'subtype': 'success', 'is_error': False, 'result': 'ordinary prose, not a decision'}
+    if deciding:
+        result['structured_output'] = {'decision': 'advance', 'summary': 'Proof observed', 'reason': None}
+        if os.environ['CORRECT_FIRST'] == 'false' and '--resume' not in sys.argv:
+            result['structured_output']['summary'] = ''
+    print(json.dumps(result), flush=True)
+"#,
+        );
+        let output = lf_command(
+            repo.path(),
+            home.path(),
+            &[
+                "-a",
+                "claude",
+                "-b",
+                "run",
+                "claude-decision",
+                "--no-loopflow",
+            ],
+            Some(&format!("{}:/usr/bin:/bin", bin.display())),
+        )
+        .env("CORRECT_FIRST", correct_first.to_string())
+        .env("CLAUDE_CONFIG_DIR", home.path().join(".claude"))
+        .env_remove("ANTHROPIC_API_KEY")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+            fs::read_to_string(home.path().join("provider-errors")).unwrap_or_default()
+        );
+        let flows = flow_details(repo.path(), home.path());
+        assert_eq!(
+            flows[0]["steps"].as_array().unwrap().len(),
+            if correct_first { 3 } else { 4 },
+            "{:?}",
+            flows
+        );
+        let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+        for kind in ["started", "output", "completed"] {
+            let count: i64 = db
+                .query_row(
+                    "SELECT count(*) FROM session_events WHERE kind=?1",
+                    [kind],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, if correct_first { 3 } else { 4 }, "{kind}");
+        }
+    }
+}

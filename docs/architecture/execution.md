@@ -182,6 +182,11 @@ correlation carry that snapshot. Broadcast-only starts retain unknown attributio
 late correlated replies can fill it, but cannot borrow a newer capture or bind.
 The snapshot supplies history only and never authorizes dispatch.
 
+Headless Claude uses the same stream-input harness and correlated turn history as
+chat. Deciding Flow steps pass their JSON schema to Claude, including correction
+turns; the existing answer reader consumes the native structured result. Terminal
+Claude launches retain native terminal behavior.
+
 The continuing AgentProcess retains its identity while each attachment
 receives a fresh opaque token, including reattachment of the same lf Process.
 Release revokes that token as well. The token is a compare-and-swap witness,

@@ -11,19 +11,22 @@ fn bare_lf_launches_a_conversational_prompt_with_an_agent_option() {
         let claude = bin.join("claude");
         fs::write(
             &claude,
-            r#"#!/bin/sh
-printf '%s\n' "$@" > "$TEST_ARGS"
-printf '%s\n' "$@" > "$TEST_CONTEXT"
-while [ "$#" -gt 0 ]; do
-  if [ "$1" = --append-system-prompt-file ]; then
-    cat "$2" >> "$TEST_CONTEXT"
-    shift
-  elif [ "$1" = --print ]; then
-    cat >> "$TEST_CONTEXT"
-  fi
-  shift
-done
-printf '%s\n' '{"type":"result","subtype":"success","result":"hello"}'
+            r#"#!/usr/bin/python3
+import json, os, sys
+if '--version' in sys.argv:
+    print('fixture')
+    sys.exit(0)
+args = '\n'.join(sys.argv[1:]) + '\n'
+open(os.environ['TEST_ARGS'], 'w').write(args)
+context = open(sys.argv[sys.argv.index('--append-system-prompt-file') + 1]).read()
+open(os.environ['TEST_CONTEXT'], 'w').write(context)
+if '--input-format' in sys.argv:
+    message = json.loads(sys.stdin.readline())
+    message['session_id'] = 'fixture'
+    print(json.dumps(message), flush=True)
+    print(json.dumps({'type': 'result', 'session_id': 'fixture', 'subtype': 'success', 'result': 'hello'}), flush=True)
+else:
+    print('hello')
 "#,
         )
         .unwrap();
@@ -72,7 +75,11 @@ printf '%s\n' '{"type":"result","subtype":"success","result":"hello"}'
         );
         let args = fs::read_to_string(temp.path().join("received-args")).unwrap();
         assert!(args.contains("--model\nsonnet\n"), "{args}");
-        assert_eq!(args.lines().any(|arg| arg == "--print"), batch, "{args}");
+        assert_eq!(
+            args.lines().any(|arg| arg == "--input-format"),
+            batch,
+            "{args}"
+        );
         let prompt = fs::read_to_string(temp.path().join("received-context")).unwrap();
         assert!(prompt.contains("<lf:skill:default>"), "{prompt}");
         assert!(!prompt.contains("<lf:skill:repo/operate>"), "{prompt}");

@@ -9,7 +9,7 @@ use crate::id::AgentSessionId;
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
-use std::io::{BufRead, BufReader, Read, Seek, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -177,6 +177,8 @@ pub struct AgentConfig {
     pub task_prompt: String,
     /// Native skill selection, kept separate from bounded user context.
     pub skill_invocation: Option<crate::skills::invocation::SkillInvocation>,
+    /// Native final-answer schema for this turn.
+    pub output_schema: Option<serde_json::Value>,
     /// Agent string (for example: "claude:opus" or "codex").
     pub agent: Option<String>,
     /// Max turn budget when supported by the harness.
@@ -659,10 +661,7 @@ fn claude_skip_permissions(cwd: Option<&Path>, auto: bool, skip_permissions: boo
     true
 }
 
-/// Common Claude CLI arguments shared across one-shot and session paths.
-///
-/// The one-shot command and persistent stream session add their mode-specific
-/// flags around these shared arguments.
+/// Common Claude CLI arguments shared by terminal and stream-input launches.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ClaudeArgs {
     /// Model variant (already resolved, no "claude:" prefix).
@@ -679,8 +678,6 @@ pub struct ClaudeArgs {
     pub worktree_isolation: bool,
     /// Max turn budget.
     pub max_turns: Option<u32>,
-    /// Enable streaming output (`--output-format stream-json --verbose`).
-    pub stream: bool,
     /// Enable Chrome integration.
     pub chrome: bool,
     /// Resume an existing Claude Code session.
@@ -759,12 +756,6 @@ impl ClaudeArgs {
             args.push(max_turns.to_string());
         }
 
-        if self.stream {
-            args.push("--output-format".to_string());
-            args.push("stream-json".to_string());
-            args.push("--verbose".to_string());
-        }
-
         if let Some(ref id) = self.resume_id {
             args.push("--resume".to_string());
             args.push(id.to_string());
@@ -785,6 +776,9 @@ pub fn build_claude_stream_session_args(
         "--replay-user-messages".to_string(),
         "--input-format".to_string(),
         "stream-json".to_string(),
+        "--output-format".to_string(),
+        "stream-json".to_string(),
+        "--verbose".to_string(),
     ];
     args.extend(
         ClaudeArgs {
@@ -802,12 +796,14 @@ pub fn build_claude_stream_session_args(
             worktree_isolation: config.write_scope == AgentWriteScope::Worktree
                 && config.execution_boundary.is_none(),
             max_turns: config.max_turns,
-            stream: true,
             chrome: false,
             resume_id: resume_id.cloned(),
         }
         .to_args(),
     );
+    if let Some(schema) = &config.output_schema {
+        args.extend(["--json-schema".to_string(), schema.to_string()]);
+    }
     args
 }
 
@@ -977,23 +973,14 @@ pub fn build_claude_command(
         add_dirs: provider_writable_roots(launch),
         skip_permissions: launch.execution_boundary.is_some()
             || (launch.write_scope == AgentWriteScope::Configured
-                && claude_skip_permissions(
-                    launch.cwd.as_deref(),
-                    process.auto,
-                    launch.skip_permissions,
-                )),
+                && claude_skip_permissions(launch.cwd.as_deref(), false, launch.skip_permissions)),
         worktree_isolation: launch.write_scope == AgentWriteScope::Worktree
             && launch.execution_boundary.is_none(),
         max_turns: launch.max_turns,
-        stream: process.auto && (process.stream || launch.skill_invocation.is_some()),
         chrome: capabilities.chrome,
         resume_id: launch.resume_token.clone(),
     };
     cmd.extend(claude_args.to_args());
-
-    if process.auto {
-        cmd.push("--print".to_string());
-    }
 
     cmd
 }
@@ -1790,7 +1777,7 @@ fn _run_harness_once(
                 exit_code: exit_code.expect("event loop stops with an exit code"),
                 stdout,
                 stderr,
-                agent_session,
+                agent_session: harness.agent_session(),
                 failure: None,
             })
         };
@@ -1835,7 +1822,7 @@ fn _run_agent_once(
 ) -> Result<AgentAttempt, CoreError> {
     let start = Instant::now();
     let (harness, model) = parse_agent(launch.agent());
-    if matches!(harness.as_str(), "codex" | "opencode") && process.auto {
+    if matches!(harness.as_str(), "claude" | "codex" | "opencode") && process.auto {
         return _run_harness_once(launch, process, model, retry);
     }
     let cmd_args = build_model_command(launch, process, capabilities);
@@ -1862,45 +1849,11 @@ fn _run_agent_once(
         crate::terminal_title::TerminalTitle::prepare(&launch.env, &harness, &mut cmd)
     };
     cmd.args(args);
-    if harness == "claude" && process.auto {
-        // Claude's text stdin carries large assembled context without
-        // argv limits. An anonymous file also avoids pipe backpressure at startup.
-        let mut input = tempfile::tempfile()?;
-        if let Some(invocation) = &launch.skill_invocation {
-            let (flags, command) = invocation
-                .claude_input(launch)
-                .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
-            cmd.args(["--input-format", "stream-json", "--replay-user-messages"]);
-            cmd.args(flags);
-            if !launch.task_prompt.is_empty() {
-                writeln!(
-                    input,
-                    "{}",
-                    serde_json::json!({
-                        "type": "user", "shouldQuery": false,
-                        "message": {"role": "user", "content": launch.task_prompt}
-                    })
-                )?;
-            }
-            writeln!(
-                input,
-                "{}",
-                serde_json::json!({
-                    "type": "user", "message": {"role": "user", "content": command}
-                })
-            )?;
-        } else {
-            input.write_all(launch.task_prompt.as_bytes())?;
-        }
-        input.rewind()?;
-        cmd.stdin(Stdio::from(input));
-    } else {
-        if process.auto {
-            cmd.stdin(Stdio::null());
-        }
-        if !launch.task_prompt.is_empty() {
-            cmd.arg(&launch.task_prompt);
-        }
+    if process.auto {
+        cmd.stdin(Stdio::null());
+    }
+    if !launch.task_prompt.is_empty() {
+        cmd.arg(&launch.task_prompt);
     }
 
     if let Some(ref cwd) = launch.cwd {
@@ -2393,7 +2346,6 @@ mod tests {
     fn default_launch() -> AgentConfig {
         AgentConfig {
             task_prompt: "task".to_string(),
-            skill_invocation: None,
             ..Default::default()
         }
     }
@@ -2519,25 +2471,6 @@ trust_level = "trusted"
     }
 
     #[test]
-    fn build_claude_command_auto() {
-        let launch = AgentConfig {
-            skip_permissions: false,
-            ..default_launch()
-        };
-        let process = ProcessConfig {
-            auto: true,
-            stream: false,
-            ..Default::default()
-        };
-        let cmd = build_claude_command(&launch, &process, &AgentCapabilities::default(), None);
-        assert!(cmd.contains(&"--print".to_string()));
-        assert_eq!(
-            cmd.contains(&"--dangerously-skip-permissions".to_string()),
-            claude_skip_permissions(None, true, false)
-        );
-    }
-
-    #[test]
     fn build_claude_command_yolo() {
         let launch = AgentConfig {
             skip_permissions: true,
@@ -2550,19 +2483,6 @@ trust_level = "trusted"
         };
         let cmd = build_claude_command(&launch, &process, &AgentCapabilities::default(), None);
         assert!(cmd.contains(&"--dangerously-skip-permissions".to_string()));
-    }
-
-    #[test]
-    fn build_claude_command_stream() {
-        let launch = default_launch();
-        let process = ProcessConfig {
-            auto: true,
-            stream: true,
-            ..Default::default()
-        };
-        let cmd = build_claude_command(&launch, &process, &AgentCapabilities::default(), None);
-        assert!(cmd.contains(&"stream-json".to_string()));
-        assert!(cmd.contains(&"--verbose".to_string()));
     }
 
     #[test]
@@ -2944,7 +2864,6 @@ trust_level = "trusted"
             skip_permissions: true,
             worktree_isolation: false,
             max_turns: Some(10),
-            stream: true,
             chrome: true,
             resume_id: Some("sess_abc".into()),
         }
@@ -2958,9 +2877,6 @@ trust_level = "trusted"
         assert!(args.contains(&"--dangerously-skip-permissions".to_string()));
         assert!(args.contains(&"--max-turns".to_string()));
         assert!(args.contains(&"10".to_string()));
-        assert!(args.contains(&"--output-format".to_string()));
-        assert!(args.contains(&"stream-json".to_string()));
-        assert!(args.contains(&"--verbose".to_string()));
         assert!(args.contains(&"--resume".to_string()));
         assert!(args.contains(&"sess_abc".to_string()));
     }

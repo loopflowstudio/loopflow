@@ -456,6 +456,7 @@ fn build_prompt_at(
     };
 
     let mut agent_config = prepared.config;
+    agent_config.output_schema = cli.output_schema.clone();
     if confine {
         agent_config.write_scope = crate::agent::AgentWriteScope::Worktree;
         agent_config.execution_boundary = Some(crate::agent::checkout_execution_boundary(

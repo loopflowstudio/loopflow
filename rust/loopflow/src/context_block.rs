@@ -523,9 +523,11 @@ mod tests {
     #[test]
     fn context_block_reserves_skill_when_only_the_combined_listing_overflows() {
         let repo = tempdir().unwrap();
+        // Long names keep the listing over the remaining space wherever the
+        // temporary directory lives; its path is short on Linux.
         let references: Vec<_> = (0..20)
             .map(|index| {
-                let path = repo.path().join(format!("reference-{index}.md"));
+                let path = repo.path().join(format!("reference-{index:0>60}.md"));
                 fs::write(&path, "Listed reference, not preloaded").unwrap();
                 path
             })

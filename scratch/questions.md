@@ -33,5 +33,14 @@ the Session's attachment as a nullable Process reference with a generation
 fence, and TESTING.md says fixtures carry "attachment and provider generations".
 Only the vocabulary changed; LOO-443 owns the attachment-token wording.
 
+2026-10-09 fixture repair outside the rename: `land_tests` read `via_agent`
+from the first child of the repair Process; with AgentProcess rows in the same
+table that child can be the provider. The query now selects `kind='lf'`.
+
+2026-10-09 observed, not repaired: `python/tests/test_checkout_refresh.py` runs
+the branch binary without a private Home; it failed on a missing column in the
+installed store before changing anything, and the installed schema is unchanged.
+`test_architecture` reports the same three map errors on LOO-443's commit.
+
 Signal worth sponsoring: a CI check that runs the Task's `rg` over the tree
 would keep the retired words from returning; it costs one line in lint.

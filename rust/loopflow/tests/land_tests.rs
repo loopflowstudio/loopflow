@@ -1950,7 +1950,7 @@ fi"#;
             );
             let via_agent: bool = conn
                 .query_row(
-                    "SELECT via_agent FROM processes WHERE parent_lf_process_id=?1",
+                    "SELECT via_agent FROM processes WHERE parent_lf_process_id=?1 AND kind='lf'",
                     [&owner],
                     |row| row.get(0),
                 )

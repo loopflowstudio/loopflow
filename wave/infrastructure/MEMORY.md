@@ -236,8 +236,7 @@ standbys cannot write. Group death releases custody; watchdog stays outside.
 OpenCode saves reachability before creation, identity before setup and attempts
 before HTTP; unknown creation identity remains unresolved. `c75082d01` fences HTTP
 and receipts in one worker; cancellation proof is open. `62b6c27df` proves
-reader-free reply recovery. Release's lesson applies: harness recovery proves no
-public takeover. Claude transport and public death-order proofs remain open.
+reader-free reply recovery. Harness recovery proves no public takeover. Claude transport and public death-order proofs remain open.
 Plan: `scratch/stop-and-take-over-claude.md`.
 
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)

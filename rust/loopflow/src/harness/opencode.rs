@@ -319,7 +319,7 @@ impl OpenCodeHarness {
                             return;
                         }
                     }
-                    for event in mapped.events {
+                    for event in mapped {
                         let _ = event_tx.send(event);
                     }
                 }
@@ -379,19 +379,18 @@ async fn observe_native_messages(
     turn_in_progress: &AtomicBool,
 ) -> Result<()> {
     let messages = opencode_history::read_messages(client, base_url, session).await?;
-    let (events, current_messages) = {
+    let (events, current_messages, owner) = {
         let mut history = history.lock().expect("OpenCode history lock poisoned");
         let events = history.observe(session, &messages)?;
         let current_messages: Vec<_> = messages
-            .iter()
+            .into_iter()
             .filter(|message| {
                 message["info"]["parentID"]
                     .as_str()
                     .is_some_and(|request| history.admitted(request))
             })
-            .cloned()
             .collect();
-        (events, current_messages)
+        (events, current_messages, history.owner()?)
     };
     // Emit native-correlated output between start and completion, even when
     // a snapshot gets ahead of queued SSE deltas. Empty snapshots do not idle
@@ -414,7 +413,7 @@ async fn observe_native_messages(
         }
         let _ = event_tx.send(event);
     }
-    opencode_history::reply_pending_permissions(client, base_url, session, history).await
+    opencode_history::reply_pending_permissions(client, base_url, session, &owner).await
 }
 
 #[async_trait]

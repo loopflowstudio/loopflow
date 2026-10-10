@@ -270,9 +270,9 @@ pub(super) async fn reply_pending_permissions(
     client: &reqwest::Client,
     endpoint: &str,
     thread: &AgentSessionId,
-    history: &std::sync::Mutex<History>,
+    owner: &super::agent_process::AttachmentOwner,
 ) -> Result<()> {
-    let pending: Vec<Value> = client
+    let mut pending: Vec<Value> = client
         .get(format!("{endpoint}/permission"))
         .timeout(std::time::Duration::from_secs(10))
         .send()
@@ -280,18 +280,13 @@ pub(super) async fn reply_pending_permissions(
         .error_for_status()?
         .json()
         .await?;
-    let messages = if pending
-        .iter()
-        .any(|permission| permission["sessionID"] == thread.as_str())
-    {
-        read_messages(client, endpoint, thread).await?
-    } else {
-        Vec::new()
-    };
-    for permission in pending
-        .iter()
-        .filter(|permission| permission["sessionID"] == thread.as_str())
-    {
+    pending.retain(|permission| permission["sessionID"] == thread.as_str());
+    if pending.is_empty() {
+        return Ok(());
+    }
+    // Read after permissions: each pending tool must be present in this snapshot.
+    let messages = read_messages(client, endpoint, thread).await?;
+    for permission in pending {
         let id = permission["id"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("OpenCode permission has no identity"))?;
@@ -303,11 +298,7 @@ pub(super) async fn reply_pending_permissions(
             .find(|message| message["info"]["id"] == assistant)
             .and_then(|message| message["info"]["parentID"].as_str())
             .ok_or_else(|| anyhow::anyhow!("OpenCode permission has no originating request"))?;
-        let owner = history
-            .lock()
-            .expect("OpenCode history lock poisoned")
-            .owner()?;
-        let (store, session, attachment) = &owner;
+        let (store, session, attachment) = owner;
         if !store
             .session_request(session, thread, request)?
             .is_some_and(|(origin, _)| origin.agent_process_id == attachment.agent_process_id)
@@ -316,6 +307,7 @@ pub(super) async fn reply_pending_permissions(
                 "OpenCode permission belongs to an unselected request"
             ));
         }
+        let owner = owner.clone();
         let endpoint = endpoint.to_string();
         let thread = thread.clone();
         let id = id.to_string();
@@ -401,7 +393,7 @@ mod tests {
     #[tokio::test]
     async fn permission_recovery_never_replays_an_uncertain_reply() {
         use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-        use std::sync::{Arc, Mutex};
+        use std::sync::Arc;
         use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 
         for accepted in [true, false] {
@@ -421,12 +413,10 @@ mod tests {
                 .claim_session_attachment("session", None, &process, false)
                 .unwrap();
             let thread = "thread".into();
-            let mut history = History::new(Some((store.clone(), "session".into(), first.clone())));
-            let request = history.request(&thread).unwrap();
+            let owner = (store.clone(), "session".into(), first.clone());
+            let request = History::new(Some(owner.clone())).request(&thread).unwrap();
             let messages = vec![json!({"info":{"id":"assistant","sessionID":"thread",
                 "parentID":request,"role":"assistant","time":{"created":1}},"parts":[]})];
-            history.observe(&thread, &messages).unwrap();
-            let history = Mutex::new(history);
             let pending = Arc::new(AtomicBool::new(true));
             let replies = Arc::new(AtomicUsize::new(0));
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -479,17 +469,16 @@ mod tests {
             };
             let client = reqwest::Client::new();
             let result =
-                super::reply_pending_permissions(&client, &endpoint, &thread, &history).await;
+                super::reply_pending_permissions(&client, &endpoint, &thread, &owner).await;
             assert_eq!(result.is_ok(), accepted);
             assert_eq!(replies.load(Ordering::SeqCst), 1);
             let current = store
                 .claim_session_attachment("session", Some(&first), &process, false)
                 .unwrap();
-            // Reopen the store and reconstruct the reader: no in-memory dedup state.
+            // Reopen without reconstructing a reader: saved intent alone supplies
+            // attribution and deduplication, even before any native observation.
             let reopened = SqliteStore::open_ephemeral(&path).unwrap();
-            let mut recovered = History::new(Some((reopened, "session".into(), current)));
-            recovered.observe(&thread, &messages).unwrap();
-            let recovered = Mutex::new(recovered);
+            let recovered = (reopened, "session".into(), current);
             let result =
                 super::reply_pending_permissions(&client, &endpoint, &thread, &recovered).await;
             assert_eq!(result.is_ok(), accepted);
@@ -497,7 +486,7 @@ mod tests {
             // Even a newly pending observation cannot grant a stale reader writes.
             pending.store(true, Ordering::SeqCst);
             assert!(
-                super::reply_pending_permissions(&client, &endpoint, &thread, &history)
+                super::reply_pending_permissions(&client, &endpoint, &thread, &owner)
                     .await
                     .is_err()
             );

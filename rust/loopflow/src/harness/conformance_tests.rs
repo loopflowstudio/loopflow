@@ -417,7 +417,7 @@ fn opencode_native_history_preserves_output_tools_and_usage_missingness() {
             json!({"type":"session.status","properties":{"sessionID":session,"status":{"type":"idle"},"usage":{"input_tokens":999}}}),
             json!({"type":"session.error","properties":{"sessionID":session,"code":"command_failed","message":"Bash exited 1"}}),
         ] {
-            let events = opencode_mapping::map_event(&event, &mut display).events;
+            let events = opencode_mapping::map_event(&event, &mut display);
             assert!(events
                 .iter()
                 .all(|event| matches!(event, ConversationEvent::Error { .. })));

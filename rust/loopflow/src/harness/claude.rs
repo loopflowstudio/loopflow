@@ -46,7 +46,7 @@ pub struct ClaudeHarness {
     /// The runner turn id every provider turn in the current coalesced boundary
     /// reports under. Set by `send_input`, read by the reader.
     current_turn_id: Arc<Mutex<Option<String>>>,
-    requests: Arc<Mutex<HashMap<String, Option<crate::session::SessionTurnOrigin>>>>,
+    requests: Arc<Mutex<HashMap<String, crate::session::SessionTurnOrigin>>>,
     child: Option<Child>,
     stdin: Option<ChildStdin>,
     reader_task: Option<JoinHandle<()>>,
@@ -94,9 +94,9 @@ impl ClaudeHarness {
         }
     }
 
-    fn turn_origin(&self) -> Result<Option<crate::session::SessionTurnOrigin>> {
+    fn turn_origin(&self) -> Result<crate::session::SessionTurnOrigin> {
         let (store, session, attachment) = self.owner()?;
-        Ok(Some(store.session_turn_origin(&session, &attachment)?))
+        Ok(store.session_turn_origin(&session, &attachment)?)
     }
 
     /// Spawn the persistent stream-json process and its reader, if not already
@@ -161,7 +161,7 @@ impl ClaudeHarness {
         self.spawn_reader(
             stdout,
             super::claude_history::History {
-                owner: Some(owner),
+                owner,
                 requests: self.requests.clone(),
                 pending: VecDeque::new(),
                 attention: Default::default(),

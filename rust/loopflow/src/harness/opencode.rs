@@ -132,12 +132,8 @@ impl OpenCodeHarness {
             shutdown_child(&mut child).await;
             return Err(error.into());
         }
-        {
-            let history = self.history.lock().expect("OpenCode history lock poisoned");
-            if let Some((store, session, driver)) = &history.owner {
-                store.record_session_connection(session, driver, &base_url, &agent_session)?;
-            }
-        }
+        let (store, session, attachment) = &owner;
+        store.record_session_connection(session, attachment, &base_url, &agent_session)?;
 
         let event_tx = self.events.clone();
         let raw_provider = self.raw_provider.clone();
@@ -287,7 +283,7 @@ impl OpenCodeHarness {
                                 if !history.lock().expect("OpenCode history lock poisoned").admitted(request) {
                                     return Err(anyhow!("OpenCode permission belongs to an unselected request"));
                                 }
-                                let owner = history.lock().expect("OpenCode history lock poisoned").owner.clone();
+                                let owner = history.lock().expect("OpenCode history lock poisoned").owner()?;
                                 opencode_history::post(owner, format!("{reader_base_url}/permission/{request_id}/reply"), json!({"reply":"once"})).await?;
                             }
                             Ok::<_, anyhow::Error>(())
@@ -413,7 +409,7 @@ impl Harness for OpenCodeHarness {
         let mut payload = build_turn_payload(&turn_content, config, first_turn);
         let (request, owner) = {
             let mut history = self.history.lock().expect("OpenCode history lock poisoned");
-            (history.request()?, history.owner.clone())
+            (history.request()?, history.owner()?)
         };
         payload["messageID"] = json!(request);
 
@@ -454,15 +450,14 @@ impl Harness for OpenCodeHarness {
         let mut payload = build_turn_payload(text, &config, false);
         let (provider_turn_id, owner) = {
             let mut history = self.history.lock().expect("OpenCode history lock poisoned");
-            let request = match history.request() {
-                Ok(request) => request,
-                Err(error) => {
+            match (history.request(), history.owner()) {
+                (Ok(request), Ok(owner)) => (request, owner),
+                (Err(error), _) | (_, Err(error)) => {
                     return SendCurrentOutcome::Failed {
                         error: error.to_string(),
                     }
                 }
-            };
-            (request, history.owner.clone())
+            }
         };
         payload["messageID"] = json!(provider_turn_id);
         let steer_url = format!("{base_url}/session/{agent_session}/prompt_async");

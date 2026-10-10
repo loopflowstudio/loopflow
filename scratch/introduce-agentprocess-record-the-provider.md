@@ -103,7 +103,10 @@ attribution survive.
   command carries the capture or connection owner’s frozen attachment separately.
 - Optional headless admission: `open_owner` returning `None`, `spawn`'s ownerless
   branch, Codex's unfenced writer and Claude's unfenced stdin/kill branches are
-  removed. History structs keep an optional owner only for parser fixtures.
+  removed. Claude's history owner and request origin are required; OpenCode's
+  native `post` requires the attachment, so no unfenced write remains. OpenCode
+  and Codex history keep an optional owner for the unstarted harness, a
+  storeless parser fixture and Codex's attachment-less connection reader.
 - Top’s receipt-selected inventory, `ProcessSnapshot`, and the exclusive
   `read_process_snapshot` transaction wrapper are removed. One unfinished-row
   query now serves Task membership and activity; receipts establish identity,
@@ -309,7 +312,7 @@ checks do not establish configured-provider or foreground cleanup.
 ## Remaining implementation
 
 1. **Admission types.** Headless admission is unconditional at runtime. The
-   config field and history owners remain `Option`; passing the attachment to
+   config field and the OpenCode/Codex history owners remain `Option`; passing the attachment to
    `Harness::start` would move the refusal into the type. `stop_native` keeps its
    ownerless branch for remote clients, which own no provider.
 2. Done 2026-10-09: see "Generation cut" below. Installed migration and a
@@ -449,3 +452,5 @@ Realign check (2026-10-09): `uv run python scripts/check_architecture.py` report
 Check (orphan rule and public agreement, 2026-10-09): `cargo test -p loopflow --lib harness::agent_process` 7 passed; `--test process_ownership_tests task_checkout_blockers` 1 passed; fmt and clippy `--all-targets -D warnings` pass. Wider suites stay with gate.
 
 Check (generation cut, 2026-10-09): `cargo test -p loopflow --no-fail-fast --lib` plus the ten affected integration targets, `LF_*` cleared and stdin closed: library 1766 passed, the same 4 failed (three pass alone; one is main's planning-migration fixture), integration targets pass; `swift build --build-tests` and `DTOFixtureTests` pass; `cargo fmt --all --check` and `cargo clippy -p loopflow --all-targets -- -D warnings` pass. Remaining integration targets, draft materialization, Linux lifeline and live-provider smokes stay gate/CI-owned. Earlier results: `4d720d314`, this plan.
+
+Compress check (required history owners, 2026-10-09): `cargo clippy -p loopflow --all-targets -- -D warnings` passes; `cargo test -p loopflow --lib harness::` 120 passed, 4 ignored. Wider suites stay with gate.

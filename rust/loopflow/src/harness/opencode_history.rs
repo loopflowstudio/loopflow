@@ -31,6 +31,13 @@ impl History {
             ..Self::default()
         }
     }
+    /// The attachment that fences native writes; absent until the server starts.
+    pub(super) fn owner(&self) -> Result<super::agent_process::AttachmentOwner> {
+        self.owner
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("OpenCode server not started"))
+    }
+
     /// One server event of conversation `thread`, read for attention only.
     pub(super) fn attend(&mut self, thread: &AgentSessionId, event: &Value) {
         if let Some((store, session, driver)) = &self.owner {
@@ -249,15 +256,15 @@ pub(super) async fn read_messages(
         .await?)
 }
 
-// Native submission is bounded and serialized with driver transfer. An
+// Native submission is bounded and serialized with attachment transfer. An
 // uncertain HTTP result is retained as uncertain; never submit it twice here.
 pub(super) async fn post(
-    owner: Option<super::agent_process::AttachmentOwner>,
+    (store, session, attachment): super::agent_process::AttachmentOwner,
     url: String,
     payload: Value,
 ) -> Result<()> {
     tokio::task::spawn_blocking(move || {
-        let write = || {
+        store.with_session_attachment(&session, &attachment, || {
             reqwest::blocking::Client::new()
                 .post(url)
                 .timeout(std::time::Duration::from_secs(10))
@@ -270,12 +277,7 @@ pub(super) async fn post(
                         "OpenCode native request: {error}"
                     ))
                 })
-        };
-        if let Some((store, session, driver)) = owner {
-            store.with_session_attachment(&session, &driver, write)
-        } else {
-            write()
-        }
+        })
     })
     .await??;
     Ok(())

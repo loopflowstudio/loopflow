@@ -1191,7 +1191,7 @@ impl CodexHarness {
         let pending_requests = self.pending_requests.clone();
         let retired_requests = self.retired_requests.clone();
         let account_route = self.account_route.clone();
-        let history = self.session_attachment.clone();
+        let history = owner.clone();
         let reader_task = tokio::spawn(async move {
             let mut initialized_tx = Some(initialized_tx);
             let mut state = NotificationState::new(
@@ -1214,20 +1214,19 @@ impl CodexHarness {
                 let Ok(value) = serde_json::from_str::<Value>(&line) else {
                     continue;
                 };
-                if let Some((store, session, driver)) = &history {
-                    let recorded = super::dispatch::off_reactor(|| {
-                        native_history
-                            .lock()
-                            .expect("codex history lock poisoned")
-                            .record(store, session, Some(driver), None, &value)
+                let (store, session, attachment) = &history;
+                let recorded = super::dispatch::off_reactor(|| {
+                    native_history
+                        .lock()
+                        .expect("codex history lock poisoned")
+                        .record(store, session, Some(attachment), None, &value)
+                });
+                if let Err(error) = recorded {
+                    let _ = event_tx.send(ConversationEvent::Error {
+                        code: "conversation_history_unavailable".into(),
+                        message: error.to_string(),
+                        evidence: None,
                     });
-                    if let Err(error) = recorded {
-                        let _ = event_tx.send(ConversationEvent::Error {
-                            code: "conversation_history_unavailable".into(),
-                            message: error.to_string(),
-                            evidence: None,
-                        });
-                    }
                 }
 
                 let method = value
@@ -1442,14 +1441,13 @@ impl CodexHarness {
         // returning None rather than failing startup.
         match tokio::time::timeout(Duration::from_secs(10), thread_id_rx).await {
             Ok(Ok(thread_id)) => {
-                if let Some((store, session, driver)) = &self.session_attachment {
-                    store.record_session_connection(
-                        session,
-                        driver,
-                        &endpoint.to_string_lossy(),
-                        &thread_id,
-                    )?;
-                }
+                let (store, session, attachment) = &owner;
+                store.record_session_connection(
+                    session,
+                    attachment,
+                    &endpoint.to_string_lossy(),
+                    &thread_id,
+                )?;
                 tracing::debug!(thread_id = %thread_id, "codex thread started");
             }
             Ok(Err(_)) => {

@@ -10,8 +10,8 @@ use crate::session::SessionEventKind;
 
 #[derive(Debug)]
 pub(super) struct History {
-    pub owner: Option<super::agent_process::AttachmentOwner>,
-    pub requests: Arc<Mutex<HashMap<String, Option<crate::session::SessionTurnOrigin>>>>,
+    pub owner: super::agent_process::AttachmentOwner,
+    pub requests: Arc<Mutex<HashMap<String, crate::session::SessionTurnOrigin>>>,
     pub pending: VecDeque<(AgentSessionId, String)>,
     pub attention: super::attention::Attention,
 }
@@ -21,11 +21,9 @@ impl History {
         let Ok(value) = serde_json::from_str::<Value>(line) else {
             return Ok(());
         };
-        let Some((store, session, driver)) = &self.owner else {
-            return Ok(());
-        };
+        let (store, session, attachment) = &self.owner;
         self.attention
-            .record(store, session, driver, super::attention::claude(&value));
+            .record(store, session, attachment, super::attention::claude(&value));
         if value["type"] == "user" {
             let (Some(thread), Some(turn)) = (value["session_id"].as_str(), value["uuid"].as_str())
             else {
@@ -40,9 +38,7 @@ impl History {
             else {
                 return Ok(());
             };
-            if let Some(origin) = origin {
-                store.record_session_turn_origin(&thread, turn, &origin)?;
-            }
+            store.record_session_turn_origin(&thread, turn, &origin)?;
             self.pending.push_back((thread.to_owned(), turn.to_owned()));
         } else if value["type"] == "result" {
             let Some((thread, turn)) = self.pending.front() else {
@@ -123,9 +119,9 @@ mod tests {
             .unwrap();
         let origin = store.session_turn_origin("conversation", &driver).unwrap();
         let mut history = History {
-            owner: Some((store.clone(), "conversation".into(), driver)),
+            owner: (store.clone(), "conversation".into(), driver),
             requests: std::sync::Arc::new(std::sync::Mutex::new(
-                [("request".to_string(), Some(origin))].into(),
+                [("request".to_string(), origin)].into(),
             )),
             pending: Default::default(),
             attention: Default::default(),

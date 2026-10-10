@@ -177,7 +177,7 @@ pub struct SessionRecord {
     pub attention: Option<SessionAttention>,
     pub program_status: Option<crate::program_status::Records>,
     /// The provider's current AgentProcess; absent when Loopflow never launched one.
-    pub agent_process_lfid: Option<crate::id::ProcessLfid>,
+    pub agent_process_id: Option<crate::id::LfProcessId>,
     /// Its Task names it as the Task's primary conversation.
     pub task_primary: bool,
     pub task_ids: Vec<crate::durable::TaskId>,
@@ -435,7 +435,7 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
         primary_scope: session.primary_scope.clone(),
         attention: session_attention(session),
         program_status: session.program_status.clone(),
-        agent_process_lfid: session.agent_process_lfid.clone(),
+        agent_process_id: session.agent_process_id.clone(),
         task_primary: session.task_primary,
         task_ids: session.task_ids.clone(),
         id: session.id.clone(),
@@ -932,7 +932,7 @@ async fn surface(store: &SharedStore, session: &LfSession) -> Result<SessionReco
         primary_scope: metadata.primary_scope.clone(),
         attention: session_attention(&metadata),
         program_status: metadata.program_status.clone(),
-        agent_process_lfid: metadata.agent_process_lfid.clone(),
+        agent_process_id: metadata.agent_process_id.clone(),
         task_primary: metadata.task_primary,
         task_ids: store.sqlite.session_task_ids(&session.id)?,
         id: session.id.clone(),
@@ -1320,7 +1320,7 @@ pub(crate) async fn observe_program_status(
     store: &SharedStore,
     id: &str,
     terminal: &str,
-    agent_process: Option<&crate::id::ProcessLfid>,
+    agent_process: Option<&crate::id::LfProcessId>,
 ) -> Result<()> {
     let session = find_session(store, id, false)
         .await?
@@ -1333,7 +1333,7 @@ pub(crate) async fn observe_program_status(
         )?
         .context("Session disappeared")?;
     anyhow::ensure!(
-        current.agent_process_lfid.as_ref() == agent_process,
+        current.agent_process_id.as_ref() == agent_process,
         "Session provider changed"
     );
     // Re-read capture after the AgentProcess witness. A replacement before or
@@ -1676,7 +1676,7 @@ mod tests {
         let wave = crate::id::WaveId::new();
         let mut summary = crate::session::SessionSummary {
             program_status: None,
-            agent_process_lfid: None,
+            agent_process_id: None,
             primary_scope: None,
             attachment_outcome: None,
             waiting: false,

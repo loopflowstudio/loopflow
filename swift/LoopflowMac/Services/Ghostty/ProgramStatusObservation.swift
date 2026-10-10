@@ -6,7 +6,7 @@ import Observation
 /// The provider named by one Session reading. A conversation Loopflow never
 /// launched has no AgentProcess; that absence is itself the reading.
 struct SessionProviderReading: Equatable, Sendable {
-    let agentProcessLFID: String?
+    let agentProcessId: String?
 }
 
 /// Owned by a retained surface, never by a SwiftUI mount or its current focus.
@@ -125,7 +125,7 @@ private final class ProgramStatusWriter: @unchecked Sendable {
         let helper = try LocalWaveAgentLauncher.controlLfPath()
         let process = LocalWaveAgentLauncher.queryProcess(
             [helper, "session", "observe-status", sessionId, "--terminal", terminalId]
-                + (provider.agentProcessLFID.map { ["--agent-process", $0] } ?? [])
+                + (provider.agentProcessId.map { ["--agent-process", $0] } ?? [])
         )
         let pipe = Pipe()
         process.standardInput = pipe

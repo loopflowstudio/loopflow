@@ -796,7 +796,7 @@ mod tests {
             parent_lf_process_id: Some(parent.clone()),
             via_agent: None,
             caller_session_id: None,
-            caller_agent_process_lfid: None,
+            caller_agent_process_id: None,
             command: Some(r#"["codex","app-server"]"#.into()),
             repo: Some("/repo".into()),
             cwd: Some("/repo/task".into()),

@@ -33,7 +33,7 @@ private enum SessionFixtureKind: String {
           "ready_summary": \(summary),
           "work_path": null,
           "actions": \(actions),
-          "title_source": "generated", "flow_membership": \(membership), "task_ids": [], "agent_process_lfid": "44444444-4444-4444-8444-444444444444", "terminal_ids": [],
+          "title_source": "generated", "flow_membership": \(membership), "task_ids": [], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids": [],
           "open_argv": ["/usr/bin/tail", "-f", "/dev/null"]
         }
         """

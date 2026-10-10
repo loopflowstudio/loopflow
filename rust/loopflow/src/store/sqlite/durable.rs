@@ -1845,7 +1845,7 @@ mod durable_store_tests {
                 &serde_json::json!({"input": 30}),
             )
             .unwrap();
-        // Attribution freezes when the attached invocation sends the request.
+        // Attribution freezes when the attached LfProcess sends the request.
         let process = crate::id::LfProcessId::new();
         store
             .conn

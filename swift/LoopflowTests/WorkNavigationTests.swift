@@ -798,7 +798,7 @@ struct WorkNavigationTests {
          "workspace":{"machine_id":"local","worktree":"/src/loopflow","task_id":\(taskJSON),"unavailable":null},
          "detail":"codex","cwd":"/src/loopflow","state":"\(state.rawValue)",
          "wave_id":\(waveJSON),"work_path":null,"actions":\(sessionActionFixtureJSON(state: state.rawValue)),
-         "ready_summary":null,"title_source":"generated","task_primary":false, "flow_membership":{"kind":"independent"},"task_ids": \(taskIdsJSON), "agent_process_lfid": "44444444-4444-4444-8444-444444444444", "terminal_ids":[],"open_argv":["lf","session","connect","\(id)"]}
+         "ready_summary":null,"title_source":"generated","task_primary":false, "flow_membership":{"kind":"independent"},"task_ids": \(taskIdsJSON), "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids":[],"open_argv":["lf","session","connect","\(id)"]}
         """.utf8))
     }
 }

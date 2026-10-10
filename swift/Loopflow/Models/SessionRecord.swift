@@ -157,7 +157,7 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     public let attention: SessionAttention?
     public let programStatus: ProgramStatusRecords?
     /// The provider's current AgentProcess; absent when Loopflow never launched one.
-    public let agentProcessLFID: String?
+    public let agentProcessId: String?
     /// Its Task names it as the Task's primary conversation.
     public let taskPrimary: Bool
     public let taskIds: [String]
@@ -199,7 +199,7 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case id, interactive, work, workspace, title, detail, provider, cwd, state, attention
         case programStatus = "program_status"
-        case agentProcessLFID = "agent_process_lfid"
+        case agentProcessId = "agent_process_id"
         case primaryScope = "primary_scope"
         case taskPrimary = "task_primary"
         case waveId = "wave_id"

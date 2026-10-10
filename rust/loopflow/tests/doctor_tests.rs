@@ -67,7 +67,7 @@ fn insert_process(store: &SqliteStore, _id: &str, ts: i64) {
             parent_lf_process_id: None,
             via_agent: Some(false),
             caller_session_id: None,
-            caller_agent_process_lfid: None,
+            caller_agent_process_id: None,
             command: Some(r#"["lf","flow","telemetry-daily"]"#.into()),
             repo: Some("/src/loopflow".into()),
             cwd: None,

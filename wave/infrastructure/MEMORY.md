@@ -237,8 +237,8 @@ OpenCode saves endpoint/attempts before effects. v1.2.0 creation carries rules
 and a correlation title; PATCH fixtures were wrong (`894bc61e5`).
 Missing/ambiguous identity readback stays uncertain.
 `07529ac3d`: creation-worker death/readback without replay, not public takeover.
-Claude pipes/correlation remain launcher-owned despite custody. Public dispatch
-is Codex-only; harness recovery proves no public handoff.
+Claude pipes/correlation remain launcher-owned. Public dispatch is Codex-only;
+harness recovery proves no public handoff.
 Plan: `scratch/stop-and-take-over-claude.md`.
 
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)

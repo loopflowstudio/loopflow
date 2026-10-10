@@ -110,7 +110,7 @@ pub fn observe_provider_session() -> Result<()> {
     std::io::stdin().read_to_string(&mut payload)?;
     let payload: serde_json::Value = serde_json::from_str(&payload)
         .map_err(|error| anyhow!("invalid provider session callback: {error}"))?;
-    let provider_session_id = payload
+    let agent_session = payload
         .get("session_id")
         .and_then(serde_json::Value::as_str)
         .filter(|session_id| !session_id.is_empty())
@@ -120,7 +120,7 @@ pub fn observe_provider_session() -> Result<()> {
         .map(|value| crate::store::ProviderAccountId::parse(&value))
         .transpose()
         .map_err(|error| anyhow!("invalid provider account in session callback: {error}"))?;
-    crate::session_record::write_provider_session(&capture_dir, provider_session_id, account_id)
+    crate::session_record::write_provider_session(&capture_dir, &agent_session.into(), account_id)
         .map_err(|error| anyhow!("cannot preserve provider session: {error}"))
 }
 

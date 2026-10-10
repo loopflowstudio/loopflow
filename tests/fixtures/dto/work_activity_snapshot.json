@@ -55,9 +55,7 @@
         "request": {
           "mode": "auto",
           "requested_at": "2026-07-21T18:35:51Z",
-          "head_sha": "3333333333333333333333333333333333333333",
-          "after_merge": "complete_task",
-          "next_slug": null
+          "head_sha": "3333333333333333333333333333333333333333"
         },
         "github": {
           "number": 1144,

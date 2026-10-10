@@ -631,8 +631,7 @@ fn format_task_pr_line(pr: &loopflow::work::task::TaskPr) -> String {
         .map(|error| format!("  Linear link degraded: {error}"))
         .unwrap_or_default();
     format!(
-        "  PR {}: {}  {}  {}{}{}",
-        pr.sequence,
+        "  Pull request: {}  {}  {}{}{}",
         pr.phase().as_str(),
         provider,
         pr.branch,
@@ -659,12 +658,7 @@ fn print_task_snapshot(
                 format!("pending: {error}")
             }
         };
-        let branch = snapshot
-            .active_pr
-            .as_ref()
-            .and_then(|active| snapshot.prs.iter().find(|pr| &pr.id == active))
-            .map(|pr| pr.branch.as_str())
-            .unwrap_or("none");
+        let branch = snapshot.branch.as_deref().unwrap_or("unplaced");
         let body = format!(
             "agent {}, provider {}",
             snapshot.agent.as_deref().unwrap_or("default"),
@@ -683,7 +677,7 @@ fn print_task_snapshot(
         if let Some(workflow) = &snapshot.work.workflow {
             println!("  {}", workflow.summary());
         }
-        if let Some(conflict) = &snapshot.planning_conflict {
+        if let Some(conflict) = &snapshot.completion_pending {
             println!("  error: {conflict}");
         }
         println!("  latest Flow: {}", snapshot.execution.reason);
@@ -717,8 +711,40 @@ fn print_task_snapshot(
             );
         }
         println!("  project: {}", snapshot.project_id);
-        for pr in &snapshot.prs {
+        if let Some(pr) = &snapshot.pr {
             println!("{}", format_task_pr_line(pr));
+        }
+        let follow_through = &snapshot.follow_through;
+        if snapshot
+            .pr
+            .as_ref()
+            .is_some_and(|pr| pr.phase() == loopflow::work::task::PrPhase::Merged)
+            && !snapshot.status.is_terminal()
+        {
+            let state = if follow_through.needs_conversion {
+                "scope needs conversion"
+            } else if follow_through.resolved() {
+                "recorded; ready to complete"
+            } else {
+                "pending"
+            };
+            println!("  Merged · Follow-through {state}");
+        }
+        for link in &follow_through.links {
+            println!(
+                "  Follow-up: {}{}",
+                link.identifier,
+                link.url
+                    .as_ref()
+                    .map(|url| format!(" · {url}"))
+                    .unwrap_or_default()
+            );
+        }
+        for note in &follow_through.scope_notes {
+            println!("  Scope needs conversion: {note}");
+        }
+        if let Some(reason) = &follow_through.reason {
+            println!("  Follow-through: {reason}");
         }
         match &snapshot.observation {
             loopflow::work::task::Observation::Cached { observed_at } => {
@@ -911,33 +937,30 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
         }
         TaskCommand::FollowUp {
             issue,
-            outcome,
-            evidence,
-            check_at,
-            clear,
+            title,
+            notes,
+            due,
+            wave,
+            existing,
+            none,
+            finish,
+            key,
         } => {
-            let remaining = match (outcome, evidence, check_at) {
-                (Some(outcome), Some(evidence), Some(at)) => {
-                    Some(loopflow::work::task::TaskFollowUp {
-                        outcome: outcome.clone(),
-                        evidence: evidence.clone(),
-                        check_at: time::OffsetDateTime::parse(
-                            at,
-                            &time::format_description::well_known::Rfc3339,
-                        )?
-                        .unix_timestamp(),
-                    })
-                }
-                _ => None,
-            };
             println!(
                 "{}",
                 loopflow::ops::task::task_follow_up(
+                    repo,
                     issue,
-                    remaining,
-                    clear
-                        .as_deref()
-                        .unwrap_or("Accepted work remains after delivery")
+                    &loopflow::ops::task::FollowUpOptions {
+                        title: title.clone(),
+                        notes: notes.clone(),
+                        due: due.clone(),
+                        wave: wave.clone(),
+                        existing: existing.clone(),
+                        none: none.clone(),
+                        finish: finish.clone(),
+                        key: key.clone(),
+                    }
                 )?
             );
             Ok(())
@@ -954,6 +977,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             name,
             stack_on,
             directive,
+            design,
             json,
         } => {
             let task = loopflow::ops::task::task_checkout(
@@ -963,6 +987,10 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                     name: name.clone(),
                     stack_on: stack_on.clone(),
                     directive: directive.clone(),
+                    design: design
+                        .as_ref()
+                        .map(|path| std::env::current_dir().map(|cwd| cwd.join(path)))
+                        .transpose()?,
                 },
             )?;
             print_task(&task, *json)
@@ -976,13 +1004,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             loopflow::lf::TaskWorkflowCommand::Restart { issue } => {
                 println!(
                     "{}",
-                    loopflow::ops::task::workflow_set(
-                        repo,
-                        issue,
-                        "start",
-                        Some("Restart Workflow"),
-                        &loopflow::ops::task::EndOptions::default()
-                    )?
+                    loopflow::ops::task::workflow_set(issue, "start", Some("Restart Workflow"),)?
                 );
                 Ok(())
             }
@@ -996,18 +1018,21 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             issue,
             node,
             reason,
-            force,
         } => {
             println!(
                 "{}",
-                loopflow::ops::task::workflow_set(
-                    repo,
-                    issue,
-                    node,
-                    reason.as_deref(),
-                    &loopflow::ops::task::EndOptions { force: *force },
-                )?
+                loopflow::ops::task::workflow_set(issue, node, reason.as_deref())?
             );
+            Ok(())
+        }
+        TaskCommand::Reopen { issue, reason } => {
+            loopflow::ops::task::task_reopen(issue, reason.as_deref())?;
+            println!("{issue}: reopened; Workflow unchanged");
+            Ok(())
+        }
+        TaskCommand::Complete { issue, reason } => {
+            loopflow::ops::task::task_complete(repo, issue, reason.as_deref())?;
+            println!("{issue}: completed");
             Ok(())
         }
         TaskCommand::Create {
@@ -1059,6 +1084,9 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                         },
                         planning.observed_at
                     );
+                    if let Some(due) = &planning.item.due_date {
+                        println!("Due: {due}");
+                    }
                     if planning.project.is_none() {
                         println!("No Project assigned; managed work requires ownership.");
                     }
@@ -1416,7 +1444,7 @@ fn run() -> anyhow::Result<()> {
     })?;
     let args = reorder_args(normalized);
 
-    let cli = match Cli::try_parse_from(args.clone()).and_then(Cli::checked) {
+    let mut cli = match Cli::try_parse_from(args.clone()).and_then(Cli::checked) {
         Ok(cli) => cli,
         Err(error) => {
             let code = u8::try_from(error.exit_code()).expect("Clap exit status fits a byte");
@@ -1514,10 +1542,39 @@ fn run() -> anyhow::Result<()> {
         };
     }
 
-    // Process admission records this process's cwd. Each operation resolves the
-    // repository it needs after dispatch; machine inspection needs no Git.
+    // Resolve existing placement before recording where this Process performs
+    // work. A failed resolution is still observed at the directory it reached.
+    let mut _work_declaration = None;
+    let mut _bound_cwd = None;
+    let placement = (|| -> anyhow::Result<Option<loopflow::ops::WorkBinding>> {
+        if let Some(name) = &cli.wt {
+            _bound_cwd = Some(CwdGuard::enter(
+                &loopflow::lf::commands::ops::resolve_worktree(name)?,
+            )?);
+        }
+        if let Some(task) = cli.task.as_ref() {
+            let directory = loopflow::repo::working_directory()?;
+            let repo = loopflow::ops::task::task_repository(&directory, Some(task))?;
+            let mut binding = prepare_work_binding(&format!("task:{task}"), &repo)?;
+            if let Some(cwd) = cli.bound_cwd.clone() {
+                binding.cwd = cwd;
+            }
+            if cli.agent.is_none() {
+                cli.agent = binding.agent.clone();
+            }
+            _bound_cwd = Some(CwdGuard::enter(&binding.cwd)?);
+            binding.cwd = std::env::current_dir()?;
+            _work_declaration = Some(EnvGuard::set(
+                loopflow::lf::WORK_DECLARATION_ENV,
+                format!("task:{}", binding.work.id()),
+            ));
+            return Ok(Some(binding));
+        }
+        Ok(None)
+    })();
     let directory = std::env::current_dir()?;
     journal::admit_process(&directory, &args);
+    let direct_binding = placement?;
     {
         let _account_isolation = cli
             .isolate
@@ -1540,22 +1597,18 @@ fn run() -> anyhow::Result<()> {
         };
         debug!(batch = cli.batch, "parsed CLI arguments");
 
-        dispatch(cli, &args)
+        dispatch(cli, &args, direct_binding)
     }
 }
 
-fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
+fn dispatch(
+    mut cli: Cli,
+    args: &[String],
+    mut direct_binding: Option<loopflow::ops::WorkBinding>,
+) -> anyhow::Result<()> {
     // Remote commands prove they reached the saved machine before dispatch.
     loopflow::lf::commands::machine::validate_expected_machine_process()?;
 
-    let mut direct_binding = None;
-    let mut _work_declaration = None;
-    let mut _bound_cwd = None;
-    if let Some(name) = &cli.wt {
-        _bound_cwd = Some(CwdGuard::enter(
-            &loopflow::lf::commands::ops::resolve_worktree(name)?,
-        )?);
-    }
     // `lf task run` places the Task and fills its defaults; from here it is
     // `lf --task ISSUE run FLOW`.
     if let Some(Commands::Task {
@@ -1567,11 +1620,9 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
                 stack_on,
                 directive,
                 reason,
-                force,
             },
     }) = &cli.command
     {
-        let end = loopflow::ops::task::EndOptions { force: *force };
         let directory = loopflow::repo::working_directory()?;
         let repo = loopflow::ops::task::task_repository(&directory, Some(issue))?;
         let (task, flow) = loopflow::ops::task::task_place(
@@ -1585,7 +1636,6 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
                 flow: flow.clone(),
                 stack_on: stack_on.clone(),
                 directive: directive.clone(),
-                end: end.clone(),
             },
         )?;
         let Some(flow) = flow else {
@@ -1599,25 +1649,13 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
         // This process carries the edge and writes where it left the Task: at
         // the edge's target once an attempt at its Flow succeeded, otherwise
         // still on the edge.
-        loopflow::lf::commands::flow::run_for_task(&cli, &task.plan.identifier, &flow)?;
-        return Ok(loopflow::ops::task::workflow_arrive(&task, &end)?);
-    }
-    if let Some(task) = cli.task.as_ref() {
-        let directory = loopflow::repo::working_directory()?;
-        let repo = loopflow::ops::task::task_repository(&directory, Some(task))?;
-        let mut binding = prepare_work_binding(&format!("task:{task}"), &repo)?;
-        if let Some(cwd) = cli.bound_cwd.clone() {
-            binding.cwd = cwd;
-        }
-        if cli.agent.is_none() {
-            cli.agent = binding.agent.clone();
-        }
-        _bound_cwd = Some(CwdGuard::enter(&binding.cwd)?);
-        _work_declaration = Some(EnvGuard::set(
-            loopflow::lf::WORK_DECLARATION_ENV,
-            format!("task:{}", binding.work.id()),
-        ));
-        direct_binding = Some(binding);
+        loopflow::lf::commands::flow::run_for_task(
+            &cli,
+            &task.plan.identifier,
+            &flow,
+            task.worktree()?,
+        )?;
+        return Ok(loopflow::ops::task::workflow_arrive(&task)?);
     }
     let explicit_wave = cli
         .wave

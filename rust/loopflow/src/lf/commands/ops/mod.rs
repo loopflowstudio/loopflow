@@ -39,6 +39,13 @@ use std::time::Instant;
 
 pub fn run_pr(cmd: Option<&PrCommand>, cli_agent: Option<&str>) -> Result<()> {
     let progress = CliProgress;
+    let wait_and_fix = matches!(
+        cmd,
+        Some(PrCommand::Land {
+            wait_and_fix: true,
+            ..
+        })
+    );
     match cmd {
         None => pr_status(),
         Some(PrCommand::Reconcile) => {
@@ -67,8 +74,6 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_agent: Option<&str>) -> Result<()> {
         Some(PrCommand::Submit {
             strict,
             create_pr,
-            complete,
-            next,
             worktree,
             message,
             title,
@@ -78,8 +83,7 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_agent: Option<&str>) -> Result<()> {
                 strict: *strict,
                 local: false,
                 create_pr: *create_pr,
-                complete: *complete,
-                next_slug: next.clone(),
+                wait_and_fix: false,
                 worktree: worktree.clone(),
                 commit_message: message.clone(),
                 pr_title: title.clone(),
@@ -91,18 +95,15 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_agent: Option<&str>) -> Result<()> {
         Some(PrCommand::Arm {
             strict,
             local,
-            complete,
-            next,
             worktree,
             message,
             title,
             body,
         })
         | Some(PrCommand::Land {
+            wait_and_fix: _,
             strict,
             local,
-            complete,
-            next,
             worktree,
             message,
             title,
@@ -112,8 +113,7 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_agent: Option<&str>) -> Result<()> {
                 strict: *strict,
                 local: *local,
                 create_pr: true,
-                complete: *complete,
-                next_slug: next.clone(),
+                wait_and_fix,
                 worktree: worktree.clone(),
                 commit_message: message.clone(),
                 pr_title: title.clone(),
@@ -125,21 +125,7 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_agent: Option<&str>) -> Result<()> {
         Some(PrCommand::Abandon { force, branch }) => {
             abandon_current(branch.as_deref(), *force, &progress)
         }
-        Some(PrCommand::Next { slug }) => pr_next(slug.as_deref()),
     }
-}
-
-fn pr_next(slug: Option<&str>) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    let pr = crate::ops::task::pr_next(&repo_root, slug)?;
-    println!(
-        "Rotated to PR {} on {} (base {}).",
-        pr.sequence,
-        pr.branch,
-        &pr.base_commit[..pr.base_commit.len().min(12)]
-    );
-    println!("Push your follow-up edits, then `lf pr open` when ready.");
-    Ok(())
 }
 
 pub fn run_release(cmd: &ReleaseCommand) -> Result<()> {
@@ -619,7 +605,28 @@ pub(crate) fn land_repo(
     options: &LandOptions,
     progress: &impl Progress,
 ) -> Result<()> {
-    // The wave home stays put on land — no rotation, no cd.
+    let (checkout, _) = crate::ops::land::resolve_repos(repo_root, options.worktree.as_deref())?;
+    if !options.local {
+        if let Some((task, pr, state)) = crate::ops::task::reconcile_checkout_pr(&checkout)? {
+            if pr.phase() == crate::work::task::PrPhase::Merged {
+                let next = match state {
+                    crate::durable::TaskState::Done => {
+                        format!("Task {} is complete.", task.plan.identifier)
+                    }
+                    crate::durable::TaskState::Abandoned => {
+                        format!("Task {} is abandoned.", task.plan.identifier)
+                    }
+                    _ => format!(
+                        "Finish follow-through, then run lf task complete {}.",
+                        task.plan.identifier
+                    ),
+                };
+                progress.status(&format!("Pull request already merged. {next}"));
+                return Ok(());
+            }
+        }
+    }
+    // The wave home stays put on land.
     let pr = with_sync_retry(repo_root, "land", progress, |repo, integrated| {
         if integrated {
             finish_arm_after_sync(repo, options, progress, &|_| {})
@@ -628,6 +635,24 @@ pub(crate) fn land_repo(
         }
     })?;
     if let Some(pr) = pr {
+        if options.wait_and_fix {
+            crate::engine::agent::register_interrupt_cleanup(|| {
+                eprintln!("Landing wait interrupted; merge intent retained.");
+            });
+            crate::ops::pr_landing::wait_for_merge(repo_root, options, &pr).map_err(|error| {
+                match error {
+                    OpsError::DeliveryHeld(reason) => {
+                        anyhow::Error::new(crate::process::FlowHeld(reason))
+                    }
+                    error @ OpsError::CheckoutBusy(_) => {
+                        anyhow::Error::new(crate::process::FlowHeld(error.to_string()))
+                    }
+                    error => anyhow::Error::new(error),
+                }
+            })?;
+            progress.status("Pull request merged; follow-through can proceed.");
+            return Ok(());
+        }
         progress.status(&format!(
             "PR #{} handed off; lf pr reconcile checks delivery.",
             pr.number
@@ -1601,7 +1626,8 @@ mod cron_catalog_tests {
 
     #[test]
     fn declared_cron_flow_cannot_fall_back_to_builtin_skill() {
-        let machine = crate::journal::TestLedgerGuard::new();
+        let _lock = crate::journal::test_env_lock();
+        let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
         let repo = tempfile::tempdir().unwrap();
         fs::create_dir_all(repo.path().join("wave/infrastructure")).unwrap();
         fs::create_dir_all(repo.path().join(".lf/flows")).unwrap();
@@ -1621,11 +1647,15 @@ mod cron_catalog_tests {
             },
             local_machine: home.clone(),
             placed_machine: home,
-            repo: repo.path().to_path_buf(),
+            repo: repo.path().canonicalize().unwrap(),
         };
-        crate::store::sqlite::SqliteStore::new(&machine.home().join("loopflow.db"))
-            .unwrap()
-            .ensure_wave(repo.path().to_str().unwrap(), "infrastructure")
+        std::env::set_var("LF_HOME", &authority.host.lf_home);
+        let store = crate::store::sqlite::SqliteStore::open_ephemeral(
+            &authority.host.lf_home.join("loopflow.db"),
+        )
+        .unwrap();
+        store
+            .ensure_wave(authority.repo.to_str().unwrap(), "infrastructure")
             .unwrap();
         let specs = cron_specs(&authority, "infrastructure").unwrap();
         assert_eq!(specs.len(), 1);

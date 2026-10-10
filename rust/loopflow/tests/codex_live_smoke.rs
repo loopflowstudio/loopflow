@@ -29,7 +29,7 @@ async fn codex_live_one_turn_smoke() {
     };
     harness.start(&config).await.expect("codex start");
     assert!(
-        harness.provider_session_id().is_some(),
+        harness.agent_session().is_some(),
         "thread id should be captured during start"
     );
 

@@ -72,12 +72,12 @@ pub(crate) async fn record_abandoned_pr(repo: &Path, branch: &str) -> OpsResult<
     let Some((store, task)) = branch_task(repo, branch).await? else {
         return Ok(());
     };
-    for mut pr in store.task_prs(&task.id).await.map_err(task_error)? {
+    if let Some(mut pr) = store.active_task_pr(&task.id).await.map_err(task_error)? {
         if pr.branch == branch && pr.is_active() {
             let now = time::OffsetDateTime::now_utc();
             pr.abandoned_at = Some(now);
             pr.updated_at = now;
-            store.settle_task_pr(&pr, None).await.map_err(task_error)?;
+            store.settle_task_pr(&pr).await.map_err(task_error)?;
         }
     }
     Ok(())
@@ -97,12 +97,13 @@ async fn resolve_task(store: &SharedStore, selector: &str) -> OpsResult<Option<T
 async fn historical_branch_task(store: &SharedStore, branch: &str) -> OpsResult<Option<Task>> {
     let mut found = None;
     for task in store.list_tasks(None).await.map_err(task_error)? {
-        if store
-            .task_prs(&task.id)
-            .await
-            .map_err(task_error)?
-            .iter()
-            .any(|pr| pr.branch == branch)
+        if task.branch == branch
+            || store
+                .task_prs(&task.id)
+                .await
+                .map_err(task_error)?
+                .iter()
+                .any(|pr| pr.branch == branch)
         {
             if found.is_some() {
                 return Err(task_error(format!(
@@ -146,7 +147,9 @@ async fn abandon(repo: &Path, selector: &str, force: bool) -> OpsResult<String> 
     save_abandon(&store, &task).await?;
     // Failed cleanup cannot undo the decision or grant control over live work.
     let cleanup = async {
-        for deletion in prepare_abandon(repo, &store, Some(&task), selector, force, false).await? {
+        if let Some(deletion) =
+            prepare_abandon(repo, &store, Some(&task), selector, force, false).await?
+        {
             crate::ops::abandon::abandon_prepared(deletion, &NullProgress).await?;
         }
         Ok::<(), crate::ops::OpsError>(())
@@ -197,12 +200,11 @@ async fn prepare_abandon(
     issue: &str,
     force: bool,
     sweep: bool,
-) -> OpsResult<Vec<BranchDeletion>> {
-    let prs = match task {
-        Some(task) => store.task_prs(&task.id).await.map_err(task_error)?,
-        None => Vec::new(),
+) -> OpsResult<Option<BranchDeletion>> {
+    let pr = match task {
+        Some(task) => store.active_task_pr(&task.id).await.map_err(task_error)?,
+        None => None,
     };
-    let mut deletions = Vec::new();
     if let Some(task) = task {
         if store
             .work_status(&WorkRef::Task(task.id.clone()))
@@ -214,40 +216,38 @@ async fn prepare_abandon(
         }
         require_idle(store, task)?;
     }
-    if sweep || !prs.is_empty() {
+    if sweep || pr.is_some() {
         let issue = match task {
             Some(task) => task.plan.linear_id.as_ref().map(|id| id.as_str()),
             None => Some(issue),
         };
         if let Some(issue) = issue {
-            require_known_prs(repo, &prs, issue).await?;
+            require_known_prs(repo, pr.as_ref(), issue).await?;
         }
     }
 
-    for pr in &prs {
-        // Merged history is never recast as abandonment.
-        if pr.merge_commit.is_none() {
-            let deletion = crate::ops::wt::prepare_delete(repo, &pr.branch, force)?;
-            let prs = crate::ops::abandon::branch_prs(repo, &pr.branch)?;
-            if sweep && prs.iter().any(|(_, state)| state == "OPEN") {
-                return Err(task_error(format!(
-                    "{} has an open PR; excluded from chapter sweep",
-                    pr.branch
-                )));
-            }
-            if prs.iter().any(|(_, state)| state == "MERGED") && pr.is_active() {
-                return Err(task_error(format!(
-                    "{} merged outside Loopflow; reconcile its Task before abandoning",
-                    pr.branch
-                )));
-            }
-            deletions.push(deletion);
+    // Merged history is never recast as abandonment.
+    if let Some(pr) = pr.filter(|pr| pr.merge_commit.is_none()) {
+        let deletion = crate::ops::wt::prepare_delete(repo, &pr.branch, force)?;
+        let prs = crate::ops::abandon::branch_prs(repo, &pr.branch)?;
+        if sweep && prs.iter().any(|(_, state)| state == "OPEN") {
+            return Err(task_error(format!(
+                "{} has an open PR; excluded from chapter sweep",
+                pr.branch
+            )));
         }
+        if prs.iter().any(|(_, state)| state == "MERGED") && pr.is_active() {
+            return Err(task_error(format!(
+                "{} merged outside Loopflow; reconcile its Task before abandoning",
+                pr.branch
+            )));
+        }
+        return Ok(Some(deletion));
     }
-    Ok(deletions)
+    Ok(None)
 }
 
-async fn require_known_prs(repo: &Path, prs: &[TaskPr], issue: &str) -> OpsResult<()> {
+async fn require_known_prs(repo: &Path, pr: Option<&TaskPr>, issue: &str) -> OpsResult<()> {
     for url in crate::ops::pm::issue_client(repo)
         .await?
         .item_attachment_urls(issue)
@@ -255,10 +255,9 @@ async fn require_known_prs(repo: &Path, prs: &[TaskPr], issue: &str) -> OpsResul
         .map_err(task_error)?
     {
         if !url.contains("/pull/")
-            || prs
-                .iter()
-                .filter_map(TaskPr::github)
-                .any(|github| github.url == url)
+            || pr
+                .and_then(TaskPr::github)
+                .is_some_and(|github| github.url == url)
         {
             continue;
         }
@@ -343,7 +342,7 @@ pub fn task_sweep(repo: &Path, apply: bool) -> OpsResult<Vec<SweepEntry>> {
             {
                 Err(error) => format!("skipped: {error}"),
                 Ok(_) if !apply => "would cancel Task and remove any retained branches".into(),
-                Ok(deletions) => {
+                Ok(deletion) => {
                     // Read membership after preparation, immediately before effects.
                     match crate::ops::pm::require_outside_current_chapter(repo, &item.id).await {
                         Err(error) => format!("skipped: {error}"),
@@ -358,7 +357,7 @@ pub fn task_sweep(repo: &Path, apply: bool) -> OpsResult<Vec<SweepEntry>> {
                                 ),
                                 Ok(()) => {
                                     let mut outcome = "canceled".to_string();
-                                    for deletion in deletions {
+                                    if let Some(deletion) = deletion {
                                         if let Err(error) = crate::ops::abandon::abandon_prepared(
                                             deletion,
                                             &NullProgress,
@@ -367,7 +366,6 @@ pub fn task_sweep(repo: &Path, apply: bool) -> OpsResult<Vec<SweepEntry>> {
                                         {
                                             outcome =
                                                 format!("canceled; retained checkout/PR: {error}");
-                                            break;
                                         }
                                     }
                                     outcome

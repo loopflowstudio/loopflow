@@ -106,16 +106,6 @@ Show CI status for current branch
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
-## lf pr next
-
-After an out-of-band merge, rotate this Task to its next serial PR, carrying committed and uncommitted follow-up onto the new branch
-
-| Argument | What it does |
-|---|---|
-| `<slug>` | Name the next serial branch (defaults to the settled PR's next slug, then the sequence number) |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
-| `--help / -h` | Print help |
-
 ## lf pr publish
 
 Publish a ready PR headlessly: push, create or refresh, print state + URL. Opens no review surface
@@ -148,8 +138,6 @@ Prepare a PR to land: sync, clear scratch, mark ready, and assign it to you. Not
 |---|---|
 | `--strict` | strict Default: false. |
 | `--create-pr / -p` | create pr Default: false. |
-| `--complete / -c` | Complete after verified merge (the default unless --next is supplied) Default: false. |
-| `--next` | next |
 | `--worktree / -w` | worktree |
 | `--message / -m` | message |
 | `--title` | title |
@@ -165,8 +153,6 @@ Prepare a PR, request exact-head auto-merge, and return without watching
 |---|---|
 | `--strict` | strict Default: false. |
 | `--local` | local Default: false. |
-| `--complete / -c` | Complete after verified merge (the default unless --next is supplied) Default: false. |
-| `--next` | next |
 | `--worktree / -w` | worktree |
 | `--message / -m` | message |
 | `--title` | title |
@@ -180,10 +166,9 @@ Request auto-merge, retain settlement intent, and return
 
 | Argument | What it does |
 |---|---|
+| `--wait` | Wait up to 30 minutes for verified merge; timeout retains the request Default: false. |
 | `--strict` | strict Default: false. |
 | `--local` | local Default: false. |
-| `--complete / -c` | Complete after verified merge (the default unless --next is supplied) Default: false. |
-| `--next` | next |
 | `--worktree / -w` | worktree |
 | `--message / -m` | message |
 | `--title` | title |
@@ -326,7 +311,7 @@ List a bounded page of recorded commands, newest first
 | `--limit` | limit Default: 100. |
 | `--after` | Continue with the previous page's next object, encoded as JSON |
 | `--parent` | Direct children of an exact or unambiguous parent Process |
-| `--caller` | Commands issued by this AgentSession |
+| `--caller` | Commands issued by this Session |
 | `--search` | Literal command text, ignoring ASCII case |
 | `--outcome` | outcome |
 | `--task` | Recorded work for a Task, including completed Tasks |
@@ -1578,16 +1563,19 @@ Check authorized deliveries once, then exit
 
 ## lf task follow-up
 
-Record accepted work remaining after merge, or resolve it with evidence
+File or link follow-up Tasks after merge, then record the disposition
 
 | Argument | What it does |
 |---|---|
 | `<issue>` | issue |
-| `--outcome` | outcome |
-| `--evidence` | evidence |
-| `--check-at` | Next observation or decision, as an RFC 3339 timestamp |
-| `--clear` | Evidence that the remaining work is satisfied or no longer needed |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--title` | title |
+| `--notes` | notes |
+| `--due` | due |
+| `--wave` | wave |
+| `--existing` | existing |
+| `--none` | none |
+| `--finish` | finish |
+| `--key` | Stable obligation key; use a distinct key for each additional follow-up |
 | `--help / -h` | Print help |
 
 ## lf task automate
@@ -1624,6 +1612,7 @@ Ensure tracked Task Work and its worktree without launching a Flow
 | `--name` | name |
 | `--stack-on` | Fork this Task's worktree from another Task's active PR |
 | `--directive` | directive |
+| `--design` | Hand off a child-specific design from the caller's checkout |
 | `--json` | json Default: false. |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
@@ -1640,21 +1629,37 @@ Place a Task's worktree, then run a Flow there like `lf --task ISSUE run FLOW`
 | `--stack-on` | Fork this Task's worktree from another Task's active PR |
 | `--directive` | directive |
 | `--reason` | Direction for this run, published to the Task |
-| `--force` | Reach `end` although Linear already calls the active Task complete Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf task complete
+
+Complete a Task without moving its Workflow
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `--reason` | Why, kept in the Task's completion request |
+| `--help / -h` | Print help |
+
+## lf task reopen
+
+Reopen local planning without moving Workflow or replacing the PR
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `--reason` | reason |
 | `--help / -h` | Print help |
 
 ## lf task move
 
-Put a Task at a node of its workflow without running anything; `end` completes it
+Move Workflow position without running anything; `end` requests completion
 
 | Argument | What it does |
 |---|---|
 | `<issue>` | issue |
 | `<node>` | `start`, `end` or one of the workflow's nodes |
 | `--reason` | Why, kept in the Task's workflow history |
-| `--force` | Reach `end` although Linear already calls the active Task complete Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task create

@@ -127,7 +127,7 @@ fn closed_release_history_records_repair_without_settling_or_transferring_work()
     let home = tempfile::tempdir().unwrap();
     let _env = EnvGuard::with_lf_home(&[], home.path());
     let repo = TestRepo::new();
-    let task = support::register_task(
+    let task = support::register_task_with_pr(
         home.path(),
         repo.path(),
         &git(repo.path(), &["branch", "--show-current"]),

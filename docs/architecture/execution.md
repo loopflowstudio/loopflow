@@ -10,7 +10,7 @@ These commands use the current parser. This guide specifies the accepted
 lifecycle; [cutover status](../architecture-reference.md#cutover-status) records
 which owners and proofs remain unfinished.
 
-The command has a process. The agent has an AgentSession. A Flow is one lf process and the step processes it starts. Their completion and authority are different
+The command has a process. The agent has an LfSession. A Flow is one lf process and the step processes it starts. Their completion and authority are different
 facts.
 
 ## Request flow
@@ -19,7 +19,7 @@ facts.
 argv -> Process admission -> Skill discovery -> prompt -> provider route
                                                         |
                                                         v
-                                     AgentSession reservation + input capture
+                                     LfSession reservation + input capture
                                                         |
                                                         v
                                         native engine and conversation
@@ -27,7 +27,7 @@ argv -> Process admission -> Skill discovery -> prompt -> provider route
                                      provider outcomes / retries / usage
                                                         |
                                                         v
-                                           AgentSession history
+                                           LfSession history
 ```
 
 The same admission applies to headless and interactive skills, inline prompts,
@@ -108,7 +108,7 @@ authority, and recovery never authorizes killing a shared engine for one thread.
 
 ## Outcomes, retries and usage
 
-AgentSession history owns provider outcomes. Process owns command completion. A
+LfSession history owns provider outcomes. Process owns command completion. A
 provider can succeed before the command fails later, and a stopped Flow's history
 outlives its command. Failed or interrupted conversation work remains history;
 continuation appends a new result to the same conversation.
@@ -122,7 +122,7 @@ answer contract in its message and the driver reads the final answer of the
 Session turn that step Process captured; an invalid answer is corrected by
 resuming the same conversation (`lf -b session resume ID MESSAGE`), at most
 twice, then the Flow fails. A mechanical step is its own child Process and invents
-no AgentSession. After an operation the driver stops the Flow when a landing of
+no LfSession. After an operation the driver stops the Flow when a landing of
 its checkout is still being watched; neither failed. A killed driver leaves its Processes
 as history; nothing resumes it. The caller inspects them before launching fresh
 work. Unknown liveness stays unknown. Cursor movement cannot prove exactly-once

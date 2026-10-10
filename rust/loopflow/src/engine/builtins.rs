@@ -290,7 +290,13 @@ mod tests {
             .contains("flow: refresh"));
         assert!(get_builtin_flow("ship")
             .expect("Task final flow")
-            .contains("- cmd: pr land -c"));
+            .contains("- cmd: land --wait-and-fix"));
+        assert!(get_builtin_flow("ship")
+            .unwrap()
+            .contains("- follow-through"));
+        assert!(get_builtin_flow("finish-delivery")
+            .unwrap()
+            .contains("- follow-through"));
 
         for wrapper in ["design", "launch-plan", "ship-5whys", "wave"] {
             assert!(get_builtin_flow(wrapper).is_none());
@@ -304,7 +310,6 @@ mod tests {
             "lf session complete",
             "lf handoff",
             "lf reviews",
-            "lf task follow-up",
             "lf task receipt",
             "lf task acknowledge",
             "lf task decide",
@@ -348,7 +353,8 @@ mod tests {
             assert!(skill.contains("lf wave status"));
             assert!(skill.contains("task.identifier"));
             assert!(skill.contains("reference.issue_url"));
-            assert!(skill.contains("active_pr.slug"));
+            assert!(skill.contains("checkout without a PR"));
+            assert!(!skill.contains("active_pr"));
             assert!(skill.contains("reference.workspace.slug"));
             assert!(skill.contains("runtime.status"));
             assert!(skill.contains("next_move.owner"));

@@ -13,9 +13,7 @@ use loopflow::engine::git::{current_branch, worktree_remove};
 use loopflow::ops::{
     commit_workflow, release_publish, release_tag, CommitOptions, NullProgress, OpsError,
 };
-use loopflow::work::task::{
-    AfterMerge, GithubPr, PrMergeMode, PrMergeRequest, PrPresentation, PrPublication,
-};
+use loopflow::work::task::{GithubPr, PrMergeMode, PrMergeRequest, PrPresentation, PrPublication};
 use loopflow_test_support::TestRepo;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -1700,7 +1698,7 @@ NOTES
         let branch = git_read(&["branch", "--show-current"]);
         // Register the actual generated branch, not the caller's ambient Task.
         let home = PathBuf::from(std::env::var_os("LF_HOME").unwrap());
-        let task = support::register_task(&home, &checkout, &branch, &head);
+        let task = support::register_task_with_pr(&home, &checkout, &branch, &head);
         let now = time::OffsetDateTime::now_utc();
         let mut pr = task.pr.clone();
         pr.publication = Some(PrPublication {
@@ -1719,8 +1717,6 @@ NOTES
                 mode: PrMergeMode::Auto,
                 requested_at: now,
                 head_sha: head.clone(),
-                after_merge: AfterMerge::CompleteTask,
-                next_slug: None,
             }),
         });
         let runtime = tokio::runtime::Runtime::new().unwrap();

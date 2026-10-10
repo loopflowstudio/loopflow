@@ -43,10 +43,10 @@ lf wait INF-123 --until terminal                # block until it settles
 
 Tracked Work follows Wave → Task in navigation. A Wave owns its objective and
 memory; its current Linear Project owns Tasks, KRs, targets and workflow.
-Task owns the checkout and serial PRs. Every conversation and Flow attributed
+Task owns its checkout and zero or one PR. Every conversation and Flow attributed
 to it is equally its work; none is privileged.
 
-Process records an actual lf command process. AgentSession keeps a continuable
+Process records an actual lf command process. LfSession keeps a continuable
 conversation, whether interactive or headless. A Flow is one lf process and
 the step processes it starts. Provider turns and retries remain history
 inside the conversation; they do not create another generic execution object.

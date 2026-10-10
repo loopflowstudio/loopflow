@@ -85,7 +85,7 @@ shell / automation / Loopflow.app
                |
         store + repository
                |
-       Flow driver Process --> step Process --> AgentSession <--> native engine
+       Flow driver Process --> step Process --> LfSession <--> native engine
 ```
 
 Wave operations are finite attributed conversations. Each Task Flow

@@ -26,7 +26,7 @@ A Skill supplies instructions; a Flow composes skills and mechanical operations.
 A Task owns one change, its checkout and PRs. A Wave keeps the objective
 and memory; its current Linear Project holds the plan and its Tasks' workflow.
 
-Process records an actual lf command process. AgentSession keeps the conversation,
+Process records an actual lf command process. LfSession keeps the conversation,
 including headless work. A running Flow is one lf process and the step processes
 it starts. A conversation can outlive its command. A Flow whose
 command stopped stays as history; fresh work is launched explicitly.

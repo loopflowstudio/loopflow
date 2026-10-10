@@ -68,7 +68,7 @@ refresh Linear. An unknown provider alias still needs initial acquisition.
 Preparation uses the saved Task identity and title directly. New branch names retain
 the full Task UUID; default checkout names use up to four title words and an ID
 suffix. Retained provider branch names take precedence.
-Placement records the first PR and checkout before filesystem creation, without rewriting
+Placement records the checkout before filesystem creation, without creating a PR or rewriting
 planning fields. Accepted state and completion are retained on the Task, so terminal
 planning prevents first placement even without provider inventory. Task and Flow entry
 use the same SQLite admission reader as placement, without a provider resolver.
@@ -78,11 +78,11 @@ a saved Task from running; a retained invalidation still does. Remote completion
 prevents new work but does not stop an already active Workflow. Incoming removal
 retains the Task and marks its planning deleted; neither observation moves a Workflow
 or cleans a checkout. Competing reservations return the saved allocation; restoration
-uses that checkout and PR. The queued writer retains the Wave lock through commit,
+uses that checkout and its optional PR. The queued writer retains the Wave lock through commit,
 even if its caller is canceled. Native launch and resume retain the
 ordinary Session and Process authority checks. Local deletion receipts and retained
 provider deletion evidence apply regardless of planning mode. Local completion
-records its decision and workflow arrival together.
+records its planning decision and optional delivery receipt without moving the Workflow.
 GitHub delivery still requires confirmed merge evidence. Chapter rotation commits
 all selected Waves together, carrying started Tasks and preserving backlog. Stable
 local IDs select the rows and retry receipts; provider aliases select existing
@@ -412,16 +412,16 @@ Task on its edge. `lf task move ISSUE NODE` sets. An edge is not chosen
 while another runs. A move's author is its Process's calling conversation, else
 a person; an arrival is the edge's own.
 
-A Task's state is read from that position and stored nowhere else: not ready
-with no Workflow, ready at `start`, active at a node or on an edge, done at
-`end`. Abandoned is the Task's own mark. Any move that reaches `end` is
-completion: one transaction writes the position, reason, Completed event, pending
-delivery identity and retirement of an empty unpublished PR after the delivery
-checks. Linear I/O follows independently. Reopening queues its own delivery in the
-same transaction as the explicit Workflow move. A Task with no Workflow
-reaches `end` on `unplanned`, which has nothing between. Linear calling an
-active Task complete is read as `planning_conflict`; `end` then takes `--force`,
-kept in the move's note.
+Task completion, Workflow position and Process liveness are independent.
+`task complete` changes status without moving or creating a Workflow. Moving or
+arriving at end atomically records the move and a completion request, then
+attempts settlement. Failed settlement retains end and its reason; retry only
+`task complete`, never the successful edge. PR delivery requires verified merge
+and confirmed follow-through; PR-less completion retains useful artifacts.
+Accepted Linear completion or reopening updates status without moving Workflow
+or terminating Processes. Reopening supersedes old requests. Ordinary reads do
+not execute completion. Unfinished readiness remains not ready with no Workflow,
+ready at start, and active otherwise; abandonment is its own mark.
 
 Foreground Task connections acquire repository membership/state independently of
 comment and state delivery. Delivery receipts retain their original provider revision,
@@ -535,7 +535,7 @@ before selecting further work; pane closure and provider exit grant no authority
 
 Saved handoffs retain executable, Machine and database together. Renaming, binding
 and driver replacement retain conversation identity and feedback. Desktop reads
-the same record and keys its terminal surface on AgentSession identity.
+the same record and keys its terminal surface on LfSession identity.
 
 ## Work, steering and execution
 
@@ -562,7 +562,7 @@ saved direction. The shared skill path supplies Task context and live steers whe
 the checkout or explicit attribution selects a Task.
 Idle steering starts no Flow. Prompt inclusion and provider acceptance do not
 prove the model followed a correction. Wave planning uses ordinary finite
-AgentSessions.
+LfSessions.
 
 Work reservation sets Task Started once; an inspection Process does not. Constructors
 validate Task/Wave ancestry, and chapter transfers preserve historical event

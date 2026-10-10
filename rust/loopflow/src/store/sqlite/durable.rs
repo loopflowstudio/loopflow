@@ -574,12 +574,12 @@ fn inherit_placement(
     write_placement(tx, work, &machine_id, placed_at)
 }
 
-/// SQL for the state of Task row `t`, read from its Workflow position.
+/// Completion and abandonment are durable; unfinished readiness follows the Workflow.
 pub(crate) fn task_state_sql(t: &str) -> String {
     format!(
-        "CASE WHEN {t}.abandoned_at IS NOT NULL THEN 'abandoned' ELSE COALESCE((
+        "CASE WHEN {t}.abandoned_at IS NOT NULL THEN 'abandoned' WHEN {t}.planning_completed=1 THEN 'done' ELSE COALESCE((
             SELECT CASE WHEN wf.edge IS NOT NULL THEN 'active' WHEN wf.node='start' THEN 'ready'
-                WHEN wf.node='end' THEN 'done' ELSE 'active' END
+                ELSE 'active' END
             FROM task_workflows wf WHERE wf.task_id={t}.id),'not_ready') END"
     )
 }
@@ -792,7 +792,7 @@ mod durable_store_tests {
 
     use crate::id::WaveId;
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
-    use crate::session::{AgentSession, TitleSource, WorkSource};
+    use crate::session::{LfSession, TitleSource, WorkSource};
     use crate::store::sqlite::SqliteStore;
 
     use crate::work::project::Project;
@@ -802,8 +802,8 @@ mod durable_store_tests {
         task_id: Option<TaskId>,
         wave_id: Option<WaveId>,
         created_at: i64,
-    ) -> AgentSession {
-        AgentSession {
+    ) -> LfSession {
+        LfSession {
             captured: None,
             id: uuid::Uuid::new_v4().to_string(),
             artifact_key: crate::session_record::new_artifact_key(),
@@ -898,6 +898,9 @@ mod durable_store_tests {
             project_id,
             worktree: Some(PathBuf::from("/repo.probe")),
             workspace_slug: "probe".to_string(),
+            branch: "probe".to_string(),
+            base_commit: "deadbeef".to_string(),
+            parent_pr_id: None,
             agent: None,
             abandon_intent: None,
             created_at: now,
@@ -1064,8 +1067,8 @@ mod durable_store_tests {
         flow_process_lfid: Option<String>,
         task_id: Option<TaskId>,
         wave_id: Option<WaveId>,
-    ) -> crate::session::AgentSession {
-        crate::session::AgentSession {
+    ) -> crate::session::LfSession {
+        crate::session::LfSession {
             captured: None,
             id: uuid::Uuid::new_v4().to_string(),
             artifact_key: crate::session_record::new_artifact_key(),
@@ -1272,7 +1275,8 @@ mod durable_store_tests {
         pr.id = TaskPrId::new();
         pr.task_id = task.id.clone();
         pr.slug = task.workspace_slug.clone();
-        pr.branch = task.workspace_slug.clone();
+        task.branch = task.workspace_slug.clone();
+        pr.branch = task.branch.clone();
         (task, pr)
     }
 
@@ -1361,7 +1365,7 @@ mod durable_store_tests {
             store.task(&task.id).unwrap().unwrap().worktree,
             task.worktree
         );
-        assert_eq!(store.task_prs(&task.id).unwrap(), vec![pr]);
+        assert!(store.task_prs(&task.id).unwrap().is_empty());
     }
 
     #[test]
@@ -1560,7 +1564,7 @@ mod durable_store_tests {
         }
         // A done Task is still a valid assignment target.
         conn.execute(
-            "INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,'{\"name\":\"unplanned\",\"nodes\":[],\"edges\":[{\"from\":\"start\",\"to\":\"end\",\"flow\":null}]}','end',1)",
+            "UPDATE tasks SET planning_completed=1,planning_state='completed' WHERE id=?1",
             [bound_task.as_str()],
         )
         .unwrap();
@@ -1734,7 +1738,7 @@ mod durable_store_tests {
             )
             .unwrap();
         let open = |id: &str, wave: Option<WaveId>| {
-            let session = crate::session::AgentSession {
+            let session = crate::session::LfSession {
                 captured: None,
                 caller_artifact_key: None,
                 task_id: None,
@@ -1766,7 +1770,7 @@ mod durable_store_tests {
         let replacement = store
             .replace_session_input(
                 first.captured,
-                crate::session::AgentSession {
+                crate::session::LfSession {
                     caller_artifact_key: None,
                     artifact_key: crate::session_record::new_artifact_key(),
                     ..first.clone()
@@ -1777,7 +1781,7 @@ mod durable_store_tests {
             store
                 .replace_session_input(
                     replacement.captured,
-                    crate::session::AgentSession {
+                    crate::session::LfSession {
                         cwd: "/changed".into(),
                         provider: Some("changed".into()),
                         model: Some("changed".into()),
@@ -1793,7 +1797,7 @@ mod durable_store_tests {
         store
             .record_session_event(
                 "orphan",
-                "thread",
+                &"thread".into(),
                 "active",
                 crate::session::SessionEventKind::Started,
                 &serde_json::json!({}),
@@ -1802,7 +1806,7 @@ mod durable_store_tests {
         store
             .record_session_event(
                 "orphan",
-                "thread",
+                &"thread".into(),
                 "active",
                 crate::session::SessionEventKind::Usage,
                 &serde_json::json!({"input": 20}),
@@ -1835,7 +1839,7 @@ mod durable_store_tests {
         store
             .record_session_event(
                 "orphan",
-                "thread",
+                &"thread".into(),
                 "active",
                 crate::session::SessionEventKind::Usage,
                 &serde_json::json!({"input": 30}),
@@ -1844,7 +1848,7 @@ mod durable_store_tests {
         store
             .record_session_event(
                 "orphan",
-                "thread",
+                &"thread".into(),
                 "future",
                 crate::session::SessionEventKind::Started,
                 &serde_json::json!({}),
@@ -1862,7 +1866,7 @@ mod durable_store_tests {
         let future = store
             .replace_session_input(
                 replacement.captured,
-                crate::session::AgentSession {
+                crate::session::LfSession {
                     caller_artifact_key: None,
                     artifact_key: crate::session_record::new_artifact_key(),
                     ..bound.clone()

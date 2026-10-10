@@ -18,7 +18,11 @@ it helps recognition. Preserve proper names and command spelling.
 Follow with **What changes**: a short paragraph or a few bullets describing the
 meaningful change. Include implementation detail only when it helps review. Put **Why it
 matters** after that, and omit it if the summary already explains the consequence.
-Include material risks or limitations when needed. Keep automated test and lint
+Include material risks or limitations when needed. Preserve concrete accepted
+checks whose evidence comes after merge: the unverified outcome, environment or
+release prerequisite and expected evidence. Follow-through reads this durable copy
+after scratch cleanup to file linked Tasks or record none needed; suggestions
+for new scope stay labeled as suggestions. Keep automated test and lint
 results in **Checks** when useful, or link to CI. Finish with **Try it** when there
 is a useful walkthrough: describe a concrete user action and the visible result
 that demonstrates the benefit. Tests, test commands, and test results never belong

@@ -10,7 +10,7 @@ use super::{
     lock_session_process, publish_prepared_input, session_not_found, start_durable_session,
     surface, NativeSession, SessionRecord,
 };
-use crate::session::{AgentSession, PrimaryScope, TitleSource, WorkSource};
+use crate::session::{LfSession, PrimaryScope, TitleSource, WorkSource};
 use crate::store::SharedStore;
 
 /// Find or admit the primary conversation of a Wave, or of the repository
@@ -140,8 +140,8 @@ pub(crate) fn ensure_scope_worktree(
 /// conversation identity remain attached to the same Session.
 pub(super) async fn admit_workspace(
     store: &SharedStore,
-    mut session: AgentSession,
-) -> Result<AgentSession> {
+    mut session: LfSession,
+) -> Result<LfSession> {
     let Some(scope) = store.sqlite.primary_scope(&session.id)? else {
         return Ok(session);
     };
@@ -172,8 +172,8 @@ pub(super) async fn admit_workspace(
     Ok(session)
 }
 
-fn wave_session(binding: &crate::ops::WorkBinding) -> AgentSession {
-    AgentSession {
+fn wave_session(binding: &crate::ops::WorkBinding) -> LfSession {
+    LfSession {
         wave_id: Some(binding.wave_id.clone()),
         work_source: Some(WorkSource::Declared),
         ..conversation(
@@ -189,7 +189,7 @@ fn task_session(
     store: &SharedStore,
     binding: &crate::ops::WorkBinding,
     task: &crate::durable::TaskId,
-) -> Result<AgentSession> {
+) -> Result<LfSession> {
     let plan = store
         .sqlite
         .task(task)?
@@ -200,7 +200,7 @@ fn task_session(
         Some(&plan.plan.title),
         &binding.cwd,
     );
-    Ok(AgentSession {
+    Ok(LfSession {
         task_id: Some(task.clone()),
         wave_id: Some(binding.wave_id.clone()),
         work_source: Some(WorkSource::Declared),
@@ -213,22 +213,22 @@ fn task_session(
     })
 }
 
-fn repository_session(repo: &crate::repository::CanonicalRepo) -> AgentSession {
+fn repository_session(repo: &crate::repository::CanonicalRepo) -> LfSession {
     let title = repo
         .as_path()
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| repo.to_string());
-    AgentSession {
+    LfSession {
         repo: Some(repo.to_string()),
         ..conversation(repo.as_path(), None, "repo-session", title)
     }
 }
 
-fn conversation(cwd: &Path, agent: Option<&str>, skill: &str, title: String) -> AgentSession {
+fn conversation(cwd: &Path, agent: Option<&str>, skill: &str, title: String) -> LfSession {
     let agent = crate::ops::task::resolve_task_agent(cwd, agent, None);
     let (provider, model) = crate::engine::config::parse_agent(&agent);
-    AgentSession {
+    LfSession {
         captured: None,
         id: uuid::Uuid::new_v4().simple().to_string(),
         artifact_key: crate::session_record::new_artifact_key(),
@@ -258,7 +258,7 @@ fn conversation(cwd: &Path, agent: Option<&str>, skill: &str, title: String) -> 
 
 /// Publish the admitted input and launch it unless a launcher already holds
 /// it. A failed start keeps the prepared input for the next caller.
-async fn start(store: &SharedStore, session: AgentSession) -> Result<SessionRecord> {
+async fn start(store: &SharedStore, session: LfSession) -> Result<SessionRecord> {
     let session = if conversation_process_is_running(&session.id).await? {
         session
     } else {
@@ -301,7 +301,7 @@ async fn start(store: &SharedStore, session: AgentSession) -> Result<SessionReco
     surface(store, &session).await
 }
 
-fn stop_client(session: &AgentSession) -> Result<()> {
+fn stop_client(session: &LfSession) -> Result<()> {
     #[cfg(test)]
     if super::action_test::stop(&session.artifact_key) {
         return Ok(());

@@ -84,7 +84,7 @@ struct DesktopPerformanceTests {
         child["LF_HOME"] = home
         let reader = child
         let query = RegistryQuery(watchWork: {
-            let process = Foundation.Process()
+            let process = Process()
             process.executableURL = URL(fileURLWithPath: lf)
             process.arguments = ["monitor", "work", "--watch", "--json"]
             process.environment = reader
@@ -1042,11 +1042,11 @@ struct DesktopPerformanceTests {
             planning["completed"] = false
             task["task"] = planning
             var reference: [String: Any] = ["issue_url": NSNull(), "workspace": [
-                "slug": "benchmark", "branch": "benchmark", "machine_id": fixtureMachineId,
+                "slug": "benchmark", "branch": "benchmark", "base_commit": "benchmark-base", "machine_id": fixtureMachineId,
                 "worktree": checkout, "local_exists": true,
             ]]
             if index == 1 {
-                reference["workspace"] = ["slug": "benchmark-empty", "branch": "benchmark-empty", "machine_id": fixtureMachineId,
+                reference["workspace"] = ["slug": "benchmark-empty", "branch": "benchmark-empty", "base_commit": "benchmark-base", "machine_id": fixtureMachineId,
                                           "worktree": NSTemporaryDirectory(), "local_exists": true]
             }
             task["reference"] = reference
@@ -1063,6 +1063,7 @@ struct DesktopPerformanceTests {
         wave["wave"] = waveInfo
         snapshot["waves"] = [wave]
         let roadmap = String(decoding: try JSONSerialization.data(withJSONObject: snapshot), as: UTF8.self)
+        _ = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(roadmap.utf8))
         let planning = PerformancePlanning(roadmap: roadmap)
         let sessions = try JSONSerialization.data(withJSONObject: stride(from: 0, to: taskCount, by: 2).map { index in
             ["id": "perf-session-\(index)", "run_id": "perf-run-\(index)", "interactive": true,
@@ -1319,7 +1320,7 @@ private struct PerformanceStore {
     let database: String
 
     func write(_ sql: String) throws {
-        let process = Foundation.Process()
+        let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
         process.arguments = ["-bail", "-cmd", ".timeout 5000", database, sql]
         let errors = Pipe()
@@ -1579,7 +1580,7 @@ private func snapshotRead(binary: String, home: String, args: [String], cwd: Str
     guard ["roadmap", "activity"].contains(args.first ?? "") || ["wave list", "wave status", "session list", "session history", "machine id", "task status", "task files", "task diff", "flow list"].contains(verb) else {
         throw RegistryQueryError("Snapshot does not execute \(verb)")
     }
-    let process = Foundation.Process()
+    let process = Process()
     process.executableURL = URL(fileURLWithPath: binary)
     process.arguments = args
     process.currentDirectoryURL = URL(fileURLWithPath: cwd)

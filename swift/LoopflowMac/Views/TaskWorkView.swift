@@ -37,6 +37,12 @@ struct TaskWorkflowHeader: View {
                     .disabled(acting)
                     .help("lf task move \(task.task.identifier) <node>")
                     .accessibilityIdentifier("task-workflow-move")
+                    if task.runtime?.status != .done {
+                        Button("Complete") { Task { await model.completeTask(task, wave: wave) } }
+                            .disabled(acting)
+                            .help("lf task complete \(task.task.identifier)")
+                            .accessibilityIdentifier("task-complete")
+                    }
                 } else if work.value != nil {
                     // A Task takes up its Project's workflow on its first run.
                     Text("No workflow yet").foregroundStyle(palette.textSecondary)
@@ -45,7 +51,7 @@ struct TaskWorkflowHeader: View {
                         .disabled(unavailable != nil)
                         .help(unavailable ?? "lf task run \(task.task.identifier)")
                         .accessibilityIdentifier("task-workflow-start")
-                    Button("Complete") { Task { await model.moveTask(to: "end", task: task, wave: wave) } }
+                    Button("Complete") { Task { await model.completeTask(task, wave: wave) } }
                         .disabled(acting)
                         .accessibilityIdentifier("task-workflow-end")
                     Spacer()
@@ -57,26 +63,21 @@ struct TaskWorkflowHeader: View {
                 }
                 if acting { ProgressView().controlSize(.small) }
             }
-            if task.actions.reason.contains("Remaining work:") {
-                Text(task.actions.reason)
-                    .foregroundStyle(palette.textSecondary)
-                    .textSelection(.enabled)
-                    .accessibilityIdentifier("task-remaining-work")
-            }
-            // Linear called the Task complete while it is active here.
-            if let conflict = task.runtime?.planningConflict {
+            TaskDeliveryView(task: task)
+            // Completion may fail after the Workflow has already arrived.
+            if let conflict = task.runtime?.completionPending {
                 HStack(spacing: Spacing.sm) {
                     Text(conflict)
                         .foregroundStyle(WorkTone.blocked.ink)
                         .textSelection(.enabled)
-                        .accessibilityIdentifier("task-workflow-conflict")
-                    Button("Complete anyway") {
-                        Task { await model.moveTask(to: "end", force: true, task: task, wave: wave) }
+                        .accessibilityIdentifier("task-completion-pending")
+                    Button("Retry completion") {
+                        Task { await model.completeTask(task, wave: wave) }
                     }
                     .buttonStyle(WorkOutlineButtonStyle())
                     .disabled(acting)
-                    .help("lf task move \(task.task.identifier) end --force")
-                    .accessibilityIdentifier("task-workflow-force-end")
+                    .help("lf task complete \(task.task.identifier)")
+                    .accessibilityIdentifier("task-completion-retry")
                 }
             }
             if let error = draft?.error ?? model.navigation.taskSessionErrors[task.id] {
@@ -100,6 +101,54 @@ struct TaskWorkflowHeader: View {
     private var unavailable: String? {
         if acting { return "Starting" }
         return task.runControl.unavailable
+    }
+}
+
+/// Delivery evidence stays beside the conversation and in Task details.
+struct TaskDeliveryView: View {
+    let task: RoadmapTask
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.xxs) {
+            if let label = task.followThrough.deliveryLabel(
+                merged: task.pr?.phase == .merged, done: task.runtime?.status == .done
+            ) {
+                Text(label)
+                    .font(Typography.body(13))
+                    .foregroundStyle(palette.textSecondary)
+                    .accessibilityIdentifier("task-follow-through-status")
+            }
+            ForEach(Array(task.followThrough.scopeNotes.enumerated()), id: \.offset) { _, note in
+                Text(note)
+                    .font(Typography.body(12.5))
+                    .foregroundStyle(palette.textSecondary)
+            }
+            ForEach(task.followThrough.links) { followUp in
+                if let url = followUp.url {
+                    Link("Follow-up \(followUp.identifier)", destination: url)
+                        .font(Typography.body(12.5))
+                        .tint(palette.accentInk)
+                } else {
+                    Text("Follow-up \(followUp.identifier)")
+                        .font(Typography.body(12.5))
+                }
+            }
+            if let reason = task.followThrough.reason {
+                Text(reason)
+                    .font(Typography.body(12.5))
+                    .foregroundStyle(palette.textSecondary)
+            }
+            if let label = task.task.followUpLabel {
+                Text(label)
+                    .font(Typography.body(12.5))
+                    .foregroundStyle(palette.textSecondary)
+            } else if let due = task.task.dueDate {
+                Text("Due \(due)")
+                    .font(Typography.body(12.5))
+                    .foregroundStyle(palette.textSecondary)
+            }
+        }
     }
 }
 

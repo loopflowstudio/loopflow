@@ -228,9 +228,12 @@ public struct RegistryQuery: Sendable {
     }
 
     /// Put the Task at a node of its Workflow without running anything.
-    /// `force` reaches `end` although Linear already calls the Task complete.
-    public func moveTask(issue: String, node: String, force: Bool = false, cwd: String?) async throws {
-        _ = try await run(["task", "move", issue, node] + (force ? ["--force"] : []), cwd)
+    public func moveTask(issue: String, node: String, cwd: String?) async throws {
+        _ = try await run(["task", "move", issue, node], cwd)
+    }
+
+    public func completeTask(issue: String, cwd: String?) async throws {
+        _ = try await run(["task", "complete", issue], cwd)
     }
 
     /// One planning Task's complete comment thread. Read-only; works before
@@ -566,7 +569,7 @@ public struct SessionHistory: Decodable, Sendable, Identifiable, Hashable {
     public var id: String {
         if let captured { return "\(sessionId):\(captured)" }
         if case .nativeTurn(let thread, let turn, _, _) = providers.first?.reference {
-            return "\(sessionId):\(thread):\(turn)"
+            return "\(sessionId):\(thread.rawValue):\(turn)"
         }
         return sessionId
     }
@@ -643,7 +646,7 @@ public struct ProviderHistory: Decodable, Sendable, Hashable {
 }
 
 public enum ProviderHistoryReference: Decodable, Sendable, Hashable {
-    case nativeTurn(thread: String, turn: String, startSeq: Int?, completionSeq: Int?)
+    case nativeTurn(thread: AgentSessionId, turn: String, startSeq: Int?, completionSeq: Int?)
     case recordedAttempt(captured: Int, attemptKey: String)
     private enum Keys: String, CodingKey {
         case kind, thread, turn
@@ -655,7 +658,7 @@ public enum ProviderHistoryReference: Decodable, Sendable, Hashable {
         let c = try decoder.container(keyedBy: Keys.self)
         switch try c.decode(Kind.self, forKey: .kind) {
         case .nativeTurn:
-            self = .nativeTurn(thread: try c.decode(String.self, forKey: .thread),
+            self = .nativeTurn(thread: try c.decode(AgentSessionId.self, forKey: .thread),
                 turn: try c.decode(String.self, forKey: .turn),
                 startSeq: try c.decodeIfPresent(Int.self, forKey: .startSeq),
                 completionSeq: try c.decodeIfPresent(Int.self, forKey: .completionSeq))

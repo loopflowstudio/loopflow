@@ -234,10 +234,10 @@ Draft/CI: `be4a2b2af:wave/infrastructure/MEMORY.md`, this heading.
 
 LOO-447: fenced stop/abort; drop never signals. Codex acquires custody before
 claiming. Standby cannot write; group death releases custody; watchdog stays outside.
-OpenCode saves origins/permission attempts before HTTP; readback never replays
-uncertain replies. Endpoint/stderr reuse remains harness-only.
-`642e6cbf9` removes creation retries; lost identity remains unresolved.
-Claude pipes remain launcher-owned; public takeover and both death orders unfinished. Plan: `scratch/stop-and-take-over-claude.md`.
+OpenCode saves reply attempts before fenced HTTP; readback never replays uncertainty.
+`62b6c27df` recovers replies without a reader. Endpoint reuse remains harness-only;
+pre-save identity loss unresolved. Claude pipes remain launcher-owned; public takeover and
+both death orders unfinished. Plan: `scratch/stop-and-take-over-claude.md`.
 
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)
 

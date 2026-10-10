@@ -1471,39 +1471,9 @@ mod tests {
         assert!(payload.get("model").is_none());
     }
 
-    // -- Fake-SSE disconnect matrix --
-
+    // Optional configured-provider smoke; deterministic history fixtures cover
+    // per-request completion without credentials or timing guesses.
     use crate::chat::types::{ConversationItem, Lifecycle};
-
-    // -- Live checks against the real `opencode serve` --
-    //
-    // Ignored by default; they spawn `opencode serve` and drive a real model,
-    // so they need the `opencode` CLI on PATH and configured credentials (the
-    // OpenCode Zen default, `opencode/glm-5.2`). Run explicitly with:
-    //   cargo test -p loopflow --lib opencode::tests::live_ -- --ignored --nocapture
-
-    fn live_config() -> AgentConfig {
-        AgentConfig {
-            chrome: false,
-            session_attachment: None,
-            system_prompt: String::new(),
-            conversation_context: None,
-            task_prompt: String::new(),
-            skill_invocation: None,
-            agent: Some("opencode".to_string()),
-            cwd: Some(std::env::temp_dir()),
-            max_turns: None,
-            resume_token: None,
-            provider_account_id: None,
-            provider_account_authority_home: None,
-            write_scope: AgentWriteScope::Configured,
-            execution_boundary: None,
-            skip_permissions: false,
-            structured_replies: Vec::new(),
-            directive_relay: None,
-            env: Default::default(),
-        }
-    }
 
     /// Drain events up to the first `TurnCompleted`, accumulating assistant
     /// text, and return `(status, text)`.
@@ -1526,26 +1496,16 @@ mod tests {
         }
     }
 
-    /// Assert no further `TurnCompleted` arrives within a short window — proof
-    /// that the coalesced boundary was the only one for the `send_input`.
-    async fn assert_no_more_completions(rx: &mut mpsc::UnboundedReceiver<ConversationEvent>) {
-        loop {
-            match tokio::time::timeout(Duration::from_secs(5), rx.recv()).await {
-                Ok(Some(ConversationEvent::TurnCompleted { .. })) => {
-                    panic!("a second TurnCompleted arrived; the steer was not coalesced")
-                }
-                Ok(Some(_)) => {}
-                Ok(None) | Err(_) => return,
-            }
-        }
-    }
-
     #[tokio::test]
     #[ignore = "drives the real opencode serve; needs opencode CLI + credentials"]
     async fn live_basic_turn_completes() {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mut harness = OpenCodeHarness::new(tx);
-        let mut config = live_config();
+        let mut config = AgentConfig {
+            agent: Some("opencode".into()),
+            cwd: Some(std::env::temp_dir()),
+            ..Default::default()
+        };
         let _ledger = super::super::admit_for_test(&mut config);
         harness.start(&config).await.expect("start");
 
@@ -1556,46 +1516,6 @@ mod tests {
         let (status, text) = drive_turn(&mut rx).await;
         assert_eq!(status, Lifecycle::Completed);
         assert!(text.to_uppercase().contains("ALPHA"), "turn text: {text:?}");
-
-        harness.stop().await.expect("stop");
-    }
-
-    #[tokio::test]
-    #[ignore = "drives the real opencode serve; needs opencode CLI + credentials"]
-    async fn live_send_current_coalesces_into_one_boundary() {
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        let mut harness = OpenCodeHarness::new(tx);
-        let mut config = live_config();
-        let _ledger = super::super::admit_for_test(&mut config);
-        harness.start(&config).await.expect("start");
-
-        harness
-            .send_input(
-                "Write a slow, detailed 400-word essay about how a bicycle works. \
-                 Take your time and be thorough.",
-            )
-            .await
-            .expect("seed turn");
-        // Inject a steer while the seed turn is still generating.
-        tokio::time::sleep(Duration::from_secs(2)).await;
-        let outcome = harness
-            .send_current("IMPORTANT: also include the exact word PANGOLIN in your reply.")
-            .await;
-        assert!(
-            matches!(outcome, SendCurrentOutcome::Sent { .. }),
-            "steer accepted into the live turn: {outcome:?}"
-        );
-
-        // opencode keeps the session busy across the queued steer and emits one
-        // idle, so the reader must produce exactly one TurnCompleted.
-        let (status, text) = drive_turn(&mut rx).await;
-        assert_eq!(status, Lifecycle::Completed);
-        assert!(
-            text.to_uppercase().contains("PANGOLIN"),
-            "the steer was incorporated: {text:?}"
-        );
-        assert_no_more_completions(&mut rx).await;
-        assert!(!harness.turn_in_progress.load(Ordering::SeqCst));
 
         harness.stop().await.expect("stop");
     }

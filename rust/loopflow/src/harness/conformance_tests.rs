@@ -459,7 +459,7 @@ fn opencode_native_history_preserves_output_tools_and_usage_missingness() {
 }
 
 #[test]
-fn opencode_native_error_completes_only_its_request() {
+fn opencode_queued_requests_complete_independently() {
     let home = tempfile::tempdir().unwrap();
     let path = home.path().join("store.db");
     let store = crate::store::sqlite::SqliteStore::open_ephemeral(&path).unwrap();
@@ -478,6 +478,8 @@ fn opencode_native_error_completes_only_its_request() {
     let mut history = History::new((store, "session".into(), attachment));
     let request =
         super::opencode_history::record_request(&history.owner, &"session".into()).unwrap();
+    let queued =
+        super::opencode_history::record_request(&history.owner, &"session".into()).unwrap();
     let message = json!({"info":{"id":"assistant","parentID":request,"role":"assistant","sessionID":"session",
         "time":{"created":1,"completed":2},"error":{"name":"APIError","data":{"message":"provider rejected request"}}},"parts":[]});
     let events = history
@@ -486,8 +488,27 @@ fn opencode_native_error_completes_only_its_request() {
     assert!(
         matches!(&events[..], [ConversationEvent::TurnStarted {turn_id}, ConversationEvent::Error {message,..}, ConversationEvent::TurnCompleted {turn_id:completed,status:Lifecycle::Failed}] if turn_id == &request && completed == &request && message == "provider rejected request")
     );
+    let mut queued_message = json!({"info":{"id":"queued-assistant","parentID":queued,
+        "role":"assistant","sessionID":"session","time":{"created":3}},"parts":[]});
+    let events = history
+        .observe(
+            &"session".into(),
+            &[message.clone(), queued_message.clone()],
+        )
+        .unwrap();
+    assert!(
+        matches!(&events[..], [ConversationEvent::TurnStarted { turn_id }] if turn_id == &queued)
+    );
+
+    queued_message["info"]["time"]["completed"] = json!(4);
+    queued_message["info"]["finish"] = json!("stop");
+    let messages = [message, queued_message];
+    let events = history.observe(&"session".into(), &messages).unwrap();
+    assert!(
+        matches!(&events[..], [ConversationEvent::TurnCompleted { turn_id, status: Lifecycle::Completed }] if turn_id == &queued)
+    );
     assert!(history
-        .observe(&"session".into(), &[message])
+        .observe(&"session".into(), &messages)
         .unwrap()
         .is_empty());
 }

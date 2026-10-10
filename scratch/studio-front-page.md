@@ -486,3 +486,12 @@ down from six, and a new section follows it, "That was one workflow. It is a
 file.", with Jack Heart's "Every Task ends shipped" sentence, the real
 `feature.yaml`, and the three built-in workflows beside a fourth row for your
 own. HumanLayer is not named on the page. `x7` is kept for comparison.
+
+Jack Heart on the thesis: cut "Coding with agents is about empowering people,
+not delegating the thinking to robots." For the second paragraph: "All you
+have to do is share what you want to make and how it should work. Loopflow
+automatically turns that into a plan you can, and executs that plan for you,
+stopping to discuss with you according to how you like to work", then "this is
+like ... the opposite of our first claim thoguh". Both are in `x8`; the
+tension between "it doesn't make the software for you" and "carries that plan
+out for you" is open.

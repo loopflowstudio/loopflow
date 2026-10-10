@@ -2,9 +2,10 @@
 
 Jack Heart requested provider-independent takeover and stop on 2026-10-09.
 The outcome is accepted; the transport design below remains a draft (2026-10-10).
-Source reconciliation: `64b785022` (2026-10-10), including process-death creation
-recovery at `07529ac3d`, shared prompt submission, cancellation at `cd9f78dd0`
-and ordered readback at `196b57ac2`.
+Source reconciliation: `07dc2e34f` (2026-10-10), including OpenCode public
+connection at `b10b6ff065`, transport separation at `9df773fa3` and main
+`df5169ab9` (#1521). Creation recovery, shared prompt submission and ordered
+readback remain implemented.
 Dependencies #1519/#1520 are integrated at `be4a2b2af`, satisfying Jack Heart's
 steer `28e0c5cc`. LOO-443's remaining item 3 was read at
 `4f6ed76b2^:scratch/introduce-agentprocess-record-the-provider.md`.
@@ -54,6 +55,38 @@ Claude harness stop fencing, and helpers surviving leader exit. They prove neith
 public takeover nor Linux acceptance. Invalid trace IDs and foreground defaults
 in Claude fixtures were repaired; production schema and installed data are unchanged.
 
+### OpenCode public connection (implemented)
+
+Harness startup now consumes the saved
+server URL/native Session and retains common custody instead of spawning again.
+It subscribes to SSE before initial message readback, recovering request origins
+without another edge or replay. New servers write stderr to a private per-AgentProcess
+file beside the FIFO; no launcher-local pipe/logger remains. Reader failure and
+harness drop detach without stopping a reused provider; pre-exec failures retain non-start evidence. Reconnect preserves native permissions
+without another setup mutation.
+Public `ops/human_session.rs::open` now dispatches Codex and OpenCode through
+the same custody-before-claim and client-only settlement path. OpenCode reuses
+the existing harness reader and native `attach` through an authenticated local
+HTTP relay. Pending native identity reaches saved-creation readback before
+ordinary resume. Prompts and abort are fenced; answer streaming is outside
+the fence. Repeated prompt IDs refuse replay. Native reads preserve queries
+while pinning the saved working directory. Other native mutations currently
+refuse explicitly; native command/shell and manual permission UX are not proved.
+The public stand-in fixture covers identity recovery and client-only exit,
+not process-death orders. Retain the implemented permission recovery above.
+Startup saves the endpoint before spawn and creation intent before HTTP.
+The October 10 protocol correction below removes separate permission setup:
+creation saves/sends the original rules together with a per-AgentProcess title.
+A lost response is recovered by exact-title native listing; zero or multiple
+matches retain uncertainty without another create. Native title changes before
+identity recovery remain unresolved, not permission to choose a nearby Session.
+Attachment transfer retains the same AgentProcess and saved payload despite
+changed configuration. Existing native conversations retain their permissions.
+The focused fixture kills a throwaway creation worker after HTTP acceptance,
+before response/identity persistence, reopens SQLite and recovers on takeover.
+This is process-death startup recovery, not public attachment or both provider
+death orders. Preserve frozen authority for prompts, replies, abort and stop.
+
 ## Remaining implementation
 
 1. **Replace launcher-owned-only Claude transport.** Its anonymous stdin/stdout/
@@ -64,44 +97,20 @@ in Claude fixtures were repaired; production schema and installed data are uncha
    private Unix endpoint before takeover; validate frozen attachments at this owner
    before writes. Lost responses or transport death retain uncertain inputs, never
    replay them. This proposal is unimplemented, not an accepted relay design.
-   Public `open` currently requires saved native identity before reaching live
-   connection dispatch. Publishing a transport endpoint alone cannot cover takeover
-   before Claude's first native output: admission and connection must preserve the
-   pending native-identity state without launching a replacement or inventing an ID.
+   Public `open` now reaches live dispatch before requiring native identity,
+   supporting OpenCode creation readback. `connect_live_agent` still excludes
+   Claude. Its extension must preserve pending identity before Claude's first
+   native output, without launching a replacement or inventing an ID.
    `claude_history::History` also owns a frozen attachment and an in-memory
    request map/pending queue. Moving pipes alone leaves correlation and attention
    tied to the launcher. Transport extraction must preserve original turn origins
    while accepting only the current attachment for new writes; custody is not
    write authority.
-2. **Finish OpenCode public recovery.** Harness startup now consumes the saved
-   server URL/native Session and retains common custody instead of spawning again.
-   It subscribes to SSE before initial message readback, recovering request origins
-   without another edge or replay. New servers write stderr to a private per-AgentProcess
-   file beside the FIFO; no launcher-local pipe/logger remains. Reader failure and
-   harness drop detach without stopping a reused provider; pre-exec failures retain non-start evidence. Reconnect preserves native permissions
-   without another setup mutation.
-   Public `ops/human_session.rs::open` now dispatches Codex and OpenCode through
-   the same custody-before-claim and client-only settlement path. OpenCode reuses
-   the existing harness reader and native `attach` through an authenticated local
-   HTTP relay. Pending native identity reaches saved-creation readback before
-   ordinary resume. Prompts and abort are fenced; answer streaming is outside
-   the fence. Repeated prompt IDs refuse replay. Native reads preserve queries
-   while pinning the saved working directory. Other native mutations currently
-   refuse explicitly; native command/shell and manual permission UX are not proved.
-   The public stand-in fixture covers identity recovery and client-only exit,
-   not process-death orders. Retain the implemented permission recovery above.
-   Startup saves the endpoint before spawn and creation intent before HTTP.
-   The October 10 protocol correction below removes separate permission setup:
-   creation saves/sends the original rules together with a per-AgentProcess title.
-   A lost response is recovered by exact-title native listing; zero or multiple
-   matches retain uncertainty without another create. Native title changes before
-   identity recovery remain unresolved, not permission to choose a nearby Session.
-   Attachment transfer retains the same AgentProcess and saved payload despite
-   changed configuration. Existing native conversations retain their permissions.
-   The focused fixture kills a throwaway creation worker after HTTP acceptance,
-   before response/identity persistence, reopens SQLite and recovers on takeover.
-   This is process-death startup recovery, not public attachment or both provider
-   death orders. Preserve frozen authority for prompts, replies, abort and stop.
+2. **Complete OpenCode native mutation coverage.** The public connection and
+   pending-identity recovery exist. Native command/shell and manual permission
+   mutations still refuse at the relay; preserve frozen authority and saved request
+   origins when completing them. These are not accepted scope exclusions.
+   Public process-death proofs remain in step 4, distinct from creation-worker death.
 3. **Carry common custody through new public transports.** The anonymous
    lifelines, optional launch path, endpoint-derived FIFO and `HELD_LIFELINES`
    are deleted. Codex/OpenCode public connection acquires common custody before
@@ -161,8 +170,9 @@ and saves native Session identity under the fence. It is not in this branch or
 local main. Reuse that history path when integrated; preserve schema, skill-input
 and correction turns. Its Flow fixture proves no launcher-independent transport.
 
-Source reconciliation at `64b785022`: local main remains `be4a2b2af`;
-LOO-450's `784b162e0` remains outside this branch. Preserve its unified seed
+At `07dc2e34f`, main `df5169ab9` is integrated; #1521 makes checkout files
+own Wave documents and pins Linear sync to committed local default-branch bytes.
+It changes no provider transport. LOO-450's `784b162e0` remains outside this branch. Preserve its unified seed
 write/error path and native selection when extracting transport. Its non-null
 schema replay and Task-to-publication proof remain open.
 
@@ -201,4 +211,4 @@ and “Public OpenCode transport.”
 
 ## Checks
 
-Checks: `cargo test -p loopflow --lib --offline --no-run`, `cargo fmt`, `cargo clippy --offline --all-targets -- -D warnings`, and `git diff --check` pass; network-isolated library fixtures for public OpenCode pending-identity open, streamed-prompt/A → B → A fencing, and existing Codex connection pass (3 tests). Linux acceptance remains CI-owned.
+Checks: `git diff --check` passes (prose-only reconciliation); prior focused build/fmt/Clippy and three isolated public-connection/relay fixtures passed before #1521; merged-code verification and Linux acceptance remain gate/CI-owned.

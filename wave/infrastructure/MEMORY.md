@@ -246,7 +246,9 @@ and a correlation title; PATCH fixtures were wrong (`894bc61e5`).
 Missing/ambiguous identity readback stays uncertain.
 `07529ac3d`: creation-worker death/readback without replay.
 `b10b6ff065`: OpenCode identity recovery/fenced relay; answers stream outside
-the fence. Death orders unproved; Claude transport remains launcher-owned.
+the fence. `9df773fa3` separates clients from shared attachment ownership.
+Public dispatch now admits pending OpenCode identity, but excludes Claude.
+Death orders unproved; Claude transport remains launcher-owned.
 Plan: `scratch/stop-and-take-over-claude.md`.
 
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)
@@ -387,12 +389,10 @@ still requires two adjacent original configured dues, two automatic executions,
 at least one artifact publication, required verification and no manual repair.
 Collapsed misses supply accounting coverage, never additional settlements.
 
-At `fe36937fa`, main's Session/Exec/Home/Flow and release recovery are integrated.
-Exact saved-candidate inspection permits replacement only with affirmative
-unpublished evidence, preserving rejected candidate/proof and original due owner.
-Unknown or partial publication blocks replacement. CI-repair children now retain
-release target and checkout ownership. Reported focused passes and merged source
-are not a full affected gate, configured publication or Task completion.
+Earlier saved-candidate and CI-repair source proofs:
+`07dc2e34f:wave/infrastructure/MEMORY.md`, this heading. Replacement still
+requires affirmative unpublished evidence; unknown/partial publication blocks.
+Preserve rejected candidates and original due ownership. Source is not settlement.
 
 Separate durable facts: physical cron exit, product settlement, publisher stages,
 public artifact proof and dated repair ownership. Assigning a closed opportunity
@@ -403,12 +403,10 @@ reacquire after dropping the parent's shared handle. Parent death and elapsed
 wait grant neither mutation nor deletion authority. Main-reset/stash helpers can
 replace a held lock inode; explicit source selection avoids that failure class.
 
-Same-Home coverage, overlap, retry timing and interruption proofs remain at
-`c418953634bd101f51878d2be2b40fb3facafabd:wave/infrastructure/MEMORY.md`
-and its referenced commits `a60ac0281`, `02d6b3c00`, `95643bd50`, `d60d254ef`.
-They retain original ownership, physical failure, frozen coverage, candidate,
-caller bytes and child-held locks without republishing or double settlement.
-Synthetic proofs do not establish configured automatic settlements.
+Same-Home interruption/overlap proofs and exact commits remain at
+`c418953634bd101f51878d2be2b40fb3facafabd:wave/infrastructure/MEMORY.md`,
+this heading. They preserve ownership, frozen coverage, failure and child-held
+locks, but prove no configured automatic settlement.
 
 PR #1457 merged installer isolation: candidate preflight and public installer
 smoke use disposable Linux containers, checking selected CLI bytes instead of

@@ -127,6 +127,14 @@ attribution survive.
   surviving launch-path proofs. Codex's write-only `endpoint` and OpenCode's
   mirrored `child_group` are removed; Codex retains its pre-handle group slot.
 
+- Store lifecycle writers named for the Session or the native launcher:
+  `record_session_provider_launch`, `record_session_provider_process`,
+  `record_native_provider_exit` and `session_provider_process` are now
+  `record_agent_process_launch`/`_identity`/`_exit` and `agent_process_identity`;
+  headless and native launch share one pre-exec recorder and one progress query.
+  Still named for the provider: `SessionAttachment.provider_generation` and
+  `provider_process_lfid`, which leave with the generation cut below.
+
 ## Current implementation boundary (reconciled 2026-10-09)
 
 `446cfb2b5` supplies one `processes` table (`lf` / `agent`), attachment tokens,
@@ -378,5 +386,7 @@ LfSession's selected AgentSession. Branch-only fixtures use the typed identity.
 
 Earlier native-util/planning-reconnect, 16-test isolated lifecycle and typed-identity
 sync checks are retained at `e87e9d643`, this plan.
+
+Compress check: `cargo clippy -p loopflow --all-targets -- -D warnings` passes; `cargo test -p loopflow --lib` for `harness::agent_process`, `store::sqlite::processes`, `session_record::runtime`: 27 passed. Wider suites stay with gate.
 
 Check: `cargo test -p loopflow --no-fail-fast` with inherited `LF_*` cleared and stdin closed: library 1766 passed, 4 failed (three pass alone; one is main's planning-migration fixture above); every integration target passes after repair; `cargo fmt --all --check` and `cargo clippy --all-targets -- -D warnings` pass. Swift, draft materialization, Linux lifeline and live-provider smokes remain gate/CI-owned. Earlier focused results: `16415389c`, this plan.

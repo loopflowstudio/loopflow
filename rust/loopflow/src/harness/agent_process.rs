@@ -25,6 +25,20 @@ pub(super) fn open_owner(
     ))
 }
 
+/// The pre-exec recorder both launch paths share: the child's PID and birth
+/// reach its record under the owner's attachment before the provider runs.
+fn record_identity(
+    (store, session, attachment): &(SqliteStore, String, SessionAttachment),
+) -> impl FnOnce(u32) -> std::io::Result<()> + Send + '_ {
+    move |pid| {
+        let started_at = process_started_at(pid)?
+            .ok_or_else(|| std::io::Error::other("AgentProcess birth unavailable before exec"))?;
+        store
+            .record_agent_process_identity(session, attachment, pid, started_at)
+            .map_err(std::io::Error::other)
+    }
+}
+
 /// One headless launch sequence for every harness. Keep the attachment fence
 /// through pre-exec recording, and retain failed attempts without inventing an
 /// observed exit. Synchronous admission cannot detach a launch on async cancellation.
@@ -41,17 +55,14 @@ pub(super) fn spawn(
             .to_string_lossy()
             .into_owned();
         store.with_session_attachment(session, attachment, || {
-            store.record_session_provider_launch(session, attachment, command.as_std())?;
-            let spawned = crate::engine::process::spawn_agent_process(command, lifeline, |pid| {
-                let started_at = process_started_at(pid)?.ok_or_else(|| {
-                    std::io::Error::other("AgentProcess birth unavailable before exec")
-                })?;
-                store
-                    .record_session_provider_process(session, attachment, pid, started_at)
-                    .map_err(std::io::Error::other)
-            });
+            store.record_agent_process_launch(session, attachment, command.as_std())?;
+            let spawned = crate::engine::process::spawn_agent_process(
+                command,
+                lifeline,
+                record_identity(owner),
+            );
             if spawned.is_err() {
-                store.record_native_provider_exit(session, attachment, false)?;
+                store.record_agent_process_exit(session, attachment, false)?;
             }
             spawned.map_err(|error| {
                 StoreError::InvalidData(format!("failed to spawn {program}: {error}"))
@@ -71,17 +82,11 @@ pub(crate) fn spawn_native(
     let (store, session, attachment) = owner;
     store
         .with_session_attachment(session, attachment, || {
-            store.record_session_provider_launch(session, attachment, &command)?;
-            let spawned = crate::engine::process::spawn_native_agent_process(command, |pid| {
-                let started_at = process_started_at(pid)?.ok_or_else(|| {
-                    std::io::Error::other("AgentProcess birth unavailable before exec")
-                })?;
-                store
-                    .record_session_provider_process(session, attachment, pid, started_at)
-                    .map_err(std::io::Error::other)
-            });
+            store.record_agent_process_launch(session, attachment, &command)?;
+            let spawned =
+                crate::engine::process::spawn_native_agent_process(command, record_identity(owner));
             if spawned.is_err() {
-                store.record_native_provider_exit(session, attachment, false)?;
+                store.record_agent_process_exit(session, attachment, false)?;
             }
             // Preserve the OS error (including NotFound) for the caller's message.
             Ok(spawned)
@@ -106,7 +111,7 @@ pub(crate) fn stop_native(
         };
         wait().map_err(|error| StoreError::InvalidData(error.to_string()))?;
         if let Some((store, session, attachment)) = owner {
-            store.record_native_provider_exit(session, attachment, true)?;
+            store.record_agent_process_exit(session, attachment, true)?;
         }
         Ok(())
     };
@@ -160,8 +165,7 @@ fn reap_in(store: &SqliteStore, dry_run: bool) -> StoreResult<AgentProcessReapRe
                 process.evidence(start)
             });
         let dead = evidence == ProcessIdentityEvidence::Dead;
-        let orphaned = evidence == ProcessIdentityEvidence::Live
-            && counts[&(pid, start)] == 1
+        let orphaned = counts[&(pid, start)] == 1
             && !agent.interactive
             && agent.attached_process_lfid.as_ref().is_none_or(|attached| {
                 process_evidence(store, attached) == ProcessIdentityEvidence::Dead
@@ -504,7 +508,7 @@ mod tests {
         // Spawn success alone must not manufacture exit evidence.
         assert!(recorded.completed_at.is_none());
         store
-            .record_native_provider_exit(&session.id, &first, true)
+            .record_agent_process_exit(&session.id, &first, true)
             .unwrap();
         let next = store
             .prepare_session_agent_process(&session.id, &first)
@@ -573,7 +577,7 @@ mod tests {
         assert!(recorded.os_started_at.is_some());
         assert_eq!(child.wait().unwrap().code(), Some(42));
         store
-            .record_native_provider_exit(&session.id, &first, true)
+            .record_agent_process_exit(&session.id, &first, true)
             .unwrap();
         let next = store
             .prepare_session_agent_process(&session.id, &first)
@@ -647,7 +651,7 @@ mod tests {
                 .claim_session_attachment(&session.id, None, &parent, true)
                 .unwrap();
             store
-                .record_session_provider_process(&session.id, &attached, pid, start)
+                .record_agent_process_identity(&session.id, &attached, pid, start)
                 .unwrap();
             store
                 .release_session_attachment(&session.id, &attached)

@@ -1081,7 +1081,7 @@ mod tests {
                 .unwrap()
                 .unwrap();
             store
-                .record_session_provider_process(&session.id, &original, child.id(), started)
+                .record_agent_process_identity(&session.id, &original, child.id(), started)
                 .unwrap();
             // An engine whose socket has gone must still be reaped on exit.
             store
@@ -1636,7 +1636,7 @@ mod tests {
             )
             .unwrap();
         store
-            .record_session_provider_process("conversation", &original, 12345, 12)
+            .record_agent_process_identity("conversation", &original, 12345, 12)
             .unwrap();
         store
             .record_session_turn_origin(
@@ -1653,7 +1653,7 @@ mod tests {
         assert_eq!(replacement.provider_generation, 2);
         assert!(store.session_connection("conversation").unwrap().is_none());
         assert!(store
-            .session_provider_process("conversation")
+            .agent_process_identity("conversation")
             .unwrap()
             .is_none());
         assert_eq!(
@@ -1669,7 +1669,7 @@ mod tests {
             )
             .is_err());
         assert!(store
-            .record_session_provider_process("conversation", &original, 12346, 13)
+            .record_agent_process_identity("conversation", &original, 12346, 13)
             .is_err());
         store
             .record_session_event(

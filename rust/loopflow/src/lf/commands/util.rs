@@ -851,8 +851,8 @@ fn run_native_session(
     } else {
         child.wait()?
     };
-    if let Some((store, session, driver)) = owned {
-        store.record_native_provider_exit(session, driver, true)?;
+    if let Some((store, session, attachment)) = owned {
+        store.record_agent_process_exit(session, attachment, true)?;
     }
     if let Some(observer) = observer {
         observer

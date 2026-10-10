@@ -165,7 +165,7 @@ mod tests {
         let pid = old.0.id();
         let start = crate::journal::process_started_at(pid).unwrap().unwrap();
         store
-            .record_session_provider_process(&session.id, &first, pid, start)
+            .record_agent_process_identity(&session.id, &first, pid, start)
             .unwrap();
         let released = store
             .release_session_attachment(&session.id, &first)
@@ -191,7 +191,7 @@ mod tests {
         let pid = current.0.id();
         let start = crate::journal::process_started_at(pid).unwrap().unwrap();
         store
-            .record_session_provider_process(&session.id, &second, pid, start)
+            .record_agent_process_identity(&session.id, &second, pid, start)
             .unwrap();
         let observed = read();
         assert_eq!(observed.discovery, DiscoveryState::Ready);

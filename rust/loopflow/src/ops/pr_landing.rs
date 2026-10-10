@@ -242,18 +242,18 @@ fn admit_ci_fix(
             return Ok(());
         }
         if let Some(session) = &reservation.session {
-            // A bound driver's engine is judged by its own OS identity.
+            // An attached Session's AgentProcess is judged by its own OS identity.
             let bound = store
                 .sqlite
                 .session_attachment(session)
                 .map_err(repair_error)?
                 .is_some();
-            let engine = store
+            let agent = store
                 .sqlite
-                .session_provider_process(session)
+                .agent_process_identity(session)
                 .map_err(repair_error)?;
             if bound
-                && engine.is_some_and(|(pid, started)| {
+                && agent.is_some_and(|(pid, started)| {
                     crate::journal::process_identity_evidence(pid, started)
                         != crate::journal::ProcessIdentityEvidence::Dead
                 })

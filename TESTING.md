@@ -1074,6 +1074,8 @@ container works on macOS). That suite is compiled out on macOS, so a local Rust
 pass there does not cover its HTTPS fixtures. Keep nullable requested fields,
 including `dueDate`, present in fixture responses. Team migration also reads issue
 comments; its fixtures must include the requested pagination metadata.
+Run the same Linux suite when changing Linear mutation inputs or acknowledgements:
+the reconnect peer must accept partial Initiative updates and return `success`.
 
 ```bash
 cargo nextest run -p loopflow --lib -E 'test(pm::linear::) | test(ops::pm::) | test(ops::linear_observe::)' --no-fail-fast

@@ -106,14 +106,16 @@ pub(super) fn session_in(conn: &Connection, id: &str) -> StoreResult<Option<LfSe
 /// current attachment's input/hand-back/quiet reading. Filter before pagination.
 fn waiting_sql(session: &str, now: i64) -> String {
     format!(
-        "EXISTS(SELECT 1 FROM session_activity act WHERE act.session_id={session}.id
+        "EXISTS(SELECT 1 FROM session_activity act
+            JOIN processes p ON p.id={session}.agent_process_id
+            WHERE act.session_id={session}.id
             AND {session}.completed_at IS NULL AND act.agent_process_id IS {session}.agent_process_id
-            AND EXISTS(SELECT 1 FROM processes p WHERE p.id={session}.agent_process_id AND p.completed_at IS NULL)
+            AND p.completed_at IS NULL
             AND CASE WHEN act.program_status IS NOT NULL THEN
                 EXISTS(SELECT 1 FROM json_each(act.program_status,'$.records') r
                     WHERE json_extract(r.value,'$.state')='blocked'
                     OR ({session}.interactive=1 AND json_extract(r.value,'$.state')='idle'))
-            ELSE act.attachment_token=(SELECT attachment_token FROM processes WHERE id={session}.agent_process_id)
+            ELSE act.attachment_token=p.attachment_token
                 AND (act.pending_input>0 OR (act.open_tools=0 AND (({session}.interactive=1 AND act.yielded=1)
                     OR {now}-act.observed_at>={quiet}))) END)",
         quiet = crate::session::WAITING_QUIET_SECONDS
@@ -269,17 +271,16 @@ fn read_summary(
             None => None,
         };
         let agent_process_id: Option<crate::id::LfProcessId> = row.get(32)?;
-        let agent_process_evidence = agent_process_id
-            .as_ref()
-            .map(|_| {
-                Ok::<_, rusqlite::Error>(crate::journal::agent_process_evidence(
-                    row.get(33)?,
-                    row.get(34)?,
-                    row.get(35)?,
-                    crate::journal::process_identity_evidence,
-                ))
-            })
-            .transpose()?;
+        let agent_process_evidence = if agent_process_id.is_some() {
+            Some(crate::journal::agent_process_evidence(
+                row.get(33)?,
+                row.get(34)?,
+                row.get(35)?,
+                crate::journal::process_identity_evidence,
+            ))
+        } else {
+            None
+        };
         let live = agent_process_evidence == Some(crate::journal::ProcessIdentityEvidence::Live);
         Ok(crate::session::SessionSummary {
             task_ids: serde_json::from_str(&row.get::<_, String>(26)?)?,

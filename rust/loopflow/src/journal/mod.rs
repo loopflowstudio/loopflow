@@ -996,8 +996,12 @@ pub(crate) fn process_evidence(
     let Ok(Some(record)) = store.process(process) else {
         return ProcessIdentityEvidence::Unknown;
     };
-    let receipts = read_process_receipts_at(&crate::store::lf_home_dir());
-    recorded_process_evidence(&record, receipts.as_deref().ok(), process_identity_evidence)
+    let receipts = if record.kind == crate::process::ProcessKind::Agent {
+        None
+    } else {
+        read_process_receipts_at(&crate::store::lf_home_dir()).ok()
+    };
+    recorded_process_evidence(&record, receipts.as_deref(), process_identity_evidence)
 }
 
 /// Completion is final. Otherwise only the recorded OS identity proves liveness;

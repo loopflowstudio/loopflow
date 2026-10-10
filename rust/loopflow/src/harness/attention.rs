@@ -33,6 +33,7 @@ pub(super) struct Attention {
     yielded: bool,
     failed: bool,
     saved: Option<SessionActivity>,
+    saved_attachment: Option<SessionAttachment>,
 }
 
 impl Attention {
@@ -113,6 +114,10 @@ impl Attention {
     ) {
         if !self.apply(signals) {
             return;
+        }
+        if self.saved_attachment.as_ref() != Some(attachment) {
+            self.saved = None;
+            self.saved_attachment = Some(attachment.clone());
         }
         if let Some(reading) = self.reading(now) {
             if let Err(error) = store.record_session_activity(session, attachment, &reading) {

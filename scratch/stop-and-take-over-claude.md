@@ -4,8 +4,15 @@ Jack Heart requested provider-independent takeover and stop on 2026-10-09.
 The outcome is accepted; the transport design below remains a draft (2026-10-10).
 Source reconciliation: `9bef6bbbe` (2026-10-10), including shared native-client
 launch, command dispatch, saved Claude origins and the unused OpenCode policy removal.
-Claude correlation now uses saved request origins and reconstructs admitted,
+Claude correlation uses saved request origins and reconstructs admitted,
 unfinished turns from Session history; its pipes still belong to the launcher.
+October 10's observation slice removes the reader's stored write attachment:
+activity follows only the same AgentProcess's current display attachment, while
+caller dispatch/stop authority stays frozen. Tools survive detachment in the reader;
+replacement-provider output cannot overwrite current activity. Repeated activity
+is saved immediately after token changes, rather than suppressed by the five-second
+save interval. The surviving-reader fixture proves A → B → A display updates,
+stale dispatch/stop refusal, detachment and replacement isolation; not public takeover.
 Local main remains `df5169ab9` (#1521). Creation recovery, shared prompt
 submission and ordered readback remain implemented. Earlier iteration feedback's
 manual-permission implementation item is satisfied; rendered UX and public
@@ -113,9 +120,10 @@ death orders. Preserve frozen authority for prompts, replies, abort and stop.
    unfinished turns in observation order for the same AgentProcess. Store/reader
    reopen tests cover loss before echo and before result, changed captured input,
    duplicate echo, foreign-process rejection and native-thread binding; they do
-   not preserve an unread pipe or prove public takeover. Attention still uses the
-   reader's frozen attachment. Transport extraction must accept only the current
-   attachment for new writes; custody is not write authority.
+   not preserve an unread pipe or prove public takeover. The reader now stores
+   immutable AgentProcess identity rather than caller write authority and follows
+   the current display attachment only for activity. Transport extraction must
+   accept only the current attachment for new writes; custody is not write authority.
    Source inspection at `b16be2b7a` also finds two launcher-local failure paths:
    `spawn_reader` emits failed completion on EOF, and `send_input` calls
    `kill_process` after a seed write error. Transport extraction must distinguish
@@ -125,11 +133,10 @@ death orders. Preserve frozen authority for prompts, replies, abort and stop.
    error, not just EOF: a failed durable observation cannot become provider-death
    evidence. The transport proof must interrupt recording while a throwaway
    provider survives and retain the uncertain turn. Keep the existing parser, but
-   separate its immutable
-   request origins from current-attachment activity writes: `History::record`
-   currently sends attention through its original attachment, which becomes stale
-   after handoff. Refreshing that observer must never refresh an old caller's
-   write authority. These are remaining transport changes, not source fixes here.
+   preserve the implemented separation between immutable request origins,
+   current-attachment display activity and frozen caller dispatch authority.
+   The launcher-local EOF/history-error and uncertain-write teardown paths remain
+   deletion targets, not repaired by the observation slice.
 2. **Finish OpenCode shell correlation.** Command dispatch is implemented: one
    HTTP/1 connection is polled under the fence until the complete fixed-length
    request reaches the socket, then response collection continues outside it.
@@ -163,6 +170,10 @@ direct-child stop, OpenCode's direct-child/group shutdown and retrying abort.
 The shared close and Codex unrelated-thread inspection survive.
 
 ## Delete — do not maintain
+
+Removed in the observation slice: Claude History's retained AttachmentOwner.
+The surviving reader retains AgentProcess identity, saved request origins and
+current-owner display activity without providing callers a refreshed write token.
 
 Remaining: launcher-owned Claude pipe transport and its exclusive fixtures;
 Claude's native-resume fallback for a live headless provider. Preserve the existing
@@ -250,4 +261,4 @@ response collection must not poll an already-completed connection again.
 
 ## Checks
 
-Checks inherited from `9bef6bbbe`: `cargo check -p loopflow`, network-isolated `cargo test -p loopflow --lib reconnect_recovers_pending_input_without_spawning_or_replaying` (1), `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check` pass; public death orders unfinished, Linux acceptance CI-owned; this prose-only realignment: `git diff --check` passed, product checks not rerun.
+`cargo check -p loopflow`, network-isolated lib filters `harness::claude_history::tests` (3) and `harness::attention::tests` (9), `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check`: pass; public death orders unfinished, Linux acceptance CI-owned.

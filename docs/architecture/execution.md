@@ -140,8 +140,10 @@ settles only its attachment, not the provider.
 Claude saves input UUID origins before pipe writes, then recovers admitted,
 unfinished native turns in observation order for the same AgentProcess. These
 receipts preserve attribution across reader reconstruction, not unread pipe
-output. Its stream attention still uses the reader's frozen attachment; Claude
-still lacks launcher-independent pipes and public live connection.
+output. The reader follows the same AgentProcess's current attachment for display
+activity only, retaining tool state while detached and ignoring replacement
+providers. Dispatch and stop keep their original frozen authority. Claude still
+lacks launcher-independent pipes and public live connection.
 OpenCode saves request IDs and frozen origins in Session history before HTTP
 submission. Native receipts recover pending correlation after launcher loss;
 submission evidence alone proves neither admission nor completion. Harness reconnect

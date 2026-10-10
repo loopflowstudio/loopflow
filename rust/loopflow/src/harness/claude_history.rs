@@ -1,5 +1,5 @@
 //! Stream input UUIDs, echoed by Claude, correlate each native result.
-use crate::id::AgentSessionId;
+use crate::id::{AgentSessionId, LfProcessId};
 use std::collections::VecDeque;
 
 use anyhow::Result;
@@ -9,19 +9,24 @@ use crate::session::SessionEventKind;
 
 #[derive(Debug)]
 pub(super) struct History {
-    owner: super::agent_process::AttachmentOwner,
+    store: crate::store::sqlite::SqliteStore,
+    session: String,
+    agent_process_id: LfProcessId,
     pending: VecDeque<(AgentSessionId, String)>,
     attention: super::attention::Attention,
 }
 
 impl History {
     pub(super) fn new(owner: super::agent_process::AttachmentOwner) -> Result<Self> {
-        let pending = owner
-            .0
-            .pending_session_turns(&owner.1, &owner.2.agent_process_id)?
+        let (store, session, attachment) = owner;
+        let agent_process_id = attachment.agent_process_id;
+        let pending = store
+            .pending_session_turns(&session, &agent_process_id)?
             .into();
         Ok(Self {
-            owner,
+            store,
+            session,
+            agent_process_id,
             pending,
             attention: Default::default(),
         })
@@ -31,9 +36,27 @@ impl History {
         let Ok(value) = serde_json::from_str::<Value>(line) else {
             return Ok(());
         };
-        let (store, session, attachment) = &self.owner;
-        self.attention
-            .record(store, session, attachment, super::attention::claude(&value));
+        let store = &self.store;
+        let session = &self.session;
+        // This reader observes one immutable provider stream. Following its
+        // current display attachment must never refresh a caller's write token.
+        let signals = super::attention::claude(&value);
+        match store.session_attachment(session) {
+            Ok(Some(attachment))
+                if attachment.agent_process_id == self.agent_process_id
+                    && attachment.lf_process_id.is_some() =>
+            {
+                self.attention.record(store, session, &attachment, signals);
+            }
+            current => {
+                if let Err(error) = current {
+                    tracing::warn!(%error, session, "failed to read Session activity attachment");
+                }
+                // Retain open tools while detached, but publish nothing for a
+                // replacement provider (or manufacture an attached owner).
+                self.attention.apply(signals);
+            }
+        }
         if value["type"] == "user" {
             let (Some(thread), Some(turn)) = (value["session_id"].as_str(), value["uuid"].as_str())
             else {
@@ -43,7 +66,7 @@ impl History {
             let Some((origin, completed)) = store.session_request(session, &thread, turn)? else {
                 return Ok(());
             };
-            if origin.agent_process_id != attachment.agent_process_id || completed {
+            if origin.agent_process_id != self.agent_process_id || completed {
                 return Ok(());
             }
             store.record_session_turn_origin(&thread, turn, &origin)?;
@@ -238,6 +261,135 @@ mod tests {
             value
         );
     }
+    #[test]
+    fn surviving_reader_reports_current_attention_without_reviving_caller_authority() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history.db");
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        store.test_session("conversation", &crate::session_record::new_artifact_key());
+        let sql = rusqlite::Connection::open(&path).unwrap();
+        sql.execute("UPDATE agent_sessions SET interactive=1", [])
+            .unwrap();
+        let a = LfProcessId::new();
+        let b = LfProcessId::new();
+        for process in [&a, &b] {
+            sql.execute(
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+                [process],
+            )
+            .unwrap();
+        }
+        let first = store
+            .claim_session_attachment("conversation", None, &a, false)
+            .unwrap();
+        let mut reader =
+            History::new((store.clone(), "conversation".into(), first.clone())).unwrap();
+        let waiting = || {
+            store
+                .session_summary(
+                    "conversation",
+                    time::OffsetDateTime::now_utc().unix_timestamp(),
+                )
+                .unwrap()
+                .unwrap()
+                .waiting
+        };
+        let yielded = json!({"type":"result","subtype":"success"}).to_string();
+        reader.record(&yielded).unwrap();
+        assert!(waiting());
+        let second = store
+            .claim_session_attachment("conversation", Some(&first), &b, false)
+            .unwrap();
+        assert!(!waiting());
+        // Identical evidence must reach the new owner even inside the attention
+        // save interval, without rebuilding this stream's reader.
+        reader.record(&yielded).unwrap();
+        assert!(waiting());
+        let third = store
+            .claim_session_attachment("conversation", Some(&second), &a, false)
+            .unwrap();
+        assert!(!waiting());
+        reader.record(&yielded).unwrap();
+        assert!(waiting());
+        for stale in [&first, &second] {
+            assert!(store
+                .with_session_attachment::<()>("conversation", stale, || {
+                    panic!("observation refreshed stale dispatch authority")
+                })
+                .is_err());
+            assert!(store
+                .finish_session_attachment("conversation", stale, "interrupted", || {
+                    panic!("observation refreshed stale stop authority")
+                })
+                .is_err());
+        }
+        let detached = store
+            .release_session_attachment("conversation", &third)
+            .unwrap();
+        reader.record(&yielded).unwrap();
+        assert!(!waiting());
+        assert_eq!(
+            store.session_attachment("conversation").unwrap(),
+            Some(detached.clone())
+        );
+        // Continue observing tools while no client is attached. Reattaching
+        // must not lose a running tool or classify its provider as waiting.
+        reader
+            .record(
+                &json!({"type":"assistant","message":{"content":[
+                    {"type":"tool_use","id":"tool"}
+                ]}})
+                .to_string(),
+            )
+            .unwrap();
+        let fourth = store
+            .claim_session_attachment("conversation", Some(&detached), &b, false)
+            .unwrap();
+        reader
+            .record(&json!({"type":"content_block_delta"}).to_string())
+            .unwrap();
+        assert!(
+            !store
+                .session_summary("conversation", i64::MAX)
+                .unwrap()
+                .unwrap()
+                .waiting
+        );
+        reader
+            .record(
+                &json!({"type":"user","message":{"content":[
+                    {"type":"tool_result","tool_use_id":"tool"}
+                ]}})
+                .to_string(),
+            )
+            .unwrap();
+        reader.record(&yielded).unwrap();
+        assert!(waiting());
+        let replacement = store
+            .claim_session_attachment("conversation", Some(&fourth), &a, true)
+            .unwrap();
+        assert_ne!(replacement.agent_process_id, first.agent_process_id);
+        let mut replacement_reader =
+            History::new((store.clone(), "conversation".into(), replacement)).unwrap();
+        replacement_reader
+            .record(
+                &json!({"type":"assistant","message":{"content":[
+                    {"type":"tool_use","id":"replacement-tool"}
+                ]}})
+                .to_string(),
+            )
+            .unwrap();
+        reader.record(&yielded).unwrap();
+        assert!(
+            !store
+                .session_summary("conversation", i64::MAX)
+                .unwrap()
+                .unwrap()
+                .waiting,
+            "an old provider's output replaced the current provider's activity"
+        );
+    }
+
     #[test]
     fn request_from_another_agent_process_cannot_admit_a_native_turn() {
         let dir = tempfile::tempdir().unwrap();

@@ -242,13 +242,13 @@ CI: `be4a2b2af:wave/infrastructure/MEMORY.md`, this heading.
 LOO-447: fenced stop/abort, signal-free drop, standby custody until group death;
 external watchdog. OpenCode saves endpoint/attempts before effects; v1.2.0
 creation carries rules/title, not PATCH. Unknown identity stays uncertain.
-`07529ac3d`: creation-worker death/readback without replay.
-`b10b6ff065`: pending-identity recovery/fenced relay;
-`b16be2b7a`: frozen native launch/client-only settlement;
-`1ce7d0119`: exact UI choices; `773f244b3`: dispatch ends before headers.
-Shell lacks IDs. `4834c18f4` retains Claude origins/admissions,
-not unread pipes or current-owner attention. EOF, history-write failure and
-uncertain input cannot justify settlement/teardown. Public death orders unproved; client loss grants no authority.
+Creation recovery, relay, native launch, permission choices and dispatch proofs:
+`7fec3b53f:wave/infrastructure/MEMORY.md`, this heading. Shell lacks IDs.
+`4834c18f4` retains Claude origins/admissions, not unread pipes. The surviving
+reader now follows current-owner display activity for the same AgentProcess,
+without refreshing caller dispatch/stop authority; replacement providers are isolated.
+EOF, history-write failure and uncertain input cannot justify settlement/teardown.
+Public death orders remain unproved; client loss grants no authority.
 Plan: `scratch/stop-and-take-over-claude.md`.
 
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)

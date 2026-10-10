@@ -59,7 +59,7 @@ Exercise draft upgrade with no document table and retained workflows; reject
 `wave edit`; cover creation and direct edit propagation. Gate owns affected suites,
 CLI launch and Linear sync acceptance; CI owns the full materialized matrix.
 
-## Reconciled implementation
+## Reconciled implementation (2026-10-09)
 
 The deletion cut is implemented. Context reads checkout Markdown on every assembly;
 config and summaries read GOAL.md directly. Creation writes missing files in the
@@ -79,16 +79,23 @@ stored-document reader and file importer, and keeps config fixtures filesystem-o
 Workflow import still prefers `.yaml` and preserves saved definitions; help now
 states that ownership rather than claiming checkout reads.
 
-Release child memory's operation-entry lesson informed native launch coverage;
-its remaining publication/schedule evidence is unrelated and unchanged. No other
-immediate Infrastructure child memory exists in this checkout.
+Release is the only immediate child with memory in this checkout. Its goal,
+memory headings and relevant release/recovery sections were inspected; the full
+historical file was not reread. Its operation-entry lesson applies to Linear sync
+as well as native launch: a config-reader proof alone cannot prove dispatch uses
+the invoking checkout. Release-specific evidence remains in the child.
 
 ## Remaining
 
 Gate owns affected planning/PM/cron/metrics/context suites, Linear sync entry-path
 coverage and materialized migration checks. CI owns the full platform matrix.
+The sync proof must distinguish main and worktree goal bytes, edit the worktree
+file between invocations and inspect the provider-bound summary without a save
+or import. Existing public checkout status and native launch fixtures cover their
+own boundaries, not this one.
 Reconcile LOO-444's context-reader overlap when integrating its committed change;
-no transport changes or installed-store access occurred here. `wave_workflows`
+the locally available main ref is still `906576f39`, so no integrated LOO-444
+result is claimed. No transport changes or installed-store access occurred here. `wave_workflows`
 removal remains Jack's open decision, not a dependency for this cut.
 
 Checks: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, and network-isolated `cargo test --offline -p loopflow --lib` with `work::wave::config::tests` / `store::sqlite::wave_definitions::tests` pass (11 tests); gate/CI own broader acceptance. Earlier checkout/native-launch proofs remain at `3db1e0c00:scratch/read-wave-goals-and-memory.md`.

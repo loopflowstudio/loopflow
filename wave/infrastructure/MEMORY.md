@@ -72,12 +72,14 @@ Newer explicitly active Linear evidence restores visibility and retains the lose
 inventory grants neither restoration nor execution authority. Exact slice proofs:
 `078a6642e:wave/infrastructure/MEMORY.md`, this heading; installed acceptance is unproved.
 
-Jack Heart's October 9 LOO-449 decision supersedes stored Wave documents:
-GOAL.md, MEMORY.md and ancestor Markdown come from the checkout.
-Edit files directly; no document CLI, import, cache or fallback.
-Creation preserves authored bytes. SQLite retains identity, addresses and execution. Registry relocation leaves files in place. `wave_workflows` remains
-unselected for removal: Project catalog/source/selection and Task workflow capture
-read it. LOO-449 edits the draft; installed acceptance is unproved. LOO-444 overlaps the context reader; preserve its transport.
+Jack Heart's October 9 LOO-449 decision makes checkout files own GOAL.md,
+MEMORY.md and ancestor Markdown; edit them directly, without CLI/import/cache.
+Canonical identity must not redirect checkout reads/writes into main.
+`10d44520f` removes document storage in the draft; creation preserves authored
+bytes and relocation leaves files in place. SQLite retains identity/execution.
+`wave_workflows` stays: Project catalog/source/selection and Task capture read it;
+removal is unselected. Gate/installed acceptance remain open. Preserve LOO-444's
+overlapping context transport at integration.
 
 LOO-406's common writer boundary is `84664e661`; `e68f2a423` exports saved UUIDs.
 Separate creation/link attempts retain uncertainty without replay; identity attachment

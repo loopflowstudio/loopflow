@@ -6,9 +6,7 @@
   new files as explicitly required. No stored-document compatibility path remains.
 - Relocation remains a registry-address operation; authored directories are not
   silently moved or overwritten. Direct file authoring owns their placement too.
-- 2026-10-09: Jack Heart's mocked-sync acceptance requires a missing summary
-  writer. The narrow writer is now implemented, without treating a
-  creation/config-reader test as acceptance. Branch-versus-main policy stays
-  open; the implementation preserves sync's supplied checkout path rather than choosing
-  another checkout. Missing GOAL.md is diagnosed before outbound mutation, not
-  treated as permission to clear the provider summary.
+- 2026-10-10: Jack Heart resolved branch/main selection: Linear sync publishes
+  only the committed default-branch goal. The reader uses the local default-branch
+  ref selected by existing origin/HEAD discovery (main when unset), without fetching.
+  Missing refs/files fail rather than falling back to the checkout or stored text.

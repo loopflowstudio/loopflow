@@ -2918,6 +2918,26 @@ fn foreign_projects_do_not_block_sweep_refresh_or_sync() {
     std::env::set_var("LF_HOME", fixture.directory.path());
     let (repo, wave) = runtime.block_on(planning_repo(&fixture));
     runtime.block_on(fixture.seed(now() + 86_400));
+    for args in [
+        vec!["branch", "-M", "main"],
+        vec!["add", "."],
+        vec![
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "-qm",
+            "merged goals",
+        ],
+    ] {
+        assert!(std::process::Command::new("git")
+            .args(args)
+            .current_dir(&repo)
+            .status()
+            .unwrap()
+            .success());
+    }
     let foreign = json!({
         "id":"foreign-project", "name":"Other Repository — Technical Architecture",
         "description":"", "content":"", "status":{"type":"started"},
@@ -4208,7 +4228,7 @@ fn planning_export_removal_during_uncertain_creation_retains_identity() {
 mod planning_order_tests;
 
 #[test]
-fn wave_summary_sync_reads_direct_checkout_edits() {
+fn wave_summary_sync_reads_committed_default_branch() {
     let _lock = crate::journal::test_env_lock();
     let _restore = PlanningEnvironment::isolate();
     let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -4228,6 +4248,15 @@ fn wave_summary_sync_reads_direct_checkout_edits() {
             String::from_utf8_lossy(&output.stderr)
         );
     };
+    git(&repo, &["branch", "-M", "trunk"]);
+    git(
+        &repo,
+        &[
+            "symbolic-ref",
+            "refs/remotes/origin/HEAD",
+            "refs/remotes/origin/trunk",
+        ],
+    );
     git(&repo, &["add", "."]);
     git(
         &repo,
@@ -4252,7 +4281,7 @@ fn wave_summary_sync_reads_direct_checkout_edits() {
             checkout.to_str().unwrap(),
         ],
     );
-    let goal = checkout.join("wave/product/GOAL.md");
+    let goal = repo.join("wave/product/GOAL.md");
     let write = |text: &str| {
         std::fs::write(
             &goal,
@@ -4260,19 +4289,47 @@ fn wave_summary_sync_reads_direct_checkout_edits() {
         )
         .unwrap();
     };
+    let commit = || {
+        git(&repo, &["add", "."]);
+        git(
+            &repo,
+            &[
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "commit",
+                "-qm",
+                "update merged goal",
+            ],
+        );
+    };
     let state = Arc::new(tokio::sync::Mutex::new(PlanningState::default()));
     let (url, server) = runtime.block_on(serve(state.clone()));
     PM_TEST_CONTEXT.sync_scope(fixture.context(&url), || {
         let sync = |plan| {
             crate::lf::commands::ops::sync_planning(&checkout, Some("product"), false, plan, false)
         };
-        write("Checkout objective.");
+        std::fs::write(
+            checkout.join("wave/product/GOAL.md"),
+            "---\npm:\n  linear_initiative: initiative-1\n---\n\n## Objective\n\nEdited directly.\n",
+        ).unwrap();
+        git(&checkout, &["add", "."]);
+        git(&checkout, &["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+            "commit", "-qm", "unmerged objective"]);
         sync(false).unwrap();
         assert_eq!(
             runtime.block_on(async { state.lock().await.wave_summary.clone() }),
-            "Checkout objective."
+            "Keep working."
         );
+        // Even a dirty default checkout must not publish unmerged text.
         write("Edited directly.");
+        sync(false).unwrap();
+        assert_eq!(
+            runtime.block_on(async { state.lock().await.wave_summary.clone() }),
+            "Keep working."
+        );
+        commit();
         sync(false).unwrap();
         assert_eq!(
             runtime.block_on(async { state.lock().await.wave_summary.clone() }),
@@ -4285,18 +4342,21 @@ fn wave_summary_sync_reads_direct_checkout_edits() {
             2
         );
         write("Plan only.");
+        commit();
         sync(true).unwrap();
         assert_eq!(
             runtime.block_on(async { state.lock().await.wave_summary.clone() }),
             "Edited directly."
         );
         std::fs::remove_file(&goal).unwrap();
+        commit();
         assert!(sync(false).unwrap_err().to_string().contains("missing"));
         assert_eq!(
             runtime.block_on(async { state.lock().await.wave_updates }),
             2
         );
         write("Rejected update.");
+        commit();
         runtime.block_on(async { state.lock().await.reject_wave_update = true });
         assert!(sync(false)
             .unwrap_err()
@@ -4312,14 +4372,15 @@ fn wave_summary_sync_reads_direct_checkout_edits() {
         );
         runtime.block_on(async { state.lock().await.reject_wave_update = false });
         write("");
+        commit();
         sync(false).unwrap();
         assert_eq!(
             runtime.block_on(async { state.lock().await.wave_summary.clone() }),
             ""
         );
-        assert!(std::fs::read_to_string(repo.join("wave/product/GOAL.md"))
+        assert!(std::fs::read_to_string(checkout.join("wave/product/GOAL.md"))
             .unwrap()
-            .contains("Keep working."));
+            .contains("Edited directly."));
     });
     server.abort();
 }

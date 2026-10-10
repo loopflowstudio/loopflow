@@ -2122,19 +2122,20 @@ async fn pm_sync_async(
         }
     }
 
+    let default_branch = crate::engine::git::get_default_branch(repo)?;
+    let summary_revision =
+        crate::engine::git::rev_parse(repo, &format!("refs/heads/{default_branch}^{{commit}}"))?;
     let mut wave_updates = Vec::new();
     let mut seen_projects: BTreeMap<String, String> = BTreeMap::new();
     for wave in &waves {
-        let goal = repo.join("wave").join(wave).join("GOAL.md");
-        let content = match std::fs::read_to_string(&goal) {
-            Ok(content) => content,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                let message = format!("{} is missing; cannot sync its summary", goal.display());
-                diagnostics.push(message.clone());
-                blocking.push(message);
-                continue;
-            }
-            Err(error) => return Err(error.into()),
+        let goal = format!("wave/{wave}/GOAL.md");
+        let Some(content) = crate::engine::git::show_file(repo, &summary_revision, &goal)? else {
+            let message = format!(
+                "{goal} is missing on default branch {default_branch}; cannot sync its summary"
+            );
+            diagnostics.push(message.clone());
+            blocking.push(message);
+            continue;
         };
         let summary = crate::work::wave::config::wave_summary(&content);
         let summary = crate::pm::linear::linear_description(&summary);
@@ -2160,7 +2161,7 @@ async fn pm_sync_async(
         }
         if summary.is_some() {
             actions.push(format!(
-                "update Linear Initiative {initiative_id} summary from wave/{wave}/GOAL.md"
+                "update Linear Initiative {initiative_id} summary from {default_branch}:wave/{wave}/GOAL.md"
             ));
         }
 

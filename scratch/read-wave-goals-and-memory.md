@@ -3,13 +3,17 @@
 Jack Heart selected checkout ownership on October 9, 2026
 (`507b173a-3969-469d-8c91-028d57ae225f`). His later steer
 `2991ceb1-c0a7-40a7-90db-b61280abf36d` authorizes publication after a mocked
-sync proves direct GOAL.md edit propagation, not landing or a branch/main policy.
+sync proves direct GOAL.md edit propagation, not landing. His October 10 steer
+`a7f4cbaf-0d87-47d2-83b8-940e5ce7b461` resolves the policy: Linear sees only the
+merged default-branch goal; launch context, list, status and roadmap remain
+checkout-based. He requested republishing.
 
 ## Design and preservation
 
 Read `wave/<address>/` Markdown from the selected checkout on every assembly,
 including ancestors and additional Markdown. Read GOAL.md config and summaries
-there too. Missing files mean absence, never a stored fallback. SQLite retains
+there too, except Linear sync reads the committed default-branch goal. Missing
+files mean absence, never a stored fallback. SQLite retains
 identity, Projects, execution, provider links and Workflow definitions.
 Creation seeds missing GOAL.md/MEMORY.md without overwriting authored bytes.
 Canonical repository identity must not redirect checkout reads or writes into main.
@@ -31,7 +35,7 @@ Workflow import and PM metadata updates remain separate.
   shared by launch policy, cron, metrics and PM.
 - `lf/commands/waves.rs`: list/status/roadmap summaries and PM validation use
   the invoking checkout for its repository, otherwise the recorded repository.
-- `ops/pm.rs`: checkout bindings, legacy Team validation and summary sync.
+- `ops/pm.rs`: checkout bindings and legacy Team validation; default-branch summary sync.
 - `store/sqlite/wave_definitions.rs`: registration, missing-file creation and
   Workflow import. `store/sqlite.rs` and `store/migrations.rs` retain only
   Workflow import/retirement comparisons, not document storage.
@@ -45,11 +49,13 @@ Jack has not selected its removal.
 
 ## Summary sync implemented; publication remains separate
 
-The October 9 draft is implemented. `sync_planning` preserves its supplied
-checkout through `pm_sync_async`; preflight captures summaries before mutations,
-using creation's description normalization. Initiative observations retain their
-summaries. Preflight carries the checked Initiative and changed fields directly
-into apply, removing repeated binding reads, comparisons and map indexing.
+Sync resolves the existing default-branch name from origin/HEAD (main when absent),
+pins its local refs/heads commit once, and reads goal blobs from that commit.
+It neither fetches nor checks out another branch. Dirty default-checkout files and
+committed feature-branch edits cannot supply the summary. Missing refs fail;
+missing GOAL.md blocks outbound mutation. There is no checkout fallback.
+Binding and other planning behavior is unchanged.
+Preflight carries the checked Initiative and changed fields directly into apply.
 Only changed name/description fields are sent through the existing update operation; standalone rename omits description. Provider errors or missing
 success acknowledgements return failure, without automatic write retry.
 
@@ -58,21 +64,20 @@ clear the summary. Review removed an existence-check/read race: preflight parses
 one successful file read instead of a reader whose missing-file result is empty.
 No schema, Workflow, membership or execution owner was added.
 
-The stateful mocked-provider test calls the public `sync_planning` dispatcher
-twice around a direct edit in a disposable linked checkout, whose main checkout
-retains different text. Resulting provider summaries prove propagation without
-import/save. It also covers unchanged sync, plan-only, missing file, rejected
-update without retry, and intentional empty text. Existing foreign-Project and
-legacy Workflow-conversion sync fixtures pass.
+The stateful mocked-provider test uses the public `sync_planning` dispatcher
+from a linked feature checkout, with a non-main default branch. Committed branch
+edits and dirty default-checkout edits leave the provider unchanged; committing the
+same text on the default branch sends it without import/save. It also covers no-op,
+plan-only, missing goal, rejected update without retry and intentional empty text.
+The existing foreign-Project and legacy Workflow fixtures now commit their goals.
 
 ## Remaining and PR notes
 
-Jack's mocked-sync publication condition is satisfied by that source proof.
-Publication belongs to the caller's delivery step; no publication or landing
-occurred here. Branch-versus-main policy remains explicitly open for Jack:
-implementation preserves the caller's existing checkout selection, not a newly
-approved default. CLI process-level dispatch and installed behavior remain gate
-or CI evidence, distinct from the public command-function proof.
+Branch/main selection is resolved by Jack's October 10 decision. Publication is
+authorized after the updated mocked proof; landing is not. CLI process-level and
+installed behavior remain gate/CI evidence, distinct from command-function proof.
+Review retained one pinned Git revision rather than reading another checkout's
+mutable files, preventing dirty default-checkout text from leaking to Linear.
 
 Gate owns broader affected suites, public dispatch and migration acceptance;
 CI owns the platform matrix. Reconcile LOO-444's context reader at integration;
@@ -87,4 +92,4 @@ Release is the only immediate child directory with memory. Its top-level goal
 and full memory were read; the operation-entry lesson above remains applicable,
 with release-specific history retained there.
 
-Checks: `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, and `cargo test -p loopflow --lib wave_summary_sync_reads_direct_checkout_edits -- --test-threads=1` pass after compression; gate/CI own broader and installed acceptance.
+Checks: `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo test -p loopflow --lib sync_ -- --test-threads=1` (17), and the focused foreign-Project sync test (1) pass; broader/platform/installed acceptance remains with gate/CI.

@@ -100,9 +100,15 @@ main = f'''
   </ol>
 </section>
 <section id="yours-to-change" class="conf">
-  <h2>That was one workflow. It is a file.</h2>
+  <h2>How your team works with agents, written down.</h2>
   <p class="say"><b>Every Task ends shipped.</b> Loopflow uses configurable workflows to ensure that Tasks are designed thoughtfully, built simply, shipped, and validated thoroughly, all automatically.</p>
-  <p class="say">None of that process is fixed. Where you step in, what runs between, and which agent runs each step are files in your repository, set project by project. Three workflows come with it. Copy one and change it, or write your own.</p>
+  <p class="say">This is how you share how to work with agents with the other people on your team. What you share is the patterns around your sessions: the prompts, the order they run in, and where a person steps in. They are files in your repository. Commit them, and everyone’s Tasks go the same way. Change one in a pull request, like any other code.</p>
+  <ul class="shared">
+    <li><code>.lf/skills/</code><span>How you like one thing done, in Markdown.</span></li>
+    <li><code>.lf/flows/</code><span>Skills in order, with the loops.</span></li>
+    <li><code>.lf/workflows/</code><span>Where people step in, and the Flow between each stop.</span></li>
+    <li><code>wave/</code><span>What each Wave is for and what it has learned.</span></li>
+  </ul>
   <div class="two">
     <pre tabindex="0" aria-label="The feature workflow file" class="term">{YAML}</pre>
     <ul class="wfs">
@@ -142,7 +148,7 @@ extra = '''
 .walk .lab.down{margin-top:14px!important}.walk .steps{white-space:pre-wrap}
 .conf{padding-top:72px}.conf h2{font-size:clamp(30px,3.2vw,42px);margin:0 0 14px}
 .home-page .conf .say{font-size:18px;line-height:1.6;color:#333;max-width:720px;margin:0 0 12px}.conf .say b{color:var(--text);font-weight:600}
-.conf .two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:28px 40px;align-items:start;margin:28px 0 22px}
+.conf .shared{list-style:none;margin:22px 0 0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));border-top:1px solid var(--border);border-bottom:1px solid var(--border)}.conf .shared li{list-style:none;margin:0;padding:16px 18px 16px 0;display:grid;gap:5px}.conf .shared code{font:500 13px var(--font-mono);color:var(--text);background:none;padding:0}.conf .shared span{font-size:13.5px;line-height:1.5;color:#444}.conf .two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:28px 40px;align-items:start;margin:28px 0 22px}
 .conf .term{margin:0;font-size:12.5px}
 .conf .wfs{list-style:none;margin:0;padding:0;border-top:1px solid var(--border)}
 .conf .wfs li{list-style:none;margin:0;padding:14px 0;border-bottom:1px solid var(--border)}

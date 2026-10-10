@@ -495,3 +495,11 @@ stopping to discuss with you according to how you like to work", then "this is
 like ... the opposite of our first claim thoguh". Both are in `x8`; the
 tension between "it doesn't make the software for you" and "carries that plan
 out for you" is open.
+
+Jack Heart: "I think maybe this page does need more of a \"this is how you
+share how to work with agents with other people on your team\"", then "but
+humanlayer: \"work on the same session\" loopflow: \"share the patterns AROUND
+the sessions, the prompts, etc\"". The `x8` section after the figures is now
+"How your team works with agents, written down.": his sentence, the patterns
+around your sessions as files you commit, the four directories, the real
+`feature.yaml` and the built-in workflows.

@@ -224,9 +224,8 @@ its committed API/integration state and use supported lf operations, never dirty
 
 Remote companions are checkpointed at `7aa8a5eb5`; selectors are implemented locally.
 Existing Work resolution plus one Desktop inspection captures internal lifetime tokens.
-Headless selector/lifetime tests pass; native proof remains.
-LOO-412's committed frontier is `a60d5594a`; no stack/sync or dirty-checkout edits occurred.
-Admission still needs committed-API inspection and composition, not another exchange engine.
+LOO-412 frontier `a60d5594a` has identical `planning_git.rs`: publication/readback,
+not exclusive admission. No stack/sync or dirty-checkout edit occurred.
 
 Admission must replace the temporary refusal with an exclusive path through existing
 planning/execution owners. Two independent Machines must not allocate/start one Task;

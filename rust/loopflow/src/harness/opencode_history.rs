@@ -252,29 +252,19 @@ fn record_receipts(
     Ok(())
 }
 
-pub(super) async fn read_messages(
-    client: &reqwest::Client,
-    endpoint: &str,
-    thread: &AgentSessionId,
-) -> Result<Vec<Value>> {
-    Ok(client
-        .get(format!("{endpoint}/session/{thread}/message"))
-        .timeout(std::time::Duration::from_secs(10))
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await?)
+#[derive(Debug)]
+pub(super) struct Snapshot {
+    pub(super) messages: Vec<Value>,
+    pending: Vec<Value>,
 }
 
-/// Pending native permissions own reply eligibility. SSE only wakes this read:
-/// duplicate edges and reconnect cannot repeat an already attempted reply.
-pub(super) async fn reply_pending_permissions(
+/// Acquire permissions before messages so every pending tool can resolve its
+/// originating request. Output and replies consume this same ordered readback.
+pub(super) async fn read_snapshot(
     client: &reqwest::Client,
     endpoint: &str,
     thread: &AgentSessionId,
-    owner: &super::agent_process::AttachmentOwner,
-) -> Result<()> {
+) -> Result<Snapshot> {
     let mut pending: Vec<Value> = client
         .get(format!("{endpoint}/permission"))
         .timeout(std::time::Duration::from_secs(10))
@@ -284,70 +274,87 @@ pub(super) async fn reply_pending_permissions(
         .json()
         .await?;
     pending.retain(|permission| permission["sessionID"] == thread.as_str());
-    if pending.is_empty() {
-        return Ok(());
-    }
-    // Read after permissions: each pending tool must be present in this snapshot.
-    let messages = read_messages(client, endpoint, thread).await?;
-    for permission in pending {
-        let id = permission["id"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("OpenCode permission has no identity"))?;
-        let assistant = permission["tool"]["messageID"].as_str().ok_or_else(|| {
-            anyhow::anyhow!("OpenCode permission has no originating assistant message")
-        })?;
-        let request = messages
-            .iter()
-            .find(|message| message["info"]["id"] == assistant)
-            .and_then(|message| message["info"]["parentID"].as_str())
-            .ok_or_else(|| anyhow::anyhow!("OpenCode permission has no originating request"))?;
-        let (store, session, attachment) = owner;
-        if !store
-            .session_request(session, thread, request)?
-            .is_some_and(|(origin, _)| origin.agent_process_id == attachment.agent_process_id)
-        {
-            return Err(anyhow::anyhow!(
-                "OpenCode permission belongs to an unselected request"
-            ));
-        }
-        let owner = owner.clone();
-        let endpoint = endpoint.to_string();
-        let thread = thread.clone();
-        let id = id.to_string();
-        let request = request.to_string();
-        with_attached_http(owner, move |(store, session, _), client| {
-            let first_attempt =
-                store.record_session_permission_reply(session, &thread, &id, &request)?;
-            if first_attempt {
-                let response = client
-                    .post(format!("{endpoint}/permission/{id}/reply"))
-                    .json(&json!({"reply":"once"}))
-                    .send()
-                    .and_then(reqwest::blocking::Response::error_for_status);
-                if response.is_ok() {
-                    return Ok(());
-                }
-            }
-            // A lost response can follow acceptance. Readback may settle
-            // absence, but a still-pending permission never permits replay.
-            let pending: Vec<Value> = client
-                .get(format!("{endpoint}/permission"))
-                .send()
-                .and_then(reqwest::blocking::Response::error_for_status)
-                .and_then(|response| response.json())
-                .context("OpenCode permission reply readback")?;
-            if pending.iter().any(|permission| {
-                permission["sessionID"] == thread.as_str() && permission["id"] == id
-            }) {
-                return Err(anyhow!(
-                    "OpenCode permission {id} reply is uncertain; not replaying"
+    let messages = client
+        .get(format!("{endpoint}/session/{thread}/message"))
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    Ok(Snapshot { messages, pending })
+}
+
+/// Pending native permissions own reply eligibility; repeated observations and
+/// reconnect cannot repeat an already attempted reply.
+impl Snapshot {
+    pub(super) async fn reply_pending_permissions(
+        &self,
+        endpoint: &str,
+        thread: &AgentSessionId,
+        owner: &super::agent_process::AttachmentOwner,
+    ) -> Result<()> {
+        for permission in &self.pending {
+            let id = permission["id"]
+                .as_str()
+                .ok_or_else(|| anyhow::anyhow!("OpenCode permission has no identity"))?;
+            let assistant = permission["tool"]["messageID"].as_str().ok_or_else(|| {
+                anyhow::anyhow!("OpenCode permission has no originating assistant message")
+            })?;
+            let request = self
+                .messages
+                .iter()
+                .find(|message| message["info"]["id"] == assistant)
+                .and_then(|message| message["info"]["parentID"].as_str())
+                .ok_or_else(|| anyhow::anyhow!("OpenCode permission has no originating request"))?;
+            let (store, session, attachment) = owner;
+            if !store
+                .session_request(session, thread, request)?
+                .is_some_and(|(origin, _)| origin.agent_process_id == attachment.agent_process_id)
+            {
+                return Err(anyhow::anyhow!(
+                    "OpenCode permission belongs to an unselected request"
                 ));
             }
-            Ok(())
-        })
-        .await?;
+            let owner = owner.clone();
+            let endpoint = endpoint.to_string();
+            let thread = thread.clone();
+            let id = id.to_string();
+            let request = request.to_string();
+            with_attached_http(owner, move |(store, session, _), client| {
+                let first_attempt =
+                    store.record_session_permission_reply(session, &thread, &id, &request)?;
+                if first_attempt {
+                    let response = client
+                        .post(format!("{endpoint}/permission/{id}/reply"))
+                        .json(&json!({"reply":"once"}))
+                        .send()
+                        .and_then(reqwest::blocking::Response::error_for_status);
+                    if response.is_ok() {
+                        return Ok(());
+                    }
+                }
+                // A lost response can follow acceptance. Readback may settle
+                // absence, but a still-pending permission never permits replay.
+                let pending: Vec<Value> = client
+                    .get(format!("{endpoint}/permission"))
+                    .send()
+                    .and_then(reqwest::blocking::Response::error_for_status)
+                    .and_then(|response| response.json())
+                    .context("OpenCode permission reply readback")?;
+                if pending.iter().any(|permission| {
+                    permission["sessionID"] == thread.as_str() && permission["id"] == id
+                }) {
+                    return Err(anyhow!(
+                        "OpenCode permission {id} reply is uncertain; not replaying"
+                    ));
+                }
+                Ok(())
+            })
+            .await?;
+        }
+        Ok(())
     }
-    Ok(())
 }
 
 /// Run bounded HTTP and its durable receipts under frozen attachment authority.
@@ -474,8 +481,12 @@ mod tests {
                 })
             };
             let client = reqwest::Client::new();
-            let result =
-                super::reply_pending_permissions(&client, &endpoint, &thread, &owner).await;
+            let snapshot = super::read_snapshot(&client, &endpoint, &thread)
+                .await
+                .unwrap();
+            let result = snapshot
+                .reply_pending_permissions(&endpoint, &thread, &owner)
+                .await;
             assert_eq!(result.is_ok(), accepted);
             assert_eq!(replies.load(Ordering::SeqCst), 1);
             let current = store
@@ -485,17 +496,23 @@ mod tests {
             // attribution and deduplication, even before any native observation.
             let reopened = SqliteStore::open_ephemeral(&path).unwrap();
             let recovered = (reopened, "session".into(), current);
-            let result =
-                super::reply_pending_permissions(&client, &endpoint, &thread, &recovered).await;
+            let snapshot = super::read_snapshot(&client, &endpoint, &thread)
+                .await
+                .unwrap();
+            let result = snapshot
+                .reply_pending_permissions(&endpoint, &thread, &recovered)
+                .await;
             assert_eq!(result.is_ok(), accepted);
             assert_eq!(replies.load(Ordering::SeqCst), 1);
             // Even a newly pending observation cannot grant a stale reader writes.
             pending.store(true, Ordering::SeqCst);
-            assert!(
-                super::reply_pending_permissions(&client, &endpoint, &thread, &owner)
-                    .await
-                    .is_err()
-            );
+            let snapshot = super::read_snapshot(&client, &endpoint, &thread)
+                .await
+                .unwrap();
+            assert!(snapshot
+                .reply_pending_permissions(&endpoint, &thread, &owner)
+                .await
+                .is_err());
             assert_eq!(replies.load(Ordering::SeqCst), 1);
             server.abort();
         }

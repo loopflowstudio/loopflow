@@ -370,12 +370,13 @@ async fn observe_native_messages(
     event_tx: &mpsc::UnboundedSender<ConversationEvent>,
     turn_in_progress: &AtomicBool,
 ) -> Result<()> {
-    let messages = opencode_history::read_messages(client, base_url, session).await?;
+    let snapshot = opencode_history::read_snapshot(client, base_url, session).await?;
     let (events, current_messages, owner) = {
         let mut history = history.lock().expect("OpenCode history lock poisoned");
-        let events = history.observe(session, &messages)?;
-        let current_messages: Vec<_> = messages
-            .into_iter()
+        let events = history.observe(session, &snapshot.messages)?;
+        let current_messages: Vec<_> = snapshot
+            .messages
+            .iter()
             .filter(|message| {
                 message["info"]["parentID"]
                     .as_str()
@@ -395,7 +396,7 @@ async fn observe_native_messages(
         turn_in_progress.store(true, Ordering::SeqCst);
         let _ = event_tx.send(event);
     }
-    for event in state.observe_messages(&current_messages) {
+    for event in state.observe_messages(current_messages) {
         let _ = event_tx.send(event);
     }
     for event in remaining {
@@ -405,7 +406,9 @@ async fn observe_native_messages(
         }
         let _ = event_tx.send(event);
     }
-    opencode_history::reply_pending_permissions(client, base_url, session, &owner).await
+    snapshot
+        .reply_pending_permissions(base_url, session, &owner)
+        .await
 }
 
 #[async_trait]
@@ -1148,11 +1151,15 @@ mod tests {
         let requests = Arc::new(Mutex::new(Vec::new()));
         let fail_readback = Arc::new(AtomicBool::new(true));
         let permission_pending = Arc::new(AtomicBool::new(true));
+        // Publish the assistant while permissions are being acquired. Output
+        // must use that later snapshot too, without requiring another SSE edge.
+        let messages_available = Arc::new(AtomicBool::new(false));
         let server = {
             let subscribed = subscribed.clone();
             let requests = requests.clone();
             let fail_readback = fail_readback.clone();
             let permission_pending = permission_pending.clone();
+            let messages_available = messages_available.clone();
             tokio::spawn(async move {
                 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
                 let mut clients = tokio::task::JoinSet::new();
@@ -1163,6 +1170,7 @@ mod tests {
                     let messages = messages.clone();
                     let fail_readback = fail_readback.clone();
                     let permission_pending = permission_pending.clone();
+                    let messages_available = messages_available.clone();
                     clients.spawn(async move {
                         let mut socket = BufReader::new(socket);
                         let mut line = String::new();
@@ -1186,10 +1194,13 @@ mod tests {
                             }
                             assert!(line.starts_with("GET /session/native/message ") || line.starts_with("GET /permission "));
                             let messages = if line.starts_with("GET /permission ") {
+                                if !fail_readback.load(Ordering::SeqCst) {
+                                    messages_available.store(true, Ordering::SeqCst);
+                                }
                                 if permission_pending.load(Ordering::SeqCst) {
                                     json!([{"id":"pending","sessionID":"native","tool":{"messageID":"assistant"}}]).to_string()
                                 } else { "[]".to_string() }
-                            } else { messages };
+                            } else if messages_available.load(Ordering::SeqCst) { messages } else { "[]".to_string() };
                             let status = if fail_readback.load(Ordering::SeqCst) { "503 Unavailable" } else { "200 OK" };
                             socket.get_mut().write_all(format!("HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", messages.len(), messages).as_bytes()).await.unwrap();
                         }

@@ -105,7 +105,10 @@ impl ReaderState {
         self.turn_substantive
     }
 
-    pub(super) fn observe_messages(&mut self, messages: &[Value]) -> Vec<ConversationEvent> {
+    pub(super) fn observe_messages<'a>(
+        &mut self,
+        messages: impl IntoIterator<Item = &'a Value>,
+    ) -> Vec<ConversationEvent> {
         let mut events = Vec::new();
         for message in messages {
             let info = &message["info"];

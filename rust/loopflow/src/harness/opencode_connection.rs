@@ -81,35 +81,10 @@ impl OpenCodeConnection {
                 .await?;
             return stream_response(response);
         }
-        if method == Method::POST {
-            if let Some(id) = path
-                .strip_prefix("/permission/")
-                .and_then(|path| path.strip_suffix("/reply"))
-            {
-                ensure!(
-                    !id.is_empty() && !id.contains('/'),
-                    "Invalid permission identity"
-                );
-                let bytes = to_bytes(request.into_body(), 16 * 1024 * 1024).await?;
-                let payload = serde_json::from_slice(&bytes)?;
-                let snapshot = super::opencode_history::read_snapshot(
-                    &reqwest::Client::new(),
-                    &self.endpoint,
-                    &self.thread,
-                )
-                .await?;
-                snapshot
-                    .reply_native_permission(&self.endpoint, &self.thread, &self.owner, id, payload)
-                    .await?;
-                return Ok(axum::Json(true).into_response());
-            }
-        }
-        let prefix = format!("/session/{}/", self.thread);
-        let operation = path.strip_prefix(&prefix).unwrap_or_default();
         // Admission, deletion, global configuration and provider shutdown do not
         // belong to an attached conversation client. Keep these out of the relay.
         ensure!(
-            method == Method::POST && matches!(operation, "message" | "prompt_async" | "abort"),
+            method == Method::POST,
             "Native mutation is not supported by this conversation connection"
         );
         let bytes = to_bytes(request.into_body(), 16 * 1024 * 1024).await?;
@@ -118,6 +93,31 @@ impl OpenCodeConnection {
         } else {
             serde_json::from_slice(&bytes)?
         };
+        if let Some(id) = path
+            .strip_prefix("/permission/")
+            .and_then(|path| path.strip_suffix("/reply"))
+        {
+            ensure!(
+                !id.is_empty() && !id.contains('/'),
+                "Invalid permission identity"
+            );
+            let snapshot = super::opencode_history::read_snapshot(
+                &reqwest::Client::new(),
+                &self.endpoint,
+                &self.thread,
+            )
+            .await?;
+            snapshot
+                .reply_native_permission(&self.endpoint, &self.thread, &self.owner, id, payload)
+                .await?;
+            return Ok(axum::Json(true).into_response());
+        }
+        let prefix = format!("/session/{}/", self.thread);
+        let operation = path.strip_prefix(&prefix).unwrap_or_default();
+        ensure!(
+            matches!(operation, "message" | "prompt_async" | "abort"),
+            "Native mutation is not supported by this conversation connection"
+        );
         let thread = self.thread.clone();
         let directory = self.directory.clone();
         let prompt = matches!(operation, "message" | "prompt_async");
@@ -432,6 +432,17 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), 409);
+        let saved = store.session_history("conversation", 0, 0).unwrap();
+        let replies_saved: Vec<_> = saved
+            .iter()
+            .filter_map(|event| event.payload.get("permission_reply"))
+            .collect();
+        assert_eq!(
+            replies_saved,
+            vec![&json!({
+                "id":"choice", "request":"request", "response":payload
+            })]
+        );
         assert_eq!(*replies.lock().await, vec![payload]);
         relay.abort();
         server.abort();

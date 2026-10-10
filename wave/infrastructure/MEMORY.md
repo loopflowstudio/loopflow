@@ -239,17 +239,16 @@ leader death or unknown descendants grants no signaling.
 `82b5d90d5` proves A → B → A rejection with stand-ins, not configured relay.
 CI: `be4a2b2af:wave/infrastructure/MEMORY.md`, this heading.
 
-LOO-447: fenced stop/abort, signal-free drop.
-Standbys cannot write; group death releases custody; watchdog stays outside.
-OpenCode saves endpoint/attempts before effects. v1.2.0 creation carries rules
-and a correlation title; PATCH fixtures were wrong (`894bc61e5`).
-Missing/ambiguous identity readback stays uncertain.
+LOO-447: fenced stop/abort, signal-free drop. Standbys cannot write; group death
+releases custody; watchdog stays outside. OpenCode saves endpoint/attempts before
+effects. v1.2.0 creation carries rules/title, not PATCH (`894bc61e5`);
+missing/ambiguous identity stays uncertain.
 `07529ac3d`: creation-worker death/readback without replay.
-`b10b6ff065`: OpenCode identity recovery/fenced relay; answers stream outside
-the fence. `9df773fa3` separates clients from shared attachment ownership.
-Public OpenCode admits pending identity and fenced manual permissions; Claude
-transport remains launcher-owned. Command/shell await headers after execution:
-the prompt dispatch fence cannot be reused. Public death orders remain unproved.
+`b10b6ff065`: pending-identity recovery/fenced relay; answers drain outside the
+fence. `9df773fa3` separates clients from attachment ownership. Manual permission
+receipts retain the exact choice/explanation, not fabricated approval.
+Claude transport remains launcher-owned. Command/shell await headers after
+execution: the prompt fence cannot be reused. Public death orders remain unproved.
 Plan: `scratch/stop-and-take-over-claude.md`.
 
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)

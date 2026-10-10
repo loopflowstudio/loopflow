@@ -158,8 +158,11 @@ Codex and OpenCode transports have separate client functions. OpenCode's discard
 event-drain task is deleted: its native UI renders output while the reader retains
 history and permission recovery. GET and mutation responses share one streaming
 translation, preserving status/content type and leaving answers outside the fence.
-The native permission path reuses the existing reply writer rather than adding
-another authority or receipt format. Automatic replies are removed from native
+The native permission path reuses the existing reply writer. Its retained response
+is now the exact HTTP payload, including rejection explanations: review found
+the predecessor receipt hardcoded `once` even for native rejection. Repeated
+choices preserve the first intent and never replay it. Relay mutations share
+one bounded body decoder; permission and prompt dispatch remain separate. Automatic replies are removed from native
 attachment readers; headless readers retain recovery.
 Duplicated OpenCode blocking-worker/fence/client setup is replaced by
 `with_attached_http`; creation, replies, prompts and abort retain
@@ -224,4 +227,4 @@ and “Public OpenCode transport.”
 
 ## Checks
 
-Checks: `cargo check -p loopflow`, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, three focused `cargo test -p loopflow --lib` cases (native permission relay, reconnect in both approval modes, uncertain permission recovery) and `git diff --check` pass; public death-order acceptance remains unfinished and Linux acceptance CI-owned.
+Checks: `cargo check -p loopflow`, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, network-isolated `cargo test -p loopflow --lib` filters `native_permissions_preserve_choice_and_refuse_foreign_repeated_and_stale_replies`, `permission_recovery_never_replays_an_uncertain_reply`, `native_prompt_stream_does_not_hold_authority_and_stale_clients_cannot_write`, and `git diff --check` pass; public death-order acceptance remains unfinished and Linux acceptance CI-owned.

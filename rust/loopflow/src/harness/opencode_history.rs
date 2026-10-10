@@ -362,7 +362,7 @@ impl Snapshot {
         let request = request.to_string();
         with_attached_http(owner, move |(store, session, _), client| {
             let first_attempt =
-                store.record_session_permission_reply(session, &thread, &id, &request)?;
+                store.record_session_permission_reply(session, &thread, &id, &request, &payload)?;
             if first_attempt {
                 let response = client
                     .post(format!("{endpoint}/permission/{id}/reply"))

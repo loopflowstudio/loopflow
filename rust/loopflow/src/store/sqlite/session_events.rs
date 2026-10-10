@@ -211,6 +211,7 @@ impl SqliteStore {
         thread: &AgentSessionId,
         permission: &str,
         request: &str,
+        response: &Value,
     ) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -230,7 +231,7 @@ impl SqliteStore {
             thread,
             &turn,
             SessionEventKind::Observed,
-            &serde_json::json!({"permission_reply":{"id":permission,"request":request,"reply":"once"}}),
+            &serde_json::json!({"permission_reply":{"id":permission,"request":request,"response":response}}),
         )?;
         tx.commit()?;
         Ok(true)

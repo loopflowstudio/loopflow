@@ -70,9 +70,20 @@ missing/conflicting owners remain unavailable and cannot admit first start.
 Task run/move/checkout and Desktop opening share location provenance, including
 Started without a checkout path. Two-CLI/simulated-SSH evidence covers retained
 checkout routing and effect-free previews, not running Flows or configured SSH.
-Desktop still refuses a remote owner before app launch; Swift's location DTO has
-no native opening consumer yet. Remote opening remains implementation work, not
-just an unexecuted demo. The original host judgments remain unchanged.
+At that revision, Desktop still refused remote owners and Swift only decoded location.
+`faebb042e`–`5d55957c6` now compose remote Task opening through TaskLink,
+RegistryQuery and the retained Session/Files owners. The repository scene keeps
+local planning and drafts; only the addressed peer Session joins its inventory.
+Fresh nonce-bound owner observations precede opening and Session connection;
+stale, unavailable or changed-checkout readings fail without transfer. Session-only
+links prepare the same Files owner as Changes links, using local cache identity
+and the peer's command subject. Recorded query copies retain remote classification:
+SSH closures alone cannot prevent accidental local watchers or recovery-folder opens.
+SSH carries its script as an argument, preserving stdin and remote native argv/Home.
+Headless fixtures and simulated SSH cover these boundaries, not mounted terminals
+or configured peers. Remote shells/live file observation, exclusive first start,
+mixed-provider exchange, running-Flow composition and broader explanation remain.
+The original host judgments remain unchanged.
 Earlier command names below are dated evidence, not compatibility aliases.
 
 ## Evidence and version boundary

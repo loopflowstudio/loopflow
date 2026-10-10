@@ -113,16 +113,15 @@ recovery with unchanged seeded execution.
 Cached confirmation cannot prove repeat exchange: require fresh stream confirmation
 of an unconfirmed receipt. Git confirmation never acknowledges provider
 delivery; comment errors stay local. No live Linear, running-provider or mounted
-Desktop proof. Mixed exchange, admission and remote opening remain;
-mixed-provider and first-start refusals stay.
+Desktop proof. Mixed-provider exchange and first-start admission stay refused;
+remote-opening composition is recorded below.
 
 #1512 connects live clients or resumes native history after driver death, never
-from import. #1517's opaque AgentSessionId preserves stored bytes; the new explanation
-reader's rename was repaired locally. Neither identity nor fixtures prove takeover
-or native acceptance. Earlier evidence: `829c9b993`, this heading.
+from import. #1517 preserves opaque AgentSessionId bytes. Repairs/evidence:
+`829c9b993`, this heading. Neither proves takeover or native acceptance.
 
 `e3ca861b1`: mounted-page/visibility observation replaces callbacks; request IDs
-fence registration only. Pre-registration failures survive; native proof remains.
+fence registration only. Pre-registration failures survive.
 
 Preview counterexamples (WAL, registry and Flow):
 `829c9b993:wave/product/MEMORY.md`, this heading. Explicit-Machine previews skip
@@ -161,13 +160,14 @@ execution. Nonces fence stale replies without peer-clock comparison; deadlines
 bound each peer, not the whole sequential scan. Added peers are not a global
 inventory. One positive owner survives another peer's unavailability; conflicting
 positives refuse. No negative observation authorizes first start.
-Two-CLI/import fixtures route retained checkout after delegation edits; run/move/Desktop
-share provenance, including Started without a path.
-Remote Task links retain one scene and scope Session/Files to nonce-validated
-owners. SSH script arguments preserve stdin/native Home; peer paths never become
-local watches/cwd. Headless fixtures retain drafts, not native acceptance. Mixed
-exchange, admission, remote shells/live file observation and running-Flow/configured-SSH
-proof remain.
+Two-CLI/import fixtures cover delegation edits and shared pathless-Started
+provenance, not launches.
+`faebb042e`–`5d55957c6`: remote Task links retain the scene and nonce-validated
+Session/Files owners. Local cache identity differs from the peer command subject.
+Session-only/Changes links share Files preparation; recording copies transport
+classification as well as closures, or remote paths regain local affordances.
+SSH script arguments preserve stdin/native Home. Mixed exchange, admission,
+remote shells/live file observation and running-Flow/configured-SSH/native proof remain.
 
 ## Task delivery boundary (LOO-418, reconciled 2026-10-09)
 

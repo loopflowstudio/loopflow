@@ -121,6 +121,9 @@ OpenCode abort uses bounded fenced HTTP without retries; drop never signals its
 child. Failed startup retains the child for fenced cleanup and reports refusal.
 Runtime settlement alone does not establish takeover safety. Public live connection
 currently dispatches only to Codex; Claude and OpenCode still take native resume.
+OpenCode's saved server URL is not sufficient for takeover: its request map is
+launcher-local, and origin is saved only when native output is observed. Reconnect
+must preserve pending request correlation as well as the server and native Session.
 Codex's public connection claims before acquiring its FIFO writer; closing that
 handoff race is part of the common custody replacement.
 

@@ -4,7 +4,7 @@
       "path": "/src/repo.finished",
       "branch": "jack/finished",
       "observed_head": "abcdef",
-      "action": "remove_checkout",
+      "action": "validate_checkout",
       "evidence": ["landing: exact merged head"],
       "estimated_bytes": null
     },

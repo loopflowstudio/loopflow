@@ -7,6 +7,7 @@
     "sequence": 3,
     "full_scan_at": null,
     "full_scan_started": 1791500000000000,
+    "fairness_after": "/src/repo.deferred",
     "observed": 8,
     "removed": 2,
     "deferred": 5,

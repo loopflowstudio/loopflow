@@ -736,6 +736,10 @@ fn cleanup_report_keeps_retention_reasons_and_unknown_sizes() {
     let report: loopflow::ops::wt::cleanup::CleanupReport = serde_json::from_str(json).unwrap();
     assert_eq!(report.planned[0].estimated_bytes, None);
     assert_eq!(
+        report.planned[0].action,
+        loopflow::ops::wt::cleanup::CleanupAction::ValidateCheckout
+    );
+    assert_eq!(
         serde_json::to_value(&report).unwrap(),
         serde_json::from_str::<serde_json::Value>(json).unwrap()
     );
@@ -768,6 +772,10 @@ fn cleanup_receipt_preserves_partial_scan_progress() {
     let receipt: loopflow::ops::CronReceipt = serde_json::from_str(input).unwrap();
     let progress = receipt.cleanup.as_ref().unwrap();
     assert_eq!(progress.sequence, 3);
+    assert_eq!(
+        progress.fairness_after.as_deref(),
+        Some(std::path::Path::new("/src/repo.deferred"))
+    );
     assert_eq!(progress.full_scan_at, None);
     assert_eq!(progress.observed, 8);
     assert_eq!(progress.removed, 2);

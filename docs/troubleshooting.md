@@ -153,6 +153,11 @@ Interrupted runs are recorded; a run killed outright is not. The file holds
 durations, counts, the repository root and the `lf` version, and never more
 than 1,000 samples.
 
+A preview reports `validate_checkout` for settled candidates that still need fresh
+Session evidence validation. It does not recursively traverse native history or
+read the complete reference set. Prune validates those candidates under checkout
+admission before deleting anything; a preview never grants removal authority.
+
 Missing checkouts retain their Git registration unless an exact removal record
 proves cleanup had started. Prune repairs only that registration, after fresh
 delivery and execution checks; previews never prune metadata.

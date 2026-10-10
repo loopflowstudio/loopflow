@@ -98,7 +98,8 @@ Current local defaults are eight removals, 32 observations and 30 seconds admitt
 new candidates; an admitted attempt finishes. Size estimates are background-only
 and unknown on timeout. These are implementation choices, not accepted machine-wide
 budgets or a whole-pass time guarantee. Last-attempt hints in existing Git
-registrations order retries before newer arrivals; fixed hourly cohorts prevent
+registrations give older retries a priority lane; a receipt sweep prevents failed
+hint writes from starving neighbors, and fixed hourly cohorts prevent
 arrivals from extending discovery indefinitely. Hints grant no deletion authority.
 
 ## Constraints
@@ -153,7 +154,7 @@ PID/start-time classifier. Cleanup derives settlement from its exact-head eviden
 instead of maintaining a parallel boolean. The background batch planner/deadline
 branch, its exclusive budget fixture and the one-item batch wrapper are removed.
 Manual prune and maintenance share one checkout attempt; only their callers own
-admission budgets, so an admitted observation finishes its locked application.
+admission budgets. An admitted destructive removal is never canceled.
 They also share observation-error handling and one bounded persistent-branch read
 for present or interrupted checkouts. Git filename output is no longer trimmed:
 an ignored ` target` directory must not borrow the declaration of `target`.
@@ -166,9 +167,10 @@ The per-checkout `Observations` wrapper and single-use evidence cache are also g
 Registration paths are normalized once per snapshot, borrowed during planning and
 refreshed under removal admission; retry sorting no longer performs filesystem
 reads or clones paths. Cheap checkout protections precede registry reads, and
-known dirty/unclassified content retains without a history traversal. Eligible
-previews still traverse native history; that remaining cost conflict is unchanged.
-No known deletion targets remain. Explicit abandonment and persistent-branch
+known dirty/unclassified content retains without a history traversal. Planning now
+stops at `ValidateCheckout`; only locked application traverses history. The duplicate
+pre-admission history traversal is deleted, including from maintenance. No known
+deletion targets remain. Explicit abandonment and persistent-branch
 restart retain their separate authority; missing-registration repair does not
 justify restoring broad metadata pruning.
 
@@ -209,17 +211,24 @@ after setup, so a slow successful registration snapshot no longer spends the who
 window before the first attempt. A real delayed Git fixture proves this and a hung
 registration command returns an error without deleting anything.
 
-Path rotation is removed. `lf-cleanup-attempt` in each existing Git registration
+Path-only rotation is removed. `lf-cleanup-attempt` in each existing Git registration
 records discovery/last-attempt time, atomically replaced before observation. Malformed
 hints receive oldest priority and are replaced; hints never establish ownership.
-Retries order the oldest unattempted/last-deferred checkout first. The hourly cohort
+Retries interleave oldest unattempted/last-deferred priority with a receipt-owned
+lexical sweep (`fairness_after`). The sweep is persisted before hint I/O and prevents
+failed writes from pinning every observation slot. It does not establish ownership
+or replace the timestamp lane that protects old deferrals against arrivals. The hourly cohort
 has a fixed start timestamp; settled retries remain eligible while discovery is in
 progress. Tests introduce three eligible arrivals per tick with a one-removal cap
 and prove previously deferred checkouts go first. Receipts retain constant-size
-cohort coverage and counts, with an updated Rust-only DTO fixture. Wall-clock rollback
-and repeated hint-write failures are not covered by this fairness proof. The
-unavailable-hint fixture covers one failing checkout beside one healthy neighbor,
-not failures filling the 32-observation window. Previews do not write scheduling hints.
+cohort coverage, sweep position and counts, with an updated Rust-only DTO fixture.
+A composed fixture interrupts after durable admission, then introduces three arrivals
+per tick beside 41 persistently unwritable hints. Healthy collection progresses,
+every failed candidate is retried, and repairing one hint allows its collection.
+This proves failures beyond the 32-observation window without exhausting the time
+window; stalled I/O and arbitrary arrival rates are not covered. Directory-entry and
+type errors now isolate the affected registration rather than aborting discovery.
+Previews do not write scheduling hints.
 
 ### History observation contract
 
@@ -232,15 +241,16 @@ changed references atomically, including observations of older captures. Arrival
 cannot extend the backfill cohort. No negative deletion decision or canonicalized
 destination is stored. An interrupted page rolls back with its cursor; incomplete
 coverage or malformed references never authorize removal. The index can be rebuilt
-from Session events. Previews read it without advancing it.
+from Session events. Previews neither read the complete projection nor advance it.
 
 Only complete coverage is read, in one SQLite snapshot. Raw destinations are resolved
 again in the locked removal observation, so earlier symlink/ancestor changes cannot
 hide behind a page cursor. The released-frontier migration fixture exercises multiple
 pages, heavier arrivals, an aborted page, an earlier-reference update, appended
-terminal evidence and malformed data. A composed collector fixture crosses three
-pages, preserves a retargeted historical symlink during apply and eventually removes
-an unrelated settled checkout. This proves progress beyond the row-page budget, not
+terminal evidence and malformed data. The composed collector now crosses three
+pages with 600 arrivals per tick and an aborted second page, verifies rollback to
+256 rows, preserves a retargeted historical symlink during apply and eventually
+removes an unrelated settled checkout. This proves progress beyond the row-page budget, not
 arbitrarily large final reference sets or an end-to-end wall-time ceiling.
 
 Historical-owner inspection covered capture manifests (context/runtime files), legacy
@@ -258,41 +268,49 @@ launched; this is not a provider-resume proof.
 
 ### Remaining in this PR
 
-1. **Finish bounded observation and failure isolation.** Git/SQL deadlines and
-   setup-before-admission are implemented; filesystem normalization, administrative
-   hint/receipt I/O, lease discovery and aggregate locked observation remain
-   unbounded. Receipt retention bounds normal file counts, not stalled filesystem
-   calls. Initial directory-entry/type errors can still abort the repository pass.
-   Source inspection on October 9 also found a fairness hole: unreadable hints sort
-   at zero, and failed writes cannot relinquish that priority. Enough persistent
-   failures can consume every 32-observation window before a healthy neighbor is
-   admitted. This is an inferred counterexample, not a measured failure; the
-   one-bad-neighbor fixture does not cover it. Remaining implementation must isolate
-   these failures and prove healthy progress across more failures than one window,
-   while retaining failed candidates and fair retries. Never cancel an admitted
-   destructive removal.
-2. **Resolve final evidence cost without weakening preservation.** Raw-history
-   backfill now progresses across ticks; final validation does not. Every eligible
-   observation rereads the complete raw set under a two-second limit, resolves all
-   destinations and traverses native layouts; apply repeats it under admission.
-   Large reference/native-directory sets can therefore retain forever even after
-   backfill completes. Measure final-read/traversal costs separately from backfill,
-   then implement adequate progress or revise the mechanism. A cached negative
-   filesystem result is not authority. Manual previews currently traverse native
-   layouts too, violating the no-mandatory-foreground-recursive-scan constraint.
-   A cheap conservative preview with explicit deferred validation is a possible
-   approach, not implemented or selected; allowing mandatory foreground traversal
-   instead would require changing the accepted constraint. This substantial
-   observation-contract work remains before shipping, not a gate-only check.
-   Native-owner coverage is limited to supported reader layouts, not arbitrary
-   provider storage/archive or every filesystem alias.
+1. **Finish bounded observation and failure isolation.** The unwritable-hint
+   starvation counterexample is repaired and composed coverage passes. Git/SQL
+   deadlines and setup-before-admission remain; filesystem normalization, hint/receipt
+   I/O, lease discovery and aggregate locked observation remain unbounded. The new
+   fairness lane cannot make progress through a stalled syscall. A read-only,
+   cancellable observation boundary must cover these operations without allowing a
+   timed-out worker to perform later deletion. Never cancel an admitted destructive
+   removal. This is implementation work, not a gate-only check.
+2. **Revise final evidence observation before dependent implementation.** The
+   opt-in `cleanup_evidence_cost_probe` measures already-complete raw projection,
+   fresh path resolution and native traversal separately—no backfill is timed.
+   At 1,024 rows: 8,192 paths, 23 ms raw read and 67 ms resolution; at 8,192 rows:
+   65,536 paths, 228 ms and 519 ms. At 65,536 rows the raw read hit its two-second
+   deadline. Native traversal of 1,024 / 8,192 / 65,536 ordinary files took roughly
+   0.5 / 3.6 / 33 ms. These synthetic debug-build samples overlapped compilation;
+   they show a real final-read failure, not a universal cardinality threshold.
+   Native symlink-heavy layouts and stalled filesystems remain unmeasured.
+
+   **Architectural counterexample:** after complete backfill, an unchanged reference
+   set that cannot finish within the final-read deadline restarts and retains on
+   every tick. Paging raw history does not resolve this. Persisting partial negative
+   filesystem observations would violate fresh validation: an earlier symlink may
+   retarget before removal. Raising a fixed timeout only moves the counterexample.
+   Dependent evidence progress implementation stops at this mechanism-review boundary.
+   The replacement needs either a workload-sized, bounded observation contract with isolated I/O,
+   or a history-owner mechanism that supplies a complete fresh view without a full
+   traversal. No cached negative result, relaxed preservation rule or increased
+   timeout has been adopted as a substitute.
+
+   The independent preview conflict is resolved: `validate_checkout` reports exact
+   source settlement with deferred history validation. Planning performs no recursive
+   native-history traversal and does not read the full reference set. Application
+   repeats cheap facts and validates history freshly under admission; unreadable or
+   incomplete history retains. Native symlink and unreadable-layout fixtures cover
+   preview-to-apply preservation. Eventual collection beyond final observation
+   budgets remains unproved and is still required before shipping.
 3. **Composed acceptance.** Native provider launch/resume, a second release CLI
    writer, full headless acceptance and regression matrix remain with gate. The
    current fixture reads a native transcript but does not launch its provider.
    Appended/updated references and interrupted pages have projection-level proofs;
-   the collector's multi-page fixture composes symlink retargeting and eventual
-   unrelated collection. Composed arrivals/interruption remain distinct checks,
-   not claims supplied by those separate fixtures.
+   the collector's multi-page fixture now composes heavier arrivals, transactional
+   interruption, symlink retargeting and eventual unrelated collection. These do
+   not establish progress beyond the final-read deadline.
    Loaded OS schedule, promotion recovery, unsupported-host experience and a full
    published-upgrade exercise remain with demo. Abandoned PRs without exact-head
    disposition remain retained; no new discard authority is implied.
@@ -348,4 +366,4 @@ allocated bytes by category; observed free-space delta after collection; oldest
 eligible retention age. APFS sharing, hardlinks and concurrent writers mean
 directory sums are estimates, not guaranteed reclaimed bytes.
 
-Check: `git diff --check` — passed (prose-only reconciliation); prior `cargo test -p loopflow --lib cleanup_` (33 passed), fmt/Clippy and DTO evidence reused unchanged; full acceptance: gate; loaded-scheduler/upgrade experience: demo.
+Check: `cargo test -p loopflow --lib cleanup_` — 35 passed, cost probe ignored; `cargo test -p loopflow --test dto_fixtures cleanup_` — 3 passed; opt-in cost probe completed; `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` — passed; full acceptance/provider resume: gate; loaded scheduler/upgrade: demo.

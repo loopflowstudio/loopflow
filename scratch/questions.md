@@ -37,13 +37,12 @@
   filesystem/receipt I/O, lease discovery and aggregate locked observation remain
   unbounded. An admitted destructive removal is never canceled by these budgets.
 - Implementation choice, 2026-10-09: retain the 32-observation/eight-removal caps,
-  but replace path rotation with last-attempt timestamps in existing Git registrations
-  and a fixed hourly cohort. These disposable hints never establish ownership.
-  A one-removal fixture with three arrivals per tick proves older deferrals go first;
-  wall-clock rollback remains outside that proof. October 9 source reconciliation
-  also identifies repeated unwritable hints as a starvation risk when they fill
-  the observation window; the existing single-failure fixture proves only local
-  isolation, not this larger progress case.
+  using last-attempt timestamps and a fixed hourly cohort. A receipt-owned fairness
+  sweep now interleaves with oldest-first scheduling because failed hint writes cannot
+  relinquish priority themselves. The 41-failure fixture covers healthy progress,
+  retries, interruption and arrivals beyond the 32-observation cap; it does not cover
+  stalled I/O or arbitrary arrival rates. Neither scheduling lane authorizes deletion;
+  no second checkout registry is introduced. Wall-clock rollback remains unproved.
 - Implementation choice, 2026-10-09: one Session-history migration materializes raw
   references, backfilled 256 rows per tick to a fixed high-water mark. Source triggers
   maintain later appends/edits/deletes atomically. Complete coverage is required and
@@ -55,10 +54,13 @@
   symlink into a disposable checkout. Cleanup now checks the supported native layouts
   and the composed test invokes the real transcript-discovery reader after retention.
   Provider launch/resume and arbitrary provider archive layouts are not proved.
-- Review boundary, 2026-10-09: the native symlink safety fix currently traverses
-  known history layouts during manual previews too. That conflicts with the design's
-  no-mandatory-foreground-recursive-scan constraint. Resolve the observation/cost
-  contract before expanding this path or shipping; a stale negative scan is not an
-  acceptable shortcut. Cheap previews that report deferred fresh validation are
-  one unselected implementation option. Mandatory foreground traversal would need
-  an explicit change to the accepted constraint; no such change is recorded.
+- Implementation choice, 2026-10-09: previews report `validate_checkout` for settled
+  source requiring fresh history validation. Only locked application reads complete
+  evidence and traverses native layouts. This conservative preview resolves the
+  no-mandatory-foreground-traversal conflict without granting deletion authority.
+- Architectural stop, 2026-10-09: the cost probe reaches the final-read deadline with
+  65,536 already-projected rows. The fixed final scan cannot progress on that unchanged
+  input; completed backfill is insufficient. Freshness forbids using accumulated
+  negative filesystem results as authority. Final observation needs design review
+  of workload-sized bounded observation plus isolated I/O, or a history-owner fresh
+  view. Neither is selected here; no preservation constraint has been relaxed.

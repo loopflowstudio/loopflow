@@ -2327,6 +2327,9 @@ fn wt_prune(dry_run: bool, json: bool) -> Result<()> {
         } {
             let reason = match &decision.action {
                 CleanupAction::RemoveCheckout => "would remove",
+                CleanupAction::ValidateCheckout => {
+                    "settled; fresh Session evidence validation required"
+                }
                 CleanupAction::Retain(reason) => reason,
             };
             println!("{}: {reason}", decision.path.display());

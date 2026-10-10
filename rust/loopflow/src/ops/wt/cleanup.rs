@@ -21,6 +21,8 @@ use crate::work::task::PrPhase;
 #[non_exhaustive]
 pub enum CleanupAction {
     RemoveCheckout,
+    /// Source is settled; fresh history validation is still required under admission.
+    ValidateCheckout,
     Retain(String),
 }
 
@@ -57,6 +59,8 @@ pub struct CleanupProgress {
     pub sequence: u64,
     pub full_scan_at: Option<i64>,
     pub full_scan_started: Option<i64>,
+    /// A receipt-owned fairness lane survives failed writes to registration hints.
+    pub fairness_after: Option<PathBuf>,
     pub observed: usize,
     pub removed: usize,
     pub deferred: usize,
@@ -69,6 +73,7 @@ impl CleanupProgress {
             sequence: 0,
             full_scan_at: None,
             full_scan_started: None,
+            fairness_after: None,
             observed: 0,
             removed: 0,
             deferred: 0,
@@ -286,6 +291,7 @@ fn observe(
             .into_iter()
             .map(|(path, _)| path)
             .collect(),
+        true,
     )
 }
 
@@ -295,6 +301,7 @@ fn observe_registered(
     decision: &mut CleanupDecision,
     external: &OpsResult<HashSet<PathBuf>>,
     registered: &HashSet<PathBuf>,
+    validate_history: bool,
 ) -> OpsResult<()> {
     // Each observation stands alone, including a recheck after planning.
     decision.evidence.clear();
@@ -463,6 +470,12 @@ fn observe_registered(
                 return Ok(());
             }
         }
+    }
+    if !validate_history {
+        // A preview is not deletion authority. Do not walk native history or
+        // resolve the complete Session reference set on the foreground path.
+        decision.action = CleanupAction::ValidateCheckout;
+        return Ok(());
     }
     // History can be much larger than the checkout registry. Read it only for
     // otherwise removable candidates; incomplete coverage never authorizes removal.
@@ -689,7 +702,8 @@ fn plan_checkout(
         evidence: Vec::new(),
         estimated_bytes: None,
     };
-    if let Err(error) = observe_registered(store, repo, &mut decision, external, registered) {
+    if let Err(error) = observe_registered(store, repo, &mut decision, external, registered, false)
+    {
         retain(&mut decision, format!("observation unavailable: {error}"));
     }
     decision
@@ -710,7 +724,7 @@ pub fn apply_cleanup(
     };
     let started = Instant::now();
     for mut decision in plan {
-        if decision.action == CleanupAction::RemoveCheckout
+        if !matches!(decision.action, CleanupAction::Retain(_))
             && (report.removed.len() >= budget.removals
                 || started.elapsed() >= budget.admission_time)
         {
@@ -729,7 +743,7 @@ fn apply_checkout(
     mut decision: CleanupDecision,
     report: &mut CleanupReport,
 ) {
-    if decision.action != CleanupAction::RemoveCheckout {
+    if matches!(decision.action, CleanupAction::Retain(_)) {
         report.deferred.push(decision);
         return;
     }
@@ -759,7 +773,10 @@ fn apply_checkout(
         let expected_head = decision.observed_head.clone();
         let expected_branch = decision.branch.clone();
         // Refresh all authority and filesystem facts under both locks.
-        observe(store, repo, &mut decision, &running_paths())?;
+        if let Err(error) = observe(store, repo, &mut decision, &running_paths()) {
+            retain(&mut decision, format!("observation unavailable: {error}"));
+            return Ok(false);
+        }
         if decision.observed_head != expected_head || decision.branch != expected_branch {
             retain(&mut decision, "checkout changed after planning");
         }
@@ -871,9 +888,20 @@ fn checkout_attempts(
     match std::fs::read_dir(common.join("worktrees")) {
         Ok(entries) => {
             for entry in entries {
-                let entry = entry?;
-                if !entry.file_type()?.is_dir() {
-                    continue;
+                let entry = match entry {
+                    Ok(entry) => entry,
+                    Err(error) => {
+                        tracing::warn!(%error, "cleanup registration entry unavailable");
+                        continue;
+                    }
+                };
+                match entry.file_type() {
+                    Ok(kind) if kind.is_dir() => {}
+                    Ok(_) => continue,
+                    Err(error) => {
+                        tracing::warn!(%error, "cleanup registration type unavailable");
+                        continue;
+                    }
                 }
                 let admin = entry.path();
                 let Ok(gitdir) = std::fs::read_to_string(admin.join("gitdir")) else {
@@ -887,7 +915,9 @@ fn checkout_attempts(
             }
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error.into()),
+        Err(error) => {
+            tracing::warn!(%error, "cleanup registration hints unavailable");
+        }
     }
     let mut attempts = HashMap::new();
     for (path, admin) in admins {
@@ -976,6 +1006,21 @@ fn collect_pass(
             .cmp(&priority(right))
             .then_with(|| left.cmp(right))
     });
+    // Hints are best-effort. Interleave oldest-first retries with a receipt-owned
+    // sweep, so even a full window of persistently unwritable hints cannot pin
+    // all subsequent passes to the same candidates. This cursor is scheduling
+    // only; every candidate still receives fresh observation under admission.
+    let mut sweep: Vec<_> = registered.iter().collect();
+    sweep.sort_by(|left, right| left.0.cmp(&right.0));
+    let pivot = progress
+        .fairness_after
+        .as_ref()
+        .map_or(0, |after| sweep.partition_point(|(path, _)| path <= after));
+    sweep.rotate_left(pivot);
+    let scheduled = registered
+        .iter()
+        .zip(sweep)
+        .flat_map(|(oldest, next)| [(oldest, false), (next, true)]);
     // Setup must not spend the admission window before the first candidate
     // can persist its attempt. Each admitted application still finishes.
     let deadline = Instant::now() + budget.admission_time;
@@ -991,14 +1036,23 @@ fn collect_pass(
     progress.failed = 0;
     // Empty cheap ticks need no execution or Session history observations.
     let external = std::cell::OnceCell::new();
-    for (path, branch) in &registered {
+    let mut seen = HashSet::new();
+    for ((path, branch), fairness) in scheduled {
         if Instant::now() >= deadline
             || report.removed.len() >= budget.removals
             || progress.observed >= 32
         {
             break;
         }
+        if fairness {
+            progress.fairness_after = Some(path.clone());
+        }
+        if !seen.insert(path) {
+            continue;
+        }
         progress.observed += 1;
+        // Persist sweep progress before touching an unwritable or stalled hint.
+        save(progress)?;
         let scheduled = (|| {
             let (marker, at) = attempts
                 .get(path)
@@ -1011,9 +1065,6 @@ fn collect_pass(
             }
             write_attempt(marker, chrono::Utc::now().timestamp_micros())
         })();
-        // Save before observation: even a killed/stalled read relinquishes
-        // its priority on the next pass. This never records eligibility.
-        save(progress)?;
         if let Err(error) = scheduled {
             let decision = CleanupDecision {
                 path: path.clone(),
@@ -1036,7 +1087,7 @@ fn collect_pass(
             external.get_or_init(running_paths),
             &paths,
         );
-        if decision.action == CleanupAction::RemoveCheckout {
+        if decision.action == CleanupAction::ValidateCheckout {
             // Size is optional; it cannot prevent this admitted removal.
             decision.estimated_bytes = estimate_bytes(&decision.path, deadline);
         }
@@ -1191,7 +1242,7 @@ mod tests {
         );
         assert_eq!(
             plan.iter().find(|item| item.path == path).unwrap().action,
-            CleanupAction::RemoveCheckout
+            CleanupAction::ValidateCheckout
         );
         retained(
             plan.iter().find(|item| item.path == unrelated).unwrap(),
@@ -1352,6 +1403,77 @@ mod tests {
             "scheduling unavailable",
         );
         assert!(path.exists());
+    }
+
+    #[tokio::test]
+    async fn cleanup_failed_hints_beyond_a_window_allow_progress_and_retry_after_interruption() {
+        let _guard = crate::journal::TestLedgerGuard::new();
+        let _external = ExternalInspection::idle();
+        let (repo, directory, store, first) = fixture().await;
+        let mut blocked = vec![first];
+        for index in 0..40 {
+            blocked.push(add_settled(
+                &repo,
+                &directory,
+                &format!("a-blocked-{index:02}"),
+            ));
+        }
+        for path in &blocked {
+            let admin = crate::engine::git::absolute_git_dir(path).unwrap();
+            std::fs::create_dir(admin.join("lf-cleanup-attempt")).unwrap();
+        }
+        let healthy = add_settled(&repo, &directory, "zz-healthy");
+        let mut receipt =
+            crate::ops::cron::cleanup::CleanupReceipt::begin(&store.sqlite, repo.path()).unwrap();
+        let mut progress = receipt.progress();
+        let interrupted = super::collect_pass(
+            &store,
+            repo.path(),
+            CleanupBudget::default(),
+            &mut progress,
+            |progress| {
+                receipt.save(progress.clone())?;
+                if progress.observed == 12 {
+                    return Err(super::error("interrupted after durable admission"));
+                }
+                Ok(())
+            },
+        );
+        assert!(interrupted.is_err());
+        drop(receipt);
+        let mut attempted = HashSet::new();
+        for tick in 0..6 {
+            // Arrivals exceed a one-removal pass, but must not restart coverage.
+            for prefix in ["0", "m", "zzz"] {
+                add_settled(&repo, &directory, &format!("{prefix}-arrival-{tick}"));
+            }
+            let report =
+                super::run_cleanup_pass(&store, repo.path(), CleanupBudget::default()).unwrap();
+            attempted.extend(report.planned.iter().map(|d| d.path.clone()));
+            assert!(report.planned.len() <= 32);
+            assert!(blocked.iter().all(|path| path.exists()));
+            if !healthy.exists() && blocked.iter().all(|path| attempted.contains(path)) {
+                break;
+            }
+        }
+        assert!(
+            !healthy.exists(),
+            "failed hints must not starve a healthy neighbor"
+        );
+        assert!(
+            blocked.iter().all(|path| attempted.contains(path)),
+            "failed candidates must also get fair retries"
+        );
+        let recovered = blocked.last().unwrap();
+        let admin = crate::engine::git::absolute_git_dir(recovered).unwrap();
+        std::fs::remove_dir(admin.join("lf-cleanup-attempt")).unwrap();
+        for _ in 0..4 {
+            super::run_cleanup_pass(&store, repo.path(), CleanupBudget::default()).unwrap();
+            if !recovered.exists() {
+                break;
+            }
+        }
+        assert!(!recovered.exists(), "a repaired hint must allow collection");
     }
 
     #[tokio::test]
@@ -1839,6 +1961,26 @@ mod tests {
             .unwrap();
         let conn = rusqlite::Connection::open(directory.path().join("loopflow.db")).unwrap();
         conn.execute("INSERT INTO provider_accounts(provider,account_id,home,credential_state,routing_state,created_at,updated_at) VALUES('codex','native-account',?1,'missing','disabled',1,1)", [home.to_str().unwrap()]).unwrap();
+        let preview = plan_cleanup(&store, repo.path()).unwrap();
+        assert_eq!(
+            preview
+                .iter()
+                .find(|item| item.path == path)
+                .unwrap()
+                .action,
+            CleanupAction::ValidateCheckout
+        );
+        let report = apply_cleanup(&store, repo.path(), preview, CleanupBudget::default()).unwrap();
+        assert!(report.removed.is_empty());
+        retained(
+            report
+                .deferred
+                .iter()
+                .find(|item| item.path == path)
+                .unwrap(),
+            "Session evidence",
+        );
+        // A previously fully observed decision grants no stale authority either.
         let report =
             apply_cleanup(&store, repo.path(), vec![initial], CleanupBudget::default()).unwrap();
         assert!(report.removed.is_empty());
@@ -1950,11 +2092,34 @@ mod tests {
             [serde_json::json!({"evidence":{"provider_session_path":alias}}).to_string()]).unwrap();
         // Rebuild the derived projection, as after upgrading a populated store.
         conn.execute_batch("BEGIN; DELETE FROM session_evidence; UPDATE session_evidence_backfill SET through_seq=0,target_seq=(SELECT MAX(seq) FROM session_events),complete=0; COMMIT;").unwrap();
-        for _ in 0..2 {
+        for tick in 0..3 {
+            if tick == 1 {
+                conn.execute_batch("CREATE TRIGGER interrupt_cleanup_projection BEFORE INSERT ON session_evidence WHEN NEW.event_seq>300 AND NEW.event_seq<600 BEGIN SELECT RAISE(ABORT,'interrupted page'); END;").unwrap();
+            }
             let report =
                 super::run_cleanup_pass(&store, repo.path(), CleanupBudget::default()).unwrap();
             assert!(report.removed.is_empty());
             assert!(path.exists() && disposable.exists());
+            if tick == 1 {
+                assert_eq!(
+                    conn.query_row(
+                        "SELECT through_seq FROM session_evidence_backfill",
+                        [],
+                        |row| row.get::<_, i64>(0)
+                    )
+                    .unwrap(),
+                    256
+                );
+                conn.execute_batch("DROP TRIGGER interrupt_cleanup_projection")
+                    .unwrap();
+            }
+            // Source triggers must project heavier arrivals without extending
+            // the frozen historical cohort or concealing the interrupted page.
+            let tx = conn.unchecked_transaction().unwrap();
+            for index in (10000 + tick * 600)..(10600 + tick * 600) {
+                tx.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES('past','captured',?1,1,'{}')", [format!("{index:032x}")]).unwrap();
+            }
+            tx.commit().unwrap();
         }
         // The next maintenance page resumes from durable coverage.
         store.sqlite.advance_session_evidence().unwrap();
@@ -1978,6 +2143,99 @@ mod tests {
             std::fs::read_to_string(payload).unwrap(),
             "preserved history"
         );
+    }
+
+    #[tokio::test]
+    #[ignore = "opt-in evidence cost probe; creates a large disposable history"]
+    async fn cleanup_evidence_cost_probe() {
+        let _guard = crate::journal::TestLedgerGuard::new();
+        let (_repo, directory, store, _path) = fixture().await;
+        let conn = rusqlite::Connection::open(directory.path().join("loopflow.db")).unwrap();
+        conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd) VALUES('cost','cost','generated',1,1,'/')", []).unwrap();
+        let mut previous = 0;
+        for count in [1024, 8192, 65536] {
+            let tx = conn.unchecked_transaction().unwrap();
+            for index in previous..count {
+                tx.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES('cost','captured',?1,1,'{}')", [format!("{index:032x}")]).unwrap();
+            }
+            tx.commit().unwrap();
+            previous = count;
+            let started = std::time::Instant::now();
+            let raw = store.sqlite.session_evidence_paths();
+            let read_elapsed = started.elapsed();
+            match raw {
+                Ok(paths) => {
+                    let started = std::time::Instant::now();
+                    for path in &paths {
+                        crate::store::canonicalize_with_missing_tail(path).unwrap();
+                    }
+                    eprintln!("history rows={count} paths={} raw_read={read_elapsed:?} fresh_resolution={:?}", paths.len(), started.elapsed());
+                }
+                Err(error) => {
+                    eprintln!("history rows={count} raw_read={read_elapsed:?} unavailable={error}")
+                }
+            }
+        }
+        let home = directory.path().join("native-cost");
+        let day = home.join("sessions/2026/10/09");
+        std::fs::create_dir_all(&day).unwrap();
+        let mut previous = 0;
+        for count in [1024, 8192, 65536] {
+            for index in previous..count {
+                std::fs::write(day.join(format!("rollout-{index}.jsonl")), "").unwrap();
+            }
+            previous = count;
+            let started = std::time::Instant::now();
+            let result = crate::ops::human_session::provider_conversation::transcript_evidence(
+                crate::provider_auth::Provider::Codex,
+                &home,
+            );
+            eprintln!(
+                "native entries={count} traversal={:?} complete={}",
+                started.elapsed(),
+                result.is_ok()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn cleanup_preview_defers_unreadable_history_without_granting_removal() {
+        let _guard = crate::journal::TestLedgerGuard::new();
+        let _external = ExternalInspection::idle();
+        let (repo, directory, store, path) = fixture().await;
+        let conn = rusqlite::Connection::open(directory.path().join("loopflow.db")).unwrap();
+        // Incomplete raw coverage and an unreadable native layout both belong
+        // to locked application, not to a foreground recursive preview.
+        conn.execute("UPDATE session_evidence_backfill SET complete=0", [])
+            .unwrap();
+        let home = directory.path().join("native-account");
+        std::fs::create_dir(&home).unwrap();
+        std::fs::write(home.join("sessions"), "not a directory").unwrap();
+        conn.execute("INSERT INTO provider_accounts(provider,account_id,home,credential_state,routing_state,created_at,updated_at) VALUES('codex','native-account',?1,'missing','disabled',1,1)", [home.to_str().unwrap()]).unwrap();
+        for complete in [false, true] {
+            conn.execute(
+                "UPDATE session_evidence_backfill SET complete=?1",
+                [complete],
+            )
+            .unwrap();
+            let plan = plan_cleanup(&store, repo.path()).unwrap();
+            assert_eq!(
+                plan.iter().find(|item| item.path == path).unwrap().action,
+                CleanupAction::ValidateCheckout
+            );
+            let report =
+                apply_cleanup(&store, repo.path(), plan, CleanupBudget::default()).unwrap();
+            assert!(report.removed.is_empty());
+            retained(
+                report
+                    .deferred
+                    .iter()
+                    .find(|item| item.path == path)
+                    .unwrap(),
+                "observation unavailable",
+            );
+            assert!(path.exists());
+        }
     }
 
     #[tokio::test]

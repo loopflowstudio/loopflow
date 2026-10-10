@@ -280,31 +280,30 @@ Earlier cleanup history: `66da3fdf7:wave/infrastructure/MEMORY.md` under
 
 ## Automatic checkout collection (2026-10-09)
 
-Jack Heart authorized automatic checkout collection and classified Etude output
-as disposable; expiry/budgets remain proposals. Rotation/compression design grants
-no conversation-expiry or one-off deletion authority.
+Jack Heart authorized automatic collection and disposable Etude output; budgets
+remain draft. Rotation design grants no conversation-expiry or one-off deletion.
 
 Require ownership, exact-head settlement, idle execution and classified content;
-age, remote disappearance, ignored status and completion cannot substitute.
-PR-less Tasks and unresolved follow-through retain checkouts. Compare-and-delete
-local refs; cache tags never override Session history.
+age, remote absence, ignored status and completion cannot substitute.
+PR-less Tasks/unresolved follow-through retain checkouts. Compare-and-delete refs;
+cache tags never override history.
 
-Schedule repair precedes binary pruning; failure retains old binaries and disable
-survives. Installed proof remains. Release tests need disposable OS accounts.
+Repair schedules before pruning binaries; failure retains them and disable survives.
+Release's lesson: generated schedules prove no loaded firing.
 
-`713058ab3`/`dfcebffd6` replace cursors with last-attempt registration hints and
-fixed hourly cohorts. Fixtures prove slow Git setup and oldest-deferred progress
-under heavier arrivals, not whole-pass bounds or fairness with unwritable hints.
-Hints grant no deletion authority.
+`65018af2e` adds a receipt sweep beside timestamp priority: 41 persistent hint
+failures no longer starve healthy neighbors under tested arrivals/interruption.
+Neither lane authorizes deletion or bounds stalled I/O. Setup writes hints/receipts;
+it is not read-only. Never cancel destructive removal.
 
-History owns transactional raw-reference backfill and appended/changed coverage.
-Complete coverage and fresh destinations remain mandatory: cached negatives cannot
-survive symlink retargeting. Three-page collection proves no arbitrary-size final
-scan. Native traversal still conflicts with foreground cost constraints. Transcript
-discovery now reads preserved rollout bytes but proves no provider launch/resume.
-Real-child/direct-admission fixtures prove no release
-CLI writer; generated schedules prove no loaded firing (Release's incident).
-Earlier proofs: `4ac9ca4ca:wave/infrastructure/MEMORY.md`, this heading.
+Previews defer history; removal requires complete coverage and fresh destinations.
+Early protection matches help, but the raw read times out at 65,536 synthetic rows. Repeating that
+unchanged input cannot progress; paged backfill does not repair final observation.
+Cached negatives cannot survive symlink retargeting. Workload-sized isolated
+observation versus a history-owner fresh view remains unselected. Native deadlines
+are cooperative, not syscall bounds. Provider launch/resume, second release CLI
+writer and installed schedule/upgrade acceptance remain unproved.
+Prior proofs: `968db3886:wave/infrastructure/MEMORY.md`, this heading.
 Plan: `scratch/clean-up.md`.
 
 ## Project configuration and review direction (2026-10-05)

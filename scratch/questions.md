@@ -64,3 +64,7 @@
   negative filesystem results as authority. Final observation needs design review
   of workload-sized bounded observation plus isolated I/O, or a history-owner fresh
   view. Neither is selected here; no preservation constraint has been relaxed.
+- Reconciliation, 2026-10-09: setup isolation must distinguish read-only observation
+  from missing-hint writes and receipt creation/pruning. Cancellation must neither
+  leave a worker capable of deleting later nor strand checkout admission. Bounded
+  scheduling-write ownership remains implementation work, not deletion authority.

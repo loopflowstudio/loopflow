@@ -274,14 +274,25 @@ launched; this is not a provider-resume proof.
 
 ### Remaining in this PR
 
+Reconciled 2026-10-09 against `65018af2e` and `c62a28b02`: failed-hint
+fairness, cheap previews and composed backfill coverage now exist. They do not
+resolve the final-observation counterexample below. The locally available
+`origin/main` has no commits absent from this branch; no remote refresh is claimed.
+
 1. **Finish bounded observation and failure isolation.** The unwritable-hint
    starvation counterexample is repaired and composed coverage passes. Git/SQL
    deadlines and setup-before-admission remain; filesystem normalization, hint/receipt
    I/O, lease discovery and aggregate locked observation remain unbounded. The new
-   fairness lane cannot make progress through a stalled syscall. A read-only,
-   cancellable observation boundary must cover these operations without allowing a
-   timed-out worker to perform later deletion. Never cancel an admitted destructive
-   removal. This is implementation work, not a gate-only check.
+   fairness lane cannot make progress through a stalled syscall. Separate isolated,
+   cancellable reads from hint/receipt writes and lock ownership: `checkout_attempts`
+   writes missing hints during setup, and `CleanupReceipt::begin` reads, writes and
+   prunes receipts. Wrapping that whole path in a nominally read-only worker would
+   misstate its effects. Scheduling writes need bounded, interruption-safe ownership
+   too; they never grant deletion authority. A timed-out observer must have no path
+   to later deletion, and an abandoned worker must not retain admission indefinitely.
+   Never cancel an admitted destructive removal. This is substantial implementation
+   work, not a gate-only check; independent setup isolation can proceed without
+   choosing a final-history mechanism.
 2. **Revise final evidence observation before dependent implementation.** The
    opt-in `cleanup_evidence_cost_probe` measures already-complete raw projection,
    fresh path resolution and native traversal separately—no backfill is timed.
@@ -302,6 +313,23 @@ launched; this is not a provider-resume proof.
    or a history-owner mechanism that supplies a complete fresh view without a full
    traversal. No cached negative result, relaxed preservation rule or increased
    timeout has been adopted as a substitute.
+
+   `c62a28b02` removes duplicate home traversal and returns on a positive protection
+   match. It does not stream the raw projection: `session_evidence_paths` still
+   constructs the complete deduplicated path set before checkout overlap checks.
+   Thus the measured raw-read failure still prevents unrelated collection. The
+   native deadline is cooperative per home, not a bound on stalled filesystem calls
+   or aggregate observation across homes and registries.
+
+   **Unresolved mechanism choice, not a new retention decision:** workload-sized
+   isolated observation must specify how a healthy finite set eventually completes
+   while a stalled path does not monopolize maintenance. A history-owner fresh view
+   must also cover external native writers and symlink changes; the SQL projection
+   alone does not. Either design needs a composed proof with already-complete
+   history exceeding today's final budget, fresh retargeting/appended-reference
+   vetoes, interrupted observation, and eventual unrelated collection. Symlink-heavy
+   native layouts need their own measurement/proof. Raising a constant timeout or
+   accumulating negative path results does not meet this requirement.
 
    The independent preview conflict is resolved: `validate_checkout` reports exact
    source settlement with deferred history validation. Planning performs no recursive
@@ -372,4 +400,4 @@ allocated bytes by category; observed free-space delta after collection; oldest
 eligible retention age. APFS sharing, hardlinks and concurrent writers mean
 directory sums are estimates, not guaranteed reclaimed bytes.
 
-Check: `cargo test -p loopflow --lib cleanup_` — 35 passed, cost probe ignored; `cargo test -p loopflow --lib ops::human_session::provider_conversation::tests` — 6 passed; `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` — passed; full acceptance/provider resume: gate; loaded scheduler/upgrade: demo.
+Check: `git diff --check` — passed (prose-only reconciliation); prior `c62a28b02` checks retained: `cargo test -p loopflow --lib cleanup_` — 35 passed, cost probe ignored; provider-conversation tests — 6 passed; fmt/Clippy passed; full acceptance/provider resume: gate; loaded scheduler/upgrade: demo.

@@ -225,69 +225,54 @@ merge, follow-through files accepted obligations or records none, then
 remote supports local work and refuses hosted landing. Local planning does not
 require Linear at any of these boundaries.
 
-## Select Git planning
+## Choose planning synchronization
+
+Planning defaults to your Git ref on `origin`. Select a shared ref or Linear in
+`.lf/config.yaml`, or set a personal default in `~/.lf/config.yaml`:
+
+```yaml
+planning:
+  provider: git
+  remote: origin
+  shared: team
+```
+
+```yaml
+planning:
+  provider: linear
+pm:
+  linear_team: <team-id>
+```
+
+Repository `planning` replaces the personal selection as a whole. Omit `shared`
+for `refs/loopflow/planning/users/<user-key>`; shared names use
+`refs/loopflow/planning/shared/<name>`. Existing `pm.linear_team` selects Linear
+when `planning` is omitted. Every machine uses the selected transport independently.
+Linear unavailability leaves saves buffered locally; it never switches to Git.
 
 ```bash
-lf planning key --new               # once; prints the user key to recover elsewhere
-lf planning key --recover <uuid>    # on another machine, instead of --new
-lf planning connect --remote plans # pin an explicitly chosen, controlled Git remote
-lf planning use <destination-id>    # route future root Waves to the printed destination
-lf planning select <destination-id> --wave <wave-uuid>
 lf planning status --json
+lf planning key                    # show this machine's personal planning key
+lf planning key --recover <uuid>   # reuse it on a fresh second machine
 ```
 
-For retained duplicate provider identities, associate exact full IDs locally:
+The first personal Git connection creates the key. Recover the same key before
+starting personal synchronization on another machine. Shared refs require no key.
+Ref separation is not access control; choose a remote appropriate for the plan.
+Configuration selects the repository's entire plan, including retained history.
+Changing configuration retains old receipts and history; it does not undo earlier
+publication or transfer uncertain provider attempts to another machine.
 
-```bash
-lf planning associate <incoming-work-id> --with <local-work-id> --linear <provider-id>
-```
+Commands save locally, then attempt synchronization. Interactive and headless
+Sessions and Desktop's Work connection keep planning current while connected.
+Cold Task lookup acquires planning before placement. There is no resident or
+automatic turn retry. Status separates fetched revisions, retained imports and
+pending, unconfirmed or confirmed publication. Retained alternatives can be copied
+into ordinary edits. Endpoint URLs are omitted because they may contain credentials.
 
-Both IDs remain intact. The incoming full ID resolves to existing local Work;
-no execution or private history moves. The next exchange projects selected fields
-and receipts jointly. Private references and rejected projections remain held;
-association alone never authorizes provider delivery.
-
-Setup is local: these commands neither fetch nor publish planning. Interactive and
-headless sessions exchange selected planning with or without Linear, even
-without a Task. Desktop's work connection does the same. Task saves and Project
-edits commit locally, then attempt exchange before returning; failed exchange
-leaves pending state, not a failed save. Machine dispatch publishes first; cold
-Task resolution acquires before placement. No resident or turn retry runs.
-
-Status separates fetched revisions, retained imports, pending local edits and
-pending/unconfirmed/confirmed publication. Confirmation covers the recorded revision,
-not future edits or held records. Each destination includes its sharing holds and
-retained projection conflicts. An invalid local journal reports unknown pending
-changes (`pending_local: null` in JSON), without hiding other destinations or
-changing sync receipts. Status does not repair the journal. In Desktop, open **Git planning** in the
-repository roadmap and expand a Work record to inspect its selection, associated
-local ID, retained parent references, assignees and authored comment values.
-CLI status exposes the same records, including losing values and mutation IDs.
-Candidates are ranked journal values, not proof of projection or delivery. Unknown
-authors stay unknown. Copy a retained value into an ordinary edit to save it again;
-inspection never enrolls Work or publishes it. Selecting a Wave can share its
-retained private history, including comments and old parent references. Its
-foreground reader updates these receipts without a manual refresh; a failed
-reading keeps the last status visibly stale. Import retention is not convergence.
-Git publication and Linear delivery have separate receipts. An observed Linear
-value retires a matching unattempted intention without claiming a local provider
-write; unknown effects and losing edits remain available for inspection.
-
-Connection defaults to `refs/loopflow/planning/users/<uuid>`; `--shared <name>`
-explicitly joins `refs/loopflow/planning/shared/<name>`. Joining selects no existing
-work and does not change the destination for new Waves. Select existing Waves
-explicitly; selection includes descendants and retained history. A private reference
-holds that record and its dependents out of exchange. Selecting its referenced Wave
-may release that history for sharing; moving back alone does not.
-
-`use` affects future root Waves only. Children inherit their parent's selection,
-not the currently active destination. `lf planning use local` leaves future roots
-unshared without withdrawing already selected work. Existing membership survives
-switches, reconnects and remote-alias edits. Selection is shared by this machine's
-checkouts of the repository; execution stays local.
-
-Ref separation is not privacy. Use a controlled remote; the code remote is never
-selected implicitly. Status omits endpoint URLs because they may contain credentials.
+Only planning travels: Tasks, Project content, comments and planning disposition.
+Workflows, Sessions, Processes, checkouts and machine control stay local. A completed
+plan does not move another machine's Workflow or clean its checkout.
 
 ## Connect planning and create work
 

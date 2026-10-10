@@ -1,13 +1,9 @@
-//! Explicit planning setup. A connection pins routing; it never enrolls existing
-//! records, contacts a remote, or claims that planning has been published.
+//! Inspect configured planning and recover personal Git identity.
 
 use std::path::Path;
 
 use anyhow::{anyhow, Result};
 
-use crate::engine::planning_exchange::{PlanningKind, PlanningObject};
-use crate::engine::planning_git::PlanningDestination;
-use crate::id::WaveId;
 use crate::lf::PlanningCommand;
 use crate::store::{RegistryUnavailable, Store};
 
@@ -50,94 +46,49 @@ async fn run_async(repo: &Path, cmd: &PlanningCommand) -> Result<()> {
             }
             println!("{key}");
         }
-        PlanningCommand::Connect { remote, shared } => {
-            let reference = match shared {
-                Some(name) => format!("refs/loopflow/planning/shared/{name}"),
-                None => {
-                    let key = store.planning_user_key().await?.ok_or_else(|| {
-                        anyhow!("Create or recover a planning user key before connecting.")
-                    })?;
-                    format!("refs/loopflow/planning/users/{key}")
-                }
-            };
-            let destination = PlanningDestination::resolve(repo, remote, &reference)?;
-            let id = store.bind_peer_planning(&repo_key, &destination).await?;
-            println!("{id}");
-            eprintln!("Pinned {reference}. Existing selection unchanged; nothing published. Ref separation is not privacy: use a controlled remote.");
-        }
-        PlanningCommand::Use { destination } => {
-            store
-                .use_peer_planning(
-                    &repo_key,
-                    (destination != "local").then_some(destination.as_str()),
-                )
-                .await?;
-            println!("Future root Waves: {destination}. Existing selection unchanged.");
-        }
-        PlanningCommand::Select { destination, waves } => {
-            let waves = waves
-                .iter()
-                .map(|wave| WaveId::parse(wave))
-                .collect::<Result<Vec<_>, _>>()?;
-            store
-                .select_peer_waves(&repo_key, destination, &waves)
-                .await?;
-            println!("Selected {} Wave(s) and descendants. Retained history may now be shared; nothing published by this command.", waves.len());
-        }
-        PlanningCommand::Associate {
-            incoming,
-            local,
-            linear,
-        } => {
-            let kind = if incoming.starts_with("task_") {
-                PlanningKind::Task
-            } else if incoming.starts_with("proj_") {
-                PlanningKind::Project
-            } else {
-                return Err(anyhow!(
-                    "Use a full incoming Task or Project ID, not an issue name or prefix."
-                ));
-            };
-            store
-                .associate_peer_planning(
-                    &repo_key,
-                    &PlanningObject {
-                        kind,
-                        id: incoming.clone(),
-                    },
-                    local,
-                    linear,
-                )
-                .await?;
-            println!("{incoming} resolves to local {local}. Neither identity, execution nor sharing selection changed.");
-            eprintln!("The next exchange projects selected history; private and rejected records remain held. No provider effect or Git publication was issued.");
-        }
         PlanningCommand::Status { json } => print_status(&store, &repo_key, *json).await?,
     }
     Ok(())
 }
 
 async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
+    let config = crate::engine::config::load_config(Some(Path::new(repo)))?.unwrap_or_default();
+    if matches!(
+        config.planning_transport(),
+        crate::engine::config::PlanningConfig::Linear {}
+    ) {
+        if json {
+            println!(
+                "{}",
+                serde_json::json!({"transport":"linear","destinations":[]})
+            );
+        } else {
+            println!("Planning: Linear. Unavailable transport leaves local saves pending.");
+        }
+        return Ok(());
+    }
+    crate::ops::planning_sync::configured_destination(store, repo).await?;
     let destinations = store.peer_planning_status(repo).await?;
     if json {
         println!(
             "{}",
             serde_json::to_string(&serde_json::json!({
+                "transport":"git",
                 "destinations": destinations,
             }))?
         );
         return Ok(());
     }
     if !destinations.iter().any(|d| d.active) {
-        println!("Future root Waves: local");
+        println!("Planning: user-keyed Git (configured remote; local saves wait when unavailable)");
     }
     for destination in destinations {
         println!(
-            "{}  {}{}  {} selected records",
+            "{}  {}{}  {} records",
             destination.id,
             destination.reference,
             if destination.active {
-                " (future root Waves)"
+                " (configured)"
             } else {
                 ""
             },
@@ -192,7 +143,7 @@ async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
                 record.object.kind.as_str(),
                 record.object.id,
                 match record.destination.as_deref() {
-                    Some(id) if id == destination.id => "selected here".to_string(),
+                    Some(id) if id == destination.id => "configured here".to_string(),
                     Some(id) => format!("not selected here; selected in {id}"),
                     None => "local only; not selected".to_string(),
                 }
@@ -233,7 +184,6 @@ async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
             }
         }
     }
-    println!("Recovery inspection changes nothing. Copy a retained value into an ordinary edit to save it again; selecting a Wave can share its retained history.");
-    println!("Import retention is not publication or convergence. Linear delivery is separate.");
+    println!("Copy a retained value into an ordinary edit to save it again. Import retention is not publication.");
     Ok(())
 }

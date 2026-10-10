@@ -14,12 +14,12 @@ struct PeerPlanningView: View {
                 }
                 if let destinations = reading.value {
                     if !destinations.contains(where: \.active) {
-                        Text("Future root Waves: local")
+                        Text("No active Git planning destination")
                     }
                     ForEach(destinations) { destination in
                         status(destination)
                     }
-                    Text("Import retention is not publication or convergence. Linear delivery is separate.")
+                    Text("Fetched, imported and published show separate steps of synchronization.")
                 } else if reading.isLoading {
                     Text("Reading sync status…")
                 }
@@ -36,11 +36,11 @@ struct PeerPlanningView: View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             Text(destination.reference)
             Text("Destination: \(destination.id)")
-            if destination.active { Text("Selected for future root Waves") }
-            Text("\(destination.selectedRecords) selected records")
+            if destination.active { Text("Configured for this repository") }
+            Text("\(destination.selectedRecords) planning records")
             switch destination.pendingLocal {
             case true?: Text("Local changes pending")
-            case false?: Text("No additional eligible local changes")
+            case false?: Text("No pending local changes")
             case nil: Text("Local changes unknown")
             }
             Text("Publication: \(destination.publicationState ?? "not attempted") (\(destination.publicationRevision ?? "none"))")
@@ -83,7 +83,7 @@ struct PeerPlanningView: View {
                         Text("Mutation: \(value.id); author: \(value.authorLabel)")
                     }
                 }
-                Text("Inspection changes nothing. Copy a retained value into an ordinary edit to save it again. Selecting a Wave can share its retained history.")
+                Text("Inspection changes nothing. Copy a retained value into an ordinary edit to save it again. Repository configuration selects which ref receives retained history.")
             }
         }
         .accessibilityIdentifier("peer-recovery-\(record.object.id)")

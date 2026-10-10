@@ -602,40 +602,28 @@ accounts or installed data. Ordinary retry, usage, binding and review behavior
 belong in `session_lifecycle_tests`; Chapter convergence belongs in
 `ops::chapter::tests`, including interrupted rotation and second-Machine sync.
 
-`planning_reconnect_tests` runs the public work-watch and Flow reconnect fixtures
-on Linux, using disposable TLS trust and synthetic Linear state. They exercise
-repository/Wave scope without Task selection, selection changes, stdin close/reopen,
-lost replies and independent propagation during rejected field delivery. The
-association cases add two stores and a disposable custom ref: public setup,
-correspondence, Git exchange, HTTPS readback, subsequent saves, older documents
-and private-origin holds preserve populated execution and losing receipts.
-The creation-origin case transfers lost creation/attachment receipts through Git,
-retains later saves and execution, and proves changed Linear fields still win.
-The synthetic provider rejects duplicate UUIDs; a request can race peer receipt
-acquisition, but settled reconnect must send no further creation requests.
-The associated-origin case seeds divergent historical Task/Project captures,
-then enters public association, Git exchange and HTTPS readback. It requires only
-the exact provider UUID to settle, retains the other origin's uncertainty and
-later saves, and compares populated execution across repeated older documents.
-Its private-origin variant also requires selected acknowledgements to reach their
-retained origins without publishing private parents, captures or later edits, while
-independent public Task saves propagate. Freeze exchange comparisons after explicit
-local activation, checking that setup preserves all earlier execution rows. Neither
-variant proves original dispatch of its seeded attempts or native engine continuity.
-The ordering/removal case loses actual order and deletion replies, transports their
-receipts through Git, then interleaves incomplete lists, unchanged-revision detail,
-comments and a later reorder. Only complete lists settle order; only trash readback
-settles deletion. Replayed documents preserve exact inputs, saved times and execution.
-The cold peer explicitly imports its local Wave document before Linear delivery;
-Git planning does not transport Wave documents.
+`planning_reconnect_tests` runs public work-watch and Flow reconnect against
+synthetic Linear on Linux, with disposable TLS trust. It covers lost replies,
+independent acquisition during failed delivery, local buffering and retained execution.
+Linear and Git planning run separately; no provider receipt crosses Git.
+`planning_setup_tests` proves configuration selection and personal-key recovery.
+`planning_foreground_tests` exercises disposable custom refs through public CLI and
+Session connections, including offline independent edits, comments, completion and
+unchanged execution. `planning_write` covers atomic local journal capture and import
+through the same typed writer. `task_remote_tests` exercises actual target CLI dispatch
+with simulated SSH/providers; it does not establish configured remote installation.
 
 `tests/e2e/codex_connect.py --codex "$(command -v codex)" --lf target/debug/lf
 --planning-peers --output <dir>` composes a real Codex engine with a synthetic
-Responses endpoint and disposable Git planning. It exchanges edits, comments and
-completion during live connect and explicit resume, including after killing the
-fixture's driver. Session/native identity and captured history survive; exchange
-starts no engine or provider turn. The controlled protocol client is headless,
-not a rendered native TUI proof. Prepare the script's uv dependencies before
+Responses endpoint and disposable Git planning. It launches with `--task`, then
+imports edits, comments and completion for that same Task during live connect and
+explicit resume, including after killing the fixture's driver. Its historical
+Workflow is seeded; its Session, drivers and checkout are created by public commands.
+Exchange preserves Workflow/placement, live driver, Session/native identity and
+append-only history without starting an engine or provider turn. After imported
+completion, the current client explicitly starts and completes another turn on the
+same engine. The controlled protocol client is headless, not a rendered TUI or
+running Workflow-edge proof. Prepare the script's uv dependencies before
 running it through `scripts/test_network.py`.
 
 Only attempted effects acknowledge; equal-desired provider readback can instead

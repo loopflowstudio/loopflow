@@ -744,8 +744,7 @@ fn apply_set(conn: &rusqlite::Connection, set: &[Migration]) -> StoreResult<()> 
 
 fn seed_peer_planning(conn: &rusqlite::Connection, sql: &str) -> StoreResult<()> {
     if sql.contains("CREATE TABLE planning_peer_changes (") {
-        super::sqlite::project_content::seed_peer_content(conn)?;
-        super::sqlite::planning::seed_peer_evidence(conn)?;
+        super::sqlite::planning_write::seed(conn)?;
     }
     Ok(())
 }

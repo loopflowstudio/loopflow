@@ -17,6 +17,7 @@ pub(crate) struct TaskSource {
     pub commit: String,
     pub task_id: crate::durable::TaskId,
     pub identifier: String,
+    pub issue_id: Option<String>,
 }
 
 impl TaskSource {
@@ -41,6 +42,11 @@ impl TaskSource {
             commit,
             task_id: task.id,
             identifier: task.plan.identifier,
+            issue_id: task
+                .plan
+                .linear_id
+                .as_ref()
+                .map(|id| id.as_str().to_owned()),
         }))
     }
 
@@ -65,7 +71,10 @@ pub(crate) fn source_for_task(issue: &str) -> OpsResult<Option<TaskSource>> {
     };
     let source: TaskSource = serde_json::from_str(&value.to_string_lossy())
         .map_err(|error| OpsError::Message(format!("invalid SSH Task source: {error}")))?;
-    Ok((source.identifier == issue || source.task_id.as_str() == issue).then_some(source))
+    Ok((source.identifier == issue
+        || source.task_id.as_str() == issue
+        || source.issue_id.as_deref() == Some(issue))
+    .then_some(source))
 }
 
 fn require_pushed_code(repo: &Path, issue: &str, branch: &str, commit: &str) -> OpsResult<()> {

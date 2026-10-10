@@ -33,7 +33,7 @@ tracing = "0.1"
 thiserror = "2.0"
 tiktoken-rs = "0.12"
 fancy-regex = "0.19"
-uuid = { version = "1", features = ["v4"] }
+uuid = { version = "1", features = ["v4", "v5"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 chrono-tz = "0.10"
 iana-time-zone = "0.1"

@@ -1,5 +1,7 @@
 //! Project content and stored Wave workflows share one transaction in every repository.
 
+use super::planning_write::{self, PlanningEdit as Edit};
+use crate::engine::planning_exchange::PlanningKind;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde_json::Value;
 
@@ -7,7 +9,6 @@ use crate::durable::ProjectId;
 use crate::id::WaveId;
 use crate::planning::PlanningChange;
 use crate::pm::{PmProject, ProjectContent};
-use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
 
 use super::planning_changes::PlanningChanges;
@@ -48,11 +49,14 @@ impl SqliteStore {
             }
         }
         if changed {
-            tx.execute(
-                "UPDATE projects SET project_name=COALESCE(?2,project_name),
-             project_summary=COALESCE(?3,project_summary),updated_at=?4 WHERE id=?1",
-                params![project.as_str(), name, summary, now_unix()],
-            )?;
+            let mut edits = Vec::new();
+            if let Some(name) = name {
+                edits.push(Edit::ProjectName(Some(name.into())));
+            }
+            if let Some(summary) = summary {
+                edits.push(Edit::ProjectSummary(summary.into()));
+            }
+            planning_write::local(&tx, PlanningKind::Project, project.as_str(), &edits)?;
         }
         tx.commit()?;
         Ok(())
@@ -167,20 +171,17 @@ pub(super) fn save_content(
     project: &ProjectId,
     content: &ProjectContent,
 ) -> StoreResult<()> {
-    content
-        .validate()
-        .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-    conn.execute(
-        "UPDATE projects SET project_prompt_context=?2,workflow=?3,updated_at=?4
-         WHERE id=?1 AND (project_prompt_context IS NOT ?2 OR workflow IS NOT ?3)",
-        params![
-            project.as_str(),
-            crate::pm::render_project_content(content),
-            content.workflow,
-            now_unix()
+    planning_write::local(
+        conn,
+        PlanningKind::Project,
+        project.as_str(),
+        &[
+            Edit::Workflow(content.workflow.clone()),
+            Edit::Krs(content.krs.clone()),
+            Edit::MetricTargets(content.metric_targets.clone()),
         ],
     )?;
-    super::planning_peers::capture_project_content(conn, project)
+    Ok(())
 }
 
 pub(super) fn read_content(conn: &Connection, project: &ProjectId) -> StoreResult<ProjectContent> {
@@ -194,18 +195,6 @@ pub(super) fn read_content(conn: &Connection, project: &ProjectId) -> StoreResul
     // Match the common reader: the saved selection owns workflow, not old prose.
     content.workflow = workflow;
     Ok(content)
-}
-
-/// Released-frontier backfill, called by the same migration transaction as SQL.
-pub(crate) fn seed_peer_content(conn: &Connection) -> StoreResult<()> {
-    let mut query = conn.prepare("SELECT id FROM projects ORDER BY id")?;
-    let ids = query
-        .query_map([], |row| row.get::<_, String>(0))?
-        .collect::<Result<Vec<_>, _>>()?;
-    for id in ids {
-        super::planning_peers::capture_project_content(conn, &ProjectId::from_raw(id))?;
-    }
-    Ok(())
 }
 
 #[cfg(test)]

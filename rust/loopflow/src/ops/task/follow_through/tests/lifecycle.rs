@@ -299,6 +299,8 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
         assert_eq!(merged["status"]["execution"]["work"]["workflow"]["position"]["running"], true);
         assert_ne!(merged["status"]["execution"]["status"], "done");
         assert!(crate::ops::task::task_complete(repo.path(), "FIX-1", None).is_err());
+        // Exercise buffered filing while the selected planning transport is offline.
+        provider.lock().unwrap().unavailable = true;
         task_follow_up(repo.path(), "FIX-1", &FollowUpOptions {
             key: Some("installed".into()), title: Some("Verify installed release".into()),
             notes: Some("Run the released command; retain failures.".into()), due: Some("2026-10-09".into()),

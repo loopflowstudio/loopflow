@@ -595,7 +595,16 @@ impl Reader {
                 Part::PeerPlanning => {
                     let repo = self.scope.repo.clone().context("no repository in scope")?;
                     let root = CanonicalRepo::discover(Path::new(&repo))?;
-                    let destinations = store.peer_planning_status(&root.to_string()).await?;
+                    let config = crate::engine::config::load_config(Some(root.as_path()))?
+                        .unwrap_or_default();
+                    let destinations = if matches!(
+                        config.planning_transport(),
+                        crate::engine::config::PlanningConfig::Linear {}
+                    ) {
+                        Vec::new()
+                    } else {
+                        store.peer_planning_status(&root.to_string()).await?
+                    };
                     WorkContent::PeerPlanning(Some(PeerPlanningPart { repo, destinations }))
                 }
                 Part::Sessions => {

@@ -226,7 +226,7 @@ async fn save_abandon(store: &SharedStore, task: &Task) -> OpsResult<()> {
         .await
         .map_err(task_error)?;
     let wave = owning_wave(store, task).await?;
-    crate::ops::planning_peer::sync_after_save(store, wave.repo()).await;
+    crate::ops::planning_sync::sync_after_save(store, wave.repo()).await;
     Ok(())
 }
 
@@ -245,7 +245,7 @@ pub fn task_delete(repo: &Path, issue: &str) -> OpsResult<String> {
         };
         store.sqlite.delete_task(&task.id).map_err(task_error)?;
         let wave = owning_wave(&store, &task).await?;
-        crate::ops::planning_peer::sync_after_save(&store, wave.repo()).await;
+        crate::ops::planning_sync::sync_after_save(&store, wave.repo()).await;
         Ok(task.plan.identifier)
     })
 }

@@ -96,6 +96,7 @@ impl Drop for Watch {
     }
 }
 
+#[track_caller]
 fn wait_for(mut condition: impl FnMut() -> bool) {
     let deadline = Instant::now() + Duration::from_secs(30);
     while !condition() {
@@ -167,6 +168,10 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
     fs::write(left.path().join("config.yaml"), "user:\n  name: Maya\n").unwrap();
     fs::write(right.path().join("config.yaml"), "user:\n  name: Lee\n").unwrap();
     let fixture = support::register_task_with_pr(left.path(), &source, "main", &repo.head_sha());
+    loopflow::store::sqlite::SqliteStore::new(&left.path().join("loopflow.db"))
+        .unwrap()
+        .ensure_wave_project(source.to_str().unwrap(), "task-pr-tests")
+        .unwrap();
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let worker = runtime
         .block_on(open_ephemeral_store(&StorageConfig::sqlite(
@@ -176,6 +181,8 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
     let binding =
         PlanningDestination::resolve(&source, "origin", "refs/loopflow/planning/shared/fixture")
             .unwrap();
+    configure(&source, &binding);
+    configure(&target, &binding);
     runtime.block_on(async {
         fixture
             .store
@@ -184,11 +191,7 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
             .unwrap();
         fixture
             .store
-            .select_peer_waves(
-                source_key,
-                &binding.id(),
-                std::slice::from_ref(&fixture.task.wave_id),
-            )
+            .use_peer_planning(source_key, Some(&binding.id()))
             .await
             .unwrap();
         worker
@@ -497,6 +500,7 @@ fn fetched_invalid_document_does_not_claim_import_or_publication() {
     runtime
         .block_on(store.bind_peer_planning(repo_key, &binding))
         .unwrap();
+    configure(repo.path(), &binding);
     let git = PlanningGit::new(repo.path(), &binding).unwrap();
     let invalid = git.save(b"not planning JSON", None, None).unwrap();
     assert_eq!(
@@ -624,7 +628,16 @@ fn taskless_terminal_and_headless_sessions_keep_planning_live() {
         "refs/loopflow/planning/shared/taskless",
     )
     .unwrap();
-    // The connection must also discover destinations selected after launch.
+    configure(&source_path, &binding);
+    configure(&target_path, &binding);
+    // Session worktrees receive the same checked-in repository configuration.
+    source.stage_all();
+    source.commit("configure shared planning");
+    source.push();
+    target.stage_all();
+    target.commit("configure shared planning");
+    target.push();
+    // Ordinary foreground Sessions exchange the configured repository plan.
     let mut source_agent = Agent::start(&source_path, left.path(), true);
     let mut target_agent = Agent::start(&target_path, right.path(), false);
     runtime.block_on(async {
@@ -692,6 +705,10 @@ fn public_wave_reads_imported_planning_without_placing_or_changing_execution() {
     let source = repo.path().canonicalize().unwrap();
     let target = other.path().canonicalize().unwrap();
     let fixture = support::register_task_with_pr(left.path(), &source, "main", &repo.head_sha());
+    loopflow::store::sqlite::SqliteStore::new(&left.path().join("loopflow.db"))
+        .unwrap()
+        .ensure_wave_project(source.to_str().unwrap(), "task-pr-tests")
+        .unwrap();
     let source_store =
         loopflow::store::sqlite::SqliteStore::new(&left.path().join("loopflow.db")).unwrap();
     let retained = create(&target, right.path(), "");
@@ -700,17 +717,15 @@ fn public_wave_reads_imported_planning_without_placing_or_changing_execution() {
     let binding =
         PlanningDestination::resolve(&source, "origin", "refs/loopflow/planning/shared/fixture")
             .unwrap();
+    configure(&source, &binding);
+    configure(&target, &binding);
     let source_key = source.to_str().unwrap();
     let target_key = target.to_str().unwrap();
     source_store
         .bind_peer_planning(source_key, &binding)
         .unwrap();
     source_store
-        .select_peer_waves(
-            source_key,
-            &binding.id(),
-            std::slice::from_ref(&fixture.task.wave_id),
-        )
+        .use_peer_planning(source_key, Some(&binding.id()))
         .unwrap();
     worker.bind_peer_planning(target_key, &binding).unwrap();
     let snapshot = source_store
@@ -783,4 +798,23 @@ fn public_wave_reads_imported_planning_without_placing_or_changing_execution() {
     assert_eq!(placements(), placements_before);
     assert_eq!(execution(&conn, fixture.task.id.as_str()), imported_before);
     assert_eq!(execution(&conn, &retained), before);
+}
+
+fn configure(repo: &Path, binding: &PlanningDestination) {
+    fs::create_dir_all(repo.join(".lf")).unwrap();
+    let shared = binding
+        .reference()
+        .strip_prefix("refs/loopflow/planning/shared/")
+        .unwrap();
+    assert!(Command::new("git")
+        .current_dir(repo)
+        .args(["config", "remote.plans.url", binding.endpoint()])
+        .status()
+        .unwrap()
+        .success());
+    fs::write(
+        repo.join(".lf/config.yaml"),
+        format!("planning:\n  provider: git\n  remote: plans\n  shared: {shared}\n"),
+    )
+    .unwrap();
 }

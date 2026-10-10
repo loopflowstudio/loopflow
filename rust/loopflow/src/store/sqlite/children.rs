@@ -1,5 +1,7 @@
 //! SQLite persistence for Project and Tasks.
 
+use super::planning_write::{self, PlanningEdit as Edit};
+use crate::engine::planning_exchange::PlanningKind;
 use std::path::PathBuf;
 
 // Product writes read before they write (for example, validating parent Work),
@@ -93,7 +95,25 @@ pub(super) fn create_task_in(conn: &Connection, input: &NewTask) -> StoreResult<
     };
     validate_task(&task)?;
     insert_task_row(conn, &task)?;
-    conn.execute("UPDATE tasks SET planning_due_date=?3,planning_state='unstarted',planning_rank=COALESCE((SELECT max(planning_rank)+1 FROM tasks WHERE project_id=?2 AND id!=?1),0) WHERE id=?1",params![task.id.as_str(),task.project_id.as_str(),input.due_date])?;
+    let rank: u32 = conn.query_row(
+        "SELECT COALESCE(max(planning_rank)+1,0) FROM tasks WHERE project_id=?1 AND id!=?2",
+        params![task.project_id.as_str(), task.id.as_str()],
+        |r| r.get(0),
+    )?;
+    planning_write::local(
+        conn,
+        PlanningKind::Task,
+        task.id.as_str(),
+        &[
+            Edit::TaskDueDate(input.due_date.clone()),
+            Edit::TaskRank(rank),
+            Edit::Disposition(super::planning_write::Disposition {
+                planning_state: Some("unstarted".into()),
+                planning_completed: 0,
+                planning_completed_at: None,
+            }),
+        ],
+    )?;
     conn.execute(
         "INSERT INTO task_creation_intents(task_id, project_id, title, description, due_date)
          VALUES(?1, ?2, ?3, ?4, ?5)",
@@ -381,7 +401,7 @@ impl SqliteStore {
             "SELECT t.id, COALESCE(t.issue_title, t.issue_identifier, t.id) FROM tasks t
              LEFT JOIN projects p ON p.id=t.project_id LEFT JOIN waves w ON w.id=p.wave_id
              WHERE t.id=?1 OR ((t.external_issue_id=?1 OR t.issue_identifier=?1
-                OR t.id=(SELECT task_id FROM planning_creations WHERE kind='task' AND json_extract(export_json,'$.id')=?1)
+                OR t.id=(SELECT task_id FROM task_creation_intents WHERE json_extract(export_json,'$.id')=?1)
                 OR substr(lower(t.id), 6, length(?2))=?2) AND (?3 IS NULL OR w.repo=?3))
              ORDER BY t.id",
         )?;
@@ -409,13 +429,7 @@ impl SqliteStore {
         if let Some((id, _)) = tasks.pop() {
             return Ok(Some(id));
         }
-        super::planning_peers::associated_local_id(
-            &conn,
-            crate::engine::planning_exchange::PlanningKind::Task,
-            issue,
-            repo,
-        )
-        .map(|id| id.map(TaskId::from_raw))
+        Ok(None)
     }
 
     pub fn task_by_branch(&self, branch: &str) -> StoreResult<Option<Task>> {
@@ -648,12 +662,7 @@ impl SqliteStore {
         let observed_at = observed_at.unix_timestamp();
         let mut follow_ups_created = Vec::new();
         for comment in &observation.comments {
-            if !super::task_comments::ingest_task_comment(
-                &transaction,
-                task_id,
-                comment,
-                observed_at,
-            )? {
+            if !super::task_comments::ingest_task_comment(&transaction, task_id, comment)? {
                 continue;
             }
             if !crate::ops::linear_observe::is_direction_comment(
@@ -840,33 +849,35 @@ impl SqliteStore {
     pub fn insert_project(&self, project: &Project) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        transaction.execute(
-            PROJECT_INSERT,
-            params![
-                project.id.as_str(),
-                project.wave_id,
-                project.plan.linear_id.as_ref().map(LinearProjectId::as_str),
-                project.plan.slug,
-                project.plan.name,
-                project.plan.prompt_context,
-                project.plan.pm_snapshot_synced_at,
-                project
-                    .abandon_intent
-                    .as_ref()
-                    .map(|intent| intent.requested_at.unix_timestamp()),
-                project
-                    .abandon_intent
-                    .as_ref()
-                    .map(|intent| intent.reason.as_str()),
-                project.created_at.unix_timestamp(),
-                project.updated_at.unix_timestamp(),
-                project.iteration,
-                project.plan.workflow,
-                project.plan.status.as_str(),
-                project.plan.summary,
+        let mut content = crate::pm::parse_project_content(&project.plan.prompt_context)
+            .map_err(|e| StoreError::InvalidData(e.to_string()))?;
+        content.workflow = project.plan.workflow.clone();
+        planning_write::create(
+            &transaction,
+            "",
+            PlanningKind::Project,
+            project.id.as_str(),
+            &[
+                Edit::ProjectWave(project.wave_id.to_string()),
+                Edit::ProjectLinearId(
+                    project
+                        .plan
+                        .linear_id
+                        .as_ref()
+                        .map(|id| id.as_str().to_owned()),
+                ),
+                Edit::ProjectSlug(Some(project.plan.slug.clone())),
+                Edit::ProjectName(Some(project.plan.name.clone())),
+                Edit::ProjectSummary(project.plan.summary.clone()),
+                Edit::ProjectStatus(project.plan.status),
+                Edit::Workflow(content.workflow),
+                Edit::Krs(content.krs),
+                Edit::MetricTargets(content.metric_targets),
             ],
         )?;
-        super::planning_peers::capture_project_content(&transaction, &project.id)?;
+        transaction.execute("UPDATE projects SET pm_snapshot_synced_at=?2,abandon_requested_at=?3,abandon_reason=?4,created_at=?5,updated_at=?6,iteration=?7 WHERE id=?1",params![
+            project.id.as_str(),project.plan.pm_snapshot_synced_at,project.abandon_intent.as_ref().map(|i|i.requested_at.unix_timestamp()),
+            project.abandon_intent.as_ref().map(|i|i.reason.as_str()),project.created_at.unix_timestamp(),project.updated_at.unix_timestamp(),project.iteration])?;
         inherit_project_placement(&transaction, &project.id)?;
         transaction.commit()?;
         Ok(())
@@ -888,16 +899,6 @@ impl SqliteStore {
             if let Some(project) = self.project(&project_id)? {
                 return Ok(Some(project));
             }
-            let local = super::planning_peers::associated_local_id(
-                &self.conn.lock().expect("store mutex poisoned"),
-                crate::engine::planning_exchange::PlanningKind::Project,
-                project,
-                None,
-            )?;
-            return match local {
-                Some(id) => self.project(&ProjectId::from_raw(id)),
-                None => Ok(None),
-            };
         }
         let conn = self.conn.lock().expect("store mutex poisoned");
         let query = format!(
@@ -1142,34 +1143,28 @@ fn task_deleted_on(conn: &Connection, task: &Task) -> StoreResult<bool> {
 }
 
 fn insert_task_row(conn: &Connection, task: &Task) -> StoreResult<()> {
-    conn.execute(
-        TASK_INSERT,
-        params![
-            task.id.as_str(),
-            task.project_id.as_str(),
-            task.plan.linear_id.as_ref().map(LinearIssueId::as_str),
-            task.plan.identifier,
-            task.plan.title,
-            task.plan.description,
-            task.plan.pm_snapshot_synced_at,
-            task.worktree
-                .as_ref()
-                .map(|path| path.display().to_string()),
-            task.workspace_slug,
-            task.abandon_intent
-                .as_ref()
-                .map(|intent| intent.requested_at.unix_timestamp()),
-            task.abandon_intent
-                .as_ref()
-                .map(|intent| intent.reason.as_str()),
-            task.created_at.unix_timestamp(),
-            task.updated_at.unix_timestamp(),
-            task.agent,
-            task.branch,
-            task.base_commit,
-            task.parent_pr_id.as_ref().map(TaskPrId::as_str),
+    planning_write::create(
+        conn,
+        "",
+        PlanningKind::Task,
+        task.id.as_str(),
+        &[
+            Edit::TaskProject(task.project_id.to_string()),
+            Edit::TaskLinearId(
+                task.plan
+                    .linear_id
+                    .as_ref()
+                    .map(|id| id.as_str().to_owned()),
+            ),
+            Edit::TaskIdentifier(task.plan.identifier.clone()),
+            Edit::TaskTitle(Some(task.plan.title.clone())),
+            Edit::TaskDescription(Some(task.plan.description.clone())),
         ],
     )?;
+    conn.execute("UPDATE tasks SET pm_snapshot_synced_at=?2,worktree=?3,workspace_slug=?4,abandon_requested_at=?5,abandon_reason=?6,created_at=?7,updated_at=?8,agent=?9,branch=?10,base_commit=?11,parent_pr_id=?12 WHERE id=?1",params![
+        task.id.as_str(),task.plan.pm_snapshot_synced_at,task.worktree.as_ref().map(|p|p.display().to_string()),task.workspace_slug,
+        task.abandon_intent.as_ref().map(|i|i.requested_at.unix_timestamp()),task.abandon_intent.as_ref().map(|i|i.reason.as_str()),
+        task.created_at.unix_timestamp(),task.updated_at.unix_timestamp(),task.agent,task.branch,task.base_commit,task.parent_pr_id.as_ref().map(TaskPrId::as_str)])?;
     Ok(())
 }
 
@@ -1215,14 +1210,6 @@ fn validate_task_project(conn: &Connection, task: &Task) -> StoreResult<()> {
     Ok(())
 }
 
-const TASK_INSERT: &str = "INSERT INTO tasks (
-    id, project_id, external_issue_id, issue_identifier, issue_title,
-    issue_description, pm_snapshot_synced_at,
-    worktree, workspace_slug,
-    abandon_requested_at, abandon_reason, created_at, updated_at, agent, branch, base_commit, parent_pr_id
-) VALUES (
-    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17
-)";
 const TASK_VISIBLE: &str = "t.planning_deleted_at IS NULL
     AND NOT EXISTS(SELECT 1 FROM task_deletions d WHERE d.wave_id=p.wave_id AND d.issue_id=t.external_issue_id)";
 // Both Work records and planning projections display the same unique local prefix.
@@ -1784,14 +1771,6 @@ pub(super) fn task_events_after_in(
         .map_err(StoreError::from)
 }
 
-const PROJECT_INSERT: &str = "INSERT INTO projects (
-    id, wave_id, external_project_id, project_slug, project_name,
-    project_prompt_context, pm_snapshot_synced_at,
-    abandon_requested_at, abandon_reason,
-    created_at, updated_at, iteration, workflow, status, project_summary
-) VALUES (
-    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15
-)";
 const PROJECT_COLUMNS: &str = "SELECT
     id, external_project_id, project_slug, project_name, project_prompt_context,
     wave_id, pm_snapshot_synced_at, abandon_requested_at, abandon_reason,

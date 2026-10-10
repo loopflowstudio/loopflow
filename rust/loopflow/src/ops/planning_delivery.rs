@@ -327,7 +327,7 @@ async fn observe(
     }
 }
 
-pub(crate) fn task_input(store: &Store, change: &PlanningChange) -> OpsResult<Value> {
+fn task_input(store: &Store, change: &PlanningChange) -> OpsResult<Value> {
     match change.field.as_str() {
         "name" => Ok(json!({"title": change.value})),
         "description" => Ok(json!({"description": change.value})),
@@ -342,7 +342,7 @@ pub(crate) fn task_input(store: &Store, change: &PlanningChange) -> OpsResult<Va
             .map_err(message)?;
             let project = store
                 .sqlite
-                .project_by_project(id.as_str())
+                .project(&id)
                 .map_err(message)?
                 .ok_or_else(|| message("destination Project is missing"))?;
             Ok(json!({"projectId":project.plan.linear_id()?.as_str()}))

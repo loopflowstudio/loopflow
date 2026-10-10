@@ -32,14 +32,11 @@ impl SqliteStore {
              FROM task_comments c JOIN task_comment_deliveries d ON d.comment_id=c.id
              WHERE c.task_id=?1 AND (d.conflicting_comment_json IS NOT NULL OR (?2 AND d.acknowledged=0))
              ORDER BY c.created_at,c.id", task.as_str(), connected)?;
-        append(
-            &tx,
-            &mut changes,
-            "SELECT origin_id,'creation',input,attempted,error,NULL FROM planning_exports
-             WHERE kind='task' AND id=?1 AND ?2",
-            task.as_str(),
-            connected,
-        )?;
+        append(&tx, &mut changes,
+            "SELECT c.task_id,'creation',COALESCE(json_extract(c.export_json,'$.input'),json_object('title',c.title,'description',c.description)),
+                c.export_attempted,c.export_error,NULL FROM task_creation_intents c
+             JOIN tasks t ON t.id=c.task_id WHERE c.task_id=?1 AND ?2 AND t.external_issue_id IS NULL
+             AND (t.planning_deleted_at IS NULL OR c.export_attempted=1)", task.as_str(), connected)?;
         tx.commit()?;
         Ok(PlanningSyncStatus { connected, changes })
     }
@@ -54,14 +51,11 @@ impl SqliteStore {
         )?;
         let connected = crate::ops::linear_observe::connected(&repo);
         let mut changes = fields(&tx, "project", project.as_str(), connected, false)?;
-        append(
-            &tx,
-            &mut changes,
-            "SELECT origin_id,'creation',input,attempted,error,NULL FROM planning_exports
-             WHERE kind='project' AND id=?1 AND ?2",
-            project.as_str(),
-            connected,
-        )?;
+        append(&tx, &mut changes,
+            "SELECT c.successor_id,'creation',COALESCE(json_extract(c.export_json,'$.input'),c.local_plan_json),c.export_attempted OR c.export_link_attempted,c.export_error,NULL
+             FROM project_transitions c JOIN projects p ON p.id=c.successor_id
+             WHERE p.id=?1 AND ?2 AND p.external_project_id IS NULL AND c.local_plan_json IS NOT NULL",
+            project.as_str(), connected)?;
         tx.commit()?;
         Ok(PlanningSyncStatus { connected, changes })
     }
@@ -85,7 +79,7 @@ fn fields(
             CASE WHEN c.conflict_json IS NOT NULL THEN json_quote(json_extract(c.conflict_json,'$.value')) END
          FROM {owner}_changes c WHERE c.{owner}_id=?1 {filter} AND
          (c.conflict_json IS NOT NULL OR (?2 AND c.acknowledged=0 AND
-            (c.field='deleted' OR (c.field='task_order' AND c.id IN (SELECT id FROM planning_order_deliveries)) OR (c.field!='task_order' AND (c.attempted=1 OR c.seq=(SELECT max(seq) FROM {owner}_changes WHERE {owner}_id=?1 AND field=c.field))))))
+            (c.attempted=1 OR c.seq=(SELECT max(seq) FROM {owner}_changes WHERE {owner}_id=?1 AND field=c.field))))
          ORDER BY c.seq"), id, connected)?;
     Ok(changes)
 }

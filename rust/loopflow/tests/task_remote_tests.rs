@@ -6,7 +6,6 @@ use std::path::Path;
 use std::process::Command;
 
 use loopflow::durable::TaskId;
-use loopflow::engine::planning_git::PlanningDestination;
 use loopflow::ops::resolve_work_binding;
 use loopflow::store::{open_ephemeral_store, StorageConfig};
 use loopflow_test_support::TestRepo;
@@ -28,7 +27,7 @@ fn git(repo: &Path, args: &[&str]) -> String {
 }
 
 fn source(branch: &str, commit: &str) -> String {
-    json!({"branch":branch,"commit":commit,"task_id":TaskId::new(),"identifier":"FIX-1"})
+    json!({"branch":branch,"commit":commit,"task_id":TaskId::new(),"identifier":"FIX-1","issue_id":null})
         .to_string()
 }
 
@@ -49,6 +48,10 @@ fn machine_selector_acquires_unknown_planning_and_reuses_the_pushed_checkout() {
         ".lf/skills/inspect-code.md",
         "---\nagent: claude\n---\nInspect implementation.txt.\n",
     );
+    repo.create_file(
+        ".lf/config.yaml",
+        "planning:\n  provider: git\n  shared: fixture\n",
+    );
     repo.stage_all();
     repo.commit("Implementation and skill absent from the target clone");
     git(repo.path(), &["push", "origin", branch]);
@@ -61,6 +64,13 @@ fn machine_selector_acquires_unknown_planning_and_reuses_the_pushed_checkout() {
         branch,
         &repo.head_sha(),
     );
+    loopflow::store::sqlite::SqliteStore::new(&origin_home.path().join(".lf/loopflow.db"))
+        .unwrap()
+        .ensure_wave_project(
+            repo.path().canonicalize().unwrap().to_str().unwrap(),
+            "task-pr-tests",
+        )
+        .unwrap();
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let target_store = runtime
         .block_on(open_ephemeral_store(&StorageConfig::sqlite(
@@ -69,41 +79,14 @@ fn machine_selector_acquires_unknown_planning_and_reuses_the_pushed_checkout() {
         .unwrap();
     // Setup only. Source dispatch publishes; the cold target acquires before
     // resolving the Task. No fixture import stands in for production exchange.
-    let source_repo = repo.path().canonicalize().unwrap().display().to_string();
-    let target_repo = target
-        .path()
-        .join("repo")
-        .canonicalize()
-        .unwrap()
-        .display()
-        .to_string();
-    let destination = PlanningDestination::resolve(
-        repo.path(),
-        "origin",
-        "refs/loopflow/planning/shared/fixture",
-    )
-    .unwrap();
-    let destination_id = destination.id();
-    runtime.block_on(async {
-        fixture
-            .store
-            .bind_peer_planning(&source_repo, &destination)
-            .await
-            .unwrap();
-        fixture
-            .store
-            .select_peer_waves(
-                &source_repo,
-                &destination_id,
-                std::slice::from_ref(&fixture.task.wave_id),
-            )
-            .await
-            .unwrap();
-        target_store
-            .bind_peer_planning(&target_repo, &destination)
-            .await
-            .unwrap();
-    });
+    for path in [repo.path().to_path_buf(), target.path().join("repo")] {
+        fs::create_dir_all(path.join(".lf")).unwrap();
+        fs::write(
+            path.join(".lf/config.yaml"),
+            "planning:\n  provider: git\n  shared: fixture\n",
+        )
+        .unwrap();
+    }
     let account_home = target.path().join(".lf/accounts/claude/fixture");
     fs::create_dir_all(&account_home).unwrap();
     let credential = json!({"claudeAiOauth": {

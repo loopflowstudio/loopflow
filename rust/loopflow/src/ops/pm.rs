@@ -302,9 +302,15 @@ pub(super) fn read_initiative(repo: &Path, wave: &str) -> Option<String> {
 }
 
 fn read_repository_team(repo: &Path) -> OpsResult<Option<String>> {
-    let config = load_repo_config(repo)
+    let config = crate::engine::config::load_config(Some(repo))
         .map_err(|error| OpsError::Message(format!("failed to read .lf/config.yaml: {error}")))?
         .unwrap_or_default();
+    if !matches!(
+        config.planning_transport(),
+        crate::engine::config::PlanningConfig::Linear {}
+    ) {
+        return Ok(None);
+    }
     Ok(config
         .pm
         .and_then(|pm| pm.linear_team)
@@ -1110,7 +1116,7 @@ pub(crate) async fn task_comment_async(
             .await
             .map_err(|error| OpsError::Message(error.to_string()))?
             .ok_or_else(|| OpsError::Message("Task Wave is missing".into()))?;
-        super::planning_peer::sync_after_save(&store, owner.repo()).await;
+        super::planning_sync::sync_after_save(&store, owner.repo()).await;
     }
     let refresh_error = if message.is_none() && task.plan.linear_id.is_some() {
         match tokio::time::timeout(
@@ -1142,7 +1148,7 @@ pub(crate) async fn resolve_saved_task(
     let store = Arc::new(pm_store().await?);
     let canonical = crate::repository::CanonicalRepo::discover(repo)
         .map_err(|error| OpsError::Message(error.to_string()))?;
-    let task = super::planning_peer::find_task(&store, &canonical.to_string(), issue).await?;
+    let task = super::planning_sync::find_task(&store, &canonical.to_string(), issue).await?;
     let task = match task {
         Some(task) => task,
         None => {

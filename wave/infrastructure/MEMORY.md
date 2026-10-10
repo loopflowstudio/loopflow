@@ -628,24 +628,21 @@ acceptance remain at
 
 ## Tasks across machines (LOO-412, 2026-10-09)
 
-Jack Heart selected one planning route: Linear replaces the shared Git planning
-ref for connected plans; local-only plans use Git. Each machine retains local
-records/APIs and independently reads/writes Linear. The laptop-offline worker
-counterexample supersedes the single-publisher proposal and mixed Git/Linear
-receipt replication. Linear outages retain pending local saves, never Git fallback.
-Route switching needs preservation design. Sharing-scope reduction is unselected.
+Jack Heart selected Linear, shared Git or default user-keyed Git through personal
+or repository configuration. Each machine retains local records/APIs and reads/writes
+its selected transport. Linear outages buffer locally without Git fallback; the
+offline-laptop counterexample retires publisher election and mixed receipts.
+Jack requires one typed writer and excludes inferred Machine scheduling.
 
-Delete peer transport/settlement of provider attempts, keeping local Linear
-receipts/readback and Git-only causality, losers and privacy. Execution, completion
-requests and placement stay local. Source reduction remains unimplemented.
-Publication is review-only; no landing, installation or real-plan export.
+The reduction routes local/imported planning through one transactional writer,
+deleting capture triggers, mirrored fields and transported provider attempts.
+Local Linear receipts/readback and Git causality/losers remain. Execution and
+placement stay local. Focused Git, writer, Linear and follow-up checks pass; full gate and installed
+acceptance remain unproved. Publication is review-only; no landing or installation.
 
-Earlier mixed-provider recovery: `e37099e50`/`231e75898`; unchanged readback retains
-saves, seeded attempts prove no original dispatch/exactly-once. Git/HTTPS ordering
-and Codex resume proofs remain historical. Same-Task exchange retained live Session
-controls and a subsequent follow-up; Workflow was seeded, not a running edge.
-Preserve capture prefixes; count native requests/engines. Neither those proofs nor
-release entry-point lessons establish the new route or installed acceptance.
+Historical mixed recovery: `e37099e50`/`231e75898`. Prior Git/HTTPS and synthetic
+Codex proofs remain at `ae96102580e:scratch/work-on-another-machine-name.md`;
+current design and review preserve their limits. They prove no installed acceptance.
 
 ## Driver recovery
 

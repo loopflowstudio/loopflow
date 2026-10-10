@@ -1,6 +1,6 @@
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
-use serde::{Deserialize, Serialize};
 
+use super::planning_write::{self, Disposition, PlanningEdit as Edit};
 use crate::engine::planning_exchange::PlanningKind;
 use crate::id::WaveId;
 use crate::pm::{PmItem, PmProject, PmSnapshot};
@@ -10,290 +10,6 @@ use crate::store::{
 };
 use crate::work::project::ProjectId;
 
-/// Independent provider facts. Entity revisions and receiving clocks cannot
-/// order these relationships or turn a partial observation into a complete list.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub(crate) enum ProviderEvidence {
-    IssueChange {
-        id: String,
-        revision_ns: Option<i64>,
-        removed: bool,
-        observed_at: Option<i64>,
-    },
-    IssueDetail {
-        id: String,
-        revision_ns: Option<i64>,
-        observed_at: i64,
-    },
-    Archive {
-        project: PmProject,
-        observed_at: Option<i64>,
-    },
-    Teams {
-        project: PmProject,
-        previous: Option<Vec<String>>,
-        observed_at: i64,
-    },
-}
-
-impl ProviderEvidence {
-    pub(crate) fn field(&self) -> &'static str {
-        match self {
-            Self::IssueChange { removed: true, .. } => "provider_removal",
-            Self::IssueChange { removed: false, .. } | Self::IssueDetail { .. } => {
-                "provider_invalidation"
-            }
-            Self::Archive { .. } => "provider_archive",
-            Self::Teams { .. } => "provider_teams",
-        }
-    }
-
-    pub(super) fn id(&self) -> &str {
-        match self {
-            Self::IssueChange { id, .. } => id,
-            Self::IssueDetail { id, .. } => id,
-            Self::Archive { project, .. } | Self::Teams { project, .. } => &project.id,
-        }
-    }
-
-    pub(crate) fn validate(
-        kind: PlanningKind,
-        field: &str,
-        value: &serde_json::Value,
-    ) -> StoreResult<Self> {
-        let evidence: Self = serde_json::from_value(value.clone())?;
-        let (expected, age) = match &evidence {
-            Self::IssueChange { observed_at, .. } => (PlanningKind::Task, *observed_at),
-            Self::IssueDetail { observed_at, .. } => (PlanningKind::Task, Some(*observed_at)),
-            Self::Archive {
-                project,
-                observed_at,
-            } => {
-                revision_nanos(project.revision.as_deref())?;
-                (PlanningKind::Project, *observed_at)
-            }
-            Self::Teams {
-                project,
-                observed_at,
-                ..
-            } => {
-                revision_nanos(project.revision.as_deref())?;
-                if project.initiative_ids.len() != 1 {
-                    return Err(StoreError::InvalidData(
-                        "reteam requires one Initiative".into(),
-                    ));
-                }
-                (PlanningKind::Project, Some(*observed_at))
-            }
-        };
-        if kind != expected
-            || evidence.field() != field
-            || evidence.id().is_empty()
-            || age.is_some_and(|age| age < 0)
-            || serde_json::to_value(&evidence)? != *value
-        {
-            return Err(StoreError::InvalidData("invalid provider evidence".into()));
-        }
-        Ok(evidence)
-    }
-}
-
-pub(super) fn cached_project(
-    conn: &Connection,
-    repo: &str,
-    provider: &str,
-    id: &str,
-) -> StoreResult<Option<PmProject>> {
-    let body: Option<String> = conn
-        .query_row(
-            "SELECT body FROM pm_projects WHERE repo=?1 AND provider=?2 AND id=?3",
-            params![repo, provider, id],
-            |row| row.get(0),
-        )
-        .optional()?;
-    body.map(|body| serde_json::from_str(&body).map_err(StoreError::from))
-        .transpose()
-}
-
-pub(super) fn reconcile_project_teams_in(
-    conn: &Connection,
-    repo: &str,
-    provider: &str,
-    evidence: &ProviderEvidence,
-) -> StoreResult<()> {
-    let ProviderEvidence::Teams {
-        project,
-        observed_at,
-        ..
-    } = evidence
-    else {
-        unreachable!("Team reconciliation takes Team evidence")
-    };
-    if let Some(mut previous) = cached_project(conn, repo, provider, &project.id)? {
-        if !same_ids(&previous.initiative_ids, &project.initiative_ids) {
-            return Err(StoreError::ProjectMembershipConflict {
-                project_id: project.id.clone(),
-            });
-        }
-        // Reteam confirms only Teams. Preserve newer entity facts and their age.
-        previous.team_ids.clone_from(&project.team_ids);
-        conn.execute("UPDATE pm_projects SET body=?4,membership_unresolved=0 WHERE repo=?1 AND provider=?2 AND id=?3 AND (body IS NOT ?4 OR membership_unresolved!=0)",
-            params![repo, provider, project.id, serde_json::to_string(&previous)?])?;
-        if revision_nanos(project.revision.as_deref())?
-            < revision_nanos(previous.revision.as_deref())?
-        {
-            return Ok(());
-        }
-    }
-    put_project(conn, repo, provider, *observed_at, project)?;
-    Ok(())
-}
-
-pub(super) fn confirm_project_archival_in(
-    conn: &Connection,
-    repo: &str,
-    provider: &str,
-    evidence: &ProviderEvidence,
-) -> StoreResult<()> {
-    let ProviderEvidence::Archive {
-        project,
-        observed_at,
-    } = evidence
-    else {
-        unreachable!("archive confirmation takes archive evidence")
-    };
-    conn.execute(
-        "INSERT INTO pm_projects(repo,provider,id,observed_at,body,archived) VALUES(?1,?2,?3,?4,?5,1)
-         ON CONFLICT(repo,provider,id) DO UPDATE SET archived=1 WHERE archived=0",
-        params![repo, provider, project.id, observed_at.unwrap_or(0), serde_json::to_string(project)?],
-    )?;
-    Ok(())
-}
-
-pub(super) fn observe_issue_change_in(
-    conn: &Connection,
-    evidence: &ProviderEvidence,
-) -> StoreResult<()> {
-    let (id, revision_ns, removed, observed_at) = match evidence {
-        ProviderEvidence::IssueChange {
-            id,
-            revision_ns,
-            removed,
-            observed_at,
-        } => (id, *revision_ns, *removed, *observed_at),
-        // A completed detail carries a real entity revision even when its body
-        // has not projected here. It fences stale reads, never invents a revision.
-        ProviderEvidence::IssueDetail {
-            id,
-            revision_ns,
-            observed_at,
-        } => (id, *revision_ns, false, Some(*observed_at)),
-        _ => unreachable!("issue invalidation takes issue evidence"),
-    };
-    conn.execute(
-        "INSERT INTO pm_issue_changes(issue_id,revision_ns,removed) VALUES(?1,?2,?3)
-         ON CONFLICT(issue_id) DO UPDATE SET
-         revision_ns=CASE WHEN excluded.revision_ns > revision_ns OR revision_ns IS NULL
-             THEN excluded.revision_ns ELSE revision_ns END,
-         removed=MAX(removed,excluded.removed)
-         WHERE excluded.removed>removed OR
-             (excluded.revision_ns IS NOT NULL AND (revision_ns IS NULL OR excluded.revision_ns>revision_ns))",
-        params![id, revision_ns, removed],
-    )?;
-    if removed {
-        conn.execute(
-            "UPDATE tasks SET planning_deleted_at=?2 WHERE external_issue_id=?1 AND planning_deleted_at IS NULL AND ?2 IS NOT NULL",
-            params![id, observed_at],
-        )?;
-    }
-    let mut query =
-        conn.prepare("SELECT repo,body FROM pm_items WHERE provider='linear' AND id=?1")?;
-    let rows = query.query_map([id], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    })?;
-    for row in rows {
-        let (repo, body) = row?;
-        let item: PmItem = serde_json::from_str(&body)?;
-        let cached = revision_nanos(item.revision.as_deref())?;
-        if removed || revision_ns.is_none() || cached < revision_ns {
-            conn.execute("UPDATE pm_items SET needs_refresh=1 WHERE repo=?1 AND provider='linear' AND id=?2 AND needs_refresh=0", params![repo,id])?;
-        }
-    }
-    Ok(())
-}
-
-fn capture_provider_evidence(
-    conn: &Connection,
-    provider: &str,
-    evidence: &ProviderEvidence,
-) -> StoreResult<()> {
-    if provider != "linear" {
-        return Ok(());
-    }
-    let (kind, table, mapping) = match evidence {
-        ProviderEvidence::IssueChange { .. } | ProviderEvidence::IssueDetail { .. } => {
-            ("task", "tasks", "external_issue_id")
-        }
-        _ => ("project", "projects", "external_project_id"),
-    };
-    conn.execute(&format!("INSERT INTO planning_peer_changes(id,kind,object_id,field,value,clock,linear,parents)
-        SELECT lower(hex(randomblob(16))),?1,id,?2,?3,
-            max(CAST(unixepoch('subsec')*1000 AS INTEGER),COALESCE((SELECT max(clock)+1 FROM planning_peer_changes),0)),NULL,
-            (SELECT json_group_array(h.id) FROM planning_peer_heads h WHERE h.kind=?1 AND h.object_id={table}.id AND h.field=?2)
-        FROM {table} WHERE {mapping}=?4 AND (SELECT importing FROM planning_peer_context)=0"),
-        params![kind, evidence.field(), serde_json::to_string(evidence)?, evidence.id()])?;
-    Ok(())
-}
-
-/// Seed only facts retained at the released frontier. Legacy removals/archives
-/// have no acquisition timestamp; null retains that uncertainty instead of now.
-pub(crate) fn seed_peer_evidence(conn: &Connection) -> StoreResult<()> {
-    let mut query =
-        conn.prepare("SELECT issue_id,revision_ns,removed FROM pm_issue_changes WHERE removed=1")?;
-    let rows = query.query_map([], |row| {
-        Ok(ProviderEvidence::IssueChange {
-            id: row.get(0)?,
-            revision_ns: row.get(1)?,
-            removed: row.get(2)?,
-            observed_at: None,
-        })
-    })?;
-    for row in rows {
-        capture_provider_evidence(conn, "linear", &row?)?;
-    }
-    let mut query = conn.prepare("SELECT DISTINCT i.id,c.revision_ns FROM pm_items i LEFT JOIN pm_issue_changes c ON c.issue_id=i.id WHERE i.provider='linear' AND i.needs_refresh=1")?;
-    let rows = query.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, Option<i64>>(1)?))
-    })?;
-    for row in rows {
-        let (id, revision_ns) = row?;
-        capture_provider_evidence(
-            conn,
-            "linear",
-            &ProviderEvidence::IssueChange {
-                id,
-                revision_ns,
-                removed: false,
-                observed_at: None,
-            },
-        )?;
-    }
-    let mut query =
-        conn.prepare("SELECT body FROM pm_projects WHERE provider='linear' AND archived=1")?;
-    let rows = query.query_map([], |row| row.get::<_, String>(0))?;
-    for row in rows {
-        capture_provider_evidence(
-            conn,
-            "linear",
-            &ProviderEvidence::Archive {
-                project: serde_json::from_str(&row?)?,
-                observed_at: None,
-            },
-        )?;
-    }
-    Ok(())
-}
 impl SqliteStore {
     /// Accept one confirmed Project without claiming a complete Wave refresh.
     pub fn put_pm_project(
@@ -353,13 +69,27 @@ impl SqliteStore {
             )));
         }
         let tx = conn.transaction()?;
-        let previous = cached_project(&tx, &repo, provider, &project.id)?;
-        let evidence = ProviderEvidence::Teams {
-            project: project.clone(),
-            previous: previous.map(|p| p.team_ids),
-            observed_at,
-        };
-        reconcile_project_teams_in(&tx, &repo, provider, &evidence)?;
+        let previous: Option<String> = tx
+            .query_row(
+                "SELECT body FROM pm_projects WHERE repo=?1 AND provider=?2 AND id=?3",
+                params![repo, provider, project.id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if let Some(previous) = previous {
+            let mut previous: PmProject = serde_json::from_str(&previous)?;
+            if previous.initiative_ids.as_slice() != [initiative] {
+                return Err(StoreError::InvalidData(format!(
+                    "Project {} changed Initiative during reteam",
+                    project.id
+                )));
+            }
+            // Reteam orders Team relationships only. Retain independently newer entity facts.
+            previous.team_ids.clone_from(&project.team_ids);
+            tx.execute("UPDATE pm_projects SET body=?4,membership_unresolved=0 WHERE repo=?1 AND provider=?2 AND id=?3",
+                params![repo, provider, project.id, serde_json::to_string(&previous)?])?;
+        }
+        put_project(&tx, &repo, provider, observed_at, project)?;
         associate_project(&tx, &repo, provider, &project.id, wave, initiative)?;
         project_accepted_planning(
             &tx,
@@ -369,7 +99,6 @@ impl SqliteStore {
             &[],
             Some((wave, initiative)),
         )?;
-        capture_provider_evidence(&tx, provider, &evidence)?;
         tx.commit()?;
         Ok(())
     }
@@ -403,18 +132,6 @@ impl SqliteStore {
                 "UPDATE pm_items SET needs_refresh=0 WHERE repo=?1 AND provider=?2 AND id=?3",
                 params![repo, provider, record.item.id],
             )?;
-            let invalidation: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM planning_peer_heads h JOIN planning_peer_changes c ON c.id=h.id JOIN tasks t ON t.id=h.object_id WHERE h.kind='task' AND h.field='provider_invalidation' AND json_extract(c.value,'$.kind')='issue_change' AND t.external_issue_id=?1)", [&record.item.id], |row| row.get(0))?;
-            if invalidation {
-                capture_provider_evidence(
-                    &tx,
-                    provider,
-                    &ProviderEvidence::IssueDetail {
-                        id: record.item.id.clone(),
-                        revision_ns: revision_nanos(record.item.revision.as_deref())?,
-                        observed_at: record.observed_at,
-                    },
-                )?;
-            }
         }
         if let Some((wave, initiative)) = confirmed_wave {
             let project_id = record.item.project_id.as_deref().ok_or_else(|| {
@@ -441,15 +158,12 @@ impl SqliteStore {
         project: &PmProject,
         observed_at: i64,
     ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction()?;
-        let evidence = ProviderEvidence::Archive {
-            project: project.clone(),
-            observed_at: Some(observed_at),
-        };
-        confirm_project_archival_in(&tx, repo, provider, &evidence)?;
-        capture_provider_evidence(&tx, provider, &evidence)?;
-        tx.commit()?;
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO pm_projects(repo,provider,id,observed_at,body,archived) VALUES(?1,?2,?3,?4,?5,1)
+             ON CONFLICT(repo,provider,id) DO UPDATE SET archived=1",
+            params![repo, provider, project.id, observed_at, serde_json::to_string(project)?],
+        )?;
         Ok(())
     }
 
@@ -459,16 +173,47 @@ impl SqliteStore {
         revision: Option<&str>,
         removed: bool,
     ) -> StoreResult<()> {
+        let revision = revision_nanos(revision)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
-        let evidence = ProviderEvidence::IssueChange {
-            id: issue_id.into(),
-            revision_ns: revision_nanos(revision)?,
-            removed,
-            observed_at: Some(super::super::rows::now_unix()),
-        };
-        observe_issue_change_in(&tx, &evidence)?;
-        capture_provider_evidence(&tx, "linear", &evidence)?;
+        tx.execute(
+            "INSERT INTO pm_issue_changes(issue_id,revision_ns,removed) VALUES(?1,?2,?3)
+             ON CONFLICT(issue_id) DO UPDATE SET
+             revision_ns=CASE WHEN excluded.revision_ns > revision_ns OR revision_ns IS NULL
+                 THEN excluded.revision_ns ELSE revision_ns END,
+             removed=MAX(removed,excluded.removed)",
+            params![issue_id, revision, removed],
+        )?;
+        if removed {
+            let ids = {
+                let mut q=tx.prepare("SELECT id FROM tasks WHERE external_issue_id=?1 AND planning_deleted_at IS NULL")?;
+                let rows = q.query_map([issue_id], |r| r.get::<_, String>(0))?;
+                rows.collect::<Result<Vec<_>, _>>()?
+            };
+            for id in ids {
+                planning_write::local(
+                    &tx,
+                    PlanningKind::Task,
+                    &id,
+                    &[Edit::TaskDeletedAt(Some(super::super::rows::now_unix()))],
+                )?;
+            }
+        }
+        let mut query =
+            tx.prepare("SELECT repo,body FROM pm_items WHERE provider='linear' AND id=?1")?;
+        let rows = query
+            .query_map([issue_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        for (repo, body) in rows {
+            let item: PmItem = serde_json::from_str(&body)?;
+            let cached = revision_nanos(item.revision.as_deref())?;
+            if removed || revision.is_none() || cached < revision {
+                tx.execute("UPDATE pm_items SET needs_refresh=1 WHERE repo=?1 AND provider='linear' AND id=?2", params![repo,issue_id])?;
+            }
+        }
+        drop(query);
         tx.commit()?;
         Ok(())
     }
@@ -479,11 +224,10 @@ impl SqliteStore {
         provider: &str,
         expected: &PmTaskRecord,
     ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction()?;
+        let conn = self.conn.lock().expect("store mutex poisoned");
         // A null detail response invalidates cached admission, not provider history.
         // Only a complete detail observation can repair it; list omission is ambiguous.
-        let changed = tx.execute(
+        conn.execute(
             "UPDATE pm_items SET needs_refresh=1 WHERE repo=?1 AND provider=?2 AND id=?3
             AND observed_at=?4 AND json_extract(body,'$.revision') IS ?5",
             params![
@@ -494,19 +238,6 @@ impl SqliteStore {
                 expected.item.revision
             ],
         )?;
-        if changed != 0 {
-            capture_provider_evidence(
-                &tx,
-                provider,
-                &ProviderEvidence::IssueChange {
-                    id: expected.item.id.clone(),
-                    revision_ns: None,
-                    removed: false,
-                    observed_at: Some(super::super::rows::now_unix()),
-                },
-            )?;
-        }
-        tx.commit()?;
         Ok(())
     }
 
@@ -783,7 +514,7 @@ const ACCEPTED_WAVE_PROJECTS: &str = "
         CASE WHEN m.wave_id=?4 THEN ?5 ELSE sync.initiative END";
 
 /// Inputs select IDs only; project their accepted rows inside the ingestion transaction.
-pub(super) fn project_accepted_planning(
+fn project_accepted_planning(
     tx: &Transaction<'_>,
     repo: &str,
     provider: &str,
@@ -838,29 +569,33 @@ pub(super) fn project_accepted_planning(
             }?,
             None => ProjectId::new(),
         };
-        super::planning_peers::observe_project(tx, provider, &project, observed_at)?;
         let project =
             super::planning_changes::PlanningChanges::Project(&id).reconcile(tx, &project)?;
-        tx.execute(
-            "INSERT INTO projects(id,wave_id,external_project_id,project_slug,project_name,
-             project_prompt_context,pm_snapshot_synced_at,created_at,updated_at,workflow,status,project_summary,planning_provider_revision,planning_initiatives,planning_teams)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?8,?9,?10,?11,?12,?13,?14)
-             ON CONFLICT(id) DO UPDATE SET project_slug=excluded.project_slug,
-             project_name=excluded.project_name,project_prompt_context=excluded.project_prompt_context,
-             pm_snapshot_synced_at=excluded.pm_snapshot_synced_at,workflow=excluded.workflow,status=excluded.status,project_summary=excluded.project_summary,planning_provider_revision=excluded.planning_provider_revision,
-             planning_initiatives=excluded.planning_initiatives,planning_teams=excluded.planning_teams",
-            params![id.as_str(),wave_id,project.id,project.slug,project.name,
-                crate::pm::render_project_content(&crate::pm::ProjectContent { workflow: project.workflow.clone(), krs: project.krs.clone(), metric_targets: project.metric_targets.clone() }),
-                observed_at,super::super::rows::now_unix(),project.workflow,project.status.as_str(),project.summary,
-                project.revision,serde_json::to_string(&project.initiative_ids)?,serde_json::to_string(&project.team_ids)?],
-        )?;
-        tx.execute(
-            "UPDATE projects SET planning_rank=COALESCE((SELECT position FROM pm_wave_projects
-                WHERE wave_id=?2 AND project_id=?3),planning_rank) WHERE id=?1",
-            params![id.as_str(), wave_id, project.id],
-        )?;
-        super::planning_peers::capture_project_content(tx, &id)?;
-        super::planning_peers::clear_observation(tx)?;
+        let rank: Option<u32> = tx
+            .query_row(
+                "SELECT position FROM pm_wave_projects WHERE wave_id=?1 AND project_id=?2",
+                params![wave_id, project.id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let mut edits = vec![
+            Edit::ProjectWave(wave_id.to_string()),
+            Edit::ProjectLinearId(Some(project.id.clone())),
+            Edit::ProjectSlug(Some(project.slug.clone())),
+            Edit::ProjectName(Some(project.name.clone())),
+            Edit::ProjectSummary(project.summary.clone()),
+            Edit::ProjectStatus(project.status),
+            Edit::Workflow(project.workflow.clone()),
+            Edit::Krs(project.krs.clone()),
+            Edit::MetricTargets(project.metric_targets.clone()),
+            Edit::ProjectInitiatives(serde_json::to_string(&project.initiative_ids)?),
+            Edit::ProjectTeams(serde_json::to_string(&project.team_ids)?),
+        ];
+        if let Some(rank) = rank {
+            edits.push(Edit::ProjectRank(rank));
+        }
+        planning_write::create(tx, repo, PlanningKind::Project, id.as_str(), &edits)?;
+        tx.execute("UPDATE projects SET pm_snapshot_synced_at=?2,planning_provider_revision=?3 WHERE id=?1",params![id.as_str(),observed_at,project.revision])?;
     }
     for item in items {
         if let Some(body) = tx.query_row("SELECT body FROM pm_items WHERE repo=?1 AND provider=?2 AND id=?3 AND needs_refresh=0",
@@ -905,7 +640,6 @@ pub(super) fn project_accepted_planning(
     for (id, body, observed_at, project) in updates {
         let item: PmItem = serde_json::from_str(&body)?;
         let task_id = crate::durable::TaskId::from_raw(&id);
-        super::planning_peers::observe_task(tx, provider, &item, &project, observed_at)?;
         super::task_state_delivery::reconcile_in(tx, &task_id, &item)?;
         let item = super::planning_changes::PlanningChanges::Task(&task_id).reconcile(tx, &item)?;
         let project: String = match item.project_id.as_deref() {
@@ -916,23 +650,17 @@ pub(super) fn project_accepted_planning(
             )?,
             None => project,
         };
+        let pending:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM task_state_deliveries WHERE task_id=?1 AND settled=0 AND seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=?1))",[&id],|r|r.get(0))?;
+        let mut edits = item_edits(&item, &project);
+        edits.retain(|edit| {
+            !matches!(edit, Edit::TaskRank(_))
+                && (!pending || !matches!(edit, Edit::Disposition(_)))
+        });
+        planning_write::local(tx, PlanningKind::Task, &id, &edits)?;
         tx.execute(
-            "WITH pending AS (SELECT task_id FROM task_state_deliveries d WHERE d.settled=0
-                 AND d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=d.task_id))
-             UPDATE tasks SET issue_identifier=?2,issue_title=?3,issue_description=?4,
-                 planning_state=CASE WHEN id IN (SELECT task_id FROM pending) THEN planning_state ELSE ?5 END,
-                 planning_completed=CASE WHEN id IN (SELECT task_id FROM pending) THEN planning_completed ELSE ?6 END,
-                 planning_completed_at=CASE WHEN id IN (SELECT task_id FROM pending) THEN planning_completed_at ELSE ?7 END,
-                 planning_provider_revision=?8,planning_url=?9,planning_branch_name=?10,
-                 planning_team_id=?11,planning_assignee=?12,planning_due_date=?15,
-                 pm_snapshot_synced_at=?13,project_id=?14,
-                 planning_revision=planning_revision+CASE WHEN issue_title IS NOT ?3 OR issue_description IS NOT ?4
-                     OR planning_assignee IS NOT ?12 OR project_id IS NOT ?14 THEN 1 ELSE 0 END
-             WHERE id=?1",
-            params![id,item.identifier,item.name,item.description,item.state,item.completed,item.completed_at,
-                item.revision,item.url,item.branch_name,item.team_id,item.assignee,observed_at,project,item.due_date],
+            "UPDATE tasks SET planning_provider_revision=?2,pm_snapshot_synced_at=?3 WHERE id=?1",
+            params![id, item.revision, observed_at],
         )?;
-        super::planning_peers::clear_observation(tx)?;
     }
     let mut query = tx.prepare(&format!(
         "WITH accepted AS ({ACCEPTED_WAVE_PROJECTS})
@@ -966,21 +694,44 @@ pub(super) fn project_accepted_planning(
     drop(query);
     for (body, observed_at, project) in imported {
         let item: PmItem = serde_json::from_str(&body)?;
-        super::planning_peers::observe_task(tx, provider, &item, &project, observed_at)?;
+        let id = crate::durable::TaskId::from_issue(&item.id);
+        planning_write::create(
+            tx,
+            repo,
+            PlanningKind::Task,
+            id.as_str(),
+            &item_edits(&item, &project),
+        )?;
         tx.execute(
-            "INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,issue_title,
-             issue_description,pm_snapshot_synced_at,created_at,updated_at,planning_rank,workspace_slug,planning_state,planning_completed,
-             planning_completed_at,planning_provider_revision,planning_url,planning_branch_name,planning_team_id,planning_assignee,planning_due_date)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?8,?9,'',?10,?11,?12,?13,?14,?15,?16,?17,?18)",
-            params![crate::durable::TaskId::new().as_str(),project,item.id,item.identifier,
-                item.name,item.description,observed_at,super::super::rows::now_unix(),item.rank,item.state,item.completed,item.completed_at,item.revision,item.url,item.branch_name,item.team_id,item.assignee,item.due_date],
+            "UPDATE tasks SET planning_provider_revision=?2,pm_snapshot_synced_at=?3 WHERE id=?1",
+            params![id.as_str(), item.revision, observed_at],
         )?;
     }
-    super::planning_peers::clear_observation(tx)?;
     Ok(())
 }
 
-pub(super) fn same_ids(left: &[String], right: &[String]) -> bool {
+fn item_edits(item: &PmItem, project: &str) -> Vec<Edit> {
+    vec![
+        Edit::TaskProject(project.into()),
+        Edit::TaskLinearId(Some(item.id.clone())),
+        Edit::TaskIdentifier(item.identifier.clone()),
+        Edit::TaskTitle(Some(item.name.clone())),
+        Edit::TaskDescription(Some(item.description.clone())),
+        Edit::TaskRank(item.rank),
+        Edit::TaskUrl(item.url.clone()),
+        Edit::TaskBranch(item.branch_name.clone()),
+        Edit::TaskTeam(item.team_id.clone()),
+        Edit::TaskAssignee(item.assignee.clone()),
+        Edit::TaskDueDate(item.due_date.clone()),
+        Edit::Disposition(Disposition {
+            planning_state: item.state.clone(),
+            planning_completed: i64::from(item.completed),
+            planning_completed_at: item.completed_at.clone(),
+        }),
+    ]
+}
+
+fn same_ids(left: &[String], right: &[String]) -> bool {
     left.iter().all(|id| right.contains(id)) && right.iter().all(|id| left.contains(id))
 }
 
@@ -1031,7 +782,7 @@ fn require_accepted_initiative(
     Ok(accepted)
 }
 
-pub(super) fn validate_project_membership(
+fn validate_project_membership(
     conn: &Connection,
     repo: &str,
     provider: &str,
@@ -1059,35 +810,23 @@ pub(super) fn validate_project_membership(
     if !same_ids(&project.initiative_ids, &previous.initiative_ids)
         || !same_ids(&project.team_ids, &previous.team_ids)
     {
-        retain_membership_conflict(conn, repo, provider, &project.id)?;
-        return Err(StoreError::ProjectMembershipConflict {
-            project_id: project.id.clone(),
-        });
+        conn.execute("UPDATE pm_projects SET membership_unresolved=1 WHERE repo=?1 AND provider=?2 AND id=?3",
+            params![repo, provider, project.id])?;
+        return Err(StoreError::InvalidData(format!(
+            "Project {} membership changed without relationship ordering evidence",
+            project.id
+        )));
     }
     Ok(())
 }
 
-pub(super) fn retain_membership_conflict(
-    conn: &Connection,
-    repo: &str,
-    provider: &str,
-    project_id: &str,
-) -> StoreResult<()> {
-    conn.execute(
-        "UPDATE pm_projects SET membership_unresolved=1
-         WHERE repo=?1 AND provider=?2 AND id=?3 AND membership_unresolved=0",
-        params![repo, provider, project_id],
-    )?;
-    Ok(())
-}
-
-pub(super) fn put_project(
+fn put_project(
     conn: &Connection,
     repo: &str,
     provider: &str,
     observed_at: i64,
     project: &PmProject,
-) -> StoreResult<bool> {
+) -> StoreResult<()> {
     let previous: Option<(String, i64, bool)> = conn
         .query_row(
             "SELECT body,observed_at,archived FROM pm_projects WHERE repo=?1 AND provider=?2 AND id=?3",
@@ -1097,7 +836,7 @@ pub(super) fn put_project(
         .optional()?;
     // A later list/detail response cannot undo a confirmed archive receipt.
     if previous.as_ref().is_some_and(|(_, _, archived)| *archived) {
-        return Ok(false);
+        return Ok(());
     }
     let pending_name_cutover: bool = conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM pm_project_name_cutover
@@ -1110,7 +849,7 @@ pub(super) fn put_project(
         let previous: PmProject = serde_json::from_str(&previous)?;
         let previous_revision = revision_nanos(previous.revision.as_deref())?;
         if revision.is_some() && revision < previous_revision {
-            return Ok(false);
+            return Ok(());
         }
         let mut comparable = project.clone();
         comparable.revision = previous.revision.clone();
@@ -1122,21 +861,20 @@ pub(super) fn put_project(
             comparable.slug.clone_from(&previous.slug);
         }
         if comparable != previous && (revision.is_none() || revision == previous_revision) {
-            return Err(StoreError::ProviderObservationConflict {
-                entity: "Project",
-                id: project.id.clone(),
-            });
+            return Err(StoreError::InvalidData(format!(
+                "unordered or conflicting Project facts for {}; refresh planning",
+                project.id
+            )));
         }
         if revision.is_none() && previous_revision.is_some()
             || revision == previous_revision && observed_at < acquired
         {
-            return Ok(false);
+            return Ok(());
         }
     }
     conn.execute(
         "INSERT INTO pm_projects(repo,provider,id,observed_at,body) VALUES(?1,?2,?3,?4,?5)
-         ON CONFLICT(repo,provider,id) DO UPDATE SET observed_at=excluded.observed_at,body=excluded.body
-         WHERE pm_projects.observed_at IS NOT excluded.observed_at OR pm_projects.body IS NOT excluded.body",
+         ON CONFLICT(repo,provider,id) DO UPDATE SET observed_at=excluded.observed_at,body=excluded.body",
         params![repo,provider,project.id,observed_at,serde_json::to_string(project)?],
     )?;
     if pending_name_cutover {
@@ -1146,7 +884,7 @@ pub(super) fn put_project(
             params![repo, provider, project.id, observed_at],
         )?;
     }
-    Ok(true)
+    Ok(())
 }
 
 pub(super) fn revision_nanos(revision: Option<&str>) -> StoreResult<Option<i64>> {
@@ -1220,10 +958,9 @@ pub(super) fn put_item(
                 comparable.due_date = None;
             }
             if comparable != previous {
-                return Err(StoreError::ProviderObservationConflict {
-                    entity: "Task",
-                    id: item.id.clone(),
-                });
+                return Err(StoreError::InvalidData(format!(
+                    "conflicting planning facts at the same provider revision for {}; refresh planning", item.identifier
+                )));
             }
         }
         status_changed = revision > previous_revision
@@ -1236,8 +973,7 @@ pub(super) fn put_item(
     conn.execute(
         "INSERT INTO pm_items(repo,provider,id,identifier,project_id,observed_at,body) VALUES(?1,?2,?3,?4,?5,?6,?7)
          ON CONFLICT(repo,provider,id) DO UPDATE SET identifier=excluded.identifier,
-         project_id=excluded.project_id,observed_at=excluded.observed_at,body=excluded.body
-         WHERE pm_items.observed_at IS NOT excluded.observed_at OR pm_items.body IS NOT excluded.body",
+         project_id=excluded.project_id,observed_at=excluded.observed_at,body=excluded.body",
         params![repo,provider,item.id,item.identifier,item.project_id,observed_at,serde_json::to_string(item)?],
     )?;
     if status_changed {

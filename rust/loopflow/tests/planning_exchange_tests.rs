@@ -1,18 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use loopflow::engine::planning_exchange::{
-    LinearObservation, PlanningKind, PlanningMutation, PlanningObject, PlanningSnapshot,
+    PlanningKind, PlanningMutation, PlanningObject, PlanningSnapshot,
 };
 use serde_json::json;
 
-fn write(
-    snapshot: &mut PlanningSnapshot,
-    id: &str,
-    field: &str,
-    value: &str,
-    clock: i64,
-    linear: bool,
-) {
+fn write(snapshot: &mut PlanningSnapshot, id: &str, field: &str, value: &str, clock: i64) {
     let object = PlanningObject {
         kind: PlanningKind::Task,
         id: "task-existing".into(),
@@ -33,23 +26,6 @@ fn write(
                 json!(value)
             },
             clock,
-            linear: linear.then(|| {
-                let mut item: loopflow::pm::PmItem = serde_json::from_value(
-                    serde_json::from_str::<serde_json::Value>(include_str!(
-                        "../../../tests/fixtures/dto/task_history_planning.json"
-                    ))
-                    .unwrap()["items"][0]
-                        .clone(),
-                )
-                .unwrap();
-                item.name = value.into();
-                item.state = Some(value.into());
-                item.revision = Some("2026-10-08T10:00:00Z".into());
-                LinearObservation {
-                    body: serde_json::to_value(item).unwrap(),
-                    observed_at: 1,
-                }
-            }),
             parents,
         },
     );
@@ -72,19 +48,12 @@ fn value(snapshot: &PlanningSnapshot, field: &str) -> serde_json::Value {
 #[test]
 fn concurrent_edits_converge_without_losing_independent_fields_or_losing_values() {
     let mut base = PlanningSnapshot::default();
-    write(&mut base, "initial", "issue_title", "Initial", 1, false);
+    write(&mut base, "initial", "issue_title", "Initial", 1);
     let mut laptop = base.clone();
     let mut worker = base;
-    write(&mut laptop, "left", "issue_title", "Laptop", 2, false);
-    write(&mut worker, "right", "issue_title", "Worker", 3, false);
-    write(
-        &mut worker,
-        "brief",
-        "issue_description",
-        "Independent",
-        4,
-        false,
-    );
+    write(&mut laptop, "left", "issue_title", "Laptop", 2);
+    write(&mut worker, "right", "issue_title", "Worker", 3);
+    write(&mut worker, "brief", "issue_description", "Independent", 4);
     let merged = laptop.merge(&worker).unwrap();
     assert_eq!(merged, worker.merge(&laptop).unwrap());
     assert_eq!(merged.merge(&laptop).unwrap(), merged);
@@ -98,48 +67,18 @@ fn concurrent_edits_converge_without_losing_independent_fields_or_losing_values(
 }
 
 #[test]
-fn observed_reopening_beats_delayed_completion_and_linear_beats_concurrent_peer() {
+fn observed_reopening_beats_delayed_completion() {
     let mut completed = PlanningSnapshot::default();
-    write(
-        &mut completed,
-        "complete",
-        "disposition",
-        "completed",
-        1,
-        true,
-    );
+    write(&mut completed, "complete", "disposition", "completed", 1);
     let mut reopened = completed.clone();
-    write(&mut reopened, "reopen", "disposition", "open", 2, false);
+    write(&mut reopened, "reopen", "disposition", "unstarted", 2);
     assert_eq!(
         value(&completed.merge(&reopened).unwrap(), "disposition"),
-        "open"
+        "unstarted"
     );
-    let mut observed = completed.clone();
-    write(
-        &mut observed,
-        "linear-reopen",
-        "disposition",
-        "Linear open",
-        3,
-        true,
-    );
-    write(
-        &mut reopened,
-        "later",
-        "disposition",
-        "Peer completed",
-        100,
-        false,
-    );
-    let merged = reopened.merge(&observed).unwrap();
-    assert_eq!(value(&merged, "disposition"), "Linear open");
-    let (id, winner) = merged.winners().next().unwrap();
-    assert_eq!(id, "linear-reopen");
-    assert!(winner.linear.is_some());
-    assert_eq!(winner, &merged.changes[id]);
     assert_eq!(
-        merged.changes["later"].value["planning_state"],
-        "Peer completed"
+        value(&reopened.merge(&completed).unwrap(), "disposition"),
+        "unstarted"
     );
 }
 
@@ -147,10 +86,10 @@ fn observed_reopening_beats_delayed_completion_and_linear_beats_concurrent_peer(
 fn equal_values_retain_both_causes_and_ties_use_stable_identity() {
     let mut left = PlanningSnapshot::default();
     let mut right = PlanningSnapshot::default();
-    write(&mut left, "a", "issue_title", "Same", 1, false);
-    write(&mut right, "b", "issue_title", "Same", 1, false);
+    write(&mut left, "a", "issue_title", "Same", 1);
+    write(&mut right, "b", "issue_title", "Same", 1);
     let mut merged = left.merge(&right).unwrap();
-    write(&mut merged, "c", "issue_title", "Next", 2, false);
+    write(&mut merged, "c", "issue_title", "Next", 2);
     assert_eq!(
         merged.changes["c"].parents,
         BTreeSet::from(["a".into(), "b".into()])
@@ -166,7 +105,7 @@ fn equal_values_retain_both_causes_and_ties_use_stable_identity() {
 #[test]
 fn conflicting_identity_missing_ancestors_and_execution_fields_are_rejected() {
     let mut saved = PlanningSnapshot::default();
-    write(&mut saved, "a", "issue_title", "Saved", 1, false);
+    write(&mut saved, "a", "issue_title", "Saved", 1);
     let mut reused = saved.clone();
     reused.changes.get_mut("a").unwrap().value = json!("Replacement");
     assert!(saved.merge(&reused).is_err());
@@ -185,143 +124,4 @@ fn conflicting_identity_missing_ancestors_and_execution_fields_are_rejected() {
         changes: BTreeMap::new(),
     };
     assert_eq!(saved.merge(&empty).unwrap(), saved);
-}
-
-#[test]
-fn concurrent_linear_facts_follow_provider_revision_not_the_receivers_clock() {
-    let mut newer = PlanningSnapshot::default();
-    write(&mut newer, "newer", "issue_title", "Newer", 2, true);
-    newer
-        .changes
-        .get_mut("newer")
-        .unwrap()
-        .linear
-        .as_mut()
-        .unwrap()
-        .body["revision"] = json!("2026-10-08T12:00:00Z");
-    let mut delayed = PlanningSnapshot::default();
-    write(&mut delayed, "delayed", "issue_title", "Older", 100, true);
-    let merged = newer.merge(&delayed).unwrap();
-    assert_eq!(value(&merged, "issue_title"), "Newer");
-    assert_eq!(merged.changes["delayed"].value, "Older");
-}
-
-#[test]
-fn provider_observations_cannot_smuggle_execution_or_invalid_revisions() {
-    let mut snapshot = PlanningSnapshot::default();
-    write(
-        &mut snapshot,
-        "observed",
-        "issue_title",
-        "Observed",
-        1,
-        true,
-    );
-    snapshot
-        .changes
-        .get_mut("observed")
-        .unwrap()
-        .linear
-        .as_mut()
-        .unwrap()
-        .body["worktree"] = json!("/private/path");
-    assert!(snapshot.to_bytes().is_err());
-    snapshot
-        .changes
-        .get_mut("observed")
-        .unwrap()
-        .linear
-        .as_mut()
-        .unwrap()
-        .body
-        .as_object_mut()
-        .unwrap()
-        .remove("worktree");
-    snapshot
-        .changes
-        .get_mut("observed")
-        .unwrap()
-        .linear
-        .as_mut()
-        .unwrap()
-        .body["revision"] = json!("not-a-revision");
-    assert!(snapshot.to_bytes().is_err());
-}
-
-#[test]
-fn cross_origin_observation_retains_portable_causality_without_redirecting_identity() {
-    let mut snapshot = PlanningSnapshot::default();
-    write(&mut snapshot, "peer", "issue_title", "Observed", 1, true);
-    snapshot.changes.get_mut("peer").unwrap().object.id = "task-peer".into();
-    let mut observation = snapshot.changes["peer"].clone();
-    observation.object.id = "task-existing".into();
-    observation.clock = 2;
-    observation.linear.as_mut().unwrap().observed_at = 10;
-    observation.parents.insert("peer".into());
-    snapshot.changes.insert("observed-here".into(), observation);
-    write(
-        &mut snapshot,
-        "save",
-        "issue_title",
-        "Next local save",
-        3,
-        false,
-    );
-    let exchanged = PlanningSnapshot::from_bytes(&snapshot.to_bytes().unwrap()).unwrap();
-    assert_eq!(
-        exchanged.changes["save"].parents,
-        BTreeSet::from(["observed-here".into()])
-    );
-    assert_eq!(
-        exchanged.changes["observed-here"].parents,
-        BTreeSet::from(["peer".into()])
-    );
-    assert_eq!(
-        exchanged.heads().map(|(id, _)| id).collect::<Vec<_>>(),
-        ["peer", "save"]
-    );
-    assert_eq!(snapshot.merge(&exchanged).unwrap(), snapshot);
-
-    // Provider identity/revision is not an alias. Even an observed successor
-    // with another provider fact leaves both original identities intact.
-    for field in ["id", "revision"] {
-        let mut unrelated = snapshot.clone();
-        unrelated
-            .changes
-            .get_mut("observed-here")
-            .unwrap()
-            .linear
-            .as_mut()
-            .unwrap()
-            .body[field] = json!(if field == "revision" {
-            "2026-10-08T11:00:00Z"
-        } else {
-            "another-provider"
-        });
-        let unrelated = PlanningSnapshot::from_bytes(&unrelated.to_bytes().unwrap()).unwrap();
-        assert_eq!(unrelated.winners().count(), 2);
-    }
-    // A peer-authored save can explicitly follow the accepted source ID without
-    // claiming a Linear observation. This link still does not merge identities.
-    let mut saved = snapshot.clone();
-    let save = saved.changes.get_mut("observed-here").unwrap();
-    save.linear = None;
-    save.value = json!("Peer-authored successor");
-    let saved = PlanningSnapshot::from_bytes(&saved.to_bytes().unwrap()).unwrap();
-    assert_eq!(saved.heads().count(), 2);
-    let mut wrong_field = saved.clone();
-    wrong_field.changes.get_mut("observed-here").unwrap().field = "issue_description".into();
-    assert!(wrong_field.to_bytes().is_err());
-    let mut wrong_kind = saved;
-    wrong_kind
-        .changes
-        .get_mut("observed-here")
-        .unwrap()
-        .object
-        .kind = PlanningKind::Project;
-    wrong_kind.changes.get_mut("observed-here").unwrap().field = "project_name".into();
-    assert!(wrong_kind.to_bytes().is_err());
-    let mut missing = snapshot;
-    missing.changes.remove("peer");
-    assert!(missing.to_bytes().is_err());
 }

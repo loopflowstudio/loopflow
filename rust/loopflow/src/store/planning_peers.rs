@@ -1,7 +1,6 @@
 use crate::engine::planning_exchange::PlanningObject;
 
 use crate::engine::planning_git::PlanningDestination;
-use crate::id::WaveId;
 
 use super::{run_sqlite, Store, StoreResult};
 
@@ -56,23 +55,6 @@ pub struct PeerPlanningValue {
 }
 
 impl Store {
-    pub async fn associate_peer_planning(
-        &self,
-        repo: &str,
-        origin: &PlanningObject,
-        local_id: &str,
-        provider_id: &str,
-    ) -> StoreResult<()> {
-        let repo = repo.to_owned();
-        let origin = origin.clone();
-        let local_id = local_id.to_owned();
-        let provider_id = provider_id.to_owned();
-        run_sqlite(&self.sqlite, move |sqlite| {
-            sqlite.associate_peer_planning(&repo, &origin, &local_id, &provider_id)
-        })
-        .await
-    }
-
     pub async fn use_peer_planning(
         &self,
         repo: &str,
@@ -115,32 +97,6 @@ impl Store {
         let destination = destination.clone();
         run_sqlite(&self.sqlite, move |sqlite| {
             sqlite.bind_peer_planning(&repo, &destination)
-        })
-        .await
-    }
-
-    pub(crate) async fn peer_planning_destination_ids(
-        &self,
-        repo: &str,
-    ) -> StoreResult<Vec<String>> {
-        let repo = repo.to_string();
-        run_sqlite(&self.sqlite, move |sqlite| {
-            sqlite.peer_planning_destination_ids(&repo)
-        })
-        .await
-    }
-
-    pub async fn select_peer_waves(
-        &self,
-        repo: &str,
-        destination: &str,
-        waves: &[WaveId],
-    ) -> StoreResult<()> {
-        let repo = repo.to_string();
-        let destination = destination.to_string();
-        let waves = waves.to_vec();
-        run_sqlite(&self.sqlite, move |sqlite| {
-            sqlite.select_peer_waves(&repo, &destination, &waves)
         })
         .await
     }

@@ -1,5 +1,7 @@
 //! Field receipts share one protocol; each object's table retains its foreign key.
 
+use super::planning_write::{self, PlanningEdit as Edit};
+use crate::engine::planning_exchange::PlanningKind;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -7,7 +9,7 @@ use serde_json::Value;
 use super::SqliteStore;
 use crate::durable::{ProjectId, TaskId};
 use crate::planning::PlanningChange;
-use crate::store::{StoreError, StoreResult};
+use crate::store::StoreResult;
 
 impl SqliteStore {
     pub(crate) fn planning_field_owners(
@@ -22,12 +24,12 @@ impl SqliteStore {
                  AND ((t.planning_deleted_at IS NULL AND c.field!='deleted')
                      OR (t.planning_deleted_at IS NOT NULL AND c.field='deleted'))
                  AND c.acknowledged=0 AND c.conflict_json IS NULL
-                 AND (c.field='deleted' OR c.attempted=1 OR c.seq=(SELECT max(seq) FROM task_changes WHERE task_id=t.id AND field=c.field)))
+                 AND (c.attempted=1 OR c.seq=(SELECT max(seq) FROM task_changes WHERE task_id=t.id AND field=c.field)))
              UNION ALL
              SELECT 'project',p.id FROM projects p JOIN waves w ON w.id=p.wave_id
              WHERE w.repo=?1 AND p.external_project_id IS NOT NULL AND EXISTS(
                  SELECT 1 FROM project_changes c WHERE c.project_id=p.id AND c.acknowledged=0 AND c.conflict_json IS NULL
-                 AND (c.id IN (SELECT id FROM planning_order_deliveries) OR (c.field!='task_order' AND (c.attempted=1 OR c.seq=(SELECT max(seq) FROM project_changes WHERE project_id=p.id AND field=c.field)))))"
+                 AND (c.attempted=1 OR c.seq=(SELECT max(seq) FROM project_changes WHERE project_id=p.id AND field=c.field)))"
         )?;
         let rows = query.query_map([repo], |row| {
             let kind: String = row.get(0)?;
@@ -49,7 +51,6 @@ impl SqliteStore {
     ) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        super::planning_peers::require_projected_effects(&tx, owner)?;
         let observation = owner.observation(&tx)?;
         if observation
             .as_ref()
@@ -71,9 +72,9 @@ impl SqliteStore {
         let (owner, id) = owner.owner();
         let changed = tx.execute(
             &format!(
-                "UPDATE {owner}_changes SET attempted=1,error=NULL WHERE id=?1 AND {owner}_id=?2 AND field=?3
+                "UPDATE {owner}_changes SET attempted=1,error=NULL WHERE id=?1 AND {owner}_id=?2
              AND attempted=0 AND acknowledged=0 AND conflict_json IS NULL
-             AND (field='deleted' OR seq=(SELECT max(seq) FROM {owner}_changes WHERE {owner}_id=?2 AND field=?3))
+             AND seq=(SELECT max(seq) FROM {owner}_changes WHERE {owner}_id=?2 AND field=?3)
              AND NOT EXISTS(SELECT 1 FROM {owner}_changes WHERE {owner}_id=?2 AND field=?3
                  AND attempted=1 AND acknowledged=0 AND conflict_json IS NULL)"
             ),
@@ -91,10 +92,10 @@ impl SqliteStore {
         if retained.as_ref().and_then(|body| body["revision"].as_str()) != Some(revision) {
             return Ok(());
         }
-        for change in owner
+        if let Some(change) = owner
             .pending(&tx)?
             .into_iter()
-            .filter(|c| c.field == "deleted")
+            .find(|c| c.field == "deleted")
         {
             let baseline = change
                 .base
@@ -110,9 +111,14 @@ impl SqliteStore {
                     "UPDATE task_changes SET conflict_json=?2,error=NULL WHERE id=?1 AND conflict_json IS NULL",
                     params![change.id, serde_json::json!({"revision":revision,"value":false}).to_string()],
                 )?;
+                planning_write::local(
+                    &tx,
+                    PlanningKind::Task,
+                    id.as_str(),
+                    &[Edit::TaskDeletedAt(None)],
+                )?;
             }
         }
-        reconcile_deletion(&tx, id)?;
         tx.commit()?;
         Ok(())
     }
@@ -192,9 +198,7 @@ impl<'a> PlanningChanges<'a> {
             let Some(remote) = observed.get(&field) else {
                 continue;
             };
-            let remote = self.comparison_value(conn, &field, remote.clone())?;
-            let value = self.comparison_value(conn, &field, value)?;
-            let base_value = self.comparison_base(conn, &field, base.as_ref())?;
+            let remote = self.normalize(conn, &field, remote.clone())?;
             if super::planning::revision_nanos(observed["revision"].as_str())?
                 < super::planning::revision_nanos(
                     base.as_ref().and_then(|b| b["revision"].as_str()),
@@ -204,33 +208,28 @@ impl<'a> PlanningChanges<'a> {
             }
             if remote == value {
                 let baseline =
-                    serde_json::json!({"revision": observed["revision"], "value": remote})
-                        .to_string();
-                let mut later = conn.prepare(&format!(
-                    "SELECT id,base_json FROM {owner}_changes
-                     WHERE {owner}_id=?1 AND field=?2
-                     AND seq>(SELECT seq FROM {owner}_changes WHERE id=?3)
-                     AND attempted=0 AND acknowledged=0 AND conflict_json IS NULL"
-                ))?;
-                let later = later
-                    .query_map(params![id, field, receipt], |row| {
-                        Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
-                    })?
-                    .collect::<Result<Vec<_>, _>>()?;
-                for (receipt, base) in later {
-                    let base = base.map(|base| serde_json::from_str(&base)).transpose()?;
-                    if self.comparison_base(conn, &field, base.as_ref())? == base_value {
-                        conn.execute(
-                            &format!("UPDATE {owner}_changes SET base_json=?2 WHERE id=?1"),
-                            params![receipt, baseline],
-                        )?;
-                    }
-                }
+                    serde_json::json!({"revision": observed["revision"], "value": remote});
+                conn.execute(
+                    &format!(
+                        "UPDATE {owner}_changes SET base_json=?2 WHERE {owner}_id=?3 AND field=?4
+                     AND seq>(SELECT seq FROM {owner}_changes WHERE id=?1)
+                     AND attempted=0 AND acknowledged=0 AND conflict_json IS NULL
+                     AND (base_json IS ?5 OR (base_json IS NOT NULL AND ?5 IS NOT NULL
+                         AND json_extract(base_json,'$.value') IS json_extract(?5,'$.value')))"
+                    ),
+                    params![
+                        receipt,
+                        baseline.to_string(),
+                        id,
+                        field,
+                        base.as_ref().map(Value::to_string)
+                    ],
+                )?;
                 conn.execute(
                     &format!("UPDATE {owner}_changes SET acknowledged=1,acknowledged_revision=?2,error=NULL WHERE id=?1"),
                     params![receipt, observed["revision"].as_str()],
                 )?;
-            } else if base_value.as_ref() != Some(&remote) {
+            } else if base.as_ref().is_none_or(|base| base["value"] != remote) {
                 conn.execute(
                     &format!("UPDATE {owner}_changes SET conflict_json=?2,error=NULL WHERE id=?1"),
                     params![
@@ -285,82 +284,27 @@ impl<'a> PlanningChanges<'a> {
         if previous == value {
             return Ok(false);
         }
-        self.record_value(conn, field, &uuid::Uuid::new_v4().to_string(), value, None)?;
-        Ok(true)
-    }
-
-    /// One receipt writer for ordinary edits and imported intentions. A caller
-    /// with a retained mutation identity can repeat the save without a new effect.
-    pub(super) fn record_value(
-        self,
-        conn: &Connection,
-        field: &str,
-        receipt: &str,
-        value: Value,
-        baseline: Option<Value>,
-    ) -> StoreResult<()> {
-        let value = self.normalize(conn, field, value)?;
         let (owner, id) = self.owner();
-        // Preserve the causal predecessor's provider revision, not this
-        // machine's potentially newer observation of a different value.
-        let base = match baseline {
-            Some(base) => Some((base["revision"].clone(), base["value"].clone())),
-            None => self
-                .observation(conn)?
-                .map(|body| (body["revision"].clone(), body[field].clone())),
-        }
-        .map(|(revision, value)| -> StoreResult<Value> {
-            Ok(serde_json::json!({
-                "revision":revision, "value":self.normalize(conn, field, value)?
-            }))
-        })
-        .transpose()?;
-        let (capture_column, capture_value) = if matches!(self, Self::Task(_)) {
-            (",deletion_saved_at", ",CASE WHEN ?3='deleted' THEN (SELECT planning_deleted_at FROM tasks WHERE id=?2) END")
-        } else {
-            ("", "")
-        };
+        let body = self.observation(conn)?;
+        let base = body
+            .map(|body| -> StoreResult<Value> {
+                Ok(serde_json::json!({"revision": body["revision"], "value": self.normalize(conn, field, body[field].clone())?}))
+            })
+            .transpose()?;
         conn.execute(
             &format!(
-                "INSERT INTO {owner}_changes(id,{owner}_id,field,value_json,base_json{capture_column})
-                VALUES(?1,?2,?3,?4,?5{capture_value}) ON CONFLICT(id) DO NOTHING"
+                "INSERT INTO {owner}_changes(id,{owner}_id,field,value_json,base_json)
+                VALUES(?1,?2,?3,?4,?5)"
             ),
             params![
-                receipt,
+                uuid::Uuid::new_v4().to_string(),
                 id,
                 field,
                 value.to_string(),
                 base.map(|v| v.to_string())
             ],
         )?;
-        Ok(())
-    }
-
-    /// Importing a Linear winner retires local intentions, not their history or
-    /// attempted flags. It is not an acknowledgement of our own provider write.
-    pub(super) fn adopt_peer_linear(
-        self,
-        conn: &Connection,
-        field: &str,
-        mutation: &str,
-        value: Value,
-        revision: Option<&str>,
-    ) -> StoreResult<()> {
-        let value = self.normalize(conn, field, value)?;
-        let (owner, id) = self.owner();
-        conn.execute(
-            &format!(
-                "UPDATE {owner}_changes SET conflict_json=?3
-                WHERE {owner}_id=?1 AND field=?2 AND acknowledged=0 AND conflict_json IS NULL"
-            ),
-            params![
-                id,
-                field,
-                serde_json::json!({"value":value,"peer_change":mutation,"revision":revision})
-                    .to_string()
-            ],
-        )?;
-        Ok(())
+        Ok(true)
     }
 
     // Membership receipts retain durable identity even when a provider mapping arrives later.
@@ -387,32 +331,12 @@ impl<'a> PlanningChanges<'a> {
         Ok(value)
     }
 
-    // Resolve references only for comparison/projection. The saved value and
-    // causal baseline retain the originating machine's captured identities.
-    fn comparison_value(self, conn: &Connection, field: &str, value: Value) -> StoreResult<Value> {
-        let value = self.normalize(conn, field, value)?;
-        if matches!(self, Self::Task(_)) && field == "project_id" {
-            return super::planning_peers::projected_value(conn, field, &value);
-        }
-        Ok(value)
-    }
-
-    fn comparison_base(
-        self,
-        conn: &Connection,
-        field: &str,
-        base: Option<&Value>,
-    ) -> StoreResult<Option<Value>> {
-        base.map(|base| self.comparison_value(conn, field, base["value"].clone()))
-            .transpose()
-    }
-
     pub(super) fn pending(self, conn: &Connection) -> StoreResult<Vec<PlanningChange>> {
         let (owner, id) = self.owner();
         let mut query = conn.prepare(&format!(
             "SELECT id,field,value_json,base_json FROM {owner}_changes c
-             WHERE {owner}_id=?1 AND acknowledged=0 AND conflict_json IS NULL AND (field='deleted' OR (field='task_order' AND id IN (SELECT id FROM planning_order_current)) OR (field!='task_order' AND seq=(SELECT max(seq) FROM {owner}_changes
-                 WHERE {owner}_id=c.{owner}_id AND field=c.field))) ORDER BY seq"
+             WHERE {owner}_id=?1 AND acknowledged=0 AND conflict_json IS NULL AND seq=(SELECT max(seq) FROM {owner}_changes
+                 WHERE {owner}_id=c.{owner}_id AND field=c.field) ORDER BY seq"
         ))?;
         let changes = query.query_and_then([id], read_change)?;
         changes.collect()
@@ -433,20 +357,19 @@ impl<'a> PlanningChanges<'a> {
             let Some(value) = saved.get(&change.field) else {
                 continue;
             };
-            let remote = self.comparison_value(conn, &change.field, value.clone())?;
-            let desired = self.comparison_value(conn, &change.field, change.value.clone())?;
-            let base = self.comparison_base(conn, &change.field, change.base.as_ref())?;
-            // A changed provider baseline also retires an unattempted save
-            // whose value already arrived through another peer. Preserve the
-            // receipt as an adopted observation, never invent our own effect.
-            // observe_attempts above alone acknowledges actual local attempts.
-            if base.as_ref() != Some(&remote) {
+            let remote = self.normalize(conn, &change.field, value.clone())?;
+            if remote != change.value
+                && change
+                    .base
+                    .as_ref()
+                    .is_none_or(|base| base["value"] != remote)
+            {
                 conn.execute(
                     &format!("UPDATE {owner}_changes SET conflict_json=?2 WHERE id=?1 AND conflict_json IS NULL"),
                     params![change.id, serde_json::json!({"revision": saved["revision"], "value": remote}).to_string()],
                 )?;
             } else {
-                saved[&change.field] = desired;
+                saved[&change.field] = change.value;
             }
         }
         Ok(serde_json::from_value(saved)?)
@@ -462,232 +385,4 @@ fn read_change(row: &rusqlite::Row<'_>) -> StoreResult<PlanningChange> {
         value: serde_json::from_str(&value)?,
         base: base.map(|value| serde_json::from_str(&value)).transpose()?,
     })
-}
-
-/// Transport the common deletion receipt, never a synthetic provider observation.
-/// The receipt's field key carries its identity; local sequence numbers stay local.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct DeletionReceipt {
-    deleted_at: Option<i64>,
-    base: Option<DeletionObservation>,
-    attempted: bool,
-    acknowledged: bool,
-    acknowledged_revision: Option<String>,
-    conflict: Option<DeletionObservation>,
-    error: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct DeletionObservation {
-    revision: Option<String>,
-    value: Option<bool>,
-}
-
-pub(crate) fn validate_peer_deletion(value: &Value) -> StoreResult<()> {
-    let receipt: DeletionReceipt = serde_json::from_value(value.clone())?;
-    // Roundtrip also requires every optional member: omitted evidence is not null.
-    if serde_json::to_value(&receipt)? != *value
-        || receipt.deleted_at.is_some_and(|at| at < 0)
-        || receipt
-            .base
-            .as_ref()
-            .is_some_and(|base| base.value == Some(true))
-        || receipt
-            .conflict
-            .as_ref()
-            .is_some_and(|conflict| conflict.value != Some(false) || conflict.revision.is_none())
-        || receipt.acknowledged_revision.is_some() && !receipt.acknowledged
-        || receipt.acknowledged && receipt.conflict.is_some()
-    {
-        return Err(crate::store::StoreError::InvalidData(
-            "invalid planning deletion receipt".into(),
-        ));
-    }
-    for revision in [
-        receipt
-            .base
-            .as_ref()
-            .and_then(|base| base.revision.as_deref()),
-        receipt.acknowledged_revision.as_deref(),
-        receipt
-            .conflict
-            .as_ref()
-            .and_then(|conflict| conflict.revision.as_deref()),
-    ] {
-        super::planning::revision_nanos(revision)?;
-    }
-    Ok(())
-}
-
-pub(super) fn import_peer_deletion(
-    conn: &Connection,
-    task: &TaskId,
-    id: &str,
-    history: &[DeletionReceipt],
-) -> StoreResult<()> {
-    let mut receipts = history.iter();
-    let local: Option<(String, String, String)> = conn.query_row(
-        "SELECT task_id,field,json_object('deleted_at',deletion_saved_at,'base',json(base_json),'attempted',json(CASE WHEN attempted THEN 'true' ELSE 'false' END),
-        'acknowledged',json(CASE WHEN acknowledged THEN 'true' ELSE 'false' END),'acknowledged_revision',acknowledged_revision,
-        'conflict',json(conflict_json),'error',error) FROM task_changes WHERE id=?1",
-        [id], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
-    ).optional()?;
-    let mut merged = if let Some((owner, field, body)) = local {
-        if owner != task.as_str() || field != "deleted" {
-            return Err(StoreError::PlanningReceiptConflict { effect: "deletion" });
-        }
-        serde_json::from_str::<DeletionReceipt>(&body)?
-    } else {
-        receipts
-            .next_back()
-            .expect("a deletion field has at least one mutation")
-            .clone()
-    };
-    for receipt in receipts {
-        let baseline_conflict = match (&merged.base, &receipt.base) {
-            (Some(left), Some(right)) => left != right,
-            (None, Some(_)) => merged.attempted,
-            (Some(_), None) => receipt.attempted,
-            (None, None) => false,
-        };
-        if baseline_conflict
-            || merged
-                .deleted_at
-                .zip(receipt.deleted_at)
-                .is_some_and(|(left, right)| left != right)
-            || merged.acknowledged && receipt.conflict.is_some()
-            || receipt.acknowledged && merged.conflict.is_some()
-        {
-            // Unordered active/trash evidence stays a retained projection conflict;
-            // a clock is not authority to discard either provider result.
-            return Err(StoreError::PlanningReceiptConflict { effect: "deletion" });
-        }
-        // Creation readback may fill an unattempted, baseline-free deletion.
-        // A captured attempt's baseline cannot subsequently change.
-        if merged.base.is_none() {
-            merged.base.clone_from(&receipt.base);
-        }
-        merged.deleted_at = merged.deleted_at.or(receipt.deleted_at);
-        merged.attempted |= receipt.attempted;
-        merged.acknowledged |= receipt.acknowledged;
-        if super::planning::revision_nanos(receipt.acknowledged_revision.as_deref())?
-            > super::planning::revision_nanos(merged.acknowledged_revision.as_deref())?
-        {
-            merged
-                .acknowledged_revision
-                .clone_from(&receipt.acknowledged_revision);
-        }
-        if super::planning::revision_nanos(
-            receipt
-                .conflict
-                .as_ref()
-                .and_then(|c| c.revision.as_deref()),
-        )? > super::planning::revision_nanos(
-            merged.conflict.as_ref().and_then(|c| c.revision.as_deref()),
-        )? {
-            merged.conflict.clone_from(&receipt.conflict);
-        }
-        // Diagnostics do not order effects. Keep a deterministic one here; all
-        // original messages and losing values remain in the immutable journal.
-        if receipt.error > merged.error {
-            merged.error.clone_from(&receipt.error);
-        }
-    }
-    if merged.acknowledged || merged.conflict.is_some() {
-        merged.error = None;
-    }
-    // Import the captured receipt directly. The scalar save path would sample
-    // this machine's provider baseline and visibility only to overwrite them.
-    conn.execute(
-        "INSERT INTO task_changes(id,task_id,field,value_json,base_json,attempted,
-            acknowledged,acknowledged_revision,conflict_json,error,deletion_saved_at)
-         VALUES(?1,?2,'deleted','true',?3,?4,?5,?6,?7,?8,?9)
-         ON CONFLICT(id) DO UPDATE SET base_json=excluded.base_json,
-            attempted=excluded.attempted,acknowledged=excluded.acknowledged,
-            acknowledged_revision=excluded.acknowledged_revision,
-            conflict_json=excluded.conflict_json,error=excluded.error,
-            deletion_saved_at=excluded.deletion_saved_at
-         WHERE base_json IS NOT excluded.base_json OR attempted IS NOT excluded.attempted
-            OR acknowledged IS NOT excluded.acknowledged
-            OR acknowledged_revision IS NOT excluded.acknowledged_revision
-            OR conflict_json IS NOT excluded.conflict_json OR error IS NOT excluded.error
-            OR deletion_saved_at IS NOT excluded.deletion_saved_at",
-        params![
-            id,
-            task.as_str(),
-            merged
-                .base
-                .map(|base| serde_json::to_string(&base))
-                .transpose()?,
-            merged.attempted,
-            merged.acknowledged,
-            merged.acknowledged_revision,
-            merged
-                .conflict
-                .map(|conflict| serde_json::to_string(&conflict))
-                .transpose()?,
-            merged.error,
-            merged.deleted_at
-        ],
-    )?;
-    Ok(())
-}
-
-/// An explicitly active Linear response can defeat a concurrent tombstone.
-/// Ordinary detail/list acquisition never creates this evidence. Keep unordered
-/// acknowledgements conservative; neither absence nor a peer clock proves revival.
-pub(super) fn reconcile_deletion(conn: &Connection, task: &TaskId) -> StoreResult<()> {
-    let mut query = conn.prepare("SELECT base_json,acknowledged,acknowledged_revision,conflict_json,deletion_saved_at FROM task_changes WHERE task_id=?1 AND field='deleted'")?;
-    let rows = query.query_map([task.as_str()], |row| {
-        Ok((
-            row.get::<_, Option<String>>(0)?,
-            row.get::<_, bool>(1)?,
-            row.get::<_, Option<String>>(2)?,
-            row.get::<_, Option<String>>(3)?,
-            row.get::<_, Option<i64>>(4)?,
-        ))
-    })?;
-    let mut active = None;
-    let mut baseline = None;
-    let mut unordered_ack = false;
-    let mut deleted_at = None;
-    for row in rows {
-        let (base, acknowledged, revision, conflict, saved_at) = row?;
-        if conflict.is_none() {
-            deleted_at = deleted_at.max(saved_at);
-        }
-        let base: Option<DeletionObservation> =
-            base.map(|body| serde_json::from_str(&body)).transpose()?;
-        baseline = baseline.max(super::planning::revision_nanos(
-            base.as_ref().and_then(|b| b.revision.as_deref()),
-        )?);
-        if acknowledged {
-            let revision = super::planning::revision_nanos(revision.as_deref())?;
-            unordered_ack |= revision.is_none();
-            baseline = baseline.max(revision);
-        }
-        let conflict: Option<DeletionObservation> = conflict
-            .map(|body| serde_json::from_str(&body))
-            .transpose()?;
-        if let Some(conflict) = conflict {
-            let revision = super::planning::revision_nanos(conflict.revision.as_deref())?;
-            if revision > active.as_ref().map(|(revision, _)| *revision) {
-                active = revision.map(|revision| (revision, conflict));
-            }
-        }
-    }
-    if let Some((_, conflict)) =
-        active.filter(|(revision, _)| !unordered_ack && Some(*revision) > baseline)
-    {
-        conn.execute("UPDATE task_changes SET conflict_json=?2,error=NULL WHERE task_id=?1 AND field='deleted' AND acknowledged=0 AND conflict_json IS NULL",
-            params![task.as_str(),serde_json::to_string(&conflict)?])?;
-        conn.execute("UPDATE tasks SET planning_deleted_at=NULL,planning_revision=planning_revision+1 WHERE id=?1 AND planning_deleted_at IS NOT NULL", [task.as_str()])?;
-    } else if let Some(deleted_at) = deleted_at {
-        // A later removal can share a millisecond with an earlier restoration.
-        // Its own receipt, not the unrelated scalar's clock, supplies visibility.
-        conn.execute("UPDATE tasks SET planning_deleted_at=?2,planning_revision=planning_revision+1 WHERE id=?1 AND planning_deleted_at IS NOT ?2", params![task.as_str(),deleted_at])?;
-    }
-    Ok(())
 }

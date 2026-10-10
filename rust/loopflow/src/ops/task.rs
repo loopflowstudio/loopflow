@@ -734,7 +734,7 @@ pub(crate) async fn resolve_task(
     }
     let main = crate::engine::worktrees::main_repo_root(repo).map_err(task_error)?;
     if let Err(error) =
-        super::planning_peer::acquire_repository(store, &main.to_string_lossy()).await
+        super::planning_sync::acquire_repository(store, &main.to_string_lossy()).await
     {
         tracing::warn!(%error, "planning acquisition pending; resolving retained Task");
     }
@@ -764,6 +764,16 @@ pub(crate) async fn resolve_task(
             .as_ref()
             .map(|source| source.identifier.clone())
             .unwrap_or_else(|| task.id.to_string()),
+        None if super::linear_observe::connected(&main.to_string_lossy())
+            && source
+                .as_ref()
+                .is_some_and(|source| source.issue_id.is_some()) =>
+        {
+            source
+                .as_ref()
+                .and_then(|source| source.issue_id.clone())
+                .expect("source has a Linear identity")
+        }
         None if source.is_some() || crate::durable::TaskId::parse(selector).is_ok() => {
             return Err(task_error(format!(
                 "Task {selector} has not synchronized to this machine; synchronize the selected planning destination before launching"
@@ -794,7 +804,7 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskProcessOptions) -> OpsRes
     block_on_task(async {
         let store = task_store().await?;
         let main = crate::engine::worktrees::main_repo_root(repo).map_err(task_error)?;
-        let saved = super::planning_peer::find_task(&store, &main.to_string_lossy(), issue).await?;
+        let saved = super::planning_sync::find_task(&store, &main.to_string_lossy(), issue).await?;
         let acquired = saved.is_none();
         let task = match saved {
             Some(task) => task,
@@ -1273,6 +1283,12 @@ pub fn task_create(
     let main = crate::engine::worktrees::main_repo_root(repo).map_err(task_error)?;
     block_on_task(async {
         let store = super::pm::pm_store().await?;
+        if let Err(error) =
+            super::planning_sync::acquire_repository(&store, &main.to_string_lossy()).await
+        {
+            tracing::debug!(%error,"planning acquisition pending; creating from retained planning");
+        }
+
         if let Some(name) = wave {
             let locator =
                 crate::work::wave::WaveLocator::discover(&main, name).map_err(task_error)?;
@@ -1335,7 +1351,7 @@ pub fn task_create(
             )
             .await
             .map_err(task_error)?;
-        super::planning_peer::sync_after_save(&store, wave.repo()).await;
+        super::planning_sync::sync_after_save(&store, wave.repo()).await;
         task_planning_item(&store, &task)
     })
 }
@@ -3046,7 +3062,7 @@ pub fn task_reopen(issue: &str, note: Option<&str>) -> OpsResult<Task> {
             .reopen_task(&task.id, note)
             .map_err(task_error)?;
         let wave = owning_wave(&store, &task).await?;
-        super::planning_peer::sync_after_save(&store, wave.repo()).await;
+        super::planning_sync::sync_after_save(&store, wave.repo()).await;
         Ok(task)
     })
 }
@@ -3168,7 +3184,7 @@ async fn settle_completion(store: &SharedStore, task: &mut Task, request: i64) -
             .map_err(task_error)?
             .ok_or_else(|| task_error("completed Task is missing"))?;
         let wave = owning_wave(store, task).await?;
-        super::planning_peer::sync_after_save(store, wave.repo()).await;
+        super::planning_sync::sync_after_save(store, wave.repo()).await;
         // Cleanup retains live work and unpublished artifacts independently of status.
         cleanup_completed_task(store, task).await?;
         Ok(())
@@ -4047,7 +4063,7 @@ pub fn task_edit(
             .await
             .map_err(task_error)?;
         let owner = owning_wave(&store, &edited).await?;
-        super::planning_peer::sync_after_save(&store, owner.repo()).await;
+        super::planning_sync::sync_after_save(&store, owner.repo()).await;
         Ok(TaskEdit {
             wave: owner.slug().into(),
             id: edited.id.to_string(),
@@ -4105,7 +4121,7 @@ pub fn task_refile(repo: &Path, issue: &str, wave: &str) -> OpsResult<super::pm:
             eprintln!("Saved locally; pending Linear sync.");
         }
         drop(guards);
-        super::planning_peer::sync_after_save(&store, destination.repo()).await;
+        super::planning_sync::sync_after_save(&store, destination.repo()).await;
         Ok(super::pm::PmUpdateResult {
             wave: destination.slug().into(),
             id: task.id.to_string(),

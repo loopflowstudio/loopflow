@@ -1432,31 +1432,6 @@ pub enum PlanningCommand {
         #[arg(long, value_name = "UUID")]
         recover: Option<String>,
     },
-    /// Pin a remote and user-keyed ref; joining selects no existing work
-    Connect {
-        #[arg(long)]
-        remote: String,
-        /// Explicitly join a shared ref instead of the saved user's ref
-        #[arg(long, value_name = "NAME")]
-        shared: Option<String>,
-    },
-    /// Route future root Waves to a destination, or use 'local' for no sharing
-    Use { destination: String },
-    /// Include existing Waves and their descendants in a destination
-    Select {
-        destination: String,
-        /// Exact Wave IDs; this may make retained history eligible for sharing
-        #[arg(long = "wave", required = true, num_args = 1..)]
-        waves: Vec<String>,
-    },
-    /// Associate an incoming full Work ID with existing local Work; never merge execution or share it
-    Associate {
-        incoming: String,
-        #[arg(long = "with", value_name = "LOCAL_ID")]
-        local: String,
-        #[arg(long, value_name = "PROVIDER_ID")]
-        linear: String,
-    },
     /// Show selection, retained imports and held records without contacting Git
     Status {
         #[arg(long)]
@@ -1466,7 +1441,7 @@ pub enum PlanningCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum RepoCommand {
-    /// Configure Git planning synchronization without publishing existing work
+    /// Inspect planning synchronization and personal identity
     Planning {
         #[command(subcommand)]
         cmd: PlanningCommand,

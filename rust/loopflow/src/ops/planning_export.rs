@@ -42,46 +42,15 @@ pub(crate) async fn sync_export(store: &Store, repo: &Path, work: &WorkRef) -> O
     let Some(_lock) = super::planning_delivery::lock_fields(store, owner)? else {
         return Ok(());
     };
-    let mut result = Ok(());
-    for origin in store
-        .sqlite
-        .planning_export_origins(owner)
-        .map_err(message)?
-    {
-        let origin = match &origin {
-            WorkRef::Task(id) => PlanningChanges::Task(id),
-            WorkRef::Project(id) => PlanningChanges::Project(id),
-            _ => unreachable!("creation origins are Tasks or Projects"),
-        };
-        if let Err(error) = sync_origin(store, repo, owner, origin).await {
-            result = Err(error);
-        }
-    }
-    result
-}
-
-async fn sync_origin(
-    store: &Store,
-    repo: &Path,
-    owner: PlanningChanges<'_>,
-    origin: PlanningChanges<'_>,
-) -> OpsResult<()> {
     let attempt = async {
-        if !store
-            .sqlite
-            .planning_export_pending(origin)
-            .map_err(message)?
-        {
-            return Ok(());
-        }
-        let wave_id = match owner {
+        let (wave_id, mapped) = match owner {
             PlanningChanges::Task(id) => {
                 let task = store
                     .get_task(id)
                     .await
                     .map_err(message)?
                     .ok_or_else(|| message("Task is missing"))?;
-                task.wave_id
+                (task.wave_id, task.plan.linear_id.is_some())
             }
             PlanningChanges::Project(id) => {
                 let project = store
@@ -89,9 +58,12 @@ async fn sync_origin(
                     .await
                     .map_err(message)?
                     .ok_or_else(|| message("Project is missing"))?;
-                project.wave_id
+                (project.wave_id, project.plan.linear_id.is_some())
             }
         };
+        if mapped {
+            return Ok(());
+        }
         let wave = store
             .get_wave(&wave_id)
             .await
@@ -102,15 +74,15 @@ async fn sync_origin(
         let team = super::pm::repository_team_id(repo)?;
         let export = store
             .sqlite
-            .prepare_planning_export(origin, &team, &initiative)
+            .prepare_planning_export(owner, &team, &initiative)
             .map_err(message)?;
         let client = super::pm::linear_client(repo).await?;
-        if observe(store, repo, origin, &client, &export, &wave_id).await? {
+        if observe(store, repo, owner, &client, &export, &wave_id).await? {
             return Ok(());
         }
         let (attempted, _) = store
             .sqlite
-            .planning_export_attempts(origin)
+            .planning_export_attempts(owner)
             .map_err(message)?;
         if attempted {
             return Err(message(
@@ -138,7 +110,7 @@ async fn sync_origin(
         }
         if !store
             .sqlite
-            .attempt_planning_export(origin, &input, false)
+            .attempt_planning_export(owner, &input, false)
             .map_err(message)?
         {
             return Ok(());
@@ -147,7 +119,7 @@ async fn sync_origin(
             .deliver_planning_creation(project, input)
             .await
             .map_err(message)?;
-        if !observe(store, repo, origin, &client, &export, &wave_id).await? {
+        if !observe(store, repo, owner, &client, &export, &wave_id).await? {
             return Err(message(
                 "Creation acknowledgement lacks exact readback; receipt retained",
             ));
@@ -161,7 +133,7 @@ async fn sync_origin(
     if let Err(error) = &result {
         store
             .sqlite
-            .planning_export_error(origin, &error.to_string())
+            .planning_export_error(owner, &error.to_string())
             .map_err(message)?;
     }
     result
@@ -170,16 +142,16 @@ async fn sync_origin(
 async fn observe(
     store: &Store,
     repo: &Path,
-    origin: PlanningChanges<'_>,
+    owner: PlanningChanges<'_>,
     client: &LinearClient,
     export: &PlanningExport,
     wave: &crate::id::WaveId,
 ) -> OpsResult<bool> {
     let (attempted, link_attempted) = store
         .sqlite
-        .planning_export_attempts(origin)
+        .planning_export_attempts(owner)
         .map_err(message)?;
-    match origin {
+    match owner {
         PlanningChanges::Project(_) => {
             let Some(mut project) = client.find_project(&export.id).await.map_err(message)? else {
                 return Ok(false);
@@ -195,7 +167,7 @@ async fn observe(
                 }
                 if !store
                     .sqlite
-                    .attempt_planning_export(origin, &export.input, true)
+                    .attempt_planning_export(owner, &export.input, true)
                     .map_err(message)?
                 {
                     return Ok(false);

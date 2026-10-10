@@ -16,10 +16,12 @@ use crate::store::{SharedStore, Store};
 use crate::work::task::Task;
 
 pub(crate) fn connected(repo: &str) -> bool {
-    crate::engine::config::load_config_or_default(Some(std::path::Path::new(repo)))
-        .pm
-        .and_then(|pm| pm.linear_team)
-        .is_some()
+    crate::engine::config::load_config(Some(std::path::Path::new(repo))).is_ok_and(|config| {
+        matches!(
+            config.unwrap_or_default().planning_transport(),
+            crate::engine::config::PlanningConfig::Linear {}
+        )
+    })
 }
 
 /// Explicit steering carries its marker, whichever account published it.
@@ -108,10 +110,10 @@ impl PlanningSync {
                     tokio::select! {
                         _ = stopped => {},
                         _ = repeat_sync("Git planning acquisition", Duration::from_secs(5), || {
-                            super::planning_peer::acquire_repository(&store, &repo)
+                            super::planning_sync::acquire_repository(&store, &repo)
                         }) => {},
                         _ = repeat_sync("Git planning publication", Duration::from_secs(1), || {
-                            super::planning_peer::publish_repository(&store, &repo)
+                            super::planning_sync::publish_repository(&store, &repo)
                         }) => {},
                         _ = repeat_sync("comment acquisition", Duration::from_secs(15), || {
                             refresh_repository_comments(&store, &repo)
@@ -239,7 +241,11 @@ async fn refresh_repository_planning(store: &Store, repository: &str) -> OpsResu
     Ok(())
 }
 
-async fn sync_repository_deliveries(store: &Store, repository: &str, state: bool) -> OpsResult<()> {
+pub(super) async fn sync_repository_deliveries(
+    store: &Store,
+    repository: &str,
+    state: bool,
+) -> OpsResult<()> {
     if !connected(repository) {
         return Ok(());
     }

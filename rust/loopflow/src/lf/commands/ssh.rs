@@ -37,10 +37,6 @@ pub fn run(target: &str, forward_agent: bool, lf_args: &[String]) -> anyhow::Res
         ),
         crate::provider_account::activation::isolation_env(true),
     ];
-    let declaration = std::env::var(crate::lf::WORK_DECLARATION_ENV).ok();
-    if let Some(value) = declaration.as_deref() {
-        extra_env.push((crate::lf::WORK_DECLARATION_ENV, value));
-    }
     if let Some(source) = source_json.as_deref() {
         extra_env.push((crate::lf::TASK_SOURCE_ENV, source));
     }
@@ -88,11 +84,17 @@ fn resident_args(args: &[String], cli: &Cli, source: Option<&TaskSource>) -> Vec
             (arg == "--task" && iter.as_slice().first() == cli.task.as_ref())
                 || task_flag.as_ref() == Some(arg)
         }) {
-            // Replication preserves the saved identity, including local-born Tasks.
+            // Linear mappings resolve independently retained Task IDs on the target.
             if arg == "--task" {
                 iter.next();
             }
-            result.push(format!("--task={}", source.task_id));
+            result.push(format!(
+                "--task={}",
+                source
+                    .issue_id
+                    .as_deref()
+                    .unwrap_or(source.task_id.as_str())
+            ));
         } else {
             result.push(arg.clone());
         }
@@ -107,18 +109,46 @@ async fn resolve_task_source(selector: Option<&str>) -> anyhow::Result<Option<Ta
     let Some(store) = crate::store::open_existing_store().await else {
         return Ok(None);
     };
+    // Validate pushed code before any planning I/O can hide missing source work.
     let source = TaskSource::resolve(&store, selector).await?;
-    // A source Task can select its repository outside Git; a target-only Task
-    // still resolves in the target's saved repository without a local checkout.
-    if let Ok(repo) =
-        crate::ops::task::task_repository(&crate::repo::working_directory()?, Some(selector))
-    {
+    let repo = match store.get_task_by_issue(selector).await? {
+        Some(task) => store
+            .get_wave(&task.wave_id)
+            .await?
+            .map(|wave| std::path::PathBuf::from(wave.repo())),
+        None => crate::repo::discover_repo_root(&crate::repo::working_directory()?)
+            .ok()
+            .flatten(),
+    };
+    if let Some(repo) = repo {
+        if crate::ops::linear_observe::connected(&repo.to_string_lossy()) {
+            if let Some(task) = store.get_task_by_issue(selector).await? {
+                if let Err(error) = crate::ops::planning_export::sync_export(
+                    &store,
+                    &repo,
+                    &crate::durable::WorkRef::Task(task.id),
+                )
+                .await
+                {
+                    tracing::warn!(%error,"Linear publication pending; remote resolution uses retained planning");
+                }
+            }
+            let source = TaskSource::resolve(&store, selector).await?;
+            if source
+                .as_ref()
+                .is_some_and(|source| source.issue_id.is_none())
+            {
+                return Err(anyhow!("Task {selector} is saved locally but has not reached Linear; retry after planning synchronization"));
+            }
+            return Ok(source);
+        }
         if let Err(error) =
-            crate::ops::planning_peer::publish_repository(&store, &repo.to_string_lossy()).await
+            crate::ops::planning_sync::publish_repository(&store, &repo.to_string_lossy()).await
         {
-            tracing::warn!(%error, "planning publication pending; remote resolution uses retained planning");
+            tracing::warn!(%error,"Git planning publication pending; remote resolution uses retained planning");
         }
     }
+
     Ok(source)
 }
 
@@ -312,6 +342,7 @@ mod tests {
         let source = crate::ops::task::remote::TaskSource {
             task_id: crate::durable::TaskId::new(),
             identifier: "FIX-1".into(),
+            issue_id: Some("provider-issue".into()),
             branch: "fix".into(),
             commit: "fixture".into(),
         };
@@ -325,7 +356,13 @@ mod tests {
             assert_eq!(
                 resident_args(&args, &cli, Some(&source)),
                 [
-                    format!("--task={}", source.task_id),
+                    format!(
+                        "--task={}",
+                        source
+                            .issue_id
+                            .as_deref()
+                            .unwrap_or(source.task_id.as_str())
+                    ),
                     "--isolate".into(),
                     "skill".into(),
                     "implement".into(),

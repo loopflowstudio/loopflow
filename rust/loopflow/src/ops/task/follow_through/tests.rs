@@ -220,6 +220,7 @@ fn follow_up_export_recovers_lost_issue_and_relation_responses_after_completion(
     pr.merge_commit = Some(repo.head_sha());
     runtime.block_on(store.update_task_pr(&pr)).unwrap();
     let linear = Arc::new(Mutex::new(Linear {
+        unavailable: true,
         lose_responses: true,
         ..Default::default()
     }));
@@ -283,6 +284,8 @@ fn follow_up_export_recovers_lost_issue_and_relation_responses_after_completion(
                     ))
                     .unwrap()
             };
+            // The command buffered while offline; reconnect attempts the saved creation.
+            linear.lock().unwrap().unavailable = false;
             // Remote creation commits, but both the reply and readback are lost.
             let lost_creation = runtime
                 .block_on(crate::ops::planning_export::sync_export(
@@ -664,7 +667,7 @@ fn historical_filing_converts_to_one_local_child_and_preserves_export_uncertaint
             relation_id: uuid::Uuid::new_v4().to_string(),
             project_id: "project-1".into(),
             team_id: "original-team".into(),
-            state_id: created_remotely.then(|| "original-state".into()),
+            state_id: Some("original-state".into()),
             wave: "product".into(),
             title: "Original title".into(),
             notes: "Original evidence condition".into(),
@@ -751,20 +754,9 @@ fn historical_filing_converts_to_one_local_child_and_preserves_export_uncertaint
                     .unwrap();
                 assert_eq!(export.id, intent.issue_id);
                 assert_eq!(export.input["teamId"], "original-team");
-                assert_eq!(export.input["stateId"], json!(intent.state_id));
+                assert_eq!(export.input["stateId"], "original-state");
                 assert_eq!(export.input["dueDate"], "2026-10-09");
                 assert_eq!(export.input["description"], intent.notes);
-                // The same retained effect must remain portable without claiming
-                // acknowledgement or restoring the old creation writer.
-                crate::store::sqlite::planning_export::validate_peer_receipt(
-                    &crate::engine::planning_exchange::PlanningObject {
-                        kind: crate::engine::planning_exchange::PlanningKind::Task,
-                        id: child.id.to_string(),
-                    },
-                    &json!({"export":export,"attempted":true,"link_attempted":false,
-                        "error":"Historical outcome unknown","acknowledged":false}),
-                )
-                .unwrap();
                 let result = runtime.block_on(crate::ops::planning_export::sync_export(
                     &store,
                     std::path::Path::new(wave.repo()),

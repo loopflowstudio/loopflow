@@ -93,7 +93,7 @@ pub async fn update_plan(
         .update_project_content(&project.id, &content)
         .map_err(project_error)?;
     drop(_acquisition);
-    super::planning_peer::sync_after_save(&store, wave.repo()).await;
+    super::planning_sync::sync_after_save(&store, wave.repo()).await;
     planning(&store, &project)
 }
 
@@ -277,7 +277,7 @@ pub async fn edit(
         .edit_project(&project.id, name, summary)
         .map_err(project_error)?;
     drop(_acquisition);
-    super::planning_peer::sync_after_save(&store, wave.repo()).await;
+    super::planning_sync::sync_after_save(&store, wave.repo()).await;
     planning(&store, &project)
 }
 
@@ -307,7 +307,7 @@ pub async fn workflow(
             .select_project_workflow(&project.id, name, &definition)
             .map_err(project_error)?;
         drop(_acquisition);
-        super::planning_peer::sync_after_save(&store, wave.repo()).await;
+        super::planning_sync::sync_after_save(&store, wave.repo()).await;
     }
     planning(&store, &project)
 }

@@ -999,9 +999,6 @@ fn peer_planning_receipts_reach_open_desktop_without_refresh() {
     )
     .unwrap();
     let id = home.store.bind_peer_planning(repo, &destination).unwrap();
-    home.store
-        .select_peer_waves(repo, &id, &[home.wave.id().clone()])
-        .unwrap();
     home.store.use_peer_planning(repo, Some(&id)).unwrap();
     let statuses = read(&|statuses| statuses.iter().any(|status| status.active));
     assert_eq!(statuses.len(), 1);

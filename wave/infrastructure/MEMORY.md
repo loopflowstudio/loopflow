@@ -72,16 +72,16 @@ Newer explicitly active Linear evidence restores visibility and retains the lose
 inventory grants neither restoration nor execution authority. Exact slice proofs:
 `078a6642e:wave/infrastructure/MEMORY.md`, this heading; installed acceptance is unproved.
 
-Jack Heart's October 9 LOO-449 decision makes checkout files own goal, memory
-and ancestor Markdown; edit directly, without import/cache or an editing CLI.
-Canonical identity cannot redirect checkout bytes. `10d44520f`
-removes draft storage and preserves creation/relocation bytes. SQLite owns
-identity/execution; `wave_workflows` keeps Project selection and Task capture.
-Preserve LOO-444 at integration.
-Jack Heart's October 10 decision selects committed default-branch goals for
-Linear sync; local views stay checkout-based. Pin one local default-branch commit,
-not mutable checkout files; never fetch or fall back. After main integration,
-`bfba1d78f` records the mocked sync pass. Publication is authorized, not landing.
+Jack Heart's LOO-449 decision makes checkout files own goal, memory and ancestor
+Markdown; edit directly, without a document cache or CLI. Canonical identity
+cannot redirect bytes. SQLite retains identity/execution; `wave_workflows` retains
+Project selection and Task capture. Registry relocation preserves files in place;
+authoring moves them. Gate repaired fixtures assuming automatic document movement
+or registration before reading, plus stale prompt goldens.
+Jack's October 10 decision makes Linear sync pin one committed local default-branch
+revision, never fetch or fall back; local views stay checkout-based. Mocked sync,
+checkout and stand-in launch proofs preserve LOO-444; installed acceptance remains
+unproved. Jack approved #1521 and landing with the default-branch fix (`05b04fa8`).
 Plan: `scratch/read-wave-goals-and-memory.md`.
 
 LOO-406's common writer boundary is `84664e661`; `e68f2a423` exports saved UUIDs.

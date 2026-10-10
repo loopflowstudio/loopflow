@@ -6,7 +6,8 @@ Jack Heart selected checkout ownership on October 9, 2026
 sync proves direct GOAL.md edit propagation, not landing. His October 10 steer
 `a7f4cbaf-0d87-47d2-83b8-940e5ce7b461` resolves the policy: Linear sees only the
 merged default-branch goal; launch context, list, status and roadmap remain
-checkout-based. He requested republishing.
+checkout-based. His October 10 approval of PR #1521
+(`05b04fa8-9fa7-4c3f-be41-300b8f68dacd`) authorizes landing with that fix.
 
 ## Design and preservation
 
@@ -76,17 +77,17 @@ The existing foreign-Project and legacy Workflow fixtures now commit their goals
 
 ## Remaining and PR notes
 
-Branch/main selection is resolved by Jack's October 10 decision. Publication is
-authorized after the updated mocked proof; landing is not. CLI process-level and
-installed behavior remain gate/CI evidence, distinct from command-function proof.
+Branch/main selection is resolved by Jack's October 10 decision. Jack approved
+PR #1521 and authorized landing with the published default-branch fix. The mocked
+sync dispatch proves provider behavior; installed acceptance remains unproved.
 Review retained one pinned Git revision rather than reading another checkout's
 mutable files, preventing dirty default-checkout text from leaking to Linear.
 
-Gate owns broader affected suites, public dispatch and migration acceptance;
-CI owns the platform matrix. Main `be4a2b2af` is integrated; its module move
+Gate exercised the materialized migration graph, public checkout/status/context
+fixtures and composed stand-in launch paths; CI owns the platform matrix. Main `be4a2b2af` is integrated; its module move
 places the context reader in `prompt/mod.rs` and Git helpers in `git/mod.rs`.
 The retained revision-file reader and updated calls pass the focused sync proof
-(recorded at `bfba1d78f`). LOO-444's composed launch acceptance and installed
+(recorded at `bfba1d78f`). Configured providers and installed
 acceptance remain unproved. Creation/relocation must retain
 IDs, execution and Workflow import; deletion must not resurrect stored text.
 Earlier checkout/native-launch proofs: `3db1e0c00:scratch/read-wave-goals-and-memory.md`.
@@ -94,8 +95,14 @@ Canonicalization fixes and Release's operation-entry lesson:
 `45c184227:scratch/read-wave-goals-and-memory.md`; a config-reader proof alone
 cannot establish public sync behavior.
 
+Gate found three stale fixture assumptions: relocation implicitly carrying stored
+documents, budget fixtures provisioning unrelated goals, and goldens retaining old
+guidance/provisioning. Fixtures now move authored directories explicitly, read
+files without registration, and expect the direct-edit instructions. Production
+ownership needed no further change.
+
 Release is the only immediate child directory with memory. Its top-level goal
 and full memory were read; the operation-entry lesson above remains applicable,
 with release-specific history retained there.
 
-Checks: `cargo test -p loopflow --lib wave_summary_sync_reads_committed_default_branch -- --test-threads=1` passed after main integration (`bfba1d78f`, LF_* unset, stdin closed); earlier fmt/Clippy and 8 config tests passed before integration; prose-only reconciliation adds no rerun; broader/public-dispatch/migration/platform checks remain with gate/CI.
+Checks: `uv run python scripts/test.py --reuse-passing` passed architecture/website/fmt/Clippy and 2,388 materialized Rust tests, with 18 skipped and three stale-fixture failures; after repair, fmt/Clippy and `scripts/materialize_rust_tests.py -- cargo … nextest run --all -E 'test(release_task_prompt_follows_parent_rename_and_reparenting) | test(repository_ancestor_and_selected_wave_memory_share_one_budget) | test(golden_prompts_match)'` passed both unit repairs, and its golden-only rerun passed after removing provisioning; no second broad pass; CI owns remaining platform/skip coverage, installed acceptance unproved.

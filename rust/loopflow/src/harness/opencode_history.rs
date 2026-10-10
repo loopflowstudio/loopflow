@@ -20,6 +20,7 @@ pub(super) struct History {
 
 #[derive(Debug, Default)]
 struct Request {
+    // Emitted boundary, not admission: failed receipt saves leave it unreported.
     started: bool,
     completed: bool,
 }
@@ -64,14 +65,14 @@ impl History {
         messages: &[Value],
     ) -> Result<Vec<ConversationEvent>> {
         let mut events = Vec::new();
+        let Some((store, session, attachment)) = &self.owner else {
+            return Ok(events);
+        };
         let receipts = native_receipts(thread, messages);
         for (request, receipt) in receipts {
             // Origins are immutable. Recover once; subsequent observations only
             // advance native receipts and this reader's emitted boundaries.
             if let Entry::Vacant(entry) = self.requests.entry(request.clone()) {
-                let Some((store, session, attachment)) = &self.owner else {
-                    continue;
-                };
                 if let Some((origin, completed)) =
                     store.session_request(session, thread, &request)?
                 {
@@ -86,9 +87,7 @@ impl History {
                     }
                 }
             }
-            if let Some((store, session, _)) = &self.owner {
-                record_receipts(store, session, thread, &request, &receipt)?;
-            }
+            record_receipts(store, session, thread, &request, &receipt)?;
             let Some(submitted) = self.requests.get_mut(&request) else {
                 continue;
             };

@@ -104,6 +104,11 @@ retains caller write authority. Exact predecessor/replacement evidence:
 `4834c18f4c70d10315e768648e5a40b1cd2f2580:scratch/stop-and-take-over-claude.md`,
 “Delete — do not maintain.”
 
+OpenCode keeps one start-emission flag per recovered request: admission alone
+does not prove its receipts saved or a start was emitted. Failed saves leave
+that boundary unreported. Observation checks its owner once and extracts starts
+in place before output/completion, without temporary partition lists.
+
 The surviving owners are common group close/custody, `run_native_client`, saved
 request/reply receipts and one ordered permission/message `Snapshot`. Creation
 and bounded replies use `with_attached_http`; streamed prompt/command dispatch
@@ -221,4 +226,4 @@ pipes, their failure tails and the public takeover path remain unchanged.
 
 ## Checks
 
-`cargo test -p loopflow --lib harness::claude_history::tests` (5), `cargo build -p loopflow`, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check`: pass; public death orders unfinished, Linux acceptance CI-owned.
+Network-isolated `cargo test -p loopflow --lib harness::opencode`: 19 pass, 2 configured-provider checks excluded; `cargo build -p loopflow`, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check`: pass. Public death orders remain unfinished; Linux acceptance belongs to CI.

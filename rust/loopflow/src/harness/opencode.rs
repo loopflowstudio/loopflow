@@ -403,7 +403,7 @@ async fn observe_native_messages(
     turn_in_progress: &AtomicBool,
 ) -> Result<()> {
     let snapshot = opencode_history::read_snapshot(client, base_url, session).await?;
-    let (events, current_messages, owner) = {
+    let (mut events, current_messages, owner) = {
         let mut history = history.lock().expect("OpenCode history lock poisoned");
         let events = history.observe(session, &snapshot.messages)?;
         let current_messages: Vec<_> = snapshot
@@ -426,10 +426,9 @@ async fn observe_native_messages(
     // Emit native-correlated output between start and completion, even when
     // a snapshot gets ahead of queued SSE deltas. Empty snapshots do not idle
     // an in-flight submission.
-    let (starts, remaining): (Vec<_>, Vec<_>) = events
-        .into_iter()
-        .partition(|event| matches!(event, ConversationEvent::TurnStarted { .. }));
-    for event in starts {
+    for event in events.extract_if(.., |event| {
+        matches!(event, ConversationEvent::TurnStarted { .. })
+    }) {
         state.observe_lifecycle(&event);
         turn_in_progress.store(true, Ordering::SeqCst);
         let _ = event_tx.send(event);
@@ -437,7 +436,7 @@ async fn observe_native_messages(
     for event in state.observe_messages(current_messages) {
         let _ = event_tx.send(event);
     }
-    for event in remaining {
+    for event in events {
         state.observe_lifecycle(&event);
         if matches!(event, ConversationEvent::TurnCompleted { .. }) {
             turn_in_progress.store(false, Ordering::SeqCst);

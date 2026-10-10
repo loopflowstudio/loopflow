@@ -230,8 +230,8 @@ unpublished code retained, without deletion or delivery authorization.
 ## AgentProcess (LOO-443/447, 2026-10-10)
 
 Jack Heart accepted #1519 (`71741bd4`); preserve uncertainty/history.
-LOO-447 owns Claude/OpenCode takeover/stop; two-second removal, three orphans
-and configured-provider runs are accepted unproven.
+LOO-447 owns Claude/OpenCode takeover/stop. Jack excluded the two-second removal demo,
+three historical orphans and configured-provider runs.
 
 Headless launch requires attachment. AgentProcess replaces generation;
 released counters stay unread, old callers stale. Client/provider death differs;

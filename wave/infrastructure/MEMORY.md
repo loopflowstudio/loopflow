@@ -239,17 +239,16 @@ leader death or unknown descendants grants no signaling.
 `82b5d90d5` proves A → B → A rejection with stand-ins, not configured relay.
 CI: `be4a2b2af:wave/infrastructure/MEMORY.md`, this heading.
 
-LOO-447: fenced stop/abort, signal-free drop. Standbys cannot write; group death
-releases custody; watchdog stays outside. OpenCode saves endpoint/attempts before
-effects. v1.2.0 creation carries rules/title, not PATCH (`894bc61e5`);
-missing/ambiguous identity stays uncertain.
+LOO-447: fenced stop/abort, signal-free drop, standby custody until group death;
+external watchdog. OpenCode saves endpoint/attempts before effects; v1.2.0
+creation carries rules/title, not PATCH. Unknown identity stays uncertain.
 `07529ac3d`: creation-worker death/readback without replay.
-`b10b6ff065`: pending-identity recovery/fenced relay; answers drain outside the
-fence. `b16be2b7a`: frozen native launch/client-only settlement;
-`1ce7d0119`: exact UI choices. Claude origins/admissions survive reader loss;
-pipes/attention remain launcher-owned. Client loss grants no settlement or refreshed
-authority. Commands fence writes, not headers; shell lacks request IDs.
-Public death orders unproved.
+`b10b6ff065`: pending-identity recovery/fenced relay;
+`b16be2b7a`: frozen native launch/client-only settlement;
+`1ce7d0119`: exact UI choices; `773f244b3`: dispatch ends before headers.
+Shell lacks IDs. `4834c18f4` retains Claude origins/admissions,
+not unread pipes or current-owner attention. EOF, history-write failure and
+uncertain input cannot justify settlement/teardown. Public death orders unproved; client loss grants no authority.
 Plan: `scratch/stop-and-take-over-claude.md`.
 
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)

@@ -2,8 +2,8 @@
 
 Jack Heart requested provider-independent takeover and stop on 2026-10-09.
 The outcome is accepted; the transport design below remains a draft (2026-10-10).
-Source reconciliation: shared native-client launch (`b16be2b7a`, 2026-10-10)
-and command dispatch (`773f244b3`), including exact native permission choices.
+Source reconciliation: `9bef6bbbe` (2026-10-10), including shared native-client
+launch, command dispatch, saved Claude origins and the unused OpenCode policy removal.
 Claude correlation now uses saved request origins and reconstructs admitted,
 unfinished turns from Session history; its pipes still belong to the launcher.
 Local main remains `df5169ab9` (#1521). Creation recovery, shared prompt
@@ -121,7 +121,11 @@ death orders. Preserve frozen authority for prompts, replies, abort and stop.
    `kill_process` after a seed write error. Transport extraction must distinguish
    client disconnect, transport failure and confirmed provider death; neither
    client loss nor an uncertain write may kill/restart the surviving provider or
-   settle its pending turn. Keep the existing parser, but separate its immutable
+   settle its pending turn. The same reader tail also runs after a history-write
+   error, not just EOF: a failed durable observation cannot become provider-death
+   evidence. The transport proof must interrupt recording while a throwaway
+   provider survives and retain the uncertain turn. Keep the existing parser, but
+   separate its immutable
    request origins from current-attachment activity writes: `History::record`
    currently sends attention through its original attachment, which becomes stale
    after handoff. Refreshing that observer must never refresh an old caller's
@@ -193,8 +197,11 @@ and correction turns. Its Flow fixture proves no launcher-independent transport.
 
 At `07dc2e34f`, main `df5169ab9` is integrated; #1521 makes checkout files
 own Wave documents and pins Linear sync to committed local default-branch bytes.
-It changes no provider transport. LOO-450's `784b162e0` remains outside this branch. Preserve its unified seed
-write/error path and native selection when extracting transport. Its non-null
+It changes no provider transport. LOO-450's `784b162e0` remains outside this branch.
+Its plan was reread at
+`784b162e0:scratch/let-a-flow-read-a.md`: preserve unified context/query writes
+and fenced native selection, but replace its teardown-on-write-error behavior
+with the uncertainty-preserving transport boundary above. Its non-null
 schema replay and Task-to-publication proof remain open.
 
 Detailed reviews and compression history are retained at
@@ -243,4 +250,4 @@ response collection must not poll an already-completed connection again.
 
 ## Checks
 
-Checks: `cargo check -p loopflow`, network-isolated `cargo test -p loopflow --lib reconnect_recovers_pending_input_without_spawning_or_replaying` (1), `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check` pass; public death orders unfinished, Linux acceptance CI-owned.
+Checks inherited from `9bef6bbbe`: `cargo check -p loopflow`, network-isolated `cargo test -p loopflow --lib reconnect_recovers_pending_input_without_spawning_or_replaying` (1), `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check` pass; public death orders unfinished, Linux acceptance CI-owned; this prose-only realignment: `git diff --check` passed, product checks not rerun.

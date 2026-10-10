@@ -137,7 +137,11 @@ streaming. Native commands use the same saved message identity and dispatch fenc
 shell and other mutations still refuse explicitly. The fence ends after the full
 request reaches the socket, not after response headers or execution. Client exit
 settles only its attachment, not the provider.
-Claude still lacks launcher-independent pipes and public live connection.
+Claude saves input UUID origins before pipe writes, then recovers admitted,
+unfinished native turns in observation order for the same AgentProcess. These
+receipts preserve attribution across reader reconstruction, not unread pipe
+output. Its stream attention still uses the reader's frozen attachment; Claude
+still lacks launcher-independent pipes and public live connection.
 OpenCode saves request IDs and frozen origins in Session history before HTTP
 submission. Native receipts recover pending correlation after launcher loss;
 submission evidence alone proves neither admission nor completion. Harness reconnect

@@ -607,8 +607,8 @@ registered-Task fixtures must reuse it rather than insert a second owner.
 
 Planning-owner changes must cover context/catalog reads, Wave relocation, Task
 initialization, Workflow completion/reopening and PR delivery fixtures alongside
-the new planning APIs. Seed stored definitions explicitly; writing a fixture file
-is not a planning mutation.
+the new planning APIs. Write Wave goal/memory fixtures directly in their checkout. Seed stored Workflow
+definitions explicitly; writing a Workflow file is not a planning mutation.
 An existing checkout fixture must settle initialization before testing delivery.
 Prompt fixtures nested in the source tree must fence Git discovery so the enclosing
 checkout cannot become their stored Wave owner. Verify them inside a Git checkout;
@@ -1074,6 +1074,8 @@ container works on macOS). That suite is compiled out on macOS, so a local Rust
 pass there does not cover its HTTPS fixtures. Keep nullable requested fields,
 including `dueDate`, present in fixture responses. Team migration also reads issue
 comments; its fixtures must include the requested pagination metadata.
+Run the same Linux suite when changing Linear mutation inputs or acknowledgements:
+the reconnect peer must accept partial Initiative updates and return `success`.
 
 ```bash
 cargo nextest run -p loopflow --lib -E 'test(pm::linear::) | test(ops::pm::) | test(ops::linear_observe::)' --no-fail-fast

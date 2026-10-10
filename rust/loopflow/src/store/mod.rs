@@ -2003,7 +2003,7 @@ mod tests {
             } else {
                 let project = store
                     .sqlite
-                    .ensure_wave_project(wave.repo(), "inbox")
+                    .ensure_wave_project(directory.path().to_str().unwrap(), "inbox")
                     .unwrap();
                 store
                     .sqlite

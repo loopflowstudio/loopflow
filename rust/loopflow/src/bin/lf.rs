@@ -858,19 +858,6 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
         WaveCommand::Place { .. } | WaveCommand::Rename { .. } => {
             loopflow::lf::commands::placement::wave(repo, command)
         }
-        WaveCommand::Edit { wave, goal, memory } => {
-            for (document, path) in [("GOAL.md", goal), ("MEMORY.md", memory)] {
-                if let Some(path) = path {
-                    loopflow::work::wave::config::write_wave_document(
-                        repo,
-                        wave,
-                        document,
-                        &std::fs::read_to_string(path)?,
-                    )?;
-                }
-            }
-            Ok(())
-        }
         WaveCommand::UpdatePlan { wave, plan } => {
             let saved = tokio::runtime::Runtime::new()?.block_on(update_plan(
                 repo,

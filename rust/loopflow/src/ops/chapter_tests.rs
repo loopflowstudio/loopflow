@@ -169,8 +169,8 @@ async fn graphql(
         json!({"initiative":{"id":id}})
     } else if query.contains("query ListInitiatives") {
         json!({"initiatives":page(vec![
-            json!({"id":"initiative-a","name":"A","description":""}),
-            json!({"id":"initiative-b","name":"B","description":""}),
+            json!({"id":"initiative-a","name":"A","description":"Durable mandate."}),
+            json!({"id":"initiative-b","name":"B","description":"Durable mandate."}),
         ])})
     } else if query.contains("query ListInitiativeProjects") {
         let initiative = &vars["initiativeId"];
@@ -519,6 +519,26 @@ async fn explicit_sync_converts_legacy_flow_without_renaming_or_losing_content()
     let _restore = PlanningEnvironment::isolate();
     let directory = tempfile::tempdir().unwrap();
     let repo = fixture_repo(directory.path());
+    for args in [
+        vec!["branch", "-M", "main"],
+        vec!["add", "."],
+        vec![
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "-qm",
+            "merged goals",
+        ],
+    ] {
+        assert!(std::process::Command::new("git")
+            .args(args)
+            .current_dir(&repo)
+            .status()
+            .unwrap()
+            .success());
+    }
     let original = "Keep this prose.\n\n## Flows\nrecommended: custom\n\n## KRs\n- [ ] Keep this KR\n\n## Notes\nRetain this closing note.\n";
     let mut state = provider_fixture();
     let old = state

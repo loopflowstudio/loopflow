@@ -546,32 +546,31 @@ fn gather_wave_docs(repo_root: &Path, wave: Option<&str>) -> Result<Vec<Document
     let Some(wave) = wave else {
         return Ok(docs);
     };
-    let database = crate::store::database_path_from_env()?;
-    if !database.exists() {
-        return Ok(docs);
-    }
-    let store = crate::store::sqlite::SqliteStore::open_read_only(&database)
-        .map_err(|error| CoreError::IoError(error.to_string()))?;
-    let repo = crate::repository::CanonicalRepo::discover(repo_root)
-        .map_err(|error| CoreError::IoError(error.to_string()))?;
     let mut prefix = String::new();
     for segment in wave.split('/') {
         if !prefix.is_empty() {
             prefix.push('/');
         }
         prefix.push_str(segment);
-        let locator = crate::work::wave::WaveLocator::new(repo.clone(), &prefix)
-            .map_err(|error| CoreError::IoError(error.to_string()))?;
-        let Some(saved) = store
-            .get_wave_at(&locator)
-            .map_err(|error| CoreError::IoError(error.to_string()))?
-        else {
-            continue;
+        let directory = repo_root.join("wave").join(&prefix);
+        let entries = match std::fs::read_dir(&directory) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error.into()),
         };
-        for (name, content) in store
-            .wave_documents(saved.id())
-            .map_err(|error| CoreError::IoError(error.to_string()))?
-        {
+        let mut paths = entries
+            .map(|entry| entry.map(|entry| entry.path()))
+            .collect::<Result<Vec<_>, _>>()?;
+        paths.sort();
+        for path in paths {
+            if !path.is_file() || path.extension().is_none_or(|extension| extension != "md") {
+                continue;
+            }
+            let name = path
+                .file_name()
+                .expect("document has a name")
+                .to_string_lossy();
+            let content = std::fs::read_to_string(&path)?;
             docs.push(Document {
                 path: format!("wave/{prefix}/{name}"),
                 content,
@@ -1547,7 +1546,7 @@ pub fn loopflow_section() -> String {
 pub fn format_wave_sections(components: &PromptComponents) -> Vec<String> {
     let mut parts = Vec::new();
     if let Some(wave) = &components.wave {
-        let memory = format!("Curate stored Wave memory with `lf wave edit {wave} --memory <file>`. Ancestor definitions provide inherited context; repository files change only through explicit authoring.");
+        let memory = format!("Edit wave/{wave}/GOAL.md and wave/{wave}/MEMORY.md like any other file in this checkout. Ancestor files provide inherited context.");
         parts.push(format!(
             "<lf:wave name=\"{wave}\">\nYou are building toward the {wave} program of work.\n\
              {memory}\n\
@@ -1801,6 +1800,40 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         std::fs::create_dir_all(dir.path().join(".lf/skills")).expect("create skills");
         dir
+    }
+
+    #[test]
+    fn wave_context_reads_fresh_checkout_files_without_a_registry() {
+        let repo = tempfile::tempdir().unwrap();
+        let parent = repo.path().join("wave/tools");
+        let child = parent.join("parser");
+        std::fs::create_dir_all(&child).unwrap();
+        std::fs::write(parent.join("MEMORY.md"), "Inherited decision").unwrap();
+        std::fs::write(child.join("GOAL.md"), "Parse tokens").unwrap();
+        std::fs::write(child.join("MEMORY.md"), "First decision").unwrap();
+        std::fs::write(child.join("README.md"), "Additional context").unwrap();
+        let first = gather_wave_docs(repo.path(), Some("tools/parser")).unwrap();
+        assert_eq!(
+            first
+                .iter()
+                .map(|doc| doc.content.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "Inherited decision",
+                "Parse tokens",
+                "First decision",
+                "Additional context"
+            ]
+        );
+        std::fs::write(child.join("MEMORY.md"), "Edited decision λ").unwrap();
+        let next = gather_wave_docs(repo.path(), Some("tools/parser")).unwrap();
+        assert_eq!(next[2].content, "Edited decision λ");
+        std::fs::remove_file(child.join("MEMORY.md")).unwrap();
+        let absent = gather_wave_docs(repo.path(), Some("tools/parser")).unwrap();
+        assert_eq!(absent.len(), 3);
+        assert!(!absent.iter().any(|doc| doc.content.contains("decision λ")));
+        std::fs::write(child.join("GOAL.md"), [0xff]).unwrap();
+        assert!(gather_wave_docs(repo.path(), Some("tools/parser")).is_err());
     }
 
     #[test]

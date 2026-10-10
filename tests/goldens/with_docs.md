@@ -122,7 +122,8 @@ their durable owner before shipping.
 
 Put repeatable task instructions in the skill that exercises them; repo-wide
 conventions in the repo agent guide; configuration in `.lf/config.yaml`.
-Curate Wave decisions in `wave/<address>/MEMORY.md` through `realign`. Child
+Edit Wave `wave/<address>/GOAL.md` and `MEMORY.md` like any other files in the
+checkout; launches read them directly. Curate decisions through `realign`. Child
 memories live in nested directories; find relevant ones with filesystem tools.
 Do not create miscellaneous `.lf/` handoff notes or copy maintainer
 instructions into customer skills.
@@ -150,7 +151,7 @@ The current conversation participant's display name is "Fixture Participant" (JS
 
 <lf:wave name="rust">
 You are building toward the rust program of work.
-Curate stored Wave memory with `lf wave edit rust --memory <file>`. Ancestor definitions provide inherited context; repository files change only through explicit authoring.
+Edit wave/rust/GOAL.md and wave/rust/MEMORY.md like any other file in this checkout. Ancestor files provide inherited context.
 Use realign to reconcile the plan, code and Wave memory.
 </lf:wave>
 

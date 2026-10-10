@@ -412,8 +412,9 @@ in effect until enabled again. Checks continue with Desktop closed while the pla
 Machine's user is logged in. Without launchd, work-producing commands trigger a
 throttled background check instead. Checks also retry safe checkout cleanup and
 report retained paths in `lf task reconcile --json`. Minute ticks revisit settled
-owners; hourly scans reconcile all registrations. Bounded receipts carry scan
-cursors so slow or blocked checkouts do not repeatedly jump ahead of deferred work.
+owners; hourly scans reconcile all registrations. Last-attempt hints in Git
+registrations put older deferrals before arrivals; bounded receipts track hourly
+scan coverage.
 They record CI failures and settle verified merges. Flow recovery belongs to its
 caller: inspect execution and effect history before launching fresh work.
 

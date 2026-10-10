@@ -187,7 +187,6 @@ struct RegistryObservations {
     home: PathBuf,
     tasks: Vec<crate::store::sqlite::TaskCheckout>,
     open: crate::store::sqlite::task_work::OpenProcesses,
-    evidence_roots: std::cell::OnceCell<OpsResult<Vec<PathBuf>>>,
 }
 
 impl RegistryObservations {
@@ -204,7 +203,6 @@ impl RegistryObservations {
             home: store.home_dir().map_err(error)?,
             tasks,
             open: store.open_processes().map_err(error)?,
-            evidence_roots: std::cell::OnceCell::new(),
         })
     }
 
@@ -267,49 +265,9 @@ impl RegistryObservations {
     }
 
     fn evidence_blocker(&self, path: &Path) -> OpsResult<bool> {
-        let roots = self
-            .evidence_roots
-            .get_or_init(|| evidence_roots(&self.store));
-        Ok(roots
-            .as_ref()
-            .map_err(error)?
+        Ok(evidence_roots(&self.store)?
             .iter()
             .any(|root| root.starts_with(path) || path.starts_with(root)))
-    }
-}
-
-#[derive(Debug)]
-struct Observations {
-    local: RegistryObservations,
-    // A release read failure retains candidates, without obscuring local blockers.
-    release: OpsResult<Option<RegistryObservations>>,
-    registered: HashSet<PathBuf>,
-    default_branch: String,
-}
-
-impl Observations {
-    fn read(store: &SharedStore, repo: &Path, registered: HashSet<PathBuf>) -> OpsResult<Self> {
-        Ok(Self {
-            local: RegistryObservations::read(&store.sqlite)?,
-            release: release_registry()
-                .and_then(|store| store.as_ref().map(RegistryObservations::read).transpose()),
-            registered,
-            default_branch: {
-                let branch = read_git(
-                    repo,
-                    &[
-                        "for-each-ref",
-                        "--format=%(symref:short)",
-                        "refs/remotes/origin/HEAD",
-                    ],
-                )?;
-                branch
-                    .trim()
-                    .strip_prefix("origin/")
-                    .unwrap_or("main")
-                    .to_string()
-            },
-        })
     }
 }
 
@@ -319,26 +277,24 @@ fn observe(
     decision: &mut CleanupDecision,
     external: &OpsResult<HashSet<PathBuf>>,
 ) -> OpsResult<()> {
-    observe_with_snapshot(
+    observe_registered(
+        store,
         repo,
         decision,
         external,
-        &Observations::read(
-            store,
-            repo,
-            list_porcelain(repo)?
-                .into_iter()
-                .map(|(path, _)| normalized(&path))
-                .collect(),
-        )?,
+        &list_porcelain(repo)?
+            .into_iter()
+            .map(|(path, _)| path)
+            .collect(),
     )
 }
 
-fn observe_with_snapshot(
+fn observe_registered(
+    store: &SharedStore,
     repo: &Path,
     decision: &mut CleanupDecision,
     external: &OpsResult<HashSet<PathBuf>>,
-    snapshot: &Observations,
+    registered: &HashSet<PathBuf>,
 ) -> OpsResult<()> {
     // Each observation stands alone, including a recheck after planning.
     decision.evidence.clear();
@@ -366,7 +322,7 @@ fn observe_with_snapshot(
         };
         // The administrative HEAD and local ref must still name the exact
         // source observed before removal. A missing path alone proves nothing.
-        if !snapshot.registered.contains(path)
+        if !registered.contains(path)
             || std::fs::read_to_string(admin.join("HEAD"))?.trim()
                 != format!("ref: refs/heads/{branch}")
             || Some(
@@ -382,9 +338,7 @@ fn observe_with_snapshot(
         decision.observed_head = started.observed_head;
         admin
     } else {
-        if normalized(&main_repo_root(path)?) != normalized(repo)
-            || !snapshot.registered.contains(path)
-        {
+        if normalized(&main_repo_root(path)?) != normalized(repo) || !registered.contains(path) {
             retain(decision, "checkout registration changed");
             return Ok(());
         }
@@ -393,7 +347,19 @@ fn observe_with_snapshot(
         decision.observed_head = Some(read_git(path, &["rev-parse", "HEAD"])?.trim().to_string());
         git_directory(path, "--absolute-git-dir")?
     };
-    if decision.branch.as_deref() == Some(snapshot.default_branch.as_str()) {
+    let default_branch = read_git(
+        repo,
+        &[
+            "for-each-ref",
+            "--format=%(symref:short)",
+            "refs/remotes/origin/HEAD",
+        ],
+    )?;
+    let default_branch = default_branch
+        .trim()
+        .strip_prefix("origin/")
+        .unwrap_or("main");
+    if decision.branch.as_deref() == Some(default_branch) {
         retain(decision, "default branch");
         return Ok(());
     }
@@ -414,19 +380,17 @@ fn observe_with_snapshot(
             return Ok(());
         }
     }
+    // Cheap checkout protections need no registry or history scan. Each candidate
+    // gets fresh bounded readers here, including the locked removal recheck.
+    let local = RegistryObservations::read(&store.sqlite)?;
     let mut owned = admin.join("lf-created").is_file();
-    if let Some(reason) = snapshot.local.blocker(path)? {
+    if let Some(reason) = local.blocker(path)? {
         retain(decision, reason);
         return Ok(());
     }
-    for task in snapshot.local.tasks_at(path) {
+    for task in local.tasks_at(path) {
         owned = true;
-        for pr in snapshot
-            .local
-            .store
-            .task_prs(&task.task_id)
-            .map_err(error)?
-        {
+        for pr in local.store.task_prs(&task.task_id).map_err(error)? {
             if decision.branch.as_deref() == Some(pr.branch.as_str())
                 && pr.phase() == PrPhase::Merged
                 && pr.head_sha() == decision.observed_head.as_deref()
@@ -437,20 +401,19 @@ fn observe_with_snapshot(
             }
         }
     }
-    let release = snapshot.release.as_ref().map_err(error)?.as_ref();
-    if let Some(release) = release {
+    // A release read failure retains candidates without obscuring local blockers.
+    let release = release_registry()?
+        .as_ref()
+        .map(RegistryObservations::read)
+        .transpose()?;
+    if let Some(release) = &release {
         // Release facts can veto removal, never settle experimental source.
         if let Some(reason) = release.blocker(path)? {
             retain(decision, format!("{reason} in release registry"));
             return Ok(());
         }
     }
-    for landing in snapshot
-        .local
-        .store
-        .merged_landings_at(path)
-        .map_err(error)?
-    {
+    for landing in local.store.merged_landings_at(path).map_err(error)? {
         owned = true;
         if decision.branch.as_deref() == Some(landing.branch.as_str())
             && decision.observed_head.as_deref() == Some(landing.observed_head_sha.as_str())
@@ -477,9 +440,33 @@ fn observe_with_snapshot(
         }
         Ok(_) => {}
     }
+    if !missing {
+        if read_git(path, &["ls-files", "-v"])?.lines().any(|line| {
+            line.as_bytes()
+                .first()
+                .is_some_and(|flag| flag.is_ascii_lowercase() || *flag == b'S')
+        }) {
+            retain(decision, "tracked files excluded from Git change detection");
+            return Ok(());
+        }
+        if !read_git(path, &["status", "--porcelain"])?.is_empty() {
+            retain(decision, "uncommitted or untracked files");
+            return Ok(());
+        }
+        if let Err(reason) = disposable_artifacts(path) {
+            retain(decision, reason.to_string());
+            return Ok(());
+        }
+        for root in [".lf/logs", ".lf/runs", ".lf/sessions"] {
+            if path.join(root).try_exists()? {
+                retain(decision, "local Session evidence");
+                return Ok(());
+            }
+        }
+    }
     // History can be much larger than the checkout registry. Read it only for
-    // settled candidates; an incomplete scan still never authorizes removal.
-    for registry in std::iter::once(&snapshot.local).chain(release) {
+    // otherwise removable candidates; incomplete coverage never authorizes removal.
+    for registry in std::iter::once(&local).chain(release.as_ref()) {
         if registry.evidence_blocker(path)? {
             retain(decision, "local Session evidence");
             return Ok(());
@@ -489,30 +476,6 @@ fn observe_with_snapshot(
         decision
             .evidence
             .push("interrupted cleanup: exact administrative HEAD".into());
-        decision.action = CleanupAction::RemoveCheckout;
-        return Ok(());
-    }
-    if read_git(path, &["ls-files", "-v"])?.lines().any(|line| {
-        line.as_bytes()
-            .first()
-            .is_some_and(|flag| flag.is_ascii_lowercase() || *flag == b'S')
-    }) {
-        retain(decision, "tracked files excluded from Git change detection");
-        return Ok(());
-    }
-    if !read_git(path, &["status", "--porcelain"])?.is_empty() {
-        retain(decision, "uncommitted or untracked files");
-        return Ok(());
-    }
-    if let Err(reason) = disposable_artifacts(path) {
-        retain(decision, reason.to_string());
-        return Ok(());
-    }
-    for root in [".lf/logs", ".lf/runs", ".lf/sessions"] {
-        if path.join(root).try_exists()? {
-            retain(decision, "local Session evidence");
-            return Ok(());
-        }
     }
     decision.action = CleanupAction::RemoveCheckout;
     Ok(())
@@ -575,10 +538,12 @@ fn main_repo_root(repo: &Path) -> OpsResult<PathBuf> {
 }
 
 fn list_porcelain(repo: &Path) -> OpsResult<Vec<(PathBuf, Option<String>)>> {
-    Ok(parse_porcelain(&read_git(
-        repo,
-        &["worktree", "list", "--porcelain", "-z"],
-    )?))
+    Ok(
+        parse_porcelain(&read_git(repo, &["worktree", "list", "--porcelain", "-z"])?)
+            .into_iter()
+            .map(|(path, branch)| (normalized(&path), branch))
+            .collect(),
+    )
 }
 
 // Filesystem-sensitive Git reads must not hold up every later candidate.
@@ -696,26 +661,25 @@ fn plan_selected(
     let registered = list_porcelain(&repo)?;
     let paths = registered
         .iter()
-        .map(|(path, _)| normalized(path))
+        .map(|(path, _)| path.clone())
         .collect::<HashSet<_>>();
     let mut plan = Vec::new();
     for (path, branch) in registered {
-        let path = normalized(&path);
         if selected.as_ref().is_some_and(|selected| *selected != path) {
             continue;
         }
-        let snapshot = Observations::read(store, &repo, paths.clone());
-        plan.push(plan_checkout(&repo, path, branch, &external, &snapshot));
+        plan.push(plan_checkout(store, &repo, path, branch, &external, &paths));
     }
     Ok(plan)
 }
 
 fn plan_checkout(
+    store: &SharedStore,
     repo: &Path,
     path: PathBuf,
     branch: Option<String>,
     external: &OpsResult<HashSet<PathBuf>>,
-    snapshot: &OpsResult<Observations>,
+    registered: &HashSet<PathBuf>,
 ) -> CleanupDecision {
     let mut decision = CleanupDecision {
         path,
@@ -725,11 +689,7 @@ fn plan_checkout(
         evidence: Vec::new(),
         estimated_bytes: None,
     };
-    let result = snapshot
-        .as_ref()
-        .map_err(error)
-        .and_then(|snapshot| observe_with_snapshot(repo, &mut decision, external, snapshot));
-    if let Err(error) = result {
+    if let Err(error) = observe_registered(store, repo, &mut decision, external, registered) {
         retain(&mut decision, format!("observation unavailable: {error}"));
     }
     decision
@@ -977,10 +937,7 @@ fn collect_pass(
     }
     let now = chrono::Utc::now().timestamp();
     let mut registered = list_porcelain(repo)?;
-    let paths: HashSet<_> = registered
-        .iter()
-        .map(|(path, _)| normalized(path))
-        .collect();
+    let paths: HashSet<_> = registered.iter().map(|(path, _)| path.clone()).collect();
     let attempts = checkout_attempts(repo, &paths)?;
     let full = progress.full_scan_started.is_some()
         || progress
@@ -1002,28 +959,22 @@ fn collect_pass(
         .map(|path| normalized(&path))
         .collect();
     let in_scan = |path: &Path| {
-        progress.full_scan_started.is_some_and(|cutoff| {
-            attempts
-                .get(&normalized(path))
-                .is_some_and(|(_, at)| *at <= cutoff)
-        })
+        progress
+            .full_scan_started
+            .is_some_and(|cutoff| attempts.get(path).is_some_and(|(_, at)| *at <= cutoff))
     };
     let mut pending_scan = registered.iter().filter(|(path, _)| in_scan(path)).count();
     registered.retain(|(path, _)| {
-        in_scan(path)
-            || settled.contains(&normalized(path))
-            || (full && !attempts.contains_key(&normalized(path)))
+        in_scan(path) || settled.contains(path) || (full && !attempts.contains_key(path))
     });
     // Persisted last-attempt times put old deferrals ahead of arrivals, while
     // every attempted checkout goes behind its waiting neighbors. Names have
     // no scheduling priority and no hint can authorize a removal.
-    registered.sort_by_key(|(path, _)| {
-        (
-            attempts
-                .get(&normalized(path))
-                .map_or(i64::MAX, |(_, at)| *at),
-            path.clone(),
-        )
+    registered.sort_by(|(left, _), (right, _)| {
+        let priority = |path| attempts.get(path).map_or(i64::MAX, |(_, at)| *at);
+        priority(left)
+            .cmp(&priority(right))
+            .then_with(|| left.cmp(right))
     });
     // Setup must not spend the admission window before the first candidate
     // can persist its attempt. Each admitted application still finishes.
@@ -1045,17 +996,12 @@ fn collect_pass(
             || report.removed.len() >= budget.removals
             || progress.observed >= 32
         {
-            if full && pending_scan == 0 {
-                progress.full_scan_at = Some(now);
-                progress.full_scan_started = None;
-            }
-            save(progress)?;
-            return Ok(report);
+            break;
         }
         progress.observed += 1;
         let scheduled = (|| {
             let (marker, at) = attempts
-                .get(&normalized(path))
+                .get(path)
                 .ok_or_else(|| error("checkout registration has no scheduling hint"))?;
             if progress
                 .full_scan_started
@@ -1083,11 +1029,12 @@ fn collect_pass(
             continue;
         }
         let mut decision = plan_checkout(
+            store,
             repo,
-            normalized(path),
+            path.clone(),
             branch.clone(),
             external.get_or_init(running_paths),
-            &Observations::read(store, repo, paths.clone()),
+            &paths,
         );
         if decision.action == CleanupAction::RemoveCheckout {
             // Size is optional; it cannot prevent this admitted removal.
@@ -1099,7 +1046,7 @@ fn collect_pass(
         progress.deferred = report.deferred.len();
         progress.failed = report.failed.len();
     }
-    if full {
+    if full && pending_scan == 0 {
         progress.full_scan_at = Some(now);
         progress.full_scan_started = None;
     }
@@ -2038,6 +1985,8 @@ mod tests {
         let _guard = crate::journal::TestLedgerGuard::new();
         let _external = ExternalInspection::idle();
         let (repo, directory, store, path) = fixture().await;
+        let dirty = add_settled(&repo, &directory, "dirty");
+        std::fs::write(dirty.join("notes"), "unfinished work").unwrap();
         let unowned = repo
             .create_named_worktree("unowned")
             .canonicalize()
@@ -2072,6 +2021,18 @@ mod tests {
                 .find(|item| item.path == unowned)
                 .unwrap(),
             "unknown Loopflow ownership",
+        );
+        retained(
+            report
+                .deferred
+                .iter()
+                .find(|item| item.path == dirty)
+                .unwrap(),
+            "uncommitted",
+        );
+        assert_eq!(
+            std::fs::read_to_string(dirty.join("notes")).unwrap(),
+            "unfinished work"
         );
         assert!(path.exists());
     }

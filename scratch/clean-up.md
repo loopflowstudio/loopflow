@@ -162,6 +162,12 @@ receipts retain their output root, not an unused schedule specification. Foregro
 The restarting `session_events::session_evidence_paths` payload scan, path-only
 retry/full-scan cursors and per-pass registry snapshots are now also removed.
 Raw history projection and last-attempt scheduling replace them end to end.
+The per-checkout `Observations` wrapper and single-use evidence cache are also gone.
+Registration paths are normalized once per snapshot, borrowed during planning and
+refreshed under removal admission; retry sorting no longer performs filesystem
+reads or clones paths. Cheap checkout protections precede registry reads, and
+known dirty/unclassified content retains without a history traversal. Eligible
+previews still traverse native history; that remaining cost conflict is unchanged.
 No known deletion targets remain. Explicit abandonment and persistent-branch
 restart retain their separate authority; missing-registration repair does not
 justify restoring broad metadata pruning.
@@ -327,4 +333,4 @@ allocated bytes by category; observed free-space delta after collection; oldest
 eligible retention age. APFS sharing, hardlinks and concurrent writers mean
 directory sums are estimates, not guaranteed reclaimed bytes.
 
-Check: `cargo test -p loopflow --lib cleanup_` — 33 passed; `cargo test -p loopflow --test dto_fixtures cleanup_receipt` — passed; `cargo fmt`/`git diff --check` — passed; `cargo clippy --all-targets -- -D warnings` — passed; full acceptance: gate; loaded-scheduler/upgrade experience: demo.
+Check: `cargo test -p loopflow --lib cleanup_` — 33 passed, including dirty-neighbor retention with malformed history; `cargo fmt`/`git diff --check` and `cargo clippy --all-targets -- -D warnings` — passed; unchanged DTO fixture result reused; full acceptance: gate; loaded-scheduler/upgrade experience: demo.

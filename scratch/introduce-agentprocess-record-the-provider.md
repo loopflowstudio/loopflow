@@ -156,8 +156,9 @@ Top, active Sessions, Task membership and scheduled orphan settlement query
 unfinished AgentProcesses, including detached/replaced rows; live views retain
 unknown identities without inferring liveness or control. Settlement rechecks
 attachment under the Session lock without holding SQLite across OS I/O. It still
-excludes interactive agents and recognizes only Codex app-server/OpenCode serve
-for live-orphan termination. Only Codex supplies a named FIFO for reconnect;
+excludes interactive agents; live-orphan termination recognizes Codex app-server,
+OpenCode serve and, since 2026-10-09, headless Claude (program name only: it has
+no subcommand, so exact PID/birth and group leadership carry the identity). Only Codex supplies a named FIFO for reconnect;
 Claude/OpenCode anonymous lifelines do not establish takeover coverage.
 
 Shared headless and owned native admission record argv and OS identity before
@@ -314,17 +315,20 @@ checks do not establish configured-provider or foreground cleanup.
 2. Done 2026-10-09: see "Generation cut" below. Installed migration and a
    provider conversation that outlives the upgrade remain unproved.
 3. Complete stop/release authority across providers, both takeover death orders,
-   and FIFO ownership. Cover Claude/OpenCode anonymous lifelines and the reaper's current
-   Codex/OpenCode-only, noninteractive selection without applying headless group
-   control to a foreground TTY. `HELD_LIFELINES` still retains superseded writers
+   and FIFO ownership. Cover Claude/OpenCode anonymous lifelines under takeover. The reaper now
+   selects every noninteractive provider; foreground TTY providers stay outside
+   headless group control. `HELD_LIFELINES` still retains superseded writers
    until lf exit. No current live attachment means orphan settlement, not invented exit;
    unknown attachment liveness stays unknown. Live close still supports only
    noninteractive Codex with a saved connection; native
    foreground and other-provider cleanup remain in this lifecycle cut.
    Source resume proofs do not establish configured-provider acceptance.
    No configured orphan was signaled; OS death supplies no successful outcome.
-4. Complete public Task-status agreement, caller-lineage exclusion, native-history
-   coverage and two-second removal. The scheduled-entry regression exercises failed
+4. Complete caller-lineage exclusion, native-history coverage and two-second
+   removal. Public agreement is covered (2026-10-09): through `task create`,
+   `checkout`, `task status`, `monitor ps` and `task abandon`, a reserved
+   AgentProcess with no OS identity holds the checkout, and every Process the
+   hold names is a listed row. It uses a store-recorded row, not a launched provider. The scheduled-entry regression exercises failed
    observation, retained history, detached settlement and activity removal through
    `task reconcile`; it proves no installed firing or configured-provider behavior.
    Prune still stops before reaping on failed OS sampling. Earlier visibility
@@ -441,5 +445,7 @@ its throwaway `/bin/sleep` and `fixture` commands read as production subprocess
 edges; the module uses `#[cfg(test)]` like `harness/agent_process.rs`.
 
 Realign check (2026-10-09): `uv run python scripts/check_architecture.py` reports zero drift after repair (three findings before); `render_architecture_html.py --check` and `cargo fmt --all --check` pass; the Task's `rg` returns nothing outside applied migrations and this Task's draft. No suite rerun; gate owns it.
+
+Check (orphan rule and public agreement, 2026-10-09): `cargo test -p loopflow --lib harness::agent_process` 7 passed; `--test process_ownership_tests task_checkout_blockers` 1 passed; fmt and clippy `--all-targets -D warnings` pass. Wider suites stay with gate.
 
 Check (generation cut, 2026-10-09): `cargo test -p loopflow --no-fail-fast --lib` plus the ten affected integration targets, `LF_*` cleared and stdin closed: library 1766 passed, the same 4 failed (three pass alone; one is main's planning-migration fixture), integration targets pass; `swift build --build-tests` and `DTOFixtureTests` pass; `cargo fmt --all --check` and `cargo clippy -p loopflow --all-targets -- -D warnings` pass. Remaining integration targets, draft materialization, Linux lifeline and live-provider smokes stay gate/CI-owned. Earlier results: `4d720d314`, this plan.

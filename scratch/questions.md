@@ -60,3 +60,13 @@ Whether to delete that history outright is Jack's choice.
 so a provider launched before the upgrade keeps issuing commands as a stale
 caller instead of failing every `lf` call on an unparseable environment. New
 launches always carry it. Refusing old environments outright is the alternative.
+
+2026-10-09 implementation choice: the orphan rule now ends a detached headless
+Claude as it does Codex and OpenCode servers. Claude has no subcommand to match,
+so recognition is the program name plus exact PID/birth and group leadership.
+Interactive providers stay excluded.
+
+2026-10-09 observation, not changed here: `lf task abandon` on a Task whose
+checkout is held prints "canceled; PRs and branches removed" on stdout while
+stderr reports the retained checkout and its blocker. The cancellation is
+intended (LOO-408); the stdout wording contradicts the retention.

@@ -125,9 +125,9 @@ attachment settlement. A recorded client move is an intentional command exit,
 not provider failure; it does not establish a successful provider turn.
 
 Scheduled settlement reads unfinished AgentProcess rows, but live-orphan
-termination currently recognizes only noninteractive Codex app-server and
-OpenCode serve groups. Claude and native foreground coverage remain unfinished;
-recording them alone does not establish orphan cleanup. Unknown identities and
+termination covers noninteractive providers only: Codex app-server, OpenCode
+serve and headless Claude groups. Native foreground coverage remains unfinished;
+recording a foreground provider alone does not establish orphan cleanup. Unknown identities and
 duplicate PID/birth records remain non-signallable. Failed OS observation makes
 scheduled reconciliation fail with the affected LFID, without settling that row.
 The reaper's identity, command and descendant observations use the shared OS

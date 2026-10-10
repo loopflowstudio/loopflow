@@ -232,7 +232,7 @@ fn reap_in(store: &SqliteStore, dry_run: bool) -> StoreResult<AgentProcessReapRe
     Ok(report)
 }
 
-/// Exact live identity, the provider's server command, and its own process group.
+/// Exact live identity, the provider's headless command, and its own process group.
 fn is_agent_process(process: &OsProcess, started_at: i64, provider: Option<&str>) -> bool {
     if process.pid <= 1
         || process.pgid != process.pid
@@ -251,6 +251,8 @@ fn is_agent_process(process: &OsProcess, started_at: i64, provider: Option<&str>
     match provider {
         Some("codex") => program("codex") && has("app-server") && has("--listen"),
         Some("opencode") => program("opencode") && has("serve"),
+        // Headless Claude has no subcommand to match; identity and group carry it.
+        Some("claude") => program("claude"),
         _ => false,
     }
 }
@@ -615,17 +617,21 @@ mod tests {
     fn detached_agent_is_reaped_but_duplicate_historical_identity_is_not_signal_authority() {
         let _lock = crate::journal::test_env_lock();
         let _ambient = crate::test_ambient::EnvGuard::new();
+        for (provider, argv) in [
+            ("codex", &["codex", "app-server", "--listen", "fixture"][..]),
+            ("opencode", &["opencode", "serve"]),
+            ("claude", &["claude"]),
+        ] {
+            reap_detached(provider, argv);
+        }
+    }
+
+    fn reap_detached(provider: &str, argv: &[&str]) {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
         let mut child = Command::new("/bin/sh")
-            .args([
-                "-c",
-                "sleep 60 & wait; :",
-                "codex",
-                "app-server",
-                "--listen",
-                "fixture",
-            ])
+            .args(["-c", "sleep 60 & wait; :"])
+            .args(argv)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -640,8 +646,8 @@ mod tests {
             rusqlite::Connection::open(home.path().join("db"))
                 .unwrap()
                 .execute(
-                    "UPDATE agent_sessions SET provider='codex',interactive=0 WHERE id=?1",
-                    [name],
+                    "UPDATE agent_sessions SET provider=?2,interactive=0 WHERE id=?1",
+                    [name, provider],
                 )
                 .unwrap();
             let attached = store
@@ -670,9 +676,9 @@ mod tests {
         // Always clean up this fixture's own group before assertions.
         crate::engine::process::terminate_process_group(pid);
         let _ = child.wait();
-        assert!(report.errors.is_empty(), "{:?}", report.errors);
-        assert_eq!(report.orphaned, [pid]);
-        assert_eq!(report.reaped, 1);
+        assert!(report.errors.is_empty(), "{provider}: {:?}", report.errors);
+        assert_eq!(report.orphaned, [pid], "{provider}");
+        assert_eq!(report.reaped, 1, "{provider}");
         assert!(store.agent_processes().unwrap().is_empty());
     }
 }

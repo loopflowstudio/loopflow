@@ -184,6 +184,78 @@ async fn scheduled_agent_settlement_reports_failed_observation_and_recovers_with
     assert_eq!(store.session_history("orphan", 0, 0).unwrap(), history);
 }
 
+/// The Task gate and the activity list read one inventory: a held checkout
+/// never names a Process the list omits, including an agent with no OS identity.
+#[test]
+fn task_checkout_blockers_are_rows_in_the_activity_list() {
+    use loopflow::lf::commands::top::{ActivityNodeKind, ActivitySnapshot};
+
+    let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    let lf = |cwd: &Path, args: &[&str]| {
+        let mut command = command(home.path(), cwd, args);
+        command
+            .env("HOME", home.path())
+            .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+            .env("LF_USER_NAME", "Fixture Person")
+            .stdin(std::process::Stdio::null());
+        command.output().unwrap()
+    };
+    let json = |cwd: &Path, args: &[&str]| {
+        let output = lf(cwd, args);
+        assert!(output.status.success(), "{args:?}: {output:?}");
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+    };
+    let created = json(
+        repo.path(),
+        &["task", "create", "--title", "Hold a Task", "--json"],
+    );
+    let id = created["id"].as_str().unwrap();
+    let placed = json(repo.path(), &["checkout", id, "--json"]);
+    let worktree = Path::new(placed["worktree"].as_str().unwrap());
+
+    let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    reserve_session(&store, "held", worktree);
+    let attachment = store
+        .claim_session_attachment("held", None, &ProcessLfid::new(), true)
+        .unwrap();
+    let agent = attachment.agent_process_lfid.as_str();
+
+    let output = lf(repo.path(), &["monitor", "ps", "--json"]);
+    assert!(output.status.success(), "{output:?}");
+    let listed: ActivitySnapshot = serde_json::from_slice(&output.stdout).unwrap();
+    let row = listed
+        .nodes
+        .iter()
+        .find(|row| row.id == format!("process:{agent}"))
+        .expect("reserved AgentProcess is listed");
+    assert_eq!(row.kind, ActivityNodeKind::AgentProcess);
+
+    let status = json(repo.path(), &["task", "status", id, "--json"]);
+    assert!(status.to_string().contains(agent), "{status}");
+
+    // Cancellation is the Task's decision; only checkout cleanup is held.
+    let abandoned = lf(repo.path(), &["task", "abandon", id]);
+    assert!(abandoned.status.success(), "{abandoned:?}");
+    let reason = String::from_utf8_lossy(&abandoned.stderr);
+    let named = reason
+        .split("Process ")
+        .skip(1)
+        .filter_map(|rest| rest.split_whitespace().next())
+        .collect::<Vec<_>>();
+    assert!(named.contains(&agent), "{reason}");
+    for lfid in named {
+        assert!(
+            listed
+                .nodes
+                .iter()
+                .any(|row| row.id == format!("process:{lfid}")),
+            "blocker {lfid} is not a listed row: {reason}"
+        );
+    }
+    assert!(worktree.exists());
+}
+
 #[tokio::test]
 async fn activity_lists_unresolved_records_without_receipts_or_os_sampling() {
     use loopflow::lf::commands::top::{ActivitySnapshot, ActivityState};

@@ -232,9 +232,9 @@ failed descendant inventory refuses before signaling.
 Headless launch refuses a missing attachment. Jack's steer `0aa2c34c` requested
 publication without merge: #1519 is open, incomplete. AgentProcess identity replaced
 provider generation; released counters stay unread, pre-upgrade callers read stale.
-Foreground cleanup, takeover death orders, public Task agreement, two-second
+Foreground cleanup, takeover death orders, two-second
 removal, installed settlement stay open; whether they join #1519 is undecided.
-FIFO is Codex-only; reaping noninteractive Codex/OpenCode. Focused filters hid
+FIFO is Codex-only; reaping covers noninteractive providers. Focused filters hid
 30 whole-library failures. PR CI defers every job while `scratch/` holds files:
 no hosted proof before landing. It hid an architecture-drift failure.
 

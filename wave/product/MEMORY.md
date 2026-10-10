@@ -94,7 +94,7 @@ Entity revisions cannot order relationships; scalar/list replay cannot clear
 freshness or unseen notices.
 
 Binding retains locators/Work/execution; imports allocate identity, exporting no
-RepositoryId/delegation. Locator readings need observation fences: A→B→A and concurrent
+RepositoryId. Locator readings need observation fences: A→B→A and concurrent
 locators defeat scene/per-path fences. Native proof remains.
 
 **Unmapping is not association:** it can enable duplicate creation. `66dd3c44f`
@@ -113,7 +113,7 @@ recovery with unchanged seeded execution.
 Cached confirmation cannot prove repeat exchange: require fresh stream confirmation
 of an unconfirmed receipt. Git confirmation never acknowledges provider
 delivery; comment errors stay local. No live Linear, running-provider or mounted
-Desktop proof. Mixed exchange, delegation, admission and remote opening remain;
+Desktop proof. Mixed exchange, admission and remote opening remain;
 mixed-provider and first-start refusals stay.
 
 #1512: live connect hands off; dead-driver resume uses native history, never
@@ -154,14 +154,14 @@ end retry cannot revive superseded requests, which never synchronize. Seeded
 Workflow/PR/placement, disk drafts and one fake provider prove no running Task Flow
 or native acceptance. Earlier failures: `b2add0cf8`, this heading.
 
-October 9 delegation exchanges grouped Machine ID/time/explicit-or-legacy provenance
-through the existing journal and Placement. Null restores inheritance. A planning
-reference needs no local connection: importing an unknown Machine creates no route.
-Two isolated Homes, public Wave saves and file-Git work-watch prove offline convergence, narrower
-sub-Wave overrides, future inheritance and retained losing inputs. Store fixtures add
-Task/Project overrides and no-echo replay. Assignment grants neither execution location
-nor exclusive admission; shared first-start refusal remains. Mixed-provider, remote
-opening and native acceptance remain unfinished.
+October 9: `787f440ea`/`50bf78f1e` exchange Machine ID/time/provenance through
+the journal and Placement. Null restores inheritance; unknown Machines create no
+connections. Reaffirming explicit intent preserves timestamp/mutation; explicitly
+selecting legacy intent authors a save.
+Two-Home/file-Git fixtures cover offline conflicts, narrower/future inheritance,
+retained losers and unchanged seeded execution—not running Flows. Store fixtures
+add Task/Project overrides, clearing and no echo. Assignment grants neither execution location nor exclusive admission.
+First-start and mixed-provider refusals stay; remote opening and native proof remain.
 
 ## Task delivery boundary (LOO-418, reconciled 2026-10-09)
 

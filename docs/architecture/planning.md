@@ -614,7 +614,13 @@ attachment; after acknowledgement, a later accepted move does not reopen creatio
 Exact observations attach mappings in the common ingestion transaction before
 inventory can allocate another local identity. The creation snapshot establishes
 field baselines without acknowledging later edits. Observed Linear conflicts still
-win and retain the losing receipt. Removed Tasks export only when an attempted
+win and retain the losing receipt. For unchanged creation fields, peer capture
+retains the exact captured heads rather than minting a competing Linear edit.
+Every observed head must be covered by a retained creation receipt; changed or
+uncaptured heads keep normal provider priority. Provider bodies remain retained.
+The receipt can reach another machine after that machine sends the same captured
+UUID: readback recovery does not guarantee exactly-once requests across machines.
+Removed Tasks export only when an attempted
 creation needs reconciliation, then their existing deletion receipt owns removal.
 Creation receipt changes advance the planning revision, so active readers acquire
 new attempt errors and confirmations. Composed CLI/Desktop reconnect remains unproved.

@@ -639,14 +639,12 @@ Earlier scalar Git/HTTPS association, recovery, ordering and #1499 proofs:
 `9d3d2ba90:wave/infrastructure/MEMORY.md`, this heading. Due dates synchronize;
 completion requests, placements and execution remain local.
 
-`e37099e50`'s public two-store creation/link recovery exposed unchanged readback
-incorrectly defeating a later peer save. Capture retains exact baseline heads;
-changed Linear facts still win. The previous conflict assertion was wrong.
-Attachment can race peer receipt acquisition with the same UUID;
-synthetic rejection proves no exactly-once requests. Associated origins,
-negative-evidence/order, native lifetimes and installed acceptance remain unproved.
-Plan:
-`scratch/work-on-another-machine-name.md`.
+`e37099e50`: same-origin Git/HTTPS recovery repairs unchanged readback defeating
+later saves. Retain captured heads; changed facts win, superseding the wrong
+conflict assertion. `23bb7c2c4` lacks an execution verdict. Attachment
+can race acquisition using one UUID: no exactly-once guarantee. Associated origins,
+negative-evidence/order and native lifetimes need composed cases; installation is
+unproved. `scratch/work-on-another-machine-name.md` owns acceptance.
 
 ## Driver recovery
 

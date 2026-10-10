@@ -226,12 +226,12 @@ fn admit_ci_fix(
                 .session_attachment(session)
                 .map_err(repair_error)?
                 .is_some();
-            let provider = store
+            let agent = store
                 .sqlite
-                .session_provider_process(session)
+                .agent_process_identity(session)
                 .map_err(repair_error)?;
             if bound
-                && provider.is_some_and(|(pid, started)| {
+                && agent.is_some_and(|(pid, started)| {
                     crate::journal::process_identity_evidence(pid, started)
                         != crate::journal::ProcessIdentityEvidence::Dead
                 })

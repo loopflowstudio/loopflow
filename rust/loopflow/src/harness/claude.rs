@@ -315,7 +315,7 @@ impl ClaudeHarness {
             })?;
             child.wait().await?;
             self.child = None;
-            store.record_native_provider_exit(&session, &attachment, true)?;
+            store.record_agent_process_exit(&session, &attachment, true)?;
         }
         self.stdin = None;
         if let Some(task) = self.reader_task.take() {
@@ -698,7 +698,7 @@ mod tests {
             harness.send_input("one turn").await.unwrap();
             recorded.push((
                 harness.pid().unwrap(),
-                store.session_provider_process(id).unwrap(),
+                store.agent_process_identity(id).unwrap(),
             ));
             // Retain the first process while the same Process starts the next step.
             harnesses.push(harness);

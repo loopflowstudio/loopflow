@@ -124,7 +124,7 @@ mod tests {
         let pid = child.0.id();
         let birth = crate::journal::process_started_at(pid).unwrap().unwrap();
         store
-            .record_session_provider_process("resume", &attached, pid, birth)
+            .record_agent_process_identity("resume", &attached, pid, birth)
             .unwrap();
         store
             .record_session_connection(
@@ -174,7 +174,7 @@ mod tests {
             .claim_session_attachment("resume", Some(&detached), &LfProcessId::new(), false)
             .unwrap();
         store
-            .record_session_provider_launch(
+            .record_agent_process_launch(
                 "resume",
                 &attached,
                 &std::process::Command::new("fixture"),
@@ -217,7 +217,7 @@ mod tests {
         let pid = child.0.id();
         let birth = crate::journal::process_started_at(pid).unwrap().unwrap();
         store
-            .record_session_provider_process("resume", &attached, pid, birth)
+            .record_agent_process_identity("resume", &attached, pid, birth)
             .unwrap();
         store
             .record_session_connection(
@@ -235,7 +235,7 @@ mod tests {
             .claim_session_attachment("duplicate", None, &LfProcessId::new(), true)
             .unwrap();
         store
-            .record_session_provider_process("duplicate", &duplicate, pid, birth)
+            .record_agent_process_identity("duplicate", &duplicate, pid, birth)
             .unwrap();
         let error = crate::session_record::resume_session_agent_process(
             &store,
@@ -266,7 +266,7 @@ mod tests {
         let pid = child.0.id();
         let birth = crate::journal::process_started_at(pid).unwrap().unwrap();
         store
-            .record_session_provider_process("resume", &attached, pid, birth)
+            .record_agent_process_identity("resume", &attached, pid, birth)
             .unwrap();
         store
             .release_session_attachment("resume", &attached)
@@ -303,7 +303,7 @@ mod tests {
             .claim_session_attachment("resume", Some(&detached), &LfProcessId::new(), false)
             .unwrap();
         store
-            .record_session_provider_launch(
+            .record_agent_process_launch(
                 "resume",
                 &attached,
                 &std::process::Command::new("fixture"),
@@ -385,13 +385,13 @@ mod tests {
         let mut command = std::process::Command::new("/bin/sleep");
         command.env_clear().arg("60").process_group(0);
         store
-            .record_session_provider_launch("retry", &attachment, &command)
+            .record_agent_process_launch("retry", &attachment, &command)
             .unwrap();
         let child = Child(command.spawn().unwrap());
         let pid = child.0.id();
         let birth = crate::journal::process_started_at(pid).unwrap().unwrap();
         store
-            .record_session_provider_process("retry", &attachment, pid, birth)
+            .record_agent_process_identity("retry", &attachment, pid, birth)
             .unwrap();
         store
             .record_session_connection(

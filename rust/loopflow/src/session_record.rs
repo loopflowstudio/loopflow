@@ -2393,7 +2393,7 @@ impl CaptureHandle {
                 "Capture attachment changed".into(),
             ));
         }
-        row_store(&capture.dir)?.record_native_provider_exit(session, expected, true)
+        row_store(&capture.dir)?.record_agent_process_exit(session, expected, true)
     }
 
     pub(crate) fn session_attachment(&self) -> Option<(String, crate::process::SessionAttachment)> {
@@ -4169,7 +4169,7 @@ mod tests {
             // The previous provider is a throwaway child whose exit is observed
             // before continuation; a live one would refuse replacement.
             let mut provider = std::process::Command::new("/bin/sleep").arg("60").spawn()?;
-            store.record_session_provider_process(
+            store.record_agent_process_identity(
                 &session.id,
                 &attachment,
                 provider.id(),
@@ -4214,7 +4214,7 @@ mod tests {
                 next_attachment.lf_process_id.as_ref()
             );
             assert!(store.session_connection(&session.id)?.is_none());
-            assert!(store.session_provider_process(&session.id)?.is_none());
+            assert!(store.agent_process_identity(&session.id)?.is_none());
             assert_ne!(next_attachment.token, attachment.token);
             let saved = super::read_manifest(&next.artifact_dir()).unwrap();
             assert_eq!(
@@ -4375,12 +4375,7 @@ mod tests {
             .unwrap()
             .unwrap();
         store
-            .record_session_provider_process(
-                "conversation",
-                &attachment,
-                agent_process.id(),
-                started,
-            )
+            .record_agent_process_identity("conversation", &attachment, agent_process.id(), started)
             .unwrap();
         let socket = ledger.home().join("agent.sock");
         store
@@ -4419,7 +4414,7 @@ mod tests {
         assert_eq!(replacement.provider_lf_process_id, next);
         assert!(store.session_connection("conversation").unwrap().is_none());
         assert!(store
-            .session_provider_process("conversation")
+            .agent_process_identity("conversation")
             .unwrap()
             .is_none());
         assert_eq!(
@@ -4442,7 +4437,7 @@ mod tests {
             .unwrap()
             .unwrap();
         store
-            .record_session_provider_process("conversation", &attachment, provider.id(), started)
+            .record_agent_process_identity("conversation", &attachment, provider.id(), started)
             .unwrap();
         process.kill().unwrap();
         process.wait().unwrap();

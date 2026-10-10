@@ -26,9 +26,9 @@ Heart authorized for implementation and demonstration. These are not accepted UX
   the markers around missing text; whole-string comparison is required. The
   builder now counts the complete rendered UTF-8 bytes against the shared 10,000-byte
   ceiling. Provider integration must preserve that string without extra unbudgeted text.
-- Main #1512 now resumes saved native history on a new engine after driver death.
-  Context/trust lifetime must cover that path; restoring the deleted surviving-engine
-  recovery is not part of this cut. Existing probes do not cover lf replacement.
+- Main #1519/#1520 separate AgentProcess from its attached LfProcess. Context/trust
+  must cover supported Codex takeover and native-history replacement without replay;
+  existing probes do not cover those paths. LOO-447 owns other-provider takeover.
 - Before-compaction scratch writes and Session search remain out of scope.
 
 ## Implementation boundary (2026-10-09)

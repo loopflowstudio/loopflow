@@ -12,17 +12,17 @@ same bytes. The launch cut now wires fixed additions and file/excerpt callbacks;
 provider/resume/compaction matrix remains for gate. Jack's later `e1fdb81b-75ff-4cca-b789-243ad84bad14` steer authorizes
 that production cut. Option A below resolves first-turn transport; no fixed-slot
 or transport decision remains open.
-Reconciled through `17c1a2909` on 2026-10-09 against locally available main
-`906576f39`, including `3e1e6245c` (#1512) and `e69d5103f` (#1511). No newer
-remote inspection is claimed. `5e8fdde2f` implements the checkout Wave-source
-decision; `17c1a2909` removes obsolete SQLite fixture setup while retaining
-stale-store counterexamples at the callback and CLI boundaries.
+Reconciled on 2026-10-10 through `8951376e5`, with locally available main
+`be4a2b2af` (#1520), including #1519's AgentProcess ownership. No newer remote
+inspection is claimed. The October 10 clipboard/excerpt cut is implemented at
+`95e6703d9` and simplified at `b7300bf0c`; `30a4d48c8` reconnects its modules to
+main's flattened owners. Native acceptance remains below.
 
 The earlier callback-only review describes the pre-production checkpoint.
 `494210e37` connects the launchers and removes inlining/overrides;
 `d3c01464e` reduces callbacks to saved delivery and preserves OpenCode resume
 settings. Source inspection confirms those changes, not native acceptance.
-The remaining work below is integration proof and review of proposed UX,
+The remaining work is native integration proof and review of proposed UX,
 not another channel cutover.
 
 First-turn transport resolved (Jack, 2026-10-09, "A is fine"): the first turn
@@ -257,21 +257,30 @@ follow checkout paths under Jack's later source decision. No installation, publi
 The pre-cut implementation plan and complete older checks remain at
 `6149952c8:scratch/what-goes-in-system-prompt.md`.
 
-Checks: `cargo test -p loopflow --lib context_block` (9 passed), `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` and `lf context --json` pass; native integration remains with gate and presentation with demo.
+Checks: `cargo test -p loopflow --lib gather_documents_` (9), `--test context_tests context_delivery_repository_memory` (1), `--test context_launch_tests terminal_context_refreshes` (1), `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` pass; tests clear inherited `LF_*` and close stdin. Prior native-skill ordering regression is retained; this reconciliation inspected `6b8f13e3f` and current `send_input`, without rerunning unchanged tests. `lf context --json` fits. Native delivery/resume/compaction remains with gate; proposed UX with demo/review.
 
 ### Integrated upstream boundary
 
-Main #1512 changes engine lifetime, not prompt delivery. Codex/OpenCode engines
-now follow driver lifelines; replacing a provably dead driver ends its old engine
-and resumes saved native history on a new one. Live handoff retains the lifeline.
-The deleted surviving-engine recovery path is not a context-refresh integration
-point. Context hooks and their complete source files must remain usable across
-supported native resume and engine replacement without replaying the initial
-skill/request or restoring the abandoned in-flight turn. Launch-scoped trust
-must be established on the replacement engine as well as the first one.
-These are preservation requirements for the production cut, not outcomes proved
-by the provider-only probes. #1512's source and throwaway-child tests establish
-no installed or real-provider lifeline acceptance.
+Main #1519/#1520 supersede #1512's driver/engine vocabulary and ownership.
+An LfSession owns the conversation; AgentSessionId names native history;
+AgentProcess names the provider OS process, separately from its attached LfProcess.
+Codex can adopt a saved AgentProcess connection under the current attachment claim.
+Its lifeline and provider history are distinct from that attachment; LOO-447 owns
+Claude/OpenCode takeover and stop. Context delivery must cover supported Codex
+handoff and dead-provider replacement, not restore the deleted driver-generation model. Live AgentProcess adoption
+and dead-provider replacement are separate acceptance cases. Saved sources and hook trust must survive
+those transitions without replaying the initial skill/request. The current
+app-server start/resume request carries the generated hook configuration; source
+inspection establishes wiring only, not native refresh on a live takeover.
+
+The review-requested ordering repair is implemented in `6b8f13e3f`; the earlier
+return-to-implement feedback is resolved at the request-construction boundary.
+It puts the explicit native skill reference before
+request/clipboard text in `CodexHarness::send_input`. Its focused regression
+checks the first outbound turn, exact arguments, original declaration/asset paths
+and a later turn without replay. This proves app-server request construction,
+not native expansion, delivery or resumed-provider acceptance; gate retains those
+boundaries. Review kept the existing seed owner and native resolver unchanged.
 
 Main #1511 launches lf Codex terminals with `--no-daemon` in
 `spawn_session_command_with_env`, after command construction. Hook configuration
@@ -287,56 +296,26 @@ coverage; provider-only passes cannot stand in for that integration.
 
 ## Delete — do not maintain
 
-Compression removes the prototype callback's `--repo`, `--skill-file` and
-`--reference` mode plus `build_context_block`; all refreshes use saved
-`ContextDelivery`. Wave context reads no longer open the store.
-`PreparedProcessPrompt.prompt` is removed: diagnostics still use `format_prompt`
-on demand, not a second string assembled for every launch. OpenCode config
-composition appends its plugin directly to existing settings, without temporary
-Command objects or a generic config merge; resume applies caller settings before
-appending the plugin so those settings cannot overwrite it. These are source
-reductions, not native acceptance.
+The predecessor is removed: `INITIAL_TURN_PROMPT`, system-channel file assembly,
+launch budgeting/bounding, stored-Wave context lookup/snapshots, the installed-skill
+channel split, Codex instruction overrides, clipboard references and rejected
+editor/paste/stdin transport runners. Do not restore them. Complete deletion and
+fixture history: `95e6703d9:scratch/what-goes-in-system-prompt.md`, this heading.
 
-The config guide's detailed docs/diff/clipboard and third-party sections now match
-the channel table: paths or private references, no obsolete preloading, budget
-enforcement or implicit operating-guide opt-out. The October 10 cut changes clipboard assembly and context excerpt selection.
-
-The whole channel cut remains one PR; source implementation is not native acceptance. The rejected transport runner `first_turn_transport.py` and its exclusive
-`test_first_turn_transport.py` are deleted. Their complete editor evidence/code is
-archived at `d81f12c42:scripts/benchmarks/skill-invocation/`; stdin/paste code is at
-`d008a9761`. No transport probe remains to maintain or rerun. Shared native Codex
-settings in `launch.py` remain used by context-delivery and skill-fidelity probes.
-
-- Removed: `gather_saved_wave_docs`, `ContextDelivery.wave_id`, its database lookup,
-  Wave snapshot generation and the exclusive rename/private-snapshot tests.
-  Checkout-source fixtures retain ancestor ordering, sibling/child exclusion,
-  stale database rejection, refresh and readable real paths. Review also corrected
-  these fixtures to inspect gathered documents, not obsolete diagnostic inlining.
-- Removed: `context_tests::import_wave` and registry/Git/skill setup used only
-  by Wave document filtering. Exact path/content assertions retain Markdown order
-  and exclusion coverage; launch and stale-store callback fixtures stay separate.
-  The repository-memory assertion now reads the conversation block, not diagnostics.
-  `lf context` refresh edits checkout memory while the imported copy stays stale.
-  Wave configuration still uses saved GOAL frontmatter (LOO-449), so its CLI fixture
-  retains registration: removing it yielded the repo limit 700, not Wave limit 400.
-- Removed: duplicate context listing/header metadata and the separate long-root
-  fallback. The complete manifest now owns both inline and pointed metadata.
-- Removed: `INITIAL_TURN_PROMPT`, its naming special cases and exclusive tests.
-  Attributed request selection and existing-name protection remain.
-- Removed: `<lf:scratch>`, `format_wave_sections`, `format_content_sections` and their exclusive assembly tests. Diagnostics retain a source inventory, not provider file bodies.
-- Removed: context bounding/excerpts, preserved-excerpt store, notice, goal/input
-  ceilings and launch-time measurement. `measure_context` owns size-target reporting
-  from documents only; no second submitted-source count or skill preview remains.
-- Removed: all Codex `model_instructions_file` writers. Both terminal writers and app-server use additive instructions.
-- Removed: the installed-skill context split; native invocation, declarations, arguments and captured assets survive.
-- Removed: LOOPFLOW.md launch-excerpt guidance and unused
-  `SkillInvocation::instruction_text`, formerly used only by launch budgeting.
-  Recursive scratch remains available whole, excerpted or listed; translated skill/argument
-  coverage remains.
-- Removed: tests asserting scratch or memory bodies inside `system_prompt`; surviving checks assert refreshed conversation content.
-
-Must survive: the size targets, `lf context`, `lf monitor usage --context`,
-prompt logs under `.lf/prompts/`, source-boundary escaping.
+Keep one saved `ContextDelivery` callback path. Preserve size-target reporting,
+prompt logs, source escaping, native declarations/assets and first-turn bytes.
+Excerpt selection now indexes only nonempty UTF-8 prefixes within the remaining
+byte budget, avoiding whole-source boundary allocation and empty-prefix cases.
+Whole-file selection still precedes excerpts; metadata and escaping count in full.
+Review corrected the CLI guide's obsolete promise of whole GOAL.md delivery and
+the terminal fixture's stale assertion that oversized scratch has no preloaded text;
+it now requires a marked excerpt while retaining the complete source.
+Cross-repository documents now keep readable source paths instead of display-only
+`[repo] path` labels; repository memory stays only in the refreshed-source list,
+not a second saved reference. The terminal fixture executes the emitted Codex
+callback strings, deleting timestamp-based descriptor selection and reconstructed
+commands. These source/callback checks do not establish native delivery.
+No remaining predecessor deletion is identified; native acceptance remains above.
 
 ## Forbidden outcomes
 

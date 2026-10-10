@@ -422,3 +422,7 @@ a goal, a Task, design waiting on you, built without you, demo waiting on
 you, shipped. Every card shows the Task's row and a strip of the workflow
 with its current stop. The thesis sits under the subheader. `x6` is kept for
 comparison.
+Jack Heart: "thats where \"Loopflow is a software instrument\" came from.
+Still a little forced maybe, but it communicates that idea of enhancing YOUR
+creavitiy". The phrase is now inside the `x7` thesis with its reason beside
+it, not standing alone as a label.

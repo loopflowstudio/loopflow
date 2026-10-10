@@ -193,13 +193,11 @@ Reuse these owners.
 
 ## Delete — do not maintain
 
-- Retire `scratch/design-walkthrough.html`: its October 8 simulation duplicates
-  this plan and still calls implemented routing/preview work proposed. The reviewed
-  artifact remains at `4c43550c2:scratch/design-walkthrough.html`; it is neither
-  current status nor native acceptance. The command comparison stays maintained.
-- Delete the duplicate sharing query in `children::require_task_planning`;
-  routing and transactional preparation use `repositories::task_is_shared_in`.
-  Both refusal boundaries remain until exclusive admission has an accepted owner.
+`42990dea3` completed both remaining deletions: the stale October 8 walkthrough
+and the duplicate sharing query. The reviewed simulation remains at
+`4c43550c2:scratch/design-walkthrough.html`, not as current status or native acceptance.
+Routing and transactional preparation share `repositories::task_is_shared_in`;
+both first-start refusal boundaries remain pending an accepted admission owner.
 
 Completed removal details and preserved behaviors: `5825f95d9:scratch/compare-cmux-s-command-line.md`,
 this heading; pre-edit reconciled notes: `/tmp/loo427-shell-files-before/`.
@@ -521,4 +519,4 @@ identity/delegation, open them, add shell/Files panes, retain an unfinished draf
 change focus, target a harmless command, read output, hide/restore, and verify the
 original input target and draft survive. Demo owns native usability; preserve comparison evidence and use no real accounts or live user terminals.
 
-Check: `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`, lib-test build, `git diff --check` — PASS; network-isolated lib tests `independent_peer_tasks_converge_without_transferring_execution` and `conflicting_and_negative_location_readings_never_choose_a_launch_destination` — 2 PASS. Broader checks: gate/CI; configured/native proof: demo.
+Check: `git diff --check` — PASS (prose-only realign); prior build/Clippy/focused passes retained at `43bf9bad2`, this section; broader verification: gate/CI; configured/native proof: demo.

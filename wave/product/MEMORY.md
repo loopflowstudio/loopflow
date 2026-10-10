@@ -173,10 +173,10 @@ and optional `--pane`. Unique panes are implicit; ambiguity/absence dispatches
 nothing. Arrangement stays owner-pinned; native acceptance remains unproved.
 
 **Confirmation cannot elect execution.** `4c43550c2`: divergent revisions and
-independent refs both confirm, without Task-allocation proof. Admission remains
-unimplemented; a pinned Machine/key is unreviewed. Establishment, associated
-identity and unavailable-Machine recovery need a decision. Jack authorized committed
-LOO-412 stacking, never dirty peer work or runtime replication.
+independent refs both confirm, not Task allocation. `42990dea3` shares membership
+checks, not admission. A pinned Machine/key remains unreviewed: establishment,
+associated identity and unavailable-Machine recovery need a decision. Jack authorized
+committed LOO-412 stacking, never dirty peer work or runtime replication.
 
 ## Task delivery boundary (LOO-418, reconciled 2026-10-09)
 

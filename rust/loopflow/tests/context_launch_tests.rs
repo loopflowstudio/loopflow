@@ -133,7 +133,9 @@ exit 23
         let first = invoke(0);
         assert!(first.contains("CURRENT_SCRATCH"));
         assert!(!first.contains("Saved active skill.\n"));
-        assert!(!first.contains("UNCHANGED_LARGE_FILE"));
+        assert!(first.contains("UNCHANGED_LARGE_FILE"));
+        assert!(first.contains("source=\"scratch/large.md\" excerpt=\"start\""));
+        assert!(!first.contains(&large));
         repo.create_file("scratch/small.md", "FRESH_SCRATCH");
         let compact = invoke(1);
         assert!(compact.contains("FRESH_SCRATCH"));

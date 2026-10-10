@@ -274,13 +274,18 @@ fn append_excerpt(text: &mut String, doc: &Document) {
         doc.content.len(), doc.content.len(), &doc.content[..end]
     ))
     };
-    let boundaries: Vec<_> = doc.content.char_indices().map(|(index, _)| index).collect();
-    let count =
-        boundaries.partition_point(|&end| text.len() + render(end).len() <= HOOK_CONTEXT_BYTES);
-    if let Some(&end) = count.checked_sub(1).and_then(|index| boundaries.get(index)) {
-        if end > 0 {
-            append_whole(text, &render(end));
-        }
+    // Only nonempty prefixes can be excerpts. Escaping never shrinks them, so
+    // bytes beyond the remaining budget cannot fit and need no boundary index.
+    let remaining = HOOK_CONTEXT_BYTES.saturating_sub(text.len());
+    let boundaries: Vec<_> = doc
+        .content
+        .char_indices()
+        .map(|(index, ch)| index + ch.len_utf8())
+        .take_while(|&end| end <= remaining)
+        .collect();
+    let count = boundaries.partition_point(|&end| render(end).len() <= remaining);
+    if count > 0 {
+        text.push_str(&render(boundaries[count - 1]));
     }
 }
 

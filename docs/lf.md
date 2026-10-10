@@ -138,9 +138,8 @@ Compaction also restores the saved active skill. Task direction and summaries
 remain complete private reference files. Terminal first turns use argv; only a
 first turn exceeding the argument cap is refused before spawning the provider.
 
-Selected Wave goals are supplied once as complete `GOAL.md` documents. Repeated
-requests for the same document do not repeat its contents; distinct memory files
-remain separate even when their text matches.
+Wave goals use the same whole-file, excerpt and listing rules as memory.
+Distinct source files remain separate even when their text matches.
 
 Launching a Flow for an existing Task uses valid cached planning regardless of age.
 Known invalidation, removal, terminal state or ownership changes still block.

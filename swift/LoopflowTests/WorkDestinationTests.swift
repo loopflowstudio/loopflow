@@ -87,8 +87,14 @@ struct WorkDestinationTests {
             #expect(model.taskOpening?.status == .opening)
             let remote = registry.workspace(for: remoteIdentity)
             remote.multiplexer.load(sessionId: record.id)
-            let companion = registry.showChanges(task: task, in: remoteIdentity,
-                query: query.onMachine("peer", repository: "repository"), executionTask: remoteID)
+            let peerQuery = query.onMachine("peer", repository: "repository").recording { _ in }
+            let sessionOnly = LinkedSession(generation: request.generation, record: record,
+                task: task, showsChanges: false, location: request.location)
+            let companion = try #require(registry.prepareLinkedFiles(sessionOnly, query: peerQuery))
+            companion.document("remote-draft.txt").editor.string = "retained peer draft"
+            #expect(remote.multiplexer.layout.allPanes.count == 1)
+            #expect(registry.prepareLinkedFiles(request, query: peerQuery) === companion)
+            #expect(companion.document("remote-draft.txt").editor.string == "retained peer draft")
             let sessions = local.sessionStore(repoPath: wave.wave.repo, query: query)
             sessions.retainLocation(try #require(request.location), for: record)
             sessions.reconcile([record])
@@ -241,22 +247,22 @@ struct WorkDestinationTests {
         let sessionOnly = TaskLink(issue: task.task.identifier, repo: wave.wave.repo, session: record.id)
         await model.openTaskLink(try #require(sessionOnly.url))
         #expect(model.linkedSession?.record.id == record.id)
-        #expect(model.linkedSession?.changesTask == nil)
+        #expect(model.linkedSession?.showsChanges == false)
         // The same Session with a companion is a different pending destination,
         // even if SwiftUI has not consumed the first request yet.
         let link = TaskLink(issue: try #require(task.runtime?.workId), repo: wave.wave.repo, session: record.id, diff: true)
         await model.openTaskLink(try #require(link.url))
         #expect(model.linkedSession?.record.id == record.id)
-        #expect(model.linkedSession?.changesTask?.id == task.id)
+        #expect(model.linkedSession?.showsChanges == true)
         #expect(model.taskOpening?.status == .opening) // selection is not native readiness
         let registry = SessionsWorkspaceRegistry()
         let workspace = registry.workspace(for: identity)
         workspace.multiplexer.load(sessionId: record.id)
         let terminal = try #require(workspace.multiplexer.layout.allPanes.first)
-        registry.showChanges(task: task, in: identity, query: query)
+        registry.prepareLinkedFiles(try #require(model.linkedSession), query: query)
         let files = workspace.files(taskId: try #require(task.runtime?.workId), issue: task.task.identifier, cwd: identity.worktree, query: query)
         files.selection = "retained-draft.rs"
-        registry.showChanges(task: task, in: identity, query: query)
+        registry.prepareLinkedFiles(try #require(model.linkedSession), query: query)
         #expect(workspace.multiplexer.layout.allPanes.count == 2)
         #expect(workspace.multiplexer.layout.pane(for: terminal.id) == terminal)
         #expect(workspace.multiplexer.focusedPaneId == terminal.id)
@@ -282,7 +288,7 @@ struct WorkDestinationTests {
         let request = try #require(model.linkedSession)
         let workspace = SessionsWorkspace(identity: try #require(record.workspace?.identity))
         workspace.multiplexer.load(sessionId: record.id)
-        workspace.multiplexer.show(.files(taskId: try #require(request.changesTask?.id)), focus: false)
+        workspace.multiplexer.show(.files(taskId: request.task.id), focus: false)
         let store = SessionsStore(repoPath: try #require(model.repoPath), query: query)
         store.reconcile([record])
         let files = TaskFilesStore(issue: "LOO-427", cwd: "/fixture", query: query)
@@ -320,7 +326,7 @@ struct WorkDestinationTests {
         let request = try #require(model.linkedSession)
         let workspace = SessionsWorkspace(identity: try #require(record.workspace?.identity))
         workspace.multiplexer.load(sessionId: record.id)
-        workspace.multiplexer.show(.files(taskId: try #require(request.changesTask?.id)), focus: false)
+        workspace.multiplexer.show(.files(taskId: request.task.id), focus: false)
         let store = SessionsStore(repoPath: try #require(model.repoPath), query: query)
         // An incomplete Session reading is not failure, but cannot hide a
         // definitive layout change while the request waits for that reading.
@@ -339,7 +345,7 @@ struct WorkDestinationTests {
         let oldRequest = try #require(model.linkedSession)
         let workspace = SessionsWorkspace(identity: try #require(record.workspace?.identity))
         workspace.multiplexer.load(sessionId: record.id)
-        workspace.multiplexer.show(.files(taskId: try #require(oldRequest.changesTask?.id)), focus: false)
+        workspace.multiplexer.show(.files(taskId: oldRequest.task.id), focus: false)
         let oldStore = SessionsStore(repoPath: try #require(model.repoPath), query: query)
         oldStore.reconcile([record])
         await oldStore.select(record.id)
@@ -370,7 +376,7 @@ struct WorkDestinationTests {
         let request = try #require(model.linkedSession)
         let workspace = SessionsWorkspace(identity: try #require(record.workspace?.identity))
         workspace.multiplexer.load(sessionId: record.id)
-        workspace.multiplexer.show(.files(taskId: try #require(request.changesTask?.id)), focus: false)
+        workspace.multiplexer.show(.files(taskId: request.task.id), focus: false)
         let store = SessionsStore(repoPath: try #require(model.repoPath), query: query)
         store.reconcile([record])
         await store.select(record.id)

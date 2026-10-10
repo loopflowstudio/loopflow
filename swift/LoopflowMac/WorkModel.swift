@@ -96,7 +96,6 @@ struct LinkedSession: Equatable {
     let task: RoadmapTask
     let showsChanges: Bool
     let location: TaskLocationObservation?
-    var changesTask: RoadmapTask? { showsChanges ? task : nil }
 }
 
 struct LinkedTaskPage: Equatable {
@@ -329,9 +328,9 @@ final class WorkModel {
         } else { sessionPane = layout.allPanes.first { $0.content == .session(id: destination.record.id) } }
         var panes = [PaneState]()
         if let sessionPane { panes.append(sessionPane) }
-        if let task = destination.changesTask,
-           let pane = layout.allPanes.first(where: { $0.content == .files(taskId: task.id) }) { panes.append(pane) }
-        guard panes.count == (destination.changesTask == nil ? 1 : 2) else {
+        if destination.showsChanges,
+           let pane = layout.allPanes.first(where: { $0.content == .files(taskId: destination.task.id) }) { panes.append(pane) }
+        guard panes.count == (destination.showsChanges ? 2 : 1) else {
             taskOpening = taskOpening.map { DesktopOpening(url: $0.url, status: .failed, reason: "Opening panes are no longer available.") }
             return
         }
@@ -381,7 +380,7 @@ final class WorkModel {
         if let reason {
             taskOpening = DesktopOpening(url: opening.url, status: .failed, reason: reason)
         } else if item.state == .live,
-                  destination.changesTask == nil || (files?.changes != nil && files?.isRefreshingChanges == false) {
+                  !destination.showsChanges || (files?.changes != nil && files?.isRefreshingChanges == false) {
             taskOpening = DesktopOpening(url: opening.url, status: .usable, reason: nil)
         }
     }

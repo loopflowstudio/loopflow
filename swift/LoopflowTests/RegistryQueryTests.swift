@@ -7,6 +7,25 @@ import Testing
 
 @Suite("RegistryQuery")
 struct RegistryQueryTests {
+    @Test("Recording a remote reading preserves its Machine and transport", arguments: [false, true])
+    func recordingRemoteQuery(recordFirst: Bool) async throws {
+        let json = #"{"id":"peer"}"#
+        let local = RegistryQuery { args, cwd in
+            guard args.starts(with: ["--machine", "peer", "--repository", "plan"]), cwd == nil else {
+                throw RegistryQueryError("The reading lost its remote selectors")
+            }
+            return json
+        }
+        let record: @Sendable (String) -> Void = { #expect($0 == json) }
+        let query = recordFirst
+            ? local.recording(record).onMachine("peer", repository: "plan")
+            : local.onMachine("peer", repository: "plan").recording(record)
+        #expect(query.remoteMachine == "peer")
+        #expect(try await query.localMachineId() == "peer")
+        #expect(!query.streamsWork)
+        #expect(local.remoteMachine == nil)
+    }
+
     @Test("Session pages return a stable continuation and preserve renamed records")
     func sessionsReadPages() async throws {
         let row = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: sessionFixtureURL())) as? [String: Any])

@@ -5,7 +5,7 @@
 //
 // Reads run `lf` subprocesses and decode shared wire types into app models.
 // The injected runner on macOS launches the `lf` shipped inside the app. There is no
-// HTTP fallback for reads; remote reads need to become proxied `lf` queries.
+// HTTP fallback; remote reads use the same CLI with explicit Machine selectors.
 
 import Foundation
 
@@ -39,7 +39,7 @@ public struct DiscoveryEntry: Codable, Equatable, Sendable, Identifiable {
 
 public struct RegistryQuery: Sendable {
     public private(set) var remoteMachine: String?
-    private let run: RegistryRunner
+    private var run: RegistryRunner
     private let runWithInput: @Sendable ([String], String?, String) async throws -> String
     private let start: RegistryStarter?
     private let observeWork: (@Sendable () async throws -> WorkObservation)?
@@ -90,11 +90,13 @@ public struct RegistryQuery: Sendable {
     /// A copy that also reports each successful read's wire text, so a caller
     /// can retain exactly what it decoded.
     public func recording(_ record: @escaping @Sendable (_ stdout: String) -> Void) -> RegistryQuery {
-        RegistryQuery(runWithInput: runWithInput, watchWork: observeWork, start: start) { [run] args, cwd in
+        var query = self
+        query.run = { [run] args, cwd in
             let stdout = try await run(args, cwd)
             record(stdout)
             return stdout
         }
+        return query
     }
 
     /// Explicit workspace opening binds a plain repository to its local plan.

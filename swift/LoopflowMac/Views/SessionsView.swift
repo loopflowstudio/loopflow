@@ -131,15 +131,23 @@ final class SessionsWorkspaceRegistry {
         }
     }
 
-    /// Shares the Files pane and document cache with toolbar/CLI companions.
-    /// Repeated opens retain both the conversation draft and file selection.
+    /// Prime the retained Files owner even for Session-only remote links, so a
+    /// later toolbar/CLI open never interprets the peer's path locally.
     @discardableResult
-    func showChanges(task: RoadmapTask, in identity: WorkspaceIdentity, query: RegistryQuery, executionTask: String? = nil) -> TaskFilesStore {
-        let workspace = workspace(for: identity)
+    func prepareLinkedFiles(_ destination: LinkedSession, query: RegistryQuery) -> TaskFilesStore? {
+        guard destination.showsChanges || destination.location != nil,
+              let identity = destination.record.workspace?.identity else { return nil }
+        let task = destination.task
         let key = task.runtime?.workId ?? task.task.identifier
-        let files = workspace.files(taskId: key, issue: executionTask ?? key, cwd: identity.worktree, query: query)
-        files.showsChanges = true
-        workspace.multiplexer.show(.files(taskId: task.id), focus: false)
+        let executionTask: String
+        if case .recorded(let taskID, _) = destination.location?.location { executionTask = taskID }
+        else { executionTask = key }
+        let workspace = workspace(for: identity)
+        let files = workspace.files(taskId: key, issue: executionTask, cwd: identity.worktree, query: query)
+        if destination.showsChanges {
+            files.showsChanges = true
+            workspace.multiplexer.show(.files(taskId: task.id), focus: false)
+        }
         return files
     }
 
@@ -868,26 +876,11 @@ struct SessionsContentView: View {
               model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath else { return }
         let record = destination.record
         model.linkedSession = nil
-        if let location = destination.location {
-            store.retainLocation(location, for: record)
-            if case .recorded(let taskID, _) = location.location,
-               let identity = record.workspace?.identity {
-                // Cache the existing Files owner even without a requested pane:
-                // later toolbar/CLI opens must not interpret this peer path locally.
-                let key = destination.task.runtime?.workId ?? destination.task.task.identifier
-                _ = workspaces.workspace(for: identity).files(taskId: key, issue: taskID,
-                    cwd: identity.worktree, query: store.query(for: record))
-            }
-        }
+        if let location = destination.location { store.retainLocation(location, for: record) }
         store.reconcile(model.sessions.value ?? [])
         openSession(record, preservingOpening: true)
-        var files: TaskFilesStore?
-        if let task = destination.changesTask, let identity = record.workspace?.identity {
-            let executionTask: String?
-            if case .recorded(let taskID, _) = destination.location?.location { executionTask = taskID }
-            else { executionTask = nil }
-            files = workspaces.showChanges(task: task, in: identity, query: store.query(for: record), executionTask: executionTask)
-        }
+        let preparedFiles = workspaces.prepareLinkedFiles(destination, query: store.query(for: record))
+        let files = destination.showsChanges ? preparedFiles : nil
         let openingWorkspace = workspace
         if files != nil, let zoomed = openingWorkspace.multiplexer.zoomedPaneId {
             openingWorkspace.multiplexer.setZoom(zoomed, enabled: false)

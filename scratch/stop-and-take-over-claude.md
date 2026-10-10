@@ -2,10 +2,12 @@
 
 Jack Heart requested provider-independent takeover and stop on 2026-10-09.
 The outcome is accepted; the transport design below remains a draft (2026-10-10).
-Source reconciliation: `07dc2e34f` (2026-10-10), including OpenCode public
-connection at `b10b6ff065`, transport separation at `9df773fa3` and main
-`df5169ab9` (#1521). Creation recovery, shared prompt submission and ordered
-readback remain implemented.
+Source reconciliation: `1ce7d0119` (2026-10-10), including native permission
+choices at `157a29596`, exact reply receipts and shared mutation decoding.
+Local main remains `df5169ab9` (#1521). Creation recovery, shared prompt
+submission and ordered readback remain implemented. Earlier iteration feedback's
+manual-permission implementation item is satisfied; rendered UX and public
+death-order proofs are not.
 Dependencies #1519/#1520 are integrated at `be4a2b2af`, satisfying Jack Heart's
 steer `28e0c5cc`. LOO-443's remaining item 3 was read at
 `4f6ed76b2^:scratch/introduce-agentprocess-record-the-provider.md`.
@@ -156,8 +158,10 @@ exclusive fixtures; saved native permissions survive on creation/reconnect.
 The shared public attachment path owns custody, claims and client-only settlement;
 Codex and OpenCode transports have separate client functions. OpenCode's discard-only
 event-drain task is deleted: its native UI renders output while the reader retains
-history and permission recovery. GET and mutation responses share one streaming
+history and permission recovery. GET and prompt/abort responses share one streaming
 translation, preserving status/content type and leaving answers outside the fence.
+Permission replies instead return a boolean after the receipt writer confirms
+HTTP success or pending-list readback; they do not forward the upstream body.
 The native permission path reuses the existing reply writer. Its retained response
 is now the exact HTTP payload, including rejection explanations: review found
 the predecessor receipt hardcoded `once` even for native rejection. Repeated
@@ -227,4 +231,4 @@ and “Public OpenCode transport.”
 
 ## Checks
 
-Checks: `cargo check -p loopflow`, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, network-isolated `cargo test -p loopflow --lib` filters `native_permissions_preserve_choice_and_refuse_foreign_repeated_and_stale_replies`, `permission_recovery_never_replays_an_uncertain_reply`, `native_prompt_stream_does_not_hold_authority_and_stale_clients_cannot_write`, and `git diff --check` pass; public death-order acceptance remains unfinished and Linux acceptance CI-owned.
+Checks: `git diff --check` passes (prose-only reconciliation); `1ce7d0119`'s recorded build/fmt/Clippy and focused permission/recovery/prompt-stream tests remain applicable, not rerun; public death-order acceptance remains unfinished and Linux acceptance CI-owned.

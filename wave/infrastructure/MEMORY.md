@@ -245,8 +245,8 @@ effects. v1.2.0 creation carries rules/title, not PATCH (`894bc61e5`);
 missing/ambiguous identity stays uncertain.
 `07529ac3d`: creation-worker death/readback without replay.
 `b10b6ff065`: pending-identity recovery/fenced relay; answers drain outside the
-fence. `9df773fa3` separates clients from attachment ownership. Manual permission
-receipts retain the exact choice/explanation, not fabricated approval.
+fence. `9df773fa3` separates clients from attachment ownership. `1ce7d0119` retains
+native permission choices/explanations; readers leave choices to the UI.
 Claude transport remains launcher-owned. Command/shell await headers after
 execution: the prompt fence cannot be reused. Public death orders remain unproved.
 Plan: `scratch/stop-and-take-over-claude.md`.

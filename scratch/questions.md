@@ -14,15 +14,16 @@ existing attempt. After a lost response, exact-title native listing recovers one
 identity; absent/ambiguous evidence remains uncertain without replay. A title
 changed externally before recovery cannot establish identity. Existing native
 conversations retain their rules. This replaces the draft's separate setup phase;
-The correction and process-death creation readback are implemented at
-`07529ac3d`; public transport is now the remaining implementation, not blocked
-on this protocol correction.
+the correction and process-death creation readback are implemented at
+`07529ac3d`. Public prompt/abort transport followed at `b10b6ff065`; command/shell
+dispatch and public death-order proofs remain.
 
 2026-10-10: OpenCode native attachment uses an ephemeral authenticated loopback
 HTTP relay and the existing headless history/permission reader. Prompt and abort
-are the initial write surface; other native mutations explicitly refuse, rather
-than bypassing the fence. Full native command/shell and manual permission UX
-remain unproved, not accepted exclusions. The pinned native prompt route streams
+were the initial write surface. `157a29596` adds manual permission replies;
+`1ce7d0119` retains exact choices and explanations. Other native mutations still
+refuse. Command/shell implementation and rendered permission UX remain open,
+not accepted exclusions. The pinned native prompt route streams
 headers before generation, so only dispatch holds the fence; the answer drains
 outside it. Claude's separate transport proposal remains unchanged.
 

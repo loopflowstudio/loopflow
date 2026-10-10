@@ -34,7 +34,8 @@ is established by these notes.
 Additive series. The keystone is one cleanup owner plus automatic worktree
 collection. It replaces today's overlapping deletion decisions in one PR.
 Independent follow-ups cover artifacts in retained checkouts and other storage;
-they must use this owner rather than introduce another cleaner.
+they must use this owner rather than introduce another cleaner. The all-user
+rollout and retention boundaries are in [storage follow-through](../docs/reviews/automatic-storage-cleanup.md).
 
 ## The demo
 
@@ -338,8 +339,8 @@ fixture passes with that shared key.
 Reconciled 2026-10-09 against `6cd3c7594` and `7e1a51086`. The requested
 aggregate-settlement discovery repair and preparatory isolation exist. Durable
 continuation and fixed sweep endpoints remain intact. Exact-head settlement,
-completed-Task delivery and fail-closed history remain mandatory. Item 2 remains
-a mechanism-review boundary; neither this isolation cut nor passing tests make
+completed-Task delivery and fail-closed history remain mandatory. The final-observation mechanism is now selected in item 2; the source-alias
+locality gap remains unresolved. Neither selection nor passing focused tests makes
 the full PR ready to ship.
 
 1. **Preparatory isolation implemented; source progress still has a review gap.**
@@ -409,51 +410,71 @@ the full PR ready to ship.
    Aggregate final history, its connection opens/path resolution, and native
    traversal remain item 2. Git's admitted removal may inspect siblings;
    setup isolation does not prove deletion through a permanently stalled sibling.
-2. **Revise final evidence observation before dependent implementation.** The
-   opt-in `cleanup_evidence_cost_probe` measures already-complete raw projection,
-   fresh path resolution and native traversal separately—no backfill is timed.
-   At 1,024 rows: 8,192 paths, 23 ms raw read and 67 ms resolution; at 8,192 rows:
-   65,536 paths, 228 ms and 519 ms. At 65,536 rows the raw read hit its two-second
-   deadline. Native traversal of 1,024 / 8,192 / 65,536 ordinary files took roughly
-   0.5 / 3.6 / 33 ms. These synthetic debug-build samples overlapped compilation;
-   they show a real final-read failure, not a universal cardinality threshold.
-   Native symlink-heavy layouts and stalled filesystems remain unmeasured.
+2. **This slice: stream fresh evidence with a progress deadline.** On October 9,
+   Jack Heart requested finishing automatic cleanup for all users. The mechanism
+   review selects workload-sized observation below as an engineering decision;
+   it does not authorize history expiry or weaken any preservation condition.
 
-   **Architectural counterexample:** after complete backfill, an unchanged reference
-   set that cannot finish within the final-read deadline restarts and retains on
-   every tick. Paging raw history does not resolve this. Persisting partial negative
-   filesystem observations would violate fresh validation: an earlier symlink may
-   retarget before removal. Raising a fixed timeout only moves the counterexample.
-   Dependent evidence progress implementation stops at this mechanism-review boundary.
-   The replacement needs either a workload-sized, bounded observation contract with isolated I/O,
-   or a history-owner mechanism that supplies a complete fresh view without a full
-   traversal. No cached negative result, relaxed preservation rule or increased
-   timeout has been adopted as a substitute.
+   Counterevidence retained: `cleanup_evidence_cost_probe` reached the fixed
+   two-second final-read deadline with 65,536 already-projected synthetic rows.
+   A constant larger timeout or restarted all-history scan still cannot guarantee
+   progress for healthy finite input. Full measurements and preceding alternatives
+   remain at `4a6d54fa9:scratch/clean-up.md`, Remaining item 2.
 
-   `c62a28b02` removes duplicate home traversal and returns on a positive protection
-   match. It does not stream the raw projection: `session_evidence_paths` still
-   constructs the complete deduplicated path set before checkout overlap checks.
-   Thus the measured raw-read failure still prevents unrelated collection. The
-   native deadline is cooperative per home, not a bound on stalled filesystem calls
-   or aggregate observation across homes and registries.
+   Replace the aggregate final reader with one isolated, read-only observation
+   that streams a complete SQLite snapshot and visits native evidence incrementally.
+   Parent-owned checkout admission remains held for the attempt. The child owns
+   no checkout locks, never deletes, inherits no outer exclusions, and exits before
+   its final observation can be consumed. A positive reference retains immediately.
+   Only successful complete coverage permits the parent to continue its existing
+   locked deletion checks. No intermediate negative result survives the attempt.
 
-   **Unresolved mechanism choice, not a new retention decision:** workload-sized
-   isolated observation must specify how a healthy finite set eventually completes
-   while a stalled path does not monopolize maintenance. A history-owner fresh view
-   must also cover external native writers and symlink changes; the SQL projection
-   alone does not. Either design needs a composed proof with already-complete
-   history exceeding today's final budget, fresh retargeting/appended-reference
-   vetoes, interrupted observation, and eventual unrelated collection. Symlink-heavy
-   native layouts need their own measurement/proof. Raising a constant timeout or
-   accumulating negative path results does not meet this requirement.
+   **Bound stalled work, not total useful work.** Replace the two-second whole-set
+   timer in this final observation with a no-progress deadline. Progress means
+   consuming a new indexed evidence row, completing resolution of a referenced
+   path, or advancing a native directory entry. Timer heartbeats, retries and
+   repeated traversal of the same item are not progress. Stream and validate
+   monotonic counters/stages; empty or malformed output, EOF without completion,
+   error, cancellation and missing progress retain. An unchanged finite healthy
+   set can therefore finish even when its total duration exceeds two seconds.
+   A blocked SQLite open/read, path resolution or native directory syscall cannot
+   keep the parent waiting with a synthetic heartbeat. Reuse the existing isolated
+   worker/process-group termination owner; do not create a resident scanner.
 
-   The independent preview conflict is resolved: `validate_checkout` reports exact
-   source settlement with deferred history validation. Planning performs no recursive
-   native-history traversal and does not read the full reference set. Application
-   repeats cheap facts and validates history freshly under admission; unreadable or
-   incomplete history retains. Native symlink and unreadable-layout fixtures cover
-   preview-to-apply preservation. Eventual collection beyond final observation
-   budgets remains unproved and is still required before shipping.
+   One read transaction defines the evidence cohort. Complete backfill remains
+   mandatory. Indexed keyset reads or a streaming cursor keep working memory
+   bounded; no full `Vec<PathBuf>` / `BTreeSet` is required. New history written
+   during observation must be detected and revalidated before admission proceeds
+   (using an existing history revision if suitable, otherwise source-owned
+   transactional change evidence in the same migration draft). Appended or edited
+   references must never disappear behind a frozen snapshot. Each new attempt
+   re-resolves filesystem destinations; interrupted work does not accumulate
+   negative path facts. Retargeted aliases between preview and application remain
+   covered. Arbitrary concurrent external filesystem mutation cannot be fenced by
+   lf locks; no new atomic-filesystem guarantee is claimed.
+
+   Native evidence traversal follows the supported provider layouts, bounds depth
+   as today, and reports progress only for newly visited entries. A stalled or
+   unreadable alias still retains when disjointness cannot be proved. This slice
+   fixes large **healthy** evidence sets, not the separate unresolved source-alias
+   locality contract in item 1. It must not silently reinterpret unknown as absent.
+
+   **Delete — do not maintain:** aggregate `session_evidence_paths` materialization
+   and its final whole-set deadline; aggregate `transcript_evidence` collection and
+   its per-home whole-set deadline, replacing their callers/tests with the streaming
+   owner. Retain bounded transactional backfill, raw-reference freshness, provider
+   discovery/resume readers and timeout process-group cleanup. No second evidence
+   index, cached canonical-path authority or additional migration generation.
+
+   **Proof:** a composed collection with already-complete history beyond the old
+   deadline completes without changing the data or increasing a constant timeout;
+   late positive references, appended/updated references, retargeted symlinks and
+   symlink-heavy native layouts preserve evidence. A real stalled filesystem read
+   and interrupted stream release the attempt, preserve bytes, and let a later
+   healthy retry complete. Stream progress cannot mask a stuck operation. The
+   existing preservation matrix still passes. Large finite history is the target;
+   continuous adversarial mutation remains unknown, not disposable.
+
 3. **Composed acceptance.** Native provider launch/resume, a second release CLI
    writer, full headless acceptance and regression matrix remain with gate. The
    current fixture reads a native transcript but does not launch its provider.
@@ -516,4 +537,4 @@ allocated bytes by category; observed free-space delta after collection; oldest
 eligible retention age. APFS sharing, hardlinks and concurrent writers mean
 directory sums are estimates, not guaranteed reclaimed bytes.
 
-Check: recorded at `7e1a51086`: `cargo test -p loopflow --lib` with filters `cleanup_setup_` and `cleanup_apply_` — 19 passed; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` — passed (unchanged code, not rerun); prose reconciliation: `git diff --check` — passed; full acceptance/provider resume: gate; installed scheduler/upgrade: demo.
+Check: plan revision `git diff --check` — passed (prose-only); code checks recorded at `7e1a51086`: `cargo test -p loopflow --lib` with filters `cleanup_setup_` and `cleanup_apply_` — 19 passed; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` — passed (unchanged code, not rerun); prose reconciliation: `git diff --check` — passed; full acceptance/provider resume: gate; installed scheduler/upgrade: demo.

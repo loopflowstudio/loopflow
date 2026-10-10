@@ -61,12 +61,12 @@
   source requiring fresh history validation. Only locked application reads complete
   evidence and traverses native layouts. This conservative preview resolves the
   no-mandatory-foreground-traversal conflict without granting deletion authority.
-- Architectural stop, 2026-10-09: the cost probe reaches the final-read deadline with
-  65,536 already-projected rows. The fixed final scan cannot progress on that unchanged
-  input; completed backfill is insufficient. Freshness forbids using accumulated
-  negative filesystem results as authority. Final observation needs design review
-  of workload-sized bounded observation plus isolated I/O, or a history-owner fresh
-  view. Neither is selected here; no preservation constraint has been relaxed.
+- Mechanism review, 2026-10-09: the final-read deadline was reached with 65,536
+  already-projected rows. The selected repair is fresh streaming observation with
+  a no-progress deadline, not a fixed whole-set timeout. See `clean-up.md`, This
+  slice. This is an engineering selection following Jack Heart's request to finish
+  automatic cleanup, not a history-retention approval. Complete observation under
+  concurrent reference updates, interruption and native symlinks still needs proof.
 - Implementation choice, 2026-10-09: candidate-local positive settlement queries
   replace the registry-wide normalizing inventory. Historical aliases can miss
   minute selection but remain in hourly registration scans. Lookup failures yield

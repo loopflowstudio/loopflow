@@ -32,8 +32,8 @@ attribution survive.
   process record or lifecycle owner. A → B → A cannot revive A's first token.
   This is the October 9 implementation choice, not a new approval attributed to
   Jack Heart. The AgentProcess retains identity and original parent across live takeover;
-  its row now owns the attached LfProcess and token. Numeric provider generation
-  still remains in caller/status/history wires pending the complete lifecycle cut.
+  its row now owns the attached LfProcess and token. AgentProcess identity
+  replaced the numeric provider generation everywhere it fenced or attributed.
 - OpenCode `start_inner` allocates a dedicated port/server per harness and creates
   or resumes exactly one native Session; stop removes that server. Codex creates
   a private socket per launch and reconnects to the same native thread. New
@@ -136,8 +136,13 @@ attribution survive.
   `record_native_provider_exit` and `session_provider_process` are now
   `record_agent_process_launch`/`_identity`/`_exit` and `agent_process_identity`;
   headless and native launch share one pre-exec recorder and one progress query.
-  Still named for the provider: `SessionAttachment.provider_generation` and
-  `provider_process_lfid`, which leave with the generation cut below.
+  `SessionAttachment.provider_process_lfid` keeps its name: it is the
+  AgentProcess's parent LfProcess, which `AgentCaller` carries as its origin.
+- The numeric provider generation: the draft's `processes.provider_generation`,
+  `session_activity.provider_generation`, `SessionAttachment`/`AgentCaller`/
+  `SessionTurnOrigin`/`SessionSummary` fields, `LfProcess.caller_provider_generation`,
+  the Session/SessionEvent/LfProcess DTO keys with their Swift mirrors and
+  fixtures, and `observe-status --generation`. AgentProcess identity replaces each.
 
 ## Current implementation boundary (reconciled 2026-10-09)
 
@@ -145,8 +150,7 @@ attribution survive.
 and shared record readers; `ea205e3d0` removes inferred discovery. The single
 Task draft backfills parent, PID/birth, endpoint, attachment and available
 spawn/exit evidence before dropping Session process columns. Duplicate PID/birth
-rows stay separate and non-signallable. Native thread/history stay on the Session;
-provider generation still survives in records and caller/status/history wires.
+rows stay separate and non-signallable. Native thread/history stay on the Session.
 
 Top, active Sessions, Task membership and scheduled orphan settlement query
 unfinished AgentProcesses, including detached/replaced rows; live views retain
@@ -188,7 +192,7 @@ AgentProcess for the provider's parent; failed and exited starts are asserted on
 AgentProcess records, not the deleted `provider:<n>` receipts. A third product
 defect surfaced in the CLI suite: passive Program Status joined the AgentProcess
 and recorded nothing for a native conversation Loopflow never attached to; a
-missing AgentProcess now reads as generation 0 in the writer and both readers.
+missing AgentProcess is now a reading of its own in the writer and both readers.
 Integration fixtures followed the deleted mechanisms: the active-Session watch
 records an AgentProcess and its exit instead of a client receipt and the OpenCode
 registry lock; the landing query selects `kind='lf'` children. A background run
@@ -307,13 +311,8 @@ checks do not establish configured-provider or foreground cleanup.
    config field and history owners remain `Option`; passing the attachment to
    `Harness::start` would move the refusal into the type. `stop_native` keeps its
    ownerless branch for remote clients, which own no provider.
-2. Remove numeric provider generation from runtime caller/status fences in favor
-   of AgentProcess identity. Request correlation already freezes Process, Work and
-   capture before send in Claude, Codex and OpenCode history; `SessionTurnOrigin`
-   still stores provider generation, not AgentProcess identity. Preserve that
-   correlation while moving history and performed-work filters to the agent record;
-   neither a delayed Started event nor a process's launch capture identifies a
-   later request. Rewrite this same migration, never add another Task draft.
+2. Done 2026-10-09: see "Generation cut" below. Installed migration and a
+   provider conversation that outlives the upgrade remain unproved.
 3. Complete stop/release authority across providers, both takeover death orders,
    and FIFO ownership. Cover Claude/OpenCode anonymous lifelines and the reaper's current
    Codex/OpenCode-only, noninteractive selection without applying headless group
@@ -331,13 +330,14 @@ checks do not establish configured-provider or foreground cleanup.
    Prune still stops before reaping on failed OS sampling. Earlier visibility
    counterexamples: `48aaf72a1`, this plan.
 5. LOO-441's LfProcess/LfSession rename is integrated from #1516. Update the final
-   model/API docs and all wire fixtures after the generation cut. The common
+   model/API docs once the lifecycle cut settles. The common
    LfProcess projection still carries both kinds during this draft cutover.
+   The generation wires and their docs moved with item 2.
    Provider-"engine" and driver-noun prose is replaced in the architecture
    reference, overview (and its rendered HTML), data, machines and conducting
    docs; the lifeline paragraph now states that only Codex takeover holds a named
    lifeline. Retained on purpose: the `engine.sock` socket filename, fixture
-   locals named `engine`, and generation wording that leaves with item 2.
+   locals named `engine`.
 6. Gate owns affected Rust/Swift/DTO and materialized-migration verification plus
    Linux lifeline checks. Hosted CI on #1519 ran only `scratch-clear`; every
    build, lint, test, migration and Swift job reports skipped at `8b18110cf`,
@@ -345,6 +345,31 @@ checks do not establish configured-provider or foreground cleanup.
    seconds and no invisible Task blocker. Only the installed scheduled path may
    settle Jack Heart's three pre-#1512 orphaned Codex processes. Branch fixtures
    never signal them or migrate that store.
+
+**Generation cut (2026-10-09):** AgentProcess identity is the fence and the
+attribution. `AgentCaller` carries `agent_process_lfid`; a caller is current only
+when that record is the Session's and still attached. Turn origin, Session
+activity and Program Status name the record. A conversation Loopflow never
+launched has none, and that absence is the Program Status witness: Desktop omits
+`--agent-process`, and a later launch fences the passive stream like any
+replacement. Session, SessionEvent and LfProcess DTOs, Swift mirrors and fixtures
+moved together.
+
+The draft backfills identity only for each Session's current generation: its
+reading, its `started` events (through the released partial index, not a table
+scan) and commands it issued. Earlier generations have no record and read as
+unknown. Released `session_events.provider_generation` and
+`processes.caller_provider_generation` stay as unread history: dropping the
+first rewrites the largest table, and neither maps to a record.
+`session_activity.provider_generation` is dropped. The frontier fixture asserts
+current identity, unknown earlier generations and retained counters.
+
+A provider launched before the upgrade holds an environment without the
+identity. It parses as a caller that is never current: its commands keep their
+origin parent, and it cannot rename or otherwise mutate its own Session until
+relaunched. No source proof exercises a provider across an installed migration.
+`tests/e2e/codex_connect.py` read the dropped Session columns since the record
+cut; it now reads the AgentProcess. It needs live Codex and was not run.
 
 ## Preservation counterexamples
 
@@ -402,4 +427,4 @@ Compress check: `cargo clippy -p loopflow --all-targets -- -D warnings` passes; 
 
 Realign check (2026-10-09): the Task's `rg -i 'provider_pid|driver_generation|SessionDriver|engine_orphans' rust/loopflow/src` returns nothing outside migrations; `render_architecture_html.py --check` and `cargo fmt --all --check` pass after the prose repair. No suite rerun; gate owns it.
 
-Check: `cargo test -p loopflow --no-fail-fast` with inherited `LF_*` cleared and stdin closed: library 1766 passed, 4 failed (three pass alone; one is main's planning-migration fixture above); every integration target passes after repair; `cargo fmt --all --check` and `cargo clippy --all-targets -- -D warnings` pass. Swift, draft materialization, Linux lifeline and live-provider smokes remain gate/CI-owned. Earlier focused results: `16415389c`, this plan.
+Check (generation cut, 2026-10-09): `cargo test -p loopflow --no-fail-fast --lib` plus the ten affected integration targets, `LF_*` cleared and stdin closed: library 1766 passed, the same 4 failed (three pass alone; one is main's planning-migration fixture), integration targets pass; `swift build --build-tests` and `DTOFixtureTests` pass; `cargo fmt --all --check` and `cargo clippy -p loopflow --all-targets -- -D warnings` pass. Remaining integration targets, draft materialization, Linux lifeline and live-provider smokes stay gate/CI-owned. Earlier results: `4d720d314`, this plan.

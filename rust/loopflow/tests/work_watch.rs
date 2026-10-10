@@ -542,8 +542,8 @@ fn every_displayed_session_fact_committed_elsewhere_is_shown() {
 
     // A question the stream reported is Waiting; its answer ends that.
     write(
-        "INSERT INTO session_activity(session_id,attachment_token,provider_generation,observed_at,open_tools,pending_input,yielded)
-         SELECT s.id,p.attachment_token,p.provider_generation,CAST(strftime('%s','now') AS INTEGER),0,1,0
+        "INSERT INTO session_activity(session_id,attachment_token,agent_process_lfid,observed_at,open_tools,pending_input,yielded)
+         SELECT s.id,p.attachment_token,p.lfid,CAST(strftime('%s','now') AS INTEGER),0,1,0
          FROM agent_sessions s JOIN processes p ON p.lfid=s.agent_process_lfid WHERE s.id='conversation'",
     );
     watch.session(|record| record["attention"] == "waiting");

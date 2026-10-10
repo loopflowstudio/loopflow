@@ -63,7 +63,7 @@ LfSession identity, name and feedback survive attachment replacement. The
 attached LfProcess is a nullable reference on the AgentProcess record, fenced by a
 fresh token per claim. The AgentProcess has separate identity: its attached
 LfProcess can die while it continues. History retains the original Process and
-provider generation when a later attachment recovers a missed native completion. Missing command outcome, usage or process
+AgentProcess when a later attachment recovers a missed native completion. Missing command outcome, usage or process
 evidence stays unknown.
 
 A capture's `events.jsonl` holds every provider event verbatim. SQLite history

@@ -124,8 +124,8 @@ fn watch_updates_and_releases_only_its_reader_on_eof_or_closed_stdout() {
     let agent = loopflow::id::ProcessLfid::new();
     db.execute(
         "INSERT INTO processes(lfid,trace_id,kind,agent_session_id,started_at,pid,os_started_at,
-            agent_provider,agent_interactive,provider_generation,spawn_state)
-         VALUES(?1,?1,'agent',?2,?3,?4,?3,'cat',1,1,'spawn_requested')",
+            agent_provider,agent_interactive,spawn_state)
+         VALUES(?1,?1,'agent',?2,?3,?4,?3,'cat',1,'spawn_requested')",
         rusqlite::params![agent, id, client_started, client.0.id()],
     )
     .unwrap();

@@ -500,7 +500,7 @@ lf session list --task LOO-358 --interactive all --history
 `--waiting` narrows that selection to conversations waiting on you. In Desktop,
 a program's OSC 7501 report takes precedence: any blocked record means Waiting,
 as does idle for an interactive Session. Working, done, error and explicit clear
-suppress the quiet-time inference for that provider generation. A blocked child
+suppress the quiet-time inference for that AgentProcess. A blocked child
 still counts when its parent reports working.
 
 Without reports, the existing provider stream supplies questions, hand-back and

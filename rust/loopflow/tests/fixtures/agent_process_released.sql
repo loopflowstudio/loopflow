@@ -10,3 +10,8 @@ PRAGMA foreign_keys=ON;
             UPDATE agent_sessions SET current_capture=(SELECT seq FROM session_events WHERE receipt_key='input') WHERE id='live';
             INSERT INTO session_activity(session_id,driver_generation,observed_at,open_tools,pending_input,yielded,provider_generation)
               VALUES('live',7,100,0,1,0,3),('stale',6,90,0,1,0,3);
+            INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,provider_generation,process_lfid,observed_at,payload)
+              VALUES('live','native','current','started','native:current:started',3,'parent',3,'{}'),
+                    ('live','native','earlier','started','native:earlier:started',2,'parent',2,'{}');
+            INSERT INTO processes(lfid,trace_id,started_at,via_agent,caller_session_id,caller_provider_generation)
+              VALUES('current-child','trace',4,1,'live',3),('earlier-child','trace',3,1,'live',2);

@@ -17,7 +17,7 @@ pub struct LfProcess {
     pub parent_process_lfid: Option<ProcessLfid>,
     pub via_agent: Option<bool>,
     pub caller_session_id: Option<String>,
-    pub caller_provider_generation: Option<i64>,
+    pub caller_agent_process_lfid: Option<ProcessLfid>,
     pub command: Option<String>,
     pub repo: Option<String>,
     pub cwd: Option<String>,
@@ -107,7 +107,9 @@ impl FlowHeld {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentCaller {
     pub session_id: String,
-    pub provider_generation: i64,
+    /// Absent in an environment installed before AgentProcess records: such a
+    /// caller keeps its causal history and is never the current provider.
+    pub agent_process_lfid: Option<ProcessLfid>,
     #[serde(rename = "origin_exec_id")] // Retained provider environments use this format.
     pub origin_process_lfid: ProcessLfid,
 }
@@ -119,7 +121,6 @@ pub struct SessionAttachment {
     pub agent_process_lfid: ProcessLfid,
     pub process_lfid: Option<ProcessLfid>,
     pub token: crate::id::AttachmentToken,
-    pub provider_generation: i64,
     pub provider_process_lfid: ProcessLfid,
 }
 
@@ -127,7 +128,7 @@ impl SessionAttachment {
     pub fn caller(&self, session_id: String) -> AgentCaller {
         AgentCaller {
             session_id,
-            provider_generation: self.provider_generation,
+            agent_process_lfid: Some(self.agent_process_lfid.clone()),
             origin_process_lfid: self.provider_process_lfid.clone(),
         }
     }

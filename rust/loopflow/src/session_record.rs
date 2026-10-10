@@ -4204,10 +4204,7 @@ mod tests {
                 Some("native-thread".into())
             );
             // The finished attachment's AgentProcess is never adopted.
-            assert_eq!(
-                next_driver.provider_generation,
-                driver.provider_generation + 1
-            );
+            assert_ne!(next_driver.agent_process_lfid, driver.agent_process_lfid);
             assert_eq!(
                 Some(&next_driver.provider_process_lfid),
                 next_driver.process_lfid.as_ref()
@@ -4406,10 +4403,7 @@ mod tests {
         );
         // Ending the AgentProcess may already have reaped this exact child.
         let _ = engine.wait();
-        assert_eq!(
-            replacement.provider_generation,
-            driver.provider_generation + 1
-        );
+        assert_ne!(replacement.agent_process_lfid, driver.agent_process_lfid);
         assert_eq!(replacement.provider_process_lfid, next);
         assert!(store.session_connection("conversation").unwrap().is_none());
         assert!(store
@@ -4456,10 +4450,7 @@ mod tests {
         provider.wait().unwrap();
         let replacement =
             super::resume_session_agent_process(&store, "conversation", &next).unwrap();
-        assert_eq!(
-            replacement.provider_generation,
-            driver.provider_generation + 1
-        );
+        assert_ne!(replacement.agent_process_lfid, driver.agent_process_lfid);
     }
 
     #[test]

@@ -17,7 +17,7 @@ public struct LfProcess: Codable, Sendable, Equatable, Identifiable {
     public let parentProcessLFID: String?
     public let viaAgent: Bool?
     public let callerSessionID: String?
-    public let callerProviderGeneration: Int64?
+    public let callerAgentProcessLFID: String?
     public let command: String?
     public let repo: String?
     public let cwd: String?
@@ -36,7 +36,7 @@ public struct LfProcess: Codable, Sendable, Equatable, Identifiable {
         case parentProcessLFID = "parent_process_lfid"
         case viaAgent = "via_agent"
         case callerSessionID = "caller_session_id"
-        case callerProviderGeneration = "caller_provider_generation"
+        case callerAgentProcessLFID = "caller_agent_process_lfid"
         case startedAt = "started_at"
         case completedAt = "completed_at"
         case exitCode = "exit_code"

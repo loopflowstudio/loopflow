@@ -11,7 +11,7 @@ use crate::id::{AgentSessionId, WaveId};
 pub(crate) struct SessionTurnOrigin {
     pub session_id: String,
     pub process_lfid: crate::id::ProcessLfid,
-    pub provider_generation: i64,
+    pub agent_process_lfid: crate::id::ProcessLfid,
     pub captured_event: Option<i64>,
     pub task_id: Option<String>,
     pub wave_id: Option<String>,
@@ -27,7 +27,7 @@ pub struct SessionEvent {
     pub agent_session: Option<AgentSessionId>,
     pub provider_turn: Option<String>,
     pub kind: SessionEventKind,
-    pub provider_generation: Option<i64>,
+    pub agent_process_lfid: Option<String>,
     pub process_lfid: Option<String>,
     pub task_id: Option<String>,
     pub wave_id: Option<String>,
@@ -212,7 +212,8 @@ pub(crate) struct SessionSummary {
     /// Waiting on a person, as of the read's clock.
     pub waiting: bool,
     pub program_status: Option<crate::program_status::Records>,
-    pub provider_generation: i64,
+    /// None for a conversation Loopflow never attached to.
+    pub agent_process_lfid: Option<crate::id::ProcessLfid>,
     pub task_terminal: bool,
     /// Its Task names it as the Task's primary conversation.
     pub task_primary: bool,

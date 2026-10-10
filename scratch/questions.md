@@ -3,8 +3,7 @@
 2026-10-09 implementation choice: fresh opaque attachment tokens fence each
 claim and release, including A → B → A. This resolves the repeated-ID ambiguity
 without another process identity or lifecycle. The single-table AgentProcess cut
-now owns the token and attached LfProcess on that record; provider generation
-still exists in this internal slice. No approval beyond Jack Heart's original
+now owns the token and attached LfProcess on that record. No approval beyond Jack Heart's original
 Task directive is inferred.
 
 2026-10-09: Source OpenCode launches are one-server/one-Session. Historical
@@ -49,3 +48,15 @@ attachment in memory, never serialized into stable tool provenance. The client
 relay and provider endpoint are separate paths. Connection exit/interruption
 records its attachment outcome without asserting provider death or invoking
 provider close; independent orphan settlement still owns detached providers.
+
+2026-10-09 implementation choice: the generation cut keeps the released
+`session_events.provider_generation` and `processes.caller_provider_generation`
+columns as unread history instead of dropping them. Earlier generations have no
+AgentProcess to map to, and dropping the event column rewrites the store's
+largest table. Nothing reads or writes them; dropping later is one statement.
+Whether to delete that history outright is Jack's choice.
+
+2026-10-09 implementation choice: `AgentCaller.agent_process_lfid` is optional
+so a provider launched before the upgrade keeps issuing commands as a stale
+caller instead of failing every `lf` call on an unparseable environment. New
+launches always carry it. Refusing old environments outright is the alternative.

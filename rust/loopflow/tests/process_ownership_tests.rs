@@ -938,7 +938,7 @@ async fn actual_engine_children_follow_driver_handoff_but_not_provider_replaceme
         .release_session_attachment(session_id, &first)
         .unwrap();
     assert_eq!(vacant.process_lfid, None);
-    assert_eq!(vacant.provider_generation, first.provider_generation);
+    assert_eq!(vacant.agent_process_lfid, first.agent_process_lfid);
     assert_eq!(vacant.provider_process_lfid, first.provider_process_lfid);
     assert_eq!(
         store.session_attachment(session_id).unwrap(),
@@ -947,7 +947,7 @@ async fn actual_engine_children_follow_driver_handoff_but_not_provider_replaceme
     let handed_off = store
         .claim_session_attachment(session_id, Some(&vacant), &replacement.id, false)
         .unwrap();
-    assert_eq!(handed_off.provider_generation, first.provider_generation);
+    assert_eq!(handed_off.agent_process_lfid, first.agent_process_lfid);
     assert_ne!(handed_off.token, first.token);
     assert!(store
         .claim_session_attachment(session_id, Some(&first), &original.id, false)
@@ -958,10 +958,7 @@ async fn actual_engine_children_follow_driver_handoff_but_not_provider_replaceme
     let restarted = store
         .claim_session_attachment(session_id, Some(&handed_off), &restart.id, true)
         .unwrap();
-    assert_ne!(
-        restarted.provider_generation,
-        handed_off.provider_generation
-    );
+    assert_ne!(restarted.agent_process_lfid, handed_off.agent_process_lfid);
     std::fs::write(control.join("replace.go"), "").unwrap();
     assert!(engine.wait().unwrap().success());
     let conn = rusqlite::Connection::open(&database).unwrap();

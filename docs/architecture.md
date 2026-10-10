@@ -226,7 +226,7 @@ for one thread. AgentProcess PID, client PID and attached LfProcess are distinct
 
 Process ancestry records the actual lf caller. A direct child names its parent's
 Process; an agent-issued child also records `via_agent` and LfSession provenance.
-The provider's generation resolves to the current driver at child admission.
+The provider's AgentProcess resolves to its attached LfProcess at child admission.
 A delayed command from a replaced provider retains historical provenance; old
 Process parents are never rewritten. Causal ancestry grants no control authority.
 

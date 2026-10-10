@@ -54,8 +54,8 @@ not evidence that old captured intent changed.
 Process admission records one actual lf process and immutable causal ancestry.
 Nested wrappers reuse the process identity and cannot finish the outer command
 early. Direct child commands name their invoking Process. Agent-issued commands
-record the incoming agent bit plus stable Session/provider-generation provenance,
-then resolve the current matching driver once at admission.
+record the incoming agent bit plus stable Session/AgentProcess provenance,
+then resolve the current attached LfProcess once at admission.
 
 AgentProcess rows use the same `processes` inventory, with kind `agent`, exact
 PID/birth, served Session, original parent and current attachment. Session rows
@@ -182,11 +182,11 @@ correlation carry that snapshot. Broadcast-only starts retain unknown attributio
 late correlated replies can fill it, but cannot borrow a newer capture or bind.
 The snapshot supplies history only and never authorizes dispatch.
 
-The continuing AgentProcess retains its provider generation while each attachment
+The continuing AgentProcess retains its identity while each attachment
 receives a fresh opaque token, including reattachment of the same lf Process.
 Release revokes that token as well. The token is a compare-and-swap witness,
-not another process identity or lifecycle owner. The AgentProcess
-launch cutover remains unfinished; caller/status wires still use provider generation.
+not another process identity or lifecycle owner. Caller provenance, turn origin
+and Program Status name the AgentProcess itself; no generation counter remains.
 
 Attachment exit retains an exact history-event reference rather than deriving a
 receipt from counter arithmetic. Migration preserves old event keys and payloads,

@@ -222,8 +222,8 @@ unpublished code retained, without deletion or delivery authorization.
 ## AgentProcess (LOO-443, 2026-10-09)
 
 Jack Heart requested one inventory; #1512/#1516/#1499 integrated. Unknown stays visible; retry retains history. `c1c09fb6c` fences resume; `9255e9b03` shares native admission.
-`82b5d90d5` separates attachment/provenance and relay/upstream. Stand-ins
-prove launch and takeover rejection (A → B → A), not configured relay.
+`82b5d90d5` separates attachment/provenance and relay/upstream; stand-ins
+prove takeover rejection (A → B → A), not configured relay.
 Client exit never settles its provider, nor provider death an unknown attachment.
 
 Entry fixtures exposed swallowed errors and zombie-as-live probes.
@@ -231,12 +231,12 @@ Reaper and Codex close share group judgment: leader death is insufficient;
 failed descendant inventory refuses before signaling.
 
 Headless launch refuses a missing attachment. Jack's steer `0aa2c34c` requested
-publication without merge: #1519 is open at `8b18110cf`, incomplete. Generations,
-foreground cleanup, takeover death orders, public Task agreement, two-second
+publication without merge: #1519 is open, incomplete. AgentProcess identity replaced
+provider generation; released counters stay unread, pre-upgrade callers read stale.
+Foreground cleanup, takeover death orders, public Task agreement, two-second
 removal, installed settlement stay open; whether they join #1519 is undecided.
 FIFO is Codex-only; reaping noninteractive Codex/OpenCode. Focused filters hid
-30 whole-library failures. PR CI ran only `scratch-clear`; its green proves no
-build or test.
+30 whole-library failures. PR CI ran only `scratch-clear`: no build/test proof.
 
 ## Execution ownership names (LOO-441, 2026-10-09)
 

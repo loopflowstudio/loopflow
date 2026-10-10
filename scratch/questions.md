@@ -44,8 +44,9 @@
   removal is never canceled by these budgets.
 - Implementation choice, 2026-10-09: candidate continuation is carried by at most
   32 pending administrative paths in the existing cron receipt, consumed before
-  publication and drained before another setup window. This replaces both fairness
-  fields, not ownership or deletion evidence. Last-attempt priority applies within
+  publication and drained before another setup window. Resuming that continuation
+  skips repository-wide discovery. This replaces both fairness fields, not ownership
+  or deletion evidence. Last-attempt priority applies within
   the remaining window. A fixed lexical sweep endpoint excludes later tail arrivals;
   arbitrary adversarial arrivals below that endpoint remain unproved.
 - Implementation choice, 2026-10-09: one Session-history migration materializes raw

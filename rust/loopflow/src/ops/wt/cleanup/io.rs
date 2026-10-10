@@ -51,7 +51,6 @@ enum Request {
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct Attempt {
     pub path: PathBuf,
-    pub marker: PathBuf,
     pub branch: Option<String>,
     /// Missing hints are initialized by the owner, never by a read worker.
     pub at: Option<i64>,
@@ -234,13 +233,7 @@ fn execute(request: Request) -> OpsResult<serde_json::Value> {
                 // An unreadable hint is oldest priority, never ownership.
                 Err(_) => Some(0),
             };
-            serde_json::to_value(Attempt {
-                path,
-                marker,
-                branch,
-                at,
-            })
-            .map_err(super::error)
+            serde_json::to_value(Attempt { path, branch, at }).map_err(super::error)
         }
         Request::Read(Read::Receipts { root, flow }) => {
             serde_json::to_value(cron::read_receipts(&root, "", Some(&flow))?).map_err(super::error)

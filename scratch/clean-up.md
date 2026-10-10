@@ -102,7 +102,8 @@ budgets or a whole-pass time guarantee. Last-attempt hints in existing Git
 registrations prioritize older retries within each bounded setup window. Receipts retain at most 32 pending registration
 keys until attempted; later windows cannot overwrite this continuation. A fixed
 lexical endpoint also bounds each registration sweep against later tail arrivals.
-Hourly timestamps still bound history-independent cohort membership, not wall time. Hints grant no deletion authority.
+Hourly timestamps still bound history-independent cohort membership, not wall time.
+Hints grant no deletion authority.
 
 ## Constraints
 
@@ -162,9 +163,10 @@ Bounded setup now joins registration branches and retry hints into
 candidate list, not repeated path joins or an impossible missing-hint error.
 Fresh locked observation remains required; receipt continuation now replaces the
 failed-write fairness cursor described in the prior implementation.
-This iteration removes the shared candidate fairness lane and the background/locked
-aggregate registration listing. Their required retry and registration-validation
-behavior now lives in bounded receipt continuation and registration-local reads.
+Removed the shared candidate fairness lane, background/locked aggregate listing,
+`observe_registered` wrapper, candidate-membership sets and stored derived hint paths.
+One observation reads each selected registration once; locked application validates
+its reciprocal backlink. Saved candidate windows resume without rediscovery.
 No known deletion targets remain. Explicit abandonment and persistent-branch
 restart retain their separate authority; missing-registration repair never
 justifies broad metadata pruning. Admitted destructive removal is never canceled.
@@ -208,8 +210,11 @@ receipt now carries `pending_registrations`: at most 32 administrative paths fro
 one setup window. Successful reads join fresh path, branch and hint facts; candidates
 use oldest-first ordering. Each admitted candidate is consumed durably before hint
 publication. Failures and interruption therefore yield to the remaining members.
-No new window is discovered until that continuation drains. This is bounded receipt
-continuation, not another checkout registry or source-disposition queue.
+No new window is discovered until that continuation drains; setup resumption no longer
+repeats administrative enumeration or common-directory discovery. A fixture reloads
+saved candidates with Git unavailable and verifies setup resumes without removal.
+This is bounded receipt continuation, not another checkout registry or
+source-disposition queue.
 
 A fixed `registration_through` endpoint prevents continuous tail arrivals from
 postponing wrap and retry of an interrupted candidate. Names inserted ahead of the
@@ -451,4 +456,4 @@ allocated bytes by category; observed free-space delta after collection; oldest
 eligible retention age. APFS sharing, hardlinks and concurrent writers mean
 directory sums are estimates, not guaranteed reclaimed bytes.
 
-Check: `cargo test -p loopflow --lib cleanup_setup_` — 12 passed; focused registration/lease, interrupted-registration, failed-hint, oldest-deferral and hourly tests — 7 passed; `cargo test -p loopflow --test dto_fixtures cleanup_receipt` — 1 passed; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` — passed; full acceptance/provider resume: gate; installed scheduler/upgrade: demo.
+Check: `cargo test -p loopflow --lib` with focused setup, apply, interrupted-registration, failed-hint, oldest-deferral and hourly filters — 21 passed (12 setup tests plus the new resume test); `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` — passed; full acceptance/provider resume: gate; installed scheduler/upgrade: demo.

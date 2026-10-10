@@ -413,9 +413,9 @@ Machine's user is logged in. Without launchd, work-producing commands trigger a
 throttled background check instead. Checks also retry safe checkout cleanup and
 report retained paths in `lf task reconcile --json`. Minute ticks revisit settled
 owners; hourly scans reconcile all registrations. Bounded registration windows
-resume from receipts. Within each window, last-attempt hints prioritize older
-deferrals, interleaved with a lexical retry sweep. Cross-window retries can still
-be delayed by stalled hint writes.
+resume from receipts. Each window drains before discovery resumes; failed hint
+writes yield to its remaining candidates. Last-attempt hints prioritize older
+deferrals within a window.
 They record CI failures and settle verified merges. Flow recovery belongs to its
 caller: inspect execution and effect history before launching fresh work.
 

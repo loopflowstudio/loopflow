@@ -311,37 +311,7 @@ fn observe(
     repo: &Path,
     decision: &mut CleanupDecision,
     external: &OpsResult<HashSet<PathBuf>>,
-) -> OpsResult<()> {
-    if normalized(&decision.path) == normalized(repo) {
-        retain(decision, "primary checkout");
-        return Ok(());
-    }
-    // Validate only this registration. A stalled sibling gitdir must not make
-    // Git's repository-wide worktree listing a prerequisite for its removal.
-    let registered = if decision.path.try_exists()? {
-        let admin = git_directory(&decision.path, "--absolute-git-dir")?;
-        let common = git_directory(repo, "--git-common-dir")?;
-        let path: PathBuf = io::read(io::Read::Checkout(admin.clone()))?;
-        if admin.parent() == Some(common.join("worktrees").as_path()) && path == decision.path {
-            HashSet::from([path])
-        } else {
-            HashSet::new()
-        }
-    } else if interrupted_removal(repo, &decision.path)?.is_some() {
-        HashSet::from([decision.path.clone()])
-    } else {
-        HashSet::new()
-    };
-    observe_registered(store, repo, decision, external, &registered, true)
-}
-
-fn observe_registered(
-    store: &SharedStore,
-    repo: &Path,
-    decision: &mut CleanupDecision,
-    external: &OpsResult<HashSet<PathBuf>>,
-    registered: &HashSet<PathBuf>,
-    validate_history: bool,
+    validate_removal: bool,
 ) -> OpsResult<()> {
     // Each observation stands alone, including a recheck after planning.
     decision.evidence.clear();
@@ -369,9 +339,8 @@ fn observe_registered(
         };
         // The administrative HEAD and local ref must still name the exact
         // source observed before removal. A missing path alone proves nothing.
-        if !registered.contains(path)
-            || std::fs::read_to_string(admin.join("HEAD"))?.trim()
-                != format!("ref: refs/heads/{branch}")
+        if std::fs::read_to_string(admin.join("HEAD"))?.trim()
+            != format!("ref: refs/heads/{branch}")
             || Some(
                 read_git(repo, &["rev-parse", &format!("refs/heads/{branch}")])?
                     .trim()
@@ -385,14 +354,25 @@ fn observe_registered(
         decision.observed_head = started.observed_head;
         admin
     } else {
-        if normalized(&main_repo_root(path)?) != normalized(repo) || !registered.contains(path) {
+        if normalized(&main_repo_root(path)?) != normalized(repo) {
             retain(decision, "checkout registration changed");
             return Ok(());
+        }
+        let admin = git_directory(path, "--absolute-git-dir")?;
+        if validate_removal {
+            // Locked observation validates this registration, not a sibling-wide
+            // inventory. A preview's registration cannot authorize removal.
+            let common = git_directory(repo, "--git-common-dir")?;
+            let backlink: PathBuf = io::read(io::Read::Checkout(admin.clone()))?;
+            if admin.parent() != Some(common.join("worktrees").as_path()) || backlink != *path {
+                retain(decision, "checkout registration changed");
+                return Ok(());
+            }
         }
         let branch = read_git(path, &["rev-parse", "--abbrev-ref", "HEAD"])?;
         decision.branch = (branch.trim() != "HEAD").then(|| branch.trim().to_string());
         decision.observed_head = Some(read_git(path, &["rev-parse", "HEAD"])?.trim().to_string());
-        git_directory(path, "--absolute-git-dir")?
+        admin
     };
     let default_branch = read_git(
         repo,
@@ -511,7 +491,7 @@ fn observe_registered(
             }
         }
     }
-    if !validate_history {
+    if !validate_removal {
         // A preview is not deletion authority. Do not walk native history or
         // resolve the complete Session reference set on the foreground path.
         decision.action = CleanupAction::ValidateCheckout;
@@ -707,16 +687,12 @@ fn plan_selected(
     let selected = selected.map(normalized);
     let external = running_paths();
     let registered = list_porcelain(&repo)?;
-    let paths = registered
-        .iter()
-        .map(|(path, _)| path.clone())
-        .collect::<HashSet<_>>();
     let mut plan = Vec::new();
     for (path, branch) in registered {
         if selected.as_ref().is_some_and(|selected| *selected != path) {
             continue;
         }
-        plan.push(plan_checkout(store, &repo, path, branch, &external, &paths));
+        plan.push(plan_checkout(store, &repo, path, branch, &external));
     }
     Ok(plan)
 }
@@ -727,7 +703,6 @@ fn plan_checkout(
     path: PathBuf,
     branch: Option<String>,
     external: &OpsResult<HashSet<PathBuf>>,
-    registered: &HashSet<PathBuf>,
 ) -> CleanupDecision {
     let mut decision = CleanupDecision {
         path,
@@ -737,8 +712,7 @@ fn plan_checkout(
         evidence: Vec::new(),
         estimated_bytes: None,
     };
-    if let Err(error) = observe_registered(store, repo, &mut decision, external, registered, false)
-    {
+    if let Err(error) = observe(store, repo, &mut decision, external, false) {
         retain(&mut decision, format!("observation unavailable: {error}"));
     }
     decision
@@ -808,7 +782,7 @@ fn apply_checkout(
         let expected_head = decision.observed_head.clone();
         let expected_branch = decision.branch.clone();
         // Refresh all authority and filesystem facts under both locks.
-        if let Err(error) = observe(store, repo, &mut decision, &running_paths()) {
+        if let Err(error) = observe(store, repo, &mut decision, &running_paths(), true) {
             retain(&mut decision, format!("observation unavailable: {error}"));
             return Ok(false);
         }
@@ -917,7 +891,6 @@ struct CheckoutAttempt {
     admin: PathBuf,
     path: PathBuf,
     branch: Option<String>,
-    marker: PathBuf,
     at: i64,
 }
 
@@ -931,32 +904,35 @@ fn checkout_attempts(
     save: &mut impl FnMut(&CleanupProgress) -> OpsResult<()>,
     report: &mut CleanupReport,
 ) -> OpsResult<Vec<CheckoutAttempt>> {
-    let common = git_directory(repo, "--git-common-dir")?;
-    let mut admins: Vec<PathBuf> = io::read(io::Read::Registrations(common))?;
-    admins.sort();
-    if progress.registration_through.is_none() {
-        progress.registration_through = admins.last().cloned();
-        save(progress)?;
-    }
-    if let Some(through) = &progress.registration_through {
-        admins.retain(|admin| admin <= through);
-    }
-    let start = progress
-        .registration_after
-        .as_ref()
-        .map_or(0, |after| admins.partition_point(|admin| admin <= after));
+    let resuming = !progress.pending_registrations.is_empty();
+    let (window, remaining) = if resuming {
+        // Durable candidates need no new discovery. Resumption does not
+        // depend on another repository-wide listing.
+        (progress.pending_registrations.clone(), None)
+    } else {
+        let common = git_directory(repo, "--git-common-dir")?;
+        let mut admins: Vec<PathBuf> = io::read(io::Read::Registrations(common))?;
+        admins.sort();
+        if progress.registration_through.is_none() {
+            progress.registration_through = admins.last().cloned();
+            save(progress)?;
+        }
+        if let Some(through) = &progress.registration_through {
+            admins.retain(|admin| admin <= through);
+        }
+        let start = progress
+            .registration_after
+            .as_ref()
+            .map_or(0, |after| admins.partition_point(|admin| admin <= after));
+        let window = admins[start..].iter().take(32).cloned().collect();
+        (window, Some(admins.len() - start))
+    };
     // Setup has its own admission window, so slow reads cannot consume every
     // opportunity to apply the healthy candidates already observed. One admitted
     // read/initialization pair finishes; no checkout locks are held here.
     let deadline = Instant::now() + budget.admission_time.min(Duration::from_secs(5));
     let mut attempts = Vec::new();
     progress.registrations_observed = 0;
-    let resuming = !progress.pending_registrations.is_empty();
-    let window = if resuming {
-        progress.pending_registrations.clone()
-    } else {
-        admins[start..].iter().take(32).cloned().collect()
-    };
     for admin in &window {
         if progress.registrations_observed >= 32 || Instant::now() >= deadline {
             break;
@@ -990,7 +966,7 @@ fn checkout_attempts(
             Some(at) => at,
             None => {
                 let now = chrono::Utc::now().timestamp_micros();
-                if write_attempt(&attempt.marker, now).is_ok() {
+                if write_attempt(&admin.join("lf-cleanup-attempt"), now).is_ok() {
                     now
                 } else {
                     0
@@ -1002,11 +978,10 @@ fn checkout_attempts(
             admin: admin.clone(),
             path: attempt.path,
             branch: attempt.branch,
-            marker: attempt.marker,
             at,
         });
     }
-    if !resuming && start + progress.registrations_observed == admins.len() {
+    if remaining == Some(progress.registrations_observed) {
         progress.registration_after = None;
     }
     save(progress)?;
@@ -1042,10 +1017,6 @@ fn collect_pass(
     progress.deferred = 0;
     progress.failed = 0;
     let mut attempts = checkout_attempts(repo, budget, progress, &mut save, &mut report)?;
-    let paths = attempts
-        .iter()
-        .map(|attempt| attempt.path.clone())
-        .collect();
     let setup_finished = progress.registration_after.is_none();
     if progress.full_scan_started.is_none()
         && progress
@@ -1092,7 +1063,6 @@ fn collect_pass(
             admin,
             path,
             branch,
-            marker,
             ..
         } = attempt;
         if Instant::now() >= deadline
@@ -1112,7 +1082,10 @@ fn collect_pass(
         if in_scan(attempt) {
             pending_scan -= 1;
         }
-        if let Err(error) = write_attempt(marker, chrono::Utc::now().timestamp_micros()) {
+        if let Err(error) = write_attempt(
+            &admin.join("lf-cleanup-attempt"),
+            chrono::Utc::now().timestamp_micros(),
+        ) {
             let decision = CleanupDecision {
                 path: path.clone(),
                 branch: branch.clone(),
@@ -1132,7 +1105,6 @@ fn collect_pass(
             path.clone(),
             branch.clone(),
             external.get_or_init(running_paths),
-            &paths,
         );
         if decision.action == CleanupAction::ValidateCheckout {
             // Size is optional; it cannot prevent this admitted removal.
@@ -1224,7 +1196,7 @@ mod tests {
             evidence: Vec::new(),
             estimated_bytes: None,
         };
-        observe(store, repo.path(), &mut decision, &Ok(HashSet::new())).unwrap();
+        observe(store, repo.path(), &mut decision, &Ok(HashSet::new()), true).unwrap();
         decision
     }
 
@@ -1459,6 +1431,44 @@ mod tests {
             .join("lf-cleanup-attempt")
             .exists());
         assert!(primary.exists());
+    }
+
+    #[tokio::test]
+    async fn cleanup_setup_resumes_saved_candidates_without_repository_discovery() {
+        let _guard = crate::journal::TestLedgerGuard::new();
+        let external = ExternalInspection::idle();
+        let (repo, _directory, store, path) = fixture().await;
+        let admin = crate::engine::git::absolute_git_dir(&path).unwrap();
+        let mut receipt = begin_receipt(&store, &repo);
+        let mut progress = receipt.progress();
+        progress.pending_registrations.push(admin.clone());
+        progress.registration_after = Some(admin.clone());
+        progress.registration_through = Some(admin);
+        receipt.save(progress.clone()).unwrap();
+        let mut progress = begin_receipt(&store, &repo).progress();
+        external.wrap_git("exit 1");
+        let mut report = super::CleanupReport {
+            planned: Vec::new(),
+            removed: Vec::new(),
+            deferred: Vec::new(),
+            failed: Vec::new(),
+        };
+        let attempts = super::checkout_attempts(
+            repo.path(),
+            CleanupBudget::default(),
+            &mut progress,
+            &mut |_| Ok(()),
+            &mut report,
+        )
+        .unwrap();
+        assert_eq!(attempts.len(), 1);
+        assert_eq!(attempts[0].path, path);
+        assert_eq!(attempts[0].branch.as_deref(), Some("landed"));
+        assert_eq!(
+            progress.pending_registrations,
+            receipt.progress().pending_registrations
+        );
+        assert!(path.exists(), "resumed setup grants no removal authority");
     }
 
     #[tokio::test]
@@ -2301,6 +2311,7 @@ mod tests {
             repo.path(),
             &mut item,
             &Err(super::error("inspection failed")),
+            true,
         )
         .unwrap();
         retained(&item, "inspection failed");
@@ -2309,10 +2320,11 @@ mod tests {
             repo.path(),
             &mut item,
             &Ok(HashSet::from([path.join("nested")])),
+            true,
         )
         .unwrap();
         retained(&item, "running external process");
-        observe(&store, repo.path(), &mut item, &Ok(HashSet::new())).unwrap();
+        observe(&store, repo.path(), &mut item, &Ok(HashSet::new()), true).unwrap();
         assert_eq!(item.action, CleanupAction::RemoveCheckout);
         assert_eq!(item.evidence, ["landing: exact merged head"]);
     }

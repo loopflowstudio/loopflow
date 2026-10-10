@@ -178,9 +178,9 @@ Explicit disable survives those repairs. Without launchd, work-producing command
 per minute. Cleanup leaves remote branches and Task outcomes intact. It protects
 recorded historical capture references and provider homes, including paths inside
 declared caches and native transcript symlinks; unavailable evidence retains the checkout.
-Setup resumes through bounded registration windows; within each window, older
-deferrals get priority alongside a lexical retry sweep. Stalled hint writes can
-still delay retries across windows. After an upgrade,
+Setup resumes each saved registration window before discovering another. Failed
+hint writes yield to remaining candidates; older deferrals get priority within
+the window. After an upgrade,
 large Session histories may report `Session evidence backfill incomplete` while
 maintenance fills the raw-reference index in pages. Partial history never permits
 removal; previews do not advance this index. Use `lf wt delete NAME --force` only

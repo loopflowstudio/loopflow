@@ -1181,7 +1181,7 @@ Show the recorded Task's Flow processes beside an exact pane
 
 ## lf desktop split
 
-Add an empty split beside an exact pane, retaining selection and clients
+Add a shell split beside an exact pane, retaining selection and clients
 
 | Argument | What it does |
 |---|---|

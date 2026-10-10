@@ -374,8 +374,10 @@ struct DesktopPaneControlTests {
         let store = registry.workspace(for: identity).multiplexer
         let before = store.layout
         register(router, window: window, registry: registry)
-        #expect(throws: RegistryQueryError.self) {
-            try router.controlPane(.init(target: target(store.focusedPane, window: window), action: .shell))
+        for action in [DesktopPaneAction.shell, .split(axis: .horizontal), .split(axis: .vertical)] {
+            #expect(throws: RegistryQueryError.self) {
+                try router.controlPane(.init(target: target(store.focusedPane, window: window), action: action))
+            }
         }
         #expect(store.layout == before)
         #expect(store.shellCommands.isEmpty)
@@ -410,7 +412,7 @@ struct DesktopPaneControlTests {
     }
 
     @Test func arrangementRetainsDocumentsSurfacesSelectionAndContentOccurrences() throws {
-        let router = WorkLinkRouter(), registry = SessionsWorkspaceRegistry(), window = UUID()
+        let router = WorkLinkRouter(), registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId), window = UUID()
         let workspace = registry.workspace(for: identity), store = workspace.multiplexer
         store.newShell(command: ["fixture-shell"])
         let shell = store.focusedPane
@@ -431,15 +433,16 @@ struct DesktopPaneControlTests {
         store.setFocusedPane(filesPane.id)
         let split = try router.controlPane(.init(target: shellTarget, action: .split(axis: .horizontal)))
         #expect(split.pane != shellTarget.pane)
-        #expect(store.layout.pane(for: split.pane)?.content == .empty)
+        #expect(store.layout.pane(for: split.pane)?.content == .shell)
+        #expect(store.shellCommands[split.pane] == [])
         #expect(split.repository == repository)
         #expect(split.machineId == identity.machineId)
         #expect(split.worktree == identity.worktree)
         #expect(store.layout.allPanes.count == 4)
         #expect(store.focusedPane == filesPane)
-        let empty = try #require(store.layout.allPanes.first { $0.content == .empty })
+        let splitShell = try #require(store.layout.pane(for: split.pane))
         _ = try router.controlPane(.init(target: shellTarget, action: .move(destination: sessionTarget, axis: .vertical)))
-        #expect(store.layout.allPanes.map(\.id) == [empty.id, session.id, shell.id, filesPane.id])
+        #expect(store.layout.allPanes.map(\.id) == [splitShell.id, session.id, shell.id, filesPane.id])
         _ = try router.controlPane(.init(target: shellTarget, action: .resize(toward: sessionTarget, ratio: 0.7)))
         let reading = DesktopLayoutInspection(store.layout, surface: { _ in nil })
         let movedSplit = reading.children[1].children[0]

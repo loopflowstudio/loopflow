@@ -47,6 +47,17 @@ final class SessionsWorkspace {
 
     @discardableResult
     func newShell(beside pane: String? = nil, focus: Bool = true) throws -> PaneState? {
+        let command = try shellCommand()
+        return multiplexer.newShell(command: command, beside: pane, focus: focus)
+    }
+
+    @discardableResult
+    func split(_ pane: String, axis: SplitAxis, focus: Bool = true) throws -> PaneState? {
+        let command = try shellCommand()
+        return multiplexer.split(pane, axis: axis, command: command, focusNewPane: focus)
+    }
+
+    private func shellCommand() throws -> [String] {
         let command: [String]
         if isLocal { command = [] }
         else {
@@ -59,7 +70,7 @@ final class SessionsWorkspace {
                 "--repository", location.repositoryID, "task", "shell", task,
                 "--checkout", identity.worktree]
         }
-        return multiplexer.newShell(command: command, beside: pane, focus: focus)
+        return command
     }
     let multiplexer = MultiplexerStore()
     let hover = PaneHover()
@@ -232,7 +243,7 @@ final class SessionsWorkspaceRegistry {
         case .hide: workspace.setCollapsed(paneId: target.pane, collapsed: true)
         case .restore: workspace.setCollapsed(paneId: target.pane, collapsed: false)
         case .focus: store.setFocusedPane(target.pane)
-        case .split(let axis): result = store.split(target.pane, axis: axis, focusNewPane: false)
+        case .split(let axis): result = try workspace.split(target.pane, axis: axis, focus: false)
         case .move(let destination, let axis):
             try peer(destination)
             store.move(target.pane, beside: destination.pane, axis: axis)
@@ -1127,12 +1138,17 @@ struct SessionsContentView: View {
         }
     }
 
+    private func split(_ axis: SplitAxis) {
+        do { try workspace.split(multiplexer.focusedPaneId, axis: axis) }
+        catch { launchErrorTitle = "Could not split pane"; launchError = error.localizedDescription }
+    }
+
     private func _handle(_ shortcut: SessionsShortcut) {
         switch shortcut {
         case .splitRight:
-            _ = multiplexer.split(multiplexer.focusedPaneId, axis: .vertical)
+            split(.vertical)
         case .splitDown:
-            _ = multiplexer.split(multiplexer.focusedPaneId, axis: .horizontal)
+            split(.horizontal)
         case .close:
             _destroySurface(in: multiplexer.focusedPane)
             multiplexer.close(multiplexer.focusedPaneId)
@@ -1435,6 +1451,11 @@ private struct SessionPaneView: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(_title), \(isFocused ? "active" : "open")")
         .accessibilityIdentifier(item.map { "session-pane-\($0.id)" } ?? "session-pane-empty")
+        .alert("Could not open shell", isPresented: Binding(
+            get: { shellError != nil }, set: { if !$0 { shellError = nil } }
+        )) {
+            Button("OK") { shellError = nil }
+        } message: { Text(shellError ?? "") }
         .onReceive(NotificationCenter.default.publisher(for: .ghosttyTerminalBell)) { notification in
             guard let terminal = notification.object as? TerminalIdentity,
                   terminal == _terminalIdentity else { return }
@@ -1481,10 +1502,10 @@ private struct SessionPaneView: View {
             if isFocused && hovering {
                 HStack(spacing: 2) {
                     stripButton("rectangle.split.2x1", label: "Split right", id: "pane-split-right", help: "Split right (⌘D)") {
-                        _ = store.split(pane.id, axis: .vertical)
+                        split(.vertical)
                     }
                     stripButton("rectangle.split.1x2", label: "Split down", id: "pane-split-down", help: "Split down (⌘⇧D)") {
-                        _ = store.split(pane.id, axis: .horizontal)
+                        split(.horizontal)
                     }
                     stripButton("xmark", label: "Close view", id: "pane-close", help: closeHelp, disabled: !store.canClose) {
                         closePane()
@@ -1509,8 +1530,8 @@ private struct SessionPaneView: View {
 
     @ViewBuilder
     private var paneActions: some View {
-        Button("Split right (⌘D)") { _ = store.split(pane.id, axis: .vertical) }
-        Button("Split down (⌘⇧D)") { _ = store.split(pane.id, axis: .horizontal) }
+        Button("Split right (⌘D)") { split(.vertical) }
+        Button("Split down (⌘⇧D)") { split(.horizontal) }
         Button(store.zoomedPaneId == pane.id ? "Exit zoom (⌘⇧↩)" : "Zoom pane (⌘⇧↩)") { store.toggleZoom(pane.id) }
         Divider()
         Button("Close view (⌘W)") { closePane() }.disabled(!store.canClose)
@@ -1518,6 +1539,11 @@ private struct SessionPaneView: View {
 
     private var closeHelp: String {
         pane.content == .shell ? "Close this shell (⌘W)" : "Close this view; the Session keeps running (⌘W)"
+    }
+
+    private func split(_ axis: SplitAxis) {
+        do { try workspace.split(pane.id, axis: axis) }
+        catch { shellError = error.localizedDescription }
     }
 
     private func closePane() {
@@ -1637,7 +1663,6 @@ private struct SessionPaneView: View {
             .buttonStyle(.bordered)
             .tint(TerminalPalette.accent)
             .accessibilityIdentifier("sessions-empty-new-shell")
-            if let shellError { Text(shellError) }
         }
     }
 

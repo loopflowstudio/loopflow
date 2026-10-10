@@ -169,6 +169,13 @@ Jack authorized Product follow-ups LOO-452 (shortcut customization, beyond LOO-4
 and LOO-453 (readiness/events); research:
 [the comparison](../../docs/reviews/terminal-command-comparison.md#rex-composition-and-discoverability-2026-10-10).
 
+Jack Heart (October 10) accepted Work-named repository/Wave/Task tabs over retained
+panes, with close meaning hide; the Work-keyed cutover remains unimplemented.
+His later `ff61b6bc` correction selects shell-by-default Split, no empty option.
+CLI and native split controls now share shell-location resolution before mutation;
+missing remote location refuses without a local fallback. Headless fixtures are
+not native acceptance. Admission and all other LOO-427 obligations remain.
+
 **Confirmation cannot elect execution.** `4c43550c2`: divergent revisions and
 independent refs both confirm, not Task allocation. `42990dea3` shares membership
 checks, not admission. A pinned Machine/key remains unreviewed: establishment,
@@ -219,24 +226,17 @@ Settlement rechecks merge/disposition.
 Jack Heart: Flow → Task → Wave, Desktop optional. Automated trials are account-free;
 Jack starts real providers in dedicated windows. No host code is lifted.
 
-Herdr/PTY fixtures passed taskless paths. Fresh Tasks require Linear; seeded Tasks
-accounts: refusal is not adoption. Original lf
-0.13.9's revision is unknown; source fixes cannot rebut release reports.
-Owners: LOO-422 status/titles, LOO-428 launch/Flow noise, LOO-423 account/polish,
-LOO-406 no-Linear planning; LOO-429 prompt placement overlaps 428's transport.
+Taskless fixtures passed, not fresh-Task adoption. Native mode forwards through
+skills/Task launches (28 Flow tests). Jack confirmed cmux step two and herdr
+Flow/question/resize/input trials and authorized landing. Native resume, Task
+publication and Continue/Stop remain unresolved; no host integration or external
+progress. Release 0.13.9 revision, owners and earlier evidence:
+`31ec76b01:wave/product/MEMORY.md`, this heading.
 
-Jack prioritizes native interaction. The trial exposed forced batch steps
-(introduced #1283); this branch forwards mode through skills and Task launches.
-28 Flow tests pass. Jack saw native step two in cmux and confirmed herdr's Flow,
-background question/clearing and resize/input trials. Successful provider exit
-advances; a deliberate Continue/Stop action remains unresolved. Native resume
-and herdr Task publication remain unproven. No host integration was added.
-
-Native resume's **Loopflow operating guide** is one repeated observation;
-first-content naming stays a hypothesis. Preserve native hooks/titles before
-adding outer Flow metadata that could obscure attention. Jack authorized landing
-the fix after these demos; remaining trials keep LOO-421 open. [Findings](../../docs/reviews/terminal-host-trial.md)
-preserve evidence and limits. No external-progress proof.
+Native resume repeated the **Loopflow operating guide** once; first-content naming
+is only a hypothesis. Preserve native hooks/titles. Remaining trials keep LOO-421
+open; [findings](../../docs/reviews/terminal-host-trial.md) and
+`31ec76b01:wave/product/MEMORY.md`, this heading, retain failed attempts and limits.
 
 ## Live Home reconciliation
 

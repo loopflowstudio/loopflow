@@ -136,6 +136,10 @@ Earlier command names below are dated evidence, not compatibility aliases.
   fixture is unexecuted. Native extraction, peer composition, complete opening and
   native acceptance remain unfinished. Detailed implementation and contrary check evidence:
   `a342d6870:docs/reviews/terminal-command-comparison.md`, this section.
+  **October 10 Split correction:** Jack Heart selected a shell in each new split,
+  not an empty pane. CLI and native controls share the existing shell-location
+  owner, preserving retained contents and exact targeting. This correction does
+  not implement Work tabs or establish native acceptance.
   **October 9 bounded-reader update:** lf3 is published with a verified public
   download and selected in SwiftPM. Exact-target reads now use its fixed buffer;
   inspection advertises `read`. Removed the temporary unavailable-reader result.

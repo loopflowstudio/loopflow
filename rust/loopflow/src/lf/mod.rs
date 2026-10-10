@@ -568,7 +568,7 @@ pub enum DesktopCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Add an empty split beside an exact pane, retaining selection and clients
+    /// Add a shell split beside an exact pane, retaining selection and clients
     Split {
         #[arg(long)]
         pane: Option<String>,

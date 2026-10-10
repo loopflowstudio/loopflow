@@ -87,8 +87,8 @@ public final class MultiplexerStore {
     }
 
     @discardableResult
-    public func split(_ paneId: String, axis: SplitAxis, focusNewPane: Bool = true) -> PaneState? {
-        _insert(.empty, beside: paneId, focus: focusNewPane, splitAxis: axis)
+    public func split(_ paneId: String, axis: SplitAxis, command: [String] = [], focusNewPane: Bool = true) -> PaneState? {
+        _insert(.shell, beside: paneId, focus: focusNewPane, splitAxis: axis, shellCommand: command)
     }
 
     /// Relocate the leaf itself, retaining content occurrence and surface keys.

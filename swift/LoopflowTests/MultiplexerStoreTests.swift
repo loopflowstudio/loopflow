@@ -94,7 +94,7 @@ struct MultiplexerStoreTests {
         store.show(.files(taskId: "task"), beside: empty.id, focus: false)
         store.show(.flowLog(taskId: "task"), beside: empty.id, focus: false)
         store.show(.files(taskId: "task"), beside: empty.id, focus: false)
-        #expect(store.layout.allPanes.count == 4)
+        #expect(store.layout.allPanes.count == 5)
         #expect(store.layout.pane(for: empty.id) == shell)
         #expect(store.layout.pane(for: selected.id) == selected)
         #expect(store.focusedPane == selected)
@@ -246,7 +246,8 @@ struct MultiplexerStoreTests {
         let pane = try #require(store.split(first, axis: .vertical))
         #expect(store.layout.allPanes.count == 2)
         #expect(store.focusedPaneId == pane.id)
-        #expect(pane.content == .empty)
+        #expect(pane.content == .shell)
+        #expect(store.shellCommands[pane.id] == [])
     }
 
     @Test("loading an open session jumps to its pane without duplicating it")
@@ -277,7 +278,7 @@ struct MultiplexerStoreTests {
         #expect(store.focusedPane.content == .session(id: "ask-2"))
     }
 
-    @Test("an explicit split keeps the first session when another is selected")
+    @Test("opening a conversation after split retains both the shell and original conversation")
     func explicitSplitKeepsBothSessions() throws {
         let store = MultiplexerStore()
         store.load(sessionId: "session-1")
@@ -287,6 +288,7 @@ struct MultiplexerStoreTests {
 
         #expect(store.layout.allPanes.map(\.content) == [
             .session(id: "session-1"),
+            .shell,
             .session(id: "ask-2"),
         ])
     }

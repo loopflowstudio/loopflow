@@ -148,6 +148,10 @@ struct WorkDestinationTests {
             let command = try #require(remote.multiplexer.shellCommands[shell.id])
             #expect(Array(command.dropFirst()) == ["--machine", "peer", "--repository", "repository",
                 "task", "shell", remoteID, "--checkout", remoteIdentity.worktree])
+            let splitID = try registry.controlPane(.init(target: target, action: .split(axis: .horizontal)), model: model)
+            #expect(remote.multiplexer.layout.pane(for: splitID)?.content == .shell)
+            #expect(remote.multiplexer.shellCommands[splitID] == command)
+            #expect(remote.multiplexer.layout.pane(for: targetPane.id) == targetPane)
             #expect(remote.multiplexer.focusedPaneId == focus)
             #expect(remote.multiplexer.zoomedPaneId == targetPane.id)
             #expect(companion.document("remote-draft.txt").editor.string == "retained peer draft")

@@ -744,6 +744,9 @@ lf --task LOO-427 desktop zoom --pane "$pane"
 lf --task LOO-427 desktop zoom --pane "$pane" --off
 ```
 
+Split creates a shell beside the addressed pane on its execution Machine and checkout.
+It preserves the selected pane; a missing remote location refuses before changing layout.
+
 ```sh
 pane=$(lf --task LOO-427 desktop shell --pane "$anchor" --json | jq -r .pane)
 lf --task LOO-427 desktop zoom --pane "$pane"

@@ -628,24 +628,23 @@ acceptance remain at
 
 ## Tasks across machines (LOO-412, 2026-10-09)
 
-Jack Heart selected review-only custom-ref sync; no landing or real-plan export. Joining
-publishes nothing; imports stay unplaced. Malformed imports abort;
-contradictions defer only effects. Preserve execution, uncertainty, losers and receipt origins. Correspondence grants no identity or authority;
-private references hold groups. Causality precedes ranking; equal revisions can
-carry different ranks, so retain bodies.
-
+Jack Heart selected review-only custom-ref sync; no landing/real-plan export.
+Joining publishes nothing; imports stay unplaced. Malformed imports abort;
+contradictions defer effects. Retain execution, uncertain receipts and losers.
+Correspondence grants no authority; private references hold groups. Causality
+precedes ranking; equal revisions can carry different ranks.
 Due dates synchronize; completion requests, placements and execution stay local.
 
-`e37099e50`/`231e75898` prove same-origin/private association recovery. Unchanged readback preserves later saves; changed facts win.
-Private owners acknowledge selected origins without settling divergent UUIDs
-or exporting private history. Seeded attempts prove no dispatch/exactly-once;
-attachment can race acquisition.
+`e37099e50`/`231e75898`: unchanged readback preserves saves; changed facts win.
+Private recovery acknowledges selected origins, never divergent UUIDs or private
+export. Seeded attempts prove no dispatch/exactly-once; attachment can race acquisition.
 
-`6bc57aefc`: Git/HTTPS order/removal and Codex 0.161.0 resume pass:
-only complete lists settle order; trash settles deletion. Replay preserves times,
-receipts, edits and execution; exchange launches no engine/turn. Fixtures
-prove no UI/account/installed acceptance. Linear delivery needs local Wave
-documents. Gate owns broader/materialized checks.
+`6bc57aefc`: Git/HTTPS order/removal and Codex 0.161.0 resume pass. Complete lists
+settle order; trash settles deletion. Native exchange is taskless; populated rows
+prove no running controls. Capture can append: preserve its prefix and count
+requests/engines. Resume launches; exchange does not. Same-Task live controls
+remain unproved, as do UI/account/installation. Linear delivery needs local Wave
+documents.
 
 ## Driver recovery
 

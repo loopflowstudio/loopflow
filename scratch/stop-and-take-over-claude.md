@@ -2,8 +2,9 @@
 
 Jack Heart requested provider-independent takeover and stop on 2026-10-09.
 The outcome is accepted; the transport design below remains a draft (2026-10-10).
-Source reconciliation: `196b57ac2` (2026-10-10), including startup preservation
-at `3806dd4da`, cancellation proof at `cd9f78dd0` and shared ordered readback.
+Source reconciliation: `64b785022` (2026-10-10), including process-death creation
+recovery at `07529ac3d`, shared prompt submission, cancellation at `cd9f78dd0`
+and ordered readback at `196b57ac2`.
 Dependencies #1519/#1520 are integrated at `be4a2b2af`, satisfying Jack Heart's
 steer `28e0c5cc`. LOO-443's remaining item 3 was read at
 `4f6ed76b2^:scratch/introduce-agentprocess-record-the-provider.md`.
@@ -67,6 +68,11 @@ in Claude fixtures were repaired; production schema and installed data are uncha
    connection dispatch. Publishing a transport endpoint alone cannot cover takeover
    before Claude's first native output: admission and connection must preserve the
    pending native-identity state without launching a replacement or inventing an ID.
+   `claude_history::History` also owns a frozen attachment and an in-memory
+   request map/pending queue. Moving pipes alone leaves correlation and attention
+   tied to the launcher. Transport extraction must preserve original turn origins
+   while accepting only the current attachment for new writes; custody is not
+   write authority.
 2. **Finish OpenCode public recovery.** Harness startup now consumes the saved
    server URL/native Session and retains common custody instead of spawning again.
    It subscribes to SSE before initial message readback, recovering request origins
@@ -124,7 +130,7 @@ replaced by persisted startup attempts, readback and attachment-transfer proofs.
 Removed in the protocol correction: unsupported permission PATCH and its
 exclusive fixtures; saved native permissions survive on creation/reconnect.
 Duplicated OpenCode blocking-worker/fence/client setup is replaced by
-`with_attached_http`; creation, configuration, replies, prompts and abort retain
+`with_attached_http`; creation, replies, prompts and abort retain
 one timeout and cancellation boundary. Native receipt grouping borrows messages
 from the readback snapshot instead of cloning their full JSON on every wake.
 Output and permission recovery now share one ordered Snapshot (permissions,
@@ -141,86 +147,26 @@ and saves native Session identity under the fence. It is not in this branch or
 local main. Reuse that history path when integrated; preserve schema, skill-input
 and correction turns. Its Flow fixture proves no launcher-independent transport.
 
-Source reconciliation (2026-10-10, rechecked at `196b57ac2`): local main remains `be4a2b2af`;
-LOO-450's reconciliation `784b162e0` is still outside this branch. Its plan retains
-non-null schema replay and Task-to-publication proof as open; its unified seed
-write/error path and native Session selection must survive transport extraction.
-`b5b089978` completes the earlier OpenCode
-stop/abort/drop step using frozen history ownership, not mutable launch config.
-Release is the only immediate child Wave; its complete goal and memory were read.
-Its entry-point lesson applies: harness close tests cannot establish public handoff.
-Connection reuse now recovers native messages after subscribing.
-Launcher-independent Claude transport and public OpenCode recovery remain
-implementation work. Common custody is implemented below that public boundary.
-Earlier review details: `5ea5cf5d6:scratch/stop-and-take-over-claude.md`.
+Source reconciliation at `64b785022`: local main remains `be4a2b2af`;
+LOO-450's `784b162e0` remains outside this branch. Preserve its unified seed
+write/error path and native selection when extracting transport. Its non-null
+schema replay and Task-to-publication proof remain open.
 
-Review (2026-10-10): starting the custody worker before provider spawn/attachment
-claim keeps thread-creation failure before effects. Birth is captured before exec,
-not sampled after a fast child exits. Public Codex's fixture now uses the real
-headless launcher rather than a native child lacking custody. Existing live
-providers with the predecessor's FIFO location refuse handoff without changing
-history or stopping them; this source change does not migrate running providers.
+Detailed reviews and compression history are retained at
+`07529ac3db346196031f26115a9ec63768dcdaae:scratch/stop-and-take-over-claude.md`.
+The surviving constraints are reflected above: record birth before exec, acquire
+custody before claim, retain immutable request origins and uncertain HTTP attempts,
+and never signal on reader failure or drop. An empty snapshot cannot clear a
+submitted turn. Existing providers with predecessor FIFO paths refuse handoff
+without migration, history changes or signaling. Release's entry-point lesson
+still applies: harness fixtures cannot prove public handoff. Release is the only
+immediate child Wave; its complete goal and memory were read on October 10.
 
-The OpenCode regression enters real harness startup with a throwaway stand-in,
-cancels after admission, transfers the attachment, rejects stale stop/abort even
-after config changes, drops the old harness without killing the provider, and closes from the current
-attachment without a local child handle. This is not a public takeover proof.
-
-Compression (2026-10-10): the shared pre-exec recorder now samples birth once
-and supplies that identity to both custody and SQLite; the second OS lookup is
-deleted. Lifeline fixtures require a named FIFO instead of keeping the removed
-optional-path shape. Remaining transport deletion targets above are unchanged.
-
-Compression: OpenCode recovers each immutable request origin once per reader,
-not on every native observation. The same map retains emitted boundaries; intent
-creation no longer claims mutable reader state. SQLite decodes the saved origin
-directly, without an intermediate JSON tree. Native receipts still advance on
-every observation, including uncorrelated requests; public transport work above
-is unchanged. At `74347955c` recovery remained only in `History::observe`;
-`c8b9ca782` adds startup readback through the same reader. Public connection is still missing.
-
-Review (2026-10-10): request intent uses existing immutable Session observations,
-not Started, a new table or a second store. A reconstructed reader retains the
-original capture and LfProcess after input replacement and attachment transfer;
-already completed requests do not emit another completion. The focused fixture
-reopens SQLite before any native observation; it is not an HTTP/SIGKILL or public
-handoff proof. No configured provider is used.
-
-Review (2026-10-10): failed reader setup must not call provider stop. The
-initial new-child/reused-connection cleanup split is superseded by startup
-preservation below; drop aborts only the reader. Message readback sets busy on recovered native Start,
-not on empty snapshots: an empty early read must not clear an in-flight submission.
-The harness fixture transfers attachment, drops the launcher harness, observes
-later stderr output, and recovers an unobserved pending request without an SSE
-message. This is not a second-process SIGKILL or public takeover proof.
-
-Compression review (2026-10-10): deleted the generic HTTP retry helper, whose
-only remaining caller created native Sessions. Creation errors now return without
-repeating a potentially successful write; the loopback fixture counts one native
-creation for both server failure and missing response identity. Readback selects
-admitted messages under one history lock and emits start → output → completion
-without cloning start events or repeatedly filtering lifecycle events. This does
-not finish public takeover or recover an unknown creation identity.
-
-
-Permission recovery (2026-10-10): the existing history owner acquires pending
-permissions, then reads native messages so a permission appearing during the earlier
-message snapshot still resolves its origin. Attempts live in existing observed
-Session events, not another schema or in-memory dedup map. The attachment fence
-covers intent, HTTP and uncertain-response readback. A pending previously attempted
-reply surfaces uncertainty; absence means no pending action, not proof of approval.
-The harness startup fixture recovers a pending permission without an SSE edge;
-the HTTP fixture loses both applied and unapplied responses, reopens SQLite and
-transfers attachment without repeating the reply. Public takeover remains open.
-Protocol reference: OpenCode v1.2.0's
-[permission routes](https://github.com/anomalyco/opencode/blob/v1.2.0/packages/opencode/src/server/routes/permission.ts).
-
-Compression (2026-10-10): permission recovery takes the frozen attachment owner,
-not a mutex-protected stream reader. The fixture now reopens SQLite and replies
-without first observing native messages, proving saved intent supplies attribution
-and no-replay evidence. Message projection borrows the shared snapshot instead of cloning it;
-SSE mapping returns events directly after deletion of its permission side channel.
-Public takeover and the remaining deletion targets are unchanged.
+Ordinary input and steering share `submit_prompt`: save one request identity,
+then enqueue it through fenced HTTP. Native observations alone supply admission
+and completion. The obsolete reconnect fixture route for the deleted
+`open_agent_session` detail GET is removed; creation readback and pending
+permissions keep their surviving fixtures.
 
 ## Startup protocol correction (2026-10-10)
 
@@ -245,4 +191,4 @@ Release's entry-point lesson still applies. Public transport work remains open.
 
 ## Checks
 
-Network-isolated `cargo test --offline -p loopflow --lib harness::opencode -- --test-threads=1`: 14 passed, 2 configured-provider tests ignored; lib build, fmt, all-target Clippy and `git diff --check` passed. Public takeover remains implementation work; Linux acceptance belongs to CI.
+Prior source checks (unchanged code): network-isolated `cargo test --offline -p loopflow --lib harness::opencode -- --test-threads=1`: 14 passed, 2 configured-provider tests ignored; `--test session_lifecycle_tests headless_history_is_discoverable_without_entering_the_interactive_list -- --exact`: 1 passed; fmt, all-target Clippy and `git diff --check` passed. Realignment: `git diff --check` passed; no code retest. Public takeover remains implementation work; Linux acceptance belongs to CI.

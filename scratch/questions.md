@@ -14,4 +14,6 @@ existing attempt. After a lost response, exact-title native listing recovers one
 identity; absent/ambiguous evidence remains uncertain without replay. A title
 changed externally before recovery cannot establish identity. Existing native
 conversations retain their rules. This replaces the draft's separate setup phase;
-public transport implementation remains deferred until this correction is proved.
+The correction and process-death creation readback are implemented at
+`07529ac3d`; public transport is now the remaining implementation, not blocked
+on this protocol correction.

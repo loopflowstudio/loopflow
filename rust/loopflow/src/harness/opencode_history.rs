@@ -31,7 +31,7 @@ impl History {
             ..Self::default()
         }
     }
-    /// The attachment that fences native writes; absent until the server starts.
+    /// Frozen launch authority for prompts, abort and stop; never refreshed from config.
     pub(super) fn owner(&self) -> Result<super::agent_process::AttachmentOwner> {
         self.owner
             .clone()

@@ -460,29 +460,29 @@ impl Harness for OpenCodeHarness {
         }
         let base_url = self
             .server_base_url
-            .clone()
+            .as_ref()
             .ok_or_else(|| anyhow!("opencode server not started"))?;
         let agent_session = self
             .agent_session
-            .clone()
+            .as_ref()
             .ok_or_else(|| anyhow!("opencode provider session id is not available"))?;
 
         let abort_url = format!("{base_url}/session/{agent_session}/abort");
-        let owner = super::agent_process::open_owner(
-            self.config
-                .as_ref()
-                .and_then(|config| config.session_attachment.as_ref()),
-        )?;
+        let owner = self
+            .history
+            .lock()
+            .expect("OpenCode history lock poisoned")
+            .owner()?;
         opencode_history::post(owner, abort_url, json!({})).await
     }
 
     async fn stop(&mut self) -> Result<()> {
         if self.child.is_some() || self.server_base_url.is_some() {
-            let owner = super::agent_process::open_owner(
-                self.config
-                    .as_ref()
-                    .and_then(|config| config.session_attachment.as_ref()),
-            )?;
+            let owner = self
+                .history
+                .lock()
+                .expect("OpenCode history lock poisoned")
+                .owner()?;
             super::agent_process::stop(&owner)?;
             self.child = None;
         }
@@ -873,6 +873,9 @@ mod tests {
         let replacement = store
             .claim_session_attachment("opencode", Some(&first), &process, false)
             .unwrap();
+        // Changing next-launch configuration cannot refresh this harness's authority.
+        harness.config.as_mut().unwrap().session_attachment =
+            Some(("opencode".into(), replacement.clone()));
         assert!(harness.stop().await.is_err());
         assert_eq!(harness.pid(), Some(pid));
         // Stale abort must refuse before attempting HTTP.
@@ -891,10 +894,11 @@ mod tests {
         );
         let (tx, _rx) = mpsc::unbounded_channel();
         let mut current = OpenCodeHarness::new(tx, ApprovalPolicy::AutoApprove);
-        current.config = Some(AgentConfig {
-            session_attachment: Some(("opencode".into(), replacement)),
-            ..Default::default()
-        });
+        current.history = Arc::new(Mutex::new(opencode_history::History::new(Some((
+            store.clone(),
+            "opencode".into(),
+            replacement,
+        )))));
         current.server_base_url = Some("http://127.0.0.1:1".into());
         current.stop().await.unwrap();
         assert!(current.server_base_url.is_none());

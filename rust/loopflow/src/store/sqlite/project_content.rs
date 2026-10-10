@@ -1,5 +1,7 @@
 //! Project content and stored Wave workflows share one transaction in every repository.
 
+use super::planning_write::{self, PlanningEdit as Edit};
+use crate::engine::planning_exchange::PlanningKind;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde_json::Value;
 
@@ -7,7 +9,6 @@ use crate::durable::ProjectId;
 use crate::id::WaveId;
 use crate::planning::PlanningChange;
 use crate::pm::{PmProject, ProjectContent};
-use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
 
 use super::planning_changes::PlanningChanges;
@@ -48,11 +49,14 @@ impl SqliteStore {
             }
         }
         if changed {
-            tx.execute(
-                "UPDATE projects SET project_name=COALESCE(?2,project_name),
-             project_summary=COALESCE(?3,project_summary),updated_at=?4 WHERE id=?1",
-                params![project.as_str(), name, summary, now_unix()],
-            )?;
+            let mut edits = Vec::new();
+            if let Some(name) = name {
+                edits.push(Edit::ProjectName(Some(name.into())));
+            }
+            if let Some(summary) = summary {
+                edits.push(Edit::ProjectSummary(summary.into()));
+            }
+            planning_write::local(&tx, PlanningKind::Project, project.as_str(), &edits)?;
         }
         tx.commit()?;
         Ok(())
@@ -123,9 +127,6 @@ impl SqliteStore {
         project: &ProjectId,
         content: &ProjectContent,
     ) -> StoreResult<()> {
-        content
-            .validate()
-            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let current = super::plan_read::project_in(&tx, project)?;
@@ -160,17 +161,40 @@ pub(super) fn write_content(
     ] {
         PlanningChanges::Project(project).record(conn, field, previous, value)?;
     }
-    conn.execute(
-        "UPDATE projects SET project_prompt_context=?2,workflow=?3,updated_at=?4
-         WHERE id=?1 AND (project_prompt_context IS NOT ?2 OR workflow IS NOT ?3)",
-        params![
-            project.as_str(),
-            crate::pm::render_project_content(content),
-            content.workflow,
-            now_unix()
+    save_content(conn, project, content)
+}
+
+/// Persist the combined semantic winners without minting another delivery receipt.
+/// Local edits and peer projection use the same content representation.
+pub(super) fn save_content(
+    conn: &Connection,
+    project: &ProjectId,
+    content: &ProjectContent,
+) -> StoreResult<()> {
+    planning_write::local(
+        conn,
+        PlanningKind::Project,
+        project.as_str(),
+        &[
+            Edit::Workflow(content.workflow.clone()),
+            Edit::Krs(content.krs.clone()),
+            Edit::MetricTargets(content.metric_targets.clone()),
         ],
     )?;
     Ok(())
+}
+
+pub(super) fn read_content(conn: &Connection, project: &ProjectId) -> StoreResult<ProjectContent> {
+    let (body, workflow): (String, String) = conn.query_row(
+        "SELECT COALESCE(project_prompt_context,''),workflow FROM projects WHERE id=?1",
+        [project.as_str()],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    let mut content = crate::pm::parse_project_content(&body)
+        .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+    // Match the common reader: the saved selection owns workflow, not old prose.
+    content.workflow = workflow;
+    Ok(content)
 }
 
 #[cfg(test)]
@@ -270,6 +294,11 @@ mod tests {
                 store.project(&project).unwrap().unwrap().plan.workflow,
                 "review"
             );
+            for (name, source) in [("invalid/review", definition), ("review", "changed")] {
+                assert!(store
+                    .select_project_workflow(&project, name, source)
+                    .is_err());
+            }
             let changed = "nodes: {}\nedges: [{from: start, to: end, flow: debug}]\n";
             store
                 .select_project_workflow(&project, "review", changed)

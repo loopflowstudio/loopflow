@@ -1,8 +1,10 @@
 //! Current Project selection has one owner: the Wave row. YAML is import evidence only.
 use rusqlite::{params, Connection, OptionalExtension};
 
+use super::planning_write::{self, PlanningEdit as Edit};
 use super::SqliteStore;
 use crate::durable::ProjectId;
+use crate::engine::planning_exchange::PlanningKind;
 use crate::id::WaveId;
 use crate::pm::PmProject;
 use crate::store::{PlanningLocks, StoreError, StoreResult};
@@ -52,9 +54,11 @@ fn bind_in(conn: &Connection, wave: &WaveId, project: &str) -> StoreResult<Proje
             "Wave already has a different configured Project".into(),
         ));
     }
-    conn.execute(
-        "UPDATE waves SET current_project_id=?2 WHERE id=?1 AND current_project_id IS NULL",
-        params![wave, id.as_str()],
+    planning_write::local(
+        conn,
+        PlanningKind::Wave,
+        wave.as_str(),
+        &[Edit::WaveProject(Some(id.to_string()))],
     )?;
     Ok(id)
 }
@@ -71,9 +75,11 @@ fn write_in(
         ));
     }
     let id = resolve_project_id(conn, wave, project)?;
-    conn.execute(
-        "UPDATE waves SET current_project_id=?2 WHERE id=?1 AND current_project_id IS NOT ?2",
-        params![wave, id.as_str()],
+    planning_write::local(
+        conn,
+        PlanningKind::Wave,
+        wave.as_str(),
+        &[Edit::WaveProject(Some(id.to_string()))],
     )?;
     Ok(())
 }
@@ -168,11 +174,17 @@ impl SqliteStore {
             if let Some(existing) = existing {
                 existing
             } else {
-                tx.execute(
-                    "INSERT INTO projects(id,wave_id,created_at,updated_at,project_slug,
-                    project_name,project_prompt_context,status,workflow)
-                    VALUES(?1,?2,?3,?3,?4,?4,'','started','')",
-                    params![id.as_str(), wave, now, name],
+                planning_write::create(
+                    &tx,
+                    "",
+                    PlanningKind::Project,
+                    id.as_str(),
+                    &[
+                        Edit::ProjectWave(wave.to_string()),
+                        Edit::ProjectSlug(Some(name.into())),
+                        Edit::ProjectName(Some(name.into())),
+                        Edit::ProjectStatus(crate::pm::ProjectStatus::Started),
+                    ],
                 )?;
                 super::durable::inherit_project_placement(&tx, &id)?;
                 if pending.is_none() {
@@ -200,9 +212,11 @@ impl SqliteStore {
             serde_json::to_value(project.status)?,
             serde_json::json!("started"),
         )?;
-        tx.execute(
-            "UPDATE projects SET status='started',updated_at=?2 WHERE id=?1 AND status!='started'",
-            params![id.as_str(), now],
+        planning_write::local(
+            &tx,
+            PlanningKind::Project,
+            id.as_str(),
+            &[Edit::ProjectStatus(crate::pm::ProjectStatus::Started)],
         )?;
         write_in(&tx, wave, selected.as_deref(), id.as_str())?;
         if readiness_in(&tx, wave)?.state == ProjectReadinessState::Unavailable {
@@ -329,7 +343,8 @@ impl SqliteStore {
 }
 
 // Saved planning supplies values and age; retained provider evidence can invalidate
-// selection, but absent inventory does not erase an owned Project.
+// selection, but absent inventory does not erase an owned Project. A peer can
+// supply an accepted entity without claiming a complete provider membership list.
 fn readiness_in(conn: &Connection, wave: &WaveId) -> StoreResult<ProjectReadiness> {
     Ok(conn.query_row(
             "SELECT COALESCE(p.external_project_id,p.id), p.pm_snapshot_synced_at,
@@ -337,7 +352,6 @@ fn readiness_in(conn: &Connection, wave: &WaveId) -> StoreResult<ProjectReadines
                   WHEN p.id IS NULL OR p.project_name IS NULL OR p.project_slug IS NULL OR p.project_prompt_context IS NULL THEN 'unavailable'
                   WHEN f.id IS NOT NULL AND NOT json_valid(f.body) THEN 'unavailable'
                   WHEN f.id IS NOT NULL AND (f.archived OR f.membership_unresolved OR p.pm_snapshot_synced_at IS NOT f.observed_at
-                    OR NOT EXISTS(SELECT 1 FROM pm_wave_projects m WHERE m.wave_id=w.id AND m.project_id=f.id)
                     OR (s.wave_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM json_each(f.body,'$.initiative_ids') WHERE value=s.initiative)))
                     THEN 'unavailable'
                   WHEN p.status IN ('completed','canceled') THEN 'terminal'

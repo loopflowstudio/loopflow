@@ -72,6 +72,7 @@ pub struct WorkFrame {
 #[non_exhaustive]
 pub enum WorkContent {
     Planning(Option<Box<PlanningPart>>),
+    PeerPlanning(Option<PeerPlanningPart>),
     Sessions(Option<SessionsPart>),
     Task(Option<Box<TaskPart>>),
     Wave(Option<Box<WavePart>>),
@@ -85,6 +86,13 @@ pub enum WorkContent {
 pub struct PlanningPart {
     pub roadmap: RoadmapSnapshot,
     pub waves: Vec<WaveSnapshot>,
+}
+
+/// The selected repository's Git planning receipts, independent of roadmap reads.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PeerPlanningPart {
+    pub repo: String,
+    pub destinations: Vec<crate::store::PeerPlanningStatus>,
 }
 
 /// Every Session of the scoped repository, as `lf session list` pages them.
@@ -162,6 +170,7 @@ struct Scope {
 enum Part {
     Sessions,
     Planning,
+    PeerPlanning,
     Task,
     Wave,
     WorkActivity,
@@ -169,20 +178,28 @@ enum Part {
 }
 
 impl Part {
-    const ALL: [Part; 6] = [
+    const ALL: [Part; 7] = [
         Part::Sessions,
         Part::Planning,
+        Part::PeerPlanning,
         Part::Task,
         Part::Wave,
         Part::WorkActivity,
         Part::Activity,
     ];
-    const SCOPED: [Part; 4] = [Part::Sessions, Part::Task, Part::Wave, Part::WorkActivity];
+    const SCOPED: [Part; 5] = [
+        Part::Sessions,
+        Part::PeerPlanning,
+        Part::Task,
+        Part::Wave,
+        Part::WorkActivity,
+    ];
 
     fn name(self) -> &'static str {
         match self {
             Part::Sessions => "sessions",
             Part::Planning => "planning",
+            Part::PeerPlanning => "peer_planning",
             Part::Task => "task",
             Part::Wave => "wave",
             Part::WorkActivity => "work_activity",
@@ -195,6 +212,9 @@ impl Part {
     /// Processes; the Session list reads no Process, and only a Wave's Session
     /// history shows token totals.
     fn changed(self, mut old: StoreRevisions, new: StoreRevisions) -> bool {
+        if self == Part::PeerPlanning {
+            return old.planning != new.planning;
+        }
         if self == Part::Activity {
             return old.processes != new.processes;
         }
@@ -226,7 +246,7 @@ impl Part {
 
     fn selected(self, scope: &Scope) -> bool {
         match self {
-            Part::Sessions => scope.repo.is_some(),
+            Part::Sessions | Part::PeerPlanning => scope.repo.is_some(),
             Part::Task => scope.task.is_some(),
             Part::Wave => scope.wave.is_some(),
             Part::WorkActivity => scope.activity.is_some(),
@@ -572,6 +592,21 @@ impl Reader {
                     roadmap: super::waves::roadmap_all(store).await?,
                     waves: super::waves::wave_snapshots(store, true, true).await?,
                 }))),
+                Part::PeerPlanning => {
+                    let repo = self.scope.repo.clone().context("no repository in scope")?;
+                    let root = CanonicalRepo::discover(Path::new(&repo))?;
+                    let config = crate::engine::config::load_config(Some(root.as_path()))?
+                        .unwrap_or_default();
+                    let destinations = if matches!(
+                        config.planning_transport(),
+                        crate::engine::config::PlanningConfig::Linear {}
+                    ) {
+                        Vec::new()
+                    } else {
+                        store.peer_planning_status(&root.to_string()).await?
+                    };
+                    WorkContent::PeerPlanning(Some(PeerPlanningPart { repo, destinations }))
+                }
                 Part::Sessions => {
                     let repo = self.scope.repo.clone().context("no repository in scope")?;
                     let filter = crate::session::SessionFilter {
@@ -658,6 +693,10 @@ impl Reader {
                 },
                 waves: Vec::new(),
             }))),
+            Part::PeerPlanning => WorkContent::PeerPlanning(Some(PeerPlanningPart {
+                repo: self.scope.repo.clone().context("no repository in scope")?,
+                destinations: Vec::new(),
+            })),
             Part::Sessions => WorkContent::Sessions(Some(SessionsPart {
                 repo: self.scope.repo.clone().context("no repository in scope")?,
                 includes_headless: self.scope.headless,
@@ -674,6 +713,7 @@ impl Reader {
 fn unavailable(part: Part) -> WorkContent {
     match part {
         Part::Planning => WorkContent::Planning(None),
+        Part::PeerPlanning => WorkContent::PeerPlanning(None),
         Part::Sessions => WorkContent::Sessions(None),
         Part::Task => WorkContent::Task(None),
         Part::Wave => WorkContent::Wave(None),

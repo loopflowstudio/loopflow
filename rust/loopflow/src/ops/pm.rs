@@ -111,6 +111,28 @@ pub struct TaskComment {
     pub created_at: Option<String>,
 }
 
+impl From<&crate::pm::IssueComment> for TaskComment {
+    fn from(comment: &crate::pm::IssueComment) -> Self {
+        let author =
+            if comment.author_id.is_some() || crate::ops::linear_observe::is_steer(&comment.body) {
+                TaskCommentAuthor::Person {
+                    name: crate::ops::linear_observe::comment_requester(
+                        &comment.body,
+                        comment.author_name.as_deref(),
+                    ),
+                }
+            } else {
+                TaskCommentAuthor::Integration
+            };
+        Self {
+            id: comment.id.clone(),
+            body: comment.body.clone(),
+            author,
+            created_at: comment.created_at.clone(),
+        }
+    }
+}
+
 /// Who wrote a comment. A person has a provider user; an integration has none
 /// and is never participant direction, whatever the display says.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -280,9 +302,15 @@ pub(super) fn read_initiative(repo: &Path, wave: &str) -> Option<String> {
 }
 
 fn read_repository_team(repo: &Path) -> OpsResult<Option<String>> {
-    let config = load_repo_config(repo)
+    let config = crate::engine::config::load_config(Some(repo))
         .map_err(|error| OpsError::Message(format!("failed to read .lf/config.yaml: {error}")))?
         .unwrap_or_default();
+    if !matches!(
+        config.planning_transport(),
+        crate::engine::config::PlanningConfig::Linear {}
+    ) {
+        return Ok(None);
+    }
     Ok(config
         .pm
         .and_then(|pm| pm.linear_team)
@@ -1083,6 +1111,12 @@ pub(crate) async fn task_comment_async(
     let (store, task) = resolve_saved_task(repo, wave, issue).await?;
     if let Some(message) = message {
         super::task::append_task_comment(&store, &task, message, steer)?;
+        let owner = store
+            .get_wave(&task.wave_id)
+            .await
+            .map_err(|error| OpsError::Message(error.to_string()))?
+            .ok_or_else(|| OpsError::Message("Task Wave is missing".into()))?;
+        super::planning_sync::sync_after_save(&store, owner.repo()).await;
     }
     let refresh_error = if message.is_none() && task.plan.linear_id.is_some() {
         match tokio::time::timeout(
@@ -1112,10 +1146,9 @@ pub(crate) async fn resolve_saved_task(
     issue: &str,
 ) -> OpsResult<(Arc<Store>, crate::work::task::Task)> {
     let store = Arc::new(pm_store().await?);
-    let task = store
-        .get_task_by_issue(issue)
-        .await
+    let canonical = crate::repository::CanonicalRepo::discover(repo)
         .map_err(|error| OpsError::Message(error.to_string()))?;
+    let task = super::planning_sync::find_task(&store, &canonical.to_string(), issue).await?;
     let task = match task {
         Some(task) => task,
         None => {
@@ -1134,8 +1167,6 @@ pub(crate) async fn resolve_saved_task(
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?
         .ok_or_else(|| OpsError::Message("Task Wave is missing".into()))?;
-    let canonical = crate::repository::CanonicalRepo::discover(repo)
-        .map_err(|error| OpsError::Message(error.to_string()))?;
     let expected_wave = match wave {
         Some(selector) => Some(
             crate::work::wave::context::resolve_managed_wave(

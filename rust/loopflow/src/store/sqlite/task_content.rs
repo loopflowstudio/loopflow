@@ -1,6 +1,8 @@
 //! Task fields and their delivery evidence commit together, before provider I/O.
 
-use rusqlite::{params, TransactionBehavior};
+use super::planning_write::{self, PlanningEdit as Edit};
+use crate::engine::planning_exchange::PlanningKind;
+use rusqlite::TransactionBehavior;
 use serde_json::Value;
 
 use crate::durable::{ProjectId, TaskId};
@@ -19,9 +21,22 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         super::children::task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
-        let changed = tx.execute("UPDATE tasks SET planning_deleted_at=?2,planning_revision=planning_revision+1,updated_at=?2
-            WHERE id=?1 AND planning_deleted_at IS NULL", params![id.as_str(), now_unix()])?;
-        if changed == 1 {
+        let deleted: bool = tx.query_row(
+            "SELECT planning_deleted_at IS NOT NULL FROM tasks WHERE id=?1",
+            [id.as_str()],
+            |r| r.get(0),
+        )?;
+        let changed = if deleted {
+            false
+        } else {
+            planning_write::local(
+                &tx,
+                PlanningKind::Task,
+                id.as_str(),
+                &[Edit::TaskDeletedAt(Some(now_unix()))],
+            )?
+        };
+        if changed {
             PlanningChanges::Task(id).record(
                 &tx,
                 "deleted",
@@ -58,20 +73,24 @@ impl SqliteStore {
             ));
         }
         super::durable::require_selected_project(&tx, destination)?;
-        let changed = tx.execute(
-            &format!("UPDATE tasks SET project_id=?2,planning_revision=planning_revision+1,updated_at=?3
-             WHERE id=?1 AND worktree IS NULL AND started_at IS NULL AND abandon_requested_at IS NULL
+        let available: bool = tx.query_row(
+            &format!("SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND worktree IS NULL AND started_at IS NULL AND abandon_requested_at IS NULL
              AND NOT EXISTS(SELECT 1 FROM agent_sessions WHERE task_id=?1)
              AND NOT EXISTS(SELECT 1 FROM task_workflows WHERE task_id=?1)
              AND NOT EXISTS(SELECT 1 FROM task_prs WHERE task_id=?1)
-             AND NOT EXISTS({})", super::task_work::process_lfids("?1")),
-            params![id.as_str(), destination.as_str(), now_unix()],
-        )?;
-        if changed != 1 {
+             AND NOT EXISTS({}))", super::task_work::process_lfids("?1")),
+            [id.as_str()],|r|r.get(0))?;
+        if !available {
             return Err(StoreError::InvalidAuthority(
                 "a Task with recorded work retains its owning Wave".into(),
             ));
         }
+        planning_write::local(
+            &tx,
+            PlanningKind::Task,
+            id.as_str(),
+            &[Edit::TaskProject(destination.to_string())],
+        )?;
         PlanningChanges::Task(id).record(
             &tx,
             "project_id",
@@ -139,12 +158,17 @@ impl SqliteStore {
             }
         }
         if changed {
-            tx.execute(
-                "UPDATE tasks SET issue_title=COALESCE(?2,issue_title),issue_description=COALESCE(?3,issue_description),
-                 planning_assignee=CASE WHEN ?4 THEN ?5 ELSE planning_assignee END,
-                 planning_revision=planning_revision+1,updated_at=?6 WHERE id=?1",
-                params![id.as_str(),patch.name,patch.description,patch.assignee.is_some(),patch.assignee.as_ref().and_then(|v|v.as_deref()),now_unix()],
-            )?;
+            let mut edits = Vec::new();
+            if let Some(value) = &patch.name {
+                edits.push(Edit::TaskTitle(Some(value.clone())));
+            }
+            if let Some(value) = &patch.description {
+                edits.push(Edit::TaskDescription(Some(value.clone())));
+            }
+            if let Some(value) = &patch.assignee {
+                edits.push(Edit::TaskAssignee(value.clone()));
+            }
+            planning_write::local(&tx, PlanningKind::Task, id.as_str(), &edits)?;
         }
         if let Some(rank) = patch.rank {
             super::planning_order::reorder_in(&tx, &task.project_id, id, rank)?;

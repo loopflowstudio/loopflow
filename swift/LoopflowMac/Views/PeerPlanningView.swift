@@ -1,0 +1,91 @@
+import Loopflow
+import SwiftUI
+
+/// Displays the common status without turning a receipt into convergence.
+struct PeerPlanningView: View {
+    let reading: WorkReading<[PeerPlanningStatus]>
+
+    var body: some View {
+        DisclosureGroup("Git planning") {
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                if let error = reading.errorMessage {
+                    Text("Sync status unavailable: \(error)")
+                    if reading.value != nil { Text("Showing the last sync status") }
+                }
+                if let destinations = reading.value {
+                    if !destinations.contains(where: \.active) {
+                        Text("No active Git planning destination")
+                    }
+                    ForEach(destinations) { destination in
+                        status(destination)
+                    }
+                    Text("Fetched, imported and published show separate steps of synchronization.")
+                } else if reading.isLoading {
+                    Text("Reading sync status…")
+                }
+            }
+            .font(Typography.body(12))
+            .foregroundStyle(.secondary)
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .accessibilityIdentifier("peer-planning")
+    }
+
+    private func status(_ destination: PeerPlanningStatus) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            Text(destination.reference)
+            Text("Destination: \(destination.id)")
+            if destination.active { Text("Configured for this repository") }
+            Text("\(destination.selectedRecords) planning records")
+            switch destination.pendingLocal {
+            case true?: Text("Local changes pending")
+            case false?: Text("No pending local changes")
+            case nil: Text("Local changes unknown")
+            }
+            Text("Publication: \(destination.publicationState ?? "not attempted") (\(destination.publicationRevision ?? "none"))")
+            Text("Fetched: \(destination.fetchedRevision ?? "none")")
+            Text("Retained import: \(destination.importedRevision ?? "none")")
+            if let error = destination.localError { Text(error) }
+            if let error = destination.acquisitionError { Text(error) }
+            if let error = destination.publicationError { Text(error) }
+            if let error = destination.recoveryError { Text(error) }
+            ForEach(destination.conflicts.indices, id: \.self) { index in
+                let conflict = destination.conflicts[index]
+                Text("Held \(conflict.object.kind) \(conflict.object.id): \(conflict.reason)")
+            }
+            ForEach(destination.records) { record in
+                recovery(record, destination: destination.id)
+            }
+        }
+        .accessibilityIdentifier("peer-planning-\(destination.id)")
+    }
+
+    private func recovery(_ record: PeerPlanningRecord, destination: String) -> some View {
+        DisclosureGroup("\(record.object.kind) \(record.object.id)") {
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                if let selected = record.destination {
+                    Text(selected == destination ? "Selected here" : "Not selected here; selected in \(selected)")
+                } else {
+                    Text("Local only; not selected")
+                }
+                if record.localID != record.object.id {
+                    Text("Resolves to \(record.localID) (execution stays local)")
+                }
+                ForEach(record.references.indices, id: \.self) { index in
+                    let reference = record.references[index]
+                    Text("Retained reference: \(reference.kind) \(reference.id)")
+                }
+                ForEach(record.values) { value in
+                    VStack(alignment: .leading, spacing: Spacing.xs) {
+                        Text("\(value.field): \(value.candidate ? "candidate, not confirmed" : "retained alternative")")
+                        Text(value.valueJSON)
+                        Text("Mutation: \(value.id); author: \(value.authorLabel)")
+                    }
+                }
+                Text("Inspection changes nothing. Copy a retained value into an ordinary edit to save it again. Repository configuration selects which ref receives retained history.")
+            }
+        }
+        .accessibilityIdentifier("peer-recovery-\(record.object.id)")
+    }
+}

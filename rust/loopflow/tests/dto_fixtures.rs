@@ -100,10 +100,16 @@ fn pm_show_preserves_an_unmapped_team_as_null() {
 }
 
 #[test]
-fn wave_detail_preserves_flow_and_requires_machine() {
+fn wave_detail_preserves_flow_and_machine() {
     let snapshot: WaveDetailSnapshot = serde_json::from_str(WAVE_DETAIL).unwrap();
-    assert_eq!(snapshot.wave.machine.label.as_deref(), Some("mini"));
-    assert_eq!(snapshot.wave.machine.repo.as_deref(), Some("src/project"));
+    assert_eq!(
+        snapshot.wave.machine.as_ref().unwrap().label.as_deref(),
+        Some("mini")
+    );
+    assert_eq!(
+        snapshot.wave.machine.as_ref().unwrap().repo.as_deref(),
+        Some("src/project")
+    );
     assert_eq!(
         snapshot.project_readiness.state,
         loopflow::store::sqlite::ProjectReadinessState::Ready
@@ -148,13 +154,6 @@ fn wave_detail_preserves_flow_and_requires_machine() {
         serde_json::to_value(&decoded.projects).unwrap(),
         serde_json::to_value(&snapshot.projects).unwrap()
     );
-
-    let mut missing_machine: serde_json::Value = serde_json::from_str(WAVE_DETAIL).unwrap();
-    missing_machine["wave"]
-        .as_object_mut()
-        .unwrap()
-        .remove("machine");
-    assert!(serde_json::from_value::<WaveDetailSnapshot>(missing_machine).is_err());
 }
 
 #[test]
@@ -565,6 +564,11 @@ fn work_frames_keep_each_part_and_require_every_envelope_field() {
     assert!(matches!(frames[2].content, WorkContent::Task(None)));
     assert!(frames[2].unavailable.is_some());
     assert!(frames[4].revisions.is_none());
+    let WorkContent::PeerPlanning(Some(peers)) = &frames[7].content else {
+        panic!("peer planning frame");
+    };
+    assert_eq!(peers.repo, "/src/loopflow");
+    assert!(peers.destinations.is_empty());
     let WorkContent::Heartbeat(heartbeat) = &frames[5].content else {
         panic!("last fixture frame is a heartbeat");
     };
@@ -728,4 +732,50 @@ fn planning_sync_preserves_delivery_and_losing_values() {
     );
     assert_eq!(serde_json::to_value(&sync).unwrap(), value);
     assert!(sync.lines()[3].contains("Linear: null"));
+}
+
+#[test]
+fn peer_planning_status_keeps_unknown_local_state_and_retained_receipts() {
+    let value: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/peer_planning_status.json"
+    ))
+    .unwrap();
+    let statuses: Vec<loopflow::store::PeerPlanningStatus> =
+        serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(statuses[0].pending_local, None);
+    assert_eq!(
+        statuses[0].publication_state.as_deref(),
+        Some("unconfirmed")
+    );
+    assert_eq!(statuses[0].conflicts.len(), 1);
+    assert_eq!(statuses[1].pending_local, Some(true));
+    let private = &statuses[1].records[0];
+    assert_eq!(private.destination, None);
+    assert!(!private.values[0].candidate);
+    assert_eq!(private.values[0].value_json, "\"Retained private title\"");
+    assert_eq!(
+        statuses[1].records[1].values[0].author,
+        Some(loopflow::ops::pm::TaskCommentAuthor::Person {
+            name: Some("Maya".into())
+        })
+    );
+    assert_eq!(serde_json::to_value(&statuses).unwrap(), value);
+    for field in ["conflicts", "records"] {
+        let mut missing = value[1].clone();
+        missing.as_object_mut().unwrap().remove(field);
+        assert!(serde_json::from_value::<loopflow::store::PeerPlanningStatus>(missing).is_err());
+    }
+}
+
+#[test]
+fn unplaced_wave_preserves_nullable_machine() {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/unplaced_wave.json"
+    ))
+    .unwrap();
+    let wave: loopflow::lf::commands::waves::WaveSnapshot =
+        serde_json::from_value(fixture.clone()).unwrap();
+    assert!(wave.machine.is_none());
+    assert_eq!(wave.active_tasks, 1);
+    assert_eq!(serde_json::to_value(wave).unwrap(), fixture);
 }

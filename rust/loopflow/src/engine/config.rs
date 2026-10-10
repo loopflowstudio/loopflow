@@ -169,9 +169,56 @@ pub struct PmConfig {
     pub linear_team: Option<String>,
 }
 
+/// One synchronization destination for the repository's local planning.
+/// Repository configuration overrides the personal default as one value.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "provider", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PlanningConfig {
+    Git {
+        #[serde(default = "default_planning_remote")]
+        remote: String,
+        /// Omit for this user's stable personal ref.
+        #[serde(default)]
+        shared: Option<String>,
+    },
+    Linear {},
+}
+
+fn default_planning_remote() -> String {
+    "origin".into()
+}
+
+impl Default for PlanningConfig {
+    fn default() -> Self {
+        Self::Git {
+            remote: default_planning_remote(),
+            shared: None,
+        }
+    }
+}
+
+impl Config {
+    pub fn planning_transport(&self) -> PlanningConfig {
+        self.planning.clone().unwrap_or_else(|| {
+            if self
+                .pm
+                .as_ref()
+                .and_then(|pm| pm.linear_team.as_ref())
+                .is_some()
+            {
+                PlanningConfig::Linear {}
+            } else {
+                PlanningConfig::default()
+            }
+        })
+    }
+}
+
 /// Main configuration struct.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
+    #[serde(default)]
+    pub planning: Option<PlanningConfig>,
     #[serde(default)]
     pub automation: AutomationConfig,
     #[serde(default)]
@@ -285,6 +332,7 @@ impl Default for AutomationConfig {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            planning: None,
             context_budgets: Default::default(),
             context_budget_sources: Default::default(),
             agent: None,
@@ -920,5 +968,45 @@ supported_harnesses:
         let pm = config.pm.unwrap();
         assert_eq!(pm.provider.as_deref(), Some("linear"));
         assert_eq!(pm.linear_team.as_deref(), Some("team-loo"));
+    }
+}
+
+#[cfg(test)]
+mod planning_config_tests {
+    use super::{merge_config_values, Config, PlanningConfig};
+
+    #[test]
+    fn repository_transport_replaces_personal_provider_fields() {
+        let personal = serde_yaml_ng::from_str(
+            "planning:\n  provider: git\n  remote: private\n  shared: solo\n",
+        )
+        .unwrap();
+        let repository = serde_yaml_ng::from_str("planning:\n  provider: linear\n").unwrap();
+        let config: Config =
+            serde_yaml_ng::from_value(merge_config_values(Some(personal), Some(repository)))
+                .unwrap();
+        assert_eq!(config.planning_transport(), PlanningConfig::Linear {});
+        let selected: Config = serde_yaml_ng::from_str(
+            "pm:\n  linear_team: team\nplanning:\n  provider: git\n  shared: employees\n",
+        )
+        .unwrap();
+        assert_eq!(
+            selected.planning_transport(),
+            PlanningConfig::Git {
+                remote: "origin".into(),
+                shared: Some("employees".into())
+            }
+        );
+        assert_eq!(
+            Config::default().planning_transport(),
+            PlanningConfig::Git {
+                remote: "origin".into(),
+                shared: None
+            }
+        );
+        assert!(serde_yaml_ng::from_str::<Config>(
+            "planning:\n  provider: linear\n  shared: employees\n"
+        )
+        .is_err());
     }
 }

@@ -1,5 +1,7 @@
 //! One saved Task thread and its delivery evidence, with or without Linear.
 
+use super::planning_write::{self, PlanningEdit as Edit};
+use crate::engine::planning_exchange::PlanningKind;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
 use crate::durable::TaskId;
@@ -12,7 +14,7 @@ pub(super) fn ingest_task_comment(
     conn: &Connection,
     task: &TaskId,
     comment: &crate::pm::IssueComment,
-) -> StoreResult<()> {
+) -> StoreResult<bool> {
     let existing: Option<(String, Option<String>)> = conn
         .query_row(
             "SELECT task_id,provider_revision FROM task_comments WHERE id=?1",
@@ -32,7 +34,7 @@ pub(super) fn ingest_task_comment(
                 .as_deref()
                 .is_none_or(|incoming| incoming <= revision)
         }) {
-            return Ok(());
+            return Ok(false);
         }
     }
     let delivery: Option<(String, bool)> = conn
@@ -58,14 +60,25 @@ pub(super) fn ingest_task_comment(
         }
     }
     let author = comment_author(comment);
-    conn.execute(
-        "INSERT INTO task_comments(id,task_id,body,author,created_at,provider_revision)
-         VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(id) DO UPDATE SET body=excluded.body,
-         author=excluded.author,created_at=excluded.created_at,provider_revision=excluded.provider_revision",
-        params![comment.id, task.as_str(), comment.body, serde_json::to_string(&author)?,
-            comment.created_at, comment.revision],
+    planning_write::create(
+        conn,
+        "",
+        PlanningKind::Comment,
+        &comment.id,
+        &[
+            Edit::CommentTask(task.to_string()),
+            Edit::CommentContent(super::planning_write::CommentContent {
+                body: comment.body.clone(),
+                author: serde_json::to_string(&author)?,
+                created_at: comment.created_at.clone(),
+            }),
+        ],
     )?;
-    Ok(())
+    conn.execute(
+        "UPDATE task_comments SET provider_revision=?2 WHERE id=?1",
+        params![comment.id, comment.revision],
+    )?;
+    Ok(true)
 }
 
 fn comment_author(comment: &crate::pm::IssueComment) -> TaskCommentAuthor {
@@ -104,14 +117,18 @@ fn insert_authored_comment(
     task: &TaskId,
     comment: &TaskComment,
 ) -> StoreResult<()> {
-    conn.execute(
-        "INSERT INTO task_comments(id,task_id,body,author,created_at) VALUES(?1,?2,?3,?4,?5)",
-        params![
-            comment.id,
-            task.as_str(),
-            comment.body,
-            serde_json::to_string(&comment.author)?,
-            comment.created_at
+    planning_write::create(
+        conn,
+        "",
+        PlanningKind::Comment,
+        &comment.id,
+        &[
+            Edit::CommentTask(task.to_string()),
+            Edit::CommentContent(super::planning_write::CommentContent {
+                body: comment.body.clone(),
+                author: serde_json::to_string(&comment.author)?,
+                created_at: comment.created_at.clone(),
+            }),
         ],
     )?;
     conn.execute(

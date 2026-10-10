@@ -1,0 +1,104 @@
+[
+  {
+    "id": "unreadable-plan",
+    "reference": "refs/loopflow/planning/shared/review",
+    "active": false,
+    "selected_records": 3,
+    "imported_revision": "retained-import",
+    "fetched_revision": "newer-fetch",
+    "acquisition_error": null,
+    "publication_revision": "attempted-publication",
+    "publication_state": "unconfirmed",
+    "publication_error": "reply lost",
+    "pending_local": null,
+    "local_error": "Local planning journal is invalid; pending changes and sharing holds are unknown. Retained plans and sync receipts are unchanged.",
+    "conflicts": [
+      {
+        "object": {
+          "kind": "task",
+          "id": "retained-task"
+        },
+        "reason": "retained projection conflict"
+      }
+    ],
+    "records": [],
+    "recovery_error": "Recovery values unavailable: retained planning is invalid; nothing changed."
+  },
+  {
+    "id": "healthy-plan",
+    "reference": "refs/loopflow/planning/shared/team",
+    "active": true,
+    "selected_records": 1,
+    "imported_revision": null,
+    "fetched_revision": null,
+    "acquisition_error": null,
+    "publication_revision": null,
+    "publication_state": null,
+    "publication_error": null,
+    "pending_local": true,
+    "local_error": null,
+    "conflicts": [],
+    "records": [
+      {
+        "object": {
+          "kind": "task",
+          "id": "private-task"
+        },
+        "local_id": "private-task",
+        "destination": null,
+        "references": [
+          {
+            "kind": "project",
+            "id": "private-parent"
+          }
+        ],
+        "values": [
+          {
+            "id": "title-loser",
+            "field": "issue_title",
+            "value_json": "\"Retained private title\"",
+            "candidate": false,
+            "author": null,
+            "observed_at": null
+          },
+          {
+            "id": "assignee-head",
+            "field": "planning_assignee",
+            "value_json": "\"Maya\"",
+            "candidate": true,
+            "author": null,
+            "observed_at": null
+          }
+        ]
+      },
+      {
+        "object": {
+          "kind": "comment",
+          "id": "private-comment"
+        },
+        "local_id": "private-comment",
+        "destination": null,
+        "references": [
+          {
+            "kind": "task",
+            "id": "private-task"
+          }
+        ],
+        "values": [
+          {
+            "id": "comment-loser",
+            "field": "content",
+            "value_json": "{\"body\":\"Private direction\",\"author\":\"{\\\"kind\\\": \\\"person\\\", \\\"name\\\": \\\"Maya\\\"}\",\"created_at\":null}",
+            "candidate": false,
+            "author": {
+              "kind": "person",
+              "name": "Maya"
+            },
+            "observed_at": 42
+          }
+        ]
+      }
+    ],
+    "recovery_error": null
+  }
+]

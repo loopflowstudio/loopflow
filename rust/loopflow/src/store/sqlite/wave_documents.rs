@@ -1,5 +1,7 @@
 //! Wave definitions have one stored owner. Repository files are explicit import sources.
 
+use super::planning_write::{self, PlanningEdit as Edit};
+use crate::engine::planning_exchange::PlanningKind;
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -98,7 +100,16 @@ impl SqliteStore {
                 None => {
                     let wave = authored_id.unwrap_or_default();
                     let now = now_unix();
-                    tx.execute("INSERT INTO waves(id,name,repo,created_at,parent_wave_id) VALUES(?1,?2,?3,?4,?5)", params![wave, part, repo, now, parent])?;
+                    planning_write::create(
+                        &tx,
+                        repo,
+                        PlanningKind::Wave,
+                        wave.as_str(),
+                        &[
+                            Edit::WaveName(part.into()),
+                            Edit::WaveParent(parent.as_ref().map(ToString::to_string)),
+                        ],
+                    )?;
                     durable::create_wave_work(&tx, &wave, now)?;
                     wave
                 }

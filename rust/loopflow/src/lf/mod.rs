@@ -1,3 +1,5 @@
+/// Saved Task identity and pushed-code requirements for one SSH invocation.
+pub const TASK_SOURCE_ENV: &str = "LF_TASK_SOURCE";
 /// Explicit Work declaration inherited by descendants; checkout inference never writes it.
 pub const WORK_DECLARATION_ENV: &str = "LF_AS";
 
@@ -1422,7 +1424,28 @@ pub enum CiCommand {
 }
 
 #[derive(Subcommand, Debug)]
+pub enum PlanningCommand {
+    /// Show, explicitly create, or recover the same planning user key on another machine
+    Key {
+        #[arg(long, conflicts_with = "recover")]
+        new: bool,
+        #[arg(long, value_name = "UUID")]
+        recover: Option<String>,
+    },
+    /// Show selection, retained imports and held records without contacting Git
+    Status {
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
 pub enum RepoCommand {
+    /// Inspect planning synchronization and personal identity
+    Planning {
+        #[command(subcommand)]
+        cmd: PlanningCommand,
+    },
     /// Connect a Wave to its Initiative and the repository's Team (Task prefix)
     Connect {
         /// Wave name (auto-detected if omitted)

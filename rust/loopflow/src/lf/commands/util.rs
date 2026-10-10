@@ -532,6 +532,8 @@ fn spawn_session_command_with_env(
     exact_account_id: Option<&crate::store::ProviderAccountId>,
     launch_lock: Option<File>,
 ) -> Result<()> {
+    let _planning_sync =
+        crate::ops::linear_observe::PlanningSync::start_for_directory(&command.cwd)?;
     let outcome = session_command_status_with_env(
         command,
         environment,

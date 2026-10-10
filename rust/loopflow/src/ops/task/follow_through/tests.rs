@@ -220,6 +220,7 @@ fn follow_up_export_recovers_lost_issue_and_relation_responses_after_completion(
     pr.merge_commit = Some(repo.head_sha());
     runtime.block_on(store.update_task_pr(&pr)).unwrap();
     let linear = Arc::new(Mutex::new(Linear {
+        unavailable: true,
         lose_responses: true,
         ..Default::default()
     }));
@@ -283,6 +284,8 @@ fn follow_up_export_recovers_lost_issue_and_relation_responses_after_completion(
                     ))
                     .unwrap()
             };
+            // The command buffered while offline; reconnect attempts the saved creation.
+            linear.lock().unwrap().unavailable = false;
             // Remote creation commits, but both the reply and readback are lost.
             let lost_creation = runtime
                 .block_on(crate::ops::planning_export::sync_export(

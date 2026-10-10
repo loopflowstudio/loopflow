@@ -249,10 +249,18 @@ pub(super) fn attach_in(
         conn.execute("UPDATE task_changes SET base_json=?2 WHERE task_id=?1 AND field='deleted' AND base_json IS NULL",
             params![id,json!({"revision":observed["revision"],"value":false}).to_string()])?;
     }
-    conn.execute(
-        &format!("UPDATE {kind}s SET {mapping}=?2 WHERE id=?1"),
-        params![id, export.id],
-    )?;
+    let (kind, edit) = if project {
+        (
+            crate::engine::planning_exchange::PlanningKind::Project,
+            super::planning_write::PlanningEdit::ProjectLinearId(Some(export.id.clone())),
+        )
+    } else {
+        (
+            crate::engine::planning_exchange::PlanningKind::Task,
+            super::planning_write::PlanningEdit::TaskLinearId(Some(export.id.clone())),
+        )
+    };
+    super::planning_write::local(conn, kind, &id, &[edit])?;
     conn.execute(
         &format!("UPDATE {table} SET export_error=NULL WHERE {key}=?1"),
         [id],

@@ -964,3 +964,70 @@ fn an_offline_cli_comment_reaches_the_open_desktop_thread() {
     assert!(task.worktree.is_none());
     assert!(home.store.task_prs(&task.id).unwrap().is_empty());
 }
+
+#[test]
+fn peer_planning_receipts_reach_open_desktop_without_refresh() {
+    use loopflow::engine::planning_git::PlanningDestination;
+    use loopflow::store::PeerPlanningStatus;
+
+    let home = Machine::new();
+    let mut watch = home.watch();
+    let repo = home.wave.repo();
+    watch.request(serde_json::json!({"action":"scope", "id":1, "repo":repo,
+        "headless":false, "task":null, "wave":null, "activity":null}));
+    let read = |accept: &dyn Fn(&[PeerPlanningStatus]) -> bool| {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let frame = watch
+                .next(deadline.saturating_duration_since(Instant::now()))
+                .expect("no matching peer planning frame");
+            if let WorkContent::PeerPlanning(part) = frame.content {
+                assert_eq!(frame.unavailable, None);
+                let part = part.unwrap();
+                assert_eq!(part.repo, repo);
+                if accept(&part.destinations) {
+                    return part.destinations;
+                }
+            }
+        }
+    };
+    assert!(read(&|statuses| statuses.is_empty()).is_empty());
+    // Non-Git Work folders still display stored status. No remote worker runs.
+    let destination = PlanningDestination::new(
+        home.path().join("offline.git").to_str().unwrap(),
+        "refs/loopflow/planning/shared/team",
+    )
+    .unwrap();
+    let id = home.store.bind_peer_planning(repo, &destination).unwrap();
+    home.store.use_peer_planning(repo, Some(&id)).unwrap();
+    let statuses = read(&|statuses| statuses.iter().any(|status| status.active));
+    assert_eq!(statuses.len(), 1);
+    assert_eq!(statuses[0].id, id);
+    assert_eq!(statuses[0].pending_local, Some(true));
+    assert!(statuses[0].selected_records > 0);
+
+    home.raw()
+        .execute(
+            "UPDATE planning_destinations SET fetched_revision='fetched',
+         publication_revision='attempted',publication_state='unconfirmed',
+         publication_error='reply lost' WHERE id=?1",
+            [&id],
+        )
+        .unwrap();
+    let statuses =
+        read(&|statuses| statuses[0].publication_state.as_deref() == Some("unconfirmed"));
+    assert_eq!(statuses[0].fetched_revision.as_deref(), Some("fetched"));
+    assert_eq!(statuses[0].publication_error.as_deref(), Some("reply lost"));
+    assert_eq!(statuses[0].imported_revision, None);
+    assert_eq!(statuses[0].pending_local, Some(true));
+    home.store.use_peer_planning(repo, None).unwrap();
+    let statuses = read(&|statuses| !statuses[0].active);
+    assert_eq!(
+        statuses[0].selected_records,
+        home.store.peer_planning_status(repo).unwrap()[0].selected_records
+    );
+    assert_eq!(
+        statuses[0].publication_state.as_deref(),
+        Some("unconfirmed")
+    );
+}

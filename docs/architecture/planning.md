@@ -31,6 +31,9 @@ repository-wide Linear synchronization. Creation without a Wave uses `inbox`.
 Wave provisioning imports existing Markdown and repository Workflow definitions,
 preserving stable authored IDs and source bytes. Saved documents, including ancestor
 context, serve both connection modes. Reads never provision or fall back to files.
+Imported Waves remain readable without execution placement: Wave list, status
+and roadmap emit `machine: null` and display “unplaced,” not a fabricated local
+Machine. Desktop consumes the same optional placement.
 Explicit edits and relocation change stored planning without rewriting the checkout.
 The released-frontier migration imports available registered definitions; unavailable
 sources can be imported later with `lf wave ensure`.
@@ -44,13 +47,13 @@ issues and lost replies retain uncertainty without replaying the mutation. A new
 explicitly active Linear revision retires removal and restores planning visibility,
 retaining the losing receipt. This grants no execution or cleanup authority.
 
-Task and Project rows own identity for both paths. Random UUIDs are minted before
-placement; provider UUIDs and ticket aliases remain optional mappings. Accepted
-owned Linear issues become durable, unplaced Tasks in the ingestion transaction.
-Repeated import and ticket changes retain identity. Unowned observations stay in
-the provider evidence tables; orphan deletion identities remain recovery evidence.
-The released-frontier migration preserves existing identities, serialized provider
-observations, PRs, workflows and Session links.
+Task and Project rows own identity for both paths. Locally authored Tasks mint a
+UUID before placement and retain it through provider creation. New Linear acquisitions
+derive the Task ID from the issue UUID; existing mapped Tasks keep their IDs.
+Ticket aliases remain optional mappings. Repeated imports and ticket changes retain
+identity. Unowned observations stay in provider evidence tables. Released-frontier
+migration preserves existing identities, provider observations, PRs, Workflows and
+Session links.
 
 `lf task create` generates the durable ID, saves the Task and returns that ID.
 Each explicit invocation creates a distinct Task, including identical titles.
@@ -100,58 +103,58 @@ destination changes neither the revision nor receipt. Pending refiling allows in
 observations from another Wave to adopt conflicting Linear membership, retain both
 values and advance unrelated fields. It never grants execution or provider-write authority.
 
-Task and Project field receipts share `sqlite/planning_changes.rs`, with separate
-foreign keys. Each receipt retains a stable mutation identity, baseline and first
-conflicting provider value. An observed conflict adopts Linear and retires that
-intention; an unchanged baseline preserves the pending save. `sqlite/task_content.rs`
-owns Task fields; `sqlite/project_content.rs` owns Project fields, content and Workflow
-selection. `sqlite/planning_order.rs` saves one Project `task_order` receipt and the
-neighboring Tasks' ranks in the same transaction. Edits and receipts commit together before provider mapping or I/O.
-No-op saves preserve revisions and receipts without notifying readers. Accepted
-inbound changes advance the local optimistic-write revision; unrelated fields keep
-advancing during pending delivery. Matching readback acknowledges only an attempted
-receipt. Before conflict reconciliation, its observation advances subsequent saves'
-unchanged baselines without acknowledging them. Attempts recheck the stored provider
-revision and local deletion. Lost replies retain attempt/error evidence and use
-observation before any further effect; an unresolved attempt is never blindly replayed.
+One typed writer, `sqlite/planning_write.rs`, owns planning field persistence and
+Git mutation capture. Local operations and incoming planning use the same typed
+edits and record construction. The caller's transaction includes admission, planning,
+local delivery receipts and mutation identity. Execution columns are absent from
+this writer. Local creation attaches machine-specific metadata afterward in the
+same transaction. Import never creates execution placement or provider attempts.
 
-`ops/planning_delivery.rs` consumes mapped Task titles, descriptions, nullable
-assignees and membership, and Project names, summaries, statuses and structured
-content. Content patches retain unrelated provider prose. The foreground lifetime
-runs this independently of comment/state delivery and acquisition. Project order
-delivery reads the complete list and moves individual issues using Linear's
-`prioritySortOrder` and `sortOrder` intervals. Each attempted move retains its input
-and before/after lists in the Project receipt. Complete-list acquisition recognizes
-partial progress, advances later saves' baselines and preserves their desired order.
-Lost replies require matching list readback; an unchanged list after an attempt stays
-uncertain without replay. Observed competing order adopts Linear and retains the
-losing list. New members survive; omission alone cannot retire a retained Task.
-Detail reads never change rank. Project scalar fields continue during uncertain
-ordering. These observations do not provide an atomic provider snapshot or write fence.
+Repository configuration selects Linear, personal Git (the default) or shared Git.
+Repository `planning` overrides the personal setting as one value. Linear-connected
+machines acquire and deliver independently through their existing local receipts.
+An outage buffers changes locally; Git cannot take over. Git transports code in
+both modes. Its planning document contains no Linear observations, attempt receipts,
+creation recovery or receipt-settlement protocol. No designated publisher exists.
 
-Workflow selection reads KRs and targets inside its definition-write transaction.
-`wave update-plan` uses the same content writer; inspection takes no Wave mutation
-lock. Comments use `sqlite/task_comments.rs`. Registered Task status and Wave/Desktop
-planning use `sqlite/plan_read.rs`, preserving state, completion time, ordering,
-assignee, metadata and observation age separately from Workflow position.
-Missing provider inventory cannot erase saved planning or Project selection;
-retained archival, invalidation and membership conflicts still affect availability.
-Malformed observations retain fields and diagnostics. Ingestion and migration
-preserve editable KRs and targets.
+Git imports retain immutable mutations before projection. Field causality precedes
+logical clocks and stable mutation-ID ties. All losing values remain inspectable.
+`planning_peer_observed` records only successfully applied heads: a rejected import
+cannot become the causal parent of a later local save. Projection uses per-object
+savepoints so a conflicting parent preserves that object's history while independent
+objects advance. Wave selection follows Project projection. Invalid documents,
+reused mutation IDs and foreign repository ownership roll back the import. Repeated
+imports create no echo edits. Fetch, import and publication have distinct receipts;
+a lost push reply requires readback before publication is reported confirmed.
 
-The personal namespace and provider-first planning writers are deleted. Connected
-CLI and Desktop project creation, field/order edits, state and comments through
-`PlanningSyncStatus`, derived from their existing receipts. Unmapped creation is
-pending in connected repositories; attempted effects retain uncertainty and errors.
-Observed conflicts show both values after adopting Linear. Disconnected repositories
-show no pending Linear delivery; retained losing values remain inspectable.
-A foreground connection synchronizes its repository, independent of Desktop Task
-selection. Inventory, comments and delivery use separate bounded loops; closing
-or clearing the repository connection ends them. Read projections stay read-only.
-Ingestion adopts observed Linear conflicts and retains the losing
-local intentions in field, state and comment receipts. Retired intentions never
-reenter delivery after a late acknowledgement or matching observation.
-The documented unconditional-update race remains a protocol limit.
+Task and Project Linear field receipts share `sqlite/planning_changes.rs`, with
+separate foreign keys. They retain stable mutation identity, provider baseline and
+conflicting values. An unchanged baseline preserves pending local edits; an observed
+conflict adopts Linear and retains the losing intention. `planning_order.rs` saves
+one Project order receipt and neighboring Task ranks in the same transaction.
+Complete-list evidence owns ordering; detail reads never reorder Tasks. Uncertain
+writes remain attempted and require provider readback before another effect.
+
+Creation captures a stable provider UUID and exact input before network I/O.
+Acquisition attaches the provider mapping to the original local row. Unknown creation
+or attachment outcomes retain their receipts; a matching title proves nothing.
+Comments retain identity and authorship. Incoming planning completion changes only
+the planning disposition: it neither advances a local Workflow nor authorizes cleanup.
+Session/Process records and checkout paths never enter the Git document.
+
+`PlanningSyncStatus` presents local Linear delivery evidence; `peer_planning` Work
+frames and `lf planning status` present Git acquisition/publication and retained
+alternatives. Foreground CLI, headless Session and Desktop connections own exchange
+for their lifetimes. A short save attempts exchange before returning. No resident,
+whole-store callback, scheduler or implicit turn/Flow replay is involved.
+
+`--machine` sends portable pushed-code requirements and a Task selector, then the
+target resolves its own configured planning. Linear mappings resolve independently
+retained legacy IDs. Git imports preserve local planning IDs. A source Task awaiting
+Linear creation is unavailable remotely until publication succeeds. Fetch precedes
+code decisions, including branches without PRs. Repeated dispatch reuses the existing
+Task and checkout; unpushed source work and a target missing the requested commit
+produce actionable errors without committing, resetting or replacing local work.
 
 ## Project creation and selection
 

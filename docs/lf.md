@@ -88,6 +88,22 @@ lf --task EXP-12 run incident # run a Flow without moving the Task
 lf task run EXP-12 --reason "take the smaller approach"
 ```
 
+```bash
+lf --machine mini --task EXP-12 skill implement # use the Task's pushed branch
+```
+
+The target needs the same saved planning identity before launch. SSH carries only
+that identity, its identifier, branch and required commit—not a copied planning
+record. Push source work first: missing branches, unpushed commits and uncommitted
+changes are reported without changing them. Repeated launches reuse the checkout;
+a target behind the required commit needs `lf sync` there. Existing IDs and local
+execution history remain unchanged.
+
+[Select Git planning](#select-git-planning) to exchange planning before dispatch
+and cold Task resolution. If acquisition cannot find the Task, launch reports
+missing synchronization instead of bootstrapping a copy. Imported planning never
+moves local Workflows.
+
 `--task` and `--wt` select a location. `--wave` supplies context and identity;
 it cannot override a Task's owning Wave. `task run` places the Task's
 worktree, defaults to its Project's Flow, then starts
@@ -208,6 +224,55 @@ merge, follow-through files accepted obligations or records none, then
 `lf task complete <task-id>` completes the source. A repository without a code
 remote supports local work and refuses hosted landing. Local planning does not
 require Linear at any of these boundaries.
+
+## Choose planning synchronization
+
+Planning defaults to your Git ref on `origin`. Select a shared ref or Linear in
+`.lf/config.yaml`, or set a personal default in `~/.lf/config.yaml`:
+
+```yaml
+planning:
+  provider: git
+  remote: origin
+  shared: team
+```
+
+```yaml
+planning:
+  provider: linear
+pm:
+  linear_team: <team-id>
+```
+
+Repository `planning` replaces the personal selection as a whole. Omit `shared`
+for `refs/loopflow/planning/users/<user-key>`; shared names use
+`refs/loopflow/planning/shared/<name>`. Existing `pm.linear_team` selects Linear
+when `planning` is omitted. Every machine uses the selected transport independently.
+Linear unavailability leaves saves buffered locally; it never switches to Git.
+
+```bash
+lf planning status --json
+lf planning key                    # show this machine's personal planning key
+lf planning key --recover <uuid>   # reuse it on a fresh second machine
+```
+
+The first personal Git connection creates the key. Recover the same key before
+starting personal synchronization on another machine. Shared refs require no key.
+Ref separation is not access control; choose a remote appropriate for the plan.
+Configuration selects the repository's entire plan, including retained history.
+Changing configuration retains old receipts and history; it does not undo earlier
+publication or transfer uncertain provider attempts to another machine.
+
+Commands save locally, then attempt synchronization. Interactive and headless
+Sessions and Desktop's Work connection keep planning current while connected.
+Cold Task lookup acquires planning before placement. There is no resident or
+automatic turn retry. Status separates fetched revisions, retained imports and
+pending, unconfirmed or confirmed publication. Retained alternatives can be copied
+into ordinary edits. Endpoint URLs are omitted because they may contain credentials.
+
+Only planning travels: Tasks, Project content, comments and planning disposition.
+Workflows, Sessions, Processes, checkouts and machine control stay local. A completed
+plan does not move another machine's Workflow or clean its checkout.
 
 ## Connect planning and create work
 

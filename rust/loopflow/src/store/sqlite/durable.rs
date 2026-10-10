@@ -132,6 +132,11 @@ impl SqliteStore {
         Ok(())
     }
 
+    pub fn find_placement(&self, work: &WorkRef) -> StoreResult<Option<Placement>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        find_placement_in(&conn, work)
+    }
+
     pub fn placement(&self, work: &WorkRef) -> StoreResult<Placement> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         placement_in(&conn, work)
@@ -567,8 +572,15 @@ fn inherit_placement(
     if find_placement_in(tx, work)?.is_some() {
         return Ok(());
     }
-    let machine_id = match parent {
-        Some(parent) => placement_in(tx, parent)?.machine_id,
+    // Imported planning has no execution placement. The operation creating a
+    // local placement uses this machine when its parent has never been placed;
+    // neither import nor this operation rewrites an existing placement.
+    let inherited = parent
+        .map(|parent| find_placement_in(tx, parent))
+        .transpose()?
+        .flatten();
+    let machine_id = match inherited {
+        Some(placement) => placement.machine_id,
         None => map_local_machine(tx)?.id,
     };
     write_placement(tx, work, &machine_id, placed_at)

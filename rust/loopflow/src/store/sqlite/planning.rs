@@ -1,5 +1,7 @@
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
+use super::planning_write::{self, Disposition, PlanningEdit as Edit};
+use crate::engine::planning_exchange::PlanningKind;
 use crate::id::WaveId;
 use crate::pm::{PmItem, PmProject, PmSnapshot};
 use crate::store::sqlite::SqliteStore;
@@ -183,11 +185,19 @@ impl SqliteStore {
             params![issue_id, revision, removed],
         )?;
         if removed {
-            tx.execute(
-                "UPDATE tasks SET planning_deleted_at=COALESCE(planning_deleted_at,?2)
-                 WHERE external_issue_id=?1",
-                params![issue_id, super::super::rows::now_unix()],
-            )?;
+            let ids = {
+                let mut q=tx.prepare("SELECT id FROM tasks WHERE external_issue_id=?1 AND planning_deleted_at IS NULL")?;
+                let rows = q.query_map([issue_id], |r| r.get::<_, String>(0))?;
+                rows.collect::<Result<Vec<_>, _>>()?
+            };
+            for id in ids {
+                planning_write::local(
+                    &tx,
+                    PlanningKind::Task,
+                    &id,
+                    &[Edit::TaskDeletedAt(Some(super::super::rows::now_unix()))],
+                )?;
+            }
         }
         let mut query =
             tx.prepare("SELECT repo,body FROM pm_items WHERE provider='linear' AND id=?1")?;
@@ -561,25 +571,31 @@ fn project_accepted_planning(
         };
         let project =
             super::planning_changes::PlanningChanges::Project(&id).reconcile(tx, &project)?;
-        tx.execute(
-            "INSERT INTO projects(id,wave_id,external_project_id,project_slug,project_name,
-             project_prompt_context,pm_snapshot_synced_at,created_at,updated_at,workflow,status,project_summary,planning_provider_revision,planning_initiatives,planning_teams)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?8,?9,?10,?11,?12,?13,?14)
-             ON CONFLICT(id) DO UPDATE SET project_slug=excluded.project_slug,
-             project_name=excluded.project_name,project_prompt_context=excluded.project_prompt_context,
-             pm_snapshot_synced_at=excluded.pm_snapshot_synced_at,workflow=excluded.workflow,status=excluded.status,project_summary=excluded.project_summary,planning_provider_revision=excluded.planning_provider_revision,
-             planning_initiatives=excluded.planning_initiatives,planning_teams=excluded.planning_teams",
-            params![id.as_str(),wave_id,project.id,project.slug,project.name,
-                crate::pm::render_project_content(&crate::pm::ProjectContent { workflow: project.workflow.clone(), krs: project.krs.clone(), metric_targets: project.metric_targets.clone() }),
-                observed_at,super::super::rows::now_unix(),project.workflow,project.status.as_str(),project.summary,
-                project.revision,serde_json::to_string(&project.initiative_ids)?,serde_json::to_string(&project.team_ids)?],
-        )?;
-        tx.execute(
-            "UPDATE projects SET planning_rank=COALESCE((SELECT position FROM pm_wave_projects
-                WHERE wave_id=?2 AND project_id=?3),planning_rank) WHERE id=?1",
-            params![id.as_str(), wave_id, project.id],
-        )?;
-        super::durable::inherit_project_placement(tx, &id)?;
+        let rank: Option<u32> = tx
+            .query_row(
+                "SELECT position FROM pm_wave_projects WHERE wave_id=?1 AND project_id=?2",
+                params![wave_id, project.id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let mut edits = vec![
+            Edit::ProjectWave(wave_id.to_string()),
+            Edit::ProjectLinearId(Some(project.id.clone())),
+            Edit::ProjectSlug(Some(project.slug.clone())),
+            Edit::ProjectName(Some(project.name.clone())),
+            Edit::ProjectSummary(project.summary.clone()),
+            Edit::ProjectStatus(project.status),
+            Edit::Workflow(project.workflow.clone()),
+            Edit::Krs(project.krs.clone()),
+            Edit::MetricTargets(project.metric_targets.clone()),
+            Edit::ProjectInitiatives(serde_json::to_string(&project.initiative_ids)?),
+            Edit::ProjectTeams(serde_json::to_string(&project.team_ids)?),
+        ];
+        if let Some(rank) = rank {
+            edits.push(Edit::ProjectRank(rank));
+        }
+        planning_write::create(tx, repo, PlanningKind::Project, id.as_str(), &edits)?;
+        tx.execute("UPDATE projects SET pm_snapshot_synced_at=?2,planning_provider_revision=?3 WHERE id=?1",params![id.as_str(),observed_at,project.revision])?;
     }
     for item in items {
         if let Some(body) = tx.query_row("SELECT body FROM pm_items WHERE repo=?1 AND provider=?2 AND id=?3 AND needs_refresh=0",
@@ -634,21 +650,16 @@ fn project_accepted_planning(
             )?,
             None => project,
         };
+        let pending:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM task_state_deliveries WHERE task_id=?1 AND settled=0 AND seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=?1))",[&id],|r|r.get(0))?;
+        let mut edits = item_edits(&item, &project);
+        edits.retain(|edit| {
+            !matches!(edit, Edit::TaskRank(_))
+                && (!pending || !matches!(edit, Edit::Disposition(_)))
+        });
+        planning_write::local(tx, PlanningKind::Task, &id, &edits)?;
         tx.execute(
-            "WITH pending AS (SELECT task_id FROM task_state_deliveries d WHERE d.settled=0
-                 AND d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=d.task_id))
-             UPDATE tasks SET issue_identifier=?2,issue_title=?3,issue_description=?4,
-                 planning_state=CASE WHEN id IN (SELECT task_id FROM pending) THEN planning_state ELSE ?5 END,
-                 planning_completed=CASE WHEN id IN (SELECT task_id FROM pending) THEN planning_completed ELSE ?6 END,
-                 planning_completed_at=CASE WHEN id IN (SELECT task_id FROM pending) THEN planning_completed_at ELSE ?7 END,
-                 planning_provider_revision=?8,planning_url=?9,planning_branch_name=?10,
-                 planning_team_id=?11,planning_assignee=?12,planning_due_date=?15,
-                 pm_snapshot_synced_at=?13,project_id=?14,
-                 planning_revision=planning_revision+CASE WHEN issue_title IS NOT ?3 OR issue_description IS NOT ?4
-                     OR planning_assignee IS NOT ?12 OR project_id IS NOT ?14 THEN 1 ELSE 0 END
-             WHERE id=?1",
-            params![id,item.identifier,item.name,item.description,item.state,item.completed,item.completed_at,
-                item.revision,item.url,item.branch_name,item.team_id,item.assignee,observed_at,project,item.due_date],
+            "UPDATE tasks SET planning_provider_revision=?2,pm_snapshot_synced_at=?3 WHERE id=?1",
+            params![id, item.revision, observed_at],
         )?;
     }
     let mut query = tx.prepare(&format!(
@@ -683,16 +694,41 @@ fn project_accepted_planning(
     drop(query);
     for (body, observed_at, project) in imported {
         let item: PmItem = serde_json::from_str(&body)?;
+        let id = crate::durable::TaskId::from_issue(&item.id);
+        planning_write::create(
+            tx,
+            repo,
+            PlanningKind::Task,
+            id.as_str(),
+            &item_edits(&item, &project),
+        )?;
         tx.execute(
-            "INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,issue_title,
-             issue_description,pm_snapshot_synced_at,created_at,updated_at,planning_rank,workspace_slug,planning_state,planning_completed,
-             planning_completed_at,planning_provider_revision,planning_url,planning_branch_name,planning_team_id,planning_assignee,planning_due_date)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?8,?9,'',?10,?11,?12,?13,?14,?15,?16,?17,?18)",
-            params![crate::durable::TaskId::new().as_str(),project,item.id,item.identifier,
-                item.name,item.description,observed_at,super::super::rows::now_unix(),item.rank,item.state,item.completed,item.completed_at,item.revision,item.url,item.branch_name,item.team_id,item.assignee,item.due_date],
+            "UPDATE tasks SET planning_provider_revision=?2,pm_snapshot_synced_at=?3 WHERE id=?1",
+            params![id.as_str(), item.revision, observed_at],
         )?;
     }
     Ok(())
+}
+
+fn item_edits(item: &PmItem, project: &str) -> Vec<Edit> {
+    vec![
+        Edit::TaskProject(project.into()),
+        Edit::TaskLinearId(Some(item.id.clone())),
+        Edit::TaskIdentifier(item.identifier.clone()),
+        Edit::TaskTitle(Some(item.name.clone())),
+        Edit::TaskDescription(Some(item.description.clone())),
+        Edit::TaskRank(item.rank),
+        Edit::TaskUrl(item.url.clone()),
+        Edit::TaskBranch(item.branch_name.clone()),
+        Edit::TaskTeam(item.team_id.clone()),
+        Edit::TaskAssignee(item.assignee.clone()),
+        Edit::TaskDueDate(item.due_date.clone()),
+        Edit::Disposition(Disposition {
+            planning_state: item.state.clone(),
+            planning_completed: i64::from(item.completed),
+            planning_completed_at: item.completed_at.clone(),
+        }),
+    ]
 }
 
 fn same_ids(left: &[String], right: &[String]) -> bool {

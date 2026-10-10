@@ -1,5 +1,7 @@
 //! Field receipts share one protocol; each object's table retains its foreign key.
 
+use super::planning_write::{self, PlanningEdit as Edit};
+use crate::engine::planning_exchange::PlanningKind;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -109,10 +111,11 @@ impl SqliteStore {
                     "UPDATE task_changes SET conflict_json=?2,error=NULL WHERE id=?1 AND conflict_json IS NULL",
                     params![change.id, serde_json::json!({"revision":revision,"value":false}).to_string()],
                 )?;
-                tx.execute(
-                    "UPDATE tasks SET planning_deleted_at=NULL,planning_revision=planning_revision+1
-                     WHERE id=?1 AND planning_deleted_at IS NOT NULL",
-                    [id.as_str()],
+                planning_write::local(
+                    &tx,
+                    PlanningKind::Task,
+                    id.as_str(),
+                    &[Edit::TaskDeletedAt(None)],
                 )?;
             }
         }

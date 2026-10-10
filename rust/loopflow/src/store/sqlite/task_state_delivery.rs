@@ -1,5 +1,7 @@
 //! Delivery evidence for local Task decisions; never another lifecycle owner.
 
+use super::planning_write::{self, PlanningEdit as Edit};
+use crate::engine::planning_exchange::PlanningKind;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::durable::TaskId;
@@ -35,10 +37,15 @@ pub(super) fn queue_in(conn: &Connection, task: &TaskId, target: &str) -> StoreR
         })
         .transpose()
         .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-    conn.execute(
-        "UPDATE tasks SET planning_state=?2,planning_completed=(?2='completed'),
-         planning_completed_at=?3,planning_revision=planning_revision+1 WHERE id=?1",
-        params![task.as_str(), target, completed_at],
+    planning_write::local(
+        conn,
+        PlanningKind::Task,
+        task.as_str(),
+        &[Edit::Disposition(super::planning_write::Disposition {
+            planning_state: Some(target.into()),
+            planning_completed: i64::from(target == "completed"),
+            planning_completed_at: completed_at,
+        })],
     )?;
     conn.execute(
         "INSERT INTO task_state_deliveries(id,task_id,move_seq,target,base_revision,base_state)
@@ -101,16 +108,19 @@ pub(super) fn reconcile_in(
         "UPDATE task_state_deliveries SET settled=1,conflict_json=?2,error=NULL WHERE id=?1",
         params![id, serde_json::to_string(observed)?],
     )?;
+    planning_write::local(
+        conn,
+        PlanningKind::Task,
+        task.as_str(),
+        &[Edit::Disposition(super::planning_write::Disposition {
+            planning_state: observed.state.clone(),
+            planning_completed: i64::from(observed.completed),
+            planning_completed_at: observed.completed_at.clone(),
+        })],
+    )?;
     conn.execute(
-        "UPDATE tasks SET planning_state=?2,planning_completed=?3,planning_completed_at=?4,
-         planning_provider_revision=?5,planning_revision=planning_revision+1 WHERE id=?1",
-        params![
-            task.as_str(),
-            observed.state,
-            observed.completed,
-            observed.completed_at,
-            observed.revision
-        ],
+        "UPDATE tasks SET planning_provider_revision=?2 WHERE id=?1",
+        params![task.as_str(), observed.revision],
     )?;
     super::children::insert_task_event_in(conn, task, &crate::work::task::TaskEventKind::Progress {
         summary: format!("Adopted Linear state {state}; local intention {target} remains in delivery {id}. Local Workflow unchanged."),

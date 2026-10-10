@@ -1,0 +1,31 @@
+{
+  "base": "906576f39d4f0dc0c1c7e87c6ecbc178a44fb3e8",
+  "head": "2588b1ca277e1a1a080488b3a31abaae82505685",
+  "working_tree": false,
+  "sources": [
+    {
+      "path": "rust/loopflow/src/engine/config.rs",
+      "sha256": "85604faabab8357f1427a288492289589a53bb05f77993c14ec5c82d2e4eead2",
+      "start": 176,
+      "end": 185,
+      "base_start": null,
+      "text": "pub enum PlanningConfig {\n    Git {\n        #[serde(default = \"default_planning_remote\")]\n        remote: String,\n        /// Omit for this user's stable personal ref.\n        #[serde(default)]\n        shared: Option<String>,\n    },\n    Linear {},\n}\n"
+    },
+    {
+      "path": "rust/loopflow/src/store/sqlite/task_content.rs",
+      "sha256": "42c98c06ea71d02a1c779201fa2ace3b6c6cdd5d9739b4bfda92a67706f5366d",
+      "start": 160,
+      "end": 172,
+      "base_start": 141,
+      "text": "        if changed {\n            let mut edits = Vec::new();\n            if let Some(value) = &patch.name {\n                edits.push(Edit::TaskTitle(Some(value.clone())));\n            }\n            if let Some(value) = &patch.description {\n                edits.push(Edit::TaskDescription(Some(value.clone())));\n            }\n            if let Some(value) = &patch.assignee {\n                edits.push(Edit::TaskAssignee(value.clone()));\n            }\n            planning_write::local(&tx, PlanningKind::Task, id.as_str(), &edits)?;\n        }\n"
+    },
+    {
+      "path": "rust/loopflow/src/ops/run.rs",
+      "sha256": "5c4f5d36f83e444e2184f827f5d880b939f953cf4877416ee059efb00479e99c",
+      "start": 126,
+      "end": 128,
+      "base_start": 126,
+      "text": "    if let Some(value) = selection.task {\n        let value = value.trim();\n        let task = crate::ops::task::resolve_task(store, repo, value).await?;\n"
+    }
+  ]
+}

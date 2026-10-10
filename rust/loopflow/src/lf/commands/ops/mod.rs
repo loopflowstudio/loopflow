@@ -927,6 +927,7 @@ pub fn refresh_status(wave: Option<&str>) -> Result<String> {
 
 pub fn run_repo(cmd: &RepoCommand) -> Result<()> {
     match cmd {
+        RepoCommand::Planning { cmd } => crate::lf::commands::planning::run(cmd),
         RepoCommand::Connect {
             wave,
             all,

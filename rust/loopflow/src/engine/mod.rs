@@ -17,6 +17,8 @@ pub mod git;
 pub mod identity;
 pub mod machine_route;
 pub mod naming;
+pub mod planning_exchange;
+pub mod planning_git;
 pub mod platform;
 pub(crate) mod process;
 pub mod process_prompt;

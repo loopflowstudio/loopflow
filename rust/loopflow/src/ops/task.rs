@@ -3,6 +3,7 @@ mod follow_through;
 pub use follow_through::{task_follow_up, FollowUpOptions};
 mod handoff;
 mod lifecycle;
+pub(crate) mod remote;
 pub(crate) use lifecycle::{cleanup_completed_task, notice_retained_task, record_abandoned_pr};
 pub use lifecycle::{task_abandon, task_delete, task_repository, task_sweep};
 mod file_save;
@@ -722,6 +723,72 @@ pub fn task_checkout(repo: &Path, issue: &str, options: TaskCheckoutOptions) -> 
     Ok(task)
 }
 
+pub(crate) async fn resolve_task(
+    store: &SharedStore,
+    repo: &Path,
+    selector: &str,
+) -> OpsResult<Task> {
+    let source = remote::source_for_task(selector)?;
+    if let Some(source) = &source {
+        source.require_pushed(repo)?;
+    }
+    let main = crate::engine::worktrees::main_repo_root(repo).map_err(task_error)?;
+    if let Err(error) =
+        super::planning_sync::acquire_repository(store, &main.to_string_lossy()).await
+    {
+        tracing::warn!(%error, "planning acquisition pending; resolving retained Task");
+    }
+    let mut task = store
+        .get_task_by_issue(selector)
+        .await
+        .map_err(task_error)?;
+    if task.is_none() {
+        if let Some(source) = &source {
+            // The issue-name fallback keeps older independent IDs usable, but
+            // records no correspondence between them. Titles never select identity.
+            task = store
+                .get_task_by_issue(&source.identifier)
+                .await
+                .map_err(task_error)?;
+        }
+    }
+    let selector = match task {
+        Some(task) if task.worktree.is_some() => {
+            if let Some(source) = &source {
+                restore_task_checkout(store, &task).await?;
+                source.require_checkout(&task)?;
+            }
+            return Ok(task);
+        }
+        Some(task) => source
+            .as_ref()
+            .map(|source| source.identifier.clone())
+            .unwrap_or_else(|| task.id.to_string()),
+        None if super::linear_observe::connected(&main.to_string_lossy())
+            && source
+                .as_ref()
+                .is_some_and(|source| source.issue_id.is_some()) =>
+        {
+            source
+                .as_ref()
+                .and_then(|source| source.issue_id.clone())
+                .expect("source has a Linear identity")
+        }
+        None if source.is_some() || crate::durable::TaskId::parse(selector).is_ok() => {
+            return Err(task_error(format!(
+                "Task {selector} has not synchronized to this machine; synchronize the selected planning destination before launching"
+            )));
+        }
+        None => selector.to_string(),
+    };
+    let repo = repo.to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        prepare_task(&repo, &selector, TaskProcessOptions::default())
+    })
+    .await
+    .map_err(task_error)?
+}
+
 fn prepare_task(repo: &Path, issue: &str, options: TaskProcessOptions) -> OpsResult<Task> {
     if options
         .directive
@@ -730,10 +797,14 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskProcessOptions) -> OpsRes
     {
         return Err(task_error("directive cannot be empty"));
     }
+    let source = remote::source_for_task(issue)?;
+    if let Some(source) = &source {
+        source.require_pushed(repo)?;
+    }
     block_on_task(async {
         let store = task_store().await?;
         let main = crate::engine::worktrees::main_repo_root(repo).map_err(task_error)?;
-        let saved = store.get_task_by_issue(issue).await.map_err(task_error)?;
+        let saved = super::planning_sync::find_task(&store, &main.to_string_lossy(), issue).await?;
         let acquired = saved.is_none();
         let task = match saved {
             Some(task) => task,
@@ -812,7 +883,10 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskProcessOptions) -> OpsRes
             }
             // A retained provider branch may already own Git work. It is metadata,
             // not a reason to reacquire planning or allocate another Task.
-            let branch = task_planning_item(&store, &task)?.branch_name;
+            let branch = source
+                .as_ref()
+                .map(|source| source.branch.clone())
+                .or(task_planning_item(&store, &task)?.branch_name);
             let placement =
                 prepare_task_placement(&main, &task, branch.as_deref(), &options).await?;
             place_prepared_task(&store, &task.id, placement).await?
@@ -823,6 +897,9 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskProcessOptions) -> OpsRes
             restore_task_checkout(&store, &task).await?;
             task
         };
+        if let Some(source) = &source {
+            source.require_checkout(&task)?;
+        }
         Ok(task)
     })
 }
@@ -865,15 +942,7 @@ async fn restore_task_checkout(store: &SharedStore, task: &Task) -> OpsResult<()
     // A different registered path was rejected above; no branch is reset.
     if !crate::engine::worktrees::branch_exists(&repo, &task.branch)? {
         let remote = format!("refs/remotes/origin/{}", task.branch);
-        if !ref_exists(&repo, &remote)?
-            && store
-                .active_task_pr(&task.id)
-                .await
-                .map_err(task_error)?
-                .is_some_and(|pr| pr.github().is_some())
-        {
-            fetch(&repo, "origin", &task.branch)?;
-        }
+        fetch_task_refs(&repo)?;
         let base = if ref_exists(&repo, &remote)? {
             remote
         } else {
@@ -1013,6 +1082,7 @@ async fn prepare_task_placement(
     let recorded_branch = recorded_branch.filter(|branch| !branch.is_empty());
     let generated_branch = format!("lf/{uuid}/{}", title.as_str());
     let branch = recorded_branch.unwrap_or(&generated_branch);
+    fetch_task_refs(main_repo)?;
     let mut plan = plan_branch_placement(main_repo, segment, Some(branch))
         .map_err(|error| task_error(format!("failed to plan task worktree: {error}")))?;
     // Plan without touching an occupied checkout; restoration consumes the saved placement.
@@ -1053,12 +1123,6 @@ async fn prepare_task_placement(
     };
     let mut base_commit = match &stack_parent {
         Some(parent) => {
-            fetch(main_repo, "origin", &parent.branch).map_err(|error| {
-                task_error(format!(
-                    "failed to fetch parent branch {}: {error}",
-                    parent.branch
-                ))
-            })?;
             let base_ref = format!("origin/{}", parent.branch);
             rev_parse(main_repo, &base_ref).map_err(|error| {
                 task_error(format!("failed to resolve task base {base_ref}: {error}"))
@@ -1082,19 +1146,6 @@ async fn prepare_task_placement(
     } else {
         None
     };
-    if plan.strategy == PlacementStrategy::Create && github.is_some() {
-        // A fresh clone may know the PR before fetching its branch.
-        fetch(
-            main_repo,
-            "origin",
-            &format!(
-                "refs/heads/{}:refs/remotes/origin/{}",
-                plan.branch, plan.branch
-            ),
-        )
-        .map_err(task_error)?;
-        plan.strategy = PlacementStrategy::CheckoutExisting;
-    }
     if plan.strategy != PlacementStrategy::Create {
         let branch_ref = if ref_exists(main_repo, &format!("refs/heads/{}", plan.branch))? {
             format!("refs/heads/{}", plan.branch)
@@ -1232,6 +1283,12 @@ pub fn task_create(
     let main = crate::engine::worktrees::main_repo_root(repo).map_err(task_error)?;
     block_on_task(async {
         let store = super::pm::pm_store().await?;
+        if let Err(error) =
+            super::planning_sync::acquire_repository(&store, &main.to_string_lossy()).await
+        {
+            tracing::debug!(%error,"planning acquisition pending; creating from retained planning");
+        }
+
         if let Some(name) = wave {
             let locator =
                 crate::work::wave::WaveLocator::discover(&main, name).map_err(task_error)?;
@@ -1294,6 +1351,7 @@ pub fn task_create(
             )
             .await
             .map_err(task_error)?;
+        super::planning_sync::sync_after_save(&store, wave.repo()).await;
         task_planning_item(&store, &task)
     })
 }
@@ -2050,6 +2108,22 @@ pub(crate) fn request_task_pr_merge(
 /// Whether the repository has at least one configured git remote.
 fn has_remote(repo: &Path) -> OpsResult<bool> {
     Ok(!git_output(repo, &["remote"])?.trim().is_empty())
+}
+
+pub(crate) fn fetch_task_refs(repo: &Path) -> OpsResult<()> {
+    if crate::engine::git::has_origin(repo)? {
+        git_output(
+            repo,
+            &[
+                "fetch",
+                "--prune",
+                "origin",
+                "+refs/heads/*:refs/remotes/origin/*",
+            ],
+        )
+        .map_err(|error| task_error(format!("failed to fetch task base and branches: {error}")))?;
+    }
+    Ok(())
 }
 
 /// Resolve `(base_ref, base_commit)` for a new Task PR. With a remote, fetch and
@@ -2958,25 +3032,10 @@ fn task_execution_status(repo: &Path, issue: Option<&str>) -> OpsResult<Option<T
         Ok(Some(task))
     })
 }
-// Reuse local identity first; provider acquisition is only for an unknown selector.
-async fn acquire_task(store: &Store, repo: &Path, issue: &str) -> OpsResult<Task> {
-    if let Some(task) = store.get_task_by_issue(issue).await.map_err(task_error)? {
-        return Ok(task);
-    }
-    let resolved =
-        super::task_pm::resolve_task_async(repo, issue, super::pm::PmRefresh::Force).await?;
-    store
-        .get_task_by_issue(&resolved.item.id)
-        .await
-        .map_err(task_error)?
-        .ok_or_else(|| task_error("accepted planning did not retain the Task identity"))
-}
-
 /// Complete the Task without changing its Workflow or Processes.
 pub fn task_complete(repo: &Path, issue: &str, note: Option<&str>) -> OpsResult<Task> {
     block_on_task(async {
-        let store = task_store().await?;
-        let mut task = acquire_task(&store, repo, issue).await?;
+        let (store, mut task) = super::pm::resolve_saved_task(repo, None, issue).await?;
         if let Some(request) = store
             .sqlite
             .request_task_completion(&task.id, note)
@@ -2998,7 +3057,13 @@ pub fn task_reopen(issue: &str, note: Option<&str>) -> OpsResult<Task> {
             .await
             .map_err(task_error)?
             .ok_or_else(|| task_error(format!("Task {issue} is unavailable")))?;
-        store.sqlite.reopen_task(&task.id, note).map_err(task_error)
+        let task = store
+            .sqlite
+            .reopen_task(&task.id, note)
+            .map_err(task_error)?;
+        let wave = owning_wave(&store, &task).await?;
+        super::planning_sync::sync_after_save(&store, wave.repo()).await;
+        Ok(task)
     })
 }
 
@@ -3118,6 +3183,8 @@ async fn settle_completion(store: &SharedStore, task: &mut Task, request: i64) -
             .await
             .map_err(task_error)?
             .ok_or_else(|| task_error("completed Task is missing"))?;
+        let wave = owning_wave(store, task).await?;
+        super::planning_sync::sync_after_save(store, wave.repo()).await;
         // Cleanup retains live work and unpublished artifacts independently of status.
         cleanup_completed_task(store, task).await?;
         Ok(())
@@ -3996,6 +4063,7 @@ pub fn task_edit(
             .await
             .map_err(task_error)?;
         let owner = owning_wave(&store, &edited).await?;
+        super::planning_sync::sync_after_save(&store, owner.repo()).await;
         Ok(TaskEdit {
             wave: owner.slug().into(),
             id: edited.id.to_string(),
@@ -4052,6 +4120,8 @@ pub fn task_refile(repo: &Path, issue: &str, wave: &str) -> OpsResult<super::pm:
         {
             eprintln!("Saved locally; pending Linear sync.");
         }
+        drop(guards);
+        super::planning_sync::sync_after_save(&store, destination.repo()).await;
         Ok(super::pm::PmUpdateResult {
             wave: destination.slug().into(),
             id: task.id.to_string(),

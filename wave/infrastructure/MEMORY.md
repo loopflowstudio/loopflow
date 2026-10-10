@@ -234,10 +234,10 @@ CI: `be4a2b2af:wave/infrastructure/MEMORY.md`, this heading.
 LOO-447: fenced stop/abort; drop never signals. Codex takes custody before claim;
 standbys cannot write. Group death releases custody; watchdog stays outside.
 OpenCode saves reachability before creation, identity before setup and attempts
-before HTTP; unknown creation identity remains unresolved. `c75082d01` fences HTTP
-and receipts in one worker. Cancellation fixtures fence creation/configuration
-responses and recover without replay. `62b6c27df` proves reader-free replies,
-not takeover. Claude transport and public death-order proofs remain open.
+before HTTP; unknown creation identity remains unresolved. `cd9f78dd0` proves
+caller cancellation retains the fence, not process-death recovery.
+`196b57ac2` shares permission/message readback; saved origins fence replies without
+replay. Claude transport, pre-identity takeover and both public death orders remain open.
 Plan: `scratch/stop-and-take-over-claude.md`.
 
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)

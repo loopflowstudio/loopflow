@@ -264,7 +264,7 @@ Unique descendant commands omit parents:
 between Desktop and PR (Sessions use `connect`); use `lf desktop open`. Exact owner commands win;
 ambiguous shortcuts name their choices and perform nothing. `list`/`show` generally require an owner. Explicit
 `skill`/`flow` resolve naming collisions; the shorthand collision policy remains
-open. 
+open.
 
 Jack selected Wave-owned planning. Locally, `wave show [WAVE]` reads current and
 historical chapter plans; `wave workflow` selects future take-up, and `wave edit-plan`
@@ -461,7 +461,7 @@ permanent availability dependency, not a reversible default.
 **Required proof:** two independent Machines allocate/start exactly once; retries
 and disconnects retain the winner; later delegation cannot move it; repeat import
 cannot replay execution. No runtime replication, Task transfer, duplicate Flow,
-publication or merge is authorized. 
+publication or merge is authorized.
 
 ### 2. Shared Work identity, delegation and routing
 

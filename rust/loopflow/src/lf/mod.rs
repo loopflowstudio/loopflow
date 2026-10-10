@@ -496,9 +496,7 @@ pub enum DesktopCommand {
     /// Insert literal text at an exact surface's cursor; never submits or clears a draft
     Text {
         #[arg(long)]
-        target: String,
-        #[arg(long)]
-        surface: String,
+        pane: Option<String>,
         /// Unicode text without control characters (use key for Enter/Tab)
         text: String,
         #[arg(long)]
@@ -507,9 +505,7 @@ pub enum DesktopCommand {
     /// Send one explicit key to an exact retained surface, without following focus
     Key {
         #[arg(long)]
-        target: String,
-        #[arg(long)]
-        surface: String,
+        pane: Option<String>,
         #[arg(value_enum)]
         key: commands::desktop::DesktopKey,
         #[arg(long)]
@@ -518,10 +514,7 @@ pub enum DesktopCommand {
     /// Read bounded text from an exact retained surface, without following focus
     Read {
         #[arg(long)]
-        target: String,
-        /// Native surface incarnation from desktop list
-        #[arg(long)]
-        surface: String,
+        pane: Option<String>,
         #[arg(long, value_enum)]
         region: commands::desktop::DesktopTextRegion,
         #[arg(long, default_value_t = 65536)]
@@ -531,55 +524,51 @@ pub enum DesktopCommand {
     },
     /// Hide an exact retained pane without closing its Session or process
     Hide {
-        /// JSON object with repository, window, machine_id, worktree, pane and incarnation
+        /// Pane ID from desktop list; omit only when one pane is eligible
         #[arg(long)]
-        target: String,
+        pane: Option<String>,
         #[arg(long)]
         json: bool,
     },
     /// Restore an exact hidden pane without selecting Work or acquiring a client
     Restore {
         #[arg(long)]
-        target: String,
+        pane: Option<String>,
         #[arg(long)]
         json: bool,
     },
     /// Focus an exact pane in its retained workspace (does not select Work)
     Focus {
         #[arg(long)]
-        target: String,
+        pane: Option<String>,
         #[arg(long)]
         json: bool,
     },
-    /// Add a local shell beside an exact pane without changing selection
+    /// Add a shell on the recorded Machine beside a pane without changing selection
     Shell {
         #[arg(long)]
-        target: String,
+        pane: Option<String>,
         #[arg(long)]
         json: bool,
     },
     /// Show the recorded Task's files beside an exact pane, retaining drafts
     Files {
         #[arg(long)]
-        target: String,
-        #[arg(long)]
-        task: String,
+        pane: Option<String>,
         #[arg(long)]
         json: bool,
     },
     /// Show the recorded Task's Flow processes beside an exact pane
     FlowLog {
         #[arg(long)]
-        target: String,
-        #[arg(long)]
-        task: String,
+        pane: Option<String>,
         #[arg(long)]
         json: bool,
     },
     /// Add an empty split beside an exact pane, retaining selection and clients
     Split {
         #[arg(long)]
-        target: String,
+        pane: Option<String>,
         #[arg(long, value_enum)]
         axis: commands::desktop::DesktopSplitAxis,
         #[arg(long)]
@@ -588,7 +577,7 @@ pub enum DesktopCommand {
     /// Move a retained pane after another pane in the same workspace
     Move {
         #[arg(long)]
-        target: String,
+        pane: Option<String>,
         #[arg(long)]
         destination: String,
         #[arg(long, value_enum)]
@@ -599,7 +588,7 @@ pub enum DesktopCommand {
     /// Resize the divider between two exact panes; ratio is the target side's share
     Resize {
         #[arg(long)]
-        target: String,
+        pane: Option<String>,
         #[arg(long)]
         toward: String,
         #[arg(long)]
@@ -610,7 +599,7 @@ pub enum DesktopCommand {
     /// Zoom an exact retained pane without changing selection; --off unzooms it
     Zoom {
         #[arg(long)]
-        target: String,
+        pane: Option<String>,
         #[arg(long)]
         off: bool,
         #[arg(long)]

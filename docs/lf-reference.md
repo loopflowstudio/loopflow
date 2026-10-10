@@ -169,7 +169,7 @@ Request auto-merge, retain settlement intent, and return
 
 | Argument | What it does |
 |---|---|
-| `--wait` | Wait up to 30 minutes for verified merge; timeout retains the request Default: false. |
+| `--wait-and-fix` | Wait up to 30 minutes for merge and repair failing CI; timeout retains the request Default: false. |
 | `--strict` | strict Default: false. |
 | `--local` | local Default: false. |
 | `--worktree / -w` | worktree |
@@ -1082,8 +1082,7 @@ Insert literal text at an exact surface's cursor; never submits or clears a draf
 
 | Argument | What it does |
 |---|---|
-| `--target` | target |
-| `--surface` | surface |
+| `--pane` | pane |
 | `<text>` | Unicode text without control characters (use key for Enter/Tab) |
 | `--json` | json Default: false. |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
@@ -1095,8 +1094,7 @@ Send one explicit key to an exact retained surface, without following focus
 
 | Argument | What it does |
 |---|---|
-| `--target` | target |
-| `--surface` | surface |
+| `--pane` | pane |
 | `<key>` | key |
 | `--json` | json Default: false. |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
@@ -1108,8 +1106,7 @@ Read bounded text from an exact retained surface, without following focus
 
 | Argument | What it does |
 |---|---|
-| `--target` | target |
-| `--surface` | Native surface incarnation from desktop list |
+| `--pane` | pane |
 | `--region` | region |
 | `--max-bytes` | max bytes Default: 65536. |
 | `--json` | json Default: false. |
@@ -1122,7 +1119,7 @@ Hide an exact retained pane without closing its Session or process
 
 | Argument | What it does |
 |---|---|
-| `--target` | JSON object with repository, window, machine_id, worktree, pane and incarnation |
+| `--pane` | Pane ID from desktop list; omit only when one pane is eligible |
 | `--json` | json Default: false. |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
@@ -1133,7 +1130,7 @@ Restore an exact hidden pane without selecting Work or acquiring a client
 
 | Argument | What it does |
 |---|---|
-| `--target` | target |
+| `--pane` | pane |
 | `--json` | json Default: false. |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
@@ -1144,18 +1141,18 @@ Focus an exact pane in its retained workspace (does not select Work)
 
 | Argument | What it does |
 |---|---|
-| `--target` | target |
+| `--pane` | pane |
 | `--json` | json Default: false. |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf desktop shell
 
-Add a local shell beside an exact pane without changing selection
+Add a shell on the recorded Machine beside a pane without changing selection
 
 | Argument | What it does |
 |---|---|
-| `--target` | target |
+| `--pane` | pane |
 | `--json` | json Default: false. |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
@@ -1166,8 +1163,7 @@ Show the recorded Task's files beside an exact pane, retaining drafts
 
 | Argument | What it does |
 |---|---|
-| `--target` | target |
-| `--task` | task |
+| `--pane` | pane |
 | `--json` | json Default: false. |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
@@ -1178,8 +1174,7 @@ Show the recorded Task's Flow processes beside an exact pane
 
 | Argument | What it does |
 |---|---|
-| `--target` | target |
-| `--task` | task |
+| `--pane` | pane |
 | `--json` | json Default: false. |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
@@ -1190,7 +1185,7 @@ Add an empty split beside an exact pane, retaining selection and clients
 
 | Argument | What it does |
 |---|---|
-| `--target` | target |
+| `--pane` | pane |
 | `--axis` | axis |
 | `--json` | json Default: false. |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
@@ -1202,7 +1197,7 @@ Move a retained pane after another pane in the same workspace
 
 | Argument | What it does |
 |---|---|
-| `--target` | target |
+| `--pane` | pane |
 | `--destination` | destination |
 | `--axis` | axis |
 | `--json` | json Default: false. |
@@ -1215,7 +1210,7 @@ Resize the divider between two exact panes; ratio is the target side's share
 
 | Argument | What it does |
 |---|---|
-| `--target` | target |
+| `--pane` | pane |
 | `--toward` | toward |
 | `--ratio` | ratio |
 | `--json` | json Default: false. |
@@ -1228,7 +1223,7 @@ Zoom an exact retained pane without changing selection; --off unzooms it
 
 | Argument | What it does |
 |---|---|
-| `--target` | target |
+| `--pane` | pane |
 | `--off` | off Default: false. |
 | `--json` | json Default: false. |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
@@ -1784,6 +1779,7 @@ File or link follow-up Tasks after merge, then record the disposition
 | `--none` | none |
 | `--finish` | finish |
 | `--key` | Stable obligation key; use a distinct key for each additional follow-up |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task automate
@@ -1837,6 +1833,7 @@ Place a Task's worktree, then run a Flow there like `lf --task ISSUE flow FLOW`
 | `--stack-on` | Fork this Task's worktree from another Task's active PR |
 | `--directive` | directive |
 | `--reason` | Direction for this run, published to the Task |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task complete
@@ -1847,6 +1844,7 @@ Complete a Task without moving its Workflow
 |---|---|
 | `<issue>` | issue |
 | `--reason` | Why, kept in the Task's completion request |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task reopen
@@ -1857,6 +1855,7 @@ Reopen local planning without moving Workflow or replacing the PR
 |---|---|
 | `<issue>` | issue |
 | `--reason` | reason |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task move
@@ -1868,6 +1867,7 @@ Move Workflow position without running anything; `end` requests completion
 | `<issue>` | issue |
 | `<node>` | `start`, `end` or one of the workflow's nodes |
 | `--reason` | Why, kept in the Task's workflow history |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task create
@@ -1885,16 +1885,39 @@ Create a planning Task without allocating a checkout or starting work
 
 ## lf task location
 
-Read Machine-owned execution records without checkout preparation, launch or transfer.
+Read recorded execution location without preparing or transferring Work
 
 | Argument | What it does |
 |---|---|
-| `<issue>` | Task identifier or full ID in the selected repository |
-| `--peers` | Also read added Machines; unavailable replies remain explicit |
-| `--json` | Include request identity, observing Machine, timestamp and location state |
+| `<issue>` | issue |
+| `--peers` | Observe added Machines as well as this one; never reserve first start Default: false. |
+| `--request` | request Internal. |
+| `--json` | json Default: false. |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
 
-No record is not first-start permission. `--machine` reads only the addressed
-Machine unless `--peers` is supplied.
+## lf task shell
+
+Open a shell in an existing Task checkout, without preparing work
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `--checkout` | checkout |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf task watch-files
+
+Stream invalidations from an existing Task checkout (JSON lines)
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `--checkout` | checkout |
+| `--request` | request |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
 
 ## lf task status
 

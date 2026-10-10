@@ -34,12 +34,14 @@ partial-list, foreground-provider, native and exclusive-start proof remain.
 
 ## Arrangement and terminal evidence — October 8–9
 
-`96b3217fe:scratch/findings.md`, **Arrangement evidence** and **Terminal identity
-and extraction boundary**, retain exact-target insertion, surface-key corrections,
-failed builds and lf3 publication receipts. Machine-qualified membership/callbacks,
-passive lookup and the published bounded reader are composed. Native input,
-extraction, drafts/responders and cross-machine composition remain unproved;
-primitive and headless checks are not mounted-surface acceptance.
+`96b3217fe:scratch/findings.md` retains arrangement/extraction failures and lf3
+publication. Machine-qualified owners and bounded reads are composed; headless
+checks prove neither mounted surfaces nor native drafts/responders.
+
+October 9 selector cut deletes public JSON targets/surface tokens. One inspection
+pins window/content/surface before dispatch; eligibility never uses focus. Ambiguous
+or missing matches dispatch nothing. Existing receiver tests reject delayed/replaced
+lifetimes; logs: `/tmp/loo427-selectors-{rust,swift,clippy}.log`. No native proof.
 
 ## Scoped dispatch and preview — October 9
 
@@ -230,7 +232,6 @@ native usability. Cross-platform notify is used instead of another platform-spec
 
 The first Swift build exposed nonisolated deinit accessing MainActor state; a small resource
 owner now cancels the stream on release. The shell fixture initially lacked the bundled helper,
-then assumed `/bin/false`; its isolated configured host now owns an executable stub. No user
-app, installed helper or provider account was changed. Failure logs: `/tmp/loo427-companions-*.log`.
+then assumed `/bin/false`; its isolated configured host now owns an executable stub. No user app/helper or provider account changed. Logs: `/tmp/loo427-companions-*.log`.
 Selected-path scratch commits failed empty because that operation excludes scratch; original
 notes remain at `/tmp/loo427-shell-files-before/`. Delivery is not implied by these checks.

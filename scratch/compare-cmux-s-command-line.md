@@ -222,18 +222,16 @@ then finish exclusive first-start admission. Existing delegation exchange and re
 observation must not be redone. Stacking on LOO-412 is authorized if necessary: inspect
 its committed API/integration state and use supported lf operations, never dirty peer code.
 
-The public selector change uses existing `--repo`/`--task` plus optional `--pane`.
-Omission selects exactly one eligible pane; ambiguity lists choices and requires a pane;
-no match has no effects. Move/resize destinations are pane selectors. Resolve once into
-current internal window/content/surface tokens; delayed dispatch must not follow new focus.
-Delete public `--target` and external token inputs, including aliases. Update parsing,
-production dispatch, docs and unique/ambiguous/explicit/stale behavior tests together.
+Remote companions are checkpointed at `7aa8a5eb5`; selectors are implemented locally.
+Existing Work resolution plus one Desktop inspection captures internal lifetime tokens.
+Headless selector/lifetime tests pass; native proof remains.
+LOO-412's committed frontier is `a60d5594a`; no stack/sync or dirty-checkout edits occurred.
+Admission still needs committed-API inspection and composition, not another exchange engine.
 
 Admission must replace the temporary refusal with an exclusive path through existing
 planning/execution owners. Two independent Machines must not allocate/start one Task;
 the winner survives retries, disconnects and delegation edits. No runtime replication,
-Task transfer, duplicate Flow, publication or merge is authorized. These remain implementation
-obligations, not decisions reopened by the current slice.
+Task transfer, duplicate Flow, publication or merge is authorized.
 
 Remote companions now use `task shell --checkout` and `task watch-files --checkout` on
 recorded execution. Shell admission rechecks Task/Machine/path before running the remote
@@ -411,14 +409,14 @@ one. Plain-repo and remote-unavailable cases remain useful. JSON/Swift agree.
 
 ### 4. Arrange and interact with exact retained panes
 
-**Local controls implemented; public selector simplification requested by Jack Heart October 9.**
-Delete public `--target` and `--surface`; use existing `--repo`/`--task` plus optional
-`--pane`. One eligible pane in the selected Task is implicit; multiple matches
+**Controls and Jack Heart’s October 9 selector change implemented locally.**
+Public `--target` and `--surface` are deleted; existing `--repo`/`--task` plus optional
+`--pane` select retained Work. One eligible pane in the selected Task is implicit; multiple matches
 return choices without effects. Move/resize use plain peer-pane selectors.
 `DesktopPaneTarget` and surface tokens stay internal. Resolve through existing
 Work/pane owners; validate the captured window/content/surface before acting,
-never retarget by later focus. Test unique defaults, ambiguity, explicit selection
-and replacement. Typed Apple events retain synchronous MainActor validation.
+never retarget by later focus. Unique/ambiguous/explicit selectors and retained lifetime
+refusals have headless proof. Typed Apple events retain synchronous MainActor validation.
 Restore, split, move, resize and zoom preserve selection; focus is explicit.
 Move stays within one Machine/checkout. Native proof remains.
 
@@ -491,4 +489,4 @@ identity/delegation, open them, add shell/Files panes, retain an unfinished draf
 change focus, target a harmless command, read output, hide/restore, and verify the
 original input target and draft survive. Demo owns native usability; preserve comparison evidence and use no real accounts or live user terminals.
 
-Check: focused `machine_commands remote_companions`, `dto_fixtures task_files_frames`, Desktop remote-events/opening/recording/DTO fixtures, build and Clippy — PASS; gate/CI owns broader suites, demo configured SSH/native usability.
+Check: `cargo test` pane-selector unit/CLI tests (4), focused Desktop lifetime tests (4), `cargo clippy --all-targets -- -D warnings` — PASS; `7aa8a5eb5` retains companion checks; gate/CI broader/Linux checks, demo configured SSH/native usability.

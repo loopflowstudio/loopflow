@@ -1086,63 +1086,38 @@ fn native_skill_help_and_flow_capture_keep_the_selected_source_and_declarations(
 }
 
 #[test]
-fn desktop_input_keeps_text_separate_from_keys_and_requires_surface_identity() {
+fn desktop_input_uses_work_and_pane_selectors_without_public_lifetime_tokens() {
     use loopflow::lf::commands::desktop::DesktopKey;
     use loopflow::lf::DesktopCommand;
     let literal = "héλ🙂 \\n \"$(literal)\"";
-    let args = [
-        "lf",
-        "desktop",
-        "text",
-        "--target",
-        "{}",
-        "--surface",
-        "surface",
-        "--",
-        literal,
-    ]
-    .map(str::to_string)
-    .to_vec();
-    let cli = Cli::try_parse_from(normalize_args(args).unwrap()).unwrap();
-    assert!(matches!(cli.command, Some(Commands::Desktop {
-        cmd: DesktopCommand::Text { text, surface, .. }
-    }) if text == literal && surface == "surface"));
     let cli = Cli::try_parse_from([
-        "lf",
-        "desktop",
-        "key",
-        "--target",
-        "{}",
-        "--surface",
-        "surface",
-        "enter",
+        "lf", "--repo", "project", "--task", "LOO-427", "desktop", "text", "--pane", "pane-one",
+        "--", literal,
     ])
     .unwrap();
+    assert_eq!(cli.task.as_deref(), Some("LOO-427"));
+    assert!(matches!(cli.command, Some(Commands::Desktop {
+        cmd: DesktopCommand::Text { text, pane: Some(pane), .. }
+    }) if text == literal && pane == "pane-one"));
+    let cli = Cli::try_parse_from(["lf", "--task", "LOO-427", "desktop", "key", "enter"]).unwrap();
     assert!(matches!(
         cli.command,
         Some(Commands::Desktop {
             cmd: DesktopCommand::Key {
                 key: DesktopKey::Enter,
+                pane: None,
                 ..
             }
         })
     ));
-    for operation in ["text", "key"] {
-        assert!(
-            Cli::try_parse_from(["lf", "desktop", operation, "--target", "{}", "enter"]).is_err()
-        );
+    for flag in ["--target", "--surface", "--window", "--incarnation"] {
+        assert!(Cli::try_parse_from(["lf", "desktop", "text", flag, "removed", "text"]).is_err());
     }
-    assert!(Cli::try_parse_from([
-        "lf",
-        "desktop",
-        "key",
-        "--target",
-        "{}",
-        "--surface",
-        "surface",
-        "arbitrary-bytes"
-    ])
-    .is_err());
+    assert!(Cli::try_parse_from(["lf", "desktop", "key", "arbitrary-bytes"]).is_err());
+    assert!(
+        matches!(Cli::try_parse_from(["lf", "desktop", "move", "--pane", "one", "--destination", "two", "--axis", "vertical"]).unwrap().command,
+        Some(Commands::Desktop { cmd: DesktopCommand::Move { destination, .. } }) if destination == "two")
+    );
 }
 
 #[test]

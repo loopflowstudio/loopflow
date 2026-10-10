@@ -169,12 +169,12 @@ SSH preserves stdin/native Home. Mixed exchange, admission and running-Flow/conf
 October 9 remote companions: existing SSH/line transport carries owner-pinned shells
 and filesystem invalidations into retained panes/documents. Request/checkout fencing and cancellation retain drafts on stale/disconnected
 readings; no local-path fallback or shell replay. Observations are not filesystem CAS.
-Jack Heart's latest LOO-427 comments order the remaining work: finish/checkpoint remote
-companions, replace public Desktop JSON targets/tokens with `--repo`/`--task` and optional
-`--pane`, then exclusive first-start admission. A unique eligible pane may be implicit;
-ambiguity lists choices; no match has no effects. Exact lifetime tokens stay inside transport.
-Jack authorized stacking on committed LOO-412 if needed, not touching dirty peer work or
-replicating execution in ordinary planning. Existing delegation exchange is not to be redone.
+Jack Heart ordered remote companions, simpler Desktop selectors, then exclusive
+first-start admission. `7aa8a5eb5` checkpoints companions; selectors are local. `--repo`/`--task` plus optional `--pane` replace public JSON targets/tokens.
+One eligible pane is implicit; ambiguity lists choices, no match dispatches nothing.
+One inspection pins lifetimes; focus cannot retarget. Native proof and admission remain. Jack authorized stacking on committed
+LOO-412 if needed, never dirty peer work or ordinary planning replication of execution.
+Existing delegation exchange is not to be redone.
 
 ## Task delivery boundary (LOO-418, reconciled 2026-10-09)
 

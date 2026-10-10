@@ -519,123 +519,295 @@ fn opening_url(
 
 pub fn run(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<()> {
     use crate::lf::DesktopCommand;
-    // Check before decoding targets or looking up any Work/Machine.
     require_supported()?;
-    let (target, action, json) = match command {
+    match command {
         DesktopCommand::Open {
             session,
             diff,
             json,
-        } => {
-            return open_work(cli, session.as_deref(), *diff, *json || cli.json);
-        }
-        DesktopCommand::List { json } => return invoke(None, *json),
-        DesktopCommand::Text {
-            target,
-            surface,
-            text,
-            json,
-        } => {
+        } => return open_work(cli, session.as_deref(), *diff, *json || cli.json),
+        DesktopCommand::List { json } => return invoke(None, *json || cli.json),
+        _ => {}
+    }
+    // Work selects the repository/checkout. One live reading supplies every
+    // lifetime token; dispatch never reinterprets this request using later focus.
+    let resolution = opening_context(cli, None)?;
+    let inspection: DesktopInspection = serde_json::from_slice(&contact(None, false)?)
+        .context("Desktop returned an invalid reading")?;
+    let (target, surface) = inspection.resolve_pane(&resolution, command)?;
+    let (action, json) = match command {
+        DesktopCommand::Open { .. } | DesktopCommand::List { .. } => unreachable!("handled above"),
+        DesktopCommand::Text { text, json, .. } => {
             validate_literal_text(text)?;
             (
-                target,
                 DesktopPaneAction::Text {
-                    surface: surface.clone(),
+                    surface: surface.context("Terminal surface unavailable")?,
                     text: text.clone(),
                 },
                 json,
             )
         }
-        DesktopCommand::Key {
-            target,
-            surface,
-            key,
-            json,
-        } => (
-            target,
+        DesktopCommand::Key { key, json, .. } => (
             DesktopPaneAction::Key {
-                surface: surface.clone(),
+                surface: surface.context("Terminal surface unavailable")?,
                 key: *key,
             },
             json,
         ),
         DesktopCommand::Read {
-            target,
-            surface,
             region,
             max_bytes,
             json,
+            ..
         } => {
-            if !(1..=1_048_576).contains(max_bytes) {
-                bail!("Text byte limit must be between 1 and 1048576");
-            }
+            anyhow::ensure!(
+                (1..=1_048_576).contains(max_bytes),
+                "Text byte limit must be between 1 and 1048576"
+            );
             return read_text(
                 DesktopTextRequest {
-                    target: parse_target(target)?,
-                    surface: surface.clone(),
+                    target,
+                    surface: surface.context("Terminal surface unavailable")?,
                     region: *region,
                     max_bytes: *max_bytes,
                 },
-                *json,
+                *json || cli.json,
             );
         }
-        DesktopCommand::Hide { target, json } => (target, DesktopPaneAction::Hide, json),
-        DesktopCommand::Restore { target, json } => (target, DesktopPaneAction::Restore, json),
-        DesktopCommand::Focus { target, json } => (target, DesktopPaneAction::Focus, json),
-        DesktopCommand::Shell { target, json } => (target, DesktopPaneAction::Shell, json),
-        DesktopCommand::Files { target, task, json } => (
-            target,
-            DesktopPaneAction::Files { task: task.clone() },
+        DesktopCommand::Hide { json, .. } => (DesktopPaneAction::Hide, json),
+        DesktopCommand::Restore { json, .. } => (DesktopPaneAction::Restore, json),
+        DesktopCommand::Focus { json, .. } => (DesktopPaneAction::Focus, json),
+        DesktopCommand::Shell { json, .. } => (DesktopPaneAction::Shell, json),
+        DesktopCommand::Files { json, .. } => (
+            DesktopPaneAction::Files {
+                task: bound(&resolution.task, "Task")?.into(),
+            },
             json,
         ),
-        DesktopCommand::FlowLog { target, task, json } => (
-            target,
-            DesktopPaneAction::FlowLog { task: task.clone() },
+        DesktopCommand::FlowLog { json, .. } => (
+            DesktopPaneAction::FlowLog {
+                task: bound(&resolution.task, "Task")?.into(),
+            },
             json,
         ),
-        DesktopCommand::Split { target, axis, json } => {
-            (target, DesktopPaneAction::Split { axis: *axis }, json)
+        DesktopCommand::Split { axis, json, .. } => {
+            (DesktopPaneAction::Split { axis: *axis }, json)
         }
         DesktopCommand::Move {
-            target,
             destination,
             axis,
             json,
+            ..
         } => (
-            target,
             DesktopPaneAction::Move {
-                destination: parse_target(destination)?,
+                destination: inspection.peer_pane(&target, destination)?,
                 axis: *axis,
             },
             json,
         ),
         DesktopCommand::Resize {
-            target,
             toward,
             ratio,
             json,
+            ..
         } => {
-            if !ratio.is_finite() || !(0.1..=0.9).contains(ratio) {
-                bail!("Split ratio must be between 0.1 and 0.9");
-            }
+            anyhow::ensure!(
+                ratio.is_finite() && (0.1..=0.9).contains(ratio),
+                "Split ratio must be between 0.1 and 0.9"
+            );
             (
-                target,
                 DesktopPaneAction::Resize {
-                    toward: parse_target(toward)?,
+                    toward: inspection.peer_pane(&target, toward)?,
                     ratio: *ratio,
                 },
                 json,
             )
         }
-        DesktopCommand::Zoom { target, off, json } => {
-            (target, DesktopPaneAction::Zoom { enabled: !off }, json)
-        }
+        DesktopCommand::Zoom { off, json, .. } => (DesktopPaneAction::Zoom { enabled: !off }, json),
     };
-    let request = serde_json::to_string(&DesktopPaneCommand {
-        target: parse_target(target)?,
-        action,
-    })?;
-    invoke(Some(&request), *json)
+    invoke(
+        Some(&serde_json::to_string(&DesktopPaneCommand {
+            target,
+            action,
+        })?),
+        *json || cli.json,
+    )
+}
+
+fn bound<'a>(fact: &'a crate::ops::context::ContextFact, name: &str) -> Result<&'a str> {
+    use crate::ops::context::ContextFact;
+    match fact {
+        ContextFact::Bound { value, .. } => Ok(value),
+        ContextFact::Unbound => {
+            bail!("{name} is unbound; select Work with --repo/--task. No pane was changed.")
+        }
+        ContextFact::Unavailable { reason } => {
+            bail!("{name} unavailable: {reason}. No pane was changed.")
+        }
+    }
+}
+
+impl DesktopInspection {
+    fn resolve_pane(
+        &self,
+        work: &crate::ops::context::ContextExplanation,
+        command: &crate::lf::DesktopCommand,
+    ) -> Result<(DesktopPaneTarget, Option<String>)> {
+        use crate::lf::DesktopCommand;
+        use crate::ops::context::ContextFact;
+        let (pane, terminal, peer) = match command {
+            DesktopCommand::Text { pane, .. }
+            | DesktopCommand::Key { pane, .. }
+            | DesktopCommand::Read { pane, .. } => (pane, true, None),
+            DesktopCommand::Move {
+                pane, destination, ..
+            } => (pane, false, Some(destination.as_str())),
+            DesktopCommand::Resize { pane, toward, .. } => (pane, false, Some(toward.as_str())),
+            DesktopCommand::Hide { pane, .. }
+            | DesktopCommand::Restore { pane, .. }
+            | DesktopCommand::Focus { pane, .. }
+            | DesktopCommand::Shell { pane, .. }
+            | DesktopCommand::Files { pane, .. }
+            | DesktopCommand::FlowLog { pane, .. }
+            | DesktopCommand::Split { pane, .. }
+            | DesktopCommand::Zoom { pane, .. } => (pane, false, None),
+            DesktopCommand::Open { .. } | DesktopCommand::List { .. } => {
+                bail!("This command does not address a pane")
+            }
+        };
+        let repository = bound(&work.repository, "Repository identity")?;
+        let windows = self
+            .windows
+            .iter()
+            .filter(|window| window.repository == repository)
+            .collect::<Vec<_>>();
+        anyhow::ensure!(
+            windows.len() == 1,
+            "Expected one open window for repository {repository}; found {}. No pane was changed.",
+            windows.len()
+        );
+        let window = windows[0];
+        let checkout = match &work.task {
+            ContextFact::Unbound => None,
+            _ => {
+                bound(&work.task, "Task")?;
+                Some((
+                    bound(&work.execution_machine, "Execution Machine")?,
+                    bound(&work.checkout, "Task checkout")?,
+                ))
+            }
+        };
+        let mut candidates = Vec::new();
+        for workspace in &window.workspaces {
+            if checkout.is_some_and(|(machine, path)| {
+                workspace.machine_id != machine || workspace.worktree != path
+            }) {
+                continue;
+            }
+            for leaf in workspace.layout.leaves() {
+                if leaf.pane.as_deref() == peer && peer.is_some() {
+                    continue;
+                }
+                if pane
+                    .as_ref()
+                    .is_some_and(|id| leaf.pane.as_ref() != Some(id))
+                {
+                    continue;
+                }
+                if terminal
+                    && (!matches!(leaf.content.as_deref(), Some("shell" | "session"))
+                        || leaf.surface.is_none())
+                {
+                    continue;
+                }
+                if pane.is_none()
+                    && matches!(command, DesktopCommand::Restore { .. })
+                    && !leaf
+                        .pane
+                        .as_ref()
+                        .is_some_and(|id| workspace.hidden_panes.contains(id))
+                {
+                    continue;
+                }
+                candidates.push((workspace, leaf));
+            }
+        }
+        let choices = candidates
+            .iter()
+            .map(|(_, leaf)| {
+                format!(
+                    "{} ({})",
+                    leaf.pane.as_deref().unwrap_or("unavailable"),
+                    leaf.content.as_deref().unwrap_or("empty")
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        anyhow::ensure!(!candidates.is_empty(), "No eligible pane{} in the selected Work. Inspect with `lf desktop list`; no pane was changed.", pane.as_ref().map(|id| format!(" {id}")).unwrap_or_default());
+        anyhow::ensure!(
+            candidates.len() == 1,
+            "Multiple eligible panes: {choices}. Choose --pane; no pane was changed."
+        );
+        let (workspace, leaf) = candidates[0];
+        Ok((window.pane_target(workspace, leaf)?, leaf.surface.clone()))
+    }
+
+    fn peer_pane(&self, target: &DesktopPaneTarget, selector: &str) -> Result<DesktopPaneTarget> {
+        anyhow::ensure!(
+            selector != target.pane,
+            "Choose two distinct panes; no pane was changed."
+        );
+        let window = self
+            .windows
+            .iter()
+            .find(|window| window.repository == target.repository && window.window == target.window)
+            .context("Repository window unavailable")?;
+        let workspace = window
+            .workspaces
+            .iter()
+            .find(|workspace| {
+                workspace.machine_id == target.machine_id && workspace.worktree == target.worktree
+            })
+            .context("Task workspace unavailable")?;
+        let panes = workspace
+            .layout
+            .leaves()
+            .into_iter()
+            .filter(|leaf| leaf.pane.as_deref() == Some(selector))
+            .collect::<Vec<_>>();
+        anyhow::ensure!(panes.len() == 1, "Destination pane {selector} is unavailable in the same workspace; no pane was changed.");
+        window.pane_target(workspace, panes[0])
+    }
+}
+
+impl DesktopLayoutInspection {
+    fn leaves(&self) -> Vec<&Self> {
+        if self.pane.is_some() {
+            vec![self]
+        } else {
+            self.children.iter().flat_map(Self::leaves).collect()
+        }
+    }
+}
+
+impl DesktopWindowInspection {
+    fn pane_target(
+        &self,
+        workspace: &DesktopWorkspaceInspection,
+        leaf: &DesktopLayoutInspection,
+    ) -> Result<DesktopPaneTarget> {
+        Ok(DesktopPaneTarget {
+            repository: self.repository.clone(),
+            window: self.window.clone(),
+            machine_id: workspace.machine_id.clone(),
+            worktree: workspace.worktree.clone(),
+            pane: leaf.pane.clone().context("Pane identity unavailable")?,
+            incarnation: leaf
+                .incarnation
+                .clone()
+                .context("Pane content identity unavailable")?,
+        })
+    }
 }
 
 /// Decode only a bounded reply for this exact request; never follow focus or
@@ -673,11 +845,6 @@ fn validate_literal_text(text: &str) -> Result<()> {
         bail!("Literal text cannot contain control characters; use `lf desktop key` for explicit keys. No input was sent.");
     }
     Ok(())
-}
-
-fn parse_target(target: &str) -> Result<DesktopPaneTarget> {
-    serde_json::from_str(target)
-        .context("expected the exact pane target from `lf desktop list --json`")
 }
 
 fn contact(request: Option<&str>, text_read: bool) -> Result<Vec<u8>> {
@@ -899,6 +1066,145 @@ impl DesktopTextUnavailable {
 mod tests {
     use super::{opening_url, validate_literal_text};
     use crate::ops::context::{ContextExplanation, ContextFact};
+
+    fn pane_fixture() -> (super::DesktopInspection, ContextExplanation) {
+        let inspection: super::DesktopInspection = serde_json::from_str(include_str!(
+            "../../../../../tests/fixtures/dto/desktop_inspection.json"
+        ))
+        .unwrap();
+        let window = &inspection.windows[0];
+        let workspace = &window.workspaces[0];
+        let fact = |value: &str| ContextFact::Bound {
+            value: value.into(),
+            source: "selected_work".into(),
+        };
+        let mut work = ContextExplanation::empty();
+        work.repository = fact(&window.repository);
+        work.task = fact(window.task.as_ref().unwrap().id.as_str());
+        work.checkout = fact(&workspace.worktree);
+        work.execution_machine = fact(&workspace.machine_id);
+        (inspection, work)
+    }
+
+    #[test]
+    fn pane_defaults_require_one_eligible_target_and_never_use_focus() {
+        use crate::lf::DesktopCommand;
+        let (mut inspection, work) = pane_fixture();
+        let text = DesktopCommand::Text {
+            pane: None,
+            text: "draft".into(),
+            json: true,
+        };
+        let (target, surface) = inspection.resolve_pane(&work, &text).unwrap();
+        assert_eq!(target.pane, "session-pane");
+        assert_eq!(surface.as_deref(), Some("native-surface-incarnation"));
+        let workspace = &mut inspection.windows[0].workspaces[0];
+        let mut other = workspace.layout.children[0].clone();
+        other.pane = Some("second-terminal".into());
+        other.incarnation = Some("second-content".into());
+        other.surface = Some("second-surface".into());
+        workspace.layout.children.push(other);
+        workspace.focused_pane = "second-terminal".into();
+        let error = inspection
+            .resolve_pane(&work, &text)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("session-pane")
+                && error.contains("second-terminal")
+                && error.contains("Choose --pane"),
+            "{error}"
+        );
+        let explicit = DesktopCommand::Text {
+            pane: Some("session-pane".into()),
+            text: "draft".into(),
+            json: false,
+        };
+        assert_eq!(
+            inspection.resolve_pane(&work, &explicit).unwrap(),
+            (target.clone(), surface.clone())
+        );
+        // The already resolved transport request retains the old lifetime, not
+        // the replacement or the newly focused surface. Desktop validates it.
+        inspection.windows[0].workspaces[0].layout.children[0].incarnation =
+            Some("replacement".into());
+        inspection.windows[0].workspaces[0].layout.children[0].surface =
+            Some("replacement-surface".into());
+        let replacement = inspection.resolve_pane(&work, &explicit).unwrap();
+        assert_ne!(replacement.0, target);
+        assert_ne!(replacement.1, surface);
+        assert_eq!(target.incarnation, "occurrence-session-pane");
+    }
+
+    #[test]
+    fn pane_scope_refuses_other_work_and_reports_absence_before_dispatch() {
+        use crate::lf::DesktopCommand;
+        let (inspection, mut work) = pane_fixture();
+        let focus = DesktopCommand::Focus {
+            pane: None,
+            json: false,
+        };
+        assert!(inspection
+            .resolve_pane(&work, &focus)
+            .unwrap_err()
+            .to_string()
+            .contains("Multiple eligible"));
+        let missing = DesktopCommand::Focus {
+            pane: Some("absent".into()),
+            json: false,
+        };
+        assert!(inspection
+            .resolve_pane(&work, &missing)
+            .unwrap_err()
+            .to_string()
+            .contains("No eligible pane"));
+        let files = DesktopCommand::Text {
+            pane: Some("files-pane".into()),
+            text: "no input".into(),
+            json: false,
+        };
+        assert!(inspection.resolve_pane(&work, &files).is_err());
+        let restore = DesktopCommand::Restore {
+            pane: None,
+            json: false,
+        };
+        assert_eq!(
+            inspection.resolve_pane(&work, &restore).unwrap().0.pane,
+            "files-pane"
+        );
+        work.checkout = ContextFact::Bound {
+            value: "/other-task".into(),
+            source: "recorded".into(),
+        };
+        assert!(inspection.resolve_pane(&work, &restore).is_err());
+        work.checkout = ContextFact::Unavailable {
+            reason: "owner offline".into(),
+        };
+        assert!(inspection
+            .resolve_pane(&work, &restore)
+            .unwrap_err()
+            .to_string()
+            .contains("owner offline"));
+    }
+
+    #[test]
+    fn pane_destinations_are_plain_selectors_in_the_same_worktree() {
+        use crate::lf::DesktopCommand;
+        let (inspection, work) = pane_fixture();
+        let command = DesktopCommand::Move {
+            pane: None,
+            destination: "files-pane".into(),
+            axis: super::DesktopSplitAxis::Vertical,
+            json: false,
+        };
+        let target = inspection.resolve_pane(&work, &command).unwrap().0;
+        assert_eq!(target.pane, "session-pane");
+        let destination = inspection.peer_pane(&target, "files-pane").unwrap();
+        assert_eq!(destination.incarnation, "occurrence-files-pane");
+        assert_eq!(destination.window, target.window);
+        assert!(inspection.peer_pane(&target, "session-pane").is_err());
+        assert!(inspection.peer_pane(&target, "other-workspace").is_err());
+    }
 
     #[test]
     fn opening_keeps_exact_work_and_literal_locators_without_claiming_usability() {

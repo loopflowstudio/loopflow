@@ -595,10 +595,13 @@ never prepare another checkout. The CLI transports native Session argv over SSH,
 keeping the owner's data directory and explicit takeover behavior. Local panes and
 drafts remain retained; no remote planning tree or execution record is imported.
 
-`lf desktop hide --target "$target"` and `lf desktop restore --target "$target"`
+`lf --task LOO-427 desktop hide --pane "$pane"` and `lf --task LOO-427 desktop restore --pane "$pane"`
 change retained pane visibility. Focus, split, move, resize and zoom use that same
 exact-target path through the registry and multiplexer; see the
-[CLI examples](../docs/lf.md#desktop-navigation). Move retains the pane itself,
+[CLI examples](../docs/lf.md#desktop-navigation). `--repo`/`--task` select Work;
+`--pane` selects a pane ID from inspection. Omit it only for one eligible pane;
+ambiguity lists choices and does nothing. Surface/window/content tokens are internal.
+Move retains the pane itself,
 including its content occurrence and surface key; it never closes/reopens a client.
 Split adds an empty pane. Arrangement preserves selection except explicit focus;
 zoom does not redirect input to an unselected pane. Window/content replacement
@@ -609,7 +612,7 @@ Flow-log reuse existing panes for the named Task; its recorded checkout must
 match. Remote shells run on the recorded execution Machine; changed or missing checkouts
 refuse launch without opening a local shell. Disconnects never replay shell commands.
 
-`lf desktop read --target "$target" --surface "$surface" --region selection --json`
+`lf --task LOO-427 desktop read --pane "$pane" --region selection --json`
 validates the retained pane and native surface without following focus or retiring
 an exited surface. Missing surfaces and nonterminal panes are explicit unavailable
 results, not empty text. The verified lf3 reader writes directly into the requested
@@ -619,8 +622,8 @@ command block (empty when nothing is selected). No unbounded extraction is used.
 Mounted extraction/draft acceptance and cross-machine composition remain unproved.
 
 ```sh
-lf desktop text --target "$target" --surface "$surface" -- 'add to the draft'
-lf desktop key --target "$target" --surface "$surface" enter
+lf --task LOO-427 desktop text --pane "$pane" -- 'add to the draft'
+lf --task LOO-427 desktop key --pane "$pane" enter
 ```
 
 Text preserves the draft and inserts at its cursor; Enter is separate. Control

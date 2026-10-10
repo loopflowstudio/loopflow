@@ -711,106 +711,73 @@ child. Neither token authorizes terminal input.
 It requires macOS and a running app with automation access; failure leaves
 `lf task status <task>` available in the terminal.
 
-Hide and restore an exact retained pane, without closing its Session or shell:
+Select Work and use pane IDs from the retained layout:
 
 ```sh
-lf desktop list --json > /tmp/desktop.json
-# Set pane to a pane ID from that reading.
-target=$(jq -c --arg pane "$pane" '
-  .windows[] as $w | $w.workspaces[] as $s |
-  $s.layout | .. | objects | select(.pane? == $pane) |
-  {repository: $w.repository, window: $w.window, machine_id: $s.machine_id,
-   worktree: $s.worktree, pane, incarnation}
-' /tmp/desktop.json)
-lf desktop hide --target "$target" --json
-lf desktop restore --target "$target" --json
+lf desktop list --json
+lf --task LOO-427 desktop text -- 'add to the draft'
+lf --task LOO-427 desktop key enter
+lf --repo loopflow --task LOO-427 desktop hide --pane "$pane"
+lf --task LOO-427 desktop restore --pane "$pane"
 ```
 
-The target stays attached to that window, Machine, checkout and content occurrence
-while focus changes. Replaced windows/content reject the old target. Restore removes
-only the hidden flag: it does not select a Task, leave zoom, focus a window or acquire
-a client. Hidden shell commands and native surfaces remain retained. If a reply is
-lost, inspect again; repeating hide or restore is safe.
+Omit `--pane` only when the selected Work has one eligible pane. Ambiguity lists
+choices and changes nothing; `--pane` names an exact pane ID, never the current
+focus. Text/key/read require an existing terminal surface. Restore without a pane
+selects a unique hidden pane. A Task scope uses its recorded Machine/checkout;
+a repository without Task scope considers its retained workspaces. Unavailable Work
+or no matching pane produces an error without opening a window or preparing Work.
 
-Arrange those retained panes through the same exact targets:
+Window, checkout, content and native-surface lifetimes are resolved internally
+from one Desktop reading. Replacements before dispatch refuse the request instead
+of following new focus. There is no public JSON target or surface-token argument.
 
 ```sh
-lf desktop focus --target "$target"
-lf desktop split --target "$target" --axis vertical
-# Extract another exact target into $other from the same workspace reading.
-lf desktop move --target "$target" --destination "$other" --axis horizontal
-lf desktop resize --target "$target" --toward "$other" --ratio 0.6
-lf desktop zoom --target "$target"
-lf desktop zoom --target "$target" --off
+lf --task LOO-427 desktop focus --pane "$pane"
+lf --task LOO-427 desktop split --pane "$pane" --axis vertical
+lf --task LOO-427 desktop move --pane "$pane" --destination "$other" --axis horizontal
+lf --task LOO-427 desktop resize --pane "$pane" --toward "$other" --ratio 0.6
+lf --task LOO-427 desktop zoom --pane "$pane"
+lf --task LOO-427 desktop zoom --pane "$pane" --off
 ```
 
-Vertical puts the new or moved pane to the right; horizontal puts it below.
-Split adds an empty pane. Move retains the original pane/content identity, within
-one Machine/checkout only. Resize changes the divider separating the two targets;
-0.6 gives the target's side 60%, regardless of its order (allowed range 0.1–0.9).
-Both targets are checked before a move or resize changes anything.
-Split, move, resize and zoom preserve pane selection and Work navigation. Focus
-reveals/selects the exact pane in its retained workspace; it does not select
-another Task or bring a background repository window forward. Zoom reveals its
-target without selecting it; `--off` only unzooms that target. These operations
-never close/reopen clients or write into a draft. Replies describe model state,
-not a completed render. A lost split reply is not safe to retry blindly: inspect
-first, since each split adds a pane.
-
-Add companions without changing focus, zoom or Work selection:
+Move and resize use two distinct panes in the same Machine/checkout. Vertical
+places a pane to the right; horizontal below. Resize gives the selected side its
+share (0.1–0.9). Split, move, resize, zoom, hide and restore retain drafts and
+selection. Focus selects the addressed pane without changing Work or foregrounding
+a window. Closing a view does not end a Session. Replies describe model state,
+not usable rendering. Inspect after a lost reply; split is not safe to replay.
 
 ```sh
-lf desktop shell --target "$target"
-lf desktop files --target "$target" --task "$task_id"
-lf desktop flow-log --target "$target" --task "$task_id"
+lf --task LOO-427 desktop shell --pane "$pane"
+lf --task LOO-427 desktop files --pane "$pane"
+lf --task LOO-427 desktop flow-log --pane "$pane"
 ```
 
-Shell adds a local shell (remote opening is unavailable). Files and Flow-log
-reuse the Task's existing pane or add one beside the target; `--task` is its
-Loopflow Task ID from inspection, and its recorded checkout must match.
-Existing documents and terminal drafts stay retained. An empty target is filled;
-occupied contents are never replaced. Repeating Files/Flow-log reveals the same
-pane; repeating Shell adds another shell, so inspect after a lost reply.
-
-Request text from that exact pane and native surface:
+Companions fill an empty pane or open beside occupied content, retaining focus,
+zoom and Work. Files/Flow-log reuse the Task's pane. Shell opens on the recorded
+execution Machine and rechecks the checkout before launch; it never falls back to
+a local shell. Repeating Shell creates another shell, so inspect after a lost reply.
+Remote filesystem events update retained documents; disconnects retain drafts.
 
 ```sh
-# Set surface to this pane's surface incarnation from the same inspection.
-lf desktop read --target "$target" --surface "$surface" --region screen --max-bytes 65536 --json
+lf --task LOO-427 desktop read --pane "$pane" --region screen --max-bytes 65536 --json
+lf --task LOO-427 desktop text --pane "$pane" -- 'literal text'
+lf --task LOO-427 desktop key --pane "$pane" enter
 ```
 
-Regions are `screen`, `scrollback` and `selection`; the byte limit is 1–1048576
-(default 65536). The reply echoes the request, observation time and whether the
-pane is collapsed or hidden by zoom. Available results carry `text` and
-`truncated`; an empty string is successful empty output. Unavailable results carry
-a reason instead of text. Replaced windows, content or native surfaces reject old
-targets. Reads never follow focus, acquire a client or clean up an exited surface.
+Read regions are `screen`, `scrollback` and `selection`. Byte bounds are
+1–1048576 (default 65536); truncation ends at a complete UTF-8 scalar. Selection
+includes shell command blocks; empty selection succeeds. Reads never acquire a
+client, send input, follow focus or clean up an exited surface. There is no
+unbounded fallback. A surface disappearing after resolution remains unavailable.
 
-`screen` reads the current viewport; `scrollback` includes retained history;
-`selection` reads the selected text or shell command block, or empty text when
-nothing is selected. Extraction writes directly into fixed storage and ends at a
-complete UTF-8 scalar. Absent surfaces return `missing_surface`, and nonterminal
-panes `not_terminal`. JSON preserves these outcomes; text mode reports unavailable
-reads as errors. There is no unbounded fallback. Reading alone never sends input.
-Native pane acceptance and remote Session-plus-diff composition remain unproved.
-
-Insert text into the exact surface, then submit deliberately:
-
-```sh
-lf desktop text --target "$target" --surface "$surface" -- 'literal text'
-lf desktop key --target "$target" --surface "$surface" enter
-```
-
-Text inserts at the current cursor without clearing the existing draft. Quotes,
-backslashes and Unicode are literal; control characters (including newline and
-Tab) are rejected, never interpreted as keys. Key accepts `enter`, `tab`, `escape`,
-`backspace`, `delete`, `left`, `right`, `up`, `down`, `home` and `end`.
-Neither operation changes focus or opens a client. Missing, exited or replaced
-surfaces reject input, as does an active IME composition. Complete that composition
-first; the draft is not discarded. A reply reports dispatch, not child consumption
-or Task completion. Input is not idempotent: after a lost reply, inspect before
-sending more; never automatically repeat it. Native interaction proof remains
-with the fixture demo.
+Text inserts at the cursor without clearing drafts. Quotes, backslashes and
+Unicode stay literal; control characters, including newline/Tab, are rejected.
+Keys are separate: `enter`, `tab`, `escape`, `backspace`, `delete`, `left`, `right`,
+`up`, `down`, `home`, `end`. Missing, exited or replaced surfaces reject input;
+active IME composition must finish first. Input is not idempotent: never replay
+an uncertain reply. Native/configured-SSH acceptance remains with the fixture demo.
 
 ```sh
 open 'loopflow://task/LOO-303'

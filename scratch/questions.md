@@ -83,8 +83,8 @@ Primary and stack-parent Task selectors now carry repository-scoped full IDs thr
 dispatch; an unscoped ambiguous prefix still fails.
 
 October 9: complete launch sources `2bd5a17e…` and `74c997a8…` read under
-`.lf/tmp/context/`. `lf context --skill implement` reports 34,545 generated Work-seed
-tokens (18,545 over 16,000); authored-note curation cannot remove the generated inventory.
+`.lf/tmp/context/`. `lf context --skill implement` reports 34,579 generated Work-seed
+tokens (18,579 over 16,000); authored-note curation cannot remove the generated inventory.
 Limits remain unchanged. Pre-edit notes: `/tmp/loo427-shell-files-before/`.
 
 ## Explicit repository association — October 9

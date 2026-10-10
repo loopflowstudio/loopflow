@@ -9,10 +9,10 @@ use fs2::FileExt;
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 
-use crate::engine::agent::{run_agent, AgentCapabilities, AgentConfig, ProcessConfig};
-use crate::engine::config::load_config_or_default;
-use crate::engine::git::current_branch;
-use crate::engine::load_skill;
+use crate::agent::{run_agent, AgentCapabilities, AgentConfig, ProcessConfig};
+use crate::config::load_config_or_default;
+use crate::flow::load_skill;
+use crate::git::current_branch;
 use crate::pr_landing::{
     LandingPlacement, LandingSupervisor, NewPrLanding, PrLanding, PrLandingState,
     SUPERVISOR_STALE_AFTER,
@@ -104,46 +104,27 @@ impl LandingObservation {
     }
 }
 
-pub(crate) trait LandingDriver: Send + Sync {
-    fn observe(&self, landing: &PrLanding) -> OpsResult<LandingObservation>;
-    fn repair(&self, landing: &PrLanding, incident: &CiIncident) -> OpsResult<()>;
-    /// Whether this check may start a ci-fix. A check that may not still records
-    /// the failure and leaves the repair to `lf ci watch`.
-    fn repairs(&self) -> bool {
-        true
-    }
-}
+/// How one check reads its PR.
+pub(crate) type ObservePr = Arc<dyn Fn(&PrLanding) -> OpsResult<LandingObservation> + Send + Sync>;
+/// How one check starts a ci-fix. A check without one still records the failure
+/// and leaves the repair to `lf ci watch`.
+pub(crate) type RepairCi = Arc<dyn Fn(&PrLanding, &CiIncident) -> OpsResult<()> + Send + Sync>;
 
-#[derive(Debug, Clone)]
-struct GithubLandingDriver {
-    repairs: bool,
-    release: Option<
-        Arc<(
-            super::release_lock::ReleaseLock,
-            crate::engine::git::WorktreeLease,
-        )>,
-    >,
-}
-
-impl LandingDriver for GithubLandingDriver {
-    fn observe(&self, landing: &PrLanding) -> OpsResult<LandingObservation> {
-        match observe_pr_merge(&landing.worktree, u64::from(landing.pr_number)) {
-            Ok(observation) => {
-                classify_github_observation(landing, observation.pr, observation.request)
-            }
-            Err(error) => Ok(LandingObservation::Degraded {
-                reason: error.to_string(),
-            }),
+fn observe_github(landing: &PrLanding) -> OpsResult<LandingObservation> {
+    match observe_pr_merge(&landing.worktree, u64::from(landing.pr_number)) {
+        Ok(observation) => {
+            classify_github_observation(landing, observation.pr, observation.request)
         }
+        Err(error) => Ok(LandingObservation::Degraded {
+            reason: error.to_string(),
+        }),
     }
+}
 
-    fn repair(&self, landing: &PrLanding, incident: &CiIncident) -> OpsResult<()> {
-        admit_ci_fix(landing, incident, self.release.as_deref())
-    }
-
-    fn repairs(&self) -> bool {
-        self.repairs
-    }
+fn ci_fix(
+    release: Option<Arc<(super::release_lock::ReleaseLock, crate::git::WorktreeLease)>>,
+) -> RepairCi {
+    Arc::new(move |landing, incident| admit_ci_fix(landing, incident, release.as_deref()))
 }
 
 fn classify_github_observation(
@@ -214,10 +195,7 @@ fn classify_github_observation(
 fn admit_ci_fix(
     landing: &PrLanding,
     incident: &CiIncident,
-    release: Option<&(
-        super::release_lock::ReleaseLock,
-        crate::engine::git::WorktreeLease,
-    )>,
+    release: Option<&(super::release_lock::ReleaseLock, crate::git::WorktreeLease)>,
 ) -> OpsResult<()> {
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
@@ -242,18 +220,18 @@ fn admit_ci_fix(
             return Ok(());
         }
         if let Some(session) = &reservation.session {
-            // A bound driver's engine is judged by its own OS identity.
+            // An attached Session's AgentProcess is judged by its own OS identity.
             let bound = store
                 .sqlite
-                .session_driver(session)
+                .session_attachment(session)
                 .map_err(repair_error)?
                 .is_some();
-            let engine = store
+            let agent = store
                 .sqlite
-                .session_provider_process(session)
+                .agent_process_identity(session)
                 .map_err(repair_error)?;
             if bound
-                && engine.is_some_and(|(pid, started)| {
+                && agent.is_some_and(|(pid, started)| {
                     crate::journal::process_identity_evidence(pid, started)
                         != crate::journal::ProcessIdentityEvidence::Dead
                 })
@@ -307,7 +285,7 @@ fn admit_ci_fix(
         if retry && reservation.retries >= config.automation.retries {
             return Err(repair_error("repair startup exhausted automatic retries"));
         }
-        let launcher = crate::journal::current_process_lfid()
+        let launcher = crate::journal::current_lf_process_id()
             .ok_or_else(|| repair_error("repair admission requires a recorded Process"))?;
         let session = if let Some(id) = &reservation.session {
             store
@@ -316,7 +294,7 @@ fn admit_ci_fix(
                 .map_err(repair_error)?
                 .ok_or_else(|| repair_error("reserved repair Session disappeared"))?
         } else {
-            let (provider, model) = crate::engine::parse_agent(config.agent());
+            let (provider, model) = crate::config::parse_agent(config.agent());
             crate::session::LfSession {
                 id: format!("session_{}", uuid::Uuid::new_v4().simple()),
                 captured: None,
@@ -331,7 +309,7 @@ fn admit_ci_fix(
                 iterations: None,
                 task_id: landing.task_id.clone(),
                 wave_id: None,
-                flow_process_lfid: None,
+                flow_lf_process_id: None,
                 work_source: landing
                     .task_id
                     .as_ref()
@@ -361,8 +339,8 @@ fn admit_ci_fix(
             return Err(repair_error("landing changed before repair reservation"));
         }
         drop(lock);
-        let context = crate::engine::process::execution_context().map_err(repair_error)?;
-        let bin = crate::engine::process::pin_control_binary(&context.lf_bin);
+        let context = crate::os_process::execution_context().map_err(repair_error)?;
+        let bin = crate::os_process::pin_control_binary(&context.lf_bin);
         let argv = vec![
             bin.to_string_lossy().to_string(),
             "task".into(),
@@ -385,7 +363,7 @@ fn admit_ci_fix(
             ("LF_USER_NAME", ""),
         ];
         if let Some((lock, lease)) = release {
-            crate::engine::process::start_lf_session_inheriting(
+            crate::os_process::start_lf_session_inheriting(
                 &name,
                 &landing.worktree,
                 &argv,
@@ -398,7 +376,7 @@ fn admit_ci_fix(
             .await
             .map_err(repair_error)?;
         } else {
-            crate::engine::process::start_lf_session_with_env(
+            crate::os_process::start_lf_session_with_env(
                 &name,
                 &landing.worktree,
                 &argv,
@@ -431,9 +409,9 @@ fn admit_ci_fix(
 
 /// A reservation still held by the caller was never handed to a repair worker;
 /// a long-lived watcher must be able to retry its own unacknowledged launch.
-fn repair_live(store: &SharedStore, process: Option<&crate::id::ProcessLfid>) -> bool {
+fn repair_live(store: &SharedStore, process: Option<&crate::id::LfProcessId>) -> bool {
     process.is_some_and(|process| {
-        Some(process) != crate::journal::current_process_lfid().as_ref()
+        Some(process) != crate::journal::current_lf_process_id().as_ref()
             && crate::journal::process_evidence(&store.sqlite, process)
                 != crate::journal::ProcessIdentityEvidence::Dead
     })
@@ -494,13 +472,13 @@ pub fn run_repair(identity: &str, launcher: &str) -> OpsResult<()> {
             .find(|row| row.incident.identity == identity)
             .ok_or_else(|| repair_error("repair incident disappeared"))?
             .incident;
-        let process = crate::journal::current_process_lfid()
+        let process = crate::journal::current_lf_process_id()
             .ok_or_else(|| repair_error("repair worker has no Process"))?;
         if !store
             .sqlite
             .handoff_repair(
                 identity,
-                &crate::id::ProcessLfid::parse(launcher).map_err(repair_error)?,
+                &crate::id::LfProcessId::parse(launcher).map_err(repair_error)?,
                 &process,
             )
             .map_err(repair_error)?
@@ -522,11 +500,7 @@ pub fn run_repair(identity: &str, launcher: &str) -> OpsResult<()> {
         Ok::<_, OpsError>((store, landing, incident, captured))
     })?;
     let result = (|| {
-        let observation = GithubLandingDriver {
-            repairs: true,
-            release: None,
-        }
-        .observe(&landing)?;
+        let observation = observe_github(&landing)?;
         let matching = match observation {
             LandingObservation::Failing {
                 head_sha,
@@ -566,7 +540,7 @@ pub fn run_repair(identity: &str, launcher: &str) -> OpsResult<()> {
         .sqlite
         .finish_repair(
             identity,
-            &crate::journal::current_process_lfid().expect("repair has a process"),
+            &crate::journal::current_lf_process_id().expect("repair has a process"),
             failure.as_deref(),
             conclusion,
             captured,
@@ -674,11 +648,11 @@ fn process_ci_fix(
             }
         }
     }
-    crate::engine::agent::pin_provider_account_id_blocking(&mut launch)?;
+    crate::agent::pin_provider_account_id_blocking(&mut launch)?;
     let capabilities = AgentCapabilities {
         chrome: config.chrome,
     };
-    let (harness, model) = crate::engine::parse_agent(launch.agent());
+    let (harness, model) = crate::config::parse_agent(launch.agent());
     let session = store
         .sqlite
         .session(session_id)
@@ -871,7 +845,7 @@ async fn block_landing(
     Err(OpsError::DeliveryHeld(reason))
 }
 
-async fn run_driver_operation<T, F>(
+async fn run_landing_operation<T, F>(
     ownership: &Arc<File>,
     label: &'static str,
     operation: F,
@@ -897,9 +871,7 @@ fn lock_landing(landing: &PrLanding) -> OpsResult<Option<Arc<File>>> {
         .truncate(false)
         .read(true)
         .write(true)
-        .open(
-            crate::engine::git::absolute_git_dir(&landing.worktree)?.join("lf-pr-landing.lock"),
-        )?;
+        .open(crate::git::absolute_git_dir(&landing.worktree)?.join("lf-pr-landing.lock"))?;
     match FileExt::try_lock_exclusive(&lock) {
         Ok(()) => Ok(Some(Arc::new(lock))),
         Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => Ok(None),
@@ -911,7 +883,8 @@ fn lock_landing(landing: &PrLanding) -> OpsResult<Option<Arc<File>>> {
 pub(crate) async fn reconcile_pr_landing(
     store: SharedStore,
     landing: PrLanding,
-    driver: Arc<dyn LandingDriver>,
+    observe: ObservePr,
+    repair: Option<RepairCi>,
 ) -> OpsResult<PrLanding> {
     // Acquire the OS lock before changing the lease. A canceled async repair
     // retains this lock in its blocking worker until that worker really exits.
@@ -940,7 +913,7 @@ pub(crate) async fn reconcile_pr_landing(
             .map_err(|error| OpsError::Message(error.to_string()))?
             .ok_or_else(|| OpsError::Message("landing disappeared".into()));
     };
-    let result = reconcile_claimed(&store, &mut landing, driver, &ownership).await;
+    let result = reconcile_claimed(&store, &mut landing, observe, repair, &ownership).await;
     store
         .release_pr_landing(&landing)
         .await
@@ -956,7 +929,8 @@ pub(crate) async fn reconcile_pr_landing(
 async fn reconcile_claimed(
     store: &SharedStore,
     landing: &mut PrLanding,
-    driver: Arc<dyn LandingDriver>,
+    observe: ObservePr,
+    repair: Option<RepairCi>,
     ownership: &Arc<File>,
 ) -> OpsResult<()> {
     refresh_joined_request(store, landing).await?;
@@ -966,10 +940,10 @@ async fn reconcile_claimed(
             merge_commit: merge_commit.clone(),
         }
     } else {
-        run_driver_operation(ownership, "observation", {
-            let driver = Arc::clone(&driver);
+        run_landing_operation(ownership, "observation", {
+            let observe = Arc::clone(&observe);
             let landing = landing.clone();
-            move || driver.observe(&landing)
+            move || observe(&landing)
         })
         .await?
     };
@@ -1014,13 +988,13 @@ async fn reconcile_claimed(
             .observe_ci_incident(&incident)
             .await
             .map_err(|error| OpsError::Message(error.to_string()))?;
-        if !driver.repairs() {
+        if repair.is_none() {
             return Ok(());
         }
-        observed = run_driver_operation(ownership, "CI confirmation", {
-            let driver = Arc::clone(&driver);
+        observed = run_landing_operation(ownership, "CI confirmation", {
+            let observe = Arc::clone(&observe);
             let landing = landing.clone();
-            move || driver.observe(&landing)
+            move || observe(&landing)
         })
         .await?;
         if is_ci_timeout(&incident) {
@@ -1142,13 +1116,16 @@ async fn reconcile_claimed(
             )
             .await?;
             let identity = incident.identity.clone();
-            let repair = run_driver_operation(ownership, "ci-fix", {
-                let driver = Arc::clone(&driver);
+            // A check without a ci-fix returned when it recorded the failure.
+            let Some(repair) = repair else {
+                return Ok(());
+            };
+            let repaired = run_landing_operation(ownership, "ci-fix", {
                 let landing = landing.clone();
-                move || driver.repair(&landing, &incident)
+                move || repair(&landing, &incident)
             })
             .await;
-            if let Err(error) = repair {
+            if let Err(error) = repaired {
                 if matches!(error, OpsError::CheckoutBusy(_)) {
                     // Another observer's busy checkout is not a delivery
                     // failure. In particular, a watcher must not stop a land
@@ -1276,7 +1253,7 @@ async fn cleanup_landed_pr(store: &SharedStore, landing: &PrLanding) -> OpsResul
         .map_err(|error| OpsError::Message(error.to_string()))?
         .iter()
         .any(|flow| {
-            flow.driver.completed_at.is_none()
+            flow.process.completed_at.is_none()
                 && crate::journal::process_evidence(&store.sqlite, flow.id())
                     != crate::journal::ProcessIdentityEvidence::Dead
         })
@@ -1284,7 +1261,7 @@ async fn cleanup_landed_pr(store: &SharedStore, landing: &PrLanding) -> OpsResul
         eprintln!("PR merged; retained its checkout for the Flow that landed it.");
         return Ok(());
     }
-    if crate::engine::worktrees::is_persistent_worktree(&landing.worktree)? {
+    if crate::git::worktrees::is_persistent_worktree(&landing.worktree)? {
         match crate::ops::sync::restart_landed_persistent(&landing.worktree) {
             Ok(true) => eprintln!("PR merged; restarted persistent branch from the default branch."),
             Ok(false) => eprintln!(
@@ -1310,7 +1287,7 @@ async fn cleanup_landed_pr(store: &SharedStore, landing: &PrLanding) -> OpsResul
         );
         return Ok(());
     }
-    let repo = crate::engine::worktrees::main_repo_root(&landing.worktree)?;
+    let repo = crate::git::worktrees::main_repo_root(&landing.worktree)?;
     if std::fs::canonicalize(&repo)? == std::fs::canonicalize(&landing.worktree)? {
         eprintln!("PR merged; retained the primary checkout and branch.");
         return Ok(());
@@ -1410,7 +1387,7 @@ pub(crate) fn reconcile_armed_pr(
     options: &LandOptions,
     pr: &PrInfo,
     lock: &super::release_lock::ReleaseLock,
-    lease: &crate::engine::git::WorktreeLease,
+    lease: &crate::git::WorktreeLease,
 ) -> OpsResult<PrLanding> {
     let landing = record_armed_pr(repo, options, pr)?;
     let release = Some(Arc::new((lock.try_clone()?, lease.try_clone()?)));
@@ -1418,10 +1395,8 @@ pub(crate) fn reconcile_armed_pr(
         reconcile_pr_landing(
             landing_store().await?,
             landing,
-            Arc::new(GithubLandingDriver {
-                repairs: true,
-                release,
-            }),
+            Arc::new(observe_github),
+            Some(ci_fix(release)),
         )
         .await
     })
@@ -1431,15 +1406,7 @@ pub(crate) fn reconcile_armed_pr(
 /// shares with a release's own landing. The landing lock, generation claim and
 /// incident reservation keep a second caller from repeating the repair.
 pub(crate) async fn repair_landing(store: SharedStore, landing: PrLanding) -> OpsResult<PrLanding> {
-    reconcile_pr_landing(
-        store,
-        landing,
-        Arc::new(GithubLandingDriver {
-            repairs: true,
-            release: None,
-        }),
-    )
-    .await
+    reconcile_pr_landing(store, landing, Arc::new(observe_github), Some(ci_fix(None))).await
 }
 
 /// Whether a repair worker for this landing is running now.
@@ -1484,10 +1451,8 @@ async fn wait_for_landing(
             let observed = reconcile_pr_landing(
                 store.clone(),
                 landing,
-                Arc::new(GithubLandingDriver {
-                    repairs: true,
-                    release: None,
-                }),
+                Arc::new(observe_github),
+                Some(ci_fix(None)),
             )
             .await?;
             match observed.state {
@@ -1562,14 +1527,7 @@ async fn reconcile_repository_async(
         let id = landing.id.clone();
         match tokio::time::timeout_at(
             deadline,
-            reconcile_pr_landing(
-                store.clone(),
-                landing,
-                Arc::new(GithubLandingDriver {
-                    repairs: false,
-                    release: None,
-                }),
-            ),
+            reconcile_pr_landing(store.clone(), landing, Arc::new(observe_github), None),
         )
         .await
         {
@@ -1628,13 +1586,13 @@ mod tests {
 
     use super::{
         classify_github_observation, lock_landing, reconcile_pr_landing, wait_for_landing,
-        LandingDriver, LandingObservation,
+        LandingObservation, ObservePr, RepairCi,
     };
     use crate::ops::error::{OpsError, OpsResult};
     use crate::ops::pr::{MergeRequest, PrInfo};
     use crate::pr_landing::{NewPrLanding, PrLanding, PrLandingState};
     use crate::store::{SharedStore, StorageConfig};
-    use crate::work::task::{CiCheck, CiIncident};
+    use crate::work::task::CiCheck;
     use std::path::PathBuf;
 
     fn github_landing_fixture() -> (PrLanding, PrInfo) {
@@ -1726,35 +1684,53 @@ mod tests {
         );
     }
 
-    struct FakeDriver {
+    /// Scripted observations and a counted ci-fix in place of GitHub and a repair worker.
+    struct Script {
         observations: Mutex<VecDeque<LandingObservation>>,
         repairs: Mutex<u32>,
         repair_error: Option<String>,
     }
 
-    impl LandingDriver for FakeDriver {
-        fn observe(&self, _: &PrLanding) -> OpsResult<LandingObservation> {
-            self.observations
-                .lock()
-                .unwrap()
-                .pop_front()
-                .ok_or_else(|| OpsError::Message("observation exhausted".into()))
+    impl Script {
+        fn observe(self: &Arc<Self>) -> ObservePr {
+            let script = Arc::clone(self);
+            Arc::new(move |_| {
+                script
+                    .observations
+                    .lock()
+                    .unwrap()
+                    .pop_front()
+                    .ok_or_else(|| OpsError::Message("observation exhausted".into()))
+            })
         }
-        fn repair(&self, _: &PrLanding, _: &CiIncident) -> OpsResult<()> {
-            *self.repairs.lock().unwrap() += 1;
-            match &self.repair_error {
-                Some(error) => Err(OpsError::Message(error.clone())),
-                None => Ok(()),
-            }
+
+        fn repair(self: &Arc<Self>) -> RepairCi {
+            let script = Arc::clone(self);
+            Arc::new(move |_, _| {
+                *script.repairs.lock().unwrap() += 1;
+                match &script.repair_error {
+                    Some(error) => Err(OpsError::Message(error.clone())),
+                    None => Ok(()),
+                }
+            })
         }
     }
 
-    fn driver(observations: Vec<LandingObservation>) -> Arc<FakeDriver> {
-        Arc::new(FakeDriver {
+    fn script(observations: Vec<LandingObservation>) -> Arc<Script> {
+        Arc::new(Script {
             observations: Mutex::new(observations.into()),
             repairs: Mutex::new(0),
             repair_error: None,
         })
+    }
+
+    /// One check that may start a ci-fix.
+    async fn check(
+        store: SharedStore,
+        landing: PrLanding,
+        script: &Arc<Script>,
+    ) -> OpsResult<PrLanding> {
+        reconcile_pr_landing(store, landing, script.observe(), Some(script.repair())).await
     }
 
     async fn fixture() -> (tempfile::TempDir, SharedStore, PrLanding) {
@@ -1881,39 +1857,33 @@ mod tests {
     #[tokio::test]
     async fn revoked_merge_intent_blocks_without_launching_a_repair() {
         let (_directory, store, landing) = fixture().await;
-        let driver = driver(vec![LandingObservation::Unarmed {
+        let script = script(vec![LandingObservation::Unarmed {
             head_sha: "head".into(),
         }]);
-        assert!(
-            reconcile_pr_landing(store.clone(), landing.clone(), driver.clone())
-                .await
-                .is_err()
-        );
+        assert!(check(store.clone(), landing.clone(), &script)
+            .await
+            .is_err());
         let blocked = store.get_pr_landing(&landing.id).await.unwrap().unwrap();
         assert_eq!(blocked.state, PrLandingState::Blocked);
-        assert_eq!(*driver.repairs.lock().unwrap(), 0);
+        assert_eq!(*script.repairs.lock().unwrap(), 0);
     }
 
     #[tokio::test]
     async fn finite_checks_return_pending_then_finish_only_after_merge() {
         let (_directory, store, landing) = fixture().await;
-        let driver = driver(vec![
+        let script = script(vec![
             LandingObservation::Pending {
                 head_sha: "head".into(),
                 attempt: None,
             },
             merged(),
         ]);
-        let pending = reconcile_pr_landing(store.clone(), landing, driver.clone())
-            .await
-            .unwrap();
+        let pending = check(store.clone(), landing, &script).await.unwrap();
         assert_eq!(pending.state, PrLandingState::Watching);
         assert!(pending.supervisor.is_none());
         assert!(pending.merge_commit.is_none());
-        assert_eq!(*driver.repairs.lock().unwrap(), 0);
-        let landed = reconcile_pr_landing(store.clone(), pending, driver)
-            .await
-            .unwrap();
+        assert_eq!(*script.repairs.lock().unwrap(), 0);
+        let landed = check(store.clone(), pending, &script).await.unwrap();
         assert_eq!(landed.state, PrLandingState::Merged);
         assert_eq!(landed.merge_commit.as_deref(), Some("merge"));
         assert!(store
@@ -1926,28 +1896,22 @@ mod tests {
     #[tokio::test]
     async fn unchanged_incident_gets_one_repair_across_ticks_and_still_observes_merge() {
         let (_directory, store, landing) = fixture().await;
-        let driver = driver(vec![
+        let script = script(vec![
             failure("head"),
             failure("head"),
             failure("head"),
             failure("head"),
             merged(),
         ]);
-        let pending = reconcile_pr_landing(store.clone(), landing, driver.clone())
-            .await
-            .unwrap();
+        let pending = check(store.clone(), landing, &script).await.unwrap();
         assert_eq!(pending.state, PrLandingState::Watching);
-        assert!(
-            reconcile_pr_landing(store.clone(), pending.clone(), driver.clone())
-                .await
-                .is_err()
-        );
+        assert!(check(store.clone(), pending.clone(), &script)
+            .await
+            .is_err());
         let blocked = store.get_pr_landing(&pending.id).await.unwrap().unwrap();
         assert_eq!(blocked.state, PrLandingState::Blocked);
-        assert_eq!(*driver.repairs.lock().unwrap(), 1);
-        let merged = reconcile_pr_landing(store.clone(), blocked, driver)
-            .await
-            .unwrap();
+        assert_eq!(*script.repairs.lock().unwrap(), 1);
+        let merged = check(store.clone(), blocked, &script).await.unwrap();
         assert_eq!(merged.state, PrLandingState::Merged);
         let incidents = store
             .ci_incidents_since(OffsetDateTime::UNIX_EPOCH, None, None)
@@ -1957,27 +1921,12 @@ mod tests {
         assert!(incidents[0].incident.responded_at.is_some());
     }
 
-    /// The scheduled repository check: it sees the failure, the watcher repairs it.
-    struct ObservingDriver(Arc<FakeDriver>);
-
-    impl LandingDriver for ObservingDriver {
-        fn observe(&self, landing: &PrLanding) -> OpsResult<LandingObservation> {
-            self.0.observe(landing)
-        }
-        fn repair(&self, landing: &PrLanding, incident: &CiIncident) -> OpsResult<()> {
-            self.0.repair(landing, incident)
-        }
-        fn repairs(&self) -> bool {
-            false
-        }
-    }
-
     #[tokio::test]
     async fn an_observing_check_records_the_failure_and_leaves_the_repair() {
         let (_directory, store, landing) = fixture().await;
-        let fake = driver(vec![failure("head"), failure("head"), failure("head")]);
-        let observing = Arc::new(ObservingDriver(fake.clone()));
-        let watching = reconcile_pr_landing(store.clone(), landing, observing)
+        // The scheduled repository check sees the failure; the watcher repairs it.
+        let fake = script(vec![failure("head"), failure("head"), failure("head")]);
+        let watching = reconcile_pr_landing(store.clone(), landing, fake.observe(), None)
             .await
             .unwrap();
         assert_eq!(watching.state, PrLandingState::Watching);
@@ -1990,9 +1939,7 @@ mod tests {
         assert!(incidents[0].incident.responded_at.is_none());
 
         // The watcher's check then repairs that same incident, once.
-        reconcile_pr_landing(store.clone(), watching, fake.clone())
-            .await
-            .unwrap();
+        check(store.clone(), watching, &fake).await.unwrap();
         assert_eq!(*fake.repairs.lock().unwrap(), 1);
         let incidents = store
             .ci_incidents_since(OffsetDateTime::UNIX_EPOCH, None, None)
@@ -2005,7 +1952,7 @@ mod tests {
     #[tokio::test]
     async fn recovered_checks_clear_a_block_without_another_repair() {
         let (_directory, store, landing) = fixture().await;
-        let driver = Arc::new(FakeDriver {
+        let script = Arc::new(Script {
             observations: Mutex::new(
                 vec![
                     failure("head"),
@@ -2019,42 +1966,34 @@ mod tests {
             repairs: Mutex::new(0),
             repair_error: Some("needs a secret".into()),
         });
-        assert!(
-            reconcile_pr_landing(store.clone(), landing.clone(), driver.clone())
-                .await
-                .is_err()
-        );
+        assert!(check(store.clone(), landing.clone(), &script)
+            .await
+            .is_err());
         let blocked = store.get_pr_landing(&landing.id).await.unwrap().unwrap();
         assert_eq!(blocked.state, PrLandingState::Blocked);
-        let recovered = reconcile_pr_landing(store, blocked, driver.clone())
-            .await
-            .unwrap();
+        let recovered = check(store, blocked, &script).await.unwrap();
         assert_eq!(recovered.state, PrLandingState::Watching);
         assert!(recovered.blocked_reason.is_none());
-        assert_eq!(*driver.repairs.lock().unwrap(), 1);
+        assert_eq!(*script.repairs.lock().unwrap(), 1);
     }
 
     #[tokio::test]
     async fn changed_confirmation_never_repairs_the_stale_head() {
         let (_directory, store, landing) = fixture().await;
-        let driver = driver(vec![failure("head"), failure("other")]);
-        let pending = reconcile_pr_landing(store, landing, driver.clone())
-            .await
-            .unwrap();
+        let script = script(vec![failure("head"), failure("other")]);
+        let pending = check(store, landing, &script).await.unwrap();
         assert_eq!(pending.state, PrLandingState::Watching);
-        assert_eq!(*driver.repairs.lock().unwrap(), 0);
+        assert_eq!(*script.repairs.lock().unwrap(), 0);
     }
 
     #[tokio::test]
     async fn confirmation_can_settle_a_merge_without_repair() {
         let (_directory, store, landing) = fixture().await;
-        let driver = driver(vec![failure("head"), merged()]);
-        let landed = reconcile_pr_landing(store.clone(), landing, driver.clone())
-            .await
-            .unwrap();
+        let script = script(vec![failure("head"), merged()]);
+        let landed = check(store.clone(), landing, &script).await.unwrap();
         assert_eq!(landed.state, PrLandingState::Merged);
         assert_eq!(landed.merge_commit.as_deref(), Some("merge"));
-        assert_eq!(*driver.repairs.lock().unwrap(), 0);
+        assert_eq!(*script.repairs.lock().unwrap(), 0);
         let incidents = store
             .ci_incidents_since(OffsetDateTime::UNIX_EPOCH, None, None)
             .await
@@ -2066,55 +2005,48 @@ mod tests {
     #[tokio::test]
     async fn failed_repair_does_not_hide_a_later_merge() {
         let (_directory, store, landing) = fixture().await;
-        let driver = Arc::new(FakeDriver {
+        let script = Arc::new(Script {
             observations: Mutex::new(vec![failure("head"), failure("head"), merged()].into()),
             repairs: Mutex::new(0),
             repair_error: Some("provider exited after publish".into()),
         });
-        assert!(
-            reconcile_pr_landing(store.clone(), landing.clone(), driver.clone())
-                .await
-                .is_err()
-        );
+        assert!(check(store.clone(), landing.clone(), &script)
+            .await
+            .is_err());
         let blocked = store.get_pr_landing(&landing.id).await.unwrap().unwrap();
         assert!(blocked
             .blocked_reason
             .as_deref()
             .unwrap()
             .contains("provider exited"));
-        let landed = reconcile_pr_landing(store, blocked, driver).await.unwrap();
+        let landed = check(store, blocked, &script).await.unwrap();
         assert_eq!(landed.state, PrLandingState::Merged);
     }
 
     #[tokio::test]
     async fn unavailable_observation_keeps_delivery_pending_and_releases_claim() {
         let (_directory, store, landing) = fixture().await;
-        let driver = driver(vec![LandingObservation::Degraded {
+        let script = script(vec![LandingObservation::Degraded {
             reason: "network failure".into(),
         }]);
-        assert!(
-            reconcile_pr_landing(store.clone(), landing.clone(), driver.clone())
-                .await
-                .is_err()
-        );
+        assert!(check(store.clone(), landing.clone(), &script)
+            .await
+            .is_err());
         let saved = store.get_pr_landing(&landing.id).await.unwrap().unwrap();
         assert_eq!(saved.state, PrLandingState::Watching);
         assert!(saved.supervisor.is_none());
-        assert_eq!(*driver.repairs.lock().unwrap(), 0);
+        assert_eq!(*script.repairs.lock().unwrap(), 0);
     }
 
     #[tokio::test]
     async fn closed_unmerged_never_counts_as_landed() {
         let (_directory, store, landing) = fixture().await;
-        assert!(reconcile_pr_landing(
-            store.clone(),
-            landing.clone(),
-            driver(vec![LandingObservation::Closed {
-                head_sha: "head".into()
-            }])
-        )
-        .await
-        .is_err());
+        let closed = script(vec![LandingObservation::Closed {
+            head_sha: "head".into(),
+        }]);
+        assert!(check(store.clone(), landing.clone(), &closed)
+            .await
+            .is_err());
         let saved = store.get_pr_landing(&landing.id).await.unwrap().unwrap();
         assert_eq!(saved.state, PrLandingState::Closed);
         assert!(saved.merge_commit.is_none());
@@ -2122,44 +2054,28 @@ mod tests {
 
     #[tokio::test]
     async fn overlapping_check_returns_while_canceled_repair_retains_its_lock() {
-        struct HeldRepair {
-            entered: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
-            release: Mutex<std::sync::mpsc::Receiver<()>>,
-        }
-        impl LandingDriver for HeldRepair {
-            fn observe(&self, _: &PrLanding) -> OpsResult<LandingObservation> {
-                Ok(failure("head"))
-            }
-            fn repair(&self, _: &PrLanding, _: &CiIncident) -> OpsResult<()> {
-                self.entered
-                    .lock()
-                    .unwrap()
-                    .take()
-                    .unwrap()
-                    .send(())
-                    .unwrap();
-                self.release.lock().unwrap().recv().unwrap();
-                Ok(())
-            }
-        }
         let (_directory, store, landing) = fixture().await;
         let (entered, started) = tokio::sync::oneshot::channel();
-        let (release, held) = std::sync::mpsc::channel();
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        let entered = Mutex::new(Some(entered));
+        let held = Mutex::new(held);
         let first = tokio::spawn(reconcile_pr_landing(
             store.clone(),
             landing.clone(),
-            Arc::new(HeldRepair {
-                entered: Mutex::new(Some(entered)),
-                release: Mutex::new(held),
-            }),
+            Arc::new(|_| Ok(failure("head"))),
+            Some(Arc::new(move |_, _| {
+                entered.lock().unwrap().take().unwrap().send(()).unwrap();
+                held.lock().unwrap().recv().unwrap();
+                Ok(())
+            })),
         ));
         started.await.unwrap();
         first.abort();
         assert!(first.await.unwrap_err().is_cancelled());
-        let competitor = driver(vec![merged()]);
+        let competitor = script(vec![merged()]);
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            reconcile_pr_landing(store.clone(), landing.clone(), competitor.clone()),
+            check(store.clone(), landing.clone(), &competitor),
         )
         .await;
         release.send(()).unwrap();

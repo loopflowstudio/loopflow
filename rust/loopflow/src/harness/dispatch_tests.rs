@@ -12,7 +12,7 @@ use tokio::sync::oneshot;
 use tokio_tungstenite::{tungstenite::protocol::Role, tungstenite::Message, WebSocketStream};
 
 use super::codex_history::History;
-use crate::id::ProcessLfid;
+use crate::id::LfProcessId;
 use crate::session::SessionEventKind;
 use crate::store::sqlite::SqliteStore;
 use crate::store::StoreError;
@@ -61,25 +61,25 @@ async fn stalled_dispatch() {
     let store = SqliteStore::open_ephemeral(&path).unwrap();
     let sql = rusqlite::Connection::open(&path).unwrap();
     sql.busy_timeout(Duration::from_millis(100)).unwrap();
-    let process = ProcessLfid::new();
+    let process = LfProcessId::new();
     sql.execute(
-        "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+        "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
         [process.as_str()],
     )
     .unwrap();
     store.test_session("conversation", "run_00000000000000000000000000000001");
-    let driver = store
-        .claim_session_driver("conversation", None, &process, false)
+    let attachment = store
+        .claim_session_attachment("conversation", None, &process, false)
         .unwrap();
     let (socket, _unread_peer) = UnixStream::pair().unwrap();
     let mut socket = WebSocketStream::from_raw_socket(socket, Role::Client, None).await;
     let (entered, ready) = oneshot::channel();
     let runtime = tokio::runtime::Handle::current();
     let sender_store = store.clone();
-    let sender_driver = driver.clone();
+    let sender_attachment = attachment.clone();
     let sender = tokio::task::spawn_blocking(move || {
         sender_store
-            .with_session_driver("conversation", &sender_driver, || {
+            .with_session_attachment("conversation", &sender_attachment, || {
                 entered.send(()).unwrap();
                 runtime.block_on(async {
                     // The peer never drains this frame. Only the runtime's timer
@@ -104,7 +104,7 @@ async fn stalled_dispatch() {
         .record(
             &store,
             "conversation",
-            Some(&driver),
+            Some(&attachment),
             None,
             &json!({"method":"turn/started","params":{"threadId":"thread","turn":{"id":"turn"}}}),
         )
@@ -112,7 +112,7 @@ async fn stalled_dispatch() {
     // A distinct connection proves the Machine's WAL writer is also free, not
     // merely this SqliteStore's mutex.
     sql.execute(
-        "UPDATE processes SET command='unrelated write' WHERE lfid=?1",
+        "UPDATE processes SET command='unrelated write' WHERE id=?1",
         [process.as_str()],
     )
     .unwrap();
@@ -124,9 +124,9 @@ async fn stalled_dispatch() {
         .any(|event| event.kind == SessionEventKind::Started
             && event.provider_turn.as_deref() == Some("turn")));
 
-    let replacement = ProcessLfid::new();
+    let replacement = LfProcessId::new();
     sql.execute(
-        "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+        "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
         [replacement.as_str()],
     )
     .unwrap();
@@ -134,10 +134,10 @@ async fn stalled_dispatch() {
     let (entered, ready) = mpsc::channel();
     let (release, released) = mpsc::channel();
     let dispatch_store = store.clone();
-    let dispatch_driver = driver.clone();
+    let dispatch_attachment = attachment.clone();
     let dispatch = std::thread::spawn(move || {
         dispatch_store
-            .with_session_driver("conversation", &dispatch_driver, || {
+            .with_session_attachment("conversation", &dispatch_attachment, || {
                 entered.send(()).unwrap();
                 released.recv().unwrap();
                 Ok(())
@@ -147,12 +147,12 @@ async fn stalled_dispatch() {
     ready.recv().unwrap();
     let (transferred, transfer) = mpsc::channel();
     let transfer_store = other_store.clone();
-    let original = driver.clone();
+    let original = attachment.clone();
     let claimant = std::thread::spawn(move || {
-        let driver = transfer_store
-            .claim_session_driver("conversation", Some(&original), &replacement, false)
+        let attachment = transfer_store
+            .claim_session_attachment("conversation", Some(&original), &replacement, false)
             .unwrap();
-        transferred.send(driver).unwrap();
+        transferred.send(attachment).unwrap();
     });
     // Transfer must wait for the native write, but history must not.
     assert!(transfer.recv_timeout(Duration::from_millis(100)).is_err());
@@ -165,10 +165,12 @@ async fn stalled_dispatch() {
     dispatch.join().unwrap();
     claimant.join().unwrap();
     assert!(matches!(
-        store.with_session_driver::<()>("conversation", &driver, || panic!("stale driver sent")),
+        store.with_session_attachment::<()>("conversation", &attachment, || panic!(
+            "stale attachment sent"
+        )),
         Err(StoreError::InvalidAuthority(_))
     ));
     other_store
-        .with_session_driver("conversation", &replacement, || Ok(()))
+        .with_session_attachment("conversation", &replacement, || Ok(()))
         .unwrap();
 }

@@ -49,7 +49,7 @@ pub struct Cli {
     #[arg(long, hide = true)]
     pub skill_input: Option<std::path::PathBuf>,
     #[arg(skip)]
-    pub resolved_invocation: Option<crate::engine::skill_invocation::SkillInvocation>,
+    pub resolved_invocation: Option<crate::skills::invocation::SkillInvocation>,
 
     /// Prefer this managed provider login before the normal route. Repeat to
     /// select provider-qualified preferences such as `claude=jack@`.
@@ -607,9 +607,9 @@ pub enum SessionCommand {
         /// The terminal marker in the current provider client receipt
         #[arg(long)]
         terminal: String,
-        /// Provider generation from the Session reading
+        /// AgentProcess from the Session reading; omit when it reported none
         #[arg(long)]
-        generation: i64,
+        agent_process: Option<String>,
     },
     /// Resume a conversation by ID, or the last interactive Session in this worktree
     Resume {

@@ -21,13 +21,16 @@ const EVENTS_PER_WRITER: usize = 20;
 fn process() -> LfProcess {
     let ts = 1_700_000_000;
     LfProcess {
-        lfid: loopflow::id::ProcessLfid::new(),
+        kind: loopflow::process::ProcessKind::Lf,
+        agent_session_id: None,
+        os_started_at: None,
+        id: loopflow::id::LfProcessId::new(),
         pid: None,
         trace_id: loopflow::id::TraceId::new(),
-        parent_process_lfid: None,
+        parent_lf_process_id: None,
         via_agent: Some(false),
         caller_session_id: None,
-        caller_provider_generation: None,
+        caller_agent_process_id: None,
         command: Some(r#"["lf","flow","telemetry-daily"]"#.into()),
         repo: Some("/src/loopflow".into()),
         cwd: None,
@@ -91,7 +94,7 @@ fn every_receipt_at_fleet_fanout_is_recorded_exactly_once() {
         "the ledger must hold exactly the receipts the fleet requested"
     );
     assert_eq!(
-        count(&path, "SELECT COUNT(DISTINCT lfid) FROM processes"),
+        count(&path, "SELECT COUNT(DISTINCT id) FROM processes"),
         expected,
         "no receipt may be recorded twice"
     );

@@ -19,7 +19,7 @@ path = "src/bin/lf.rs"
 name = "lf-prompt"
 path = "src/bin/lf-prompt.rs"
 
-# --- Dependencies from loopflow-engine ---
+# --- Core dependencies ---
 [dependencies]
 clap = { version = "4.6", features = ["derive", "env"] }
 dirs = "7"

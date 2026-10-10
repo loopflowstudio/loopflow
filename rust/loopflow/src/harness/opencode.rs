@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -10,16 +10,16 @@ use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
+use crate::agent::{opencode_worktree_config, AgentConfig, AgentWriteScope};
 use crate::chat::types::{ConversationEvent, FailureEvidence};
-use crate::engine::agent::{opencode_worktree_config, AgentConfig, AgentWriteScope};
-use crate::engine::config::parse_agent;
-use crate::engine::process::kill_process_group;
+use crate::config::parse_agent;
 use crate::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
 use crate::harness::{
-    opencode_history, opencode_mapping, opencode_runtime, ApprovalPolicy, Harness, HarnessError,
-    RawProviderEvent, SendCurrentOutcome,
+    opencode_history, opencode_mapping, ApprovalPolicy, Harness, HarnessError, RawProviderEvent,
+    SendCurrentOutcome,
 };
 use crate::id::AgentSessionId;
+use crate::os_process::kill_process_group;
 
 pub(crate) const OPENCODE_DISCONNECTED_CODE: &str = "opencode_disconnected";
 
@@ -33,9 +33,6 @@ pub struct OpenCodeHarness {
     turn_in_progress: Arc<AtomicBool>,
     shutdown_requested: Arc<AtomicBool>,
     child: Option<Child>,
-    /// The spawned server's process-group id (== its pid under
-    /// `process_group(0)`). 0 while no server is running.
-    child_group: Arc<AtomicU32>,
     stderr_task: Option<JoinHandle<()>>,
     sse_task: Option<JoinHandle<()>>,
     server_base_url: Option<String>,
@@ -63,7 +60,6 @@ impl OpenCodeHarness {
             turn_in_progress: Arc::new(AtomicBool::new(false)),
             shutdown_requested: Arc::new(AtomicBool::new(false)),
             child: None,
-            child_group: Arc::new(AtomicU32::new(0)),
             stderr_task: None,
             sse_task: None,
             server_base_url: None,
@@ -72,20 +68,10 @@ impl OpenCodeHarness {
     }
 
     async fn start_inner(&mut self, config: &AgentConfig) -> Result<()> {
-        let owner = config
-            .session_driver
-            .as_ref()
-            .map(|(session, driver)| {
-                Ok::<_, anyhow::Error>((
-                    crate::store::sqlite::SqliteStore::new(
-                        &crate::store::database_path_from_env()?
-                    )?,
-                    session.clone(),
-                    driver.clone(),
-                ))
-            })
-            .transpose()?;
-        self.history = Arc::new(Mutex::new(opencode_history::History::new(owner)));
+        let owner = super::agent_process::open_owner(config.session_attachment.as_ref())?;
+        self.history = Arc::new(Mutex::new(opencode_history::History::new(Some(
+            owner.clone(),
+        ))));
         let port = allocate_port()?;
         let mut command = Command::new("opencode");
         command
@@ -97,8 +83,8 @@ impl OpenCodeHarness {
             .stderr(std::process::Stdio::piped())
             // Dropping the harness (e.g. a run task is aborted) must not leak a
             // live server. The direct-child kill this fires is a backstop; the
-            // group kill in `stop()` and the driver lifeline are what reach the
-            // descendants.
+            // group kill in `stop()` and the attached LfProcess lifeline are what
+            // reach the descendants.
             .kill_on_drop(true);
         if let Some(cwd) = &config.cwd {
             command.current_dir(cwd);
@@ -111,36 +97,11 @@ impl OpenCodeHarness {
             super::context::configure_opencode(
                 command.as_std_mut(),
                 context,
-                &crate::engine::agent::system_prompt_with_structured_replies(config),
+                &crate::agent::system_prompt_with_structured_replies(config),
             )?;
         }
-        // Own process group so `stop()` and the driver lifeline can kill the
-        // whole tree — `opencode serve` spawns descendants (MCP servers, model
-        // proxies, npm-shim grandchildren) that a direct-child kill orphans.
-        #[cfg(unix)]
-        command.process_group(0);
         super::configure_vendor_std_env(command.as_std_mut())?;
-        {
-            let history = self.history.lock().expect("OpenCode history lock poisoned");
-            if let Some((store, session, driver)) = &history.owner {
-                store.record_session_provider_launch(session, driver, true)?;
-            }
-        }
-        let mut child = command
-            .spawn()
-            .map_err(|err| anyhow!("failed to spawn opencode serve: {err}"))?;
-        // `stop()` kills the group; the lifeline covers every way this process
-        // can end without reaching it, including signals and SIGKILL.
-        #[cfg(unix)]
-        if let Some(pid) = child.id() {
-            if let Err(error) = crate::engine::process::bind_group_to_driver(pid, None) {
-                kill_process_group(pid);
-                shutdown_child(&mut child).await;
-                return Err(anyhow!(
-                    "failed to bind opencode serve to its driver: {error}"
-                ));
-            }
-        }
+        let mut child = super::agent_process::spawn(command, None, &owner)?;
         let stderr = child
             .stderr
             .take()
@@ -178,17 +139,8 @@ impl OpenCodeHarness {
             shutdown_child(&mut child).await;
             return Err(error.into());
         }
-        {
-            let history = self.history.lock().expect("OpenCode history lock poisoned");
-            if let Some((store, session, driver)) = &history.owner {
-                if let Some(pid) = child.id() {
-                    if let Some(start) = crate::journal::process_started_at(pid)? {
-                        store.record_session_provider_process(session, driver, pid, start)?;
-                    }
-                }
-                store.record_session_connection(session, driver, &base_url, &agent_session)?;
-            }
-        }
+        let (store, session, attachment) = &owner;
+        store.record_session_connection(session, attachment, &base_url, &agent_session)?;
 
         let event_tx = self.events.clone();
         let raw_provider = self.raw_provider.clone();
@@ -338,7 +290,7 @@ impl OpenCodeHarness {
                                 if !history.lock().expect("OpenCode history lock poisoned").admitted(request) {
                                     return Err(anyhow!("OpenCode permission belongs to an unselected request"));
                                 }
-                                let owner = history.lock().expect("OpenCode history lock poisoned").owner.clone();
+                                let owner = history.lock().expect("OpenCode history lock poisoned").owner()?;
                                 opencode_history::post(owner, format!("{reader_base_url}/permission/{request_id}/reply"), json!({"reply":"once"})).await?;
                             }
                             Ok::<_, anyhow::Error>(())
@@ -389,18 +341,6 @@ impl OpenCodeHarness {
 
         let stderr_task = spawn_stderr_logger(stderr, "harness::opencode");
 
-        let opencode_pid = child.id();
-        if let Some(pid) = opencode_pid {
-            self.child_group.store(pid, Ordering::Release);
-            if let Err(err) = opencode_runtime::register_opencode_server(pid) {
-                tracing::warn!(
-                    opencode_pid = pid,
-                    error = %err,
-                    "failed to register OpenCode server runtime metadata"
-                );
-            }
-        }
-
         self.child = Some(child);
         self.stderr_task = Some(stderr_task);
         self.sse_task = Some(sse_task);
@@ -415,7 +355,7 @@ impl OpenCodeHarness {
 
 #[async_trait]
 impl Harness for OpenCodeHarness {
-    fn process_id(&self) -> Option<u32> {
+    fn pid(&self) -> Option<u32> {
         self.child.as_ref().and_then(Child::id)
     }
 
@@ -476,7 +416,7 @@ impl Harness for OpenCodeHarness {
         let mut payload = build_turn_payload(&turn_content, config);
         let (request, owner) = {
             let mut history = self.history.lock().expect("OpenCode history lock poisoned");
-            (history.request(), history.owner.clone())
+            (history.request()?, history.owner()?)
         };
         payload["messageID"] = json!(request);
 
@@ -517,7 +457,14 @@ impl Harness for OpenCodeHarness {
         let mut payload = build_turn_payload(text, &config);
         let (provider_turn_id, owner) = {
             let mut history = self.history.lock().expect("OpenCode history lock poisoned");
-            (history.request(), history.owner.clone())
+            match (history.request(), history.owner()) {
+                (Ok(request), Ok(owner)) => (request, owner),
+                (Err(error), _) | (_, Err(error)) => {
+                    return SendCurrentOutcome::Failed {
+                        error: error.to_string(),
+                    }
+                }
+            }
         };
         payload["messageID"] = json!(provider_turn_id);
         let steer_url = format!("{base_url}/session/{agent_session}/prompt_async");
@@ -574,16 +521,6 @@ impl Harness for OpenCodeHarness {
             shutdown_child(child).await;
         }
         self.child = None;
-        self.child_group.store(0, Ordering::Release);
-        if let Some(pid) = opencode_pid {
-            if let Err(err) = opencode_runtime::unregister_opencode_server(pid) {
-                tracing::warn!(
-                    opencode_pid = pid,
-                    error = %err,
-                    "failed to unregister OpenCode server runtime metadata"
-                );
-            }
-        }
 
         if let Some(task) = self.sse_task.take() {
             task.abort();
@@ -607,8 +544,8 @@ impl Harness for OpenCodeHarness {
     }
 
     fn process_group_id(&self) -> Option<u32> {
-        let group = self.child_group.load(Ordering::Acquire);
-        (group > 1).then_some(group)
+        // Admission makes this child the leader of its own group.
+        self.pid().filter(|pid| *pid > 1)
     }
 
     fn set_agent_session(&mut self, agent_session: Option<AgentSessionId>) {
@@ -915,6 +852,29 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    #[tokio::test]
+    async fn stop_clears_the_child_and_its_group() {
+        let child = Command::new("/bin/sleep")
+            .env_clear()
+            .arg("60")
+            .process_group(0)
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let pid = child.id().unwrap();
+        let birth = crate::journal::process_started_at(pid).unwrap().unwrap();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mut harness = OpenCodeHarness::new(tx, ApprovalPolicy::AutoApprove);
+        harness.child = Some(child);
+        assert_eq!(harness.process_group_id(), Some(pid));
+        harness.stop().await.unwrap();
+        assert_eq!(harness.pid(), None);
+        assert_eq!(harness.process_group_id(), None);
+        assert_eq!(
+            crate::journal::process_identity_evidence(pid, birth),
+            crate::journal::ProcessIdentityEvidence::Dead
+        );
+    }
     #[test]
     fn sanitize_error_message_redacts_credentials() {
         let input = "request to https://api.example.com/v1/chat?api_key=sk-secret123 failed: \
@@ -1098,7 +1058,7 @@ mod tests {
     fn live_config() -> AgentConfig {
         AgentConfig {
             chrome: false,
-            session_driver: None,
+            session_attachment: None,
             system_prompt: String::new(),
             conversation_context: None,
             task_prompt: String::new(),
@@ -1158,7 +1118,9 @@ mod tests {
     async fn live_basic_turn_completes() {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mut harness = OpenCodeHarness::new(tx, ApprovalPolicy::AutoApprove);
-        harness.start(&live_config()).await.expect("start");
+        let mut config = live_config();
+        let _ledger = super::super::admit_for_test(&mut config);
+        harness.start(&config).await.expect("start");
 
         harness
             .send_input("Reply with exactly: ALPHA")
@@ -1176,7 +1138,9 @@ mod tests {
     async fn live_send_current_coalesces_into_one_boundary() {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mut harness = OpenCodeHarness::new(tx, ApprovalPolicy::AutoApprove);
-        harness.start(&live_config()).await.expect("start");
+        let mut config = live_config();
+        let _ledger = super::super::admit_for_test(&mut config);
+        harness.start(&config).await.expect("start");
 
         harness
             .send_input(

@@ -1,4 +1,4 @@
-//! Codex app-server driver, targeting the codex-cli 0.142.5 protocol.
+//! Codex app-server harness, targeting the codex-cli 0.142.5 protocol.
 //!
 //! Protocol shapes verified live (hand-driven session + probes) and against
 //! `codex app-server generate-json-schema` (v2 bundle):
@@ -15,14 +15,13 @@
 
 use crate::id::AgentSessionId;
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use futures_util::{SinkExt, StreamExt};
+use futures_util::StreamExt;
 use serde_json::{json, Value};
 use tokio::net::UnixStream;
 use tokio::process::{Child, Command};
@@ -30,16 +29,16 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio_tungstenite::{client_async, tungstenite::Message};
 
+use crate::agent::{build_codex_thread_start_params, AgentConfig};
 use crate::chat::types::{ConversationEvent, ConversationItem, TurnUsage};
-use crate::engine::agent::{build_codex_thread_start_params, AgentConfig};
-use crate::engine::process::{
-    bind_group_to_driver, engine_lifeline_path, hold_engine_lifeline, kill_process_group,
-};
 use crate::harness::codex_mapping::ItemPhase;
 use crate::harness::common::spawn_stderr_logger;
 use crate::harness::lf_tag::LfTagParser;
 use crate::harness::{
     codex_mapping, ApprovalPolicy, Harness, HarnessError, RawProviderEvent, SendCurrentOutcome,
+};
+use crate::os_process::{
+    agent_process_lifeline_path, hold_agent_process_lifeline, kill_process_group,
 };
 use crate::provider_account::{resolve_provider_account_exact, ProviderAccountRoute};
 use crate::provider_auth::Provider;
@@ -592,17 +591,11 @@ pub struct CodexHarness {
     thread_start_request_id: Arc<AtomicI64>,
     launch: Option<AgentConfig>,
     should_seed_prompt: bool,
-    /// Pid of the live child's process group; 0 = none. `stop()` kills it;
-    /// every other way this process can end is covered by the driver
-    /// lifeline bound at spawn.
-    child_group: Arc<AtomicU32>,
-    engine_directory: Option<tempfile::TempDir>,
-    endpoint: Option<PathBuf>,
-    session_driver: Option<(
-        crate::store::sqlite::SqliteStore,
-        String,
-        crate::process::SessionDriver,
-    )>,
+    /// Retain the group from spawn through failed startup, before `child` is
+    /// installed. The harness alone mutates it; the lifeline covers lf death.
+    child_group: Option<u32>,
+    agent_directory: Option<tempfile::TempDir>,
+    session_attachment: Option<super::agent_process::AttachmentOwner>,
 }
 
 impl std::fmt::Debug for CodexHarness {
@@ -636,10 +629,9 @@ impl CodexHarness {
             thread_start_request_id: Arc::new(AtomicI64::new(0)),
             launch: None,
             should_seed_prompt: true,
-            child_group: Arc::new(AtomicU32::new(0)),
-            engine_directory: None,
-            endpoint: None,
-            session_driver: None,
+            child_group: None,
+            agent_directory: None,
+            session_attachment: None,
         }
     }
 
@@ -743,7 +735,7 @@ impl CodexHarness {
 
 #[async_trait]
 impl Harness for CodexHarness {
-    fn process_id(&self) -> Option<u32> {
+    fn pid(&self) -> Option<u32> {
         self.child.as_ref().and_then(Child::id)
     }
 
@@ -755,8 +747,7 @@ impl Harness for CodexHarness {
     }
 
     fn process_group_id(&self) -> Option<u32> {
-        let group = self.child_group.load(Ordering::SeqCst);
-        (group > 1).then_some(group)
+        self.child_group.filter(|pid| *pid > 1)
     }
 
     async fn start(&mut self, config: &AgentConfig) -> Result<()> {
@@ -919,13 +910,13 @@ impl Harness for CodexHarness {
     async fn stop(&mut self) -> Result<()> {
         self.shutdown_requested.store(true, Ordering::Relaxed);
 
-        if self.session_driver.is_some() && self.agent_session().is_some() {
-            // Managed engines close when the invocation settles its driver, under
-            // the same ownership transaction as takeover. Harness teardown
-            // only drops this connection; a replaced driver cannot stop work.
+        if self.session_attachment.is_some() && self.agent_session().is_some() {
+            // The invocation closes its AgentProcess under the attachment lock
+            // during settlement, without holding SQLite across provider I/O.
+            // Harness teardown only drops this connection after takeover.
             self.child.take();
-            self.child_group.store(0, Ordering::Release);
-            if let Some(directory) = self.engine_directory.take() {
+            self.child_group = None;
+            if let Some(directory) = self.agent_directory.take() {
                 let _ = directory.keep();
             }
             self.shutdown_tasks().await;
@@ -934,21 +925,19 @@ impl Harness for CodexHarness {
 
         let _ = self.interrupt().await;
 
-        let group = self.child_group.clone();
-        let terminate = || {
-            let pid = group.swap(0, Ordering::AcqRel);
-            if pid != 0 {
+        let mut terminate = || {
+            if let Some(pid) = self.child_group.take() {
                 kill_process_group(pid);
             }
             Ok(())
         };
-        if let Some((store, session, expected)) = &self.session_driver {
+        if let Some((store, session, expected)) = &self.session_attachment {
             if store
-                .with_session_driver(session, expected, terminate)
+                .with_session_attachment(session, expected, terminate)
                 .is_err()
             {
                 self.child.take();
-                if let Some(directory) = self.engine_directory.take() {
+                if let Some(directory) = self.agent_directory.take() {
                     let _ = directory.keep();
                 }
                 self.shutdown_tasks().await;
@@ -961,11 +950,11 @@ impl Harness for CodexHarness {
             let _ = child.wait().await;
         }
         self.child = None;
-        self.child_group.store(0, Ordering::Release);
+        self.child_group = None;
         self.turn_in_progress.store(false, Ordering::Relaxed);
 
         self.shutdown_tasks().await;
-        self.engine_directory.take();
+        self.agent_directory.take();
 
         Ok(())
     }
@@ -994,30 +983,11 @@ impl Harness for CodexHarness {
 
 impl CodexHarness {
     async fn start_inner(&mut self, launch: &AgentConfig) -> Result<()> {
-        self.session_driver = launch
-            .session_driver
-            .as_ref()
-            .map(|(session, driver)| {
-                let path = crate::store::database_path_from_env()?;
-                Ok::<_, anyhow::Error>((
-                    crate::store::sqlite::SqliteStore::new(&path)?,
-                    session.clone(),
-                    driver.clone(),
-                ))
-            })
-            .transpose()?;
-        let connection = self
-            .session_driver
-            .as_ref()
-            .map(|(store, session, _)| store.session_connection(session))
-            .transpose()?
-            .flatten();
-        let saved_thread = self
-            .session_driver
-            .as_ref()
-            .map(|(store, session, _)| store.session_thread(session))
-            .transpose()?
-            .flatten();
+        let owner = super::agent_process::open_owner(launch.session_attachment.as_ref())?;
+        self.session_attachment = Some(owner.clone());
+        let (store, session, _) = &owner;
+        let connection = store.session_connection(session)?;
+        let saved_thread = store.session_thread(session)?;
         if let Some(thread) = &saved_thread {
             if self.resume_agent_session.as_ref() != Some(thread) {
                 anyhow::bail!(
@@ -1040,9 +1010,9 @@ impl CodexHarness {
             .unwrap_or_else(|| {
                 directory
                     .as_ref()
-                    .expect("new engine owns a directory")
+                    .expect("new AgentProcess owns a directory")
                     .path()
-                    .join("engine.sock")
+                    .join("agent.sock")
             });
         let mut command = Command::new("codex");
         if let Some(route) = &self.account_route {
@@ -1063,17 +1033,12 @@ impl CodexHarness {
         if let Some(cwd) = &launch.cwd {
             command.current_dir(cwd);
         }
-        // Held until the engine has spawned, so a concurrent switch cannot
+        // Held until the AgentProcess has spawned, so a concurrent switch cannot
         // replace the native login between activation and startup.
         let activation = match &self.account_route {
             Some(route) => route.launch_as(command.as_std_mut()).await?,
             None => None,
         };
-        // Own process group so stop() can kill everything under the `codex`
-        // entry point, including the real app-server binary that npm shims
-        // spawn as a grandchild.
-        #[cfg(unix)]
-        command.process_group(0);
         super::configure_vendor_std_env(command.as_std_mut())?;
         // A login shell/snapshot can replace the launcher's PATH with the
         // installation, losing a development Session's executable/Machine.
@@ -1084,58 +1049,46 @@ impl CodexHarness {
             "features.shell_snapshot=false",
         ]);
 
-        // Codex's shell policy need not inherit arbitrary engine environment.
+        // Codex's shell policy need not inherit arbitrary app-server environment.
         // Tool authority belongs to this conversation, including when another
-        // conversation later shares its engine. Pass only explicit launch and
+        // conversation later shares its app-server. Pass only explicit launch and
         // freshly resolved lf executable/Machine values as thread configuration.
         let tool_environment = super::conversation_environment(command.as_std(), launch);
-        // The engine can host another conversation. Only this thread receives
-        // its caller/capture provenance; engine defaults must not lend it to a
+        // The app-server can host another conversation. Only this thread receives
+        // its caller/capture provenance; app-server defaults must not lend it to a
         // newly admitted sibling.
-        for name in crate::engine::agent::EXECUTION_IDENTITY_ENV {
+        for name in crate::agent::EXECUTION_IDENTITY_ENV {
             command.env_remove(name);
         }
 
-        if connection.is_none() {
-            if let Some((store, session, driver)) = &self.session_driver {
-                store.record_session_provider_launch(session, driver, true)?;
-            }
-        }
+        let lifeline = agent_process_lifeline_path(&endpoint);
         let mut child = if connection.is_none() {
-            Some(
-                command
-                    .spawn()
-                    .map_err(|err| anyhow!("failed to spawn codex app-server: {err}"))?,
-            )
+            Some(super::agent_process::spawn(
+                command,
+                Some(&lifeline),
+                &owner,
+            )?)
         } else {
             None
         };
         drop(activation);
 
-        // The engine runs in its own group and deliberately survives this
+        // The AgentProcess runs in its own group and deliberately survives this
         // harness, so no destructor or signal hook can be what stops it. The
         // lifeline ties it to the processes that drive it: when the last one
         // ends, by return, signal, panic or SIGKILL, the group is terminated.
-        let lifeline = engine_lifeline_path(&endpoint);
         if let Some(pid) = child.as_ref().and_then(tokio::process::Child::id) {
-            self.child_group.store(pid, Ordering::Release);
-            if let Some((store, session, driver)) = &self.session_driver {
-                if let Some(started_at) = crate::journal::process_started_at(pid)? {
-                    store.record_session_provider_process(session, driver, pid, started_at)?;
-                }
-            }
-            bind_group_to_driver(pid, Some(&lifeline)).map_err(|error| {
-                anyhow!("failed to bind codex app-server to its driver: {error}")
-            })?;
+            self.child_group = Some(pid);
         } else {
-            // Reconnecting adopts the engine; one that predates lifelines has none.
-            hold_engine_lifeline(&lifeline).map_err(|error| {
-                anyhow!("Codex engine is stopping after its driver exited ({error}); retry")
+            // Reconnecting adopts the AgentProcess; one that predates lifelines has none.
+            hold_agent_process_lifeline(&lifeline).map_err(|error| {
+                anyhow!(
+                    "Codex AgentProcess is stopping after its attached lf exited ({error}); retry"
+                )
             })?;
         }
 
-        self.endpoint = Some(endpoint.clone());
-        self.engine_directory = directory;
+        self.agent_directory = directory;
         let socket = tokio::time::timeout(Duration::from_secs(15), async {
             loop {
                 if let Some(child) = &mut child {
@@ -1167,7 +1120,7 @@ impl CodexHarness {
         let stderr = child.as_mut().and_then(|child| child.stderr.take());
 
         let (outbound_tx, mut outbound_rx) = mpsc::channel::<OutboundRpc>(128);
-        let authority = self.session_driver.clone();
+        let authority = owner.clone();
         let writer_events = self.events.clone();
         let native_history = Arc::new(Mutex::new(super::codex_history::History::default()));
         let writer_history = native_history.clone();
@@ -1184,31 +1137,35 @@ impl CodexHarness {
                         json!({ "jsonrpc": "2.0", "id": id, "result": result })
                     }
                 };
-                writer_history
+                let recorded = writer_history
                     .lock()
                     .expect("codex history lock poisoned")
-                    .request(&payload);
+                    .request(
+                        &payload,
+                        Some((&authority.0, authority.1.as_str(), &authority.2)),
+                    );
+                if let Err(error) = recorded {
+                    let _ = writer_events.send(ConversationEvent::Error {
+                        code: "codex_dispatch_rejected".into(),
+                        message: error.to_string(),
+                        evidence: None,
+                    });
+                    break;
+                }
                 let message = Message::Text(payload.to_string().into());
-                let outcome = if let Some((store, session, expected)) = authority.clone() {
-                    let dispatched = tokio::task::spawn_blocking(move || {
-                        let outcome = store.with_session_driver(&session, &expected, || {
-                            super::dispatch::send_fenced(&mut writer, message)
-                        });
-                        (writer, outcome)
-                    })
-                    .await;
-                    let Ok((returned, outcome)) = dispatched else {
-                        break;
-                    };
-                    writer = returned;
-                    outcome.map_err(|error| error.to_string())
-                } else {
-                    writer
-                        .send(message)
-                        .await
-                        .map_err(|error| error.to_string())
+                let (store, session, expected) = authority.clone();
+                let dispatched = tokio::task::spawn_blocking(move || {
+                    let outcome = store.with_session_attachment(&session, &expected, || {
+                        super::dispatch::send_fenced(&mut writer, message)
+                    });
+                    (writer, outcome)
+                })
+                .await;
+                let Ok((returned, outcome)) = dispatched else {
+                    break;
                 };
-                if let Err(message) = outcome {
+                writer = returned;
+                if let Err(message) = outcome.map_err(|error| error.to_string()) {
                     let _ = writer_events.send(ConversationEvent::Error {
                         code: "codex_dispatch_rejected".into(),
                         message,
@@ -1234,7 +1191,7 @@ impl CodexHarness {
         let pending_requests = self.pending_requests.clone();
         let retired_requests = self.retired_requests.clone();
         let account_route = self.account_route.clone();
-        let history = self.session_driver.clone();
+        let history = owner.clone();
         let reader_task = tokio::spawn(async move {
             let mut initialized_tx = Some(initialized_tx);
             let mut state = NotificationState::new(
@@ -1257,20 +1214,19 @@ impl CodexHarness {
                 let Ok(value) = serde_json::from_str::<Value>(&line) else {
                     continue;
                 };
-                if let Some((store, session, driver)) = &history {
-                    let recorded = super::dispatch::off_reactor(|| {
-                        native_history
-                            .lock()
-                            .expect("codex history lock poisoned")
-                            .record(store, session, Some(driver), None, &value)
+                let (store, session, attachment) = &history;
+                let recorded = super::dispatch::off_reactor(|| {
+                    native_history
+                        .lock()
+                        .expect("codex history lock poisoned")
+                        .record(store, session, Some(attachment), None, &value)
+                });
+                if let Err(error) = recorded {
+                    let _ = event_tx.send(ConversationEvent::Error {
+                        code: "conversation_history_unavailable".into(),
+                        message: error.to_string(),
+                        evidence: None,
                     });
-                    if let Err(error) = recorded {
-                        let _ = event_tx.send(ConversationEvent::Error {
-                            code: "conversation_history_unavailable".into(),
-                            message: error.to_string(),
-                            evidence: None,
-                        });
-                    }
                 }
 
                 let method = value
@@ -1485,14 +1441,13 @@ impl CodexHarness {
         // returning None rather than failing startup.
         match tokio::time::timeout(Duration::from_secs(10), thread_id_rx).await {
             Ok(Ok(thread_id)) => {
-                if let Some((store, session, driver)) = &self.session_driver {
-                    store.record_session_connection(
-                        session,
-                        driver,
-                        &endpoint.to_string_lossy(),
-                        &thread_id,
-                    )?;
-                }
+                let (store, session, attachment) = &owner;
+                store.record_session_connection(
+                    session,
+                    attachment,
+                    &endpoint.to_string_lossy(),
+                    &thread_id,
+                )?;
                 tracing::debug!(thread_id = %thread_id, "codex thread started");
             }
             Ok(Err(_)) => {
@@ -1511,6 +1466,29 @@ impl CodexHarness {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn failed_startup_retains_the_group_until_stop() {
+        let mut child = Command::new("/bin/sleep")
+            .env_clear()
+            .arg("60")
+            .process_group(0)
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mut harness = CodexHarness::new(tx, ApprovalPolicy::AutoApprove);
+        // Startup can fail before installing the child handle in the harness.
+        harness.child_group = child.id();
+        assert_eq!(harness.process_group_id(), child.id());
+        harness.stop().await.unwrap();
+        let status = tokio::time::timeout(Duration::from_secs(2), child.wait())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!status.success());
+        assert_eq!(harness.process_group_id(), None);
+    }
+
     #[test]
     fn saved_thread_rejection_precedes_spawn_and_leaves_the_conversation_resumable() {
         let ledger = crate::journal::TestLedgerGuard::new();
@@ -1522,25 +1500,25 @@ mod tests {
                 .unwrap();
         store.test_session("saved", &crate::session_record::new_artifact_key());
         let sql = rusqlite::Connection::open(ledger.home().join("loopflow.db")).unwrap();
-        let process = crate::id::ProcessLfid::new();
+        let process = crate::id::LfProcessId::new();
         sql.execute(
-            "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
             [process.as_str()],
         )
         .unwrap();
         let old = store
-            .claim_session_driver("saved", None, &process, true)
+            .claim_session_attachment("saved", None, &process, true)
             .unwrap();
         store
             .record_session_connection("saved", &old, "/missing.sock", &"saved-thread".into())
             .unwrap();
-        let driver = store
-            .claim_session_driver("saved", Some(&old), &process, true)
+        let attachment = store
+            .claim_session_attachment("saved", Some(&old), &process, true)
             .unwrap();
         let (tx, _rx) = mpsc::unbounded_channel();
         let mut harness = CodexHarness::new(tx, ApprovalPolicy::AutoApprove);
         let config = AgentConfig {
-            session_driver: Some(("saved".into(), driver.clone())),
+            session_attachment: Some(("saved".into(), attachment.clone())),
             // Even a mistakenly reached spawn cannot launch a real provider.
             cwd: Some(ledger.home().join("absent")),
             ..Default::default()
@@ -1553,20 +1531,20 @@ mod tests {
         assert!(error
             .to_string()
             .contains("Saved conversation thread differs"));
-        let released = store.release_session_driver("saved", &driver).unwrap();
+        let released = store
+            .release_session_attachment("saved", &attachment)
+            .unwrap();
         let retry = store
-            .claim_session_driver("saved", Some(&released), &process, true)
+            .claim_session_attachment("saved", Some(&released), &process, true)
             .unwrap();
         harness.resume_agent_session = Some("saved-thread".into());
         let config = AgentConfig {
-            session_driver: Some(("saved".into(), retry)),
+            session_attachment: Some(("saved".into(), retry)),
             ..config
         };
         let error = runtime.block_on(harness.start_inner(&config)).unwrap_err();
         assert!(
-            error
-                .to_string()
-                .contains("failed to spawn codex app-server"),
+            error.to_string().contains("failed to spawn codex"),
             "{error}"
         );
         assert_eq!(

@@ -1,5 +1,5 @@
-use crate::engine::platform::open_url_checked;
 use crate::ops::error::{OpsError, OpsResult};
+use crate::platform::open_url_checked;
 
 /// Where a pull request is opened for review. The only surface today is
 /// the GitHub PR page in the default browser; a terminal diff or file browser

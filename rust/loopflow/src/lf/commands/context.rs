@@ -3,9 +3,9 @@
 use anyhow::Result;
 use serde::Serialize;
 
-use crate::engine::config::load_config;
-use crate::engine::context_budget::{measure_context, ContextBudgetReport, ContextBudgets};
-use crate::engine::prompt::{gather_documents, GatherSpec};
+use crate::config::load_config;
+use crate::prompt::context_budget::{measure_context, ContextBudgetReport, ContextBudgets};
+use crate::prompt::{gather_documents, GatherSpec};
 
 #[derive(Debug, Serialize)]
 struct ContextReport {
@@ -76,9 +76,9 @@ pub fn run(json: bool, wave: Option<&str>, task: Option<&str>) -> Result<()> {
 /// A hook emits only the provider's JSON envelope; no launch or store mutation.
 pub fn emit_block(
     delivery: &std::path::Path,
-    moment: crate::engine::context_block::ContextMoment,
+    moment: crate::context_block::ContextMoment,
 ) -> Result<()> {
-    let delivery: crate::engine::context_block::ContextDelivery =
+    let delivery: crate::context_block::ContextDelivery =
         serde_json::from_slice(&std::fs::read(delivery)?)?;
     let block = delivery.block(moment)?;
     println!(

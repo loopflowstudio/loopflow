@@ -1,10 +1,18 @@
 use crate::durable::WorkRef;
-use crate::engine::flow::return_target;
-use crate::engine::flow_output::FlowOutput;
-use crate::engine::{
-    compile_flow, ConcreteSkill, ConcreteStep, ConcreteXor, ExecutionContext, ExecutionCursor,
-    FlowDefinition, FlowEngine, FlowOutcome, SkillExecutor, SkillOutcome, StepProgress,
-};
+use crate::flow::compile_flow;
+use crate::flow::output::FlowOutput;
+use crate::flow::return_target;
+use crate::flow::runner::ExecutionContext;
+use crate::flow::runner::ExecutionCursor;
+use crate::flow::runner::FlowOutcome;
+use crate::flow::runner::FlowRunner;
+use crate::flow::runner::SkillExecutor;
+use crate::flow::runner::SkillOutcome;
+use crate::flow::runner::StepProgress;
+use crate::flow::ConcreteSkill;
+use crate::flow::ConcreteStep;
+use crate::flow::ConcreteXor;
+use crate::flow::FlowDefinition;
 use crate::journal::{self, LfEventFields, LfEventType, LfNode};
 use crate::lf::output::Colors;
 use crate::lf::{Cli, Commands, PrCommand};
@@ -80,7 +88,7 @@ pub(crate) fn require_autonomous_steps(items: &[ConcreteStep]) -> Result<()> {
 }
 
 pub fn show(name: &str, repo: &Path) -> Result<()> {
-    let flow = crate::engine::flow::load_authored_flow(name, repo)?;
+    let flow = crate::flow::load_authored_flow(name, repo)?;
     let items = compile_flow(&flow, repo)?;
     for line in render_pipeline_lines(&items) {
         println!("{line}");
@@ -90,7 +98,7 @@ pub fn show(name: &str, repo: &Path) -> Result<()> {
 
 /// `lf flow list [--json]` — Flow definitions with the topology each would capture.
 pub fn list(repo: &Path, json: bool) -> Result<()> {
-    let catalog = crate::engine::flow_graph::flow_catalog(repo)?;
+    let catalog = crate::flow::graph::flow_catalog(repo)?;
     if json {
         println!("{}", serde_json::to_string(&catalog)?);
         return Ok(());
@@ -118,17 +126,17 @@ pub fn run_for_task(cli: &Cli, issue: &str, flow: &str, cwd: &Path) -> Result<()
         args.extend(["--wave".to_owned(), wave.clone()]);
     }
     args.extend(["--task", issue, "run", flow].map(str::to_owned));
-    let lf = crate::engine::process::resolve_pinned_lf_binary()?;
+    let lf = crate::os_process::resolve_pinned_lf_binary()?;
     let store = block_on(open_flow_store())?;
     let store = &store.sqlite;
     let process =
-        journal::current_process_lfid().context("a Task run requires a registered Process")?;
+        journal::current_lf_process_id().context("a Task run requires a registered Process")?;
     // An interrupted Task run takes its running attempt with it.
     static ATTEMPT_PID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-    crate::engine::agent::register_interrupt_cleanup(|| {
+    crate::agent::register_interrupt_cleanup(|| {
         let pid = ATTEMPT_PID.load(std::sync::atomic::Ordering::Acquire);
         if pid != 0 {
-            crate::engine::platform::kill_process(pid);
+            crate::platform::kill_process(pid);
         }
     });
     let mut attempt = 1;
@@ -179,9 +187,9 @@ fn execute(
         &cli.only_account,
     )?;
     report_outcome(block_on(async {
-        let driver = Driver {
+        let running = RunningFlow {
             store: open_flow_store().await?,
-            process: journal::current_process_lfid()
+            process: journal::current_lf_process_id()
                 .context("a Flow requires a registered Process")?,
             flow: flow_name,
             steps: items,
@@ -196,31 +204,31 @@ fn execute(
             steers: Mutex::default(),
         };
         // A chapter rotation moving this checkout's Task excludes new work in it.
-        let admission = driver
+        let admission = running
             .store
             .sqlite
-            .lock_task_checkouts(&[driver.cwd], driver.task.as_ref())?;
-        // The driver's one record of its Flow, written before any step runs.
-        driver
+            .lock_task_checkouts(&[running.cwd], running.task.as_ref())?;
+        // The Flow process's one record of its Flow, written before any step runs.
+        running
             .store
             .sqlite
             .record_flow_process(
-                &driver.process,
-                &crate::engine::flow_graph::FlowGraph::new(flow_name, items),
-                driver.task.as_ref(),
+                &running.process,
+                &crate::flow::graph::FlowGraph::new(flow_name, items),
+                running.task.as_ref(),
             )
             .context("could not record the Flow and start its Task; no steps launched")?;
         drop(admission);
-        let outcome = drive(&driver, accounts).await?;
+        let outcome = drive(&running, accounts).await?;
         // A step that completed its Task could not clean up under its own live
         // Flow; the finished Flow can.
-        if let (FlowOutcome::Completed, Some(task)) = (&outcome, &driver.task) {
-            let task = driver
+        if let (FlowOutcome::Completed, Some(task)) = (&outcome, &running.task) {
+            let task = running
                 .store
                 .get_task(task)
                 .await?
                 .context("Flow Task disappeared")?;
-            crate::ops::task::cleanup_completed_task(&driver.store, &task).await?;
+            crate::ops::task::cleanup_completed_task(&running.store, &task).await?;
         }
         Ok(outcome)
     })?)
@@ -255,27 +263,27 @@ fn report_outcome(outcome: FlowOutcome) -> Result<()> {
 }
 
 /// Run every step from the first until the Flow completes, stops or blocks.
-/// A driver that dies leaves its Processes as history; nothing resumes it.
+/// A Flow process that dies leaves its Processes as history; nothing resumes it.
 async fn drive(
-    driver: &Driver<'_>,
+    running: &RunningFlow<'_>,
     accounts: crate::provider_account::selection::AccountSelection,
 ) -> Result<FlowOutcome> {
     let fields = |extra: LfEventFields| LfEventFields {
-        flow: Some(driver.flow.to_owned()),
+        flow: Some(running.flow.to_owned()),
         ..extra
     };
     journal::emit(
-        driver.cwd,
+        running.cwd,
         LfNode::Flow,
         LfEventType::Started,
         fields(LfEventFields::default()),
     );
     let result = async {
-        let _flow_env = EnvVarGuard::set("LOOPFLOW_FLOW_NAME", driver.flow);
+        let _flow_env = EnvVarGuard::set("LOOPFLOW_FLOW_NAME", running.flow);
         let _accounts = accounts.activate()?;
         let mut cursor = ExecutionCursor::default();
-        FlowEngine::new(driver)
-            .run_with_cursor(driver.steps, &mut cursor)
+        FlowRunner::new(running)
+            .run_with_cursor(running.steps, &mut cursor)
             .await
     }
     .await;
@@ -285,7 +293,7 @@ async fn drive(
         Err(error) => (LfEventType::Errored, Some(error.to_string())),
     };
     journal::emit(
-        driver.cwd,
+        running.cwd,
         LfNode::Flow,
         event,
         fields(LfEventFields {
@@ -398,15 +406,15 @@ impl Drop for EnvVarGuard {
 /// The one Flow executor. It owns the cursor and the Flow's record. Each step
 /// is an ordinary command run as a child process; its result is read from the
 /// Process that child registered.
-struct Driver<'a> {
+struct RunningFlow<'a> {
     store: SharedStore,
-    process: crate::id::ProcessLfid,
+    process: crate::id::LfProcessId,
     flow: &'a str,
     steps: &'a [ConcreteStep],
     message: Option<&'a str>,
     cwd: &'a Path,
     launcher: &'a Cli,
-    /// Where the engine stands, as of its last checkpoint.
+    /// Where the runner stands, as of its last checkpoint.
     position: Mutex<ExecutionCursor>,
     task: Option<crate::durable::TaskId>,
     /// The Task's newest steer when each node last started, by node key.
@@ -420,23 +428,23 @@ enum StepExit {
     Stopped,
 }
 
-impl Driver<'_> {
-    /// The node the engine stands on and the returns taken to reach it.
+impl RunningFlow<'_> {
+    /// The node the runner stands on and the returns taken to reach it.
     fn location(&self) -> (u32, Vec<Vec<u32>>) {
         let cursor = self.position.lock().expect("Flow position mutex poisoned");
-        crate::engine::flow_graph::location(self.steps, &cursor)
-            .expect("the engine's position selects a captured node")
+        crate::flow::graph::location(self.steps, &cursor)
+            .expect("the runner's position selects a captured node")
     }
 
-    /// The captured step the engine is about to run.
+    /// The captured step the runner is about to run.
     fn current(&self) -> Option<ConcreteStep> {
         let position = self.position.lock().expect("Flow position mutex poisoned");
         let (body, leaf) = position.current_body(self.steps);
         body.get(leaf.index).cloned()
     }
 
-    /// Record the Process this driver's newest child registered, once it has.
-    fn record_step(&self, mark: i64) -> Result<Option<crate::id::ProcessLfid>> {
+    /// Record the Process this Flow process's newest child registered, once it has.
+    fn record_step(&self, mark: i64) -> Result<Option<crate::id::LfProcessId>> {
         let Some(step) = self.store.sqlite.child_process_after(&self.process, mark)? else {
             return Ok(None);
         };
@@ -452,10 +460,10 @@ impl Driver<'_> {
         &self,
         label: &str,
         args: &[String],
-    ) -> Result<(StepExit, Option<crate::id::ProcessLfid>)> {
+    ) -> Result<(StepExit, Option<crate::id::LfProcessId>)> {
         // The absolute selected path becomes argv[0] in the child's Process record.
         let mut command =
-            tokio::process::Command::new(crate::engine::process::resolve_pinned_lf_binary()?);
+            tokio::process::Command::new(crate::os_process::resolve_pinned_lf_binary()?);
         command.current_dir(self.cwd);
         command.env(flow_process::FLOW_ID_ENV, self.process.as_str());
         if let Some((id, fd)) = self
@@ -508,7 +516,7 @@ impl Driver<'_> {
             .validate_current_schema()
             .with_context(|| {
                 format!(
-                    "this driver cannot read the result of {label}; inspect its Process and effects with a compatible lf before launching further work"
+                    "this Flow process cannot read the result of {label}; inspect its Process and effects with a compatible lf before launching further work"
                 )
             })?;
         let status = status.context("could not execute Flow step")?;
@@ -536,7 +544,7 @@ impl Driver<'_> {
     }
 
     /// The conversation and input a step's Process captured; none for an operation.
-    fn captured(&self, step: Option<&crate::id::ProcessLfid>) -> Result<Option<(String, String)>> {
+    fn captured(&self, step: Option<&crate::id::LfProcessId>) -> Result<Option<(String, String)>> {
         let Some(step) = step else { return Ok(None) };
         Ok(self
             .store
@@ -545,7 +553,7 @@ impl Driver<'_> {
             .map(|(session, input, _)| (session, input)))
     }
 
-    fn turn_events(&self, step: Option<&crate::id::ProcessLfid>) -> Result<Vec<serde_json::Value>> {
+    fn turn_events(&self, step: Option<&crate::id::LfProcessId>) -> Result<Vec<serde_json::Value>> {
         Ok(match self.captured(step)? {
             Some((_, input)) => self.store.sqlite.input_events(&input)?,
             None => Vec::new(),
@@ -556,7 +564,7 @@ impl Driver<'_> {
     fn answer(
         &self,
         label: &str,
-        step: Option<&crate::id::ProcessLfid>,
+        step: Option<&crate::id::LfProcessId>,
     ) -> Result<(String, Option<String>)> {
         let (session, input) = self
             .captured(step)?
@@ -578,7 +586,7 @@ fn answer_value(text: &str) -> Result<serde_json::Value, String> {
 }
 
 #[async_trait]
-impl SkillExecutor for &Driver<'_> {
+impl SkillExecutor for &RunningFlow<'_> {
     async fn checkpoint(&self, cursor: &ExecutionCursor) -> Result<()> {
         *self.position.lock().expect("Flow position mutex poisoned") = cursor.clone();
         Ok(())
@@ -641,7 +649,7 @@ impl SkillExecutor for &Driver<'_> {
         let mut input = tempfile::NamedTempFile::new()?;
         serde_json::to_writer(
             &mut input,
-            &crate::engine::skill_invocation::SkillInvocation {
+            &crate::skills::invocation::SkillInvocation {
                 skill: skill.skill.clone(),
                 arguments: self.message.unwrap_or_default().to_string(),
             },
@@ -685,10 +693,10 @@ impl SkillExecutor for &Driver<'_> {
         unreachable!("the correction loop returns or fails")
     }
 
-    /// The operation is its own `lf` command; the driver reads how it ended.
+    /// The operation is its own `lf` command; the Flow process reads how it ended.
     async fn run_command(
         &self,
-        ops: &crate::engine::ConcreteCommand,
+        ops: &crate::flow::ConcreteCommand,
         _ctx: ExecutionContext,
     ) -> Result<SkillOutcome> {
         let label = ops.item.display_name();
@@ -743,7 +751,7 @@ fn print_step_progress(progress: Option<StepProgress>, name: &str) {
 #[cfg(test)]
 mod tests {
     use super::render_pipeline_lines;
-    use crate::engine::ConcreteStep;
+    use crate::flow::ConcreteStep;
     use std::fs;
     use tempfile::tempdir;
 
@@ -767,9 +775,9 @@ mod tests {
             temp.path().join(".lf/flows/tend.yaml"),
             "- step: tend/scan-waves\n- xor:\n    router: tend/assess\n    paths:\n      tune:\n        flow: tend/tune\n        description: Adjust the chord\n      silence:\n        description: No-op\n",
         ).unwrap();
-        let flow = crate::engine::load_flow("tend", temp.path()).unwrap();
+        let flow = crate::flow::load_flow("tend", temp.path()).unwrap();
 
-        let items = crate::engine::compile_flow(&flow, temp.path()).unwrap();
+        let items = crate::flow::compile_flow(&flow, temp.path()).unwrap();
         let lines = render_pipeline_lines(&items);
 
         assert_eq!(
@@ -789,8 +797,8 @@ mod tests {
     fn builtin_task_flows_launch_as_operational_work() {
         let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         for name in ["task-design", "pursue", "queue", "ship"] {
-            let flow = crate::engine::load_flow(name, &repo).unwrap();
-            let items = crate::engine::compile_flow(&flow, &repo).unwrap();
+            let flow = crate::flow::load_flow(name, &repo).unwrap();
+            let items = crate::flow::compile_flow(&flow, &repo).unwrap();
             super::require_autonomous_steps(&items)
                 .unwrap_or_else(|error| panic!("{name}: {error}"));
         }
@@ -806,10 +814,10 @@ mod tests {
             "- xor:\n    paths:\n      review:\n        description: Review it\n        steps:\n          - step:\n              id: revise_choice\n              name: implement\n          - step:\n              id: review_choice\n              name: review-design\n              human: true\n",
         )
         .unwrap();
-        let flow = crate::engine::load_flow("choice", repo.path()).unwrap();
-        let human = crate::engine::human_occurrence_ids(&flow, repo.path()).unwrap();
+        let flow = crate::flow::load_flow("choice", repo.path()).unwrap();
+        let human = crate::flow::human_occurrence_ids(&flow, repo.path()).unwrap();
         assert_eq!(human, vec!["review_choice"]);
-        let items = crate::engine::compile_flow(&flow, repo.path()).unwrap();
+        let items = crate::flow::compile_flow(&flow, repo.path()).unwrap();
         assert!(render_pipeline_lines(&items)
             .iter()
             .any(|line| line.contains("review-design [review:review_choice]")));

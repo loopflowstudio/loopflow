@@ -1679,9 +1679,9 @@ fn persistent_publication_pushes_committed_docs_and_preserves_local_files() {
     let gh = draft_pr_script(&state);
     let _env = EnvGuard::with_lf_home(&[("gh", &gh)], home.path());
     let repo = TestRepo::new();
-    let persistent = loopflow::engine::worktrees::ensure_agent_worktree(
+    let persistent = loopflow::git::worktrees::ensure_agent_worktree(
         repo.path(),
-        loopflow::engine::worktrees::WorktreeSegment::parse("repo").unwrap(),
+        loopflow::git::worktrees::WorktreeSegment::parse("repo").unwrap(),
     )
     .unwrap();
     fs::create_dir_all(persistent.path.join("scratch")).unwrap();

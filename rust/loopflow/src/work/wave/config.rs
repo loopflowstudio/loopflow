@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 use tracing::warn;
 
-use crate::engine::context_budget::BudgetKey;
+use crate::prompt::context_budget::BudgetKey;
 
 /// Read only the saved definition; importing repository files is an explicit mutation.
 pub(crate) fn read_wave_document(

@@ -359,12 +359,12 @@ exit 0
                     task: task.clone(), message: String::new(), steers: Vec::new(),
                     steer: 0, interrupt: 0,
                 };
-                let process = crate::engine::agent::ProcessConfig {
+                let process = crate::agent::ProcessConfig {
                     auto,
                     task_input: Some(crate::ops::task_input::TaskInput::new(store.clone(), seed)),
                     ..Default::default()
                 };
-                let launch = crate::engine::agent::AgentConfig {
+                let launch = crate::agent::AgentConfig {
                     agent: Some(agent.into()), cwd: Some(repo.clone()),
                     env: std::collections::BTreeMap::from([
                         ("PATH".into(), format!("{}:/usr/bin:/bin", bin.display())),
@@ -374,9 +374,13 @@ exit 0
                     ..Default::default()
                 };
                 let context = PM_TEST_CONTEXT.with(Clone::clone);
+                // The blocking invocation and its capture share this fixture's store.
+                let ledger = crate::store::database_path_from_env().unwrap();
                 let running = tokio::task::spawn_blocking(move || {
-                    PM_TEST_CONTEXT.sync_scope(context, || crate::engine::agent::run_agent(
-                        &launch, &process, &crate::engine::agent::AgentCapabilities::default()))
+                    crate::journal::with_test_ledger(ledger, || {
+                        PM_TEST_CONTEXT.sync_scope(context, || crate::agent::run_agent(
+                            &launch, &process, &crate::agent::AgentCapabilities::default()))
+                    })
                 });
                 let running_check = tokio::time::timeout(std::time::Duration::from_secs(7), async {
                     loop {

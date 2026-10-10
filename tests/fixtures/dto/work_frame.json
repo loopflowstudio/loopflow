@@ -92,8 +92,7 @@
     "body": {
       "schema_version": 1,
       "observed_at": 1791220000,
-      "nodes": [],
-      "provider_processes": []
+      "nodes": []
     }
   },
   {

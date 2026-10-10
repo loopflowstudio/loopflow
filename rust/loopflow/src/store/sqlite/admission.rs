@@ -56,9 +56,7 @@ impl SqliteStore {
         }
         for cwd in workspaces {
             let cwd = canonical(cwd)?;
-            include(canonical(
-                &crate::engine::git::worktree_root(&cwd).unwrap_or(cwd),
-            )?);
+            include(canonical(&crate::git::worktree_root(&cwd).unwrap_or(cwd))?);
         }
         let database = self
             .conn

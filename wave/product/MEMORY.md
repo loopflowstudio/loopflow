@@ -118,7 +118,7 @@ Definitions have independent namespaces; navigation carries kind and name.
 Project selection affects future take-up; restart retains the captured graph and
 history. Workflow selection, latest FlowProcessDetail, execution evidence and
 TaskRunControl stay separate; latest grants no authority. LOO-400's landed
-`e467ea995` supplies Process/LFID and the migration; old captures remain readable.
+`e467ea995` supplies Process ID and the migration; old captures remain readable.
 
 Choices: list/customize under `project workflow`, Project IDs or unique name/slug,
 and Flow inspection `--processes`. Failed catalogs stay errors; single-definition
@@ -167,13 +167,13 @@ flow -b) apis."
   with &"). `--mode` is taken back.
 - `--task` and running from the Task's worktree are one path with one set of
   checks. A Task helper may place and fill defaults, then enters `lf run`: "i
-  dont want to introduce parallel paths or drivers." Launch-time PR
+  dont want to introduce parallel paths" or runners. Launch-time PR
   preparation is unjustified.
 - "I hate __ and hidden arguments." A step is the plain command and "doesnt
-  need to know its part of a flow"; Flow logic and tracking live in the driver.
+  need to know its part of a flow"; Flow logic and tracking live in the Flow process.
   Every Flow is tracked alike, none primary for a Task, read-only to all but
-  its driver; the only control is ending the driver.
-- Two records: FlowExec, append-only per driver, and a mutable outer one owned
+  its own process; the only control is ending it.
+- Two records: FlowExec, append-only per Flow, and a mutable outer one owned
   by this Task. "I dont think we need the FlowSession datatype."
 
 **October 6.**
@@ -213,10 +213,10 @@ flow -b) apis."
   exit 3 (blocked or stopped short) is not retried. `lf task move ISSUE end`
   replaces `lf task complete`; correction is `lf -b session resume ID MESSAGE`,
   three turns at most.
-- The driver learns a step's Exec by polling every 10 ms; killed in that gap,
-  the step goes unrecorded. A killed driver's run reads as running forever.
+- The Flow process learns a step's Exec by polling every 10 ms; killed in that gap,
+  the step goes unrecorded. A killed Flow reads as running forever.
 - `lf` allows a second `lf task run` while an edge runs; only Desktop's
-  disabled Start keeps two drivers out of a checkout.
+  disabled Start keeps two Flows out of a checkout.
 - The answer contract is message text; provider structured output is deleted.
   Any `lf` command can be a `cmd:` step. `feature` and `code` are workflows
   only, and `lf run feature` fails naming `lf task run`.
@@ -264,7 +264,7 @@ flow -b) apis."
 
 **Evidence limits.** Headless tests and a fake provider only. Unshown: a real
 provider step (the JSON contract with no schema request), a
-driver killed mid-turn, the migration on a populated store, Desktop Start
+Flow killed mid-turn, the migration on a populated store, Desktop Start
 against real `lf`, a cron-fired Flow. September 30's workspace proof items
 (provider continuation, remote owning-Home association, cross-Task focus,
 symlink transitions, twenty layout actions against p95 <100 ms) are also
@@ -404,7 +404,7 @@ Product’s shared Session contract, not a Task or Wave placement decision.
 
 Converted Ask history follows ordinary conversation rules; its former kind alone
 creates no attention obligation. Conversion itself never completes a Session.
-Later confirmed owning-driver exits can retire unassigned, non-primary
+Later confirmed owning-attachment exits can retire unassigned, non-primary
 conversations; Task/Wave conversations and Flow reviews remain open. Missing
 process evidence grants neither retirement nor Flow settlement. This is source
 inspection, not full Desktop acceptance.
@@ -923,7 +923,7 @@ lfd and resident-cron contracts remain in
 Wave → Task is public planning; Chapter/Project identity stays internal and
 historical. Shared status, roadmap, cached plan and Rust/Swift fixtures change
 together. LfSession owns interactive Session/headless Run continuity and
-history; Process owns an lf invocation; FlowProcess records one Flow driver's graph
+history; Process owns an lf invocation; FlowProcess records one Flow process's graph
 and steps. A Task run may start several Flow processes. No separate Run owner is
 restored because identifiers happen to coincide.
 

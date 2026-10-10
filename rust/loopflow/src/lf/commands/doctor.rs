@@ -615,12 +615,12 @@ fn check_identity(events: &[LfProcess]) -> Check {
 fn check_lineage(events: &[LfProcess]) -> Check {
     let processes: HashMap<&str, &str> = events
         .iter()
-        .map(|event| (event.lfid.as_str(), event.trace_id.as_str()))
+        .map(|event| (event.id.as_str(), event.trace_id.as_str()))
         .collect();
     let dangling: HashSet<&str> = events
         .iter()
         .filter_map(|event| {
-            let parent = event.parent_process_lfid.as_ref()?.as_str();
+            let parent = event.parent_lf_process_id.as_ref()?.as_str();
             (processes.get(parent).copied() != Some(event.trace_id.as_str())).then_some(parent)
         })
         .collect();
@@ -721,13 +721,16 @@ mod tests {
 
     fn row(ts: i64, event: &str) -> LfProcess {
         LfProcess {
-            lfid: crate::id::ProcessLfid::new(),
+            kind: crate::process::ProcessKind::Lf,
+            agent_session_id: None,
+            os_started_at: None,
+            id: crate::id::LfProcessId::new(),
             pid: None,
             trace_id: crate::id::TraceId::new(),
-            parent_process_lfid: None,
+            parent_lf_process_id: None,
             via_agent: Some(false),
             caller_session_id: None,
-            caller_provider_generation: None,
+            caller_agent_process_id: None,
             command: None,
             repo: Some("/src/loopflow".into()),
             cwd: None,

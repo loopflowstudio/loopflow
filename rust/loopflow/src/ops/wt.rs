@@ -2,11 +2,11 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::engine::git::{
+use crate::git::worktrees::{list_porcelain, main_repo_root, sibling_worktree_name};
+use crate::git::{
     acquire_worktree_lease, delete_local_branch, get_default_branch, is_clean, ref_exists,
     rev_parse, worktree_remove_owned,
 };
-use crate::engine::worktrees::{list_porcelain, main_repo_root, sibling_worktree_name};
 use crate::ops::{OpsError, OpsResult, Progress};
 
 #[derive(Debug)]

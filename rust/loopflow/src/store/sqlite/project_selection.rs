@@ -220,14 +220,14 @@ impl SqliteStore {
     pub(crate) fn record_project_activation(
         &self,
         wave: &WaveId,
-        process: Option<&crate::id::ProcessLfid>,
+        process: Option<&crate::id::LfProcessId>,
     ) -> StoreResult<()> {
         let Some(process) = process else {
             return Ok(());
         };
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "UPDATE waves SET project_activation_process_lfid=?2 WHERE id=?1",
+            "UPDATE waves SET project_activation_lf_process_id=?2 WHERE id=?1",
             params![wave, process],
         )?;
         Ok(())
@@ -289,7 +289,7 @@ pub struct ProjectReadiness {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProjectActivation {
-    pub process_lfid: String,
+    pub lf_process_id: String,
     pub completed_at: Option<i64>,
     pub outcome: Option<String>,
     pub error: Option<String>,
@@ -343,11 +343,11 @@ fn readiness_in(conn: &Connection, wave: &WaveId) -> StoreResult<ProjectReadines
                   WHEN p.status IN ('completed','canceled') THEN 'terminal'
                   WHEN p.status='started' THEN 'ready' ELSE 'inactive' END,
              (SELECT successor_id FROM project_transitions WHERE wave_id=w.id AND settled_at IS NULL),
-             e.lfid,e.completed_at,e.outcome,e.error
+             e.id,e.completed_at,e.outcome,e.error
              FROM waves w LEFT JOIN projects p ON p.id=w.current_project_id
              LEFT JOIN pm_wave_sync s ON s.wave_id=w.id
              LEFT JOIN pm_projects f ON f.repo=w.repo AND f.provider=COALESCE(s.provider,'linear') AND f.id=p.external_project_id
-             LEFT JOIN processes e ON e.lfid=w.project_activation_process_lfid WHERE w.id=?1",
+             LEFT JOIN processes e ON e.id=w.project_activation_lf_process_id WHERE w.id=?1",
             [wave], |row| {
                 let state: String = row.get(2)?;
                 let process: Option<String> = row.get(4)?;
@@ -361,8 +361,8 @@ fn readiness_in(conn: &Connection, wave: &WaveId) -> StoreResult<ProjectReadines
                         _ => ProjectReadinessState::Inactive,
                     },
                     pending_successor: row.get(3)?,
-                    activation: process.map(|process_lfid| Ok::<_,rusqlite::Error>(ProjectActivation {
-                        process_lfid, completed_at: row.get(5)?, outcome: row.get(6)?, error: row.get(7)?,
+                    activation: process.map(|lf_process_id| Ok::<_,rusqlite::Error>(ProjectActivation {
+                        lf_process_id, completed_at: row.get(5)?, outcome: row.get(6)?, error: row.get(7)?,
                     })).transpose()?,
                 })
             },
@@ -496,7 +496,7 @@ mod tests {
 
 #[cfg(test)]
 mod activation_tests {
-    use crate::id::{ProcessLfid, TraceId, WaveId};
+    use crate::id::{LfProcessId, TraceId, WaveId};
     use crate::store::sqlite::SqliteStore;
     use crate::work::wave::Wave;
 
@@ -506,13 +506,13 @@ mod activation_tests {
         let store = SqliteStore::open_ephemeral(&dir.path().join("loopflow.db")).unwrap();
         let wave = Wave::new(WaveId::new(), "a".into(), "/repo".into());
         store.create_wave(&wave).unwrap();
-        let process = ProcessLfid::new();
+        let process = LfProcessId::new();
         store
             .conn
             .lock()
             .unwrap()
             .execute(
-                "INSERT INTO processes(lfid,trace_id,cwd,started_at) VALUES(?1,?2,'/repo',1)",
+                "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?2,'/repo',1)",
                 rusqlite::params![process, TraceId::new()],
             )
             .unwrap();
@@ -524,16 +524,16 @@ mod activation_tests {
             .unwrap()
             .activation
             .unwrap();
-        assert_eq!(pending.process_lfid, process.as_str());
+        assert_eq!(pending.lf_process_id, process.as_str());
         assert!(pending.completed_at.is_none());
         assert!(pending.outcome.is_none());
-        store.conn.lock().unwrap().execute("UPDATE processes SET completed_at=2,outcome='failed',error='provider unavailable' WHERE lfid=?1", [&process]).unwrap();
+        store.conn.lock().unwrap().execute("UPDATE processes SET completed_at=2,outcome='failed',error='provider unavailable' WHERE id=?1", [&process]).unwrap();
         let failed = store
             .project_readiness(wave.id())
             .unwrap()
             .activation
             .unwrap();
-        assert_eq!(failed.process_lfid, process.as_str());
+        assert_eq!(failed.lf_process_id, process.as_str());
         assert_eq!(failed.outcome.as_deref(), Some("failed"));
         assert_eq!(failed.error.as_deref(), Some("provider unavailable"));
     }

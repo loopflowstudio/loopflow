@@ -29,7 +29,7 @@ pub(crate) fn name_native_session(provider: &str, input: &Value) -> anyhow::Resu
     let Some(prompt) = input["prompt"].as_str() else {
         return Ok(None);
     };
-    let Some(title) = crate::engine::naming::request_title(prompt) else {
+    let Some(title) = crate::naming::request_title(prompt) else {
         return Ok(None);
     };
     if let Some(thread) = input["session_id"].as_str() {

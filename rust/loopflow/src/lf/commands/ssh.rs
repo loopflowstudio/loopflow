@@ -20,11 +20,11 @@ pub fn run(target: &str, forward_agent: bool, lf_args: &[String]) -> anyhow::Res
         &inherited_selection,
         &cli,
     ))?;
-    let user_name = crate::engine::config::participant_name()?.unwrap_or_default();
+    let user_name = crate::config::participant_name()?.unwrap_or_default();
     let selection = selection.env_value()?;
     let mut extra_env = vec![
         (EXPECTED_MACHINE_ID_ENV, target.id.as_str()),
-        (crate::engine::config::USER_NAME_ENV, user_name.as_str()),
+        (crate::config::USER_NAME_ENV, user_name.as_str()),
         (
             crate::provider_account::selection::ACCOUNT_SELECTION_ENV,
             selection.as_str(),
@@ -189,10 +189,7 @@ fn command_result(dest: &str, code: Option<i32>) -> anyhow::Result<()> {
 /// so an unreachable or misconfigured host fails fast instead of hanging.
 fn run_ssh(dest: &str, forward_agent: bool, preamble: &str) -> anyhow::Result<()> {
     let mut child = Command::new("ssh")
-        .args(crate::engine::machine_route::bounded_ssh_args(
-            dest,
-            forward_agent,
-        )?)
+        .args(crate::machine_route::bounded_ssh_args(dest, forward_agent)?)
         .arg("bash -s")
         .stdin(Stdio::piped())
         .stdout(Stdio::inherit())
@@ -265,8 +262,7 @@ mod tests {
     }
     #[test]
     fn ssh_args_bound_the_connection() {
-        let args =
-            crate::engine::machine_route::bounded_ssh_args("jack@mini-heart", false).unwrap();
+        let args = crate::machine_route::bounded_ssh_args("jack@mini-heart", false).unwrap();
         // Primary hang killer: never block on an interactive prompt.
         assert!(args.iter().any(|a| a == "BatchMode=yes"));
         // Connect handshake and stalled-session bounds.
@@ -281,7 +277,7 @@ mod tests {
 
     #[test]
     fn ssh_args_opt_in_agent_forwarding() {
-        let args = crate::engine::machine_route::bounded_ssh_args("host", true).unwrap();
+        let args = crate::machine_route::bounded_ssh_args("host", true).unwrap();
         assert_eq!(args.first().unwrap(), "-A");
     }
 

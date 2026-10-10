@@ -24,7 +24,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 AMBIENT_WORK_AUTHORITY = (
     "LF_AS",
     "LF_BIN",
-    "LF_PROCESS_LFID",
+    "LF_PROCESS_ID",
     "LF_RUN_ID",
     "LF_CAPTURE_KEY",
     "LF_AGENT_CALLER",

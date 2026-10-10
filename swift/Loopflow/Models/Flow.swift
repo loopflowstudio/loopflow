@@ -104,7 +104,7 @@ public enum TaskExecutionState: String, Decodable, Sendable, Hashable {
 
 /// One launched step and how its process ended.
 public struct FlowStepProcess: Decodable, Sendable, Hashable, Identifiable {
-    public let processLfid: String
+    public let lfProcessId: String
     public let label: String
     public let key: UInt32
     public let iterations: [[UInt32]]
@@ -113,18 +113,18 @@ public struct FlowStepProcess: Decodable, Sendable, Hashable, Identifiable {
     public let outcome: String?
     public let exitCode: Int32?
 
-    public var id: String { processLfid }
+    public var id: String { lfProcessId }
 
     enum CodingKeys: String, CodingKey {
         case label, key, iterations, outcome
-        case processLfid = "process_lfid"
+        case lfProcessId = "lf_process_id"
         case startedAt = "started_at"
         case completedAt = "completed_at"
         case exitCode = "exit_code"
     }
 }
 
-/// One Flow process as its driver recorded it: the graph captured at launch and
+/// One Flow process as it recorded itself: the graph captured at launch and
 /// every step it started. Any Flow reads the same way, ad hoc or a Task's edge.
 public struct FlowProcessDetail: Decodable, Sendable, Hashable {
     public let entry: FlowProcessInventoryEntry

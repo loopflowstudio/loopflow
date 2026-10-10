@@ -93,7 +93,10 @@ macro_rules! uuid_id {
 
 uuid_id!(WaveId);
 uuid_id!(TraceId);
-uuid_id!(ProcessLfid);
+uuid_id!(LfProcessId);
+
+// One claim, not a Process identity. Never reused after attachment transfer.
+uuid_id!(AttachmentToken);
 
 /// A provider-owned conversation id. Opaque vendor bytes, never an lf identity.
 #[derive(
@@ -140,7 +143,7 @@ impl rusqlite::types::FromSql for AgentSessionId {
 
 #[cfg(test)]
 mod tests {
-    use super::{AgentSessionId, ProcessLfid, TraceId, WaveId};
+    use super::{AgentSessionId, LfProcessId, TraceId, WaveId};
 
     #[test]
     fn agent_session_preserves_opaque_provider_bytes_in_json_and_sql() {
@@ -160,6 +163,6 @@ mod tests {
         assert_eq!(serde_json::from_str::<WaveId>(&encoded).unwrap(), wave);
 
         let _trace = TraceId::new();
-        let _process = ProcessLfid::new();
+        let _process = LfProcessId::new();
     }
 }

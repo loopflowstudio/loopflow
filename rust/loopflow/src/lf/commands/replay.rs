@@ -3,9 +3,12 @@
 use anyhow::{anyhow, Context, Result};
 use std::io::Write;
 
-use crate::engine::{
-    check_cli_available, run_agent, AgentCapabilities, AgentConfig, ProcessConfig, StreamFormat,
-};
+use crate::agent::check_cli_available;
+use crate::agent::run_agent;
+use crate::agent::stream::StreamFormat;
+use crate::agent::AgentCapabilities;
+use crate::agent::AgentConfig;
+use crate::agent::ProcessConfig;
 use crate::session_record::{AttributionSource, CaptureHandle, SessionCaptureSpec};
 
 pub fn run(selector: &str) -> Result<()> {
@@ -35,7 +38,7 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
             source.artifact_key
         ));
     }
-    let (harness, model) = crate::engine::parse_agent(&request.agent);
+    let (harness, model) = crate::config::parse_agent(&request.agent);
     if harness != source.harness || model != source.model {
         return Err(anyhow!(
             "capture {} has inconsistent provider identity",
@@ -60,8 +63,7 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
         skip_permissions: request.skip_permissions,
         ..AgentConfig::default()
     };
-    crate::engine::agent::pin_provider_account_id_blocking(&mut config)
-        .map_err(anyhow::Error::from)?;
+    crate::agent::pin_provider_account_id_blocking(&mut config).map_err(anyhow::Error::from)?;
     request.account_id = config.provider_account_id.clone();
     let capabilities = AgentCapabilities {
         chrome: request.chrome,
@@ -169,7 +171,7 @@ mod tests {
             agent: "opencode:opencode/glm-5.2".to_string(),
             account_id: None,
             max_turns: Some(3),
-            write_scope: crate::engine::AgentWriteScope::Worktree,
+            write_scope: crate::agent::AgentWriteScope::Worktree,
             execution_boundary: None,
             skip_permissions: true,
             chrome: false,
@@ -199,7 +201,11 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_ne!(session.id, source_id);
-        let child_id = replay_at(home.path(), &session.id).unwrap();
+        // The replaying invocation and its capture share this fixture's store.
+        let child_id = crate::journal::with_test_ledger(registry.clone(), || {
+            replay_at(home.path(), &session.id)
+        })
+        .unwrap();
 
         let evidence = std::fs::read_to_string(&evidence).unwrap();
         assert!(evidence.contains(child_id.as_str()));

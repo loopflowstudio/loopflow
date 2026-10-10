@@ -38,7 +38,7 @@ lf task interrupt EXP-12
 ```
 
 Each start is a new Flow: one lf process and the step processes it starts. Its ID
-is the Flow process's. `--state` selects `current` (the driver has no recorded
+is the Flow process's. `--state` selects `current` (the Flow process has no recorded
 exit), `completed` (it succeeded) or `stopped` (it exited before the last
 step). A stopped Flow's Processes are its history; nothing resumes it. Inspect
 them, then launch the work that remains.
@@ -470,7 +470,7 @@ Observe validated Program Status snapshots from an active local terminal
 |---|---|
 | `<id>` | id |
 | `--terminal` | The terminal marker in the current provider client receipt |
-| `--generation` | Provider generation from the Session reading |
+| `--agent-process` | AgentProcess from the Session reading; omit when it reported none |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 

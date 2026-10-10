@@ -1,17 +1,17 @@
-//! A Flow process is one driver Process and the step Processes it starts. Its driver
-//! writes a FlowProcess: the Flow's name and graph as compiled at launch, then one
-//! row per step it starts. The record is append-only and only the driver writes
+//! A Flow process is one lf Process and the step Processes it starts. It writes
+//! a FlowProcess: the Flow's name and graph as compiled at launch, then one row
+//! per step it starts. The record is append-only and only the Flow process writes
 //! it. Each step is an ordinary command that knows nothing of its Flow; whether
 //! the Flow or a step is running, finished or failed is read from their Processes.
-use crate::engine::flow_graph::FlowGraph;
-use crate::id::ProcessLfid;
+use crate::flow::graph::FlowGraph;
+use crate::id::LfProcessId;
 use crate::process::LfProcess;
 
-/// A step's agent sees which Flow started it: the driver Process's id. Steps of
+/// A step's agent sees which Flow started it: the Flow process's id. Steps of
 /// one Flow can share notes under it. It configures nothing in lf.
 pub(crate) const FLOW_ID_ENV: &str = "LF_FLOW_ID";
 
-/// One step its driver started.
+/// One step its Flow process started.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FlowProcessStep {
     pub process: LfProcess,
@@ -21,10 +21,10 @@ pub(crate) struct FlowProcessStep {
     pub iterations: Vec<Vec<u32>>,
 }
 
-/// One Flow process as its driver recorded it.
+/// One Flow process as it recorded itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FlowProcess {
-    pub driver: LfProcess,
+    pub process: LfProcess,
     pub name: String,
     pub graph: FlowGraph,
     /// Steps in launch order. A repeated or corrected step is another entry.
@@ -32,8 +32,8 @@ pub(crate) struct FlowProcess {
 }
 
 impl FlowProcess {
-    pub(crate) fn id(&self) -> &ProcessLfid {
-        &self.driver.lfid
+    pub(crate) fn id(&self) -> &LfProcessId {
+        &self.process.id
     }
 
     pub(crate) fn latest(&self) -> Option<&FlowProcessStep> {
@@ -55,7 +55,7 @@ impl FlowProcess {
     ) -> crate::durable::FlowProcessDetail {
         let finished = entry.summary.state == crate::session::FlowProcessSummaryState::Completed;
         let latest = self.latest();
-        let projection = crate::engine::flow_graph::project_position(
+        let projection = crate::flow::graph::project_position(
             &self.graph,
             latest.map_or(0, |step| step.key),
             latest.map_or(&[], |step| &step.iterations),
@@ -70,12 +70,12 @@ impl FlowProcess {
             iterations: latest
                 .map(|step| step.iterations.clone())
                 .unwrap_or_default(),
-            cwd: self.driver.cwd.as_ref().map(std::path::PathBuf::from),
+            cwd: self.process.cwd.as_ref().map(std::path::PathBuf::from),
             steps: self
                 .steps
                 .iter()
                 .map(|step| crate::durable::FlowStepProcess {
-                    process_lfid: step.process.lfid.clone(),
+                    lf_process_id: step.process.id.clone(),
                     label: self.label(step),
                     key: step.key,
                     iterations: step.iterations.clone(),

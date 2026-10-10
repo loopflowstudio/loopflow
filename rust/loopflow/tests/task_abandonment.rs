@@ -2,7 +2,7 @@ mod support;
 
 use std::process::Command;
 
-use loopflow::id::ProcessLfid;
+use loopflow::id::LfProcessId;
 use loopflow::work::task::{GithubPr, PrPublication};
 use loopflow_test_support::TestRepo;
 use rusqlite::params;
@@ -33,9 +33,9 @@ fn task_abandonment_cli_saves_offline_and_preserves_unresolved_work() {
             db.execute("UPDATE projects SET external_project_id=NULL", [])
                 .unwrap();
         }
-        let process = ProcessLfid::new();
+        let process = LfProcessId::new();
         db.execute(
-            "INSERT INTO processes(lfid,trace_id,cwd,started_at) VALUES(?1,?1,?2,?3)",
+            "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?1,?2,?3)",
             params![
                 process.as_str(),
                 repo.path().to_str().unwrap(),

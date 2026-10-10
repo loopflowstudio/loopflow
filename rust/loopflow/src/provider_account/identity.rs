@@ -236,7 +236,7 @@ pub(crate) mod tests {
     use crate::provider_account::{new_account, order_accounts_by_strain};
     use crate::provider_auth::{codex_identity_from_home, Provider};
     use crate::store::ProviderAccountId;
-    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+    use base64::prelude::*;
     use std::fs;
     use std::path::Path;
 
@@ -276,7 +276,7 @@ pub(crate) mod tests {
     fn account(root: &Path, id: &str, email: &str, subject: &str) -> crate::store::ProviderAccount {
         let home = root.join(id);
         fs::create_dir_all(&home).unwrap();
-        let claims = URL_SAFE_NO_PAD.encode(serde_json::json!({"email":email,"sub":subject,"https://api.openai.com/auth":{"chatgpt_account_id":"shared-team"}}).to_string());
+        let claims = BASE64_URL_SAFE_NO_PAD.encode(serde_json::json!({"email":email,"sub":subject,"https://api.openai.com/auth":{"chatgpt_account_id":"shared-team"}}).to_string());
         fs::write(home.join("auth.json"), serde_json::json!({"tokens":{"access_token":"fixture", "id_token":format!("h.{claims}.s")}}).to_string()).unwrap();
         new_account(
             Provider::Codex,
@@ -324,7 +324,7 @@ pub(crate) mod tests {
                 Some("user"),
             ),
         ] {
-            let claims = URL_SAFE_NO_PAD.encode(
+            let claims = BASE64_URL_SAFE_NO_PAD.encode(
                 serde_json::json!({"email":"a@example.com","https://api.openai.com/auth":auth})
                     .to_string(),
             );

@@ -115,9 +115,7 @@ mod tests {
     use crate::store::sqlite::SqliteStore;
     use serde_json::json;
 
-    fn session_owner(path: &std::path::Path) -> super::super::agent_process::AttachmentOwner {
-        let store = SqliteStore::open_ephemeral(path).unwrap();
-        store.test_session("conversation", "run_00000000000000000000000000000001");
+    fn fixture_process(path: &std::path::Path) -> LfProcessId {
         let process = LfProcessId::new();
         rusqlite::Connection::open(path)
             .unwrap()
@@ -126,8 +124,14 @@ mod tests {
                 [&process],
             )
             .unwrap();
+        process
+    }
+
+    fn session_owner(path: &std::path::Path) -> super::super::agent_process::AttachmentOwner {
+        let store = SqliteStore::open_ephemeral(path).unwrap();
+        store.test_session("conversation", "run_00000000000000000000000000000001");
         let attachment = store
-            .claim_session_attachment("conversation", None, &process, false)
+            .claim_session_attachment("conversation", None, &fixture_process(path), false)
             .unwrap();
         (store, "conversation".into(), attachment)
     }
@@ -299,14 +303,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("history.db");
         let owner = pending_pair(&path);
-        let replacement = LfProcessId::new();
-        rusqlite::Connection::open(&path)
-            .unwrap()
-            .execute(
-                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
-                [&replacement],
-            )
-            .unwrap();
+        let replacement = fixture_process(&path);
         let attachment = owner
             .0
             .claim_session_attachment("conversation", Some(&owner.2), &replacement, false)
@@ -395,30 +392,15 @@ mod tests {
     fn reconstructed_reader_retains_pending_origins_across_takeover_and_new_input() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("history.db");
-        let store = SqliteStore::open_ephemeral(&path).unwrap();
-        let conn = rusqlite::Connection::open(&path).unwrap();
-        store.test_session("conversation", "run_00000000000000000000000000000001");
-        let process = LfProcessId::new();
-        conn.execute(
-            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
-            [&process],
-        )
-        .unwrap();
-        let attachment = store
-            .claim_session_attachment("conversation", None, &process, false)
-            .unwrap();
+        let (store, _, attachment) = session_owner(&path);
+        let process = attachment.lf_process_id.clone().unwrap();
         let origin = store
             .session_turn_origin("conversation", &attachment)
             .unwrap();
         store
             .record_session_request(None, "request", &origin)
             .unwrap();
-        let replacement = LfProcessId::new();
-        conn.execute(
-            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
-            [&replacement],
-        )
-        .unwrap();
+        let replacement = fixture_process(&path);
         let current = store
             .claim_session_attachment("conversation", Some(&attachment), &replacement, false)
             .unwrap();
@@ -520,23 +502,12 @@ mod tests {
     fn surviving_reader_reports_current_attention_without_reviving_caller_authority() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("history.db");
-        let store = SqliteStore::open_ephemeral(&path).unwrap();
-        store.test_session("conversation", &crate::session_record::new_artifact_key());
+        let (store, _, first) = session_owner(&path);
         let sql = rusqlite::Connection::open(&path).unwrap();
         sql.execute("UPDATE agent_sessions SET interactive=1", [])
             .unwrap();
-        let a = LfProcessId::new();
-        let b = LfProcessId::new();
-        for process in [&a, &b] {
-            sql.execute(
-                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
-                [process],
-            )
-            .unwrap();
-        }
-        let first = store
-            .claim_session_attachment("conversation", None, &a, false)
-            .unwrap();
+        let a = first.lf_process_id.clone().unwrap();
+        let b = fixture_process(&path);
         let mut reader = History::new((store.clone(), "conversation".into(), first.clone()));
         let waiting = || {
             store
@@ -647,18 +618,7 @@ mod tests {
     #[test]
     fn request_from_another_agent_process_cannot_admit_a_native_turn() {
         let dir = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&dir.path().join("history.db")).unwrap();
-        store.test_session("conversation", &crate::session_record::new_artifact_key());
-        let process = LfProcessId::new();
-        let conn = rusqlite::Connection::open(dir.path().join("history.db")).unwrap();
-        conn.execute(
-            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
-            [&process],
-        )
-        .unwrap();
-        let attachment = store
-            .claim_session_attachment("conversation", None, &process, false)
-            .unwrap();
+        let (store, _, attachment) = session_owner(&dir.path().join("history.db"));
         let mut origin = store
             .session_turn_origin("conversation", &attachment)
             .unwrap();

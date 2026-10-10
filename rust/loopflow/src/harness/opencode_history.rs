@@ -3,7 +3,7 @@
 //! store, so dispatch never needs to lock or mutate that reader.
 
 use crate::id::AgentSessionId;
-use std::collections::{btree_map::Entry, BTreeMap};
+use std::collections::BTreeMap;
 
 use anyhow::{anyhow, Context, Result};
 use serde_json::{json, Value};
@@ -55,32 +55,34 @@ impl History {
     ) -> Result<Vec<ConversationEvent>> {
         let mut events = Vec::new();
         let (store, session, attachment) = &self.owner;
-        let receipts = native_receipts(thread, messages);
-        for (request, receipt) in receipts {
+        for (request, receipt) in native_receipts(thread, messages) {
             // Origins are immutable. Recover once; subsequent observations only
             // advance native receipts and this reader's emitted boundaries.
-            if let Entry::Vacant(entry) = self.requests.entry(request.clone()) {
+            if !self.requests.contains_key(request) {
                 if let Some((origin, completed)) =
-                    store.session_request(session, thread, &request)?
+                    store.session_request(session, thread, request)?
                 {
                     // Attribution is evidence, not authority. Only requests of
                     // this same surviving provider belong to the live reader.
                     if origin.agent_process_id == attachment.agent_process_id {
-                        store.record_session_turn_origin(thread, &request, &origin)?;
-                        entry.insert(Request {
-                            started: completed,
-                            completed,
-                        });
+                        store.record_session_turn_origin(thread, request, &origin)?;
+                        self.requests.insert(
+                            request.to_owned(),
+                            Request {
+                                started: completed,
+                                completed,
+                            },
+                        );
                     }
                 }
             }
-            record_receipts(store, session, thread, &request, &receipt)?;
-            let Some(submitted) = self.requests.get_mut(&request) else {
+            record_receipts(store, session, thread, request, &receipt)?;
+            let Some(submitted) = self.requests.get_mut(request) else {
                 continue;
             };
             if !submitted.started {
                 events.push(ConversationEvent::TurnStarted {
-                    turn_id: request.clone(),
+                    turn_id: request.to_owned(),
                 });
             }
             submitted.started = true;
@@ -104,7 +106,7 @@ impl History {
                     });
                 }
                 events.push(ConversationEvent::TurnCompleted {
-                    turn_id: request,
+                    turn_id: request.to_owned(),
                     status,
                 });
             }
@@ -140,8 +142,8 @@ struct Receipt<'a> {
 fn native_receipts<'a>(
     thread: &AgentSessionId,
     messages: &'a [Value],
-) -> BTreeMap<String, Receipt<'a>> {
-    let mut receipts = BTreeMap::<String, Receipt>::new();
+) -> BTreeMap<&'a str, Receipt<'a>> {
+    let mut receipts = BTreeMap::<&str, Receipt>::new();
     for message in messages {
         let info = &message["info"];
         if info["sessionID"] != thread.as_str() || info["role"] != "assistant" {
@@ -150,11 +152,7 @@ fn native_receipts<'a>(
         let Some(parent) = info["parentID"].as_str() else {
             continue;
         };
-        receipts
-            .entry(parent.into())
-            .or_default()
-            .messages
-            .push(message);
+        receipts.entry(parent).or_default().messages.push(message);
     }
     for receipt in receipts.values_mut() {
         receipt.messages.sort_by(|a, b| {

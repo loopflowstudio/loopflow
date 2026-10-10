@@ -33,6 +33,68 @@ pub(super) fn repository_id_in(conn: &Connection, repo: &str) -> StoreResult<Opt
 }
 
 impl SqliteStore {
+    /// Read execution only on its owning Machine. Foreign cached placements do
+    /// not become another authority; peers must read that Machine themselves.
+    pub fn observe_task_location(
+        &self,
+        repository: &RepositoryId,
+        task: &TaskId,
+        request: &str,
+    ) -> StoreResult<crate::durable::TaskLocationObservation> {
+        use crate::durable::{TaskLocation, TaskLocationObservation};
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        let machine = super::durable::map_local_machine(&tx)?.id;
+        let location = (|| -> StoreResult<TaskLocation> {
+            let repo: String = tx.query_row(
+                "SELECT repo FROM repository_plans WHERE id=?1",
+                [repository.as_str()],
+                |row| row.get(0),
+            )?;
+            let id = super::children::resolve_task_id_in(&tx, task.as_str(), Some(&repo))?
+                .ok_or(StoreError::NotFound)?;
+            let (checkout, owner, started): (Option<String>, Option<String>, Option<i64>) = tx
+                .query_row(
+                    "SELECT worktree,checkout_machine_id,started_at FROM tasks WHERE id=?1",
+                    [id.as_str()],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )?;
+            if checkout.is_none() && started.is_none() {
+                return Ok(TaskLocation::Unrecorded);
+            }
+            if owner.as_deref() != Some(machine.as_str()) {
+                return Ok(TaskLocation::Unavailable {
+                    reason: "execution Machine is unknown or not this observer; read its owner"
+                        .into(),
+                });
+            }
+            Ok(TaskLocation::Recorded {
+                task_id: id,
+                checkout,
+            })
+        })()
+        .unwrap_or_else(|error| TaskLocation::Unavailable {
+            reason: error.to_string(),
+        });
+        Ok(TaskLocationObservation {
+            request: request.into(),
+            repository_id: repository.clone(),
+            task_id: task.clone(),
+            machine_id: machine,
+            observed_at: time::OffsetDateTime::now_utc().unix_timestamp(),
+            location,
+        })
+    }
+
+    pub fn task_is_shared(&self, task: &TaskId) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM planning_members WHERE kind='task' AND object_id=?1)",
+            [task.as_str()],
+            |row| row.get(0),
+        )?)
+    }
+
     pub fn task_execution_route(&self, task: &TaskId) -> StoreResult<TaskExecutionRoute> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
@@ -69,6 +131,8 @@ impl SqliteStore {
             )
         };
         Ok(TaskExecutionRoute {
+            task_id: task.clone(),
+            checkout,
             repository_id,
             machine_id,
             source,

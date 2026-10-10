@@ -1168,3 +1168,30 @@ fn task_checkout_explanations_keep_proposals_separate_from_admission() {
         serde_json::from_str::<serde_json::Value>(json).unwrap()
     );
 }
+
+#[test]
+fn task_locations_preserve_owner_freshness_and_unavailable_evidence() {
+    use loopflow::durable::{TaskLocation, TaskLocationObservation};
+    let wire: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/task_locations.json"
+    ))
+    .unwrap();
+    let readings: Vec<TaskLocationObservation> = serde_json::from_value(wire.clone()).unwrap();
+    assert!(matches!(
+        readings[0].location,
+        TaskLocation::Recorded {
+            checkout: Some(_),
+            ..
+        }
+    ));
+    assert!(matches!(
+        readings[1].location,
+        TaskLocation::Recorded { checkout: None, .. }
+    ));
+    assert!(matches!(readings[2].location, TaskLocation::Unrecorded));
+    assert!(matches!(
+        readings[3].location,
+        TaskLocation::Unavailable { .. }
+    ));
+    assert_eq!(serde_json::to_value(readings).unwrap(), wire);
+}

@@ -1118,3 +1118,243 @@ fn flow_context_preview_reads_selected_machine_graph_without_executing_steps() {
     assert!(!fixture.root.path().join("forbidden-effect").exists());
     assert!(!repo.join(".lf/tmp").exists());
 }
+
+#[test]
+fn imported_execution_location_survives_delegation_and_rejects_stale_peer_reads() {
+    use loopflow::durable::{RepositoryId, TaskId};
+    use loopflow::engine::planning_git::PlanningDestination;
+    use loopflow::planning::NewTask;
+    use loopflow::store::sqlite::SqliteStore;
+
+    let fixture = preview_machines();
+    let local_repo = loopflow_test_support::TestRepo::new();
+    let remote_repo = loopflow_test_support::TestRepo::new();
+    let local_path = local_repo.path().canonicalize().unwrap();
+    let remote_path = remote_repo.path().canonicalize().unwrap();
+    let local_db = fixture.root.path().join("local/loopflow.db");
+    let remote_db = fixture.root.path().join("remote/store/loopflow.db");
+    let local = SqliteStore::new(&local_db).unwrap();
+    let remote = SqliteStore::new(&remote_db).unwrap();
+    let repository = RepositoryId::new();
+    local
+        .bind_repository(local_path.to_str().unwrap(), &repository)
+        .unwrap();
+    remote
+        .bind_repository(remote_path.to_str().unwrap(), &repository)
+        .unwrap();
+    let project = remote
+        .ensure_wave_project(remote_path.to_str().unwrap(), "location")
+        .unwrap();
+    let task = remote
+        .create_task(&NewTask {
+            id: TaskId::new(),
+            project_id: project.id,
+            title: "Retained elsewhere".into(),
+            description: String::new(),
+            due_date: None,
+        })
+        .unwrap();
+    let owner = remote.local_machine().unwrap().id;
+    // Execution is deliberately seeded, not imported or claimed by this proof.
+    support::record_flow(
+        &fixture.root.path().join("remote/store"),
+        &remote_path,
+        "prior",
+        "prior-step",
+        "succeeded",
+    );
+    let db = rusqlite::Connection::open(&remote_db).unwrap();
+    db.execute("UPDATE tasks SET worktree=?2,workspace_slug='retained',branch='main',base_commit=?3,checkout_machine_id=?4,started_at=1 WHERE id=?1",
+        rusqlite::params![task.id.as_str(), remote_path.to_str().unwrap(), remote_repo.head_sha(), owner.as_str()]).unwrap();
+    let destination =
+        PlanningDestination::new("/unused/fixture", "refs/loopflow/planning/shared/location")
+            .unwrap();
+    for (store, path) in [(&local, &local_path), (&remote, &remote_path)] {
+        store
+            .bind_peer_planning(path.to_str().unwrap(), &destination)
+            .unwrap();
+    }
+    remote
+        .select_peer_waves(
+            remote_path.to_str().unwrap(),
+            &destination.id(),
+            std::slice::from_ref(&task.wave_id),
+        )
+        .unwrap();
+    local
+        .import_peer_planning(
+            local_path.to_str().unwrap(),
+            &destination.id(),
+            "first",
+            &remote
+                .export_peer_planning(remote_path.to_str().unwrap(), &destination.id())
+                .unwrap(),
+        )
+        .unwrap();
+    let caller = local.local_machine().unwrap().id;
+    assert_success(&fixture.run(&[
+        "--repository",
+        repository.as_str(),
+        "wave",
+        "place",
+        task.wave_id.as_str(),
+        caller.as_str(),
+    ]));
+    remote
+        .import_peer_planning(
+            remote_path.to_str().unwrap(),
+            &destination.id(),
+            "delegated-back",
+            &local
+                .export_peer_planning(local_path.to_str().unwrap(), &destination.id())
+                .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(
+        db.query_row(
+            "SELECT machine_id FROM work_placements WHERE wave_id=?1",
+            [task.wave_id.as_str()],
+            |row| row.get::<_, String>(0)
+        )
+        .unwrap(),
+        caller.as_str()
+    );
+    assert_eq!(
+        remote.task_execution_route(&task.id).unwrap().machine_id,
+        owner
+    );
+    assert!(local.task(&task.id).unwrap().unwrap().worktree.is_none());
+    let local_before = checkpoint_bytes(&local_db);
+    let remote_before = checkpoint_bytes(&remote_db);
+    let args = [
+        "--repository",
+        repository.as_str(),
+        "task",
+        "location",
+        task.id.as_str(),
+        "--peers",
+        "--json",
+    ];
+    let reading = fixture.json(&args);
+    assert_eq!(reading[0]["location"]["state"], "unrecorded");
+    assert_eq!(reading[1]["location"]["state"], "recorded");
+    assert_eq!(reading[1]["machine_id"], owner.as_str());
+    assert_eq!(
+        reading[1]["location"]["checkout"],
+        remote_path.to_str().unwrap()
+    );
+    let explanation = fixture.json(&[
+        "--repository",
+        repository.as_str(),
+        "task",
+        "run",
+        task.id.as_str(),
+        "--explain",
+        "--json",
+    ]);
+    assert_eq!(
+        explanation["resolution"]["execution_machine"]["value"],
+        owner.as_str()
+    );
+    assert_eq!(
+        explanation["resolution"]["checkout"]["value"],
+        remote_path.to_str().unwrap()
+    );
+    assert!(explanation["action"].is_null());
+    let desktop = fixture.json(&[
+        "--repository",
+        repository.as_str(),
+        "--task",
+        task.id.as_str(),
+        "desktop",
+        "open",
+        "--explain",
+        "--json",
+    ]);
+    assert!(desktop["url"].is_null());
+    assert!(desktop["impediments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|value| value
+            .as_str()
+            .unwrap()
+            .contains("remote Desktop opening is unavailable")));
+    assert_eq!(checkpoint_bytes(&local_db), local_before);
+    assert_eq!(checkpoint_bytes(&remote_db), remote_before);
+    assert!(!fixture.root.path().join("forbidden-effect").exists());
+
+    let checkout = fixture.json(&[
+        "--repository",
+        repository.as_str(),
+        "task",
+        "checkout",
+        task.id.as_str(),
+        "--json",
+    ]);
+    assert_eq!(checkout["worktree"], remote_path.to_str().unwrap());
+    assert!(local.task(&task.id).unwrap().unwrap().worktree.is_none());
+    assert!(!fixture.root.path().join("forbidden-effect").exists());
+    let local_before = checkpoint_bytes(&local_db);
+    let remote_before = checkpoint_bytes(&remote_db);
+
+    // Replaying yesterday's successful reply cannot masquerade as a new reading.
+    let replay = fixture.root.path().join("replay.json");
+    fs::write(
+        &replay,
+        serde_json::to_vec(&vec![reading[1].clone()]).unwrap(),
+    )
+    .unwrap();
+    executable(
+        &fixture.root.path().join("bin/ssh"),
+        &format!("#!/bin/sh\ncat '{}'\n", replay.display()),
+    );
+    let stale = fixture.json(&args);
+    assert_eq!(stale[1]["location"]["state"], "unavailable");
+    assert!(stale[1]["location"]["reason"]
+        .as_str()
+        .unwrap()
+        .contains("stale or mismatched"));
+    let explanation = fixture.json(&[
+        "--repository",
+        repository.as_str(),
+        "task",
+        "run",
+        task.id.as_str(),
+        "--explain",
+        "--json",
+    ]);
+    assert_eq!(
+        explanation["resolution"]["execution_machine"]["state"],
+        "unavailable"
+    );
+    assert_eq!(
+        explanation["resolution"]["checkout"]["state"],
+        "unavailable"
+    );
+    assert!(explanation["action"].is_null());
+
+    executable(
+        &fixture.root.path().join("bin/ssh"),
+        "#!/bin/sh\necho unreachable >&2\nexit 255\n",
+    );
+    let unreachable = fixture.json(&args);
+    assert_eq!(unreachable[1]["location"]["state"], "unavailable");
+    assert_eq!(checkpoint_bytes(&local_db), local_before);
+    assert_eq!(checkpoint_bytes(&remote_db), remote_before);
+    // Actual preparation refuses before a local checkout or provider can appear.
+    let launch = fixture.run(&[
+        "--repository",
+        repository.as_str(),
+        "task",
+        "checkout",
+        task.id.as_str(),
+        "--json",
+    ]);
+    assert!(!launch.status.success());
+    assert!(
+        String::from_utf8_lossy(&launch.stderr).contains("first-start admission is unavailable")
+    );
+    assert!(local.task(&task.id).unwrap().unwrap().worktree.is_none());
+    assert!(!fixture.root.path().join("forbidden-effect").exists());
+}

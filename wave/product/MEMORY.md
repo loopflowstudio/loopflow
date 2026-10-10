@@ -2,7 +2,7 @@
 
 Formerly `concerto`.
 
-## Current direction after the October 7 Tasks
+## Direction after October 7
 
 LOO-387–430 briefs and LOO-427 steers supersede older designs.
 LOO-389 comments failed on an unbound Initiative.
@@ -10,7 +10,7 @@ LOO-389 comments failed on an unbound Initiative.
 - **Machine replaces Home** (LOO-394); one OS user and data directory.
   `LF_HOME`, provider homes and stored opaque IDs keep their meanings. LOO-411
   replaces `lf ssh` with global `lf --machine LABEL COMMAND`, no alias or
-  cross-version negotiation. Source owns current vocabulary, not older installed help.
+  cross-version negotiation. Source owns vocabulary.
 - **Work first.** Jack Heart (October 8): agents are first-class users of the
   software engineering CLI. Desktop centers Work; orchestra language stays top-level.
   One repository window across machines, identified by Work. Jack accepted
@@ -41,7 +41,7 @@ LOO-389 comments failed on an unbound Initiative.
 [LOO-427's comparison](../../docs/reviews/terminal-command-comparison.md) records
 command dispositions. Jack folded LOO-430/431/432 into LOO-427: identity, window
 control and terminal I/O in one diff. October 8: design approved; implementation
-authorized through demo review. Owned cmux probe cleaned up; no Desktop proof.
+authorized through demo review. Owned cmux probe cleaned up.
 
 October 8: LOO-427 leaves unknown checkout location unavailable. `92cafe61d`
 removes copied placements, preserves legacy overrides and routes known Tasks
@@ -116,21 +116,18 @@ delivery; comment errors stay local. No live Linear, running-provider or mounted
 Desktop proof. Mixed exchange, admission and remote opening remain;
 mixed-provider and first-start refusals stay.
 
-#1512: live connect hands off; dead-driver resume uses native history, never
-import-triggered launch. #1517 adds opaque AgentSessionId, preserving wire/storage
-bytes; `9cfc15451` missed the new explanation reader's field rename, repaired
-locally. Typed identity supplies no endpoint or takeover authority. Native proof remains.
+#1512 connects live clients or resumes native history after driver death, never
+from import. #1517's opaque AgentSessionId preserves stored bytes; the new explanation
+reader's rename was repaired locally. Neither identity nor fixtures prove takeover
+or native acceptance. Earlier evidence: `829c9b993`, this heading.
 
-`e3ca861b1`: mounted-page/visibility observation replaces callbacks, including
-pre-registration failure. Request IDs fence registration only; native proof remains.
+`e3ca861b1`: mounted-page/visibility observation replaces callbacks; request IDs
+fence registration only. Pre-registration failures survive; native proof remains.
 
-October 9 preview/launch share selection, admission, Workflow, URL validation and
-input assembly; only launch prepares Work. Read-only SQLite, early addressed-identity
-validation and fallback suppression prevent both sender and receiver writes.
-Unreadable is not absent; explicit-Machine previews skip probes/credentials.
-Missing-registry and checkpointed-WAL regressions, chapter-store ownership and
-two-CLI routing/Flow fixtures: `9cfc15451:wave/product/MEMORY.md`, this heading.
-They prove neither configured SSH nor exclusive start.
+Preview/launch share selection and assembly; only launch prepares Work/excerpts.
+Read-only SQLite and fallback suppression prevent hidden writes. Explicit-Machine
+previews skip credential/identity probes. WAL, registry and Flow counterexamples:
+`829c9b993:wave/product/MEMORY.md`, this heading; no configured SSH or admission proof.
 
 Identity is not action validation. Shared validators recheck writes; `--context`
 rejects non-agent commands before stdin. Refile resolves IDs before initialization;
@@ -143,25 +140,30 @@ follow-up delivery uses common creation receipts, preserving uncertain original 
 Abandon/delete/interrupt remain identity-only.
 Scoped alias resolution does not replace repository checks for historical branch
 selectors, which can resolve only later through retained placement.
-No preview endpoint probes, takeover or end-intent completion/cleanup; native proof remains.
+No preview provider probes, takeover or end-intent completion/cleanup; native proof remains.
 
-October 9 completion exchange: `e79451d05`/`2a2379913` repair the `37cd026a7`
-counterexample. Newly accepted Git mutations supersede intent even when offline
-complete/reopen returns to the same value; replay preserves newer requests. Supersession
-and delivery receipts share a savepoint. Linear retains status-change ownership:
-title-only revisions cannot cancel intent. Explicit complete authors new intent;
-end retry cannot revive superseded requests, which never synchronize. Seeded
-Workflow/PR/placement, disk drafts and one fake provider prove no running Task Flow
-or native acceptance. Earlier failures: `b2add0cf8`, this heading.
+October 9 completion exchange: accepted Git mutations supersede intent even when
+offline complete/reopen returns to the same value; replay preserves newer requests.
+Supersession/delivery share a savepoint. Linear's title-only revisions cannot cancel
+intent; end retry cannot revive it. `e79451d05`/`2a2379913` repair the `37cd026a7`
+counterexample. Seeded Workflow/PR/placement, disk drafts and one fake provider prove
+no running Flow or native acceptance. Full evidence and earlier failures:
+`829c9b993:wave/product/MEMORY.md`, this heading.
 
 October 9: `787f440ea`/`50bf78f1e` exchange Machine ID/time/provenance through
-the journal and Placement. Null restores inheritance; unknown Machines create no
-connections. Reaffirming explicit intent preserves timestamp/mutation; explicitly
-selecting legacy intent authors a save.
-Two-Home/file-Git fixtures cover offline conflicts, narrower/future inheritance,
-retained losers and unchanged seeded execution—not running Flows. Store fixtures
-add Task/Project overrides, clearing and no echo. Assignment grants neither execution location nor exclusive admission.
-First-start and mixed-provider refusals stay; remote opening and native proof remain.
+Placement. Null restores inheritance; unknown Machines create no connections.
+Reaffirming explicit intent preserves timestamp/mutation; selecting legacy intent
+authors a save. Two-Home/file-Git and Store fixtures cover conflicts, narrower/future
+inheritance, clearing/no-echo and unchanged seeded execution, not running Flows.
+Earlier evidence/failed attempts: `829c9b993:wave/product/MEMORY.md`, this heading.
+
+Recorded-location reads observe owning Machines, never exchange execution. Request
+nonces fence stale replies without peer-clock comparison; added peers are not a
+global inventory. The two-CLI/import fixture follows retained execution after
+delegation changes and refuses stale/unreachable fallback without copying checkouts.
+Desktop reports ownership but refuses remote opening. Remote/native composition,
+exclusive admission and mixed-provider exchange remain. Seeded history proves no
+running Flow or configured SSH.
 
 ## Task delivery boundary (LOO-418, reconciled 2026-10-09)
 

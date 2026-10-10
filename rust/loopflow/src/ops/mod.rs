@@ -33,6 +33,7 @@ pub mod task_actions;
 pub mod task_execution;
 #[doc(hidden)]
 pub mod task_input;
+pub mod task_location;
 pub(crate) mod task_pm;
 pub mod task_run;
 pub(crate) mod telemetry;

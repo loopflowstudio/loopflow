@@ -968,6 +968,7 @@ fn read_task_draft() -> anyhow::Result<String> {
 
 fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
     match command {
+        TaskCommand::Location { .. } => unreachable!("location reads precede admission"),
         TaskCommand::Automation { json } => {
             let status = loopflow::ops::task_automation::status(repo)?;
             if *json {
@@ -1487,7 +1488,14 @@ fn run() -> anyhow::Result<()> {
     {
         let args = reorder_args(std::iter::once("lf".to_string()).chain(command).collect());
         let cli = loopflow::lf::commands::ssh::parse_remote_command(&args[1..])?;
-        let preview = cli.context || cli.explain;
+        let preview = cli.context
+            || cli.explain
+            || matches!(
+                cli.command,
+                Some(Commands::Task {
+                    cmd: TaskCommand::Location { .. }
+                })
+            );
         if preview {
             journal::mark_effect_free_read();
         }
@@ -1538,7 +1546,13 @@ fn run() -> anyhow::Result<()> {
                 }
         })
     );
-    if cli.context || cli.explain || planning_read {
+    let location_read = matches!(
+        cli.command,
+        Some(Commands::Task {
+            cmd: TaskCommand::Location { .. }
+        })
+    );
+    if cli.context || cli.explain || planning_read || location_read {
         journal::mark_effect_free_read();
     }
     init_tracing(cli.verbose);
@@ -1567,6 +1581,24 @@ fn run() -> anyhow::Result<()> {
     loopflow::lf::commands::work_route::resolve_repository_selection(&mut cli)?;
     if cli.context || cli.explain {
         return preview_invocation(&cli, &args);
+    }
+    if let Some(Commands::Task {
+        cmd:
+            TaskCommand::Location {
+                issue,
+                peers,
+                request,
+                json,
+            },
+    }) = &cli.command
+    {
+        return loopflow::lf::commands::work_route::location(
+            &cli,
+            issue,
+            *peers,
+            request.as_deref(),
+            *json || cli.json,
+        );
     }
     if planning_read {
         let _cwd = cli

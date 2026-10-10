@@ -89,7 +89,7 @@ impl ContextExplanation {
 
     pub fn render(&self) -> String {
         let mut lines = vec![format!(
-            "Local reading: {} (not a peer observation or start permission)",
+            "Identity reading: {} (not start permission)",
             self.observed_at
         )];
         for (label, fact) in [

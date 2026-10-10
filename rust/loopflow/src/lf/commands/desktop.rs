@@ -367,7 +367,7 @@ fn opening_context(
         };
         return Ok(resolution);
     }
-    let resolution = if let Some(session) = session {
+    let mut resolution = if let Some(session) = session {
         let resolved = super::context::explain(None, None, Some(session), None)?;
         if cli.task.is_some() || cli.wave.is_some() {
             let work =
@@ -402,6 +402,12 @@ fn opening_context(
             );
         }
     }
+    if let Some(store) = crate::store::read_existing_registry()? {
+        tokio::runtime::Runtime::new()?.block_on(crate::ops::task_location::explain(
+            &store.sqlite,
+            &mut resolution,
+        ));
+    }
     Ok(resolution)
 }
 
@@ -432,6 +438,19 @@ fn opening_url(
         "--diff needs a Task; select --task or a Task-associated --session. No app was opened."
     );
     anyhow::ensure!(session.is_none() || task.is_some(), "This Session has no single Task workspace; use `lf session connect` in a terminal. No app was opened.");
+    if let Some(task) = task {
+        match (&resolution.execution_machine, &resolution.machine) {
+            (ContextFact::Bound { value: owner, .. }, ContextFact::Bound { value: local, .. })
+                if owner != local =>
+            {
+                bail!("Task execution resolves to Machine {owner}; remote Desktop opening is unavailable. Use `lf --machine {owner} task status {}` in a terminal. No app was opened.", task);
+            }
+            (ContextFact::Unavailable { reason }, _) => {
+                bail!("Task execution location unavailable: {reason}. No app was opened.");
+            }
+            _ => {}
+        }
+    }
     let mut url = reqwest::Url::parse(if task.is_some() {
         "loopflow://task"
     } else {

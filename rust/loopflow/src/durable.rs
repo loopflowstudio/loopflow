@@ -113,9 +113,37 @@ impl WorkRef {
     }
 }
 
+/// A fresh, Machine-local observation, never replicated as planning or a start claim.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskLocationObservation {
+    pub request: String,
+    pub repository_id: RepositoryId,
+    pub task_id: TaskId,
+    pub machine_id: MachineId,
+    pub observed_at: i64,
+    pub location: TaskLocation,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum TaskLocation {
+    Recorded {
+        task_id: TaskId,
+        checkout: Option<String>,
+    },
+    /// Only this Machine has no retained execution; this is not global absence.
+    Unrecorded,
+    Unavailable {
+        reason: String,
+    },
+}
+
 /// A launch destination read from planning and recorded execution, not a claim.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskExecutionRoute {
+    pub task_id: TaskId,
+    pub checkout: Option<String>,
     pub repository_id: RepositoryId,
     pub machine_id: MachineId,
     pub source: TaskExecutionSource,

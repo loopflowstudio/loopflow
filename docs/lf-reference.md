@@ -1883,6 +1883,19 @@ Create a planning Task without allocating a checkout or starting work
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
+## lf task location
+
+Read Machine-owned execution records without checkout preparation, launch or transfer.
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | Task identifier or full ID in the selected repository |
+| `--peers` | Also read added Machines; unavailable replies remain explicit |
+| `--json` | Include request identity, observing Machine, timestamp and location state |
+
+No record is not first-start permission. `--machine` reads only the addressed
+Machine unless `--peers` is supplied.
+
 ## lf task status
 
 Show durable Task facts and its recorded work

@@ -1,0 +1,47 @@
+[
+  {
+    "request": "fixture-reading",
+    "repository_id": "repo_11111111111141118111111111111111",
+    "task_id": "task_22222222222242228222222222222222",
+    "machine_id": "home_33333333333343338333333333333333",
+    "observed_at": 1791589900,
+    "location": {
+      "state": "recorded",
+      "task_id": "task_22222222222242228222222222222222",
+      "checkout": "/repo/task"
+    }
+  },
+  {
+    "request": "fixture-reading",
+    "repository_id": "repo_11111111111141118111111111111111",
+    "task_id": "task_22222222222242228222222222222222",
+    "machine_id": "home_33333333333343338333333333333333",
+    "observed_at": 1791589900,
+    "location": {
+      "state": "recorded",
+      "task_id": "task_22222222222242228222222222222222",
+      "checkout": null
+    }
+  },
+  {
+    "request": "fixture-reading",
+    "repository_id": "repo_11111111111141118111111111111111",
+    "task_id": "task_22222222222242228222222222222222",
+    "machine_id": "home_33333333333343338333333333333333",
+    "observed_at": 1791589900,
+    "location": {
+      "state": "unrecorded"
+    }
+  },
+  {
+    "request": "fixture-reading",
+    "repository_id": "repo_11111111111141118111111111111111",
+    "task_id": "task_22222222222242228222222222222222",
+    "machine_id": "home_33333333333343338333333333333333",
+    "observed_at": 1791589900,
+    "location": {
+      "state": "unavailable",
+      "reason": "peer unreachable"
+    }
+  }
+]

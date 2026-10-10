@@ -68,7 +68,9 @@ lf --machine build-home --wave product wave-operate
 
 `lf --machine` is transport, not a second API. The target runs its own `lf`, verifies
 its Machine identity, resolves its own files and store, and returns the result.
-There is no implicit fan-out and no central execution database.
+There is no central execution database. Shared-Task routing may observe added
+Machines for a retained execution owner, as described below; ordinary inventories
+remain local.
 
 The Machine and placement types live in
 [`durable.rs`](../../rust/loopflow/src/durable.rs). SSH routing is exposed by
@@ -116,17 +118,35 @@ rewriting Work; Desktop reassociates retained windows on opening/restoration. Th
 Task/Project IDs for one provider object; provider correspondence and uncertain
 effect ownership remain with the common planning writer.
 
-This is not complete distributed routing: a peer's absence of a checkout is not
-proof of an unstarted Task. Planning exchange excludes execution. An observed
-execution-location read, including unavailable/freshness state, must precede
-applying delegation to imported Work. The prototype handles recorded locations;
-remote observation and alias acquisition/rerouting remain unfinished. A negative
-observation is not a reservation: first-start admission must also exclude another
-Machine starting between the read and allocation. The local SQLite transaction
-does not supply that cross-machine guarantee. Until admission is composed, Tasks
-selected into any Git destination without a retained checkout refuse first start,
-including user-keyed refs. Saves and acquisition still work. Do not infer a global
-execution destination from the current delegation alone.
+Read execution separately from planning:
+
+```bash
+lf task location LOO-123 --peers --json
+```
+
+The local read uses one store snapshot. `--peers` addresses added Machines by
+exact repository/Task identity through bounded, noninteractive SSH reads. Each
+reply echoes a fresh request ID and its observing Machine; a cached, mismatched,
+unreachable or unassociated reply is unavailable. A negative reading says only
+that its Machine has no record. No connections, execution records or credentials
+are imported or created by observation.
+
+Routing shared Tasks without local execution now reads these peers before using
+any delegation. One positive owning-Machine record routes retained work there,
+even after delegation changes. Conflicting positive records refuse; no positive
+record retains the first-start refusal. Added peers are not a complete global
+inventory, and an observation reserves nothing. The destination re-resolves Work
+and retains its preparation/admission checks. Local-only work still inherits its
+nearest assignment. No execution-location cache or second placement writer exists.
+
+Task-run/checkout and Desktop opening explanations share this read. Desktop
+currently reports a remote execution owner but refuses remote opening before app
+launch, with a terminal alternative; native remote opening remains unfinished.
+
+Exclusive first-start admission is still unavailable. Tasks selected into any Git
+destination without a retained checkout refuse first start, including user refs.
+Saves and acquisition remain usable. Neither a negative peer response nor a local
+SQLite transaction supplies cross-Machine exclusion.
 
 Task checkout location is recorded separately: `tasks.checkout_machine_id` and
 `worktree` identify the Machine and path prepared for execution. New checkouts
@@ -240,8 +260,9 @@ install command implementation under [`lf/commands/`](../../rust/loopflow/src/lf
 ## Boundary contracts
 
 - Machine identity is stable; network route is replaceable.
-- Commands and read surfaces act locally unless explicitly routed with
-  `lf --machine`.
+- Commands act locally unless routed with `lf --machine` or retained Task
+  execution. Shared-Task location discovery observes added peers without merging
+  their planning or claiming their execution.
 - Placement selects where Work belongs, not whether it is currently running.
 - Detached processes use credentials installed on their Machine.
 - Direct child handles are local capability; inferred process ownership is not.

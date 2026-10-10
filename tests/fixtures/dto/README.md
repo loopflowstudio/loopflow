@@ -94,3 +94,7 @@ takeover, shared legal actions and unavailable evidence without client acquisiti
 append versus provider refresh, effects and explicit refused input.
 
 `task_checkout_explanations.json` retains proposed, reused and restored checkout intent separately from admission and unavailable evidence.
+
+`task_locations.json` covers request-bound Machine observations, retained paths,
+pathless execution, local absence and unavailable peers. Negative readings grant
+no admission; execution locations never enter planning exchange.

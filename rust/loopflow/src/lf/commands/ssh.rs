@@ -18,7 +18,14 @@ pub fn run(
     lf_args: &[String],
     task_route: Option<TaskExecutionRoute>,
 ) -> anyhow::Result<()> {
-    let preview = cli.context || cli.explain;
+    let preview = cli.context
+        || cli.explain
+        || matches!(
+            cli.command,
+            Some(crate::lf::Commands::Task {
+                cmd: crate::lf::TaskCommand::Location { .. }
+            })
+        );
     if !preview && matches!(cli.command, Some(crate::lf::Commands::Desktop { .. })) {
         super::desktop::require_supported()?;
     }
@@ -281,6 +288,41 @@ fn run_ssh(dest: &str, forward_agent: bool, preamble: &str) -> anyhow::Result<()
     let status = child.wait().context("ssh did not complete");
     written.context("failed to write preamble to ssh")?;
     command_result(dest, status?.code())
+}
+
+/// One bounded read through the ordinary SSH envelope. No probes, credentials,
+/// provider launch or local fallback; callers validate the request-bound reply.
+pub(crate) async fn read(
+    machine: &crate::durable::Machine,
+    args: &[String],
+) -> anyhow::Result<Vec<u8>> {
+    let cmd = std::iter::once("lf".to_string())
+        .chain(args.iter().cloned())
+        .collect::<Vec<_>>();
+    let preamble = build_preamble(
+        &machine.route,
+        None,
+        &cmd,
+        &[(EXPECTED_MACHINE_ID_ENV, machine.id.as_str())],
+    );
+    let mut child = tokio::process::Command::new("ssh");
+    child
+        .args(crate::engine::machine_route::bounded_ssh_args(
+            &machine.route,
+            false,
+        )?)
+        .arg(preamble)
+        .stdin(Stdio::null())
+        .kill_on_drop(true);
+    let output = tokio::time::timeout(std::time::Duration::from_secs(20), child.output())
+        .await
+        .context("execution-location observation unavailable: peer timed out")??;
+    anyhow::ensure!(
+        output.status.success(),
+        "execution-location observation unavailable: {}",
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    Ok(output.stdout)
 }
 
 #[cfg(test)]

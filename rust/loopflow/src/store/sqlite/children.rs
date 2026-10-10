@@ -1436,7 +1436,7 @@ fn task_pr_github_observation_json(pr: &TaskPr) -> StoreResult<Option<String>> {
 
 // Keep physical lookup, correspondence validation and record hydration in the
 // caller's read snapshot. A concurrent mapping change cannot mix generations.
-fn resolve_task_id_in(
+pub(super) fn resolve_task_id_in(
     conn: &Connection,
     issue: &str,
     repo: Option<&str>,

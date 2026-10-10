@@ -7,6 +7,16 @@ import Testing
 /// the Mac app.
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
+    @Test func taskLocationsRetainFreshnessAndUnavailableEvidence() throws {
+        let data = try loadFixtureData("task_locations.json")
+        let readings = try JSONDecoder().decode([TaskLocationObservation].self, from: data)
+        #expect(readings[0].location == .recorded(taskID: readings[0].taskID, checkout: "/repo/task"))
+        #expect(readings[1].location == .recorded(taskID: readings[1].taskID, checkout: nil))
+        #expect(readings[2].location == .unrecorded)
+        #expect(readings[3].location == .unavailable(reason: "peer unreachable"))
+        #expect(try JSONDecoder().decode([TaskLocationObservation].self, from: JSONEncoder().encode(readings)) == readings)
+    }
+
     @Test func repositoryIdentityPreservesExplicitLocalLocators() throws {
         let data = try loadFixtureData("repository_identity.json")
         let identity = try JSONDecoder().decode(RepositoryIdentity.self, from: data)

@@ -1127,6 +1127,17 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Read recorded execution location without preparing or transferring Work
+    Location {
+        issue: String,
+        /// Observe added Machines as well as this one; never reserve first start
+        #[arg(long)]
+        peers: bool,
+        #[arg(long, hide = true)]
+        request: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
     /// Show durable Task facts and its recorded work
     Status {
         /// Task issue; defaults to the Task in this checkout
@@ -1270,7 +1281,8 @@ impl TaskCommand {
             | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
             | Self::Checkout { issue, .. } => issue.as_deref(),
-            Self::Sync { issue, .. }
+            Self::Location { issue, .. }
+            | Self::Sync { issue, .. }
             | Self::Move { issue, .. }
             | Self::Complete { issue, .. }
             | Self::Reopen { issue, .. }
@@ -1304,7 +1316,8 @@ impl TaskCommand {
             | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
             | Self::Checkout { issue, .. } => issue.as_mut(),
-            Self::Sync { issue, .. }
+            Self::Location { issue, .. }
+            | Self::Sync { issue, .. }
             | Self::Move { issue, .. }
             | Self::Complete { issue, .. }
             | Self::Reopen { issue, .. }

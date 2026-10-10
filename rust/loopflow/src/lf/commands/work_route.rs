@@ -45,6 +45,14 @@ fn read_registry() -> Result<Option<SqliteStore>> {
 /// Resolve scoped selectors once, carrying exact IDs to downstream consumers.
 /// Unknown Tasks remain with ordinary repository-scoped planning acquisition.
 pub fn resolve_repository_selection(cli: &mut Cli) -> Result<()> {
+    if matches!(
+        cli.command,
+        Some(Commands::Task {
+            cmd: TaskCommand::Location { .. }
+        })
+    ) {
+        return Ok(()); // Keep the requested portable ID in the reply envelope.
+    }
     let explicit_repository = cli.repo.is_some() || cli.repository.is_some();
     let (command_task, parent_task) = match &mut cli.command {
         Some(Commands::Task {
@@ -96,7 +104,10 @@ pub fn resolve_repository_selection(cli: &mut Cli) -> Result<()> {
 
 fn launch_task(cli: &Cli) -> Option<&str> {
     match &cli.command {
-        Some(Commands::Desktop { .. }) => None,
+        Some(Commands::Desktop { .. })
+        | Some(Commands::Task {
+            cmd: TaskCommand::Location { .. },
+        }) => None,
         Some(Commands::Task {
             cmd: TaskCommand::Run { issue, .. } | TaskCommand::Checkout { issue, .. },
         }) => issue.as_deref().or(cli.task.as_deref()),
@@ -124,17 +135,26 @@ pub fn dispatch(cli: &Cli, args: &[String]) -> Result<bool> {
     }
     let machine = route.machine_id.clone();
     let mut forwarded = args[1..].to_vec();
-    if matches!(
-        &cli.command,
-        Some(Commands::Task {
-            cmd: TaskCommand::Run { issue: None, .. }
-        })
-    ) && cli.task.is_some()
-        && !args
-            .iter()
-            .any(|arg| arg == "--task" || arg.starts_with("--task="))
-    {
-        forwarded.extend(["--task".into(), selector.into()]);
+    // Carry the observed exact target in addition to the positional selector.
+    // Destination resolution rejects an alias that now names different Work.
+    let mut found = false;
+    let mut i = 0;
+    while i < forwarded.len() {
+        if forwarded[i] == "--" {
+            break;
+        }
+        if forwarded[i] == "--task" && i + 1 < forwarded.len() {
+            forwarded[i + 1] = route.task_id.to_string();
+            found = true;
+            i += 1;
+        } else if forwarded[i].starts_with("--task=") {
+            forwarded[i] = format!("--task={}", route.task_id);
+            found = true;
+        }
+        i += 1;
+    }
+    if !found {
+        forwarded.splice(0..0, ["--task".into(), route.task_id.to_string()]);
     }
     super::ssh::run(machine.as_str(), false, cli, &forwarded, Some(route))?;
     Ok(true)
@@ -172,8 +192,60 @@ fn resolve_task(
             None
         };
     resolve_task_id(store, selector, repo.as_deref())?
-        .map(|task| store.task_execution_route(&task).map_err(Into::into))
+        .map(|task| {
+            tokio::runtime::Runtime::new()?
+                .block_on(crate::ops::task_location::resolve(store, &task))
+        })
         .transpose()
+}
+
+pub fn location(
+    cli: &Cli,
+    selector: &str,
+    peers: bool,
+    request: Option<&str>,
+    json: bool,
+) -> Result<()> {
+    let store = read_registry()?
+        .ok_or_else(|| anyhow!("execution location unavailable: local registry is absent"))?;
+    let repo = crate::repository::CanonicalRepo::current()?
+        .ok_or_else(|| anyhow!("select a repository before reading execution location"))?;
+    let repository = cli
+        .repository
+        .clone()
+        .or(store.repository_id(&repo.to_string())?)
+        .ok_or_else(|| anyhow!("repository identity unavailable"))?;
+    // A full unknown Task ID remains an unavailable observation, not creation input.
+    let task = TaskId::parse(selector)
+        .ok()
+        .or(resolve_task_id(&store, selector, Some(&repo.to_string()))?)
+        .ok_or_else(|| anyhow!("Task {selector} is unavailable"))?;
+    if let Some(global) = cli.task.as_deref() {
+        anyhow::ensure!(
+            global == selector || {
+                let selected = resolve_task_id(&store, selector, Some(&repo.to_string()))?;
+                selected.is_some()
+                    && selected == resolve_task_id(&store, global, Some(&repo.to_string()))?
+            },
+            "conflicting Task selections: {global} and {selector}"
+        );
+    }
+    let request = request
+        .map(str::to_string)
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let readings = tokio::runtime::Runtime::new()?.block_on(crate::ops::task_location::observe(
+        &store,
+        &repository,
+        &task,
+        peers,
+        &request,
+    ))?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&readings)?);
+    } else {
+        println!("{}", crate::ops::task_location::render(&readings));
+    }
+    Ok(())
 }
 
 /// Scope aliases and prefixes before routing, just as entry dispatch does.

@@ -1,4 +1,4 @@
-# cmux, lf / Loopflow for Mac, and herdr
+# cmux, lf / Loopflow for Mac, herdr, and Rex
 
 Inline `# lf-doc: ambiguous` comments annotate retired spellings for today's
 command checker; they were not part of the recorded trial commands.
@@ -406,6 +406,53 @@ Reuse these owners without duplicating their outcomes:
 | [LOO-428](https://linear.app/loopflow/issue/LOO-428) | Duplicate launch flags/noisy output, retaining argument delivery. |
 | [LOO-429](https://linear.app/loopflow/issue/LOO-429) | All assembled context in the system file; no split, relaunch fallback or lf-side interactive error wording. |
 | [LOO-420](https://linear.app/loopflow/issue/LOO-420) | Native invocation for native skills, translated ports across harnesses, builtins inlined. No new wrapper/prompt workaround here. |
+
+## Rex: composition and discoverability (2026-10-10)
+
+Jack Heart requested this comparison and asked for worthwhile explorations outside
+LOO-427 to become Tasks. These are research recommendations, not accepted changes
+to the implementation. Public documentation was inspected; Rex was not installed
+or exercised. No competitor implementation, help payload or configuration was
+incorporated. The Loopflow comparison uses source at `46d3f8da1`.
+
+| Job | Rex's documented behavior | Loopflow finding and recommendation |
+|---|---|---|
+| Address the caller's terminal | Ordinary commands can infer their enclosing terminal; explicit selectors override inference. | **Worse.** `resolve_pane` accepts an exact pane ID or one eligible pane in the selected Work scope. Explore using validated existing terminal identity when several panes exist. Preserve explicit selectors and explain provenance; never substitute current focus. |
+| Keep targeting simple | Ordinary flags select objects; stable IDs survive label changes. Ambiguous matches fail with choices. | **Have.** The branch now uses `--repo`, `--task` and `--pane`, with lifetime checks internal. Keep these. Positional targeting and another public target object add little for agents. |
+| Compose create then act | Creation responses identify the new object. | **Worse; improve here.** Desktop mutations currently return an inspection. Return the created/affected pane ID directly so the next command does not diff two layouts. This is a result-contract improvement within LOO-427, not another Task. |
+| Wait and react | Scripts can wait for terminal completion or consume events. | **Want to explore separately.** Waiting for a view to become usable would remove blind sleeps. Keep terminal readiness, provider readiness and Process completion distinct; Desktop must not acquire a second execution owner. |
+| Discover the installed API | Connected-version discovery includes method arguments and results. | **Worse.** Desktop advertises operation names, while Work supplies legal actions separately. LOO-397 owns discovery: explore schemas generated from existing command/DTO definitions, retaining support versus present eligibility. No duplicate Task or new server architecture is needed. |
+| Share actions across entry points | Named actions are callable from shortcuts, the palette and CLI. | **Want alignment.** LOO-403 owns shortcut and palette discovery. Reuse action identity and behavior across surfaces instead of independent callbacks; availability still comes from its existing owner. |
+| Customize shortcuts | Bindings can be replaced and inspected, with source information. | **Want exploration outside this diff.** LOO-403 explicitly leaves rebinding outside its core scope. Investigate customization, conflict explanations and reset while preserving native terminal/editor input. |
+| Show program status | Rex publishes the OSC 7501 status protocol. | **Already aligned in mechanism.** `program_status.rs` implements OSC 7501. Its header names revision 0.2 while the public spec is now 0.3; compare semantics before claiming conformance. Reuse LOO-415/422, not a Rex-specific status authority. |
+
+Sources: [CLI targeting](https://www.superlogical.com/rex/docs/automate/cli),
+[script composition](https://www.superlogical.com/rex/docs/automate/shell-scripting),
+[installed API discovery](https://www.superlogical.com/rex/docs/automate/server-api),
+[named actions](https://www.superlogical.com/rex/docs/customize/actions),
+[shortcut customization](https://www.superlogical.com/rex/docs/customize/keyboard-shortcuts),
+[program status](https://www.superlogical.com/rex/docs/build/program-status).
+
+Rex's event callbacks address the event's origin. If Loopflow exposes Desktop
+events, each event must retain its repository, Machine and pane identity while
+Jack changes focus. An event reports an observation, not permission to operate
+Work. See [event scope](https://www.superlogical.com/rex/docs/automate/lua-events).
+
+Keep Loopflow's Work tree, execution-Machine ownership and one repository window.
+Do not import Rex's Session/window/block taxonomy, Lua configuration engine or
+server ownership model. Keep literal text separate from Enter, as Jack selected.
+Neither successful input dispatch nor a terminal buffer read proves that a provider
+is ready or that the intended result was rendered.
+
+Review finding: the branch's simpler selectors solve command verbosity, but the
+creation response still makes an agent rediscover the object it just requested.
+Source review only; no runtime or conformance test was performed for this research.
+
+Filed, unstarted in the Loopflow repository's Product Wave:
+[LOO-452 — Customize Desktop shortcuts and explain effective bindings](https://linear.app/loopflow/issue/LOO-452)
+and [LOO-453 — Let agents wait for Desktop readiness and observe exact pane changes](https://linear.app/loopflow/issue/LOO-453).
+These explore the separate outcomes above; filing starts no implementation.
+LOO-403 and LOO-397 retain their existing Infrastructure ownership.
 
 ## Loopflow source anchors
 

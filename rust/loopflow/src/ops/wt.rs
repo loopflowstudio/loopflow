@@ -5,7 +5,7 @@ use std::process::Command;
 
 use crate::engine::git::{
     acquire_worktree_lease, delete_local_branch, get_default_branch, is_clean, ref_exists,
-    rev_parse, worktree_remove_owned,
+    rev_parse, worktree_remove_owned, WorktreeRemoval,
 };
 use crate::engine::worktrees::{list_porcelain, main_repo_root, sibling_worktree_name};
 use crate::ops::{OpsError, OpsResult, Progress};
@@ -145,14 +145,9 @@ pub(crate) fn apply_delete(deletion: BranchDeletion, progress: &impl Progress) -
             ],
         )?;
     }
-    if let Some(path) = worktree {
+    if let Some(lease) = &lease {
         progress.status("Removing worktree...");
-        worktree_remove_owned(
-            &repo,
-            &path,
-            lease.as_ref().expect("worktree has a deletion lease"),
-            &|_| {},
-        )?;
+        worktree_remove_owned(&repo, lease, WorktreeRemoval::Force, &|_| {})?;
     }
     if ref_exists(&repo, &format!("refs/heads/{branch}"))? {
         delete_local_branch(&repo, &branch)?;

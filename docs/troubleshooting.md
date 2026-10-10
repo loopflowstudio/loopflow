@@ -164,12 +164,12 @@ with a valid `CACHEDIR.TAG` are disposable; a familiar name such as `target` or
 
 Repository reconciliation (`lf task reconcile`) retries deferred cleanup locally,
 even if delivery observation fails. Installed releases enable the repository tick on
-first work and repair its executable on later work. Explicit disable survives those
-repairs. Without launchd, work-producing commands start at most one fallback check
-per minute. Cleanup leaves
-remote branches and Task outcomes intact and retains recognized local Session
-evidence, including registered provider homes inside declared caches. Full referenced-payload protection remains unfinished. Use `lf wt delete NAME --force` only when deliberately
-discarding a checkout.
+first work and repair its executable during installation upgrades and later work.
+Explicit disable survives those repairs. Without launchd, work-producing commands start at most one fallback check
+per minute. Cleanup leaves remote branches and Task outcomes intact. It protects
+recorded historical capture references and provider homes, including paths inside
+declared caches; unavailable evidence retains the checkout. Use
+`lf wt delete NAME --force` only when deliberately discarding a checkout.
 
 ```bash
 lf sync

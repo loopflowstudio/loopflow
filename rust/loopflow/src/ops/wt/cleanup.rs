@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::durable::{WorkRef, WorkStatus};
 use crate::engine::git::{
     acquire_worktree_lease, current_branch, get_default_branch, is_clean, rev_parse,
+    worktree_remove_owned, WorktreeRemoval,
 };
 use crate::engine::worktrees::{is_persistent_worktree, list_porcelain, main_repo_root};
 use crate::journal::{process_evidence_at, ProcessIdentityEvidence};
@@ -32,6 +33,7 @@ pub struct CleanupDecision {
     pub branch: Option<String>,
     pub observed_head: Option<String>,
     pub action: CleanupAction,
+    /// Exact-head settlement facts; an empty list never authorizes removal.
     pub evidence: Vec<String>,
     /// Unknown is not zero. Foreground previews do not recursively measure checkouts.
     pub estimated_bytes: Option<u64>,
@@ -80,7 +82,7 @@ fn running_paths() -> OpsResult<HashSet<PathBuf>> {
         Command::new("lsof").args(["-d", "cwd", "-Fn"]),
         Duration::from_secs(5),
     )?;
-    if !output.status.success() || !output.stderr.is_empty() {
+    if !output.stderr.is_empty() {
         return Err(error("external process inspection unavailable"));
     }
     Ok(String::from_utf8_lossy(&output.stdout)
@@ -312,7 +314,6 @@ fn observe_with_snapshot(
     let mut owned = crate::engine::git::absolute_git_dir(path)?
         .join("lf-created")
         .is_file();
-    let mut settled = false;
     if let Some(reason) = snapshot.local.blocker(path)? {
         retain(decision, reason);
         return Ok(());
@@ -329,7 +330,6 @@ fn observe_with_snapshot(
                 && pr.phase() == PrPhase::Merged
                 && pr.head_sha() == decision.observed_head.as_deref()
             {
-                settled = true;
                 decision
                     .evidence
                     .push(format!("Task {}: exact merged head", task.issue_identifier));
@@ -353,7 +353,6 @@ fn observe_with_snapshot(
         if decision.branch.as_deref() == Some(landing.branch.as_str())
             && decision.observed_head.as_deref() == Some(landing.observed_head_sha.as_str())
         {
-            settled = true;
             decision.evidence.push("landing: exact merged head".into());
         }
     }
@@ -361,7 +360,7 @@ fn observe_with_snapshot(
         retain(decision, "unknown Loopflow ownership");
         return Ok(());
     }
-    if !settled {
+    if decision.evidence.is_empty() {
         retain(decision, "current head has no recorded settlement");
         return Ok(());
     }
@@ -572,28 +571,29 @@ pub fn apply_cleanup(
             report.deferred.push(decision);
             continue;
         }
+        let admission = (|| {
+            let local = store.sqlite.lock_checkout(&decision.path).map_err(error)?;
+            let release = release_registry()?;
+            let release = release
+                .as_ref()
+                .map(|release| release.lock_checkout(&decision.path))
+                .transpose()
+                .map_err(error)?;
+            let lease = acquire_worktree_lease(&repo, &decision.path, "checkout cleanup")?;
+            Ok::<_, OpsError>((local, release, lease))
+        })();
+        let (_admission, _release_admission, lease) = match admission {
+            Ok(locks) => locks,
+            Err(error) => {
+                retain(
+                    &mut decision,
+                    format!("cleanup admission unavailable: {error}"),
+                );
+                report.deferred.push(decision);
+                continue;
+            }
+        };
         let result = (|| {
-            let admission = (|| {
-                let local = store.sqlite.lock_checkout(&decision.path).map_err(error)?;
-                let release = release_registry()?;
-                let release = release
-                    .as_ref()
-                    .map(|release| release.lock_checkout(&decision.path))
-                    .transpose()
-                    .map_err(error)?;
-                let lease = acquire_worktree_lease(&repo, &decision.path, "checkout cleanup")?;
-                Ok::<_, OpsError>((local, release, lease))
-            })();
-            let (_admission, _release_admission, lease) = match admission {
-                Ok(locks) => locks,
-                Err(error) => {
-                    retain(
-                        &mut decision,
-                        format!("cleanup admission unavailable: {error}"),
-                    );
-                    return Ok(false);
-                }
-            };
             let expected_head = decision.observed_head.clone();
             let expected_branch = decision.branch.clone();
             // Refresh all authority and filesystem facts under both locks.
@@ -607,7 +607,7 @@ pub fn apply_cleanup(
             for root in disposable_artifacts(&decision.path)? {
                 remove_artifact(&root)?;
             }
-            crate::engine::git::worktree_remove_clean_owned(&repo, &decision.path, &lease)?;
+            worktree_remove_owned(&repo, &lease, WorktreeRemoval::Clean, &|_| {})?;
             if let (Some(branch), Some(head)) = (&decision.branch, &decision.observed_head) {
                 // Compare-and-delete cannot erase commits added since observation.
                 if let Err(error) = super::git(

@@ -1,4 +1,5 @@
-//! Bounded retries for read-only GitHub operations. Never wrap provider writes.
+//! Bounded subprocess reads and retries for read-only GitHub operations.
+//! Never wrap provider writes.
 use std::io::Read;
 use std::process::{Command, Output, Stdio};
 use std::sync::mpsc;
@@ -57,6 +58,7 @@ fn transient(stderr: &str) -> bool {
 }
 
 pub(super) fn bounded_output(command: &mut Command, timeout: Duration) -> OpsResult<Output> {
+    let program = command.get_program().to_string_lossy().into_owned();
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -106,7 +108,7 @@ pub(super) fn bounded_output(command: &mut Command, timeout: Duration) -> OpsRes
             if Instant::now() >= deadline {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::TimedOut,
-                    "GitHub read deadline exceeded",
+                    format!("{program} read deadline exceeded"),
                 ));
             }
             thread::sleep(Duration::from_millis(10));
@@ -123,7 +125,7 @@ pub(super) fn bounded_output(command: &mut Command, timeout: Duration) -> OpsRes
             });
             return Err(std::io::Error::new(
                 std::io::ErrorKind::TimedOut,
-                "GitHub read child cleanup deadline exceeded",
+                format!("{program} read child cleanup deadline exceeded"),
             )
             .into());
         }
@@ -132,7 +134,7 @@ pub(super) fn bounded_output(command: &mut Command, timeout: Duration) -> OpsRes
     let output = result?;
     if !output.status.success() {
         return Err(OpsError::CommandFailed {
-            command: "GitHub read".into(),
+            command: program,
             stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
         });
     }
@@ -193,6 +195,16 @@ mod tests {
         .to_string();
         assert_eq!(attempts, 3);
         assert!(!error.contains("secret"));
+    }
+
+    #[test]
+    fn failed_read_names_the_program_without_exposing_arguments() {
+        let error = bounded_output(
+            Command::new("sh").args(["-c", "exit 1", "private argument"]),
+            Duration::from_secs(1),
+        )
+        .unwrap_err();
+        assert!(matches!(error, OpsError::CommandFailed { command, .. } if command == "sh"));
     }
 
     #[test]

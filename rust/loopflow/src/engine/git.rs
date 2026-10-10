@@ -968,63 +968,38 @@ pub(crate) fn acquire_worktree_lease_wait(
     })
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WorktreeRemoval {
+    Clean,
+    Force,
+}
+
 pub fn worktree_remove(repo: &Path, path: &Path) -> Result<(), GitError> {
     let lease = acquire_worktree_lease(repo, path, "worktree removal")?;
-    worktree_remove_owned(repo, path, &lease, &|_| {})
+    worktree_remove_owned(repo, &lease, WorktreeRemoval::Force, &|_| {})
 }
 
+/// Remove the checkout owned by the lease. Cleanup must use `Clean` so Git
+/// performs its final dirty-file check; explicit discard keeps `Force`.
 pub(crate) fn worktree_remove_owned(
     repo: &Path,
-    path: &Path,
     lease: &WorktreeLease,
+    mode: WorktreeRemoval,
     inherit: &impl Fn(&mut Command),
 ) -> Result<(), GitError> {
-    let path = normalized_worktree_path(repo, path);
-    if lease.path != path {
-        return Err(GitError::CommandFailed {
-            command: "remove owned worktree".to_string(),
-            stderr: format!("lease does not own {}", path.display()),
-        });
+    let path = lease.path.to_string_lossy();
+    let mut args = vec!["worktree", "remove"];
+    if mode == WorktreeRemoval::Force {
+        args.push("--force");
     }
-    let path_str = path.to_string_lossy();
-    let output = run_git_inheriting(
-        repo,
-        &["worktree", "remove", "--force", path_str.as_ref()],
-        &|command| {
-            lease.inherit(command);
-            inherit(command);
-        },
-    )?;
+    args.push(&path);
+    let output = run_git_inheriting(repo, &args, &|command| {
+        lease.inherit(command);
+        inherit(command);
+    })?;
     if !output.status.success() {
         return Err(GitError::CommandFailed {
-            command: format!("git worktree remove --force {}", path.display()),
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        });
-    }
-    Ok(())
-}
-
-/// Cleanup never bypasses Git's final dirty-file check.
-pub(crate) fn worktree_remove_clean_owned(
-    repo: &Path,
-    path: &Path,
-    lease: &WorktreeLease,
-) -> Result<(), GitError> {
-    let path = normalized_worktree_path(repo, path);
-    if lease.path != path {
-        return Err(GitError::CommandFailed {
-            command: "remove clean worktree".into(),
-            stderr: "lease does not own checkout".into(),
-        });
-    }
-    let output = run_git_inheriting(
-        repo,
-        &["worktree", "remove", &path.to_string_lossy()],
-        &|command| lease.inherit(command),
-    )?;
-    if !output.status.success() {
-        return Err(GitError::CommandFailed {
-            command: "git worktree remove".into(),
+            command: format!("git {}", args.join(" ")),
             stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
         });
     }
@@ -1689,6 +1664,24 @@ mod tests {
         assert!(worktree_root(&repo.path().join(".git/refs")).is_err());
         assert!(worktree_root(linked.path()).is_err());
         assert!(worktree_root(&linked.path().join("retired")).is_err());
+    }
+
+    #[test]
+    fn worktree_removal_keeps_dirty_files_unless_explicitly_forced() {
+        let repo = loopflow_test_support::TestRepo::new();
+        let path = repo.create_named_worktree("dirty");
+        fs::write(path.join("notes"), "unfinished work").unwrap();
+        let lease = acquire_worktree_lease(repo.path(), &path, "cleanup").unwrap();
+
+        assert!(
+            worktree_remove_owned(repo.path(), &lease, WorktreeRemoval::Clean, &|_| {}).is_err()
+        );
+        assert_eq!(
+            fs::read_to_string(path.join("notes")).unwrap(),
+            "unfinished work"
+        );
+        worktree_remove_owned(repo.path(), &lease, WorktreeRemoval::Force, &|_| {}).unwrap();
+        assert!(!path.exists());
     }
 
     #[test]

@@ -137,23 +137,21 @@ mutations, including Git metadata pruning.
 
 ## Delete — do not maintain
 
-Removed: the old prune policies/classifiers and targeted APIs, their exclusive
-tests, `prepare_landed_delete`, duplicate lifecycle deletion, CLI-only protection,
-fail-open process inspection, preview metadata pruning, and the orphan
-`engine/worktree.rs` module (its root resolver also had no callers). Explicit
-abandonment and persistent-branch restart remain separate.
+Removed: old prune policies/classifiers and targeted APIs with their exclusive
+fixtures; `prepare_landed_delete`; duplicate lifecycle deletion; CLI-only protection;
+fail-open process inspection; preview metadata pruning; the orphan
+`engine/worktree.rs`; `Listing::pull_requests_known` and its optional PR map;
+`task_open_work`; the release-only `read_nonterminal_task_worktrees` reader and
+fixture; and separate `release_blocker` policy. Shared registry observations use
+`OpenProcesses`; async lifecycle callers dispatch one complete blocking attempt.
 
-The predecessor's unused `Listing::pull_requests_known` flag and optional remote
-PR map are gone; listing still reports remote failure and unknown PR state.
-Cleanup reuses `OpenProcesses` instead of a second unfinished-process query;
-the now-unused `task_open_work` history loader is removed too. No known deletion targets
-remain; targeted missing-registration repair is still unimplemented, not a reason
-to restore broad metadata pruning. The release-only `read_nonterminal_task_worktrees`
-reader and its exclusive fixture are also removed: shared checkout links, delivery
-facts and Process evidence now protect release-owned work. The separate
-`release_blocker` policy and per-query asynchronous collector dispatch are gone:
-both registry snapshots use one synchronous retention policy. Async lifecycle
-callers dispatch the complete filesystem attempt to one blocking worker.
+`worktree_remove_clean_owned` is also gone. One lease-owned Git removal function
+serves cleanup (`Clean`) and explicit discard/release teardown (`Force`), using the
+lease's path rather than a second path argument. Process receipts reuse the existing
+PID/start-time classifier. Cleanup derives settlement from its exact-head evidence
+instead of maintaining a parallel boolean. No known deletion targets remain.
+Explicit abandonment and persistent-branch restart retain their separate authority;
+missing-registration repair does not justify restoring broad metadata pruning.
 
 ## Forbidden outcomes
 
@@ -162,96 +160,57 @@ ignored equaling disposable; a successful Flow equaling Task completion;
 cleanup requiring an LLM; mandatory foreground recursive disk scans; deleting
 another machine's state; moving junk to an unlimited trash directory.
 
-## Current implementation — reconciled 2026-10-09
+## Current implementation — 2026-10-09
 
-The shared collector is in `ops/wt/cleanup.rs`. Manual prune, completed Tasks
-and taskless landings use it; repository reconciliation also attempts a local
-pass before network delivery observation. Each reconciliation invocation scans
-every registered checkout, not just settled owners. The predecessor prune policies,
-targeted-prune APIs, prompt-log pruner, automatic remote-branch deletion helper
-and orphan engine create/remove helpers are removed. Explicit abandonment keeps
-its separate authority. This is an internal checkpoint, not a shipping boundary.
+The shared collector in `ops/wt/cleanup.rs` serves manual prune, completed Tasks,
+taskless landings and repository reconciliation before network delivery observation.
+Every tick currently scans all registrations. Targeted lifecycle calls filter before
+candidate observation. Both registries share checkout, delivery, Process and evidence
+retention policy; release facts can veto, never settle experimental source. Removal
+refreshes facts under selected/release checkout admission and a Git lease. Contention
+defers rather than failing the tick. The pass lock uses the account's production home.
 
-Targeted lifecycle cleanup filters registrations before observing candidates.
-Planning reads registrations once and shares Task checkout links, unfinished
-Process membership and protected homes once per registry. Selected and release
-stores use the same retention policy and their own Process-receipt homes; release
-facts can veto removal but cannot settle experimental source. Removal refreshes
-those observations under checkout admission and Git leases. Planning and removal
-share one admission deadline; an already-started observation or removal finishes.
-Hard subprocess/SQL deadlines remain below.
+Completed Tasks need a merged active PR and resolved follow-through even if another
+landing records the same merged head. Ownership uses Task checkout links, landing
+paths or new Git-administrative creation provenance; provenance alone cannot settle
+source. Older release schemas use stable checkout links before affected delivery
+reads; unavailable matching facts retain the checkout. Unowned legacy trees remain
+report-only. Git removes without force after declared artifacts; local refs use
+compare-and-delete. Hidden index changes retain checkouts, and cache tags survive
+partial artifact deletion until Git removes the checkout.
 
-Main `906576f39` separates planning completion from delivery and follow-through.
-The synced collector (`237d1a31a`, fixture correction `e1be31600`) preserves
-PR-less and unresolved-delivery checkouts even when a matching merged landing
-exists. This guard lives in shared observation, so manual and scheduled entry
-points cannot bypass it. Task completion itself remains independent of cleanup.
+Installed releases activate repository ticks on first work, resolve executables
+through the installation gate, and persist explicit disable. Installation settlement
+repairs existing declarations before pruning superseded binaries, preserving ownership,
+cadence, activation time and disable; failed repair warns and keeps old binaries.
+Without launchd, work-producing commands admit one finite fallback per minute under
+the same lock as install/disable. Experiments activate neither service nor fallback.
+Reconciliation JSON includes decisions and contention; bounded cron logs retain it.
+Its DTOs are Rust CLI-only, with no Swift/Python consumer.
 
-Current eligibility uses Task checkout links or recorded landing paths, and
-exact merged heads. New lf-created checkouts carry Git-administrative provenance;
-provenance alone does not settle their source. Unknown settlement retains the
-checkout. Valid `CACHEDIR.TAG` declarations classify wholly ignored directories;
-other ignored data stays. No arbitrary-name artifact exemptions were added.
+Historical evidence protection covers every captured input's published files and
+retained `runs`, manifest and terminal references. The history owner projects reference
+fields through existing capture/receipt indexes, without decoding replay/transcript
+bodies. Symlinks resolve before classification. Both registries protect provider homes
+and referenced files even inside tagged caches. Missing/invalid observations retain
+candidates. History SQL has a two-second VM/row deadline and nonblocking admission;
+whole-history JSON scanning exceeded that budget against release, so the reader now
+selects exact receipt keys. This is not an incremental or whole-pass timing proof.
+Background-only allocated-byte estimates use a same-filesystem scan bounded to one
+second or the remaining admission budget; partial/failed results stay unknown.
 
-Review fixes: non-forced Git removal is the last dirty check; local refs use
-compare-and-delete; failed worktree creation cannot confer lf provenance on a
-preexisting checkout; assume-unchanged/sparse index entries retain the checkout;
-cache tags survive partial content removal and signature reads are bounded to 43 bytes. A removed checkout is still reported
-as removed if its local ref changed and was retained.
+The scheduled-command fixture proves retry after a real shell child exits, leaving
+its seeded Process row unfinished. It seeds completed merged Task delivery with
+resolved follow-through and an unfinished neighboring Task. `lsof` is substituted;
+this is neither a native provider launch nor a loaded OS scheduler. The passing
+installation-harness proof exercises experimental CLI discovery of an independent
+release registry while directly holding its admission file, then releasing and
+retrying. It does not launch a second release CLI writer. The interruption fixture
+covers artifact deletion before Git removal, with the tag and registration surviving.
 
-### Current internal slice — 2026-10-09, extending `341615ba8`
-
-Installed releases ensure repository ticks at checkout creation and work-producing
-CLI entry points. Tick installation reuses the installation-gate resolver, repairs
-changed service definitions and persists explicit disable under the existing cron
-owner. Installation, disable and fallback admission share a lock. Without launchd,
-an ordinary command starts at most one finite cron runner per minute; its target
-and bounded receipts are the same as scheduled checks. Experiments do not install
-services. A disabled declaration cannot run even if unloading the OS job failed.
-
-Experimental collection now holds release checkout admission too, checks release
-Task delivery and all release Processes, and reads Process receipts from the owning
-store's home. The pass lock lives in the account's production home, not the selected
-experimental home. Rich Task projections proved incompatible with an older release
-schema in the scheduled test; stable checkout links now select only affected Tasks
-before reading delivery facts. Unavailable matching facts still retain the checkout.
-
-Registered provider homes and native provider homes are protected even inside a
-cache-tagged root. Cache removal leaves its tag until Git removes the checkout,
-eliminating the tagless-empty-directory interruption window. Reconciliation JSON
-now includes the collector report, including deferred reasons and lock contention;
-cron logs retain that JSON alongside existing bounded receipt links. The DTO has
-no Swift/Python consumer; its Rust fixture is `repository_reconciliation.json`.
-
-The scheduled-command fixture now seeds a merged completed Task with resolved
-follow-through and an unfinished Task neighbor. A real shell child holds the
-completed checkout; its seeded Process receipt records its actual PID/start time.
-Closing its stdin and waiting for exit leaves the Process row unfinished, so the
-next tick must infer death from OS evidence. External `lsof` is still substituted;
-this is not a provider launch or a loaded OS scheduler. The passing disposable-account proof
-runs that same experimental CLI against an independent release registry while
-its checkout-admission file is locked, then releases the lock and retries.
-That proof exposed contention being reported as a failed cleanup/failed tick;
-checkout admission and Git lease contention now defer without failing the tick.
-
-Historical evidence collection now reads every captured input's published files
-and the retained `runs`, manifest and terminal payload references, not only the
-selected Session input. The history owner projects reference fields through its
-existing capture/receipt indexes; it never decodes transcript or replay bodies.
-Symlinked payloads resolve before classification. Missing/invalid observations
-retain candidates. The SQL scan uses a two-second VM/row deadline and nonblocking
-admission; this does not bound all registry or filesystem observation. An initial
-whole-history JSON scan exceeded that bound against the release registry; the
-implementation now selects exact receipt keys and projects only file references.
-Native reader/resume coverage and incremental history scan scaling remain below.
-
-Background passes estimate eligible checkouts with a bounded, same-filesystem
-allocated-byte scan (one second or remaining admission budget); partial/failed
-measurements stay unknown. Previews and lifecycle calls do not measure. Installation
-settlement repairs existing repository declarations through the cron owner before
-pruning superseded binaries. It preserves Machine/home/repository, cadence,
-activation time and explicit disable; a repair failure reports a warning and keeps
-superseded binaries. Loaded-scheduler experience still belongs to demo.
+Earlier implementation details and evidence limits are preserved at
+`f4cfefd0d:scratch/clean-up.md`; the latest implementation slice is `c99c18972`.
+This remains an internal checkpoint, not a shipping boundary.
 
 ### Remaining in this PR
 
@@ -334,4 +293,4 @@ allocated bytes by category; observed free-space delta after collection; oldest
 eligible retention age. APFS sharing, hardlinks and concurrent writers mean
 directory sums are estimates, not guaranteed reclaimed bytes.
 
-Check: focused Rust history/size/admission/schedule tests, `uv run python scripts/test_task_installation.py --test experimental_cleanup_discovers_release_checkout_admission`, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check` passed; full acceptance remains with gate and loaded-scheduler/upgrade experience with demo.
+Check: `cargo test -p loopflow --lib` with filters `cleanup`, `worktree_removal_keeps_dirty_files_unless_explicitly_forced`, `ops::wt::tests`, `ops::read_retry::tests`, and `unfinished_process_retains_identity_across_terminal_failure_interrupt_and_pid_reuse` passed (29 tests); `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check` passed. Full acceptance remains with gate; loaded-scheduler/upgrade experience remains with demo.

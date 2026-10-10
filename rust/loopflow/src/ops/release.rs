@@ -20,7 +20,7 @@ use crate::engine::config::{
 use crate::engine::git::{
     acquire_worktree_lease, acquire_worktree_lease_wait, current_branch,
     delete_local_branch_inheriting, fetch_inheriting, get_default_branch, is_clean, ref_exists,
-    rev_parse, worktree_remove_owned, WorktreeLease,
+    rev_parse, worktree_remove_owned, WorktreeLease, WorktreeRemoval,
 };
 use crate::engine::naming::{git_user, sanitize_for_branch};
 use crate::engine::prompt::write_prompt_log;
@@ -2124,7 +2124,7 @@ fn materialize_exact_source_worktree(
     }
 
     if registered_at_path.is_some() {
-        worktree_remove_owned(repo, &path, lease, &inherit)?;
+        worktree_remove_owned(repo, lease, WorktreeRemoval::Force, &inherit)?;
     }
     if local_head.is_some() {
         delete_local_branch_inheriting(repo, &branch, &inherit)?;
@@ -3494,7 +3494,7 @@ fn cleanup_release_worktree(
             lock.inherit(command);
             lease.inherit(command);
         };
-        worktree_remove_owned(main_repo, wt_path, &lease, &inherit)?;
+        worktree_remove_owned(main_repo, &lease, WorktreeRemoval::Force, &inherit)?;
         let _ = delete_local_branch_inheriting(main_repo, branch, &inherit);
         Ok::<_, crate::engine::error::GitError>(())
     })();

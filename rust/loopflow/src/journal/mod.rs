@@ -169,13 +169,7 @@ pub(crate) struct ProcessReceipt {
 
 impl ProcessReceipt {
     fn process_evidence(&self) -> ProcessIdentityEvidence {
-        match process_started_at(self.pid) {
-            Ok(Some(started_at)) if (started_at - self.started_at).abs() <= 3 => {
-                ProcessIdentityEvidence::Live
-            }
-            Ok(Some(_)) | Ok(None) => ProcessIdentityEvidence::Dead,
-            Err(_) => ProcessIdentityEvidence::Unknown,
-        }
+        process_identity_evidence(self.pid, self.started_at)
     }
 }
 

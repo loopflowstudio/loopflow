@@ -661,10 +661,7 @@ fn claude_skip_permissions(cwd: Option<&Path>, auto: bool, skip_permissions: boo
     true
 }
 
-/// Common Claude CLI arguments shared across one-shot and session paths.
-///
-/// The one-shot command and persistent stream session add their mode-specific
-/// flags around these shared arguments.
+/// Common Claude CLI arguments shared by terminal and stream-input launches.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ClaudeArgs {
     /// Model variant (already resolved, no "claude:" prefix).
@@ -681,8 +678,6 @@ pub struct ClaudeArgs {
     pub worktree_isolation: bool,
     /// Max turn budget.
     pub max_turns: Option<u32>,
-    /// Enable streaming output (`--output-format stream-json --verbose`).
-    pub stream: bool,
     /// Enable Chrome integration.
     pub chrome: bool,
     /// Resume an existing Claude Code session.
@@ -761,12 +756,6 @@ impl ClaudeArgs {
             args.push(max_turns.to_string());
         }
 
-        if self.stream {
-            args.push("--output-format".to_string());
-            args.push("stream-json".to_string());
-            args.push("--verbose".to_string());
-        }
-
         if let Some(ref id) = self.resume_id {
             args.push("--resume".to_string());
             args.push(id.to_string());
@@ -787,6 +776,9 @@ pub fn build_claude_stream_session_args(
         "--replay-user-messages".to_string(),
         "--input-format".to_string(),
         "stream-json".to_string(),
+        "--output-format".to_string(),
+        "stream-json".to_string(),
+        "--verbose".to_string(),
     ];
     args.extend(
         ClaudeArgs {
@@ -804,7 +796,6 @@ pub fn build_claude_stream_session_args(
             worktree_isolation: config.write_scope == AgentWriteScope::Worktree
                 && config.execution_boundary.is_none(),
             max_turns: config.max_turns,
-            stream: true,
             chrome: false,
             resume_id: resume_id.cloned(),
         }
@@ -986,7 +977,6 @@ pub fn build_claude_command(
         worktree_isolation: launch.write_scope == AgentWriteScope::Worktree
             && launch.execution_boundary.is_none(),
         max_turns: launch.max_turns,
-        stream: false,
         chrome: capabilities.chrome,
         resume_id: launch.resume_token.clone(),
     };
@@ -2356,8 +2346,6 @@ mod tests {
     fn default_launch() -> AgentConfig {
         AgentConfig {
             task_prompt: "task".to_string(),
-            skill_invocation: None,
-            output_schema: None,
             ..Default::default()
         }
     }
@@ -2876,7 +2864,6 @@ trust_level = "trusted"
             skip_permissions: true,
             worktree_isolation: false,
             max_turns: Some(10),
-            stream: true,
             chrome: true,
             resume_id: Some("sess_abc".into()),
         }
@@ -2890,9 +2877,6 @@ trust_level = "trusted"
         assert!(args.contains(&"--dangerously-skip-permissions".to_string()));
         assert!(args.contains(&"--max-turns".to_string()));
         assert!(args.contains(&"10".to_string()));
-        assert!(args.contains(&"--output-format".to_string()));
-        assert!(args.contains(&"stream-json".to_string()));
-        assert!(args.contains(&"--verbose".to_string()));
         assert!(args.contains(&"--resume".to_string()));
         assert!(args.contains(&"sess_abc".to_string()));
     }

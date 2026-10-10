@@ -903,8 +903,6 @@ mod tests {
             "",
             &AgentConfig {
                 task_prompt: "task".to_string(),
-                skill_invocation: None,
-                output_schema: None,
                 ..Default::default()
             },
             true,

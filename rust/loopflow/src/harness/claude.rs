@@ -500,23 +500,23 @@ impl Harness for ClaudeHarness {
             turn_id: turn_id.clone(),
         });
 
+        // Send non-query skill context and the correlated query through one
+        // write/error path, so either write failure tears down the process.
+        let mut seed = String::new();
         if let Some(input) = skill_input {
             if !turn_content.is_empty() {
-                self.send_line(format!(
+                seed = format!(
                     "{}\n",
                     serde_json::json!({
                         "type": "user", "shouldQuery": false,
                         "message": {"role": "user", "content": turn_content}
                     })
-                ))
-                .await?;
+                );
             }
             turn_content = input;
         }
-        if let Err(error) = self
-            .send_line(user_message_line(&turn_content, &turn_id))
-            .await
-        {
+        seed.push_str(&user_message_line(&turn_content, &turn_id));
+        if let Err(error) = self.send_line(seed).await {
             // The process died between spawn and write; tear it down so the
             // next send_input respawns cleanly.
             drop(turn_guard);

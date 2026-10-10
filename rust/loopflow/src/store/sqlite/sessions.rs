@@ -107,7 +107,7 @@ pub(super) fn session_in(conn: &Connection, id: &str) -> StoreResult<Option<LfSe
 fn waiting_sql(session: &str, now: i64) -> String {
     format!(
         "EXISTS(SELECT 1 FROM session_activity act WHERE act.session_id={session}.id
-            AND {session}.completed_at IS NULL AND act.provider_generation=(SELECT provider_generation FROM processes WHERE lfid={session}.agent_process_lfid)
+            AND {session}.completed_at IS NULL AND act.provider_generation=COALESCE((SELECT provider_generation FROM processes WHERE lfid={session}.agent_process_lfid),0)
             AND CASE WHEN act.program_status IS NOT NULL THEN
                 EXISTS(SELECT 1 FROM json_each(act.program_status,'$.records') r
                     WHERE json_extract(r.value,'$.state')='blocked'
@@ -215,7 +215,7 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         {waiting},
         COALESCE(({task_state}) IN ('done','abandoned'),0),
         EXISTS(SELECT 1 FROM tasks p WHERE p.primary_session_id=s.id),
-        (SELECT act.program_status FROM session_activity act WHERE act.session_id=s.id AND act.provider_generation=p.provider_generation),COALESCE(p.provider_generation,0)
+        (SELECT act.program_status FROM session_activity act WHERE act.session_id=s.id AND act.provider_generation=COALESCE(p.provider_generation,0)),COALESCE(p.provider_generation,0)
         FROM page s JOIN agent_sessions a ON a.id=s.id
         LEFT JOIN processes p ON p.lfid=a.agent_process_lfid
         LEFT JOIN session_events captured ON captured.seq=s.current_capture

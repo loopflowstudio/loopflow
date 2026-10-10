@@ -1056,14 +1056,15 @@ mod tests {
             {
                 let conn = store.conn.lock().unwrap();
                 for process in [&first, &second] {
+                    // The AgentProcess inherits this trace; the inventory reads it typed.
                     conn.execute(
-                        "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
-                        [process.as_str()],
+                        "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,?2,1)",
+                        rusqlite::params![process, crate::id::TraceId::new()],
                     )
                     .unwrap();
                 }
                 conn.execute(
-                    "UPDATE agent_sessions SET provider='codex' WHERE id=?1",
+                    "UPDATE agent_sessions SET provider='codex',interactive=0 WHERE id=?1",
                     [&session.id],
                 )
                 .unwrap();
@@ -1117,10 +1118,11 @@ mod tests {
                 "completed",
             )
             .unwrap();
-            assert!(crate::journal::process_started_at(child.id())
-                .unwrap()
-                .is_none());
-            // Shutdown may already have reaped this exact child.
+            // Close leaves reaping to the parent; an unreaped zombie is dead.
+            assert_eq!(
+                crate::journal::process_identity_evidence(child.id(), started),
+                crate::journal::ProcessIdentityEvidence::Dead
+            );
             let _ = child.wait();
             assert!(store.session_connection(&session.id).unwrap().is_none());
             assert_eq!(

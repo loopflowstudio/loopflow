@@ -1,4 +1,5 @@
 //! Passive terminal observation shares session_activity; no driver claim.
+//! A conversation Loopflow never attached to has no AgentProcess: generation 0.
 use rusqlite::params;
 
 use crate::program_status::Records;
@@ -16,8 +17,8 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn.execute(
             "INSERT INTO session_activity(session_id,attachment_token,observed_at,open_tools,pending_input,yielded,provider_generation,status_stream,status_sequence)
-             SELECT s.id,NULL,0,0,0,0,p.provider_generation,?3,0 FROM agent_sessions s JOIN processes p ON p.lfid=s.agent_process_lfid
-             WHERE s.id=?1 AND p.provider_generation=?2 AND s.completed_at IS NULL
+             SELECT s.id,NULL,0,0,0,0,?2,?3,0 FROM agent_sessions s LEFT JOIN processes p ON p.lfid=s.agent_process_lfid
+             WHERE s.id=?1 AND COALESCE(p.provider_generation,0)=?2 AND s.completed_at IS NULL
              ON CONFLICT(session_id) DO UPDATE SET
                 attachment_token=CASE WHEN session_activity.provider_generation=?2 THEN session_activity.attachment_token ELSE NULL END,
                 program_status=CASE WHEN session_activity.provider_generation=?2 THEN session_activity.program_status END,
@@ -44,7 +45,7 @@ impl SqliteStore {
         Ok(conn.execute(
             "UPDATE session_activity SET program_status=?5,status_sequence=?4
              WHERE session_id=?1 AND provider_generation=?2 AND status_stream=?3 AND status_sequence<?4
-             AND EXISTS(SELECT 1 FROM agent_sessions s JOIN processes p ON p.lfid=s.agent_process_lfid WHERE s.id=?1 AND p.provider_generation=?2 AND s.completed_at IS NULL)",
+             AND EXISTS(SELECT 1 FROM agent_sessions s LEFT JOIN processes p ON p.lfid=s.agent_process_lfid WHERE s.id=?1 AND COALESCE(p.provider_generation,0)=?2 AND s.completed_at IS NULL)",
             params![session, provider_generation, stream, sequence, json],
         )? == 1)
     }

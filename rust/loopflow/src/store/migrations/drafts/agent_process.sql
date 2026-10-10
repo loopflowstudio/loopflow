@@ -76,10 +76,10 @@ WHEN NEW.attachment_token IS NOT OLD.attachment_token
     OR NEW.yielded IS NOT OLD.yielded
     OR (OLD.open_tools = 0 AND NEW.observed_at - OLD.observed_at >= 120)
 BEGIN
-    UPDATE store_revisions SET revision=revision+1 WHERE domain='sessions';
+    UPDATE store_revisions SET revision = revision + 1 WHERE domain = 'sessions';
 END;
 CREATE TRIGGER store_revision_agent_process_update AFTER UPDATE ON processes
 WHEN NEW.kind='agent'
 BEGIN
-    UPDATE store_revisions SET revision=revision+1 WHERE domain='sessions';
+    UPDATE store_revisions SET revision = revision + 1 WHERE domain = 'sessions';
 END;

@@ -1241,7 +1241,7 @@ fn declared_agent_tools_use_their_checkout_and_keep_the_process_parent() {
         Some(sibling.id.to_string())
     );
     let (caller, ..) = fixture.session_row(&captures[0]);
-    let parent: (String, String) = fixture.db().query_row("SELECT c.parent_process_lfid,s.provider_process_lfid FROM processes c JOIN agent_sessions s ON s.id=c.caller_session_id WHERE c.caller_session_id=?1", [&caller], |row| Ok((row.get(0)?,row.get(1)?))).unwrap();
+    let parent: (String, String) = fixture.db().query_row("SELECT c.parent_process_lfid,a.parent_process_lfid FROM processes c JOIN agent_sessions s ON s.id=c.caller_session_id JOIN processes a ON a.lfid=s.agent_process_lfid WHERE c.caller_session_id=?1", [&caller], |row| Ok((row.get(0)?,row.get(1)?))).unwrap();
     assert_eq!(parent.0, parent.1);
     for line in std::fs::read_to_string(fixture.home.path().join("declarations"))
         .unwrap()
@@ -1420,7 +1420,7 @@ fn malformed_caller_cannot_use_library_agent_admission() {
         assert_eq!(output.status.code(), Some(1), "{output:?}");
         assert!(
             String::from_utf8_lossy(&output.stderr)
-                .contains("agent Process requires an admitted Process"),
+                .contains("AgentProcess requires an admitted invocation"),
             "{output:?}"
         );
         assert!(

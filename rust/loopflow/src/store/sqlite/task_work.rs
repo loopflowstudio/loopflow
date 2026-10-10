@@ -72,7 +72,8 @@ pub(super) fn task_of_process(
                 "WITH members AS MATERIALIZED (
                     SELECT session_id AS id FROM session_events INDEXED BY session_process_membership
                         WHERE process_lfid=?1
-                    UNION SELECT id FROM agent_sessions WHERE driver_process_lfid=?1)
+                    UNION SELECT agent_session_id FROM processes
+                        WHERE attached_process_lfid=?1 AND agent_session_id IS NOT NULL)
                  SELECT tw.id FROM tasks tw JOIN processes e ON e.lfid=?1
                  WHERE ({}) OR EXISTS(SELECT 1 FROM agent_sessions a
                     WHERE a.id IN (SELECT id FROM members) AND ({}))

@@ -162,6 +162,25 @@ requires an admitted invocation" before any provider code runs. Pre-exec recordi
 samples the child's birth through `ps`, so a launch PATH without `ps` fails
 admission; fixtures that narrowed PATH now include the system directories.
 The three ignored live-provider smokes admit a private Session; they were not run.
+**First whole-library run (2026-10-09):** earlier passes ran focused filters only;
+the full target exposed 30 failures. Product defects: #1499's `task_of_process`
+read the dropped `agent_sessions.driver_process_lfid` (20 tests; SQL is not
+compile-checked) and now reads the AgentProcess's attached LfProcess; the draft's
+recreated revision triggers now match the released statement form. Fixture
+repairs, no product change: fixtures selecting a store through `LF_HOME` pin the
+invocation ledger with `with_test_ledger`, because the AgentProcess row needs its
+parent LfProcess in the same database; a later turn after bind records its
+request-time origin; session exit asserts shared identity evidence on a headless
+Codex Session with a typed trace; the lifecycle integration query joins the
+AgentProcess for the provider's parent; failed and exited starts are asserted on
+AgentProcess records, not the deleted `provider:<n>` receipts. A third product
+defect surfaced in the CLI suite: passive Program Status joined the AgentProcess
+and recorded nothing for a native conversation Loopflow never attached to; a
+missing AgentProcess now reads as generation 0 in the writer and both readers.
+`migration_preserves_planning_identity_and_removes_snapshot_storage`
+still fails on a missing `task_state_deliveries` table from main's `local_planning`
+draft; this branch touches neither file and main's result was not reproduced here.
+
 Fixture repair: `continuation_resumes_the_saved_thread_on_a_fresh_engine` recorded
 the live test process as the previous provider and expected silent replacement,
 contradicting the observed-exit rule; it now records a throwaway child and observes

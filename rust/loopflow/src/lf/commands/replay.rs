@@ -192,7 +192,11 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_ne!(session.id, source_id);
-        let child_id = replay_at(home.path(), &session.id).unwrap();
+        // The replaying invocation and its capture share this fixture's store.
+        let child_id = crate::journal::with_test_ledger(registry.clone(), || {
+            replay_at(home.path(), &session.id)
+        })
+        .unwrap();
 
         let evidence = std::fs::read_to_string(&evidence).unwrap();
         assert!(evidence.contains(child_id.as_str()));

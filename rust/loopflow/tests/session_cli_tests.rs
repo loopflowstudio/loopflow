@@ -1335,12 +1335,19 @@ fn terminal_first_launch_and_failed_startup_reopen_the_same_conversation() {
     let session = store.session(&id).unwrap().unwrap();
     assert_eq!(session.id, id);
     let history = store.session_history(&id, 0, 1000).unwrap();
-    assert!(history
-        .iter()
-        .any(|event| event.payload["phase"] == "spawn_failed"));
-    assert!(history
-        .iter()
-        .any(|event| event.payload["phase"] == "exited"));
+    // Failed and exited starts are retained as their own AgentProcess records.
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    for (state, minimum) in [("spawn_failed", 1), ("exited", 1)] {
+        let recorded: i64 = db
+            .query_row(
+                "SELECT count(*) FROM processes
+                 WHERE kind='agent' AND agent_session_id=?1 AND spawn_state=?2",
+                [id.as_str(), state],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(recorded >= minimum, "{state}: {recorded}");
+    }
     assert!(
         history
             .iter()
@@ -1348,7 +1355,6 @@ fn terminal_first_launch_and_failed_startup_reopen_the_same_conversation() {
             .count()
             >= 2
     );
-    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     let count: i64 = db
         .query_row("SELECT count(*) FROM agent_sessions", [], |row| row.get(0))
         .unwrap();

@@ -114,8 +114,11 @@ Writers remain held until OS exit, even after attachment transfer;
 only the last holder's exit closes the lifeline and stops the group, including
 after SIGKILL. The lifeline does not itself enforce current attachment authority.
 Headless launch requires the invocation's attachment: Claude, Codex and OpenCode
-refuse to start a provider without one, and their writes and signals have no
-unfenced path. Owned native launches use the same pre-exec recording channel under
+refuse to start a provider without one. Runtime settlement closes their recorded
+headless groups under that attachment fence, refusing ambiguous OS ownership;
+Codex additionally refuses a server hosting unrelated conversations. OpenCode's
+harness stop/abort/drop paths still need the same fence; runtime settlement alone
+does not establish takeover safety. Owned native launches use the same pre-exec recording channel under
 the attachment lock, but no headless group/watchdog setup. Failed recording prevents provider code
 from running. Captured native waits retain the spawned attachment snapshot: a late
 wait cannot mark a replacement exited. Native terminal process groups are unchanged;

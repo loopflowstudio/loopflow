@@ -21,23 +21,9 @@ use crate::store::{StoreError, StoreResult};
 /// shutdown. Saved history and the provider thread ID survive. The endpoint and thread
 /// must come from the record; an AgentProcess that also serves an unrelated
 /// conversation is left running, and that is an error.
-pub(crate) fn close_agent_process(
+pub(crate) fn validate_agent_process_close(
     (endpoint, thread): (&str, &AgentSessionId),
-    pid: u32,
-    started: i64,
 ) -> Result<()> {
-    let same_process = || -> Result<bool> {
-        match crate::journal::process_identity_evidence(pid, started) {
-            crate::journal::ProcessIdentityEvidence::Live => Ok(true),
-            crate::journal::ProcessIdentityEvidence::Dead => Ok(false),
-            crate::journal::ProcessIdentityEvidence::Unknown => {
-                Err(anyhow!("AgentProcess OS identity is unavailable"))
-            }
-        }
-    };
-    if !same_process()? {
-        return Ok(());
-    }
     // Use a separate runtime: exit is also reached from synchronous capture
     // settlement and signal cleanup, sometimes inside an existing runtime.
     std::thread::scope(|scope| {
@@ -57,34 +43,7 @@ pub(crate) fn close_agent_process(
             })
             .join()
             .map_err(|_| anyhow!("AgentProcess close worker panicked"))?
-    })?;
-    if !same_process()? {
-        return Ok(());
-    }
-    let group = i32::try_from(pid)?;
-    // SAFETY: getpgid reads process metadata. Only the exact recorded process
-    // leading the group that Loopflow created may authorize a group signal.
-    let owner = unsafe { libc::getpgid(group) };
-    if owner == -1 && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH) {
-        // It exited on its own since the check above; reap it if it is ours.
-        // SAFETY: WNOHANG only reaps our own exited child.
-        unsafe {
-            libc::waitpid(group, std::ptr::null_mut(), libc::WNOHANG);
-        }
-        return Ok(());
-    }
-    if owner != group {
-        return Err(anyhow!(
-            "recorded process does not lead its own process group"
-        ));
-    }
-    // The leader may exit before its helpers. Use the same group-wide death
-    // judgment as scheduled settlement rather than ending on leader death.
-    if crate::os_process::terminate_process_group(pid) {
-        Ok(())
-    } else {
-        Err(anyhow!("AgentProcess group {pid} death is unresolved"))
-    }
+    })
 }
 
 async fn inspect_agent_threads(endpoint: &str, thread: &AgentSessionId) -> Result<()> {
@@ -368,63 +327,4 @@ async fn reject(client: &mut WebSocketStream<UnixStream>, rpc: &Value, reason: &
             .await?;
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use std::io::{BufRead, BufReader};
-    use std::os::unix::process::CommandExt;
-    use std::process::{Child, Command, Stdio};
-
-    struct Group(Child);
-
-    impl Drop for Group {
-        fn drop(&mut self) {
-            crate::os_process::terminate_process_group(self.0.id());
-            let _ = self.0.wait();
-        }
-    }
-
-    #[test]
-    fn close_waits_for_helpers_after_the_leader_exits() {
-        let home = tempfile::tempdir().unwrap();
-        let mut group = Group(
-            Command::new("/bin/sh")
-                .env_clear()
-                .args([
-                    "-c",
-                    "trap 'exit 0' TERM; /bin/sh -c 'trap \"\" TERM; printf \"%s\\n\" $$; exec /bin/sleep 60' & wait",
-                ])
-                .stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::null())
-                .process_group(0)
-                .spawn()
-                .unwrap(),
-        );
-        // The helper has installed its TERM handler before close can signal it.
-        let mut ready = String::new();
-        BufReader::new(group.0.stdout.take().unwrap())
-            .read_line(&mut ready)
-            .unwrap();
-        let helper: u32 = ready.trim().parse().unwrap();
-        let leader = crate::journal::OsProcess::read(group.0.id())
-            .unwrap()
-            .unwrap();
-        let child = crate::journal::OsProcess::read(helper).unwrap().unwrap();
-        super::close_agent_process(
-            (
-                home.path().join("absent.sock").to_str().unwrap(),
-                &"saved".into(),
-            ),
-            leader.pid,
-            leader.started_at,
-        )
-        .unwrap();
-        assert!(!crate::journal::OsProcess::group_is_alive(leader.pid).unwrap());
-        assert_eq!(
-            crate::journal::process_identity_evidence(helper, child.started_at),
-            crate::journal::ProcessIdentityEvidence::Dead
-        );
-    }
 }

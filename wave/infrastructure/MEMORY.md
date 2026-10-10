@@ -219,24 +219,27 @@ Process `ef54b06d-9896-467f-a920-f8d4648f9d8b`, and interrupted research Process
 closure is not yet observed. LOO-378 is explicitly paused with substantial
 unpublished code retained, without deletion or delivery authorization.
 
-## AgentProcess (LOO-443, 2026-10-09)
+## AgentProcess (LOO-443/447, 2026-10-10)
 
-Jack Heart requested one inventory; #1512/#1516/#1499 integrated. Unknown stays visible; retry retains history.
-`82b5d90d5` separates attachment/provenance and relay/upstream; stand-ins
-prove takeover rejection (A → B → A), not configured relay.
-Client exit never settles its provider, nor provider death an unknown attachment.
+Jack Heart requested one inventory; #1519 integrated.
+Unknown stays visible; retry retains history. His `71741bd4` accepted #1519:
+LOO-447 owns Claude/OpenCode takeover and stop; two-second removal, three orphans
+and configured-provider runs are accepted unproven.
 
-Reaper and Codex close share group judgment: leader death is insufficient;
-failed descendant inventory refuses before signaling.
+Headless launch requires an attachment. AgentProcess identity replaces generation;
+released counters stay unread, pre-upgrade callers stale. Client exit proves no
+provider death; provider death proves no unknown attachment's exit. Group death
+requires more than leader death; failed descendant inventory refuses signaling.
+`82b5d90d5` proves A → B → A rejection with stand-ins, not configured relay.
+Draft ordering and scratch-blocked CI evidence remain at
+`be4a2b2af:wave/infrastructure/MEMORY.md`, this heading.
 
-Headless launch refuses a missing attachment. AgentProcess identity replaced
-provider generation; released counters stay unread, pre-upgrade callers read stale.
-Jack's `71741bd4` accepted #1519 as it stands: LOO-447 owns Claude/OpenCode
-takeover and stop; two-second removal, the three orphans and live-provider runs
-are accepted unproven. FIFO is Codex-only; reaping covers noninteractive providers.
-A draft must `depends_on` main's unreleased drafts: name order broke their
-frontier fixtures in the materialized run only. PR CI defers every job while
-`scratch/` holds files: no hosted proof before landing.
+LOO-447's source inspection disproves lifeline-only takeover: Claude's pipes and
+pending correlation belong to the launcher. OpenCode saves its endpoint but still
+respawns; stop/abort/drop bypass attachment fencing. Neither finding proves
+provider takeover impossible. FIFO remains Codex-only; reaping covers headless
+providers. Common close proves no takeover. Remaining transport
+and lifetime cut: `scratch/stop-and-take-over-claude.md`.
 
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)
 

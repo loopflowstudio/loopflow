@@ -75,8 +75,8 @@ inventory grants neither restoration nor execution authority. Exact slice proofs
 Jack Heart's October 9 LOO-449 decision makes checkout files own GOAL.md,
 MEMORY.md and ancestor Markdown; edit them directly, without CLI/import/cache.
 Canonical identity must not redirect checkout reads/writes into main.
-`10d44520f` removes document storage in the draft; creation preserves authored
-bytes and relocation leaves files in place. SQLite retains identity/execution.
+`10d44520f` removes draft document storage; creation preserves bytes;
+relocation leaves files. SQLite retains identity/execution.
 `wave_workflows` stays: Project catalog/source/selection and Task capture read it;
 removal is unselected. Gate/installed acceptance remain open. Preserve LOO-444's
 overlapping context transport at integration.

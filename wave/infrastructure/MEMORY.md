@@ -246,9 +246,10 @@ missing/ambiguous identity stays uncertain.
 `07529ac3d`: creation-worker death/readback without replay.
 `b10b6ff065`: pending-identity recovery/fenced relay; answers drain outside the
 fence. `b16be2b7a`: frozen native launch/client-only settlement;
-`1ce7d0119`: exact UI choices. Claude pipes/correlation/attention remain launcher-owned;
-Client loss preserves pending turns, never refreshes stale callers. Commands fence
-socket writes, not headers; shell lacks request IDs. Public death orders unproved.
+`1ce7d0119`: exact UI choices. Claude origins/admissions survive reader loss;
+pipes/attention remain launcher-owned. Client loss grants no settlement or refreshed
+authority. Commands fence writes, not headers; shell lacks request IDs.
+Public death orders unproved.
 Plan: `scratch/stop-and-take-over-claude.md`.
 
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)

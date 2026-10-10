@@ -54,7 +54,7 @@ impl History {
         let id = format!("msg_{}", uuid::Uuid::new_v4().simple());
         let (store, session, attachment) = self.owner()?;
         let origin = store.session_turn_origin(&session, &attachment)?;
-        store.record_session_request(thread, &id, &origin)?;
+        store.record_session_request(Some(thread), &id, &origin)?;
         Ok(id)
     }
 

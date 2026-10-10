@@ -137,7 +137,7 @@ impl OpenCodeConnection {
                             "Native input already attempted; not replaying"
                         );
                         let origin = store.session_turn_origin(session, attachment)?;
-                        store.record_session_request(&thread, request, &origin)?;
+                        store.record_session_request(Some(&thread), request, &origin)?;
                     }
                     let payload = if payload.is_null() {
                         Vec::new()
@@ -388,7 +388,7 @@ mod tests {
             .session_turn_origin("conversation", &attachment)
             .unwrap();
         store
-            .record_session_request(&thread, "request", &origin)
+            .record_session_request(Some(&thread), "request", &origin)
             .unwrap();
         let replies = Arc::new(Mutex::new(Vec::<Value>::new()));
         let server =

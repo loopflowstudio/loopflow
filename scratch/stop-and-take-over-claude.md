@@ -4,6 +4,8 @@ Jack Heart requested provider-independent takeover and stop on 2026-10-09.
 The outcome is accepted; the transport design below remains a draft (2026-10-10).
 Source reconciliation: shared native-client launch (`b16be2b7a`, 2026-10-10)
 and command dispatch (`773f244b3`), including exact native permission choices.
+Claude correlation now uses saved request origins and reconstructs admitted,
+unfinished turns from Session history; its pipes still belong to the launcher.
 Local main remains `df5169ab9` (#1521). Creation recovery, shared prompt
 submission and ordered readback remain implemented. Earlier iteration feedback's
 manual-permission implementation item is satisfied; rendered UX and public
@@ -105,11 +107,15 @@ death orders. Preserve frozen authority for prompts, replies, abort and stop.
    supporting OpenCode creation readback. `connect_live_agent` still excludes
    Claude. Its extension must preserve pending identity before Claude's first
    native output, without launching a replacement or inventing an ID.
-   `claude_history::History` also owns a frozen attachment and an in-memory
-   request map/pending queue. Moving pipes alone leaves correlation and attention
-   tied to the launcher. Transport extraction must preserve original turn origins
-   while accepting only the current attachment for new writes; custody is not
-   write authority.
+   Claude's in-memory request map is removed. Dispatch saves UUID/origin under
+   the attachment fence before writing, with no invented native Session ID.
+   The existing parser recovers origins on native echo and reconstructs admitted,
+   unfinished turns in observation order for the same AgentProcess. Store/reader
+   reopen tests cover loss before echo and before result, changed captured input,
+   duplicate echo, foreign-process rejection and native-thread binding; they do
+   not preserve an unread pipe or prove public takeover. Attention still uses the
+   reader's frozen attachment. Transport extraction must accept only the current
+   attachment for new writes; custody is not write authority.
    Source inspection at `b16be2b7a` also finds two launcher-local failure paths:
    `spawn_reader` emits failed completion on EOF, and `send_input` calls
    `kill_process` after a seed write error. Transport extraction must distinguish
@@ -154,6 +160,8 @@ The shared close and Codex unrelated-thread inspection survive.
 
 ## Delete — do not maintain
 
+Removed: Claude's launcher-local request map and pre-fence origin capture;
+Session history owns request intent before native identity and admission order.
 Remaining: launcher-owned Claude pipe transport and its exclusive fixtures;
 Claude's native-resume fallback for a live headless provider. Codex-only public
 connection dispatch is removed; native remote endpoints now carry strings
@@ -257,4 +265,4 @@ response collection must not poll an already-completed connection again.
 
 ## Checks
 
-Checks: `git diff --check` passes (prose-only reconciliation); prior build, Clippy and two public connection checks remain at `b16be2b7a`; no product tests rerun, public death orders unfinished and Linux acceptance CI-owned.
+Checks: `cargo check -p loopflow`, `cargo test -p loopflow --lib` filtered to Claude history (2) and OpenCode pending-request recovery (1), `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check` pass; public death orders unfinished, Linux acceptance CI-owned.

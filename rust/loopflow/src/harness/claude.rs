@@ -1,4 +1,3 @@
-use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -46,7 +45,6 @@ pub struct ClaudeHarness {
     /// The runner turn id every provider turn in the current coalesced boundary
     /// reports under. Set by `send_input`, read by the reader.
     current_turn_id: Arc<Mutex<Option<String>>>,
-    requests: Arc<Mutex<HashMap<String, crate::session::SessionTurnOrigin>>>,
     child: Option<Child>,
     stdin: Option<ChildStdin>,
     reader_task: Option<JoinHandle<()>>,
@@ -84,7 +82,6 @@ impl ClaudeHarness {
             turn_in_progress: Arc::new(AtomicBool::new(false)),
             pending_results: Arc::new(AtomicI64::new(0)),
             current_turn_id: Arc::new(Mutex::new(None)),
-            requests: Arc::new(Mutex::new(HashMap::new())),
             child: None,
             stdin: None,
             reader_task: None,
@@ -92,11 +89,6 @@ impl ClaudeHarness {
             shutdown_requested: Arc::new(AtomicBool::new(false)),
             interrupt_requested: Arc::new(AtomicBool::new(false)),
         }
-    }
-
-    fn turn_origin(&self) -> Result<crate::session::SessionTurnOrigin> {
-        let (store, session, attachment) = self.owner()?;
-        Ok(store.session_turn_origin(&session, &attachment)?)
     }
 
     /// Spawn the persistent stream-json process and its reader, if not already
@@ -158,15 +150,7 @@ impl ClaudeHarness {
             .take()
             .ok_or_else(|| anyhow!("failed to capture claude stderr"))?;
 
-        self.spawn_reader(
-            stdout,
-            super::claude_history::History {
-                owner,
-                requests: self.requests.clone(),
-                pending: VecDeque::new(),
-                attention: Default::default(),
-            },
-        );
+        self.spawn_reader(stdout, super::claude_history::History::new(owner)?);
         self.stderr_task = Some(spawn_stderr_logger(stderr, "claude_harness"));
         self.stdin = Some(stdin);
         self.child = Some(child);
@@ -336,7 +320,7 @@ impl ClaudeHarness {
         )
     }
 
-    async fn send_line(&mut self, line: String) -> Result<()> {
+    async fn send_line(&mut self, line: String, request: String) -> Result<()> {
         let mut stdin = self
             .stdin
             .take()
@@ -350,6 +334,10 @@ impl ClaudeHarness {
         };
         let (stdin, result) = tokio::task::spawn_blocking(move || {
             let result = store.with_session_attachment(&session, &attachment, || {
+                let origin = store.session_turn_origin(&session, &attachment)?;
+                // Claude has not necessarily reported a native Session yet.
+                // Persist the UUID's origin before any bytes reach the provider.
+                store.record_session_request(None, &request, &origin)?;
                 super::dispatch::write_fenced(&mut stdin, line.as_bytes())
             });
             (stdin, result)
@@ -458,12 +446,7 @@ impl Harness for ClaudeHarness {
         self.interrupt_requested.store(false, Ordering::SeqCst);
         self.ensure_process().await?;
 
-        let origin = self.turn_origin()?;
         let turn_id = uuid::Uuid::new_v4().to_string();
-        self.requests
-            .lock()
-            .expect("Claude request lock poisoned")
-            .insert(turn_id.clone(), origin);
         *self
             .current_turn_id
             .lock()
@@ -475,7 +458,7 @@ impl Harness for ClaudeHarness {
         });
 
         if let Err(error) = self
-            .send_line(user_message_line(&turn_content, &turn_id))
+            .send_line(user_message_line(&turn_content, &turn_id), turn_id.clone())
             .await
         {
             // The process died between spawn and write; tear it down so the
@@ -505,21 +488,11 @@ impl Harness for ClaudeHarness {
         {
             return SendCurrentOutcome::NotSteerable;
         }
-        let origin = match self.turn_origin() {
-            Ok(origin) => origin,
-            Err(error) => {
-                self.pending_results.fetch_sub(1, Ordering::SeqCst);
-                return SendCurrentOutcome::Failed {
-                    error: error.to_string(),
-                };
-            }
-        };
         let request = uuid::Uuid::new_v4().to_string();
-        self.requests
-            .lock()
-            .expect("Claude request lock poisoned")
-            .insert(request.clone(), origin);
-        if let Err(error) = self.send_line(user_message_line(content, &request)).await {
+        if let Err(error) = self
+            .send_line(user_message_line(content, &request), request)
+            .await
+        {
             self.pending_results.fetch_sub(1, Ordering::SeqCst);
             return SendCurrentOutcome::Failed {
                 error: format!("failed to write claude steer: {error}"),
@@ -805,7 +778,10 @@ mod tests {
                 // current value. Neither a pipe write nor a signal may use it.
                 harness.config.as_mut().unwrap().session_attachment =
                     Some((session.clone(), first));
-                assert!(harness.send_line("stale request\n".into()).await.is_err());
+                assert!(harness
+                    .send_line("stale request\n".into(), "stale".into())
+                    .await
+                    .is_err());
                 assert!(harness.stop().await.is_err());
                 assert!(harness
                     .child

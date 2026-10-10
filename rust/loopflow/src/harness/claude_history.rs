@@ -1,7 +1,6 @@
 //! Stream input UUIDs, echoed by Claude, correlate each native result.
 use crate::id::AgentSessionId;
-use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, Mutex};
+use std::collections::VecDeque;
 
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -10,13 +9,24 @@ use crate::session::SessionEventKind;
 
 #[derive(Debug)]
 pub(super) struct History {
-    pub owner: super::agent_process::AttachmentOwner,
-    pub requests: Arc<Mutex<HashMap<String, crate::session::SessionTurnOrigin>>>,
-    pub pending: VecDeque<(AgentSessionId, String)>,
-    pub attention: super::attention::Attention,
+    owner: super::agent_process::AttachmentOwner,
+    pending: VecDeque<(AgentSessionId, String)>,
+    attention: super::attention::Attention,
 }
 
 impl History {
+    pub(super) fn new(owner: super::agent_process::AttachmentOwner) -> Result<Self> {
+        let pending = owner
+            .0
+            .pending_session_turns(&owner.1, &owner.2.agent_process_id)?
+            .into();
+        Ok(Self {
+            owner,
+            pending,
+            attention: Default::default(),
+        })
+    }
+
     pub fn record(&mut self, line: &str) -> Result<()> {
         let Ok(value) = serde_json::from_str::<Value>(line) else {
             return Ok(());
@@ -30,16 +40,17 @@ impl History {
                 return Ok(());
             };
             let thread = AgentSessionId::from(thread);
-            let Some(origin) = self
-                .requests
-                .lock()
-                .expect("Claude request lock poisoned")
-                .remove(turn)
-            else {
+            let Some((origin, completed)) = store.session_request(session, &thread, turn)? else {
                 return Ok(());
             };
+            if origin.agent_process_id != attachment.agent_process_id || completed {
+                return Ok(());
+            }
             store.record_session_turn_origin(&thread, turn, &origin)?;
-            self.pending.push_back((thread.to_owned(), turn.to_owned()));
+            let pending = (thread, turn.to_owned());
+            if !self.pending.contains(&pending) {
+                self.pending.push_back(pending);
+            }
         } else if value["type"] == "result" {
             let Some((thread, turn)) = self.pending.front() else {
                 return Ok(());
@@ -102,7 +113,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn native_echo_and_result_retain_exact_output_without_borrowing_another_request() {
+    fn reconstructed_reader_retains_pending_origins_across_takeover_and_new_input() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("history.db");
         let store = SqliteStore::open_ephemeral(&path).unwrap();
@@ -120,14 +131,26 @@ mod tests {
         let origin = store
             .session_turn_origin("conversation", &attachment)
             .unwrap();
-        let mut history = History {
-            owner: (store.clone(), "conversation".into(), attachment),
-            requests: std::sync::Arc::new(std::sync::Mutex::new(
-                [("request".to_string(), origin)].into(),
-            )),
-            pending: Default::default(),
-            attention: Default::default(),
-        };
+        store
+            .record_session_request(None, "request", &origin)
+            .unwrap();
+        let replacement = LfProcessId::new();
+        conn.execute(
+            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+            [&replacement],
+        )
+        .unwrap();
+        let current = store
+            .claim_session_attachment("conversation", Some(&attachment), &replacement, false)
+            .unwrap();
+        assert_eq!(current.agent_process_id, attachment.agent_process_id);
+        assert!(store
+            .session_turn_origin("conversation", &attachment)
+            .is_err());
+        drop(store);
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let mut history =
+            History::new((store.clone(), "conversation".into(), current.clone())).unwrap();
         history
             .record(&json!({"type":"user","uuid":"old","session_id":"thread"}).to_string())
             .unwrap();
@@ -149,6 +172,20 @@ mod tests {
         history
             .record(&json!({"type":"user","uuid":"request","session_id":"thread"}).to_string())
             .unwrap();
+        assert!(store
+            .session_request("conversation", &"other-thread".into(), "request")
+            .unwrap()
+            .is_none());
+        // Lose the reader again after admission, before the result. Repeated
+        // native echoes must not enqueue a second completion for the same input.
+        drop(history);
+        drop(store);
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let mut history =
+            History::new((store.clone(), "conversation".into(), current.clone())).unwrap();
+        history
+            .record(&json!({"type":"user","uuid":"request","session_id":"thread"}).to_string())
+            .unwrap();
         let value = json!({"decision":"advance","summary":"native proof"});
         history.record(&json!({"type":"result","uuid":"result","session_id":"thread","subtype":"success","structured_output":value}).to_string()).unwrap();
         let events: Vec<_> = store
@@ -163,6 +200,22 @@ mod tests {
             })
             .collect();
         assert_eq!(events.len(), 3);
+        assert!(events
+            .iter()
+            .all(|event| event.lf_process_id.as_deref() == Some(process.as_str())));
+        assert!(store
+            .pending_session_turns("conversation", &current.agent_process_id)
+            .unwrap()
+            .is_empty());
+        let count = store.session_history("conversation", 0, 0).unwrap().len();
+        history
+            .record(&json!({"type":"user","uuid":"request","session_id":"thread"}).to_string())
+            .unwrap();
+        history.record(&json!({"type":"result","uuid":"duplicate","session_id":"thread","subtype":"success","result":"must not settle another input"}).to_string()).unwrap();
+        assert_eq!(
+            store.session_history("conversation", 0, 0).unwrap().len(),
+            count
+        );
         assert!(events
             .iter()
             .all(|e| e.provider_turn.as_deref() == Some("request")));
@@ -184,5 +237,41 @@ mod tests {
             serde_json::from_str::<serde_json::Value>(&answer.text).unwrap(),
             value
         );
+    }
+    #[test]
+    fn request_from_another_agent_process_cannot_admit_a_native_turn() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&dir.path().join("history.db")).unwrap();
+        store.test_session("conversation", &crate::session_record::new_artifact_key());
+        let process = LfProcessId::new();
+        let conn = rusqlite::Connection::open(dir.path().join("history.db")).unwrap();
+        conn.execute(
+            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+            [&process],
+        )
+        .unwrap();
+        let attachment = store
+            .claim_session_attachment("conversation", None, &process, false)
+            .unwrap();
+        let mut origin = store
+            .session_turn_origin("conversation", &attachment)
+            .unwrap();
+        origin.agent_process_id = LfProcessId::new();
+        store
+            .record_session_request(None, "foreign", &origin)
+            .unwrap();
+        let mut history = History::new((store.clone(), "conversation".into(), attachment)).unwrap();
+        history
+            .record(&json!({"type":"user","uuid":"foreign","session_id":"thread"}).to_string())
+            .unwrap();
+        history.record(&json!({"type":"result","uuid":"result","session_id":"thread","subtype":"success","result":"foreign"}).to_string()).unwrap();
+        assert!(store
+            .session_history("conversation", 0, 0)
+            .unwrap()
+            .iter()
+            .all(|event| matches!(
+                event.kind,
+                SessionEventKind::Captured | SessionEventKind::Observed
+            )));
     }
 }

@@ -146,7 +146,7 @@ impl SqliteStore {
     ) -> StoreResult<i64> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let seq = record_event_in(&tx, session, thread, turn, kind, payload)?;
+        let seq = record_event_in(&tx, session, Some(thread), turn, kind, payload)?;
         tx.commit()?;
         Ok(seq)
     }
@@ -187,19 +187,24 @@ impl SqliteStore {
     }
 
     /// Save an intended native request before sending it. This is not admission.
+    /// A missing native Session remains unknown until the provider echoes the UUID.
     pub(crate) fn record_session_request(
         &self,
-        thread: &AgentSessionId,
+        thread: Option<&AgentSessionId>,
         request: &str,
         origin: &crate::session::SessionTurnOrigin,
     ) -> StoreResult<()> {
-        self.record_session_event(
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        record_event_in(
+            &tx,
             &origin.session_id,
             thread,
             request,
             SessionEventKind::Observed,
             &serde_json::json!({"request_origin": origin}),
         )?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -228,7 +233,7 @@ impl SqliteStore {
         record_event_in(
             &tx,
             session,
-            thread,
+            Some(thread),
             &turn,
             SessionEventKind::Observed,
             &serde_json::json!({"permission_reply":{"id":permission,"request":request,"response":response}}),
@@ -248,11 +253,15 @@ impl SqliteStore {
         let saved: Option<(String, bool)> = conn
             .query_row(
                 "SELECT json_extract(e.payload,'$.request_origin'), EXISTS(SELECT 1 FROM session_events done
-                WHERE done.session_id=e.session_id AND done.provider_thread=e.provider_thread
+                WHERE done.session_id=e.session_id AND done.provider_thread=?2
                   AND done.provider_turn=e.provider_turn AND done.kind='completed')
-             FROM session_events e WHERE e.session_id=?1 AND e.provider_thread=?2
+             FROM session_events e WHERE e.session_id=?1 AND (e.provider_thread=?2 OR e.provider_thread IS NULL)
                AND e.provider_turn=?3 AND e.kind='observed' AND e.receipt_key=''
-               AND json_type(e.payload,'$.request_origin')='object'",
+               AND json_type(e.payload,'$.request_origin')='object'
+               AND NOT EXISTS(SELECT 1 FROM session_events admitted
+                 WHERE admitted.session_id=e.session_id AND admitted.provider_turn=e.provider_turn
+                   AND admitted.kind='started' AND admitted.provider_thread!=?2
+                   AND admitted.agent_process_id=json_extract(e.payload,'$.request_origin.agent_process_id'))",
                 params![session, thread, request],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
@@ -260,6 +269,28 @@ impl SqliteStore {
         saved
             .map(|(payload, completed)| Ok((serde_json::from_str(&payload)?, completed)))
             .transpose()
+    }
+
+    /// Native admissions still awaiting results from this exact AgentProcess.
+    /// Observation order, not the replacement attachment's input, orders results.
+    pub(crate) fn pending_session_turns(
+        &self,
+        session: &str,
+        agent_process: &crate::id::LfProcessId,
+    ) -> StoreResult<Vec<(AgentSessionId, String)>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(
+            "SELECT e.provider_thread,e.provider_turn FROM session_events e
+             WHERE e.session_id=?1 AND e.agent_process_id=?2 AND e.kind='started'
+               AND NOT EXISTS(SELECT 1 FROM session_events done
+                 WHERE done.session_id=e.session_id AND done.provider_thread=e.provider_thread
+                   AND done.provider_turn=e.provider_turn AND done.kind='completed')
+             ORDER BY e.seq",
+        )?;
+        let rows = query.query_map(params![session, agent_process], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
     }
 
     /// Retain correlated origin after takeover without reading current assignment.
@@ -274,7 +305,7 @@ impl SqliteStore {
         let seq = record_event_in(
             &tx,
             &origin.session_id,
-            thread,
+            Some(thread),
             turn,
             SessionEventKind::Started,
             &serde_json::json!({}),
@@ -469,7 +500,7 @@ impl SqliteStore {
 fn record_event_in(
     tx: &rusqlite::Transaction<'_>,
     session: &str,
-    thread: &AgentSessionId,
+    thread: Option<&AgentSessionId>,
     turn: &str,
     kind: SessionEventKind,
     payload: &Value,
@@ -482,7 +513,7 @@ fn record_event_in(
     };
     let existing: Option<(i64, String)> = tx.query_row(
         "SELECT seq,payload FROM session_events
-         WHERE session_id=?1 AND provider_thread=?2 AND provider_turn=?3 AND kind=?4 AND receipt_key=?5",
+         WHERE session_id=?1 AND provider_thread IS ?2 AND provider_turn=?3 AND kind=?4 AND receipt_key=?5",
         params![session,thread,turn,kind.as_str(),receipt],
         |row| Ok((row.get(0)?,row.get(1)?)),
     ).optional()?;

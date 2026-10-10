@@ -30,8 +30,10 @@ Wave, Project and Task planning use one local SQLite owner with optional
 repository-wide Linear synchronization. Creation without a Wave uses `inbox`.
 Wave goals, memory and other Markdown live only in `wave/<name>/` in the
 checkout. Edit them like any other file; context and summaries read them directly.
-Ancestor context uses the same checkout. Linear Initiative creation sends the
-checkout summary; sync reads PM bindings but does not update the summary.
+Ancestor context uses the same checkout. Linear Initiative creation and explicit
+planning sync send its summary, using the same 255-character description limit.
+Sync writes only changed fields; plan-only sends nothing. A missing GOAL.md
+blocks mutation instead of clearing the provider summary.
 Creation preserves authored IDs and bytes and writes missing GOAL.md/MEMORY.md
 files. Reads never provision. Registry relocation changes addresses without moving authored files.
 Workflow definitions remain separately stored: provisioning and the draft migration

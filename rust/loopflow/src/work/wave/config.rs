@@ -150,7 +150,7 @@ pub fn read_wave_summary(repo: &Path, name: &str) -> std::io::Result<String> {
     }
 }
 
-fn wave_summary(content: &str) -> String {
+pub(crate) fn wave_summary(content: &str) -> String {
     let body = split_frontmatter(content)
         .map(|(_, body)| body)
         .unwrap_or_else(|| content.to_string());

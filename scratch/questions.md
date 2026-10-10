@@ -7,8 +7,8 @@
 - Relocation remains a registry-address operation; authored directories are not
   silently moved or overwritten. Direct file authoring owns their placement too.
 - 2026-10-09: Jack Heart's mocked-sync acceptance requires a missing summary
-  writer. The plan now sketches that narrow implementation, without treating a
+  writer. The narrow writer is now implemented, without treating a
   creation/config-reader test as acceptance. Branch-versus-main policy stays
-  open; the draft preserves sync's supplied checkout path rather than choosing
+  open; the implementation preserves sync's supplied checkout path rather than choosing
   another checkout. Missing GOAL.md is diagnosed before outbound mutation, not
   treated as permission to clear the provider summary.

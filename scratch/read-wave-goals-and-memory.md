@@ -31,8 +31,7 @@ Workflow import and PM metadata updates remain separate.
   shared by launch policy, cron, metrics and PM.
 - `lf/commands/waves.rs`: list/status/roadmap summaries and PM validation use
   the invoking checkout for its repository, otherwise the recorded repository.
-- `ops/pm.rs`: checkout bindings and legacy Team validation. Only Initiative
-  creation sends the checkout summary; sync does not update it.
+- `ops/pm.rs`: checkout bindings, legacy Team validation and summary sync.
 - `store/sqlite/wave_definitions.rs`: registration, missing-file creation and
   Workflow import. `store/sqlite.rs` and `store/migrations.rs` retain only
   Workflow import/retirement comparisons, not document storage.
@@ -44,45 +43,35 @@ Provisioning and draft migration import `.lf/workflows/*.{yaml,yml}` once,
 prefer `.yaml` and preserve stored edits. Retirement compares saved definitions.
 Jack has not selected its removal.
 
-## Remaining: summary sync and publication
+## Summary sync implemented; publication remains separate
 
-At `45c184227`, `lf/commands/ops/mod.rs::sync_planning` dispatches to
-`ops/pm.rs::pm_sync_async`, which validates ownership, optionally renames
-Initiatives, adopts legacy Projects and refreshes snapshots. It neither reads
-nor sends summaries. `LinearClient::rename_wave` / `UPDATE_INITIATIVE_MUTATION`
-accept only ID/name. `pm_init_async` sends the summary only on creation, not
-reconnection. The requested mocked sync test therefore needs missing behavior,
-not merely verification; testing creation or the config reader would not satisfy it.
+The October 9 draft is implemented. `sync_planning` preserves its supplied
+checkout through `pm_sync_async`; preflight captures summaries before mutations,
+using creation's description normalization. Initiative observations retain their
+summaries. Only changed name/description fields are sent through the existing
+update operation; standalone rename omits description. Provider errors or missing
+success acknowledgements return failure, without automatic write retry.
 
-### Narrow writer design (draft, October 9)
+Missing GOAL.md is diagnosed before mutation; an existing empty objective can
+clear the summary. Review removed an existence-check/read race: preflight parses
+one successful file read instead of a reader whose missing-file result is empty.
+No schema, Workflow, membership or execution owner was added.
 
-Jack's requested behavior requires an outbound summary update, not a different
-reader test. The implementation remains outstanding; a new storage owner, import
-step or broad planning rewrite is unnecessary.
+The stateful mocked-provider test calls the public `sync_planning` dispatcher
+twice around a direct edit in a disposable linked checkout, whose main checkout
+retains different text. Resulting provider summaries prove propagation without
+import/save. It also covers unchanged sync, plan-only, missing file, rejected
+update without retry, and intentional empty text. Existing foreign-Project and
+legacy Workflow-conversion sync fixtures pass.
 
-- Keep `sync_planning`'s supplied checkout path through `pm_sync_async`. Read
-  each selected GOAL.md summary during preflight, before any provider mutation.
-  Preserve existing Team/Initiative ownership checks and `--plan`'s no-write rule.
-- Retain the summary already returned by `LinearClient::list_waves` instead of
-  projecting only ID/name. Compare the checkout summary using the same provider
-  description normalization as creation; report and write only changed values.
-- Extend the existing Initiative update operation to accept a description without
-  making standalone rename erase it. Send only name/description, preserving
-  membership, Projects, execution and `wave_workflows`. Surface provider errors;
-  do not add automatic write retries or claim successful sync after failure.
-- Missing GOAL.md must not become a destructive empty-summary write: report its
-  absence before mutation. An existing, intentionally empty objective is distinct.
-  This preservation choice is a draft assumption, not a new stored fallback.
-- Prove two real sync invocations against a stateful mocked provider around a
-  direct file edit. Assert the provider's resulting summary, with distinct main
-  and checkout text; also cover unchanged sync, plan-only, missing file and
-  failed update. Isolate credentials/store and exercise public checkout dispatch.
+## Remaining and PR notes
 
-Current behavior: sync receives the caller's checkout for file bindings but sends
-no summary; creation alone sends its checkout summary. The proposed writer uses
-that existing path, without claiming Jack selected branch-over-main policy.
-That policy stays explicitly open for Jack in PR notes. Publication remains
-withheld until the mocked sync acceptance passes; this realign does not publish.
+Jack's mocked-sync publication condition is satisfied by that source proof.
+Publication belongs to the caller's delivery step; no publication or landing
+occurred here. Branch-versus-main policy remains explicitly open for Jack:
+implementation preserves the caller's existing checkout selection, not a newly
+approved default. CLI process-level dispatch and installed behavior remain gate
+or CI evidence, distinct from the public command-function proof.
 
 Gate owns broader affected suites, public dispatch and migration acceptance;
 CI owns the platform matrix. Reconcile LOO-444's context reader at integration;
@@ -97,4 +86,4 @@ Release is the only immediate child directory with memory. Its top-level goal
 and full memory were read; the operation-entry lesson above remains applicable,
 with release-specific history retained there.
 
-Checks: `git diff --check` passes; source trace confirms the absent sync writer and existing provider summary read; no code changed or suites rerun. Prior fmt/Clippy and 11 focused config/registration passes remain applicable; gate/CI own broader acceptance.
+Checks: `cargo check -p loopflow --lib`, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, and three focused sync tests pass; gate/CI own broader and installed acceptance.

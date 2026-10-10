@@ -2109,9 +2109,9 @@ async fn pm_sync_async(
     }
     progress.status("checking Linear repository Initiatives, Projects, and Tasks");
     let linear_waves = client.list_waves().await.map_err(pm_to_ops)?;
-    let linear_waves_by_id: BTreeMap<String, String> = linear_waves
+    let linear_waves_by_id: BTreeMap<String, &crate::pm::PmWave> = linear_waves
         .iter()
-        .map(|wave| (wave.id.clone(), wave.name.clone()))
+        .map(|wave| (wave.id.clone(), wave))
         .collect();
     for linear_wave in &linear_waves {
         if !initiative_waves.contains_key(&linear_wave.id) {
@@ -2122,15 +2122,31 @@ async fn pm_sync_async(
         }
     }
 
+    let mut summaries = BTreeMap::new();
     let mut seen_projects: BTreeMap<String, String> = BTreeMap::new();
     for wave in &waves {
+        let goal = repo.join("wave").join(wave).join("GOAL.md");
+        let content = match std::fs::read_to_string(&goal) {
+            Ok(content) => content,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let message = format!("{} is missing; cannot sync its summary", goal.display());
+                diagnostics.push(message.clone());
+                blocking.push(message);
+                continue;
+            }
+            Err(error) => return Err(error.into()),
+        };
+        let summary = crate::work::wave::config::wave_summary(&content);
+        let summary = crate::pm::linear::linear_description(&summary);
+        summaries.insert(wave.clone(), summary.clone());
         let Some(initiative_id) = read_initiative(repo, wave) else {
             blocking.push(format!("wave/{wave} has no Linear Initiative"));
             continue;
         };
         let expected_initiative_name = title_case(wave);
         match linear_waves_by_id.get(&initiative_id) {
-            Some(actual) if actual != &expected_initiative_name => {
+            Some(actual) if actual.name != expected_initiative_name => {
+                let actual = &actual.name;
                 let message = format!(
                     "rename Linear Initiative `{actual}` ({initiative_id}) to `{expected_initiative_name}` for wave/{wave}"
                 );
@@ -2144,6 +2160,12 @@ async fn pm_sync_async(
                 continue;
             }
             _ => {}
+        }
+
+        if linear_waves_by_id[&initiative_id].summary != summary {
+            actions.push(format!(
+                "update Linear Initiative {initiative_id} summary from wave/{wave}/GOAL.md"
+            ));
         }
 
         let projects = client
@@ -2250,9 +2272,13 @@ async fn pm_sync_async(
             let initiative =
                 read_initiative(repo, wave).expect("preflight required every selected Initiative");
             let expected_initiative_name = title_case(wave);
-            if linear_waves_by_id.get(&initiative) != Some(&expected_initiative_name) {
+            let actual = linear_waves_by_id[&initiative];
+            let name = (actual.name != expected_initiative_name)
+                .then_some(expected_initiative_name.as_str());
+            let summary = (actual.summary != summaries[wave]).then_some(summaries[wave].as_str());
+            if name.is_some() || summary.is_some() {
                 client
-                    .rename_wave(&initiative, &expected_initiative_name)
+                    .update_wave(&initiative, name, summary)
                     .await
                     .map_err(pm_to_ops)?;
             }

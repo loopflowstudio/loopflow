@@ -169,8 +169,8 @@ async fn graphql(
         json!({"initiative":{"id":id}})
     } else if query.contains("query ListInitiatives") {
         json!({"initiatives":page(vec![
-            json!({"id":"initiative-a","name":"A","description":""}),
-            json!({"id":"initiative-b","name":"B","description":""}),
+            json!({"id":"initiative-a","name":"A","description":"Durable mandate."}),
+            json!({"id":"initiative-b","name":"B","description":"Durable mandate."}),
         ])})
     } else if query.contains("query ListInitiativeProjects") {
         let initiative = &vars["initiativeId"];

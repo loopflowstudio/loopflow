@@ -55,6 +55,9 @@ async fn serve(
 // Stateful provider evidence for planning fields, state, membership, and comments.
 #[derive(Default)]
 struct PlanningState {
+    wave_summary: String,
+    reject_wave_update: bool,
+    wave_updates: usize,
     export_mode: bool,
     creation_writes: usize,
     attachment_writes: usize,
@@ -145,8 +148,17 @@ async fn planning_graphql(
     let data = if query.contains("query ListTeams") {
         json!({"teams":{"nodes":[{"id":"team-1","name":"Fixture","key":"FIX",
             "description":"<!-- loopflow-repository: loopflowstudio/fixture -->"}]}})
+    } else if query.contains("mutation UpdateInitiative") {
+        state.wave_updates += 1;
+        if state.reject_wave_update {
+            return axum::Json(json!({"errors":[{"message":"summary update refused"}]}));
+        }
+        if let Some(summary) = vars["input"]["description"].as_str() {
+            state.wave_summary = summary.into();
+        }
+        json!({"initiativeUpdate":{"success":true,"initiative":{"id":vars["id"]}}})
     } else if query.contains("query ListInitiatives") {
-        json!({"initiatives":page(vec![json!({"id":"initiative-1", "name":"Product", "description":""})])})
+        json!({"initiatives":page(vec![json!({"id":"initiative-1", "name":"Product", "description":state.wave_summary})])})
     } else if query.contains("query ListInitiativeProjects") {
         if !state.issues.is_empty() && state.fail_snapshot {
             state.fail_snapshot = false;
@@ -4194,3 +4206,120 @@ fn planning_export_removal_during_uncertain_creation_retains_identity() {
 
 #[path = "planning_order_tests.rs"]
 mod planning_order_tests;
+
+#[test]
+fn wave_summary_sync_reads_direct_checkout_edits() {
+    let _lock = crate::journal::test_env_lock();
+    let _restore = PlanningEnvironment::isolate();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let fixture = runtime.block_on(Fixture::new());
+    std::env::set_var("LF_HOME", fixture.directory.path());
+    let (repo, _) = runtime.block_on(planning_repo(&fixture));
+    runtime.block_on(fixture.seed(now() + 86_400));
+    let git = |repo: &Path, args: &[&str]| {
+        let output = std::process::Command::new("git")
+            .args(args)
+            .current_dir(repo)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    git(&repo, &["add", "."]);
+    git(
+        &repo,
+        &[
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "-qm",
+            "fixture",
+        ],
+    );
+    let checkout = fixture.directory.path().join("checkout");
+    git(
+        &repo,
+        &[
+            "worktree",
+            "add",
+            "-qb",
+            "summary",
+            checkout.to_str().unwrap(),
+        ],
+    );
+    let goal = checkout.join("wave/product/GOAL.md");
+    let write = |text: &str| {
+        std::fs::write(
+            &goal,
+            format!("---\npm:\n  linear_initiative: initiative-1\n---\n\n## Objective\n\n{text}\n"),
+        )
+        .unwrap();
+    };
+    let state = Arc::new(tokio::sync::Mutex::new(PlanningState::default()));
+    let (url, server) = runtime.block_on(serve(state.clone()));
+    PM_TEST_CONTEXT.sync_scope(fixture.context(&url), || {
+        let sync = |plan| {
+            crate::lf::commands::ops::sync_planning(&checkout, Some("product"), false, plan, false)
+        };
+        write("Checkout objective.");
+        sync(false).unwrap();
+        assert_eq!(
+            runtime.block_on(async { state.lock().await.wave_summary.clone() }),
+            "Checkout objective."
+        );
+        write("Edited directly.");
+        sync(false).unwrap();
+        assert_eq!(
+            runtime.block_on(async { state.lock().await.wave_summary.clone() }),
+            "Edited directly."
+        );
+        // No duplicate provider effect for unchanged normalized text.
+        sync(false).unwrap();
+        assert_eq!(
+            runtime.block_on(async { state.lock().await.wave_updates }),
+            2
+        );
+        write("Plan only.");
+        sync(true).unwrap();
+        assert_eq!(
+            runtime.block_on(async { state.lock().await.wave_summary.clone() }),
+            "Edited directly."
+        );
+        std::fs::remove_file(&goal).unwrap();
+        assert!(sync(false).unwrap_err().to_string().contains("missing"));
+        assert_eq!(
+            runtime.block_on(async { state.lock().await.wave_updates }),
+            2
+        );
+        write("Rejected update.");
+        runtime.block_on(async { state.lock().await.reject_wave_update = true });
+        assert!(sync(false)
+            .unwrap_err()
+            .to_string()
+            .contains("summary update refused"));
+        assert_eq!(
+            runtime.block_on(async { state.lock().await.wave_summary.clone() }),
+            "Edited directly."
+        );
+        assert_eq!(
+            runtime.block_on(async { state.lock().await.wave_updates }),
+            3
+        );
+        runtime.block_on(async { state.lock().await.reject_wave_update = false });
+        write("");
+        sync(false).unwrap();
+        assert_eq!(
+            runtime.block_on(async { state.lock().await.wave_summary.clone() }),
+            ""
+        );
+        assert!(std::fs::read_to_string(repo.join("wave/product/GOAL.md"))
+            .unwrap()
+            .contains("Keep working."));
+    });
+    server.abort();
+}

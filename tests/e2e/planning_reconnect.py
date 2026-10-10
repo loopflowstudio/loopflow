@@ -562,6 +562,7 @@ def _execution_rows(db: sqlite3.Connection, processes: tuple[str, ...]) -> dict[
         table: db.execute(f"SELECT * FROM {table} ORDER BY rowid").fetchall()
         for table in [
             "agent_sessions",
+            "session_events",
             "task_workflows",
             "task_workflow_moves",
             "task_prs",
@@ -693,7 +694,7 @@ def _exercise_exports(fixture: dict, env: dict, server: ThreadingHTTPServer) -> 
         db.close()
 
 
-def _exercise_creation_origins(fixture: dict, env: dict, server: ThreadingHTTPServer) -> None:
+def _peer_sides(fixture: dict, env: dict) -> list[tuple[dict, dict]]:
     peer = {**fixture, **fixture["peer"]}
     peer_env = {
         **env,
@@ -702,7 +703,38 @@ def _exercise_creation_origins(fixture: dict, env: dict, server: ThreadingHTTPSe
         "CLAUDE_CONFIG_DIR": str(Path(peer["home"]) / "claude"),
         "CODEX_HOME": str(Path(peer["home"]) / "codex"),
     }
-    sides = [(fixture, env), (peer, peer_env)]
+    return [(fixture, env), (peer, peer_env)]
+
+
+def _planning_status(fixture: dict, env: dict) -> dict:
+    return json.loads(_run(fixture, env, "planning", "status", "--json", timeout=45))[
+        "destinations"
+    ][0]
+
+
+def _exchange(fixture: dict, env: dict, predicate, *, wait_for_publication: bool = False) -> None:
+    def published() -> bool:
+        reading = _planning_status(fixture, env)
+        return reading["publication_state"] == "confirmed" and reading["pending_local"] is False
+
+    watch = Watch(fixture, env)
+    try:
+        watch.scope(fixture["repo"])
+        _await(predicate, "peer did not exchange")
+        if wait_for_publication:
+            _await(published, "peer did not publish receipts")
+    except AssertionError as error:
+        reading = _planning_status(fixture, env)
+        raise AssertionError(
+            {"home": fixture["home"], **{k: v for k, v in reading.items() if k != "records"}}
+        ) from error
+    finally:
+        watch.close()
+
+
+def _exercise_creation_origins(fixture: dict, env: dict, server: ThreadingHTTPServer) -> None:
+    sides = _peer_sides(fixture, env)
+    peer = sides[1][0]
     databases = [sqlite3.connect(Path(f["home"]) / "loopflow.db", timeout=5) for f, _ in sides]
     processes = ("00000000-0000-4000-8000-000000000001",)
 
@@ -720,18 +752,8 @@ def _exercise_creation_origins(fixture: dict, env: dict, server: ThreadingHTTPSe
             .fetchone()
         )
 
-    def published(side: int) -> bool:
-        reading = json.loads(run(side, "planning", "status", "--json"))["destinations"][0]
-        return reading["publication_state"] == "confirmed" and reading["pending_local"] is False
-
     def exchange(side: int, predicate) -> None:
-        watch = Watch(*sides[side])
-        try:
-            watch.scope(sides[side][0]["repo"])
-            _await(predicate, f"side {side} did not recover creation origins")
-            _await(lambda: published(side), f"side {side} did not publish receipts")
-        finally:
-            watch.close()
+        _exchange(*sides[side], predicate, wait_for_publication=True)
 
     with server.lock:
         server.state["exports"] = dict(
@@ -991,15 +1013,8 @@ def _replay_planning_document(fixture: dict, env: dict, reference: str, earlier:
 
 
 def _exercise_associated_creations(fixture: dict, env: dict, server: ThreadingHTTPServer) -> None:
-    peer = {**fixture, **fixture["peer"]}
-    peer_env = {
-        **env,
-        "HOME": peer["home"],
-        "LF_HOME": peer["home"],
-        "CLAUDE_CONFIG_DIR": str(Path(peer["home"]) / "claude"),
-        "CODEX_HOME": str(Path(peer["home"]) / "codex"),
-    }
-    sides = [(fixture, env), (peer, peer_env)]
+    sides = _peer_sides(fixture, env)
+    peer = sides[1][0]
     databases = [sqlite3.connect(Path(f["home"]) / "loopflow.db", timeout=5) for f, _ in sides]
     owners = [(fixture["local_project"], fixture["task"]), (peer["project"], peer["task"])]
     processes = ("00000000-0000-4000-8000-000000000001",)
@@ -1032,23 +1047,10 @@ def _exercise_associated_creations(fixture: dict, env: dict, server: ThreadingHT
         return _run(*sides[side], *args, timeout=45)
 
     def status(side: int) -> dict:
-        return json.loads(run(side, "planning", "status", "--json"))["destinations"][0]
+        return _planning_status(*sides[side])
 
-    def exchange(side: int, predicate, *, publish: bool = True) -> None:
-        watch = Watch(*sides[side])
-        try:
-            watch.scope(fixture["repo"])
-            _await(predicate, f"associated creation exchange failed on side {side}")
-            if publish:
-                _await(
-                    lambda: (
-                        status(side)["publication_state"] == "confirmed"
-                        and status(side)["pending_local"] is False
-                    ),
-                    f"side {side} did not publish its retained receipts",
-                )
-        finally:
-            watch.close()
+    def exchange(side: int, predicate, *, wait_for_publication: bool = True) -> None:
+        _exchange(*sides[side], predicate, wait_for_publication=wait_for_publication)
 
     def receipts(side: int) -> dict:
         return {
@@ -1057,14 +1059,21 @@ def _exercise_associated_creations(fixture: dict, env: dict, server: ThreadingHT
                 side
             ].execute(
                 "SELECT kind,origin_id,COALESCE(task_id,project_id),export_json,"
-                "export_attempted,export_link_attempted,export_acknowledged FROM planning_creations"
+                "export_attempted,export_link_attempted,export_acknowledged "
+                "FROM planning_creations WHERE origin_id IN (SELECT value FROM json_each(?))",
+                (json.dumps([origin for pair in owners for origin in pair]),),
             )
         }
 
     def assert_receipts(side: int, settled: bool) -> None:
         rows = receipts(side)
-        assert rows.keys() == captured.keys(), rows
-        for (kind, origin), body in captured.items():
+        expected = {
+            key: body
+            for key, body in captured.items()
+            if not (fixture["private"] and side == 0 and key[1] in owners[1])
+        }
+        assert rows.keys() == expected.keys(), rows
+        for (kind, origin), body in expected.items():
             index = 0 if kind == "project" else 1
             # Only the first origin has affirmative provider evidence. A mapping
             # cannot confirm the other origin's different attempted UUID.
@@ -1099,9 +1108,36 @@ def _exercise_associated_creations(fixture: dict, env: dict, server: ThreadingHT
             destination = run(
                 side, "planning", "connect", "--remote", "plans", "--shared", "origins"
             ).strip()
-            run(side, "planning", "select", destination, "--wave", fixture["wave"])
+            if not (fixture["private"] and side == 1):
+                waves = [fixture["wave"]]
+                if fixture["private"]:
+                    waves.append(fixture["independent_wave"])
+                run(side, "planning", "select", destination, "--wave", *waves)
+        if fixture["private"]:
+            run(0, "wave", "ensure", "independent")
+            independent = json.loads(
+                run(
+                    0,
+                    "task",
+                    "create",
+                    "--wave",
+                    "independent",
+                    "--title",
+                    "Independent before readback",
+                    "--json",
+                )
+            )["id"]
+            # Explicit local Project activation creates placement/transition rows.
+            # Preserve every prior row, then freeze the exchange boundary after setup.
+            prepared = _execution_rows(databases[0], processes)
+            for table, rows in before[0].items():
+                if table in ("work_placements", "project_transitions"):
+                    assert all(row in prepared[table] for row in rows), table
+                else:
+                    assert prepared[table] == rows, table
+            before[0] = prepared
         exchange(0, lambda: status(0)["publication_state"] == "confirmed")
-        for side in [1, 0]:
+        for side in [1] if fixture["private"] else [1, 0]:
             exchange(side, lambda side=side: bool(status(side)["conflicts"]))
             for index, provider in enumerate([fixture["project"], fixture["issue"]]):
                 run(
@@ -1116,6 +1152,97 @@ def _exercise_associated_creations(fixture: dict, env: dict, server: ThreadingHT
                 )
             exchange(side, lambda side=side: len(receipts(side)) == 4)
             assert_receipts(side, False)
+        if fixture["private"]:
+            earlier = status(0)["publication_revision"]
+            run(1, "task", "edit", peer["task"], "--title", "Private after association")
+            private_changes = (
+                databases[1]
+                .execute(
+                    "SELECT id,value_json,base_json,attempted,acknowledged FROM task_changes "
+                    "WHERE task_id=? ORDER BY id",
+                    (peer["task"],),
+                )
+                .fetchall()
+            )
+            assert private_changes
+            run(0, "task", "edit", independent, "--title", "Independent after readback")
+
+            def independent_title(side: int) -> str | None:
+                row = (
+                    databases[side]
+                    .execute("SELECT issue_title FROM tasks WHERE id=?", (independent,))
+                    .fetchone()
+                )
+                return row[0] if row else None
+
+            def private_preserved() -> None:
+                assert_receipts(0, True)
+                assert_receipts(1, True)
+                assert saved_title(1) == "Private after association"
+                assert (
+                    databases[1]
+                    .execute(
+                        "SELECT id,value_json,base_json,attempted,acknowledged FROM task_changes "
+                        "WHERE task_id=? ORDER BY id",
+                        (peer["task"],),
+                    )
+                    .fetchall()
+                    == private_changes
+                )
+                reading = status(1)
+                assert reading["conflicts"]
+                for identity in [peer["wave"], *owners[1]]:
+                    record = next(r for r in reading["records"] if r["object"]["id"] == identity)
+                    assert record["destination"] is None, record
+                assert independent_title(1) == "Independent after readback"
+                document = subprocess.check_output(
+                    [
+                        "git",
+                        "--git-dir",
+                        fixture["remote"],
+                        "show",
+                        "refs/loopflow/planning/shared/origins:planning.json",
+                    ],
+                    text=True,
+                )
+                for value in [peer["wave"], *owners[1], "Private after association"]:
+                    assert value not in document, value
+                for side_fixture, _ in sides:
+                    assert not (Path(side_fixture["home"]) / "provider-started").exists()
+
+            with server.lock:
+                server.state["offline"] = False
+            exchange(0, lambda: all(row[-1] == 1 for row in receipts(0).values()))
+            # The private projection still retains the selected origin's receipt.
+            # Its acknowledgement may propagate; the private UUID cannot borrow it.
+            exchange(
+                1,
+                lambda: (
+                    independent_title(1) == "Independent after readback"
+                    and all(
+                        receipts(1)[kind, owners[0][index]][-1] == 1
+                        for index, kind in enumerate(["project", "task"])
+                    )
+                ),
+            )
+            private_preserved()
+            for _ in range(2):
+                revision = _replay_planning_document(
+                    fixture, env, "refs/loopflow/planning/shared/origins", earlier
+                )
+                lock = Path(peer["home"]) / "locks/planning-peers" / f"{status(1)['id']}.lock"
+                with lock.open("a") as handle:
+                    fcntl.flock(handle, fcntl.LOCK_EX)
+                    exchange(
+                        1,
+                        lambda: status(1)["imported_revision"] == revision,
+                        wait_for_publication=False,
+                    )
+                    private_preserved()
+            with server.lock:
+                assert not server.state["creation_writes"], server.state["creation_writes"]
+                assert not server.state["unexpected"], server.state["unexpected"]
+            return
         exchange(0, lambda: status(0)["pending_local"] is False)
         earlier = status(0)["publication_revision"]
         # A subsequent public save must survive unchanged readback on either
@@ -1158,7 +1285,7 @@ def _exercise_associated_creations(fixture: dict, env: dict, server: ThreadingHT
                 exchange(
                     side,
                     lambda side=side: status(side)["imported_revision"] == revision,
-                    publish=False,
+                    wait_for_publication=False,
                 )
                 assert_receipts(side, True)
                 assert saved_title(side) == "Saved after both attempts"
@@ -1172,9 +1299,8 @@ def _exercise_associated_creations(fixture: dict, env: dict, server: ThreadingHT
 
 def _exercise_associations(fixture: dict, env: dict, server: ThreadingHTTPServer) -> None:
     repo = Path(fixture["repo"])
-    peer = {**fixture, **fixture["peer"]}
-    peer_env = {**env, "HOME": peer["home"], "LF_HOME": peer["home"]}
-    sides = [(fixture, env), (peer, peer_env)]
+    sides = _peer_sides(fixture, env)
+    peer = sides[1][0]
     databases = [sqlite3.connect(Path(f["home"]) / "loopflow.db", timeout=5) for f, _ in sides]
     processes = ("00000000-0000-4000-8000-000000000001",)
 
@@ -1182,21 +1308,10 @@ def _exercise_associations(fixture: dict, env: dict, server: ThreadingHTTPServer
         return _run(*sides[side], *args, timeout=45)
 
     def exchange(side: int, predicate) -> None:
-        watch = Watch(*sides[side])
-        try:
-            watch.scope(str(repo))
-            try:
-                _await(predicate, f"side {side} did not exchange")
-            except AssertionError as error:
-                reading = status(side)
-                raise AssertionError(
-                    {k: v for k, v in reading.items() if k != "records"}
-                ) from error
-        finally:
-            watch.close()
+        _exchange(*sides[side], predicate)
 
     def status(side: int) -> dict:
-        return json.loads(run(side, "planning", "status", "--json"))["destinations"][0]
+        return _planning_status(*sides[side])
 
     def title(side: int) -> str:
         return (
@@ -1459,7 +1574,8 @@ printf '%s\\n' '{"type":"result","subtype":"success","result":"Done"}'
     provider.chmod(0o755)
     for name in ["codex", "gh", "opencode"]:
         stub = bin_dir / name
-        stub.write_text("#!/bin/sh\nexit 1\n")
+        marker = ': > "$HOME/provider-started"\n' if name != "gh" else ""
+        stub.write_text(f"#!/bin/sh\n{marker}exit 1\n")
         stub.chmod(0o755)
     env = {
         k: v

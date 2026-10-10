@@ -629,23 +629,22 @@ acceptance remain at
 ## Tasks across machines (LOO-412, 2026-10-09)
 
 Jack Heart selected review-only custom-ref sync; no landing or real-plan export. Joining
-publishes nothing; imports stay unplaced. Malformed input aborts import;
-contradictions defer effects, not saves/acquisition. Preserve execution, uncertainty,
-losers and exact receipt origins. Correspondence grants no identity or authority;
+publishes nothing; imports stay unplaced. Malformed imports abort;
+contradictions defer only effects. Preserve execution, uncertainty, losers and receipt origins. Correspondence grants no identity or authority;
 private references hold groups. Causality precedes ranking; equal revisions can
 carry different ranks, so retain bodies.
 
-Earlier composition proofs:
-`9d3d2ba90:wave/infrastructure/MEMORY.md`, this heading. Due dates synchronize;
-completion requests, placements and execution remain local.
+Earlier composition: `9d3d2ba90`, this heading. Due dates synchronize;
+completion requests, placements and execution stay local.
 
 `e37099e50` proves same-origin Git/HTTPS recovery: unchanged readback preserves
 later saves; changed facts win. `3c462adb7` adds associated-origin readback and
-old-document replay, without an execution verdict. Seeded attempts prove neither
-original dispatch nor running controls. Attachment can race acquisition with one
-UUID: no exactly-once guarantee. Associated private origins, negative-evidence/order,
-native lifetimes and installation remain unproved. Exchange must not launch engines;
-explicit native resume may. The design owns acceptance.
+old-document replay. The private-origin public regression now passes in isolated
+Linux: exact selected acknowledgements propagate without settling divergent private
+UUIDs; private history stays unpublished while independent Task saves propagate.
+Seeded history survives without provider launch; attempts prove no original dispatch
+or exactly-once effects. Attachment can race acquisition. Negative-evidence/order, native lifetimes and installation remain unproved.
+Exchange cannot launch engines; explicit resume may.
 
 ## Driver recovery
 

@@ -15,6 +15,19 @@ use support::{register_task_without_pr, EnvGuard};
     ignore = "fixture TLS requires Linux SSL_CERT_FILE"
 )]
 fn public_associated_creation_readback_settles_only_the_exact_origin() {
+    associated_creation_fixture(false);
+}
+
+#[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "fixture TLS requires Linux SSL_CERT_FILE"
+)]
+fn public_associated_creation_readback_preserves_private_origins_and_independent_work() {
+    associated_creation_fixture(true);
+}
+
+fn associated_creation_fixture(private: bool) {
     let home = tempfile::tempdir().unwrap();
     let _env = EnvGuard::with_lf_home(&[], home.path());
     let repo = TestRepo::new();
@@ -25,6 +38,16 @@ fn public_associated_creation_readback_settles_only_the_exact_origin() {
     let wave = loopflow::work::wave::Wave::new(
         loopflow::id::WaveId::new(),
         "task-pr-tests".into(),
+        repo.path().to_str().unwrap().into(),
+    );
+    let private_wave = loopflow::work::wave::Wave::new(
+        loopflow::id::WaveId::new(),
+        "private-origins".into(),
+        repo.path().to_str().unwrap().into(),
+    );
+    let independent_wave = loopflow::work::wave::Wave::new(
+        loopflow::id::WaveId::new(),
+        "independent".into(),
         repo.path().to_str().unwrap().into(),
     );
     let tasks = [
@@ -50,7 +73,17 @@ fn public_associated_creation_readback_settles_only_the_exact_origin() {
                 &loopflow::store::StorageConfig::sqlite(directory.join("loopflow.db")),
             ))
             .unwrap();
-        runtime.block_on(store.create_wave(&wave)).unwrap();
+        let wave = if private && side == 1 {
+            &private_wave
+        } else {
+            &wave
+        };
+        runtime.block_on(store.create_wave(wave)).unwrap();
+        if private && side == 0 {
+            runtime
+                .block_on(store.create_wave(&independent_wave))
+                .unwrap();
+        }
         seed_linear_token(&runtime, &store, &key);
         let db = rusqlite::Connection::open(directory.join("loopflow.db")).unwrap();
         // Historical divergent Work: both mappings name the same provider object,
@@ -124,7 +157,8 @@ fn public_associated_creation_readback_settles_only_the_exact_origin() {
     let fixture = serde_json::json!({
         "lf":env!("CARGO_BIN_EXE_lf"),"repo":repo.path(),"home":home.path(),
         "issue":issue,"project":project,"task":tasks[0],"local_project":projects[0],"wave":wave.id(),
-        "remote":repo.bare_path(),"peer":{"home":peer_home,"task":tasks[1],"project":projects[1]},
+        "remote":repo.bare_path(),"private":private,"independent_wave":independent_wave.id(),
+        "peer":{"home":peer_home,"task":tasks[1],"project":projects[1],"wave":if private { private_wave.id() } else { wave.id() }},
     });
     run_reconnect_fixture(home.path(), &fixture, "associated-creations");
 }

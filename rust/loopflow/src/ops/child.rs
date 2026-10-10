@@ -1,6 +1,5 @@
 //! Shared recovery and execution helpers for Project and Task Work.
 
-use crate::config::load_config;
 use crate::durable::WorkRef;
 use crate::store::SharedStore;
 

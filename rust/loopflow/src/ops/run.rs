@@ -422,7 +422,7 @@ mod tests {
                 .conversation_context
                 .as_ref()
                 .unwrap()
-                .block(crate::engine::context_block::ContextMoment::Start)
+                .block(crate::context_block::ContextMoment::Start)
                 .unwrap()
                 .text;
             assert_eq!(block.matches("Ship a reliable release.").count(), 1);

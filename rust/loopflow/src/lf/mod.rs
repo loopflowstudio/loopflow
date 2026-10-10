@@ -347,7 +347,7 @@ pub enum Commands {
         #[arg(long)]
         delivery: std::path::PathBuf,
         #[arg(long, value_enum)]
-        moment: crate::engine::context_block::ContextMoment,
+        moment: crate::context_block::ContextMoment,
     },
     /// Native provider naming callback.
     #[command(name = "__session-title", hide = true)]

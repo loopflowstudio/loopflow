@@ -4,8 +4,8 @@ use anyhow::Result;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
-use crate::engine::context_block::ContextDelivery;
-use crate::engine::prompt::write_prompt_log;
+use crate::context_block::ContextDelivery;
+use crate::prompt::write_prompt_log;
 
 pub(crate) fn claude_args(context: &ContextDelivery) -> Result<Vec<String>> {
     let settings = json!({"hooks": context.hook_settings()?});
@@ -27,10 +27,10 @@ pub(crate) fn codex_config(context: Option<&ContextDelivery>, capture: bool) -> 
         None => json!({"SessionStart": []}),
     };
     if capture {
-        let executable = crate::engine::process::resolve_lf_binary();
+        let executable = crate::os_process::resolve_lf_binary();
         let command = format!(
             "{} __provider-session",
-            crate::engine::process::shell_escape(&executable.to_string_lossy())
+            crate::os_process::shell_escape(&executable.to_string_lossy())
         );
         hooks["SessionStart"]
             .as_array_mut()
@@ -103,7 +103,7 @@ pub(crate) fn opencode_config(
     instructions: &str,
     existing: Option<&str>,
 ) -> Result<String> {
-    let spec = json!({"executable":crate::engine::process::resolve_lf_binary(), "delivery":context, "instructions":instructions});
+    let spec = json!({"executable":crate::os_process::resolve_lf_binary(), "delivery":context, "instructions":instructions});
     let delivery = write_prompt_log(
         &context.repo,
         &serde_json::to_string(context)?,
@@ -165,7 +165,7 @@ pub(crate) fn native_args(
 #[cfg(test)]
 mod tests {
     use super::opencode_config;
-    use crate::engine::context_block::ContextDelivery;
+    use crate::context_block::ContextDelivery;
 
     #[test]
     fn opencode_context_preserves_settings_and_existing_plugins() {

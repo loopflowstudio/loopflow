@@ -5,7 +5,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use loopflow::engine::context_block::ContextDelivery;
+use loopflow::context_block::ContextDelivery;
 use loopflow::store::sqlite::SqliteStore;
 use loopflow_test_support::TestRepo;
 use serde_json::Value;

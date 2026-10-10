@@ -34,7 +34,8 @@ Retired history stores and intermediate branch schemas have no runtime readers.
 | Shared planning | Linear Initiatives, Projects and Issues |
 | Commits, PR heads, checks and merge | Git and GitHub |
 | Actual lf command process, causal parent and observed command outcome | `processes` |
-| Agent conversation, title, feedback, native identity and driver | `agent_sessions` |
+| The provider's OS process, its served Session, original parent and current attachment | AgentProcess rows in `processes` |
+| Agent conversation, title, feedback and native identity | `agent_sessions` |
 | Native starts, outcomes, retries and usage | LfSession history, correlated to native turn and driving Process |
 | A Flow's identity, state and step results | Its driver Process and child step processes in `processes` |
 | A Flow's name, launched graph and each step's node | FlowProcess: `flow_processes` and `flow_process_steps`, appended by the driver |
@@ -99,7 +100,7 @@ Reserve the conversation and captured-input reference, publish immutable input,
 and record publication before starting the provider. Filesystem publication and
 SQLite commit are separate boundaries with recoverable evidence. After a crash,
 reconcile the exact saved input and launch evidence. An unpublished reservation
-is not a successful launch; an absent receipt cannot prove that no engine started.
+is not a successful launch; an absent receipt cannot prove that no provider started.
 
 General Process observation cannot bypass installation preflight to open or migrate
 an incompatible store. Observation failures remain explicit; they never justify

@@ -62,7 +62,7 @@ PID/birth, served Session, original parent and current attachment. Session rows
 retain the current AgentProcess reference and native thread. Detached and replaced
 rows survive until positive terminal evidence; attachment absence never removes
 them from inventory. Shell helpers do not become fake lf invocations. After handoff, new
-commands from the continuing provider name the new driver; delayed commands from
+commands from the continuing provider name the newly attached lf invocation; delayed commands from
 a replaced provider retain their historical origin. A parent exiting never
 rewrites existing descendants. These causal links grant neither signaling nor
 Flow authority.
@@ -93,7 +93,7 @@ blockers.
 ## Publish before spawn
 
 1. Resolve one Machine for the store and payload root; validate typed ancestry.
-2. Reserve the conversation, history/capture reference and exact driver together.
+2. Reserve the conversation, history/capture reference and exact attachment together.
 3. Publish immutable launch input and record publication before spawning.
 4. Start or connect the native provider and retain exact AgentProcess/thread/client
    evidence, distinct from the attached lf invocation.
@@ -171,7 +171,7 @@ closing or ending the surviving provider; orphan settlement remains independent.
 Composed stand-ins cover launch and pre-launch takeover, not configured Codex or
 a complete native-client relay exchange.
 
-A passive viewer subscribes without claiming the Session. A former driver can
+A passive viewer subscribes without claiming the Session. A formerly attached lf invocation can
 keep receiving and retaining provider history after transfer but cannot start or
 steer a turn or change current attachment, connection, process evidence or stream
 attention. Retaining history grants no native-write or Flow authority.
@@ -259,7 +259,7 @@ tuples vary in size, and listing checks exact client receipts. The query therefo
 has no constant-byte or constant-time guarantee. Measurement status belongs in
 the [cutover status](../architecture-reference.md#cutover-status).
 
-Typed Task/Wave links survive landing and provider/driver replacement. Readers
+Typed Task/Wave links survive landing and provider replacement and takeover. Readers
 never use live PR eligibility, path names or mutable manifests to recover identity.
 Default interactive visibility does not hide headless history from explicit queries
 or make it impossible to resume. Desktop and CLI consume the same fields.

@@ -71,7 +71,7 @@ pub(super) fn close_session_agent_process(store: &SqliteStore, session: &str) ->
     Ok(false)
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests {
     use std::os::unix::process::CommandExt;
 

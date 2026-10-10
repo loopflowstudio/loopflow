@@ -226,7 +226,6 @@ Jack Heart requested one inventory; #1512/#1516/#1499 integrated. Unknown stays 
 prove takeover rejection (A → B → A), not configured relay.
 Client exit never settles its provider, nor provider death an unknown attachment.
 
-Entry fixtures exposed swallowed errors and zombie-as-live probes.
 Reaper and Codex close share group judgment: leader death is insufficient;
 failed descendant inventory refuses before signaling.
 
@@ -236,7 +235,8 @@ provider generation; released counters stay unread, pre-upgrade callers read sta
 Foreground cleanup, takeover death orders, public Task agreement, two-second
 removal, installed settlement stay open; whether they join #1519 is undecided.
 FIFO is Codex-only; reaping noninteractive Codex/OpenCode. Focused filters hid
-30 whole-library failures. PR CI ran only `scratch-clear`: no build/test proof.
+30 whole-library failures. PR CI defers every job while `scratch/` holds files:
+no hosted proof before landing. It hid an architecture-drift failure.
 
 ## Execution ownership names (LOO-441, 2026-10-09)
 

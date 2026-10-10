@@ -85,7 +85,7 @@ shell / automation / Loopflow.app
                |
         store + repository
                |
-       Flow driver Process --> step Process --> LfSession <--> native engine
+       Flow driver Process --> step Process --> LfSession <--> AgentProcess
 ```
 
 Wave operations are finite attributed conversations. Each Task Flow
@@ -117,7 +117,7 @@ never killed merely because it resembles a Loopflow child.
 
 Cross-process control requires exact PID/start identity and the applicable
 conversation and AgentProcess record. Revalidate native scope or exclusive process
-group before signaling. A driver may disappear while its engine survives;
+group before signaling. An attached lf invocation may disappear while its AgentProcess survives;
 recorded endpoints alone do not prove liveness.
 
 ## Independent bridges

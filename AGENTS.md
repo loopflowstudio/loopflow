@@ -256,7 +256,7 @@ LfProcess is one actual lf process, including direct and agent-issued nested com
 Its `lfid` is durable Loopflow identity; `pid` is the optional Unix PID and may
 collide across history. References use `process_lfid` and `parent_process_lfid`.
 LfSession is one Loopflow-owned durable conversation, interactive or headless; identity,
-name, feedback and native history survive driver replacement. Product text says
+name, feedback and native history survive takeover. Product text says
 Session for interactive and Run for headless work. AgentSession is the provider-owned
 conversation, represented by an opaque AgentSessionId used for resume, native
 turn keys and account attribution. An LfSession selects one AgentSession at a

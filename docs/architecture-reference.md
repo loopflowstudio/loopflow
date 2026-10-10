@@ -44,8 +44,8 @@ accounts/routes and resumable conversations. Configured acceptance is separate.
 
 Current CLI examples use supported spellings. `lf session connect` has `open` as
 an alias; `--replace` stops owned clients and connects through the same live
-Codex engine, preserving its active turn and other conversations. There is no
-separate Session engine-restart operation. A Flow whose driver died leaves its
+Codex AgentProcess, preserving its active turn and other conversations. There is no
+separate AgentProcess-restart operation. A Flow whose driver died leaves its
 Processes as history; nothing resumes it. `session list` supports
 `--interactive false`, `--history`, `--task` and `--search`; `--all` means all
 repositories. `--page --json` uses stable ID pages; Desktop retains earlier
@@ -61,10 +61,10 @@ external consumers before changing those references.
 | Contract | Current evidence and next dependency |
 | --- | --- |
 | One Process per actual lf process | Ordinary commands record process ancestry and outcome. Help, rejected arguments and installation entry use an existing compatible ledger without initialization; unavailable storage remains an explicit gap. Public discovery and Rust/Swift wire fixtures cover the current shape; installed startup acceptance remains open. |
-| Stable LfSession with separate driver and engine | Admission/publication and Session readers use LfSession directly; ordinary automatic retry retains both outcomes with zero Run rows in the native fixture. Public Codex connect/client replacement preserves the active turn and sibling in the synthetic-Responses proof. Complete configured account/native Machine, stale-client exclusion and shared-engine preservation across every provider path. |
+| Stable LfSession with separate attachment and AgentProcess | Admission/publication and Session readers use LfSession directly; ordinary automatic retry retains both outcomes with zero Run rows in the native fixture. Public Codex connect/client replacement preserves the active turn and sibling in the synthetic-Responses proof. Complete configured account/native Machine, stale-client exclusion and shared-AgentProcess preservation across every provider path. |
 | Flow reads each step's result from its Process | A step's result is its process exit; a deciding or routing step answers through the Session turn its Process captured. Structured native results close the earlier Codex decision-retry transport failure in the real-Codex/synthetic-Responses fixture; configured-provider acceptance remains unproven. OpenCode batch and managed launches share native user-message selection/history and permission ordering; its public retry fixture preserves earlier-caller rejection. The separate Task provider launcher and retired Run owners are deleted; configured recovery across providers remains open. |
 | One started Flow is one lf process and its step processes | Jack Heart's 2026-10-05 decision: a Flow adds nothing on top of running `lf flow ...` in a Task worktree, and its record is the lf binary's ordinary logging. Jack's later 2026-10-05 statements put that logging in the Flow's driver: an append-only FlowProcess row with the Flow's name and compiled graph, and one row per step it starts. The driver holds one cursor and its return counters in memory; steps are plain commands that know nothing of their Flow. Configured acceptance remains open. |
-| Complete recovery | Six standalone native fixtures use real Codex with synthetic Responses/private Machines, including driver/engine loss and automatic retry. Managed dispatch has synthetic successor-history proof; configured managed provider/account continuity remains unproven. |
+| Complete recovery | Six standalone native fixtures use real Codex with synthetic Responses/private Machines, including attachment/AgentProcess loss and automatic retry. Managed dispatch has synthetic successor-history proof; configured managed provider/account continuity remains unproven. |
 | Current-state cutover | Three direct migration groups retain current database state. Release conversion must also recover resumable native identities from a frozen filesystem snapshot. Finished history and intermediate branch schemas are discarded. |
 | Indexed discovery and usage | Runs/usage/telemetry/activity and landing conclusions select LfSession input history before payload decoding, preserving per-input attribution and windows. Native receipts without a captured input/start remain discoverable with unknown ownership and partial usage coverage. Debug measurements at `6d76f74926` used 20,000 Sessions, 5,000 Flows and 100,000 Processes: bounded warm CLI reads were 291–313 ms against a 300 ms empty-store baseline. The broad Process search miss was 362 ms, with a separate 64 ms SQL control. These are uncontrolled-cache local measurements, not release or Desktop latency. History uses captured event sequences and exact native references. |
 | Desktop and wire agreement | Off-roadmap ancestry and pane/draft retention pass unit and mounted native-terminal fixtures. Graph and membership wire use captured numeric IDs in Rust/Swift. History and usage use the coordinated Session wire types. Configured Desktop continuity remains unproven. |
@@ -554,7 +554,7 @@ effects. The unconditional-update race remains a protocol limit.
 | **Machine / Placement / Promotion** — stable machine identity, Work placement, and artifact selection | `MachineId` is identity; SSH route is mutable. Placement is planning state and never process ownership. Promotion owns immutable artifact selection, isolated schema proof, app replacement, and rollback only. Install selects the latest published release independently of caller Git state; the laptop schedule invokes that same command. Checkout updates belong to sync. | [`Machine`](../rust/loopflow/src/durable.rs), [`Placement`](../rust/loopflow/src/durable.rs), [`SwitchReceipt`](../rust/loopflow/src/installation.rs), [`published installation`](../rust/loopflow/src/lf/commands/install/published.rs) | `machines`, `work_placements`; Machine-local SQLite; installation selection and switch receipts; laptop refresh LaunchAgent | The promotion command owns its OS-locked switch transaction | `lf machine`, `lf self`, `lf --machine`, `lf install`, `lf schedule` | `process:ssh`, `process:launchctl`, `process:systemctl`, `process:/usr/bin/open`, `process:/usr/bin/osascript`, `process:brew`, `process:/bin/sh`, `process:tmux` |
 | **Session history projections** — captured events and exact provider evidence | LfSession owns provider outcomes and Process owns command outcomes; original payload and exact process receipts confer no Flow authority. | `SessionCaptureSpec`, `SessionCaptureManifest`, `SessionHistory`, `ProviderHistory`, `SessionUsage` | Projects LfSession-owned input/history; Machine-local `runs/<prefix>/<run-id>/` immutable payload and process receipts | shared conversation admission and history | `lf mon show`, `lf replay`, `lf usage`, `lf activity`; Work/status history | `process:lf`, provider harnesses |
 | **LfProcess** — one actual lf process | The journal transaction records command completion and fixes each child's causal parent at admission. Agent provenance grants no control authority. | [`ProcessLfid`](../rust/loopflow/src/id.rs), [`AgentCaller`](../rust/loopflow/src/process.rs) | `processes` (`kind='lf'`) | Outermost foreground command; installation/bootstrap coverage remains a cutover obligation | `lf monitor`, `lf mon list`; ordinary parsed CLI commands | — |
-| **AgentProcess** — the provider's OS process | Its original parent and served Session survive attachment transfer. PID/birth and terminal evidence belong to the record; a fresh token fences each attachment. | `AgentProcess`, `SessionAttachment`, common `LfProcess` projection | `processes` (`kind='agent'`); Session retains its current record reference | Provider launch and observed settlement; typed admission remains open | `lf top`, `lf monitor`, Task execution inventory | Provider OS process |
+| **AgentProcess** — the provider's OS process | Its original parent and served Session survive attachment transfer. PID/birth and terminal evidence belong to the record; a fresh token fences each attachment. | `AgentProcess`, `SessionAttachment`, common `LfProcess` projection | LfProcess's table, rows of `kind='agent'`; Session retains its current record reference | Provider launch and observed settlement; typed admission remains open | `lf top`, Task execution inventory; LfProcess's process readers | Provider OS process |
 | **Local process observation** — recorded processes joined to OS facts | Lf receipts and AgentProcess PID/birth establish observations, not new ownership. Detached records and unknown identities remain visible; failed OS sampling never proves absence. Duplicate or unknown identities grant no signal authority. | [`ActivitySnapshot`](../rust/loopflow/src/lf/commands/top.rs), [`ProcessPruneReport`](../rust/loopflow/src/lf/commands/top.rs) | Process rows and Machine-local lf receipts; no provider registry | Foreground observation and scheduled record settlement | `lf ps`, `lf top`, `lf mon prune`, `lf doctor` | `process:/bin/ps`, `process:ps`, `process:sysctl`, `process:lsof`, `process:kill`, `process:which` |
 | **Provider account / route** — credential authority and ordered provider selection on one Machine | Provider token/account rows and Access Profiles own routing; credentials stay in provider homes, encrypted storage or Doppler. Machine connection installs a separate resident login. | [`Provider`](../rust/loopflow/src/provider_auth/mod.rs), [`AccessProfile`](../rust/loopflow/src/profile.rs), [`ProviderRoute`](../rust/loopflow/src/profile.rs), [`ProviderAccount`](../rust/loopflow/src/store/mod.rs) | `access_profiles`, `auth_browser_bindings`, `provider_accounts`, `provider_account_limits`, `provider_account_switches`, `provider_routes`, `provider_session_accounts`, `provider_tokens` | The foreground auth command owns provider login process groups and passive browser handoff; durable processes use credentials installed on their Machine | `lf account` | `provider:claude`, `provider:codex`, `provider:doppler`, `provider:opencodezen`, `process:claude`, `process:codex`, `process:doppler`, `process:opencode`, `process:security`, `process:secret-tool` |
 | **Context budgets** — limits and usage for assembled launch input | Existing personal/repo config and Wave frontmatter resolve each limit; the shared prompt assembler measures and enforces it. | [`ContextBudgets`](../rust/loopflow/src/engine/context_budget.rs), [`ContextBudgetReport`](../rust/loopflow/src/engine/context_budget.rs) | Authored config and source files; complete excerpt sources under `.lf/tmp/context/`; no measurement store | Foreground preview and launch assembly | `lf context` | — |
@@ -684,11 +684,11 @@ Session/Process caller provenance supplies ancestry and mutation authority.
 
 1. Admit the actual lf Process; resolve typed work without granting Flow authority.
 2. Reserve the LfSession and its initial history/capture reference before
-   provider launch. Claim its driver and record exact publication state.
+   provider launch. Claim its attachment and record exact publication state.
 3. Publish immutable input atomically. An unpublished reservation is recoverable;
    uncertain publication/spawn evidence never permits a blind duplicate launch.
-4. Start the native engine, or connect to the one a live driver holds. Record its
-   identity and endpoint, distinct from the client's process and the conversation's driver.
+4. Start the AgentProcess, or connect to the one a live attachment holds. Record its
+   identity and endpoint, distinct from the client's process and the attached lf invocation.
 5. Append correlated provider outcomes and usage; retain missingness. A Flow's
    driver reads a deciding or routing step's answer from the turn that step's
    Process captured.
@@ -792,7 +792,7 @@ lf session bind SESSION --task INF-123
 ```
 
 Every conversation has one LfSession regardless of launch surface. Connect
-uses the existing engine where possible; client replacement retains its active
+uses the existing AgentProcess where possible; client replacement retains its active
 turn. Name, feedback, native identity and history survive reconnect and recovery.
 A suggested title cannot overwrite a human-assigned title. CLI and Desktop use
 the same action and availability reason.
@@ -804,7 +804,7 @@ Pane close, provider exit and readiness do not complete the review.
 
 The desktop terminal pool keys on stable LfSession identity. Rename, bind,
 reconnect and replacement retain the pane and draft when reusing that surface.
-Recovery after engine exit does not claim preservation of text never submitted
+Recovery after AgentProcess exit does not claim preservation of text never submitted
 to Loopflow without separate UI evidence.
 
 ## Flow execution

@@ -5,8 +5,8 @@ the implementation choices below are a draft based on the source inventory at
 `3e1e6245c`. Jack authorized parallel work with LOO-441, followed by integration
 of its LfProcess/LfSession rename before publication. His steer `0aa2c34c`
 then requested publication without merge, superseding the earlier no-partial-
-publication note: #1519 is open for review at `8b18110cf` on main `906576f39`
-with the remaining cuts below, not as complete or landable. No installed-store
+publication note: #1519 is open for review on main `906576f39`, tracking this
+branch, with the remaining cuts below, not as complete or landable. No installed-store
 migration.
 
 ## Intended outcome
@@ -334,14 +334,20 @@ checks do not establish configured-provider or foreground cleanup.
    LfProcess projection still carries both kinds during this draft cutover.
    The generation wires and their docs moved with item 2.
    Provider-"engine" and driver-noun prose is replaced in the architecture
-   reference, overview (and its rendered HTML), data, machines and conducting
-   docs; the lifeline paragraph now states that only Codex takeover holds a named
-   lifeline. Retained on purpose: the `engine.sock` socket filename, fixture
-   locals named `engine`.
+   reference, overview (and its rendered HTML), data, machines, execution,
+   planning and conducting docs and AGENTS.md; the October 9 realignment found
+   and replaced seventeen passages the earlier pass had left. The data owner
+   table names AgentProcess rows as the attachment's owner. The lifeline
+   paragraph states that only Codex takeover holds a named lifeline. Retained on
+   purpose: the Flow driver (a different thing), the `engine.sock` socket
+   filename, fixture locals named `engine`.
 6. Gate owns affected Rust/Swift/DTO and materialized-migration verification plus
-   Linux lifeline checks. Hosted CI on #1519 ran only `scratch-clear`; every
-   build, lint, test, migration and Swift job reports skipped at `8b18110cf`,
-   so no hosted result exists for this head. Demo still requires exact SIGKILL removal within two
+   Linux lifeline checks. Hosted CI on a pull request defers every build, lint,
+   test, migration, Swift and architecture job while `scratch/` holds files
+   (`scratch-clear` reports `candidate=false`), so #1519 has no hosted result and
+   cannot have one before scratch is cleared for landing; the Task's "lifeline
+   tests pass on Linux CI" is unobserved until then. That deferral hid a failing
+   architecture drift check, repaired locally (below). Demo still requires exact SIGKILL removal within two
    seconds and no invisible Task blocker. Only the installed scheduled path may
    settle Jack Heart's three pre-#1512 orphaned Codex processes. Branch fixtures
    never signal them or migrate that store.
@@ -425,6 +431,15 @@ sync checks are retained at `e87e9d643`, this plan.
 
 Compress check (2026-10-09, after the generation cut): the store/LfSession/attachment triple is named `AttachmentOwner`; the reaper shares one attached-invocation death judgment. No behavior change. `cargo clippy -p loopflow --all-targets -- -D warnings` passes; `cargo test -p loopflow --lib` for `harness::agent_process`, `session_record::runtime` and the Claude/OpenCode history modules: 15 passed. Wider suites stay with gate.
 
-Realign check (2026-10-09): the Task's `rg -i 'provider_pid|driver_generation|SessionDriver|engine_orphans' rust/loopflow/src` returns nothing outside migrations; `render_architecture_html.py --check` and `cargo fmt --all --check` pass after the prose repair. No suite rerun; gate owns it.
+**Architecture drift (2026-10-09):** `scripts/check_architecture.py` passes on
+main `906576f39` and failed on this branch with three findings no earlier pass
+ran it to see. The AgentProcess map row repeated `processes` and `lf monitor`,
+which the LfProcess row already owns; it now names its rows within that table
+and `lf top`. `session_record/runtime.rs` gated its tests with
+`#[cfg(all(test, unix))]`, which the check does not recognise as test code, so
+its throwaway `/bin/sleep` and `fixture` commands read as production subprocess
+edges; the module uses `#[cfg(test)]` like `harness/agent_process.rs`.
+
+Realign check (2026-10-09): `uv run python scripts/check_architecture.py` reports zero drift after repair (three findings before); `render_architecture_html.py --check` and `cargo fmt --all --check` pass; the Task's `rg` returns nothing outside applied migrations and this Task's draft. No suite rerun; gate owns it.
 
 Check (generation cut, 2026-10-09): `cargo test -p loopflow --no-fail-fast --lib` plus the ten affected integration targets, `LF_*` cleared and stdin closed: library 1766 passed, the same 4 failed (three pass alone; one is main's planning-migration fixture), integration targets pass; `swift build --build-tests` and `DTOFixtureTests` pass; `cargo fmt --all --check` and `cargo clippy -p loopflow --all-targets -- -D warnings` pass. Remaining integration targets, draft materialization, Linux lifeline and live-provider smokes stay gate/CI-owned. Earlier results: `4d720d314`, this plan.

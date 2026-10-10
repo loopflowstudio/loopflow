@@ -127,9 +127,10 @@ OpenCode abort uses bounded fenced HTTP without retries; drop never signals its
 child. Failed startup retains the child for fenced cleanup and reports refusal.
 Runtime settlement alone does not establish takeover safety. Public live connection
 currently dispatches only to Codex; Claude and OpenCode still take native resume.
-OpenCode's saved server URL is not sufficient for takeover: its request map is
-launcher-local, and origin is saved only when native output is observed. Reconnect
-must preserve pending request correlation as well as the server and native Session.
+OpenCode saves request IDs and frozen origins in Session history before HTTP
+submission. Native receipts recover pending correlation after launcher loss;
+submission evidence alone proves neither admission nor completion. Reconnect still
+needs server reuse and pending-permission acquisition through the public path.
 
 Owned native launches use the same pre-exec recording channel under the attachment
 lock, but no headless group/watchdog setup. Failed recording prevents provider code

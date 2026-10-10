@@ -7,7 +7,7 @@ use crate::id::{AgentSessionId, WaveId};
 
 /// Attribution captured before a native request, never from its delayed reply.
 /// This is observation context, not a capability to write to the provider.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct SessionTurnOrigin {
     pub session_id: String,
     pub lf_process_id: crate::id::LfProcessId,

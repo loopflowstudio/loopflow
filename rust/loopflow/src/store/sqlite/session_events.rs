@@ -186,6 +186,54 @@ impl SqliteStore {
         .ok_or_else(|| StoreError::InvalidAuthority("Session attachment changed".into()))
     }
 
+    /// Save an intended native request before sending it. This is not admission.
+    pub(crate) fn record_session_request(
+        &self,
+        thread: &AgentSessionId,
+        request: &str,
+        origin: &crate::session::SessionTurnOrigin,
+    ) -> StoreResult<()> {
+        self.record_session_event(
+            &origin.session_id,
+            thread,
+            request,
+            SessionEventKind::Observed,
+            &serde_json::json!({"request_origin": origin}),
+        )?;
+        Ok(())
+    }
+
+    /// Recover original attribution, never the replacement attachment's input.
+    pub(crate) fn session_request(
+        &self,
+        session: &str,
+        thread: &AgentSessionId,
+        request: &str,
+    ) -> StoreResult<Option<(crate::session::SessionTurnOrigin, bool)>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let saved: Option<(String, bool)> = conn
+            .query_row(
+                "SELECT e.payload, EXISTS(SELECT 1 FROM session_events done
+                WHERE done.session_id=e.session_id AND done.provider_thread=e.provider_thread
+                  AND done.provider_turn=e.provider_turn AND done.kind='completed')
+             FROM session_events e WHERE e.session_id=?1 AND e.provider_thread=?2
+               AND e.provider_turn=?3 AND e.kind='observed' AND e.receipt_key=''
+               AND json_type(e.payload,'$.request_origin')='object'",
+                params![session, thread, request],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        saved
+            .map(|(payload, completed)| {
+                let payload: Value = serde_json::from_str(&payload)?;
+                Ok((
+                    serde_json::from_value(payload["request_origin"].clone())?,
+                    completed,
+                ))
+            })
+            .transpose()
+    }
+
     /// Retain correlated origin after takeover without reading current assignment.
     pub(crate) fn record_session_turn_origin(
         &self,

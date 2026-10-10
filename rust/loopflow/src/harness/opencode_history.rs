@@ -7,7 +7,7 @@ use anyhow::Result;
 use serde_json::{json, Value};
 
 use crate::chat::types::{ConversationEvent, Lifecycle};
-use crate::session::{SessionEventKind, SessionTurnOrigin};
+use crate::session::SessionEventKind;
 use crate::store::sqlite::SqliteStore;
 
 #[derive(Debug, Default)]
@@ -19,7 +19,6 @@ pub(super) struct History {
 
 #[derive(Debug, Default)]
 struct Request {
-    origin: Option<SessionTurnOrigin>,
     started: bool,
     completed: bool,
 }
@@ -50,20 +49,11 @@ impl History {
         }
     }
 
-    pub(super) fn request(&mut self) -> Result<String> {
+    pub(super) fn request(&mut self, thread: &AgentSessionId) -> Result<String> {
         let id = format!("msg_{}", uuid::Uuid::new_v4().simple());
-        let origin = self
-            .owner
-            .as_ref()
-            .map(|(store, session, attachment)| store.session_turn_origin(session, attachment))
-            .transpose()?;
-        self.requests.insert(
-            id.clone(),
-            Request {
-                origin,
-                ..Request::default()
-            },
-        );
+        let (store, session, attachment) = self.owner()?;
+        let origin = store.session_turn_origin(&session, &attachment)?;
+        store.record_session_request(thread, &id, &origin)?;
         Ok(id)
     }
 
@@ -75,11 +65,26 @@ impl History {
         let mut events = Vec::new();
         let receipts = native_receipts(thread, messages);
         for (request, receipt) in receipts {
-            let submitted = self.requests.get_mut(&request);
-            if let Some(submitted) = submitted.as_ref().filter(|submitted| !submitted.started) {
-                if let (Some((store, _, _)), Some(origin)) = (&self.owner, &submitted.origin) {
-                    store.record_session_turn_origin(thread, &request, origin)?;
+            if let Some((store, session, attachment)) = &self.owner {
+                if let Some((origin, completed)) =
+                    store.session_request(session, thread, &request)?
+                {
+                    // Attribution is evidence, not authority. Only requests of
+                    // this same surviving provider belong to the live reader.
+                    if origin.agent_process_id == attachment.agent_process_id {
+                        store.record_session_turn_origin(thread, &request, &origin)?;
+                        self.requests.entry(request.clone()).or_insert(Request {
+                            started: completed,
+                            completed,
+                        });
+                    }
                 }
+            }
+            let submitted = self.requests.get_mut(&request);
+            if submitted
+                .as_ref()
+                .is_some_and(|submitted| !submitted.started)
+            {
                 events.push(ConversationEvent::TurnStarted {
                     turn_id: request.clone(),
                 });
@@ -293,7 +298,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn native_steps_recover_once_without_reassigning_usage_or_inventing_completion() {
+    fn pending_request_survives_launcher_loss_without_replay_or_reassigned_usage() {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("store.db");
         let store = SqliteStore::open_ephemeral(&path).unwrap();
@@ -310,7 +315,7 @@ mod tests {
             .claim_session_attachment("session", None, &process, false)
             .unwrap();
         let mut history = History::new(Some((store.clone(), "session".into(), attachment.clone())));
-        let request = history.request().unwrap();
+        let request = history.request(&"thread".into()).unwrap();
         let message = |id: &str, input: u64, finish: &str| {
             json!({
             "info":{"id":id,"sessionID":"thread","parentID":request,"role":"assistant",
@@ -330,10 +335,34 @@ mod tests {
             [second.as_str()],
         )
         .unwrap();
-        store
-            .claim_session_attachment("session", Some(&attachment), &second, true)
+        let current = store
+            .claim_session_attachment("session", Some(&attachment), &second, false)
             .unwrap();
+        assert_eq!(current.agent_process_id, attachment.agent_process_id);
+        assert_ne!(current.token, attachment.token);
+        assert!(history.request(&"thread".into()).is_err());
         assert!(!history.admitted(&request));
+        assert!(
+            !store
+                .session_history("session", 0, 0)
+                .unwrap()
+                .iter()
+                .any(|row| {
+                    matches!(
+                        row.kind,
+                        SessionEventKind::Started | SessionEventKind::Completed
+                    )
+                }),
+            "pre-submission evidence cannot invent native admission"
+        );
+        // Lose every launcher-local object before the first native receipt.
+        drop(history);
+        let reopened = SqliteStore::open_ephemeral(&path).unwrap();
+        let mut history = History::new(Some((reopened, "session".into(), current)));
+        assert!(history
+            .observe(&"other-thread".into(), &[])
+            .unwrap()
+            .is_empty());
         for (index, input) in [20, 40, 30].into_iter().enumerate() {
             let events = history
                 .observe(
@@ -370,14 +399,13 @@ mod tests {
             )));
             assert!(history.admitted(&request));
         }
-        // A reconnect can recover history without claiming these requests or
-        // emitting a new local turn boundary.
+        // A reconnect retains settled requests without emitting new turn boundaries.
         let mut reconnected = History::new(history.owner.clone());
         assert!(reconnected
             .observe(&"thread".into(), &messages)
             .unwrap()
             .is_empty());
-        assert!(!reconnected.admitted(&request));
+        assert!(reconnected.admitted(&request));
         let recovered = store.input_history(input.as_str()).unwrap();
         assert_eq!(recovered.usage.input_tokens, Some(50));
         assert_eq!(recovered.usage.output_tokens, Some(10));

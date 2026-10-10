@@ -392,8 +392,8 @@ fn opencode_native_history_preserves_output_tools_and_usage_missingness() {
             .claim_session_attachment(&session, None, &process, false)
             .unwrap();
         let mut history = History::new(Some((store.clone(), session.clone(), attachment)));
-        let request = history.request().unwrap();
         let agent_session = AgentSessionId::from(session.as_str());
+        let request = history.request(&agent_session).unwrap();
         let mut display =
             opencode_mapping::ReaderState::new(agent_session.clone(), None, "opencode");
         let mut message = json!({
@@ -459,8 +459,23 @@ fn opencode_native_history_preserves_output_tools_and_usage_missingness() {
 
 #[test]
 fn opencode_native_error_completes_only_its_request() {
-    let mut history = History::default();
-    let request = history.request().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let path = home.path().join("store.db");
+    let store = crate::store::sqlite::SqliteStore::open_ephemeral(&path).unwrap();
+    let process = crate::id::LfProcessId::new();
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute(
+            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+            [process.as_str()],
+        )
+        .unwrap();
+    store.test_session("session", &crate::session_record::new_artifact_key());
+    let attachment = store
+        .claim_session_attachment("session", None, &process, false)
+        .unwrap();
+    let mut history = History::new(Some((store, "session".into(), attachment)));
+    let request = history.request(&"session".into()).unwrap();
     let message = json!({"info":{"id":"assistant","parentID":request,"role":"assistant","sessionID":"session",
         "time":{"created":1,"completed":2},"error":{"name":"APIError","data":{"message":"provider rejected request"}}},"parts":[]});
     let events = history

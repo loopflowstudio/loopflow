@@ -234,13 +234,12 @@ requires more than leader death; failed descendant inventory refuses signaling.
 Draft ordering and scratch-blocked CI evidence remain at
 `be4a2b2af:wave/infrastructure/MEMORY.md`, this heading.
 
-LOO-447: stop shares fenced group close; abort keeps frozen authority; drop never
-signals. All providers use named custody; public Codex acquires it before claim.
-Standby grants no write authority; group death releases custody, with watchdog
-outside the group. Claude pipes/OpenCode correlation remain launcher-local.
-Endpoints prove neither pending-turn recovery nor attachment before native identity.
-Both public handoff death orders remain unproved.
-See: `scratch/stop-and-take-over-claude.md`.
+LOO-447: fenced stop/abort; drop never signals. Named custody precedes public
+Codex claims; standby cannot write. Group death releases custody; watchdog stays
+outside. OpenCode saves request origins before HTTP; intent proves no admission.
+Native receipts recover correlation, not public takeover. Claude pipes remain
+launcher-local; OpenCode connection/permission recovery and both public death
+orders remain unproved. Plan: `scratch/stop-and-take-over-claude.md`.
 
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)
 

@@ -14,7 +14,7 @@ use loopflow::lf::commands::work_watch::{WorkContent, WorkFrame};
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::PmSnapshotRow;
 #[cfg(target_os = "macos")]
-use loopflow::work::task::{TaskPr, TaskPrId};
+use loopflow::work::task::{TaskEventKind, TaskPr, TaskPrId};
 use loopflow::work::wave::Wave;
 
 const PROJECT: &str = "95159066-9098-4d0b-8903-01459dc7ec14";
@@ -151,6 +151,15 @@ impl Machine {
                 task.worktree.as_ref().unwrap(),
                 &task.workspace_slug,
                 &pr,
+            )
+            .unwrap();
+        self.store
+            .append_task_event(
+                &task.id,
+                &TaskEventKind::CheckoutReady {
+                    branch: pr.branch,
+                    base_commit: pr.base_commit,
+                },
             )
             .unwrap();
         worktree
@@ -885,24 +894,14 @@ fn offline_cli_completion_and_reopening_reach_desktop_without_refresh() {
             }
         }
     };
-    for (node, state) in [
-        ("end", loopflow::durable::TaskState::Done),
-        ("start", loopflow::durable::TaskState::Ready),
+    for (operation, state) in [
+        ("complete", loopflow::durable::TaskState::Done),
+        ("reopen", loopflow::durable::TaskState::NotReady),
     ] {
-        let output = lf(
-            home.path(),
-            &[
-                "task",
-                "move",
-                "FIX-1",
-                node,
-                "--reason",
-                "Offline decision",
-            ],
-        )
-        .current_dir(home.wave.repo())
-        .output()
-        .unwrap();
+        let output = lf(home.path(), &["task", operation, "FIX-1"])
+            .current_dir(home.wave.repo())
+            .output()
+            .unwrap();
         assert!(
             output.status.success(),
             "{}",
@@ -913,7 +912,7 @@ fn offline_cli_completion_and_reopening_reach_desktop_without_refresh() {
     drop(watch);
     let mut reopened = home.watch();
     reopened.request(scope);
-    await_state(&reopened, loopflow::durable::TaskState::Ready);
+    await_state(&reopened, loopflow::durable::TaskState::NotReady);
     let task = home.store.task_by_issue("FIX-1").unwrap().unwrap();
     assert!(task.worktree.is_none());
     assert!(home.store.task_prs(&task.id).unwrap().is_empty());

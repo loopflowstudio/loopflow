@@ -17,7 +17,7 @@ fn issue(project: serde_json::Value) -> serde_json::Value {
     json!({"data":{"issue":{
         "id":"issue-1", "identifier":"FIX-1", "url":null, "branchName":"dev/fix-1-existing",
         "title":"Inspect a planning-only Task", "description":"Keep this work visible",
-        "completedAt": null, "prioritySortOrder":0.0, "sortOrder":0.0, "updatedAt":"2026-09-29T12:00:00.123Z", "assignee":null,
+        "completedAt": null, "dueDate": null, "prioritySortOrder":0.0, "sortOrder":0.0, "updatedAt":"2026-09-29T12:00:00.123Z", "assignee":null,
         "state":{"type":"unstarted"}, "team":{"id":"team-1"}, "project":project
     }}})
 }

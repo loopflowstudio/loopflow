@@ -101,6 +101,7 @@ pub struct PmItem {
     pub rank: u32,
     pub completed: bool,
     pub completed_at: Option<String>,
+    pub due_date: Option<String>,
     /// Provider workflow category; absent in historical snapshots.
     pub state: Option<String>,
     /// Stable owning Project id. Task-to-Wave resolution follows this edge.

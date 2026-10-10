@@ -856,7 +856,13 @@ mod tests {
                 1,
             ),
             ("deploy", &["gate", "pr land"], &[], 0),
-            ("ship", &["gate", "pr land -c"], &[], 0),
+            (
+                "ship",
+                &["gate", "land --wait-and-fix", "follow-through"],
+                &[],
+                0,
+            ),
+            ("finish-delivery", &["follow-through"], &[], 0),
             ("vsm-operate", &["s1", "s2", "s3", "s4", "s5"], &[], 0),
         ];
         for (name, labels, humans, returns) in cases {

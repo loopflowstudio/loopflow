@@ -7,7 +7,7 @@ use std::process::{Command, Stdio};
 
 use loopflow_test_support::TestRepo;
 use serde_json::Value;
-use support::{register_task, EnvGuard};
+use support::{register_task_with_pr, EnvGuard};
 
 fn read(repo: &Path, home: &Path, args: &[&str], input: Option<&str>) -> Value {
     let mut child = Command::new(env!("CARGO_BIN_EXE_lf"))
@@ -50,7 +50,7 @@ fn diff_files_preserves_comparison_identity_and_draft_editing() {
     repo.commit("Comparison base");
     let base = repo.head_sha();
     repo.create_branch("file-inspection");
-    let task = register_task(home.path(), repo.path(), "file-inspection", &base);
+    let task = register_task_with_pr(home.path(), repo.path(), "file-inspection", &base);
     fs::rename(
         repo.path().join("original.txt"),
         repo.path().join("renamed.txt"),

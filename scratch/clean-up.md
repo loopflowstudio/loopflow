@@ -199,7 +199,7 @@ preexisting checkout; assume-unchanged/sparse index entries retain the checkout;
 cache tags survive partial content removal and signature reads are bounded to 43 bytes. A removed checkout is still reported
 as removed if its local ref changed and was retained.
 
-### Latest internal slice — reconciled 2026-10-09 at `341615ba8`
+### Current internal slice — 2026-10-09, extending `341615ba8`
 
 Installed releases ensure repository ticks at checkout creation and work-producing
 CLI entry points. Tick installation reuses the installation-gate resolver, repairs
@@ -223,56 +223,65 @@ now includes the collector report, including deferred reasons and lock contentio
 cron logs retain that JSON alongside existing bounded receipt links. The DTO has
 no Swift/Python consumer; its Rust fixture is `repository_reconciliation.json`.
 
-The headless installed-declaration test executes the real `lf task reconcile --json`
-command through the cron runner: unknown execution retains a checkout, completing
-that Process allows the next tick to remove it, a further tick is harmless, and an
-unfinished neighboring checkout survives. The fixture seeds a taskless merged
-landing and an unknown Process row, then marks the row complete; it does not launch
-a live checkout user. Its neighbor is dirty, not an unfinished Task. This proves
-scheduled-command retry with simulated execution, not the full Task demo or
-login-session/OS scheduler loading. The integration CLI also reads the account's
-release registry; `LF_HOME` alone does not isolate that boundary. Cross-store
-acceptance belongs in the existing disposable-account installation harness.
+The scheduled-command fixture now seeds a merged completed Task with resolved
+follow-through and an unfinished Task neighbor. A real shell child holds the
+completed checkout; its seeded Process receipt records its actual PID/start time.
+Closing its stdin and waiting for exit leaves the Process row unfinished, so the
+next tick must infer death from OS evidence. External `lsof` is still substituted;
+this is not a provider launch or a loaded OS scheduler. The passing disposable-account proof
+runs that same experimental CLI against an independent release registry while
+its checkout-admission file is locked, then releases the lock and retries.
+That proof exposed contention being reported as a failed cleanup/failed tick;
+checkout admission and Git lease contention now defer without failing the tick.
 
-The last two slices implement the earlier feedback's automatic activation,
-persisted disable, gate-based executable selection, deferred JSON and shared
-release retention/admission policy. They do not close the timing, historical
-payload or upgrade-repair gaps below. Main remains at the already-integrated
-`906576f39`; no newer local upstream change was observed in this reconciliation.
+Historical evidence collection now reads every captured input's published files
+and the retained `runs`, manifest and terminal payload references, not only the
+selected Session input. The history owner projects reference fields through its
+existing capture/receipt indexes; it never decodes transcript or replay bodies.
+Symlinked payloads resolve before classification. Missing/invalid observations
+retain candidates. The SQL scan uses a two-second VM/row deadline and nonblocking
+admission; this does not bound all registry or filesystem observation. An initial
+whole-history JSON scan exceeded that bound against the release registry; the
+implementation now selects exact receipt keys and projects only file references.
+Native reader/resume coverage and incremental history scan scaling remain below.
+
+Background passes estimate eligible checkouts with a bounded, same-filesystem
+allocated-byte scan (one second or remaining admission budget); partial/failed
+measurements stay unknown. Previews and lifecycle calls do not measure. Installation
+settlement repairs existing repository declarations through the cron owner before
+pruning superseded binaries. It preserves Machine/home/repository, cadence,
+activation time and explicit disable; a repair failure reports a warning and keeps
+superseded binaries. Loaded-scheduler experience still belongs to demo.
 
 ### Remaining in this PR
 
-1. **Session evidence and recovery:** audit referenced payload owners beyond
-   `.lf/logs`, `.lf/runs`, `.lf/sessions`, selected/production homes and
-   registered/native provider homes. Those roots are protected, but the collector
-   does not enumerate historical payload references; a cache tag must not erase
-   their sole copy. Preserve or relocate them with reader/resume proof. The
+1. **Session evidence and recovery:** retained capture/manifest/legacy-row payload
+   references and provider homes are protected in both registries, including the
+   locked recheck. Add native reader/resume proof for historical referenced files
+   and symlinked captures; audit any other historical payload owners. The
    interruption fixture covers artifact contents removed while the cache tag and
    checkout registration survive, not interruption during Git removal. Finish
    targeted missing-registration repair without broad metadata pruning. Missing
-   paths currently retain registration. Published abandoned PRs without exact-head
-   disposition stay retained; no new discard authority is implied.
+   paths still retain registration; abandoned PRs without exact-head disposition
+   remain retained. No new discard authority is implied.
 2. **Whole-pass timing and fairness:** the admission deadline stops starting
-   candidate observations/removals, but initial registry/Git snapshots and started
-   reads can overrun it. Only external `lsof` inspection has a five-second bound.
-   Bound individual observations, add hourly full reconciliation and cheap
-   settled-owner ticks, then oldest-deferred ordering. Current Git registration
-   order restarts each pass; repeated slow early candidates can starve later ones.
-   Background size estimates remain null. Add bounded size measurement and cron
-   receipt scan timestamps/summary fields; preserve unknown sizes on deadline.
-   Deferred reasons already survive in JSON/logs. No foreground recursive scan.
-3. **Upgrade repair:** existing gate-based declarations follow promotion, but old
-   immutable executable paths are repaired only on later work. Integrate repair
-   with installation, preserving explicit disable and original schedule ownership.
-   Reuse the installation gate and cron owner, not another scheduler.
-4. **Composed acceptance:** cross-store Task/Process/admission fencing exists;
-   prove concurrent release admission through an experimental CLI in a disposable
-   OS account. The unit proof reads a second registry and tests its lock directly;
-   it does not exercise `apply_cleanup` discovering that release registry. Extend
-   scheduled-command coverage to a real live Process exiting, a completed Task
-   with merged delivery, and an unfinished Task neighbor. Keep generated-service,
-   disable, executable-repair and fallback tests. Gate owns the full headless
-   matrix; demo owns loaded OS schedule/upgrade and unsupported-host experience.
+   candidate observations/removals, but initial registry/Git snapshots, filesystem
+   normalization and started reads can overrun it. `lsof`, history SQL and size
+   subprocesses are bounded; other Git/SQL reads are not. Add hourly full
+   reconciliation and cheap settled-owner ticks, then oldest-deferred ordering.
+   Git registration order still restarts each pass, so slow early candidates can
+   starve later ones. Historical evidence scans must also make progress on stores
+   larger than one observation budget without treating partial facts as complete.
+   Persist scan timestamps/summary fields in bounded cron receipts. Estimated
+   bytes now populate eligible background decisions only; no foreground scan.
+3. **Composed acceptance:** the disposable-account fixture exercises experimental
+   CLI discovery of release admission, but directly holds the admission file; it
+   does not launch a second release CLI writer. The scheduled fixture exercises a
+   real child exiting, seeded Process identity, completed merged Task delivery and
+   an unfinished Task neighbor. Native provider launch, full headless acceptance
+   and regression matrix remain with gate; loaded OS schedule, promotion recovery
+   and unsupported-host experience remain with demo. Installation repair has a
+   headless owner test; a full published-upgrade exercise is still needed.
 
 ## Done when
 
@@ -325,4 +334,4 @@ allocated bytes by category; observed free-space delta after collection; oldest
 eligible retention age. APFS sharing, hardlinks and concurrent writers mean
 directory sums are estimates, not guaranteed reclaimed bytes.
 
-Check: `git diff --check` passed (prose only); prior focused cleanup (18), Task-decision (1), scheduled/DTO (3), fmt and Clippy passes retained at `341615ba8`; full acceptance and OS-schedule experience remain with gate/demo.
+Check: focused Rust history/size/admission/schedule tests, `uv run python scripts/test_task_installation.py --test experimental_cleanup_discovers_release_checkout_admission`, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check` passed; full acceptance remains with gate and loaded-scheduler/upgrade experience with demo.

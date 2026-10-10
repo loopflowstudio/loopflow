@@ -24,8 +24,8 @@
   boundary is `lf wave cron sync --repo --disable`. Implementation assumption:
   automatic activation and ordinary-command fallback must respect explicit disable;
   that choice is now persisted; executable-definition repair is tested.
-  Promotion-time repair still needs implementation; installed-upgrade experience
-  remains with demo.
+  Installation settlement now repairs existing declarations before pruning old
+  binaries; full installed-upgrade experience remains with demo.
 
 - Implementation choice, 2026-10-09: ordinary-command fallback runs the existing
   finite cron command at most once per minute on work-producing entry points,
@@ -33,7 +33,6 @@
   they provide an OS scheduler; the fallback reports that limitation. Experiments
   neither install services nor activate fallback work automatically.
 - The 30-second budget currently bounds admission of candidate observations and
-  removals, not initial snapshots or a Git/SQL call already in progress. Hard read
-  deadlines, hourly scans, fair ordering and size measurement remain internal
-  work in this PR. These are implementation gaps, not a proposed relaxation of
+  removals, not initial snapshots or a Git/SQL call already in progress. History SQL and size scans now have individual deadlines; other hard read
+  deadlines, hourly scans and fair ordering remain internal work in this PR. These are implementation gaps, not a proposed relaxation of
   bounded maintenance.

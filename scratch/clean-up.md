@@ -42,7 +42,7 @@ or manual prune, the next maintenance pass removes the checkout. A neighboring
 unfinished Task, dirty checkout and branch with post-merge work remain intact.
 `lf wt prune --dry-run --json` explains each decision and estimated bytes.
 
-## Current system
+## Baseline before implementation
 
 - `ops/task/lifecycle.rs::cleanup_completed_task` deletes settled Task PR
   checkouts. Task movement and successful Flow completion call it.
@@ -131,22 +131,18 @@ mutations, including Git metadata pruning.
 
 ## Delete — do not maintain
 
-- Replace `WorktreePrunePolicy::{manual,automatic}`, `abandoned_prune_reason`,
-  `branch_is_stale`, `worktree_prune_reason`, and the unused targeted-prune APIs
-  with the shared classifier. Delete tests exclusively asserting stale/remote-gone
-  deletion; retain dirty, persistent, unknown-PR and new-commit protection tests.
-- Remove `prepare_landed_delete`, whose automatic path also deleted remote refs.
-  Explicit `prepare_delete` / abandonment authority remains separate.
-- Remove duplicate automatic eligibility/deletion branches in
-  `cleanup_completed_task` and `cleanup_landed_pr`; keep their completion and
-  persistent-branch behavior, delegating filesystem collection to the owner.
-- Move CLI-only `protected_worktree_paths` into shared observation. Replace
-  cleanup's fail-open `running_workspace_paths` use without breaking display.
-- Remove `prune_stale_worktree_metadata` from preview. Keep metadata repair only
-  on apply, after ownership/path inspection.
-- Remove orphan `engine/worktree.rs` create/remove helpers and exclusive tests
-  if the verified whole-repository caller search remains empty. Keep any used
-  root-resolution API.
+Removed: the old prune policies/classifiers and targeted APIs, their exclusive
+tests, `prepare_landed_delete`, duplicate lifecycle deletion, CLI-only protection,
+fail-open process inspection, preview metadata pruning, and the orphan
+`engine/worktree.rs` module (its root resolver also had no callers). Explicit
+abandonment and persistent-branch restart remain separate.
+
+The predecessor's unused `Listing::pull_requests_known` flag and optional remote
+PR map are gone; listing still reports remote failure and unknown PR state.
+Cleanup reuses `OpenProcesses` instead of a second unfinished-process query;
+the now-unused `task_open_work` history loader is removed too. No known deletion targets
+remain; targeted missing-registration repair is still unimplemented, not a reason
+to restore broad metadata pruning.
 
 ## Forbidden outcomes
 
@@ -163,6 +159,11 @@ pass before network delivery observation. The predecessor prune policies,
 targeted-prune APIs, prompt-log pruner, automatic remote-branch deletion helper
 and orphan engine create/remove helpers are removed. Explicit abandonment keeps
 its separate authority. This is an internal checkpoint, not a shipping boundary.
+
+Targeted lifecycle cleanup filters registrations before observing candidates.
+Process membership and cwd protection share one unfinished-process snapshot per
+observation, refreshed under the removal locks. Planning still rereads Tasks and
+processes for each candidate; whole-pass batching and timing remain below.
 
 Current eligibility uses Task checkout links or recorded landing paths, and
 exact merged heads. New lf-created checkouts carry Git-administrative provenance;
@@ -251,4 +252,4 @@ allocated bytes by category; observed free-space delta after collection; oldest
 eligible retention age. APFS sharing, hardlinks and concurrent writers mean
 directory sums are estimates, not guaranteed reclaimed bytes.
 
-Check: `cargo test -p loopflow --lib ops::wt::cleanup::tests -- --test-threads=1` (10 passed), `cargo test -p loopflow --test dto_fixtures cleanup_report_keeps_retention_reasons_and_unknown_sizes` (1 passed), and `cargo clippy --all-targets -- -D warnings` passed; full acceptance and installed-schedule proof remain with gate after the remaining implementation.
+Check: `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed; `cargo test -p loopflow --lib <filter> -- --test-threads=1` passed for `cleanup` (15), `task_work_includes_checkout_binding_and_mechanical_history_without_granting_ownership`, `engine::worktrees::tests::network_enrichment`, `listing_reports_each_worktree_and_leaves_checkouts_untouched`, and `task_decision_preserves_unknown_history_and_live_process_protection` (one each); full acceptance and installed-schedule proof remain with gate after the remaining implementation.

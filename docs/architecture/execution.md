@@ -128,8 +128,9 @@ detach without signaling or erasing admitted providers and uncertain effects.
 Claude persists input UUID origins before pipe writes. Native echoes admit requests;
 SQLite selects unfinished turns in observation order for the same AgentProcess.
 Durable result UUID correlation, output, usage and completion commit together.
-Repeated history observations cannot consume another turn; conflicting payloads refuse without changing
-saved receipts. This does not supply a cursor for replaying uncorrelated output.
+Repeated correlated results cannot consume another turn; conflicting payloads
+refuse without changing saved receipts. Results without an admission have no
+receipt yet; replaying them against later admissions is not safe.
 Display activity follows that provider's current attachment,
 retaining tools while detached and ignoring replacement providers. Dispatch and
 stop retain frozen caller authority. Saved origins cannot recover unread pipe

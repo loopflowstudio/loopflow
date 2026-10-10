@@ -242,14 +242,14 @@ CI: `be4a2b2af:wave/infrastructure/MEMORY.md`, this heading.
 LOO-447: fenced stop/abort, signal-free drop, standby custody until group death;
 external watchdog. OpenCode saves endpoint/attempts before effects; v1.2.0
 creation carries rules/title, not PATCH. Unknown identity stays uncertain.
-Creation recovery, relay, native launch, permission choices and dispatch proofs:
+Creation, relay, native launch, permission and dispatch proofs:
 `7fec3b53f:wave/infrastructure/MEMORY.md`, this heading. Shell lacks IDs.
 `4834c18f4` retains Claude origins, not pipes. Display follows current attachment;
 caller authority stays frozen. SQLite atomically correlates UUID-keyed results,
-rejecting conflicting repeats and rolling back failed receipts. Transport still
-needs ordered uncorrelated output; no caller-held fence reacquisition or permanent
-custody. EOF/history/write errors grant no settlement or teardown. Public death
-orders remain unproved.
+rejecting conflicting repeats and rolling back failed receipts. Results without
+admissions lack receipts; replay can consume later work. Transport needs ordering,
+no caller-held fence reacquisition or permanent custody. EOF/history/write errors
+grant no settlement or teardown. Public death orders remain unproved.
 Plan: `scratch/stop-and-take-over-claude.md`.
 
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)

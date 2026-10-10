@@ -2,9 +2,9 @@
 
 Jack Heart requested provider-independent takeover and stop on 2026-10-09.
 The outcome is accepted; the remaining Claude transport proposal is a draft.
-Reconciled 2026-10-10, including atomic result correlation below; previous
-implementation boundary: `ac0f659aa`. Dependencies #1519/#1520 are integrated
-at `be4a2b2af`, satisfying Jack's steer `28e0c5cc`; #1521 is integrated through
+Reconciled 2026-10-10 against `2c881348e`: atomic result correlation is
+`2d018f7ae`; the latest cut simplifies OpenCode observation only. Dependencies
+#1519/#1520 are integrated at `be4a2b2af`, satisfying Jack's steer `28e0c5cc`; #1521 is integrated through
 `df5169ab9`. LOO-443's remaining item 3 was read at
 `4f6ed76b2^:scratch/introduce-agentprocess-record-the-provider.md`.
 
@@ -35,8 +35,11 @@ shippable or Task completion. This plan grants no installation or delivery autho
    turns. The surviving history path now selects an admission and commits output,
    usage and completion atomically, deduplicating the native result UUID within
    its AgentProcess. Conflicting repeated payloads refuse without consuming the
-   next turn. A transport still needs ordered, durable consumption of previously
-   uncorrelated output; result deduplication alone is not a replay cursor.
+   next turn. `record_ordered_session_result` returns without a receipt when no
+   admission exists. Replaying that result after a later admission can therefore
+   assign old output to new work. The transport must retain consumption order
+   and uncorrelated observations, not replay the whole stream against current
+   admissions. UUID deduplication protects already-correlated results only.
    Client completion projection must share that decision: the current launcher
    mapper still has its own counters and is not made replay-safe by this history
    repair. Replace that coupling with the transport, not a second result parser.
@@ -226,4 +229,4 @@ pipes, their failure tails and the public takeover path remain unchanged.
 
 ## Checks
 
-Network-isolated `cargo test -p loopflow --lib harness::opencode`: 19 pass, 2 configured-provider checks excluded; `cargo build -p loopflow`, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check`: pass. Public death orders remain unfinished; Linux acceptance belongs to CI.
+Prior `2c881348e` checks: isolated `cargo test -p loopflow --lib harness::opencode` 19 pass, 2 configured checks excluded; build/fmt/Clippy pass. Realign: `git diff --check` passes (prose only); public death orders remain unfinished, Linux acceptance CI-owned.

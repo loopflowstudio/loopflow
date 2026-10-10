@@ -1000,7 +1000,7 @@ pub fn build_codex_command(
     cmd.push("-c".to_string());
     cmd.push(format!("service_tier=\"{CODEX_DEFAULT_SERVICE_TIER}\""));
 
-    // Load context via model_instructions_file (replaces AGENTS.md)
+    // This overrides Codex's built-in prompt; native AGENTS.md loading is separate.
     if let Some(ref context_file) = process.context_file {
         cmd.push("-c".to_string());
         cmd.push(format!(

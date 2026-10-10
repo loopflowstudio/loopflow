@@ -1017,18 +1017,19 @@ Jack's October 9 option A
 supersedes the transport blocker: terminal argv, no editor/paste/stdin/envelopes
 or further transport probes; the rejected runner/tests are deleted. Only an oversized
 first turn may refuse with size/cap.
-Rust removes the trigger/bounding; builtin skill precedes request. Measurement
-belongs to inspection, not launch. The Rust refresh callback reads live scratch
-and SQLite Wave/ancestor bytes, retaining complete snapshots/listings. Its 10,000-byte
-budget prevents partial files; overflow pointers remain proposed UX. No launcher
-installs it yet. App-server Codex is additive; fixed slots, native delivery/trust,
-terminal Codex and provider/resume/compaction/OpenCode/cmux acceptance remain open.
+Rust: skill first, no trigger/bounding or launch-time measurement. The callback
+reads live scratch and SQLite Wave/ancestors;
+Private snapshots and one manifest retain complete sources/listings; escaping
+counts toward 10,000 bytes. Pointer UX remains proposed.
+No launcher installs it. App-server Codex is additive; fixed slots, terminal
+Codex, delivery/trust and resume/compaction/OpenCode/cmux acceptance remain open.
 Rejected transport detail: `77ec4d000`, this heading;
 [Evidence](../../scripts/benchmarks/skill-invocation/README.md).
 
 Main `3e1e6245c` (#1512): driver lifelines own engines. Replacement resumes native
 history, not abandoned turns. Preserve context/trust without launch-input replay
-or deleted engine recovery. Fixtures prove no installed/provider acceptance.
+or deleted engine recovery. #1511's `--no-daemon` terminals need process-local
+hook delivery. Fixtures prove no installed/provider acceptance.
 
 Retain setup-free capture, saved config/trust, native identity and caller checkpoints.
 Interrupted profiles may remain unselected; PTYs prove no fresh reconnect hooks or

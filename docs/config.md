@@ -81,7 +81,7 @@ config files.
 ```bash
 lf context                         # limits, sources, original and submitted usage
 lf context --wave intelligence     # local Wave memory and scratch
-lf context --task LOO-303 --json    # Task checkout and locally stored goal
+lf context --task LOO-303 --json    # Task checkout and goal files
 lf context --skill implement       # preview this skill instead of realign
 ```
 

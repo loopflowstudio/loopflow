@@ -48,7 +48,7 @@ fn write_skill(repo: &Path, name: &str, content: &str) {
     fs::write(path, content).unwrap();
 }
 
-fn import_wave(repo: &Path, name: &str) {
+fn register_wave(repo: &Path, name: &str) {
     loopflow::store::sqlite::SqliteStore::new(&loopflow::store::database_path_from_env().unwrap())
         .unwrap()
         .ensure_wave(repo.canonicalize().unwrap().to_str().unwrap(), name)
@@ -210,7 +210,6 @@ fn gather_context_with_wave() {
     write_skill(repo, "implement", "Do work.");
     make_commit(repo, "initial");
 
-    import_wave(repo, "auth");
     let components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
         skill: Some("implement".to_string()),
@@ -349,7 +348,6 @@ fn format_prompt_includes_wave_context() {
     write_skill(repo, "implement", "Do work.");
     make_commit(repo, "initial");
 
-    import_wave(repo, "payments");
     let components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
         skill: Some("implement".to_string()),
@@ -419,7 +417,6 @@ fn wave_filtering_includes_only_specified_wave() {
     write_skill(repo, "implement", "Do work.");
     make_commit(repo, "initial");
 
-    import_wave(repo, "auth");
     let components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
         skill: Some("implement".to_string()),
@@ -588,7 +585,6 @@ fn wave_filtering_includes_all_files_in_wave_directory() {
     write_skill(repo, "implement", "Do work.");
     make_commit(repo, "initial");
 
-    import_wave(repo, "features");
     let components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
         skill: Some("implement".to_string()),
@@ -650,7 +646,6 @@ fn nested_wave_reads_stored_ancestor_markdown_in_order() {
         fs::create_dir_all(file.parent().unwrap()).unwrap();
         fs::write(file, content).unwrap();
     }
-    import_wave(repo, "infrastructure/release");
     let mut components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
         wave: Some("infrastructure/release".into()),
@@ -751,7 +746,7 @@ fn run_outside_any_wave_assembles_no_memory_section() {
 }
 
 #[tokio::test]
-async fn worktree_reads_shared_stored_wave_memory() {
+async fn worktree_reads_its_own_wave_files() {
     let _env = support::EnvGuard::new(&[]);
     let temp = TempDir::new().unwrap();
     let origin = temp.path().join("repo");
@@ -779,7 +774,7 @@ async fn worktree_reads_shared_stored_wave_memory() {
         .current_dir(&origin)
         .output()
         .expect("git worktree add");
-    // Checkout edits do not replace the stored plan.
+    // Checkout edits are the next launch context, independent of main.
     fs::write(
         worktree.join("wave/goals/MEMORY.md"),
         "- checkout-local decisions",
@@ -787,7 +782,7 @@ async fn worktree_reads_shared_stored_wave_memory() {
     .unwrap();
 
     fs::write(worktree.join("wave/goals/GOAL.md"), "Checkout goal.").unwrap();
-    import_wave(&origin, "goals");
+    register_wave(&origin, "goals");
     let store = Arc::new(
         open_ephemeral_store(&StorageConfig::sqlite(
             loopflow::store::database_path_from_env().unwrap(),
@@ -812,10 +807,12 @@ async fn worktree_reads_shared_stored_wave_memory() {
     .unwrap();
 
     let prompt = render_prompt(components);
-    assert_eq!(prompt.matches("previous committed memory").count(), 1);
-    assert_eq!(prompt.matches("Origin goal.").count(), 1);
+    assert!(!prompt.contains("previous committed memory"));
+    assert!(!prompt.contains("Origin goal."));
     assert_eq!(prompt.matches("<lf:loopflow>").count(), 1);
-    assert!(prompt.contains("Curate stored Wave memory with `lf wave edit goals --memory <file>`."));
-    assert!(!prompt.contains("checkout-local decisions"));
-    assert!(!prompt.contains("Checkout goal."));
+    assert!(prompt.contains(
+        "Edit wave/goals/GOAL.md and wave/goals/MEMORY.md like any other file in this checkout."
+    ));
+    assert_eq!(prompt.matches("checkout-local decisions").count(), 1);
+    assert_eq!(prompt.matches("Checkout goal.").count(), 1);
 }

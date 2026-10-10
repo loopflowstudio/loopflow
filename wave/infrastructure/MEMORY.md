@@ -72,13 +72,16 @@ Newer explicitly active Linear evidence restores visibility and retains the lose
 inventory grants neither restoration nor execution authority. Exact slice proofs:
 `078a6642e:wave/infrastructure/MEMORY.md`, this heading; installed acceptance is unproved.
 
-SQLite owns Wave definitions/relocation, preserving IDs, files, execution, PRs,
-checkouts and uncertain effects. Personal owners and provider-first deletion stay
-removed; Project IDs precede slugs. Common-writer boundary: `84664e661`;
-earlier proofs: `bbc6eb8d3:wave/infrastructure/MEMORY.md`, this heading.
-`e68f2a423` exports saved UUIDs. Separate creation/link attempts retain uncertainty
-without replay; identity attachment precedes inventory and preserves later saves.
-Composed/installed export acceptance is unproved.
+Jack Heart's October 9 LOO-449 decision supersedes stored Wave documents:
+GOAL.md, MEMORY.md and ancestor Markdown come from the checkout.
+Edit files directly; no document CLI, import, cache or fallback.
+Creation preserves authored bytes. SQLite retains identity, addresses and execution. Registry relocation leaves files in place. `wave_workflows` remains
+unselected for removal: Project catalog/source/selection and Task workflow capture
+read it. LOO-449 edits the draft; installed acceptance is unproved. LOO-444 overlaps the context reader; preserve its transport.
+
+LOO-406's common writer boundary is `84664e661`; `e68f2a423` exports saved UUIDs.
+Separate creation/link attempts retain uncertainty without replay; identity attachment
+precedes inventory, preserving later saves. Export acceptance remains unproved. Prior proofs: `906576f39:wave/infrastructure/MEMORY.md`, this heading.
 
 Jack selected Git-like Task prefixes: four or more hex digits, bare or prefixed;
 reject ambiguity, retain full IDs and lengthen display abbreviations as needed.
@@ -282,14 +285,10 @@ Earlier cleanup history: `66da3fdf7:wave/infrastructure/MEMORY.md` under
 
 ## Project configuration and review direction (2026-10-05)
 
-LOO-366's October 5 decisions are under Optional chapters and Task workflows;
-source and configured acceptance remain unfinished. Infrastructure recommends
-`code`; KRs and reviews remain. Earlier evidence, including v0.13.3 review:
-`470382987:wave/infrastructure/MEMORY.md` under this heading.
-LOO-326 and LOO-370 completed October 6 under the decisions below. LOO-367's
-retry recorded boot witness 819671 but stopped on that same boot; preserve its
-conversation and saved Flow. A later authorized restart, not unchanged evidence,
-can establish old-provider death. No successful continuation is claimed.
+LOO-366 remains unfinished under Optional chapters below; LOO-326/370 completed.
+LOO-367's retry retained boot witness 819671 and stopped on that boot. Preserve
+its conversation/Flow; only an authorized restart supplies new death evidence.
+Prior recommendations and review: `906576f39:wave/infrastructure/MEMORY.md`, this heading.
 
 ## Release follow-through (reconciled 2026-10-05)
 
@@ -1003,10 +1002,9 @@ invented completion date. No fourth user-facing planning noun was selected.
 
 ## Earlier follow-ups (reselect through the accepted chapter)
 
-Unselected suggestions, #818's resolved rebase work and the unbuilt policy
-harness: `adf3f9e4b:wave/infrastructure/MEMORY.md`, this heading. Measure drift
-before tuning; archived notes authorize no work. Jack Heart's July 6
-“up/down 5ths” referent remains unresolved and deferred.
+Unselected suggestions and #818's resolved work: `adf3f9e4b:wave/infrastructure/MEMORY.md`,
+this heading. Archived proposals authorize no work. Jack Heart's July 6 “up/down
+5ths” referent remains unresolved.
 
 ## Direct invocation and large inputs (curated 2026-10-08)
 

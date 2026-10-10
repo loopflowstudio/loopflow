@@ -182,7 +182,6 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     let beta = registered_wave(&repo_b, "infrastructure");
     store.create_wave(&alpha).await.unwrap();
     store.create_wave(&beta).await.unwrap();
-    let definitions = loopflow::store::sqlite::SqliteStore::new(&database).unwrap();
     assert_ne!(alpha.id(), beta.id());
 
     #[cfg(unix)]
@@ -507,21 +506,21 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     let renamed = store.get_wave(alpha.id()).await.unwrap().unwrap();
     assert_eq!(renamed.slug(), "platform");
     assert_eq!(
-        definitions.wave_documents(alpha.id()).unwrap()["GOAL.md"],
+        std::fs::read_to_string(repo_a.join("wave/infrastructure/GOAL.md")).unwrap(),
         "# alpha\n"
     );
     assert!(repo_a.join("wave/infrastructure").exists());
     let renamed_child = store.get_wave(child.id()).await.unwrap().unwrap();
     assert_eq!(renamed_child.slug(), "platform/child");
     assert_eq!(
-        definitions.wave_documents(child.id()).unwrap()["GOAL.md"],
+        std::fs::read_to_string(repo_a.join("wave/infrastructure/child/GOAL.md")).unwrap(),
         "# child\n"
     );
     let renamed_grandchild = store.get_wave(grandchild.id()).await.unwrap().unwrap();
     assert_eq!(renamed_grandchild.slug(), "platform/child/leaf");
     assert_eq!(renamed_grandchild.parent_wave_id(), Some(child.id()));
     assert_eq!(
-        definitions.wave_documents(grandchild.id()).unwrap()["GOAL.md"],
+        std::fs::read_to_string(repo_a.join("wave/infrastructure/child/leaf/GOAL.md")).unwrap(),
         "# grandchild\n"
     );
     assert_eq!(
@@ -539,7 +538,7 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         .unwrap();
     assert!(repo_a.join("wave/platform").exists());
     assert_eq!(
-        definitions.wave_documents(alpha.id()).unwrap()["GOAL.md"],
+        std::fs::read_to_string(repo_a.join("wave/infrastructure/GOAL.md")).unwrap(),
         "# alpha\n"
     );
 
@@ -845,17 +844,6 @@ async fn relocation_refuses_meaningful_destination_history() {
         .await
         .unwrap();
 
-    let definition_shadow = registered_wave(&target, "with-definition");
-    store.create_wave(&definition_shadow).await.unwrap();
-    loopflow::store::sqlite::SqliteStore::new(&database)
-        .unwrap()
-        .update_wave_document(
-            definition_shadow.id(),
-            "GOAL.md",
-            "Retain this independently authored plan",
-        )
-        .unwrap();
-
     let workflow_shadow = registered_wave(&target, "with-workflow");
     store.create_wave(&workflow_shadow).await.unwrap();
     rusqlite::Connection::open(&database).unwrap().execute(
@@ -867,7 +855,6 @@ async fn relocation_refuses_meaningful_destination_history() {
         ("with-task", &project_shadow, "Tasks"),
         ("with-child", &child_shadow, "child Waves"),
         ("with-pm", &pm_shadow, "PM snapshot"),
-        ("with-definition", &definition_shadow, "stored definitions"),
         ("with-workflow", &workflow_shadow, "stored definitions"),
     ] {
         let error = relocate_wave(&store, established.id(), &source, Some(&target), Some(slug))

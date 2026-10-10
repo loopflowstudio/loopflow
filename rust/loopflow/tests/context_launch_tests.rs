@@ -24,7 +24,7 @@ fn terminal_context_uses_files_and_preserves_failed_sessions() {
     .unwrap();
     fs::write(
         repo.path().join(".lf/config.yaml"),
-        "diff: false\ndiff_files: false\npaste: false\ndocs: [wave/fixture]\n",
+        "diff: false\ndiff_files: false\npaste: false\n",
     )
     .unwrap();
     let memory =
@@ -41,7 +41,20 @@ fn terminal_context_uses_files_and_preserves_failed_sessions() {
     .unwrap();
 
     for harness in ["claude", "codex"] {
+        fs::write(repo.path().join("wave/fixture/MEMORY.md"), &memory).unwrap();
         let home = tempfile::tempdir().unwrap();
+        let store =
+            loopflow::store::sqlite::SqliteStore::new(&home.path().join("machine/loopflow.db"))
+                .unwrap();
+        store
+            .create_wave(&loopflow::work::wave::Wave::new(
+                loopflow::id::WaveId::new(),
+                "fixture".into(),
+                loopflow::repository::CanonicalRepo::discover(repo.path())
+                    .unwrap()
+                    .to_string(),
+            ))
+            .unwrap();
         let bin = home.path().join("bin");
         fs::create_dir(&bin).unwrap();
         let provider = bin.join(harness);
@@ -75,7 +88,15 @@ exit 23
         }
         let output = command
             .current_dir(repo.path())
-            .args(["-i", "-a", harness, "probe", "Find the fixture goal."])
+            .args([
+                "-i",
+                "-a",
+                harness,
+                "--wave",
+                "fixture",
+                "probe",
+                "Find the fixture goal.",
+            ])
             .env("HOME", home.path())
             .env("LF_HOME", home.path().join("machine"))
             .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
@@ -111,6 +132,16 @@ exit 23
             .query_row("SELECT count(*) FROM agent_sessions", [], |row| row.get(0))
             .unwrap();
         assert_eq!(sessions, 1, "failed launch keeps the Session");
+        fs::write(
+            repo.path().join("wave/fixture/MEMORY.md"),
+            "New decision from a direct file edit.",
+        )
+        .unwrap();
+        let next = command.output().unwrap();
+        assert!(!next.status.success());
+        let next_context = fs::read_to_string(home.path().join("received-context")).unwrap();
+        assert!(next_context.contains("New decision from a direct file edit."));
+        assert!(!next_context.contains(&memory));
     }
 }
 

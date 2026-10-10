@@ -150,7 +150,7 @@ The current conversation participant's display name is "Fixture Participant" (JS
 
 <lf:wave name="rust">
 You are building toward the rust program of work.
-Curate stored Wave memory with `lf wave edit rust --memory <file>`. Ancestor definitions provide inherited context; repository files change only through explicit authoring.
+Edit wave/rust/GOAL.md and wave/rust/MEMORY.md like any other file in this checkout. Ancestor files provide inherited context.
 Use realign to reconcile the plan, code and Wave memory.
 </lf:wave>
 

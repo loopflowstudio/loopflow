@@ -538,8 +538,10 @@ pub(crate) async fn wave_snapshots(
         .map_err(|err| anyhow!("failed to read wave registry: {err}"))?;
     let waves = scope_waves_to_repo(waves, all)?;
     let mut snapshots = Vec::with_capacity(waves.len());
+    let mut repositories = HashMap::new();
     for wave in waves {
-        let snapshot = snapshot_wave(store, &wave).await?;
+        let checkout = wave_repository(&wave, &mut repositories)?;
+        let snapshot = snapshot_wave(store, &wave, &checkout).await?;
         if !current || current_wave(&snapshot) {
             snapshots.push(snapshot);
         }
@@ -578,7 +580,8 @@ pub(crate) async fn wave_detail(store: &SharedStore, wave: &Wave) -> Result<Wave
         .map_err(|err| anyhow!("failed to read repository Waves: {err}"))?;
     let mut repositories = HashMap::new();
     validate_pm_portfolio(store, &repository_waves, &mut repositories).await?;
-    let snapshot = snapshot_wave(store, wave).await?;
+    let checkout = wave_repository(wave, &mut repositories)?;
+    let snapshot = snapshot_wave(store, wave, &checkout).await?;
     let shared = SharedTaskReads::read(store).await?;
     let task_snapshots = wave_tasks(store, wave, true, None, &shared).await?;
     let metric_portfolio = crate::ops::metrics::wave_metric_portfolio(store, wave, now()).await?;
@@ -706,7 +709,8 @@ async fn roadmap_snapshot(
     let shared = SharedTaskReads::read(store).await?;
     let mut roadmaps = Vec::with_capacity(waves.len());
     for wave in &waves {
-        let snapshot = snapshot_wave(store, wave).await?;
+        let checkout = wave_repository(wave, &mut repositories)?;
+        let snapshot = snapshot_wave(store, wave, &checkout).await?;
         if !include_history && !current_wave(&snapshot) {
             continue;
         }
@@ -948,19 +952,31 @@ fn now() -> time::OffsetDateTime {
 
 // Resolve each recorded repository once per read. Sharing across validation and
 // display avoids one Git process per Wave without retaining facts across reads.
-fn wave_repository(wave: &Wave, repositories: &mut HashMap<String, PathBuf>) -> PathBuf {
-    repositories
-        .entry(wave.repo().to_string())
-        .or_insert_with(|| {
-            crate::engine::worktrees::main_repo_root(Path::new(wave.repo()))
-                .unwrap_or_else(|_| Path::new(wave.repo()).to_path_buf())
-        })
-        .clone()
+fn wave_repository(wave: &Wave, repositories: &mut HashMap<String, PathBuf>) -> Result<PathBuf> {
+    if let Some(checkout) = repositories.get(wave.repo()) {
+        return Ok(checkout.clone());
+    }
+    let checkout = wave_checkout(wave)?;
+    repositories.insert(wave.repo().to_string(), checkout.clone());
+    Ok(checkout)
+}
+
+// A registry address identifies the repository, not the checkout's document bytes.
+fn wave_checkout(wave: &Wave) -> Result<PathBuf> {
+    if let Some(checkout) = crate::repo::discover_repo_root(&std::env::current_dir()?)? {
+        if crate::repository::CanonicalRepo::discover(&checkout)?.contains(Path::new(wave.repo())) {
+            return Ok(checkout);
+        }
+    }
+    Ok(
+        crate::engine::worktrees::main_repo_root(Path::new(wave.repo()))
+            .unwrap_or_else(|_| PathBuf::from(wave.repo())),
+    )
 }
 
 /// Build the registry snapshot for one wave, probing its discovery endpoint
 /// for liveness.
-pub(crate) async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<WaveSnapshot> {
+async fn snapshot_wave(store: &SharedStore, wave: &Wave, checkout: &Path) -> Result<WaveSnapshot> {
     let repo = wave.repo().to_string();
     let tasks = store
         .list_tasks(Some(wave.id()))
@@ -988,12 +1004,7 @@ pub(crate) async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<Wa
         id: wave.id().to_string(),
         name: wave.slug().to_string(),
         status,
-        goal: store
-            .sqlite
-            .wave_document(wave.id(), "GOAL.md")?
-            .as_deref()
-            .map(crate::work::wave::config::wave_summary)
-            .unwrap_or_else(|| wave.slug().to_string()),
+        goal: crate::work::wave::config::read_wave_summary(checkout, wave.slug())?,
         repo,
         active_tasks,
         created_at: wave.created_at().and_then(format_time),
@@ -1036,7 +1047,7 @@ async fn validate_pm_portfolio(
 ) -> Result<()> {
     let mut ownership = std::collections::HashMap::<_, PmPortfolioValidator>::new();
     for wave in waves {
-        let repo = wave_repository(wave, repositories);
+        let repo = wave_repository(wave, repositories)?;
         let repo = std::fs::canonicalize(&repo).unwrap_or(repo);
         let row = match store.pm_snapshot(wave.id()).await {
             Ok(Some(row)) => row,
@@ -2534,7 +2545,7 @@ mod tests {
             "proof".into(),
             alias.display().to_string(),
         );
-        let resolve = || super::wave_repository(&wave, &mut Default::default());
+        let resolve = || super::wave_repository(&wave, &mut Default::default()).unwrap();
         assert_eq!(resolve(), alias);
         std::os::unix::fs::symlink(first.path(), &alias).unwrap();
         assert_eq!(resolve(), first.path().canonicalize().unwrap());

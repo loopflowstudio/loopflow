@@ -28,12 +28,13 @@ lf checkout <id>
 
 Wave, Project and Task planning use one local SQLite owner with optional
 repository-wide Linear synchronization. Creation without a Wave uses `inbox`.
-Wave provisioning imports existing Markdown and repository Workflow definitions,
-preserving stable authored IDs and source bytes. Saved documents, including ancestor
-context, serve both connection modes. Reads never provision or fall back to files.
-Explicit edits and relocation change stored planning without rewriting the checkout.
-The released-frontier migration imports available registered definitions; unavailable
-sources can be imported later with `lf wave ensure`.
+Wave goals, memory and other Markdown live only in `wave/<name>/` in the
+checkout. Edit them like any other file; context, summaries and Linear sync read
+them directly. Ancestor context uses the same checkout. Creation preserves
+authored IDs and bytes and writes missing GOAL.md/MEMORY.md files. Reads never
+provision. Registry relocation changes addresses without moving authored files.
+Workflow definitions remain separately stored: provisioning and the draft migration
+import `.lf/workflows/`, and Project workflow selection updates the stored definition.
 
 Task deletion atomically records local removal and a stable pending field receipt.
 It preserves Workflow, Session, Process, PR and checkout state, including completed

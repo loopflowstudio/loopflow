@@ -48,7 +48,7 @@ mod task_content;
 mod task_follow_through;
 pub(crate) mod task_state_delivery;
 mod task_work;
-pub(crate) mod wave_documents;
+pub(crate) mod wave_definitions;
 
 pub use project_selection::{ProjectActivation, ProjectReadiness, ProjectReadinessState};
 pub use revisions::StoreRevisions;
@@ -746,17 +746,7 @@ impl SqliteStore {
             ],
         )?;
         durable::create_wave_work(&tx, wave.id(), created_at)?;
-        let slug: String = tx.query_row(
-            "SELECT slug FROM wave_addresses WHERE id=?1",
-            [wave.id()],
-            |row| row.get(0),
-        )?;
-        wave_documents::import_documents_on(
-            &tx,
-            wave.id().as_str(),
-            Path::new(wave.repo()),
-            &slug,
-        )?;
+        wave_definitions::import_workflows_on(&tx, wave.id().as_str(), Path::new(wave.repo()))?;
         tx.commit()?;
         Ok(())
     }
@@ -1972,20 +1962,15 @@ impl SqliteStore {
         replacement: &WaveId,
     ) -> StoreResult<Vec<String>> {
         let mut blockers = Vec::new();
-        // Identical imported definitions are safe shadows; independent edits survive.
-        for table in ["wave_documents", "wave_workflows"] {
-            let differs: bool = conn.query_row(
-                &format!(
-                    "SELECT EXISTS(SELECT name,content FROM {table} WHERE wave_id=?1
-                    EXCEPT SELECT name,content FROM {table} WHERE wave_id=?2)"
-                ),
-                params![wave_id, replacement],
-                |row| row.get(0),
-            )?;
-            if differs {
-                blockers.push("stored definitions".to_string());
-                break;
-            }
+        // Independent stored Workflow edits survive retirement.
+        let differs: bool = conn.query_row(
+            "SELECT EXISTS(SELECT name,content FROM wave_workflows WHERE wave_id=?1
+                EXCEPT SELECT name,content FROM wave_workflows WHERE wave_id=?2)",
+            params![wave_id, replacement],
+            |row| row.get(0),
+        )?;
+        if differs {
+            blockers.push("stored definitions".to_string());
         }
         let projects: i64 = conn.query_row(
             "SELECT COUNT(*) FROM projects WHERE wave_id = ?1",

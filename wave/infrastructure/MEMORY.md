@@ -238,8 +238,8 @@ LOO-447: lifelines prove no takeover. Claude owns pipes/correlation; fenced stop
 waits only for its leader. OpenCode respawns; stop/abort/drop are unfenced.
 Neither proves impossibility. Holder release must preserve both death orders
 without unbounded retention. Release’s entry-point lesson applies: runtime close
-proves no public handoff. LOO-450’s `5ce7cd5e4` shares history, not transport;
-integration is open. Plan: `scratch/stop-and-take-over-claude.md`.
+proves no public handoff. Transport plan and related work:
+`scratch/stop-and-take-over-claude.md`.
 
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)
 

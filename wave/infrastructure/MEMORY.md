@@ -281,26 +281,28 @@ Earlier cleanup history: `66da3fdf7:wave/infrastructure/MEMORY.md` under
 ## Automatic checkout collection (2026-10-09)
 
 Jack Heart authorized automatic collection and disposable Etude output; budgets
-remain draft. Rotation grants no conversation-expiry or one-off deletion.
-Require ownership, exact-head settlement, idle execution and classified content.
-Age, remote absence, ignored status and completion cannot substitute. Retain PR-less
-Tasks/unresolved follow-through; compare-and-delete refs; history overrides cache tags.
-Repair schedules before pruning binaries; preserve disable.
-Release's lesson: generated schedules and manual recovery prove no unattended firing.
+remain draft. Rotation grants no history-expiry or one-off deletion. Require
+ownership, exact-head settlement, idle execution and classified content; retain
+PR-less Tasks/unresolved follow-through. Age, remote absence and ignored status
+never settle source. History overrides cache tags; compare-and-delete refs.
+Repair schedules before pruning binaries; preserve disable. Release's lesson:
+generated schedules/manual recovery prove no unattended firing.
 
-`467951af7` separates cancellable setup reads from atomic scheduling
-writes, excluding inherited locks. Lost write acknowledgments end that receipt's
-writer; later passes resume published progress. Hints never authorize deletion.
-FIFO proofs cover retention, retries, neighbors and lock release. Never cancel removal. Per-request deadlines do not bound enumeration/spawn, setup cardinality,
-inline lock discovery or aggregate locked observation. Kernel-stuck I/O is unproved.
+`9af401578` bounds hint setup with durable windows. Workers inherit
+no locks/removal authority; lost write acknowledgments end that receipt's writer.
+Never cancel admitted removal. FIFO proofs cover hint admission/retries, not
+initial listing/normalization, lock discovery or aggregate observation.
+
+Two windows can alternate first failed writers when writes exhaust admission; the
+global cursor loses position. Existing count/time fixtures miss their intersection.
+Source-derived trace only; repair/composed proof remain, even without arrivals.
 
 Previews defer history; removal needs complete coverage and fresh destinations.
-The final raw read hit its deadline at 65,536 projected synthetic rows;
-unchanged retries cannot progress. Cached negatives fail on symlink retargeting.
-Workload-sized isolated observation versus a history-owner fresh view remains
-unselected; neither a larger constant timeout nor early positive matches resolves it.
-Gate owns provider resume/second release writer; demo owns installed schedule/upgrade.
-Prior proofs: `3a571cb3a:wave/infrastructure/MEMORY.md`, this heading.
+The final read timed out at 65,536 projected synthetic rows; unchanged retries
+cannot progress. Cached negatives fail on retargeting. Workload-sized isolated
+observation versus a history-owner fresh view remains unselected; larger constant
+timeouts do not resolve it. Gate owns provider resume/second release writer;
+demo owns installed schedule/upgrade. Earlier proofs: `f800facfa:wave/infrastructure/MEMORY.md`,
 Plan: `scratch/clean-up.md`.
 
 ## Project configuration and review direction (2026-10-05)

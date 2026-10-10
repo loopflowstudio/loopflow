@@ -82,6 +82,10 @@
   registration windows, with receipt-owned continuation between them. A failed hint
   writer yields the first candidate slot to the fairness sweep on the next pass.
   Eight stalled hint FIFOs plus three arrivals per tick demonstrate eventual healthy
-  collection and interrupted-entry retry; arbitrary arrival rates remain unproved.
+  collection and interrupted-entry retry in that fixture. A source-derived two-window
+  trace now shows that the shared candidate cursor can alternate the first failed
+  writer of each window forever when writes exhaust candidate admission. Candidate
+  continuation across windows needs repair and a composed proof; arbitrary arrival
+  rates also remain unproved.
   Hints first discovered after the hourly cutoff enter settled-owner retries or the
   next hourly cohort. This changes scheduling only, never source disposition.

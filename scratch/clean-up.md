@@ -99,9 +99,10 @@ Current local defaults are eight removals, 32 observations and 30 seconds admitt
 new candidates; an admitted attempt finishes. Size estimates are background-only
 and unknown on timeout. These are implementation choices, not accepted machine-wide
 budgets or a whole-pass time guarantee. Last-attempt hints in existing Git
-registrations give older retries a priority lane; a receipt sweep prevents failed
-hint writes from starving neighbors, and fixed hourly cohorts prevent
-arrivals from extending discovery indefinitely. Hints grant no deletion authority.
+registrations prioritize older retries within each bounded setup window. Receipts
+resume registration setup and candidate retries; fixed hourly timestamps bound
+cohort membership, not discovery duration. Cross-window candidate fairness remains
+unresolved below. Hints grant no deletion authority.
 
 ## Constraints
 
@@ -205,9 +206,10 @@ Path-only rotation is removed. `lf-cleanup-attempt` in each existing Git registr
 records discovery/last-attempt time, atomically replaced before observation. Malformed
 hints receive oldest priority and are replaced; hints never establish ownership.
 Retries interleave oldest unattempted/last-deferred priority with a receipt-owned
-lexical sweep (`fairness_after`). The sweep is persisted before hint I/O and prevents
-failed writes from pinning every observation slot. It does not establish ownership
-or replace the timestamp lane that protects old deferrals against arrivals. The hourly cohort
+lexical sweep (`fairness_after`). The sweep is persisted before hint I/O and passes
+the failed-write fixtures below; cross-window time exhaustion exposes a remaining
+counterexample. It neither establishes ownership nor replaces timestamp priority
+within a setup window. The hourly cohort
 has a fixed start timestamp; settled retries remain eligible while discovery is in
 progress. Tests introduce three eligible arrivals per tick with a one-removal cap
 and prove previously deferred checkouts go first. Receipts retain constant-size
@@ -300,8 +302,9 @@ admitted destructive removal is still uncanceled.
 
 Last-attempt priority operates within each setup window; the durable registration
 sweep reaches other windows. The existing candidate sweep now gets the first slot
-after a failed/interrupted hint publication. This closes the case where one stalled
-oldest hint consumed every admission window before its fairness lane could run.
+after a failed/interrupted hint publication. This fixes the single-window case
+where one stalled oldest hint consumed every candidate admission window; it does
+not preserve that priority independently for each setup window.
 Receipt `full_scan_pending` conservatively records incomplete hourly coverage across
 windows and interruption. Newly discovered hints after the fixed timestamp enter
 ordinary settled-owner retries immediately, or the next hourly cohort otherwise.
@@ -319,16 +322,36 @@ not arbitrary arrival-rate or kernel-uninterruptible-I/O guarantees.
 
 ### Remaining in this PR
 
-Implementation update 2026-10-09 builds on reconciliation at `f800facfa` and
-setup-I/O isolation in `5d197652a` / `467951af7`. Bounded registration hint setup
-and its retry proofs are above. Exact-head settlement and fail-closed locked
-evidence checks are unchanged. Item 2 remains a mechanism-review boundary.
+Reconciled 2026-10-09 against `64667a32b` and `9af401578`: bounded hint setup
+and joined candidates implement the requested separation of setup and candidate
+admission. The new cross-window fairness finding below limits that progress.
+Exact-head settlement and fail-closed locked evidence checks are unchanged.
+Item 2 remains a mechanism-review boundary.
 
 1. **Finish bounded observation and failure isolation.** Per-registration setup
    no longer visits every hint before candidate limits: it has its own count/time
    admission limits and durable continuation. Setup-window ordering replaces global
-   oldest-first sorting; old deferrals retain priority within a window, and the sweep
-   carries coverage across windows. Arbitrary sustained arrival rates remain unproved.
+   oldest-first sorting; old deferrals retain priority within a window. Registration
+   coverage does not establish candidate coverage.
+
+   **Finite cross-window counterexample (source-derived, 2026-10-09):** take two
+   32-entry setup windows, `a00..a31` and `b00..b31`, with equally old hints. Each
+   setup finishes inside its admission window; hint publication for `a00` and
+   `b00` stalls beyond the separate candidate deadline. `registration_after`
+   advances to the next window before candidate application. The single
+   `fairness_after` then alternates `a00`, `b00`: in the other window it either
+   precedes every path or wraps past the end. Healthy `a01` never gets a slot,
+   even without arrivals. An eight-tick scheduling model reproduces this trace;
+   a composed collector fixture has not been run for this combination.
+
+   Preserve candidate retry progress across changing setup windows, rather than
+   allowing another window to overwrite its only continuation. Add a composed
+   proof crossing the 32-registration setup cap while failed publications consume
+   the entire candidate deadline, then interruption and arrivals. The existing
+   eight-FIFO test covers setup time exhaustion; the 41-failure test crosses count
+   limits without exhausting candidate time. Neither covers their intersection.
+   This is remaining implementation, not permission to weaken retry fairness.
+   Arbitrary sustained arrival rates also remain unproved.
 
    Global lock-file creation, initial registration normalization, registry filesystem
    opens/normalization, checkout/Git lease discovery and aggregate locked observation
@@ -453,4 +476,4 @@ allocated bytes by category; observed free-space delta after collection; oldest
 eligible retention age. APFS sharing, hardlinks and concurrent writers mean
 directory sums are estimates, not guaranteed reclaimed bytes.
 
-Check: `cargo test -p loopflow --lib cleanup_setup_` — 9 passed; focused oldest-deferral, failed-hint-window and slow-candidate/hourly tests — 3 passed; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` — passed; unchanged receipt DTO proof retained from `64667a32b`; full acceptance/provider resume: gate; installed scheduler/upgrade: demo.
+Check: `git diff --check` — passed; `uv run python` eight-tick source-derived scheduling model — reproduced cross-window starvation (not a collector fixture); prior unchanged-code results: `cargo test -p loopflow --lib cleanup_setup_` — 9 passed; focused oldest-deferral, failed-hint-window and slow-candidate/hourly tests — 3 passed; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` — passed; unchanged receipt DTO proof retained from `64667a32b`; full acceptance/provider resume: gate; installed scheduler/upgrade: demo.

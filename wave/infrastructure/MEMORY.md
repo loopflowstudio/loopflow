@@ -221,9 +221,8 @@ unpublished code retained, without deletion or delivery authorization.
 
 ## AgentProcess (LOO-443/447, 2026-10-10)
 
-Jack Heart accepted the integrated inventory (#1519, `71741bd4`).
-Unknown stays visible; retry retains history.
-LOO-447 owns Claude/OpenCode takeover and stop; two-second removal, three orphans
+Jack Heart accepted #1519 (`71741bd4`); unknown stays visible, retry retains history.
+LOO-447 owns Claude/OpenCode takeover/stop; two-second removal, three orphans
 and configured-provider runs are accepted unproven.
 
 Headless launch requires an attachment. AgentProcess identity replaces generation;
@@ -236,7 +235,7 @@ Draft ordering and scratch-blocked CI evidence remain at
 
 LOO-447: fenced stop/abort; drop never signals. Custody precedes public Codex
 claims; standby cannot write. Group death releases custody; watchdog stays outside.
-OpenCode saves origins before HTTP, reuses endpoints/readback/private stderr.
+OpenCode saves origins before HTTP; reuses endpoints/readback/stderr.
 `642e6cbf9` removes creation retries; lost identity remains unresolved.
 Claude pipes remain launcher-owned. Public takeover, permission recovery and
 both death orders remain unfinished. Plan: `scratch/stop-and-take-over-claude.md`.

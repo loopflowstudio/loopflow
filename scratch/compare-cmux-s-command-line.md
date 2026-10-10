@@ -521,4 +521,4 @@ identity/delegation, open them, add shell/Files panes, retain an unfinished draf
 change focus, target a harmless command, read output, hide/restore, and verify the
 original input target and draft survive. Demo owns native usability; preserve comparison evidence and use no real accounts or live user terminals.
 
-Check: `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`, lib-test build, `git diff --check` — PASS; network-isolated lib tests `independent_peer_tasks_converge_without_transferring_execution` and `conflicting_and_negative_location_readings_never_choose_a_launch_destination` — 2 PASS. Planning transport's 9-test pass: `4c43550c2`; broader checks remain with gate/CI, configured/native proof with demo.
+Check: `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`, lib-test build, `git diff --check` — PASS; network-isolated lib tests `independent_peer_tasks_converge_without_transferring_execution` and `conflicting_and_negative_location_readings_never_choose_a_launch_destination` — 2 PASS. Broader checks: gate/CI; configured/native proof: demo.

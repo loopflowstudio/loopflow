@@ -147,14 +147,6 @@ impl WorktreePrunePolicy {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TargetedPruneOutcome {
-    Removed(WorktreePruneTarget),
-    RetainedDirty(PathBuf),
-    Protected,
-    NotFound,
-}
-
 #[derive(Debug, Clone, Serialize)]
 pub struct CreateWorktreeResult {
     pub path: PathBuf,
@@ -1318,85 +1310,6 @@ pub fn prune_worktrees(
     Ok(report)
 }
 
-fn targeted_prune(
-    repo: &Path,
-    current_path: &Path,
-    path: &Path,
-    branch: Option<String>,
-    reason: WorktreePruneReason,
-    protected_paths: &HashSet<PathBuf>,
-) -> Result<TargetedPruneOutcome, GitError> {
-    let default_branch = get_default_branch(repo)?;
-    if path == current_path
-        || branch.as_deref() == Some(&default_branch)
-        || path_is_protected(path, protected_paths)
-        || is_persistent_worktree(path)?
-    {
-        return Ok(TargetedPruneOutcome::Protected);
-    }
-    if !is_clean(path)? {
-        return Ok(TargetedPruneOutcome::RetainedDirty(path.to_path_buf()));
-    }
-    let target = WorktreePruneTarget {
-        branch,
-        path: path.to_path_buf(),
-        reason,
-    };
-    remove_worktree_target(repo, &default_branch, &target)?;
-    Ok(TargetedPruneOutcome::Removed(target))
-}
-
-/// Remove one clean worktree named by a trusted remote branch event.
-pub fn prune_branch_worktree(
-    repo: &Path,
-    current_path: &Path,
-    branch: &str,
-    reason: WorktreePruneReason,
-    protected_paths: &HashSet<PathBuf>,
-) -> Result<TargetedPruneOutcome, GitError> {
-    let Some((path, branch)) = list_porcelain(repo)?
-        .into_iter()
-        .find(|(_, candidate)| candidate.as_deref() == Some(branch))
-    else {
-        return Ok(TargetedPruneOutcome::NotFound);
-    };
-    targeted_prune(repo, current_path, &path, branch, reason, protected_paths)
-}
-
-/// Delete abandoned atomic-write directories without touching durable logs.
-pub fn prune_abandoned_prompt_logs(
-    lf_home: &Path,
-    older_than: Duration,
-) -> std::io::Result<Vec<PathBuf>> {
-    let logs = lf_home.join("logs");
-    if !logs.exists() {
-        return Ok(Vec::new());
-    }
-    let cutoff = SystemTime::now()
-        .checked_sub(older_than)
-        .unwrap_or(SystemTime::UNIX_EPOCH);
-    let mut removed = Vec::new();
-    for entry in fs::read_dir(logs)? {
-        let entry = entry?;
-        let path = entry.path();
-        let is_abandoned_temp = entry
-            .file_name()
-            .to_str()
-            .is_some_and(|name| name.starts_with(".tmp"));
-        if !is_abandoned_temp || !entry.file_type()?.is_dir() {
-            continue;
-        }
-        let modified = entry.metadata()?.modified()?;
-        if modified > cutoff {
-            continue;
-        }
-        fs::remove_dir_all(&path)?;
-        removed.push(path);
-    }
-    removed.sort();
-    Ok(removed)
-}
-
 /// Create a local named sibling worktree; the caller owns publishing its branch.
 ///
 /// Source selection belongs to the caller. Wave and Project runtimes use the canonical
@@ -1849,11 +1762,10 @@ mod tests {
     use super::{
         abandoned_prune_reason, apply_network_enrichment, diff_shortstats, ensure_agent_worktree,
         git_common_dir, list_worktrees, move_default_agent_to_worktree, parse_existing_branches,
-        parse_pull_request_states, plan_placement, prune_abandoned_prompt_logs,
-        prune_branch_worktree, remote_stdout, wave_agent_segment, whole_github_answer,
-        worktree_path, worktree_prune_reason, GithubBranches, PlacementError, PlacementStrategy,
-        PullRequestState, RemoteFailure, TargetedPruneOutcome, WorktreePruneReason,
-        WorktreeSegment, WorktreeState,
+        parse_pull_request_states, plan_placement, remote_stdout, wave_agent_segment,
+        whole_github_answer, worktree_path, worktree_prune_reason, GithubBranches, PlacementError,
+        PlacementStrategy, PullRequestState, RemoteFailure, WorktreePruneReason, WorktreeSegment,
+        WorktreeState,
     };
     use std::collections::{HashMap, HashSet};
     use std::fs;
@@ -2297,92 +2209,6 @@ mod tests {
     }
 
     #[test]
-    fn prompt_log_prune_only_removes_abandoned_directories() {
-        let home = tempfile::tempdir().expect("create home");
-        let logs = home.path().join("logs");
-        fs::create_dir_all(logs.join(".tmp-abandoned")).unwrap();
-        fs::write(logs.join(".tmp-abandoned/prompt.md"), "partial").unwrap();
-        fs::create_dir_all(logs.join("durable")).unwrap();
-        fs::write(logs.join(".tmp-file"), "not a directory").unwrap();
-
-        let removed = prune_abandoned_prompt_logs(home.path(), Duration::ZERO).expect("prune logs");
-
-        assert_eq!(removed, vec![logs.join(".tmp-abandoned")]);
-        assert!(!logs.join(".tmp-abandoned").exists());
-        assert!(logs.join("durable").exists());
-        assert!(logs.join(".tmp-file").exists());
-    }
-
-    #[test]
-    fn targeted_prune_retains_dirty_work_and_removes_clean_worktree() {
-        let repo = init_repo();
-        fs::write(repo.path().join("README.md"), "base").unwrap();
-        for args in [
-            ["add", "README.md"].as_slice(),
-            ["commit", "-m", "base"].as_slice(),
-        ] {
-            let output = Command::new("git")
-                .arg("-C")
-                .arg(repo.path())
-                .args(args)
-                .output()
-                .expect("prepare repository");
-            assert!(output.status.success());
-        }
-        let worktrees = tempfile::tempdir().expect("worktree parent");
-        let path = worktrees.path().join("landed");
-        let output = Command::new("git")
-            .arg("-C")
-            .arg(repo.path())
-            .args(["worktree", "add", "-b", "landed", path.to_str().unwrap()])
-            .output()
-            .expect("add worktree");
-        assert!(output.status.success());
-        fs::write(path.join("notes.txt"), "unsaved").unwrap();
-
-        let dirty = prune_branch_worktree(
-            repo.path(),
-            repo.path(),
-            "landed",
-            WorktreePruneReason::Merged,
-            &HashSet::new(),
-        )
-        .expect("inspect dirty worktree");
-        let TargetedPruneOutcome::RetainedDirty(retained) = dirty else {
-            panic!("dirty worktree was not retained: {dirty:?}");
-        };
-        assert_eq!(
-            retained.canonicalize().unwrap(),
-            path.canonicalize().unwrap()
-        );
-        assert!(path.exists());
-
-        fs::remove_file(path.join("notes.txt")).unwrap();
-        let protected = HashSet::from([path.clone()]);
-        let owned = prune_branch_worktree(
-            repo.path(),
-            repo.path(),
-            "landed",
-            WorktreePruneReason::Merged,
-            &protected,
-        )
-        .expect("inspect owned worktree");
-        assert_eq!(owned, TargetedPruneOutcome::Protected);
-        assert!(path.exists());
-
-        let clean = prune_branch_worktree(
-            repo.path(),
-            repo.path(),
-            "landed",
-            WorktreePruneReason::Merged,
-            &HashSet::new(),
-        )
-        .expect("prune clean worktree");
-        assert!(matches!(clean, TargetedPruneOutcome::Removed(_)));
-        assert!(!path.exists());
-    }
-
-    #[test]
     fn worktree_segment_rejects_dots() {
         let err = WorktreeSegment::parse("api.v2").unwrap_err();
         assert_eq!(err, PlacementError::DotsReserved("api.v2".to_string()));
@@ -2448,7 +2274,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_persistent_checkout_recovers_commits_and_pruning_retains_it() {
+    fn missing_persistent_checkout_recovers_commits() {
         let (_root, repo) = repo_with_origin();
         let segment = wave_agent_segment("ship").unwrap();
         let persistent = ensure_agent_worktree(&repo, segment.clone()).unwrap();
@@ -2461,18 +2287,6 @@ mod tests {
             fs::read_to_string(recovered.path.join("memory.md")).unwrap(),
             "unpublished"
         );
-        assert_eq!(
-            prune_branch_worktree(
-                &repo,
-                &repo,
-                &recovered.branch,
-                WorktreePruneReason::Merged,
-                &HashSet::new()
-            )
-            .unwrap(),
-            TargetedPruneOutcome::Protected
-        );
-        assert!(recovered.path.exists());
     }
 
     #[test]

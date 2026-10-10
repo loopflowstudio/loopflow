@@ -206,10 +206,6 @@ pub struct InteractionRoute {
     pub condition: Option<String>,
 }
 
-pub fn project_interactions(graph: &FlowGraph) -> InteractionGraph {
-    project_interaction_nodes(&graph.steps)
-}
-
 fn project_interaction_nodes(steps: &[FlowNode]) -> InteractionGraph {
     use std::collections::BTreeSet;
     fn connect(
@@ -728,7 +724,7 @@ mod tests {
             skill("decide", None, false, Some(4)),
         ];
         let graph = FlowGraph::new("example", &steps);
-        let projection = super::project_interactions(&graph);
+        let projection = super::project_interaction_nodes(&graph.steps);
         assert_eq!(projection.stages, ["0", "3"]);
         let edge = projection
             .transitions
@@ -786,7 +782,10 @@ mod tests {
         .unwrap();
         for entry in entries {
             if let Some(graph) = entry.graph {
-                assert_eq!(*graph.interactions, super::project_interactions(&graph));
+                assert_eq!(
+                    *graph.interactions,
+                    super::project_interaction_nodes(&graph.steps)
+                );
             }
         }
         let graph = FlowGraph::new(

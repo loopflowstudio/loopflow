@@ -339,22 +339,6 @@ pub fn checkout(repo: &Path, ref_name: &str) -> Result<(), GitError> {
     Ok(())
 }
 
-/// Create and checkout a new branch from current HEAD.
-pub fn checkout_new_branch(repo: &Path, branch: &str) -> Result<(), GitError> {
-    git_stdout(repo, &["checkout", "-b", branch])?;
-    Ok(())
-}
-
-/// Create and checkout a new branch from an explicit ref.
-pub fn checkout_new_branch_from(
-    repo: &Path,
-    branch: &str,
-    start_point: &str,
-) -> Result<(), GitError> {
-    git_stdout(repo, &["checkout", "--no-track", "-b", branch, start_point])?;
-    Ok(())
-}
-
 /// Stash the working tree including untracked files. Returns `true` when
 /// something was stashed, `false` when the tree was already clean.
 pub fn stash_including_untracked(repo: &Path) -> Result<bool, GitError> {
@@ -433,67 +417,6 @@ pub(crate) fn delete_local_branch_inheriting(
         });
     }
     Ok(())
-}
-
-pub fn branch_rename(repo: &Path, old_name: &str, new_name: &str) -> Result<(), GitError> {
-    if let Some(worktree) = find_worktree_for_branch(repo, old_name)? {
-        let command = format!("git -C {} branch -m {}", worktree.display(), new_name);
-        let output = run_git(&worktree, &["branch", "-m", new_name])?;
-        if output.status.success() {
-            return Ok(());
-        }
-
-        return Err(GitError::CommandFailed {
-            command,
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        });
-    }
-
-    let command = format!("git branch -m {} {}", old_name, new_name);
-    for attempt in 0..3 {
-        let output = run_git(repo, &["branch", "-m", old_name, new_name])?;
-        if output.status.success() {
-            return Ok(());
-        }
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-        if stderr.contains(&format!("no branch named '{old_name}'")) {
-            if let Some(worktree) = find_worktree_for_branch(repo, old_name)? {
-                let fallback_command =
-                    format!("git -C {} branch -m {}", worktree.display(), new_name);
-                let fallback = run_git(&worktree, &["branch", "-m", new_name])?;
-                if fallback.status.success() {
-                    return Ok(());
-                }
-
-                let fallback_stderr = String::from_utf8_lossy(&fallback.stderr).to_string();
-                if attempt < 2 && fallback_stderr.contains(&format!("no branch named '{old_name}'"))
-                {
-                    thread::sleep(Duration::from_millis(25));
-                    continue;
-                }
-
-                return Err(GitError::CommandFailed {
-                    command: fallback_command,
-                    stderr: fallback_stderr,
-                });
-            }
-
-            if attempt < 2 {
-                thread::sleep(Duration::from_millis(25));
-                continue;
-            }
-        }
-        let lock_failed = stderr.contains("could not lock config file");
-        if lock_failed && attempt < 2 {
-            thread::sleep(Duration::from_millis(25));
-            continue;
-        }
-        return Err(GitError::CommandFailed { command, stderr });
-    }
-    Err(GitError::CommandFailed {
-        command,
-        stderr: "git branch rename retry exhausted".to_string(),
-    })
 }
 
 /// Get current branch name. Returns None if in detached HEAD state.
@@ -579,73 +502,14 @@ pub fn get_default_branch(repo: &Path) -> Result<String, GitError> {
 
 /// Return true if working tree is clean.
 pub fn is_clean(repo: &Path) -> Result<bool, GitError> {
-    is_clean_for_pathspec(repo, &[])
-}
-
-/// Return true when only gate artifacts under `scratch/` are dirty.
-pub fn is_materially_clean(repo: &Path) -> Result<bool, GitError> {
-    is_clean_for_pathspec(repo, &[".", ":(exclude)scratch", ":(exclude)scratch/**"])
-}
-
-fn is_clean_for_pathspec(repo: &Path, pathspec: &[&str]) -> Result<bool, GitError> {
-    let mut args = vec!["status", "--porcelain"];
-    args.extend_from_slice(pathspec);
-    let output = run_git(repo, &args)?;
+    let output = run_git(repo, &["status", "--porcelain"])?;
     if !output.status.success() {
         return Err(GitError::CommandFailed {
-            command: format!("git {}", args.join(" ")),
+            command: "git status --porcelain".to_string(),
             stderr: String::from_utf8_lossy(&output.stderr).to_string(),
         });
     }
     Ok(String::from_utf8_lossy(&output.stdout).trim().is_empty())
-}
-
-/// Repository state relevant to a Task flow's no-progress check.
-///
-/// The returned text is an opaque comparison value, not a user-facing diff.
-/// It includes committed, staged, tracked working-tree, and untracked-file
-/// changes without reading ignored files.
-pub fn worktree_state(repo: &Path) -> Result<String, GitError> {
-    worktree_state_for_pathspec(repo, &[])
-}
-
-/// Repository state that ignores gate-only artifacts under `scratch/`.
-pub fn material_worktree_state(repo: &Path) -> Result<String, GitError> {
-    worktree_state_for_pathspec(repo, &[".", ":(exclude)scratch", ":(exclude)scratch/**"])
-}
-
-fn worktree_state_for_pathspec(repo: &Path, pathspec: &[&str]) -> Result<String, GitError> {
-    let head = git_stdout(repo, &["rev-parse", "HEAD"])?;
-    let mut status_args = vec!["status", "--porcelain"];
-    status_args.extend_from_slice(pathspec);
-    let status = git_stdout(repo, &status_args)?;
-    let mut diff_args = vec!["diff", "--binary", "HEAD"];
-    diff_args.extend_from_slice(pathspec);
-    let diff = git_stdout(repo, &diff_args)?;
-    let mut untracked_args = vec!["ls-files", "--others", "--exclude-standard", "-z"];
-    untracked_args.extend_from_slice(pathspec);
-    let untracked = git_stdout(repo, &untracked_args)?;
-    let mut untracked_state = String::new();
-    for relative in untracked.split('\0').filter(|path| !path.is_empty()) {
-        let path = repo.join(relative);
-        let metadata = std::fs::symlink_metadata(&path)?;
-        let contents = if metadata.file_type().is_symlink() {
-            std::fs::read_link(path)?
-                .as_os_str()
-                .as_encoded_bytes()
-                .to_vec()
-        } else if metadata.is_file() {
-            std::fs::read(path)?
-        } else {
-            Vec::new()
-        };
-        let digest = hex::encode(Sha256::digest(contents));
-        untracked_state.push_str(relative);
-        untracked_state.push('\0');
-        untracked_state.push_str(&digest);
-        untracked_state.push('\0');
-    }
-    Ok(format!("{head}\0{status}\0{diff}\0{untracked_state}"))
 }
 
 /// Stage all changes.
@@ -996,23 +860,6 @@ pub(crate) fn worktree_remove_owned(
     if !output.status.success() {
         return Err(GitError::CommandFailed {
             command: format!("git worktree remove --force {}", path.display()),
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        });
-    }
-    Ok(())
-}
-
-/// Move a worktree to a new path.
-pub fn worktree_move(repo: &Path, old_path: &Path, new_path: &Path) -> Result<(), GitError> {
-    let old_str = old_path.to_string_lossy();
-    let new_str = new_path.to_string_lossy();
-    let output = run_git(
-        repo,
-        &["worktree", "move", old_str.as_ref(), new_str.as_ref()],
-    )?;
-    if !output.status.success() {
-        return Err(GitError::CommandFailed {
-            command: format!("git worktree move {} {}", old_str, new_str),
             stderr: String::from_utf8_lossy(&output.stderr).to_string(),
         });
     }
@@ -1457,23 +1304,6 @@ pub fn diff_names(repo: &Path, old: &str, new: &str) -> Result<Vec<PathBuf>, Git
         .collect())
 }
 
-/// Hash the contents of areas in a repo using git ls-tree.
-///
-/// Returns a hex-encoded SHA-256 digest of the `git ls-tree` output for the
-/// given paths. Changes to any file in any area will produce a different hash.
-/// Fast: reads from the git index, no file I/O.
-pub fn hash_areas(repo: &Path, areas: &[String]) -> Result<String, GitError> {
-    use sha2::{Digest, Sha256};
-
-    let mut args = vec!["ls-tree", "-r", "HEAD", "--"];
-    for area in areas {
-        args.push(area);
-    }
-    let output = git_stdout(repo, &args)?;
-    let digest = Sha256::digest(output.as_bytes());
-    Ok(hex::encode(digest))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1734,11 +1564,11 @@ mod tests {
     }
 
     #[test]
-    fn git_checkout_and_checkout_new_branch() {
+    fn git_checkout_switches_branches() {
         let repo = init_repo();
         commit_file(repo.path(), "README.md", "hello");
 
-        checkout_new_branch(repo.path(), "feature").expect("create feature");
+        git_stdout(repo.path(), &["checkout", "-b", "feature"]).expect("create feature");
         assert_eq!(
             current_branch(repo.path()).unwrap(),
             Some("feature".to_string())
@@ -1749,20 +1579,6 @@ mod tests {
             current_branch(repo.path()).unwrap(),
             Some("main".to_string())
         );
-    }
-
-    #[test]
-    fn git_checkout_new_branch_from_ignores_current_head() {
-        let repo = init_repo();
-        commit_file(repo.path(), "README.md", "hello");
-        let main = rev_parse(repo.path(), "main").unwrap();
-        checkout_new_branch(repo.path(), "first-delivery").unwrap();
-        commit_file(repo.path(), "delivery.txt", "shipped");
-
-        checkout_new_branch_from(repo.path(), "second-delivery", "main").unwrap();
-
-        assert_eq!(rev_parse(repo.path(), "HEAD").unwrap(), main);
-        assert!(!repo.path().join("delivery.txt").exists());
     }
 
     #[test]
@@ -1797,60 +1613,6 @@ mod tests {
     }
 
     #[test]
-    fn worktree_state_changes_with_committed_and_uncommitted_work() {
-        let repo = init_repo();
-        commit_file(repo.path(), "README.md", "one");
-        let initial = worktree_state(repo.path()).expect("initial state");
-
-        fs::write(repo.path().join("README.md"), "two").expect("edit tracked file");
-        let dirty = worktree_state(repo.path()).expect("dirty state");
-        assert_ne!(dirty, initial);
-
-        stage_all(repo.path(), &|_| {}).expect("stage all");
-        commit(repo.path(), "update readme", &|_| {}).expect("commit");
-        let committed = worktree_state(repo.path()).expect("committed state");
-        assert_ne!(committed, initial);
-        assert_ne!(committed, dirty);
-    }
-
-    #[test]
-    fn worktree_state_tracks_untracked_file_contents() {
-        let repo = init_repo();
-        commit_file(repo.path(), "README.md", "tracked");
-
-        fs::write(repo.path().join("new.txt"), "one").expect("write untracked file");
-        let initial = worktree_state(repo.path()).expect("initial untracked state");
-        fs::write(repo.path().join("new.txt"), "two").expect("update untracked file");
-        let updated = worktree_state(repo.path()).expect("updated untracked state");
-
-        assert_ne!(initial, updated);
-    }
-
-    #[test]
-    fn material_worktree_state_ignores_gate_scratch_artifacts() {
-        let repo = init_repo();
-        commit_file(repo.path(), "README.md", "tracked");
-        let initial = material_worktree_state(repo.path()).expect("initial state");
-        assert!(is_materially_clean(repo.path()).expect("initially clean"));
-
-        fs::create_dir(repo.path().join("scratch")).expect("create scratch");
-        fs::write(repo.path().join("scratch/review.md"), "gate evidence")
-            .expect("write gate artifact");
-        assert_eq!(
-            material_worktree_state(repo.path()).expect("scratch-only state"),
-            initial
-        );
-        assert!(is_materially_clean(repo.path()).expect("scratch-only clean"));
-
-        fs::write(repo.path().join("src.txt"), "material repair").expect("write repair");
-        assert_ne!(
-            material_worktree_state(repo.path()).expect("material state"),
-            initial
-        );
-        assert!(!is_materially_clean(repo.path()).expect("materially dirty"));
-    }
-
-    #[test]
     fn git_stage_all_and_commit() {
         let repo = init_repo();
         let path = repo.path().join("stage.txt");
@@ -1879,7 +1641,7 @@ mod tests {
         )
         .expect("add remote");
 
-        checkout_new_branch(repo.path(), "feature").expect("create feature");
+        git_stdout(repo.path(), &["checkout", "-b", "feature"]).expect("create feature");
         commit_file(repo.path(), "feature.txt", "feature");
         push_with_upstream(repo.path(), "origin", "feature", &|_| {}).expect("push with upstream");
 
@@ -1901,50 +1663,11 @@ mod tests {
         let repo = init_repo();
         commit_file(repo.path(), "README.md", "hello");
 
-        checkout_new_branch(repo.path(), "feature").expect("create feature");
+        git_stdout(repo.path(), &["checkout", "-b", "feature"]).expect("create feature");
         commit_file(repo.path(), "feature.txt", "feature");
         checkout(repo.path(), "main").expect("checkout main");
 
         delete_local_branch(repo.path(), "feature").expect("delete branch");
-    }
-
-    #[test]
-    fn git_branch_rename() {
-        let repo = init_repo();
-        commit_file(repo.path(), "README.md", "hello");
-        checkout_new_branch(repo.path(), "old-name").expect("create branch");
-        branch_rename(repo.path(), "old-name", "new-name").expect("rename branch");
-        assert_eq!(
-            current_branch(repo.path()).unwrap(),
-            Some("new-name".to_string())
-        );
-    }
-
-    #[test]
-    fn git_branch_rename_after_worktree_move() {
-        let repo = init_repo();
-        commit_file(repo.path(), "README.md", "hello");
-
-        checkout_new_branch(repo.path(), "feature-old").expect("create feature branch");
-        checkout(repo.path(), "main").expect("back to main");
-
-        let wt_path = repo.path().parent().unwrap().join("feature-old-worktree");
-        git_stdout(
-            repo.path(),
-            &["worktree", "add", wt_path.to_str().unwrap(), "feature-old"],
-        )
-        .expect("create worktree");
-
-        let moved_wt = repo.path().parent().unwrap().join("feature-new-worktree");
-        worktree_move(repo.path(), &wt_path, &moved_wt).expect("move worktree");
-
-        branch_rename(repo.path(), "feature-old", "feature-new").expect("rename branch");
-        assert_eq!(
-            current_branch(&moved_wt).unwrap(),
-            Some("feature-new".to_string())
-        );
-
-        worktree_remove(repo.path(), &moved_wt).expect("remove worktree");
     }
 
     #[test]
@@ -1955,34 +1678,6 @@ mod tests {
         let sha = rev_parse(repo.path(), "HEAD").expect("rev-parse HEAD");
         assert!(!sha.is_empty());
         assert!(sha.chars().all(|c| c.is_ascii_hexdigit()));
-    }
-
-    #[test]
-    fn git_worktree_move_and_add() {
-        let repo = init_repo();
-        commit_file(repo.path(), "README.md", "hello");
-
-        // Create a worktree
-        let wt_path = repo.path().parent().unwrap().join("test-worktree");
-        checkout_new_branch(repo.path(), "feature").expect("create feature");
-        checkout(repo.path(), "main").expect("back to main");
-
-        git_stdout(
-            repo.path(),
-            &["worktree", "add", wt_path.to_str().unwrap(), "feature"],
-        )
-        .expect("create worktree");
-
-        // Move the worktree
-        let new_path = repo.path().parent().unwrap().join("moved-worktree");
-        worktree_move(repo.path(), &wt_path, &new_path).expect("move worktree");
-
-        // Verify old path doesn't exist, new path does
-        assert!(!wt_path.exists());
-        assert!(new_path.exists());
-
-        // Clean up
-        worktree_remove(repo.path(), &new_path).expect("remove worktree");
     }
 
     #[test]
@@ -2010,38 +1705,5 @@ mod tests {
 
         // Clean up
         worktree_remove(repo.path(), &wt_path).expect("remove worktree");
-    }
-
-    #[test]
-    fn hash_areas_returns_stable_digest() {
-        let repo = init_repo();
-        let src = repo.path().join("src");
-        fs::create_dir(&src).unwrap();
-        fs::write(src.join("lib.rs"), "fn main() {}").unwrap();
-        git_stdout(repo.path(), &["add", "."]).unwrap();
-        git_stdout(repo.path(), &["commit", "-m", "init"]).unwrap();
-
-        let h1 = hash_areas(repo.path(), &["src/".to_string()]).unwrap();
-        let h2 = hash_areas(repo.path(), &["src/".to_string()]).unwrap();
-        assert_eq!(h1, h2, "same content should produce same hash");
-        assert_eq!(h1.len(), 64, "SHA-256 hex digest should be 64 chars");
-    }
-
-    #[test]
-    fn hash_areas_changes_when_file_changes() {
-        let repo = init_repo();
-        let src = repo.path().join("src");
-        fs::create_dir(&src).unwrap();
-        fs::write(src.join("lib.rs"), "v1").unwrap();
-        git_stdout(repo.path(), &["add", "."]).unwrap();
-        git_stdout(repo.path(), &["commit", "-m", "v1"]).unwrap();
-        let h1 = hash_areas(repo.path(), &["src/".to_string()]).unwrap();
-
-        fs::write(src.join("lib.rs"), "v2").unwrap();
-        git_stdout(repo.path(), &["add", "."]).unwrap();
-        git_stdout(repo.path(), &["commit", "-m", "v2"]).unwrap();
-        let h2 = hash_areas(repo.path(), &["src/".to_string()]).unwrap();
-
-        assert_ne!(h1, h2, "different content should produce different hash");
     }
 }

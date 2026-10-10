@@ -319,20 +319,11 @@ fn settle_step(
     }
 }
 
-pub fn current_skill(items: &[ConcreteStep], cursor: &ExecutionCursor) -> Option<ConcreteSkill> {
-    let (items, cursor) = cursor.current_body(items);
-    match items.get(cursor.index) {
-        Some(ConcreteStep::Skill(skill)) => Some(skill.clone()),
-        Some(ConcreteStep::Xor(branch)) => Some(branch.router_skill()),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use crate::flow::runner::{
-        current_skill, ExecutionContext, ExecutionCursor, FlowOutcome, FlowRunner, NestedCursor,
-        SkillExecutor, SkillOutcome,
+        ExecutionContext, ExecutionCursor, FlowOutcome, FlowRunner, NestedCursor, SkillExecutor,
+        SkillOutcome,
     };
     use crate::flow::transitions::{FlowDecision, FlowVerdict};
     use crate::flow::{
@@ -344,6 +335,15 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::{Arc, Mutex};
     use tempfile::tempdir;
+
+    fn current_skill(items: &[ConcreteStep], cursor: &ExecutionCursor) -> Option<ConcreteSkill> {
+        let (items, cursor) = cursor.current_body(items);
+        match items.get(cursor.index) {
+            Some(ConcreteStep::Skill(skill)) => Some(skill.clone()),
+            Some(ConcreteStep::Xor(branch)) => Some(branch.router_skill()),
+            _ => None,
+        }
+    }
 
     #[derive(Debug, Clone)]
     struct RecordingExecutor {

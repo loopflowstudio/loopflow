@@ -18,15 +18,6 @@ impl FlowOutput {
         format!("\n\nReturn the final answer as the declared JSON value: {}. This output contract supersedes saved instructions to run Flow decision or router commands. The selected successful completion supplies the decision. Return blocked with a reason when a person must resolve the question. That stops the Flow at this position; explain the missing input in the reason.", self.schema())
     }
 
-    pub fn decode_receipt(&self, payload: &Value) -> Result<SkillOutcome, String> {
-        if let Some(value) = payload.get("value") {
-            return self.decode(value);
-        }
-        let text = payload["text"].as_str().ok_or("final output is absent")?;
-        let value = serde_json::from_str(text).map_err(|_| "final output must be JSON")?;
-        self.decode(&value)
-    }
-
     pub fn for_step(step: &ConcreteStep) -> Option<Self> {
         match step {
             ConcreteStep::Skill(skill) if !skill.human && skill.returns.is_some() => {
@@ -170,16 +161,7 @@ mod tests {
             let expected = output
                 .decode(&json!({"decision": decision, field: "evidence"}))
                 .unwrap();
-            assert_eq!(
-                output.decode_receipt(&json!({"value": value})).unwrap(),
-                expected
-            );
-            assert_eq!(
-                output
-                    .decode_receipt(&json!({"text": value.to_string()}))
-                    .unwrap(),
-                expected
-            );
+            assert_eq!(output.decode(&value).unwrap(), expected);
         }
     }
 

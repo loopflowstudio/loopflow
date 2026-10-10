@@ -1091,10 +1091,6 @@ pub fn build_opencode_command(process: &ProcessConfig, model_variant: Option<&st
 /// Build the `OPENCODE_CONFIG_CONTENT` env var JSON string.
 ///
 /// Returns `None` when no config overrides are needed (interactive mode, no context).
-pub fn build_opencode_env(process: &ProcessConfig) -> Option<String> {
-    build_opencode_env_for_scope(process, AgentWriteScope::Configured)
-}
-
 fn build_opencode_env_for_scope(
     process: &ProcessConfig,
     write_scope: AgentWriteScope,
@@ -1160,19 +1156,6 @@ pub fn build_model_command(
         // Unknown harness: fall back to Claude with the full model string as variant.
         _ => build_claude_command(launch, process, capabilities, Some(agent)),
     }
-}
-
-/// Build a full CLI command (including prompt) for a model.
-pub fn build_agent_command(
-    launch: &AgentConfig,
-    process: &ProcessConfig,
-    capabilities: &AgentCapabilities,
-) -> Vec<String> {
-    let mut cmd = build_model_command(launch, process, capabilities);
-    if !launch.task_prompt.is_empty() {
-        cmd.push(launch.task_prompt.clone());
-    }
-    cmd
 }
 
 /// Launch an agent subprocess and wait for it to exit.
@@ -2852,7 +2835,7 @@ trust_level = "trusted"
         assert!(cmd.contains(&"json".to_string()));
     }
 
-    // ── build_opencode_env ──────────────────────────────────────
+    // ── build_opencode_env_for_scope ──────────────────────────────────────
 
     #[test]
     fn build_opencode_env_auto_and_context() {
@@ -2861,7 +2844,7 @@ trust_level = "trusted"
             context_file: Some(std::path::PathBuf::from("/tmp/lf-context.md")),
             ..Default::default()
         };
-        let env = build_opencode_env(&process).unwrap();
+        let env = build_opencode_env_for_scope(&process, AgentWriteScope::Configured).unwrap();
         let v: serde_json::Value = serde_json::from_str(&env).unwrap();
         assert_eq!(v["permission"], "allow");
         assert_eq!(v["instructions"][0], "/tmp/lf-context.md");
@@ -2873,7 +2856,7 @@ trust_level = "trusted"
             auto: true,
             ..Default::default()
         };
-        let env = build_opencode_env(&process).unwrap();
+        let env = build_opencode_env_for_scope(&process, AgentWriteScope::Configured).unwrap();
         let v: serde_json::Value = serde_json::from_str(&env).unwrap();
         assert_eq!(v["permission"], "allow");
         assert!(v.get("instructions").is_none());
@@ -2885,7 +2868,7 @@ trust_level = "trusted"
             context_file: Some(std::path::PathBuf::from("/tmp/lf-context.md")),
             ..Default::default()
         };
-        let env = build_opencode_env(&process).unwrap();
+        let env = build_opencode_env_for_scope(&process, AgentWriteScope::Configured).unwrap();
         let v: serde_json::Value = serde_json::from_str(&env).unwrap();
         assert!(v.get("permission").is_none());
         assert_eq!(v["instructions"][0], "/tmp/lf-context.md");
@@ -2893,43 +2876,11 @@ trust_level = "trusted"
 
     #[test]
     fn build_opencode_env_neither() {
-        assert!(build_opencode_env(&ProcessConfig::default()).is_none());
-    }
-
-    // ── build_agent_command: opencode integration ───────────────
-
-    #[test]
-    fn build_agent_command_opencode_default() {
-        let launch = AgentConfig {
-            agent: Some("opencode".to_string()),
-            task_prompt: "fix the bug".to_string(),
-            ..Default::default()
-        };
-        let process = ProcessConfig {
-            auto: true,
-            ..Default::default()
-        };
-        let cmd = build_agent_command(&launch, &process, &AgentCapabilities::default());
-        assert_eq!(cmd[0], "opencode");
-        assert_eq!(cmd[1], "run");
-        assert_eq!(*cmd.last().unwrap(), "fix the bug");
-    }
-
-    #[test]
-    fn build_agent_command_opencode_with_variant() {
-        let launch = AgentConfig {
-            agent: Some("opencode:anthropic/claude-sonnet".to_string()),
-            task_prompt: "fix the bug".to_string(),
-            ..Default::default()
-        };
-        let process = ProcessConfig {
-            auto: true,
-            ..Default::default()
-        };
-        let cmd = build_agent_command(&launch, &process, &AgentCapabilities::default());
-        assert!(cmd.contains(&"--model".to_string()));
-        assert!(cmd.contains(&"anthropic/claude-sonnet".to_string()));
-        assert_eq!(*cmd.last().unwrap(), "fix the bug");
+        assert!(build_opencode_env_for_scope(
+            &ProcessConfig::default(),
+            AgentWriteScope::Configured
+        )
+        .is_none());
     }
 
     // ── ClaudeArgs ────────────────────────────────────────────────

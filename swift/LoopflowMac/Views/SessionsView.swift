@@ -874,7 +874,8 @@ struct SessionsContentView: View {
                let identity = record.workspace?.identity {
                 // Cache the existing Files owner even without a requested pane:
                 // later toolbar/CLI opens must not interpret this peer path locally.
-                _ = workspaces.workspace(for: identity).files(taskId: location.taskID, issue: taskID,
+                let key = destination.task.runtime?.workId ?? destination.task.task.identifier
+                _ = workspaces.workspace(for: identity).files(taskId: key, issue: taskID,
                     cwd: identity.worktree, query: store.query(for: record))
             }
         }

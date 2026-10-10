@@ -93,8 +93,10 @@ struct TaskReadings<Value> {
 struct LinkedSession: Equatable {
     let generation: Int
     let record: SessionRecord
-    let changesTask: RoadmapTask?
-    var location: TaskLocationObservation? = nil
+    let task: RoadmapTask
+    let showsChanges: Bool
+    let location: TaskLocationObservation?
+    var changesTask: RoadmapTask? { showsChanges ? task : nil }
 }
 
 struct LinkedTaskPage: Equatable {
@@ -220,7 +222,7 @@ final class WorkModel {
         var executionIdentity = navigation.preparedTaskWorktrees[task.id] ?? task.reference.workspace?.identity
         if let machine = link.machine, let repository = link.repository {
             let identity = try await query.repositoryIdentity(cwd: wave.wave.repo)
-            guard identity.id == repository else {
+            guard identity.locators.contains(repository) else {
                 throw RegistryQueryError("The repository identity changed; nothing was opened.")
             }
             executionQuery = query.onMachine(machine, repository: repository)
@@ -303,7 +305,7 @@ final class WorkModel {
         sessions = .available(records)
         navigation.selectedSessionId = record.id
         navigation.content = .terminals
-        linkedSession = LinkedSession(generation: generation, record: record, changesTask: link.diff ? task : nil, location: location)
+        linkedSession = LinkedSession(generation: generation, record: record, task: task, showsChanges: link.diff, location: location)
     }
 
     /// Called by the requested Task's mounted page (or its unavailable surface).

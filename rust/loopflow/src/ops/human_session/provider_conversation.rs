@@ -301,17 +301,25 @@ async fn find(store: &SharedStore, id: &str) -> Result<Vec<NativeConversation>> 
 
 /// Codex keeps `sessions/<year>/<month>/<day>/rollout-<time>-<id>.jsonl`;
 /// Claude keeps `projects/<directory>/<id>.jsonl`.
+fn transcript_layout(provider: Provider, home: &Path) -> (PathBuf, usize) {
+    match provider {
+        Provider::Codex => (home.join("sessions"), 3),
+        _ => (home.join("projects"), 1),
+    }
+}
+
 fn transcript(provider: Provider, home: &Path, id: &str) -> Option<PathBuf> {
+    let (root, depth) = transcript_layout(provider, home);
     match provider {
         Provider::Codex => {
             let suffix = format!("-{id}.jsonl");
-            find_file(&home.join("sessions"), 3, &|name| {
+            find_file(&root, depth, &|name| {
                 name.starts_with("rollout-") && name.ends_with(&suffix)
             })
         }
         _ => {
             let name = format!("{id}.jsonl");
-            find_file(&home.join("projects"), 1, &|found| found == name)
+            find_file(&root, depth, &|found| found == name)
         }
     }
 }
@@ -368,10 +376,7 @@ pub(crate) fn transcript_evidence(
         }
         Ok(())
     }
-    let (root, depth) = match provider {
-        Provider::Codex => (home.join("sessions"), 3),
-        _ => (home.join("projects"), 1),
-    };
+    let (root, depth) = transcript_layout(provider, home);
     let mut paths = vec![root.clone(), home.join("history.jsonl")];
     visit(
         &root,

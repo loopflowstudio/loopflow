@@ -139,7 +139,11 @@ fn release_registry() -> OpsResult<Option<SqliteStore>> {
     SqliteStore::open_read_only(&path).map(Some).map_err(error)
 }
 
-fn evidence_roots(store: &SqliteStore) -> OpsResult<Vec<PathBuf>> {
+fn evidence_blocks_checkout(store: &SqliteStore, checkout: &Path) -> OpsResult<bool> {
+    let overlaps = |path: &Path| -> OpsResult<bool> {
+        let root = crate::store::canonicalize_with_missing_tail(path).map_err(error)?;
+        Ok(root.starts_with(checkout) || checkout.starts_with(root))
+    };
     let mut roots = vec![
         crate::store::lf_home_dir(),
         store.home_dir().map_err(error)?,
@@ -151,6 +155,13 @@ fn evidence_roots(store: &SqliteStore) -> OpsResult<Vec<PathBuf>> {
                 .expect("database has a parent")
                 .to_path_buf(),
         );
+    }
+    // A positive match is enough to retain. Never build a complete resolved
+    // inventory, or traverse history beneath an already protected home.
+    for root in roots {
+        if overlaps(&root)? {
+            return Ok(true);
+        }
     }
     let mut homes = Vec::new();
     for provider in [
@@ -171,17 +182,28 @@ fn evidence_roots(store: &SqliteStore) -> OpsResult<Vec<PathBuf>> {
             homes.push((provider, home));
         }
     }
-    roots.extend(store.session_evidence_paths().map_err(error)?);
-    for (provider, home) in homes {
-        roots.extend(
-            crate::ops::human_session::provider_conversation::transcript_evidence(provider, &home)?,
-        );
-        roots.push(home);
+    let mut seen = HashSet::new();
+    homes.retain(|home| seen.insert(home.clone()));
+    for (_, home) in &homes {
+        if overlaps(home)? {
+            return Ok(true);
+        }
     }
-    roots
-        .into_iter()
-        .map(|path| crate::store::canonicalize_with_missing_tail(&path).map_err(error))
-        .collect()
+    for path in store.session_evidence_paths().map_err(error)? {
+        if overlaps(&path)? {
+            return Ok(true);
+        }
+    }
+    for (provider, home) in homes {
+        for path in
+            crate::ops::human_session::provider_conversation::transcript_evidence(provider, &home)?
+        {
+            if overlaps(&path)? {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
 }
 
 /// The selected and release registries enforce the same retention policy. Read
@@ -204,10 +226,10 @@ impl RegistryObservations {
             task.worktree = normalized(&task.worktree);
         }
         Ok(Self {
-            store: store.clone(),
             home: store.home_dir().map_err(error)?,
             tasks,
             open: store.open_processes().map_err(error)?,
+            store,
         })
     }
 
@@ -267,12 +289,6 @@ impl RegistryObservations {
         }
 
         Ok(None)
-    }
-
-    fn evidence_blocker(&self, path: &Path) -> OpsResult<bool> {
-        Ok(evidence_roots(&self.store)?
-            .iter()
-            .any(|root| root.starts_with(path) || path.starts_with(root)))
     }
 }
 
@@ -480,7 +496,7 @@ fn observe_registered(
     // History can be much larger than the checkout registry. Read it only for
     // otherwise removable candidates; incomplete coverage never authorizes removal.
     for registry in std::iter::once(&local).chain(release.as_ref()) {
-        if registry.evidence_blocker(path)? {
+        if evidence_blocks_checkout(&registry.store, path)? {
             retain(decision, "local Session evidence");
             return Ok(());
         }
@@ -1143,7 +1159,6 @@ mod tests {
     };
     use crate::engine::git::{acquire_worktree_lease, rev_parse};
     use crate::ops::wt::git;
-    use crate::pr_landing::{NewPrLanding, PrLanding, PrLandingState};
     use crate::store::{open_ephemeral_store, SharedStore, StorageConfig};
 
     async fn fixture() -> (TestRepo, tempfile::TempDir, SharedStore, PathBuf) {
@@ -1159,37 +1174,7 @@ mod tests {
         std::fs::write(path.join(".gitignore"), "target/\n target/\nprivate/\n").unwrap();
         git(&path, &["add", ".gitignore"]).unwrap();
         git(&path, &["commit", "-m", "ignore generated files"]).unwrap();
-        let head = rev_parse(&path, "HEAD").unwrap();
-        let landing = PrLanding::new(
-            NewPrLanding {
-                repo: "test/repo".into(),
-                pr_number: 1,
-                worktree: path.clone(),
-                branch: "landed".into(),
-                task_id: None,
-                requested_head_sha: head.clone(),
-            },
-            OffsetDateTime::now_utc(),
-        )
-        .unwrap();
-        let landing = store.start_or_join_pr_landing(&landing).await.unwrap();
-        let mut landing = store
-            .claim_pr_landing(
-                &landing.id,
-                landing.generation,
-                &crate::pr_landing::LandingSupervisor {
-                    placement: crate::pr_landing::LandingPlacement::Local,
-                    process_id: std::process::id(),
-                    heartbeat_at: OffsetDateTime::now_utc(),
-                },
-                OffsetDateTime::UNIX_EPOCH,
-            )
-            .await
-            .unwrap()
-            .unwrap();
-        landing.state = PrLandingState::Merged;
-        landing.merge_commit = Some(head);
-        assert!(store.update_pr_landing(&landing).await.unwrap());
+        record_settlement(&directory, &path, "landed");
         (repo, directory, store, path)
     }
 
@@ -1215,12 +1200,16 @@ mod tests {
 
     fn add_settled(repo: &TestRepo, directory: &tempfile::TempDir, name: &str) -> PathBuf {
         let path = repo.create_named_worktree(name).canonicalize().unwrap();
-        let head = rev_parse(&path, "HEAD").unwrap();
+        record_settlement(directory, &path, name);
+        path
+    }
+
+    fn record_settlement(directory: &tempfile::TempDir, path: &std::path::Path, branch: &str) {
+        let head = rev_parse(path, "HEAD").unwrap();
         let conn = rusqlite::Connection::open(directory.path().join("loopflow.db")).unwrap();
         conn.execute("INSERT INTO pr_landings(id,repo,pr_number,worktree,branch,requested_head_sha,observed_head_sha,merge_commit,state,generation,created_at,updated_at)
             VALUES(?1,'test/repo',2,?2,?1,?3,?3,?3,'merged',1,1,1)",
-            rusqlite::params![name, path.to_str().unwrap(), head]).unwrap();
-        path
+            rusqlite::params![branch, path.to_str().unwrap(), head]).unwrap();
     }
 
     #[tokio::test]
@@ -1918,6 +1907,9 @@ mod tests {
         )
         .unwrap();
         std::fs::write(home.join("history.jsonl"), "retained conversation").unwrap();
+        // The home itself protects this checkout even when its native layout
+        // cannot be traversed. A positive match needs no complete inventory.
+        std::fs::write(home.join("sessions"), "unreadable layout").unwrap();
         let connection = rusqlite::Connection::open(directory.path().join("loopflow.db")).unwrap();
         connection.execute("INSERT INTO provider_accounts(provider,account_id,home,credential_state,routing_state,created_at,updated_at) VALUES('codex','account',?1,'missing','disabled',1,1)", [home.to_str().unwrap()]).unwrap();
         retained(&decision(&store, &repo, &path), "Session evidence");

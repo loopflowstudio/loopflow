@@ -69,7 +69,8 @@ Reuse Task, TaskPr, Process, Git worktree registration and persistent-worktree
 metadata as facts; no cleanup Task status or second worktree registry.
 
 `CleanupDecision { path, observed_head, action, evidence, estimated_bytes }`;
-`action = RemoveCheckout | Retain(reason)`. Size may be unknown, never silently
+`action = ValidateCheckout | RemoveCheckout | Retain(reason)`. Preview validation
+is not removal authority. Size may be unknown, never silently
 zero. A report distinguishes planned, removed, deferred and failed paths.
 Evidence records exact-head settlement, not merely a branch's old PR state.
 Checkout decisions remain transient projections, not another authority. The single
@@ -169,8 +170,13 @@ refreshed under removal admission; retry sorting no longer performs filesystem
 reads or clones paths. Cheap checkout protections precede registry reads, and
 known dirty/unclassified content retains without a history traversal. Planning now
 stops at `ValidateCheckout`; only locked application traverses history. The duplicate
-pre-admission history traversal is deleted, including from maintenance. No known
-deletion targets remain. Explicit abandonment and persistent-branch
+pre-admission history traversal is deleted, including from maintenance. The resolved
+`evidence_roots` inventory and `RegistryObservations::evidence_blocker` wrapper are
+also removed: history checks stop at a positive protection match, but still require
+complete fresh evidence before allowing removal. Duplicate native homes are visited
+once; transcript discovery and cleanup share their layout definition. Cleanup fixtures
+reuse one exact-head settlement setup instead of replaying landing supervision.
+No known deletion targets remain. Explicit abandonment and persistent-branch
 restart retain their separate authority; missing-registration repair does not
 justify restoring broad metadata pruning.
 
@@ -366,4 +372,4 @@ allocated bytes by category; observed free-space delta after collection; oldest
 eligible retention age. APFS sharing, hardlinks and concurrent writers mean
 directory sums are estimates, not guaranteed reclaimed bytes.
 
-Check: `cargo test -p loopflow --lib cleanup_` — 35 passed, cost probe ignored; `cargo test -p loopflow --test dto_fixtures cleanup_` — 3 passed; opt-in cost probe completed; `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` — passed; full acceptance/provider resume: gate; loaded scheduler/upgrade: demo.
+Check: `cargo test -p loopflow --lib cleanup_` — 35 passed, cost probe ignored; `cargo test -p loopflow --lib ops::human_session::provider_conversation::tests` — 6 passed; `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` — passed; full acceptance/provider resume: gate; loaded scheduler/upgrade: demo.

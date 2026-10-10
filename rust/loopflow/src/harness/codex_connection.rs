@@ -20,9 +20,7 @@ use crate::store::{StoreError, StoreResult};
 /// Refuse shutdown if the saved endpoint serves an unrelated conversation.
 /// The caller holds the Session attachment lock through inspection and shutdown;
 /// this check neither signals the provider nor changes its saved history.
-pub(crate) fn validate_agent_process_close(
-    (endpoint, thread): (&str, &AgentSessionId),
-) -> Result<()> {
+pub(crate) fn validate_agent_process_close(endpoint: &str, thread: &AgentSessionId) -> Result<()> {
     // Use a separate runtime: exit is also reached from synchronous capture
     // settlement and signal cleanup, sometimes inside an existing runtime.
     std::thread::scope(|scope| {

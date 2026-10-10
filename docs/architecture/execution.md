@@ -119,8 +119,10 @@ headless groups under that attachment fence, refusing ambiguous OS ownership;
 Codex additionally refuses a server hosting unrelated conversations. OpenCode's
 harness stop/abort/drop paths still need the same fence. Claude harness stop and
 interrupt use the common group close, recording death before releasing the fence.
-Runtime settlement alone does not establish takeover safety. Owned native launches use the same pre-exec recording channel under
-the attachment lock, but no headless group/watchdog setup. Failed recording prevents provider code
+Runtime settlement alone does not establish takeover safety.
+
+Owned native launches use the same pre-exec recording channel under the attachment
+lock, but no headless group/watchdog setup. Failed recording prevents provider code
 from running. Captured native waits retain the spawned attachment snapshot: a late
 wait cannot mark a replacement exited. Native terminal process groups are unchanged;
 foreground orphan cleanup remains unfinished.

@@ -1,126 +1,87 @@
 # LOO-447 — headless takeover and stop
 
 Jack Heart requested provider-independent takeover and stop on 2026-10-09.
-The Task outcome is accepted; this implementation plan is a draft (2026-10-10).
-Both dependencies are integrated at `be4a2b2af`: #1519 and #1520. This meets
-Jack Heart’s steer `28e0c5cc` to wait for the engine/driver strike (#1520).
-LOO-443's remaining item 3 was read at
+The outcome is accepted; the transport design below remains a draft (2026-10-10).
+Dependencies #1519/#1520 are integrated at `be4a2b2af`, satisfying Jack Heart's
+steer `28e0c5cc`. LOO-443's remaining item 3 was read at
 `4f6ed76b2^:scratch/introduce-agentprocess-record-the-provider.md`.
 
 ## Outcome and preservation
 
-A current attachment stops its headless AgentProcess; a superseded attachment
-cannot. Takeover retains AgentProcess identity, native history and outstanding
-turns in either launcher/attacher death order. Foreground terminal providers
-remain outside group control. Tests signal only their own throwaway children.
-No installed-store writes, configured-provider runs, or delivery are authorized
-by this implementation step. Jack accepted the SIGKILL timing demonstration and
-three historical orphans as out of scope.
+The current attachment can stop its headless AgentProcess; superseded attachments
+cannot. Takeover preserves AgentProcess identity, native history and outstanding
+turns in both death orders: launcher first and attacher first. Foreground terminal
+providers remain outside headless group control. Tests signal only their own
+throwaway children; the lifeline shell stays dash-compatible (`kill -s TERM -- -pgid`).
+Jack accepted the SIGKILL timing demonstration, three historical orphans and
+configured-provider runs as out of scope. No installed-store writes or delivery
+are authorized by this implementation step. Stop-only work is not independently
+shippable or Task completion.
 
-## Approach and remaining work
+## Implemented boundary
 
-1. Implemented: shared exact-identity/group termination across headless providers,
-   keeping the attachment lock through runtime settlement. Codex still refuses
-   servers hosting unrelated conversations; duplicate OS ownership and unknown
-   evidence still refuse. Tests cover current/stale settlement and foreground
-   exclusion for all three providers, plus group survival after leader exit.
-2. Claude stop/interrupt now use the same recorded-group close as runtime
-   settlement, including duplicate-owner refusal and exit recording under the
-   attachment fence. Local teardown only drops the child handle. Move OpenCode stop,
-   abort and failed-start cleanup under the saved attachment;
-   remove `kill_on_drop(true)` only with replacement lifetime ownership in place.
-   Its current stop sends HTTP abort and group signals without the attachment lock.
-3. Replace optional named/anonymous lifelines with one per-AgentProcess named
-   lifeline. Attach must hold it before ownership transfer commits; release must
-   drop the superseded holder without killing the current attachment's provider.
-   Specify attacher-first recovery before dropping the old holder: dropping it
-   immediately makes the new holder’s death kill a group the launcher still
-   needs. Retention without a bounded release protocol repeats the current leak.
-   Remove process-global unbounded writer retention. Preserve pre-exec recording,
-   closed-stdio descriptor safety and dash-compatible `kill -s TERM -- -pgid`.
-4. Complete reconnect transport, not merely FIFO survival. OpenCode already saves
-   its server URL/native Session but `start_inner` always spawns another server.
-   Claude owns anonymous stdin/stdout/stderr in the launching lf, so retaining a
-   watchdog FIFO alone cannot preserve communication on launcher SIGKILL. An
-   attachable Claude transport needs a design covering input ownership, output
-   draining and pending-turn correlation independently of that launcher. This is
-   not evidence that Claude cannot support takeover at all; do not turn the
-   Task's explicit-refusal allowance into a silent scope reduction.
-5. Public attachment must use the same connection/claim path as harness takeover,
-   with fenced native writes and no raw endpoint bypass. Prove both death orders,
-   A → B → A stale-token rejection, current stop, interactive exclusion, missing
-   identity, and no surviving stale lifeline. Linux CI owns platform proof.
+Runtime settlement and Claude stop/interrupt share exact-identity group close
+under the attachment fence, recording death before releasing it. Unknown identity
+and duplicate ownership refuse; Codex also refuses unrelated conversations.
+Identity is rechecked after Codex I/O. Leader death alone grants neither group
+settlement nor authority to signal surviving helpers. Claude drops its child
+handle only after common close succeeds.
 
-A first stop-only slice is not completion or an independently shippable PR.
-Dependent transport/lifeline work returns to design: the launcher-owned Claude
-pipes invalidate a lifeline-only approach. The full acceptance above remains;
-no refusal or relay design has been accepted on Jack Heart's behalf. These are
-unresolved implementation choices, not evidence that the requested outcome
-needs to shrink.
+Fixtures cover current/stale settlement and foreground exclusion for all providers,
+Claude harness stop fencing, and helpers surviving leader exit. They prove neither
+public takeover nor Linux acceptance. Invalid trace IDs and foreground defaults
+in Claude fixtures were repaired; production schema and installed data are unchanged.
 
-## Transport cut — implementation proposal (2026-10-10)
+## Remaining implementation — Delete, do not maintain
 
-The next cut gives Claude's existing stream reader a launcher-independent owner,
-not another answer parser. A per-AgentProcess transport process owns the three
-provider pipes, drains output while no client is connected, and keeps pending
-request correlation with the existing native-history writer. A private Unix
-socket carries reconnect/control. The saved endpoint is published before an
-attachment can take over; writes validate the frozen attachment at this owner,
-not just in the client. A lost client response never resubmits provider input.
-Restart after transport death must preserve uncertain requests, not replay them.
+1. **Replace OpenCode's unfenced stop/abort/drop paths.** Put stop, HTTP abort and
+   failed-start cleanup under the saved attachment. Remove `kill_on_drop(true)`
+   only with replacement lifetime ownership, so dropping a stale harness cannot
+   kill the current attachment's provider.
+2. **Replace launcher-owned-only Claude transport.** Its anonymous stdin/stdout/
+   stderr and pending correlation die with the launcher; a named watchdog FIFO
+   cannot preserve communication. Give the existing stream reader a per-AgentProcess
+   transport process owning all three pipes and native-history correlation, rather
+   than adding another answer parser. Drain output without a client. Publish a
+   private Unix endpoint before takeover; validate frozen attachments at this owner
+   before writes. Lost responses or transport death retain uncertain inputs, never
+   replay them. This proposal is unimplemented, not an accepted relay design.
+3. **Replace OpenCode's unconditional server spawn on reconnect.** Reuse its saved
+   server URL and native Session. Public attachment and harness takeover must use
+   the same connection/claim path, with fenced writes and no raw endpoint bypass.
+4. **Delete anonymous lifelines and `HELD_LIFELINES`.** One per-AgentProcess named
+   lifeline replaces both providers' anonymous paths and optional `open_lifeline`.
+   Acquire custody before committing transfer; failed claims release only their
+   own holder. A scoped holder observes group death and releases then or on its own
+   exit, instead of accumulating dead providers in a process-global vector.
+   Keep pre-exec recording and closed-stdio descriptor safety.
+   The launcher may remain a non-writing standby after takeover: immediate release
+   would kill its provider if the attacher dies first. Custody never restores stale
+   write authority. Prove both death orders and failed claims before deleting the
+   old mechanisms and their exclusive fixtures.
+5. **Prove the public path.** Both death orders, AgentProcess identity and pending
+   turns, A → B → A stale-token rejection, current stop, foreground exclusion,
+   missing identity and no retained dead-provider lifelines. Linux CI owns platform
+   acceptance. The demo attaches a second lf, SIGKILLs the launcher, checks `lf top`,
+   then stops from the current attachment, for Claude and OpenCode.
 
-Lifeline custody and write authority are separate. The launcher may remain a
-non-writing standby holder after takeover so attacher-first death does not kill
-its provider. Holders must release on observed group death or their own exit;
-they must not accumulate dead providers in a process-global vector. A scoped
-per-AgentProcess holder with group-death observation replaces `HELD_LIFELINES`.
-New attachment acquires custody before claiming; failed claims release only their
-own holder. Surviving standby custody does not restore a stale attachment token.
-This proposal still needs both death-order and failed-claim fixtures before the
-anonymous path can be deleted. No transport process is implemented in this cut.
+Neither current transport gap proves takeover impossible or authorizes a refusal.
+These are implementation choices, not missing human input or waived acceptance.
+Removed already: Codex-only signaling, runtime live-close dispatch and Claude's
+direct-child stop. The shared close and Codex unrelated-thread inspection survive.
 
-## Related work (2026-10-10)
+## Related work and review
 
-LOO-450’s local commit `5ce7cd5e4` routes headless Claude Flow steps through
-ClaudeHarness and saves the native Session ID under the attachment fence. It is
-not in this branch or local main. Reuse that turn-history path when integrated;
-do not introduce another answer reader or lose schema, skill-input and correction
-turn behavior in the transport change. Its recorded Flow fixture pass proves no
-launcher-independent transport or takeover.
+LOO-450's local `5ce7cd5e4` routes headless Claude Flow steps through ClaudeHarness
+and saves native Session identity under the fence. It is not in this branch or
+local main. Reuse that history path when integrated; preserve schema, skill-input
+and correction turns. Its Flow fixture proves no launcher-independent transport.
 
-## Delete — do not maintain
-
-Removed: Codex-only signaling and runtime live-close dispatch. The surviving
-common close retains exact identity, duplicate-owner refusal and foreground
-exclusion; Codex connection inspection retains unrelated-thread refusal.
-
-Remaining:
-- OpenCode’s unfenced stop/abort/drop cleanup; Claude's direct-child stop is removed.
-- OpenCode’s anonymous launch lifeline.
-- Claude's anonymous launch lifeline and launcher-owned-only transport, once its
-  replacement preserves pending output/input and native history.
-- `HELD_LIFELINES` and optional anonymous `open_lifeline` branch, replacing their
-  exclusive fixtures with both-death-order proofs of the surviving mechanism.
-
-## Review findings
-
-Moving Codex signaling must retain its unrelated-thread refusal; the common
-close path now owns signaling and leaves that refusal in connection inspection.
-The group test moved with its behavior rather than retaining a Codex-only copy.
-Architecture prose incorrectly claimed every harness signal was fenced; it now
-names the remaining OpenCode paths instead of overstating the runtime repair.
-No schema or installed data changed. Release memory's operation-entry lesson
-also applies here: runtime unit tests cannot establish public attachment takeover.
-
-The common close previously treated an already-dead leader as a dead group.
-It now refuses settlement while helpers survive; absent leader identity grants no
-new signal authority. The throwaway orphan-group fixture covers that boundary.
-Claude's shared inventory read exposed invalid fixture trace IDs and foreground
-defaults; both fixtures now save real LfProcess IDs and headless Claude metadata. No production schema change was needed.
-
-Compression inlines the moved identity closure (now called only once) and
-short-circuits duplicate-owner lookup. The identity recheck after Codex I/O stays:
-the earlier runtime observation is not authority to signal a later process.
+Release's entry-point lesson applies: runtime close tests cannot establish public
+handoff. Architecture docs name the remaining unfenced OpenCode paths. Compression
+keeps the low-level close private, removes the inspector's tuple argument and
+checks Claude's saved identity at launch rather than carrying optional evidence
+through shutdown. Earlier review details: `5ea5cf5d6:scratch/stop-and-take-over-claude.md`.
 
 ## Checks
 

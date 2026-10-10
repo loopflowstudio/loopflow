@@ -672,13 +672,11 @@ mod tests {
         let mut recorded = Vec::new();
         for id in ["first", "second"] {
             store.test_session(id, &crate::session_record::new_artifact_key());
-            rusqlite::Connection::open(&database)
-                .unwrap()
-                .execute(
-                    "UPDATE agent_sessions SET interactive=0, provider='claude' WHERE id=?1",
-                    [id],
-                )
-                .unwrap();
+            conn.execute(
+                "UPDATE agent_sessions SET interactive=0, provider='claude' WHERE id=?1",
+                [id],
+            )
+            .unwrap();
             let attachment = store
                 .claim_session_attachment(id, None, &process, true)
                 .unwrap();
@@ -688,10 +686,13 @@ mod tests {
             config.session_attachment = Some((id.into(), attachment.clone()));
             harness.config = Some(config);
             harness.send_input("one turn").await.unwrap();
-            recorded.push((
-                harness.pid().unwrap(),
-                store.agent_process_identity(id).unwrap(),
-            ));
+            let (pid, birth) = store
+                .agent_process_identity(id)
+                .unwrap()
+                .expect("managed Claude publishes exact AgentProcess identity");
+            assert_eq!(harness.pid(), Some(pid));
+            assert!(birth > 0);
+            recorded.push((pid, birth));
             // Retain the first process while the same Process starts the next step.
             harnesses.push(harness);
         }
@@ -701,7 +702,7 @@ mod tests {
             .unwrap();
         assert!(harnesses[0].stop().await.is_err());
         assert_eq!(
-            crate::journal::process_identity_evidence(recorded[0].0, recorded[0].1.unwrap().1,),
+            crate::journal::process_identity_evidence(recorded[0].0, recorded[0].1),
             crate::journal::ProcessIdentityEvidence::Live
         );
         harnesses[0].config.as_mut().unwrap().session_attachment =
@@ -710,11 +711,7 @@ mod tests {
             harness.stop().await.unwrap();
         }
         assert_ne!(recorded[0].0, recorded[1].0);
-        for (pid, evidence) in recorded {
-            let (saved, start) =
-                evidence.expect("managed Claude publishes exact AgentProcess identity");
-            assert_eq!(pid, saved);
-            assert!(start > 0);
+        for (pid, _) in recorded {
             assert!(!crate::journal::OsProcess::group_is_alive(pid).unwrap());
         }
     }

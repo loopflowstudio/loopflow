@@ -236,9 +236,9 @@ Draft ordering and scratch-blocked CI evidence remain at
 
 LOO-447: lifelines prove no takeover. Claude owns pipes/correlation; stop now
 shares fenced group close. OpenCode respawns; stop/abort/drop are unfenced.
-Neither proves impossibility. Holder release must preserve both death orders
-without unbounded retention. Release’s entry-point lesson applies: runtime close
-proves no public handoff. Transport plan and related work:
+Neither proves impossibility. Bounded custody must preserve both death orders;
+standby grants no write authority. Runtime close proves no public handoff
+(Release’s entry-point lesson). Transport plan:
 `scratch/stop-and-take-over-claude.md`.
 
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)

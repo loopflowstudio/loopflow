@@ -189,7 +189,7 @@ pub(crate) fn close_session_agent_process(store: &SqliteStore, session: &str) ->
         let (endpoint, thread) = store.session_connection(session)?.ok_or_else(|| {
             StoreError::InvalidAuthority("Codex AgentProcess connection is unavailable".into())
         })?;
-        crate::harness::codex_connection::validate_agent_process_close((&endpoint, &thread))
+        crate::harness::codex_connection::validate_agent_process_close(&endpoint, &thread)
             .map_err(|error| StoreError::InvalidAuthority(error.to_string()))?;
     }
     close_agent_process(pid, started)
@@ -199,7 +199,7 @@ pub(crate) fn close_session_agent_process(store: &SqliteStore, session: &str) ->
 
 /// Stop an exactly recorded headless process group. The caller holds its Session
 /// attachment fence and has refused ambiguous ownership before reaching here.
-pub(crate) fn close_agent_process(pid: u32, started: i64) -> Result<()> {
+fn close_agent_process(pid: u32, started: i64) -> Result<()> {
     match process_identity_evidence(pid, started) {
         ProcessIdentityEvidence::Live => {}
         ProcessIdentityEvidence::Dead => return confirmed_group_death(pid),
@@ -850,7 +850,7 @@ mod close_tests {
             .unwrap()
             .unwrap();
         let child = crate::journal::OsProcess::read(helper).unwrap().unwrap();
-        crate::harness::agent_process::close_agent_process(leader.pid, leader.started_at).unwrap();
+        super::close_agent_process(leader.pid, leader.started_at).unwrap();
         assert!(!crate::journal::OsProcess::group_is_alive(leader.pid).unwrap());
         assert_eq!(
             crate::journal::process_identity_evidence(helper, child.started_at),

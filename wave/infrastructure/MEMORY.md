@@ -271,11 +271,9 @@ prior one, then removes unnamed content-addressed binaries/bundles no live
 process executes. Projected 11.4 GiB here by `du`; APFS clone sharing unmeasured.
 Store growth stays unbounded, about 1.7 MB per capture. Next condition is Jack's
 retention choice: system of record (SQLite or `events.jsonl`) and capture expiry;
-then sizes in `lf home doctor`. 27.9 GiB was reclaimed October 6; Jack's 78.7 GiB
-recording and 81-copy leads were gone before measurement. Left intact: 23 GiB of
-unread legacy `traces`, `backups`, `lfd.db*`, `logs`; LOO-304's 40 GiB of
-`/private/tmp` fixtures. Unknown ownership is not permission to delete. Test
-`session_record` with `LF_*` cleared.
+then sizes in `lf home doctor`. Historical reclamation, vanished leads and untouched
+roots: `000811423:wave/infrastructure/MEMORY.md`, this heading. Unknown ownership
+never authorizes deletion. Test `session_record` with `LF_*` cleared.
 
 Earlier cleanup history: `66da3fdf7:wave/infrastructure/MEMORY.md` under
 “Retained capture storage and autonomous cleanup.” Current direction is under Capture cutover.
@@ -286,22 +284,26 @@ Jack Heart authorized automatic checkout collection and classified Etude output
 as disposable; expiry/budgets remain proposals. Rotation/compression design grants
 no conversation-expiry or one-off deletion authority.
 
-Cleanup requires ownership, exact-head settlement, idle execution and classified
-content—not age, remote disappearance, ignored status or planning completion.
-PR-less Tasks, unresolved follow-through and unknown execution retain checkouts.
-Local refs use compare-and-delete. Cache tags never override Session history.
+Require ownership, exact-head settlement, idle execution and classified content;
+age, remote disappearance, ignored status and completion cannot substitute.
+PR-less Tasks and unresolved follow-through retain checkouts. Compare-and-delete
+local refs; cache tags never override Session history.
 
-Release's incident requires schedule repair before binary pruning.
-`c99c18972` adds gate-based installation repair, preserving disable and binaries on
-failure. Historical references and provider homes veto both registries' cleanup,
-including recheck; native resume and complete payload coverage remain unproved.
+`c99c18972` repairs schedules before binary pruning, as Release's incident requires;
+disable/failure preserve binaries. Installed proof remains.
+Disposable OS accounts isolate release reads; `LF_HOME` does not.
 
-Scheduled reconciliation observes a real shell child's exit with seeded merged
-Task delivery, preserving an unfinished neighbor. Cross-store proof holds admission
-directly, not through a release CLI writer; disposable OS accounts isolate release
-reads, `LF_HOME` does not. Cache-tag survival proves only pre-Git interruption.
-Admission bounds leave started reads unbounded; ordering/planning can starve
-removals. Hourly/fair scans, missing-path recovery and installed acceptance remain.
+`fae554e2a`/`000811423` interleave observation/removal and rotate bounded receipt
+cursors through cheap/hourly scans. Stable-set progress proves neither oldest-first
+ordering under arrivals nor whole-pass timing. Registration repair requires an
+exact-head marker and fresh evidence; interruption is simulated.
+
+Historical references/provider homes veto both registries, including recheck. A
+paged negative scan cannot survive symlink retargeting: retain raw references,
+cover new observations and revalidate destinations. Large histories still fail closed;
+identifier lookup proves no native transcript resume. Real-child retry and direct
+release-admission fixtures prove neither provider launch nor a release CLI writer.
+Earlier proofs: `000811423:wave/infrastructure/MEMORY.md`, this heading.
 Plan: `scratch/clean-up.md`.
 
 ## Project configuration and review direction (2026-10-05)

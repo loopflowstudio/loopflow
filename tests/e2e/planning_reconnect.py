@@ -971,6 +971,16 @@ def _exercise_ordering(fixture: dict, env: dict, server: ThreadingHTTPServer) ->
             "SELECT issue_title FROM tasks WHERE issue_identifier='INF-125'"
         ).fetchone() == ("Retained independent save",)
         assert removal(side) == negative
+        assert databases[side].execute(
+            "SELECT planning_deleted_at FROM tasks WHERE issue_identifier='INF-127'"
+        ).fetchone() == (negative[6],)
+        assert [
+            row[0]
+            for row in databases[side].execute(
+                "SELECT id FROM tasks WHERE project_id=? ORDER BY planning_rank,id",
+                (fixture["local_project"],),
+            )
+        ] == json.loads(later[1])
     # Earlier Git documents may arrive again without erasing detail, receipts or
     # authored alternatives. Every effect retains its exact attempted input.
     settled = [receipt(1, identity) for identity in (attempted, later[0])]

@@ -634,18 +634,18 @@ contradictions defer only effects. Preserve execution, uncertainty, losers and r
 private references hold groups. Causality precedes ranking; equal revisions can
 carry different ranks, so retain bodies.
 
-Earlier composition: `9d3d2ba90`, this heading. Due dates synchronize;
-completion requests, placements and execution stay local.
+Due dates synchronize; completion requests, placements and execution stay local.
 
-`e37099e50` proves same-origin Git/HTTPS recovery: unchanged readback preserves
-later saves; changed facts win. `3c462adb7`/`231e75898`: selected/private
-associated-origin regressions pass in isolated Linux.
-Private projections acquire selected-origin acknowledgements without
-settling their divergent UUIDs or publishing private history. Independent saves
-propagate; seeded execution survives without launches. Seeded attempts prove
-neither dispatch nor exactly-once effects; attachment can race acquisition.
-Negative-evidence/order, native lifetimes and installation remain unproved.
-Exchange cannot launch engines; explicit resume may.
+`e37099e50`/`231e75898` prove same-origin/private association recovery. Unchanged readback preserves later saves; changed facts win.
+Private owners acknowledge selected origins without settling divergent UUIDs
+or exporting private history. Seeded attempts prove no dispatch/exactly-once;
+attachment can race acquisition.
+
+`2e346a052`: Git/HTTPS order/removal and Codex 0.161.0 resume pass:
+only complete lists settle order; trash settles deletion. Replay preserves times,
+receipts, edits and execution; exchange launches no engine/turn. Fixtures
+prove no UI/account/installed acceptance. Cold Linear delivery needs local Wave
+documents. Gate owns broader/materialized checks.
 
 ## Driver recovery
 

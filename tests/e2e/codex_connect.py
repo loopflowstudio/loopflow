@@ -80,7 +80,14 @@ class Handler(BaseHTTPRequestHandler):
             if item.get("type") == "function_call_output"
         ]
         prompt = request.get("instructions", "") + json.dumps(request["input"][last_user])
-        if not outputs and "held" in prompt:
+        held = (
+            "held conversation",
+            "held fixture",
+            "held sibling",
+            "held before driver death",
+            "held after driver death",
+        )
+        if not outputs and any(marker in prompt for marker in held):
             self.server.held.set()
             assert self.server.release.wait(self.server.hold_seconds), (
                 "held response was not released"

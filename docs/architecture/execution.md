@@ -100,69 +100,57 @@ not the retired provider generation.
 5. Append correlated provider outcomes and usage; settle command completion
    under its Process lifetime.
 
-Headless Claude, Codex and OpenCode prepare their lifeline before spawning. The child
-establishes its process group, waits for watchdog readiness, then asks a parent
-thread to run its recording callback before exec. This persists OS identity in the AgentProcess row; headless launch
-without an attachment is refused. The shared harness launch holds the attachment fence through recording
-and saves failed spawns on the record. Admission is synchronous so async cancellation
-cannot discard an admitted child before the harness receives it. Failed recording refuses exec;
-a failed exec retains any recorded identity without claiming provider execution.
-No post-spawn bind is needed. Every provider uses a private named FIFO keyed by
-AgentProcess ID beside its store, independent of its communication endpoint.
-Public Codex and OpenCode connections acquire custody before claiming the attachment;
-a failed claim drops only its prospective writer. Successful holders remain
-non-writing standbys through attachment transfer and harness teardown until lf
-exit or confirmed provider-group death. The last writer's exit closes the lifeline and
-stops the group, including after SIGKILL. A custody worker releases its descriptor
-when the provider group dies or the watchdog closes; no process-global writer list remains.
-The watchdog runs outside the provider group to avoid counting itself as a live
-helper. Leader death alone never releases custody; unknown evidence retains it.
-Custody never grants write authority.
-Headless launch requires the invocation's attachment: Claude, Codex and OpenCode
-refuse to start a provider without one. Runtime settlement closes their recorded
-headless groups under that attachment fence, refusing ambiguous OS ownership;
-Codex additionally refuses a server hosting unrelated conversations. Claude stop/
-interrupt and OpenCode stop use common group close, recording death under the fence.
-OpenCode abort uses bounded fenced HTTP without retries; drop never signals its
-child. Failed startup detaches without erasing the admitted provider or uncertain
-native effects; pre-exec spawn failure retains its positive non-start evidence.
-Runtime settlement alone does not establish takeover safety. Public OpenCode
-connection reuses the saved server, including recovery before native identity was
-saved. Its native TUI uses an authenticated local HTTP relay: prompts and abort
-hold the frozen attachment fence through dispatch, not through streamed answers.
-Repeated prompt identities refuse replay. Native permission choices use the same
-saved-origin and no-replay writer as headless recovery; their reader leaves pending
-choices for the native UI instead of automatically approving. Reads retain native
-streaming. Native commands use the same saved message identity and dispatch fence;
-shell and other mutations still refuse explicitly. The fence ends after the full
-request reaches the socket, not after response headers or execution. Client exit
-settles only its attachment, not the provider.
-Claude saves input UUID origins before pipe writes, then recovers admitted,
-unfinished native turns in observation order for the same AgentProcess. These
-receipts preserve attribution across reader reconstruction, not unread pipe
-output. The reader follows the same AgentProcess's current attachment for display
-activity only, retaining tool state while detached and ignoring replacement
-providers. Dispatch and stop keep their original frozen authority. Claude still
-lacks launcher-independent pipes and public live connection.
-OpenCode saves request IDs and frozen origins in Session history before HTTP
-submission. Native receipts recover pending correlation after launcher loss;
-submission evidence alone proves neither admission nor completion. Harness reconnect
-reuses the saved server/native Session, subscribes before message readback and
-never replays an uncertain request. Reader setup failure and drop leave that
-provider running. New OpenCode servers own a private stderr file beside their
-lifeline FIFO instead of a launcher-owned pipe. Pending permissions are acquired
-at reader startup and on native wake edges. Replies select saved request origins
-and retain attempts in Session observations before fenced HTTP. Lost responses
-read back pending permissions; unresolved attempts never replay after reconnect.
-The server endpoint is saved before launch/readiness, independently of native
-Session selection. Creation retains an AgentProcess-keyed attempt with its title
-and permission rules in Session observations before bounded fenced HTTP. OpenCode
-accepts these rules during creation, not through its Session PATCH route. After
-losing the response, exact-title native readback can recover the identity without
-creating another conversation. Missing or ambiguous matches remain uncertain;
-externally renamed titles cannot recover identity this way. Reconnect preserves
-native permissions rather than applying replacement configuration. Public
-process-death orders and full native-client behavior remain unproved.
+### Headless custody and stop
+
+Every headless provider requires an attachment and a private AgentProcess-keyed
+FIFO beside its store. Before exec, the child establishes its group, waits for
+watchdog readiness and asks a parent thread to persist its OS identity under the
+attachment fence. Admission is synchronous: cancellation cannot discard an admitted
+child before the harness receives it. Failed recording refuses exec; failed spawn
+retains recorded identity and positive non-start evidence, not provider execution.
+
+Public Codex/OpenCode connections acquire custody before claiming an attachment;
+a failed claim releases only its prospective writer. Successful holders remain
+non-writing standbys through harness teardown and attachment transfer until lf
+exit, confirmed group death or watchdog closure. Last-writer exit stops the group,
+including after SIGKILL. The watchdog runs outside that group so it cannot prevent
+natural-exit cleanup. Leader death and unknown evidence never release surviving
+helpers. Custody grants no write authority.
+
+Runtime settlement, Claude stop/interrupt and OpenCode stop close the recorded
+headless group and record death under the frozen attachment fence. Ambiguous OS
+ownership refuses; Codex additionally refuses unrelated conversations. OpenCode
+abort uses bounded fenced HTTP without retries. Its startup failure and drop
+detach without signaling or erasing admitted providers and uncertain effects.
+
+### Provider communication
+
+Claude persists input UUID origins before pipe writes. Native echoes admit requests;
+reopened readers recover unfinished turns in observation order for the same
+AgentProcess. Display activity follows that provider's current attachment,
+retaining tools while detached and ignoring replacement providers. Dispatch and
+stop retain frozen caller authority. Saved origins cannot recover unread pipe
+output: launcher-independent Claude transport and public live connection remain
+unfinished, including its EOF/history-error and uncertain-write teardown paths.
+
+OpenCode saves its endpoint before spawn and an AgentProcess-keyed creation attempt
+before HTTP. The attempt carries the original title and permission rules; OpenCode
+accepts rules on creation, not Session PATCH. After response loss, exact-title
+listing can recover one identity without another create. Missing, ambiguous or
+externally renamed matches remain uncertain. Reconnect preserves native rules,
+reuses the server and subscribes to SSE before reading permissions then messages.
+Saved request origins recover correlation; submission alone proves no admission or
+completion. Servers own private stderr files beside their FIFOs, not launcher pipes.
+
+The native OpenCode TUI uses an authenticated local HTTP relay. Reads retain
+streaming; prompts, commands and abort hold frozen authority through the last
+request byte, not response headers or execution. Repeated input IDs refuse replay.
+Shell and other unsupported mutations explicitly refuse. Permission replies share
+headless recovery's saved-origin writer, retaining attempts before bounded fenced
+HTTP and reading back lost responses without replay. The native reader leaves
+choices for its UI and preserves their exact values and rejection text. Client
+exit settles only its attachment. Public process-death orders and full native-client
+behavior remain unproved; shared group close alone does not establish takeover.
 
 Owned native launches use the same pre-exec recording channel under the attachment
 lock, but no headless group/watchdog setup. Failed recording prevents provider code

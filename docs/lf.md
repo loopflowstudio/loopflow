@@ -130,11 +130,11 @@ lf flow show ID --processes --json    # one Flow's steps, by its Flow process ID
 lf -b task run EXP-12       # run fresh work
 ```
 
-The first turn contains the skill followed by the request. Loopflow adds fixed
-instructions without replacing the provider's native prompt or repo guide.
+The first turn contains the skill followed by the request and tagged clipboard
+text. Loopflow adds fixed instructions without replacing the provider's native prompt or repo guide.
 Startup and compaction deliver current Wave memory and scratch as a capped
-conversation block: whole files or readable paths, never excerpts. Compaction
-also restores the saved active skill. Task direction, clipboard and summaries
+conversation block: whole files, marked start excerpts and readable source paths.
+Compaction also restores the saved active skill. Task direction and summaries
 remain complete private reference files. Terminal first turns use argv; only a
 first turn exceeding the argument cap is refused before spawning the provider.
 

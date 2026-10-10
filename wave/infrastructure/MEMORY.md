@@ -471,11 +471,6 @@ supersede older Run-owner, historical-import, pinned-development-Home and
 demo-before-landing directions for this cutover. Earlier incident observations
 remain evidence of their own versions, not instructions to restore those owners.
 
-## Installed worker recovery
-
-LOO-295/292 closed; LOO-373 retains placement repair. Evidence and unapproved
-batching: `10ca6bd39:wave/infrastructure/MEMORY.md`, this heading.
-
 ## Optional chapters and Task workflows (2026-10-02)
 
 Jack Heart's October 2 direction separates ordinary work from optional chapters:
@@ -995,21 +990,24 @@ judgments, never inferred completion. Preserve unrelated provider associations;
 ambiguous moves remain diagnoses. Standing frontier plans need not acquire an
 invented completion date. No fourth user-facing planning noun was selected.
 
-## Earlier follow-ups (reselect through the accepted chapter)
+## Earlier follow-ups
 
-Unselected suggestions and resolved proofs: `adf3f9e4b:wave/infrastructure/MEMORY.md`,
-this heading. Jack Heart's July 6 “up/down 5ths” remains unresolved and deferred;
-archives authorize no work.
+July 6 “up/down 5ths” remains deferred:
+`f5e58e79f:wave/infrastructure/MEMORY.md`, this heading. Archives authorize no work.
 
 ## Direct invocation and large inputs (curated 2026-10-09)
 
-Jack Heart's LOO-444: native prompts/guides, skill then request, whole-file
+Jack Heart's LOO-444: native prompts/guides, skill then request, file/excerpt
 start/compact context. Option B fixes additions per surface/reply/participant.
 Production authorized; native-guide wording proposed. Preserve attribution/titles.
 Jack's `cbc13fa5`: checkout Wave Markdown and path-segment ancestors.
 `5e8fdde2f` supplies real paths, deleting Wave-ID lookup/snapshots.
 GOAL config still reads SQLite; LOO-449 owns it, the table and other readers.
-Clipboard-first-turn and shrinking memory to 10,000 bytes remain undecided.
+Jack's October 10 `c8e28b6c` selects tagged clipboard after skill/message, within
+argv's cap, not a reference file. “Normal snippet + block” is interpreted as
+marked start excerpts with full source path/size and read-the-rest instruction;
+Jack must confirm at review. Small files stay whole;
+rendered bytes cap the block. Shrinking memory remains undecided.
 
 Claude 2.1.295/Codex 0.161.0 fake APIs preserve 10 KB ASCII hooks, truncate
 10,000 emoji scalars. Compare whole strings, not retained markers; budget bytes.

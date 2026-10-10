@@ -8,7 +8,7 @@ Channel contract resolved (Jack, 2026-10-09, "option B"): the added-instructions
 slot is byte-identical within a launch profile, and surface instructions,
 participant name and reply guidance stay in it. A launch profile is the surface,
 the reply settings and the participant; two launches sharing all three send the
-same bytes. The launch cut now wires fixed additions and whole-file callbacks; the native
+same bytes. The launch cut now wires fixed additions and file/excerpt callbacks; the native
 provider/resume/compaction matrix remains for gate. Jack's later `e1fdb81b-75ff-4cca-b789-243ad84bad14` steer authorizes
 that production cut. Option A below resolves first-turn transport; no fixed-slot
 or transport decision remains open.
@@ -40,8 +40,26 @@ real files. `gather_saved_wave_docs`, callback Wave-ID lookup and generated Wave
 snapshots are removed. The `wave_documents` table, `lf wave edit` and other
 readers are unchanged; LOO-449 owns their removal. This supersedes the stored-Wave
 requirements and rename/name-reuse proof at `8b41e0327`.
-Clipboard placement in the first turn and shrinking Wave memory to fit the
-10,000-byte block remain open with Jack; neither is decided by this change.
+Jack Heart resolved clipboard placement on October 10: skill, message, then tagged
+clipboard text, counted toward the argument cap. Shrinking Wave memory remains open.
+The October 10 snippet direction supersedes whole-or-listed delivery for oversized files.
+
+## October 10 narrow cut and PR notes
+
+Jack Heart's `c8e28b6c` selects clipboard in the first message and “the normal
+snippet + block thing” for oversized memory. **PR review note:** interpreting
+that phrase as marked start excerpts with path, full byte size and an instruction
+to read the rest is the operator's interpretation, for Jack to confirm at review.
+Small files remain whole. Listing/skill reservation and the 10,000 rendered-byte
+cap remain; whole files are selected first, then excerpts in existing priority
+order. No clipboard file reference remains. The saved compact-only active skill
+and overflow listing retain their complete-pointer behavior.
+
+Delete: clipboard private-reference writer and whole-or-listed-only assertions.
+Preserve: reference escaping, native skill selection, first-turn order/cap,
+current checkout reads, complete manifest and native hook ownership.
+Review caught a native-skill message-wrapper change; it was removed so only the
+clipboard suffix changes on that path. Native integration remains with gate.
 
 ## Problem
 
@@ -66,13 +84,15 @@ agent guide, its compaction, its titles.
 | Paths to `scratch/` and `wave/<address>/`; as much of Wave memory and scratch as fits; a listing with sizes for the rest and a line saying to read it | Context block | Accepted: "This seems fine" |
 | The active skill, again | Context block, after compaction only | Accepted: "I like this" |
 | Diff, `-d` docs | Not inlined; command or paths | Proposal |
-| Clipboard, summaries, steers, Task brief | Complete private files under `.lf/prompts/`, referenced from the block | Proposed default |
+| Clipboard | Tagged block after the message in the first turn | Accepted October 10 |
+| Summaries, steers, Task brief | Complete private files under `.lf/prompts/`, referenced from the block | Proposed default |
 
-Context block fill rule (proposal): a file is preloaded whole or listed, never
-cut. Order: the Wave's `MEMORY.md`, then `scratch/<branch>.md`, then other
+Context block fill rule: preload small files whole, then use remaining bytes for
+marked start excerpts of omitted files; retain all complete paths in the listing. Order: the Wave's `MEMORY.md`, then `scratch/<branch>.md`, then other
 scratch files smallest first, until the cap.
 Reserve space for paths, the complete listing and (after compaction) the skill
-before choosing file bodies. A listing or skill can itself exceed the cap:
+before choosing file bodies. Excerpts carry source path, full UTF-8 size and a
+read-the-rest instruction; their fully escaped bytes count toward the cap. A listing or skill can itself exceed the cap:
 complete manifest/saved-skill files with pointers are a proposed extension,
 not accepted replacement of the promised listing/skill. Pointer-read behavior
 and acceptance of the overflow pointers remain unresolved in `scratch/questions.md`;
@@ -88,7 +108,7 @@ current scratch are back. On Codex the native base instructions remain alongside
 instructions; test preservation rather than a model-specific opening sentence.
 
 `AgentConfig.system_prompt` holds only additions; `task_prompt` holds skill/request.
-The context-block operation carries paths, whole documents, listed UTF-8 sizes
+The context-block operation carries paths, whole documents or marked excerpts, listed UTF-8 sizes
 and the compact-only saved active skill. Native delivery is connected; its full behavioral matrix remains unproved.
 
 ## Key functions
@@ -121,7 +141,7 @@ and the compact-only saved active skill. Native delivery is connected; its full 
   message stream it sends the same block under the same cap.
 - The cap is the harness's own effective limit, not a config number. Count
   provider units, not just Unicode scalars: both harnesses spill a 10,000-scalar
-  emoji block. Whole-file selection must prevent that native truncation too.
+  emoji block. Whole-file/excerpt selection must prevent that native truncation too.
 - Limits stop deciding what is sent. `memory_tokens` and `scratch_tokens`
   remain as size targets; `lf context` measures the folders against them.
 
@@ -147,7 +167,7 @@ Required behavior through lf's actual launch paths, not only the native probes:
 - Added instructions are byte-identical across launches of one profile; no Loopflow-added file
   bodies or request appear there. Codex retains its native base and AGENTS.md,
   with no `model_instructions_file` override on terminal or app-server paths.
-- Startup and manual/automatic compaction deliver current whole documents or
+- Startup and manual/automatic compaction deliver current whole documents, marked excerpts or
   readable complete listings; compact refresh also restores the active skill.
   Boundary cases include Unicode, many files and an oversized listing/skill.
 - Supported resume/engine replacement retains native Session identity, refreshes
@@ -170,8 +190,8 @@ Codex terminal and app-server inputs use additive instructions; no production
 are unchanged.
 
 `ContextDelivery` captures repository, Wave name, Machine, complete active skill
-and reference paths. Task seed/steers, summaries and clipboard are private complete
-files; explicit docs remain paths, and changed-file context points to Git inspection.
+and reference paths. Task seed/steers and summaries are private complete
+files; clipboard is a tagged first-turn block, not a reference file; explicit docs remain paths, and changed-file context points to Git inspection.
 The compact-only saved skill identifies the original asset directory. The existing
 10,000-byte block/manifest builder rereads scratch and checkout Wave/ancestor files.
 Metadata/skill overflow pointers remain proposed UX, not Jack's acceptance.
@@ -237,7 +257,7 @@ follow checkout paths under Jack's later source decision. No installation, publi
 The pre-cut implementation plan and complete older checks remain at
 `6149952c8:scratch/what-goes-in-system-prompt.md`.
 
-Checks: prose-only reconciliation; `git diff --check` and `lf context --json` pass; unchanged-code focused tests/fmt/Clippy retained at `17c1a2909:scratch/what-goes-in-system-prompt.md`; native integration remains with gate and presentation with demo.
+Checks: `cargo test -p loopflow --lib context_block` (9 passed), `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` and `lf context --json` pass; native integration remains with gate and presentation with demo.
 
 ### Integrated upstream boundary
 
@@ -279,8 +299,7 @@ reductions, not native acceptance.
 
 The config guide's detailed docs/diff/clipboard and third-party sections now match
 the channel table: paths or private references, no obsolete preloading, budget
-enforcement or implicit operating-guide opt-out. No launch code changed during
-this reconciliation.
+enforcement or implicit operating-guide opt-out. The October 10 cut changes clipboard assembly and context excerpt selection.
 
 The whole channel cut remains one PR; source implementation is not native acceptance. The rejected transport runner `first_turn_transport.py` and its exclusive
 `test_first_turn_transport.py` are deleted. Their complete editor evidence/code is
@@ -312,7 +331,7 @@ settings in `launch.py` remain used by context-delivery and skill-fidelity probe
 - Removed: the installed-skill context split; native invocation, declarations, arguments and captured assets survive.
 - Removed: LOOPFLOW.md launch-excerpt guidance and unused
   `SkillInvocation::instruction_text`, formerly used only by launch budgeting.
-  Recursive scratch remains available whole or listed; translated skill/argument
+  Recursive scratch remains available whole, excerpted or listed; translated skill/argument
   coverage remains.
 - Removed: tests asserting scratch or memory bodies inside `system_prompt`; surviving checks assert refreshed conversation content.
 
@@ -323,7 +342,7 @@ prompt logs under `.lf/prompts/`, source-boundary escaping.
 
 - A flag or config choosing between inline and injected delivery.
 - The skill or request present in both the slot and the first turn.
-- A file cut partway to fit the cap.
+- An unmarked excerpt or an excerpt without its complete source path and size.
 - Anything in the added-instructions slot that varies between two launches of
   the same profile: Task, Wave, branch, paths, time, skill text, request.
 - Surface instructions, participant name or reply guidance moved into the

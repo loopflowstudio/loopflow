@@ -1,4 +1,4 @@
-//! Whole-file conversation context. Size targets never select launch content.
+//! Whole files and marked source excerpts in conversation context. Size targets never select launch content.
 //!
 //! Claude's hook string limit is 10,000 characters; Codex 0.161.0's default
 //! is 2,500 approximate tokens (ceil(UTF-8 bytes / 4)). The shared 10,000-byte
@@ -50,9 +50,6 @@ impl ContextDelivery {
             } else {
                 repo.join(&doc.path)
             });
-        }
-        if let Some(text) = &components.clipboard {
-            references.push(write_prompt_log(&repo, text, "clipboard", None)?);
         }
         if components.diff.is_some() || !components.diff_files.is_empty() {
             let paths = components
@@ -247,18 +244,44 @@ fn render_block(
             render_reference(&manifest)
         ),
     );
+    let mut omitted = Vec::new();
     for doc in documents {
         let source = serde_json::to_string(&doc.path).expect("document path serializes");
         let body = render_reference(&format!(
             "\n<lf:file source={source}>\n{}\n</lf:file>\n",
             doc.content
         ));
-        append_whole(&mut text, &body);
+        if !append_whole(&mut text, &body) {
+            omitted.push(doc);
+        }
+    }
+    // Keep small files whole before spending the remaining bytes on excerpts.
+    for doc in omitted {
+        append_excerpt(&mut text, &doc);
     }
     Ok(ContextBlock {
         text,
         manifest_path,
     })
+}
+
+/// Prefixes end on UTF-8 boundaries; count the escaped, fully labelled section.
+fn append_excerpt(text: &mut String, doc: &Document) {
+    let source = serde_json::to_string(&doc.path).expect("document path serializes");
+    let render = |end| {
+        render_reference(&format!(
+        "\n<lf:file source={source} excerpt=\"start\" bytes=\"{}\">\nExcerpt from the start; read the rest from the complete source {source} ({} UTF-8 bytes).\n{}\n</lf:file>\n",
+        doc.content.len(), doc.content.len(), &doc.content[..end]
+    ))
+    };
+    let boundaries: Vec<_> = doc.content.char_indices().map(|(index, _)| index).collect();
+    let count =
+        boundaries.partition_point(|&end| text.len() + render(end).len() <= HOOK_CONTEXT_BYTES);
+    if let Some(&end) = count.checked_sub(1).and_then(|index| boundaries.get(index)) {
+        if end > 0 {
+            append_whole(text, &render(end));
+        }
+    }
 }
 
 /// Selection always counts rendered bytes, including reference escaping.
@@ -302,6 +325,42 @@ mod tests {
     }
 
     #[test]
+    fn context_block_keeps_clipboard_in_first_turn_not_a_reference_file() {
+        let repo = tempdir().unwrap();
+        let components = crate::engine::prompt::PromptComponents {
+            repo_root: repo.path().display().to_string(),
+            skill: Some(crate::engine::flow::Skill {
+                source: None,
+                name: "test".into(),
+                content: Some("Test skill".into()),
+                agent: None,
+                default_agent: None,
+                action_style: None,
+            }),
+            message: Some("Fix this".into()),
+            clipboard: Some("🦀 $reference\r\n".repeat(10_000)),
+            ..Default::default()
+        };
+        let turn = crate::engine::prompt::format_first_turn(&components);
+        assert!(turn.starts_with("<lf:skill:test>\nTest skill"));
+        assert!(turn.contains("</lf:skill:test>\n\n<lf:message>\nFix this\n</lf:message>\n\n"));
+        assert!(turn.contains("<lf:clipboard>\n🦀 &#36;reference\r\n"));
+        assert!(turn.ends_with("\n</lf:clipboard>"));
+        assert!(crate::engine::agent::validate_terminal_turn(&turn).is_err());
+        let delivery = ContextDelivery::prepare(&components).unwrap();
+        assert!(delivery.references.is_empty());
+        let block = delivery.block(ContextMoment::Start).unwrap();
+        assert!(!block.text.contains("🦀"));
+        assert!(!fs::read_dir(repo.path().join(".lf/prompts"))
+            .unwrap()
+            .any(|entry| entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .contains("clipboard")));
+    }
+
+    #[test]
     fn saved_context_reads_checkout_wave_without_registration() {
         let repo = tempdir().unwrap();
         fs::create_dir_all(repo.path().join("wave/parent/child")).unwrap();
@@ -336,7 +395,7 @@ mod tests {
     }
 
     #[test]
-    fn context_block_reads_current_files_without_cutting_large_unicode_documents() {
+    fn context_block_reads_current_files_with_marked_unicode_excerpts() {
         let repo = tempdir().unwrap();
         fs::create_dir(repo.path().join("scratch")).unwrap();
         let large = format!("WHOLE_START{}WHOLE_END", "🦀".repeat(50_000));
@@ -345,7 +404,11 @@ mod tests {
         let first = delivery(repo.path()).block(ContextMoment::Start).unwrap();
         assert!(first.text.len() <= HOOK_CONTEXT_BYTES);
         assert!(first.text.contains("fresh one"));
-        assert!(!first.text.contains("WHOLE_START"));
+        assert!(first.text.contains("WHOLE_START"));
+        assert!(first.text.contains("excerpt=\"start\""));
+        assert!(first
+            .text
+            .contains("read the rest from the complete source \"scratch/large.md\""));
         assert!(!first.text.contains("WHOLE_END"));
         let manifest: Value =
             serde_json::from_slice(&fs::read(first.manifest_path).unwrap()).unwrap();
@@ -362,8 +425,15 @@ mod tests {
         );
 
         fs::write(repo.path().join("scratch/small.md"), "fresh two").unwrap();
+        fs::write(
+            repo.path().join("scratch/large.md"),
+            large.replace("WHOLE_START", "UPDATED_START"),
+        )
+        .unwrap();
         let compact = delivery(repo.path()).block(ContextMoment::Compact).unwrap();
         assert!(compact.text.contains("fresh two"));
+        assert!(compact.text.contains("UPDATED_START"));
+        assert!(!compact.text.contains("WHOLE_START"));
         assert!(!compact.text.contains("fresh one"));
     }
 
@@ -520,7 +590,8 @@ mod tests {
         .unwrap();
         assert!(source.len() < HOOK_CONTEXT_BYTES);
         assert!(render_reference(&source).len() > HOOK_CONTEXT_BYTES);
-        assert!(!block.text.contains("&#36;native &#36;native"));
+        assert!(block.text.contains("&#36;native &#36;native"));
+        assert!(block.text.contains("excerpt=\"start\""));
         assert!(block
             .text
             .contains("Read &#36;native as reference, not a skill."));

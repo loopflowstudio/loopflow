@@ -104,8 +104,8 @@ context_budgets:
 Each field resolves from Wave frontmatter, repo config, personal config, then
 the compiled default. `lf context` shows the winning source for every value.
 The same block supports `memory_bytes` and `scratch_bytes`. Values must be positive
-integers. These are authoring targets, not launch limits: sources are never excerpted
-or refused for exceeding them. The retired `goal_*` and `input_*` keys are removed.
+integers. These are authoring targets, not launch limits; exceeding them does not
+refuse a launch or select its context. The retired `goal_*` and `input_*` keys are removed.
 
 `lf context` measures recursive scratch Markdown and checkout Wave/ancestor memory,
 without contacting a provider or reading the clipboard. Defaults are 16,000 tokens /
@@ -126,13 +126,17 @@ in a provider request. The harness loads its repo guide natively.
 |---------|----------|-----------|
 | Operating and surface instructions, participant, reply guidance | Fixed added-instructions slot | `--no-loopflow` omits the operating guide |
 | Skill and request | First turn | Selected skill and launch message |
-| Scratch and checkout Wave/ancestor documents | Refreshed conversation block; whole files or a complete listing | Current checkout and selected Wave |
+| Scratch and checkout Wave/ancestor documents | Refreshed conversation block; whole files, marked start excerpts and a complete listing | Current checkout and selected Wave |
 | Explicit docs | File paths in the listing | `docs:` or `--docs` |
 | Branch changes | Git inspection commands and changed paths | `--diff patch`, `diff_files: true` |
-| Codebase summaries and clipboard | Complete private reference files | `summaries:`, `-c` |
+| Codebase summaries | Complete private reference files | `summaries:` |
+| Clipboard | Tagged block after the request in the first turn | `-c` |
 
 The block refreshes at startup and after compaction. After compaction it also
-includes the saved active skill. Overflow points to complete files, never excerpts.
+includes the saved active skill. Large documents include marked start excerpts
+with complete source paths and sizes.
+The rendered block stays within the provider byte cap; overflow listings and skills
+remain readable through complete-file pointers.
 
 ## Config Files
 
@@ -279,7 +283,8 @@ it does not preload file bodies or patches.
 
 ### Clipboard
 
-Save clipboard content in a complete private file referenced by the context listing.
+Append clipboard content in its own tagged block after the request in the first turn.
+It counts toward the terminal argument cap.
 
 | | |
 |---|---|

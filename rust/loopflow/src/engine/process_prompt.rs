@@ -143,12 +143,21 @@ pub fn prepare_process_prompt(
         });
     let system_prompt = crate::engine::prompt::format_system_sections(&components).join("\n\n");
     let task_prompt = if skill_invocation.is_some() {
-        components
-            .message
-            .as_deref()
-            .filter(|message| *message != skill_arguments)
-            .map(crate::engine::prompt::render_message)
-            .unwrap_or_default()
+        [
+            components
+                .message
+                .as_deref()
+                .filter(|message| *message != skill_arguments)
+                .map(crate::engine::prompt::render_message),
+            components
+                .clipboard
+                .as_deref()
+                .map(crate::engine::prompt::format_clipboard),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join("\n\n")
     } else {
         format_first_turn(&components)
     };

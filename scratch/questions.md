@@ -8,9 +8,13 @@ Heart authorized for implementation and demonstration. These are not accepted UX
 
 ## Remaining choices and proof gaps
 
-- Jack Heart has not decided whether clipboard content moves into the first turn
-  or whether Wave memory should shrink to fit the 10,000-byte context block.
-  Existing clipboard references and size targets are unchanged.
+- Jack Heart resolved clipboard placement on October 10: skill, message, then a
+  tagged clipboard block, counted toward the first-turn cap. No clipboard reference file.
+- Jack Heart's “normal snippet + block thing” is interpreted by the operator as
+  marked start excerpts with complete source path/size and a read-the-rest instruction.
+  This interpretation needs confirmation at review; shrinking Wave memory remains undecided.
+- Small whole files precede excerpts; remaining bytes go to excerpts in the existing
+  priority order. Files without room for excerpt metadata remain in the complete listing.
 - The callback now uses complete manifest/saved-skill pointers when the reserved
   listing and skill cannot fit together, including combined overflow. Proposed
   default, not accepted UX: demonstrate reading the omitted text through providers.

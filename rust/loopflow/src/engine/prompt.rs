@@ -1594,7 +1594,14 @@ pub fn format_first_turn(components: &PromptComponents) -> String {
             render_message(message)
         ));
     }
+    if let Some(clipboard) = &components.clipboard {
+        parts.push(format_clipboard(clipboard));
+    }
     parts.join("\n\n")
+}
+
+pub(crate) fn format_clipboard(clipboard: &str) -> String {
+    render_reference(&format!("<lf:clipboard>\n{clipboard}\n</lf:clipboard>"))
 }
 
 /// Write a runtime prompt file and return its path.

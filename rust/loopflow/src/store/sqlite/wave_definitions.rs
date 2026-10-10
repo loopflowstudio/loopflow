@@ -41,23 +41,9 @@ impl SqliteStore {
             }
             prefix.push_str(part);
             let directory = checkout.join("wave").join(&prefix);
-            let goal = directory.join("GOAL.md");
-            let authored_id = match std::fs::read_to_string(&goal) {
-                Ok(content) => {
-                    crate::work::wave::config::parse_wave_config(&content)
-                        .map_err(|error| {
-                            StoreError::InvalidData(format!("{}: {error}", goal.display()))
-                        })?
-                        .id
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-                Err(error) => {
-                    return Err(StoreError::InvalidData(format!(
-                        "{}: {error}",
-                        goal.display()
-                    )))
-                }
-            };
+            let authored_id = crate::work::wave::config::try_read_wave_config(checkout, &prefix)
+                .map_err(|error| StoreError::InvalidData(error.to_string()))?
+                .and_then(|config| config.id);
             let existing: Option<WaveId> = tx.query_row(
                 "SELECT id FROM waves WHERE repo=?1 AND name=?2 AND parent_wave_id IS ?3 AND retired_at IS NULL",
                 params![repo, part, parent], |row| row.get(0)).optional()?;
@@ -124,21 +110,8 @@ fn save_imported_workflows(
 }
 
 fn read_workflows(repo: &Path) -> StoreResult<BTreeMap<String, String>> {
-    let mut workflows = BTreeMap::new();
-    for (name, content) in read_files(&repo.join(".lf/workflows"), &["yaml", "yml"])? {
-        let name = Path::new(&name)
-            .file_stem()
-            .expect("definition has a name")
-            .to_string_lossy()
-            .into_owned();
-        // Match repository discovery's .yaml preference when both extensions exist.
-        workflows.entry(name).or_insert(content);
-    }
-    Ok(workflows)
-}
-
-fn read_files(directory: &Path, extensions: &[&str]) -> StoreResult<BTreeMap<String, String>> {
-    let entries = match std::fs::read_dir(directory) {
+    let directory = repo.join(".lf/workflows");
+    let entries = match std::fs::read_dir(&directory) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
         Err(error) => {
@@ -148,25 +121,32 @@ fn read_files(directory: &Path, extensions: &[&str]) -> StoreResult<BTreeMap<Str
             )))
         }
     };
-    let mut files = BTreeMap::new();
-    for entry in entries {
-        let entry = entry.map_err(|error| StoreError::InvalidData(error.to_string()))?;
-        let path = entry.path();
-        if path.is_file()
-            && path
-                .extension()
-                .and_then(|extension| extension.to_str())
-                .is_some_and(|extension| extensions.contains(&extension))
+    let mut paths = entries
+        .map(|entry| entry.map(|entry| entry.path()))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+    // Match repository discovery's .yaml preference when both extensions exist.
+    paths.sort();
+    let mut workflows = BTreeMap::new();
+    for path in paths {
+        if !path.is_file()
+            || !matches!(
+                path.extension().and_then(|extension| extension.to_str()),
+                Some("yaml" | "yml")
+            )
         {
-            files.insert(
-                entry.file_name().to_string_lossy().into_owned(),
-                std::fs::read_to_string(&path).map_err(|error| {
-                    StoreError::InvalidData(format!("{}: {error}", path.display()))
-                })?,
-            );
+            continue;
         }
+        let name = path
+            .file_stem()
+            .expect("definition has a name")
+            .to_string_lossy()
+            .into_owned();
+        let content = std::fs::read_to_string(&path)
+            .map_err(|error| StoreError::InvalidData(format!("{}: {error}", path.display())))?;
+        workflows.entry(name).or_insert(content);
     }
-    Ok(files)
+    Ok(workflows)
 }
 
 fn seed_wave_files(directory: &Path, id: &WaveId, name: &str) -> StoreResult<()> {
@@ -250,7 +230,9 @@ mod tests {
         )
         .unwrap();
         let definition = "nodes: {}\nedges: [{from: start, to: end}]\n";
-        std::fs::write(repo.path().join(".lf/workflows/custom.yaml"), definition).unwrap();
+        let workflow_path = repo.path().join(".lf/workflows/custom.yaml");
+        std::fs::write(&workflow_path, definition).unwrap();
+        std::fs::write(repo.path().join(".lf/workflows/custom.yml"), "not selected").unwrap();
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         apply_before_current_draft(&conn, "local_planning");
         let id = WaveId::new();
@@ -261,6 +243,8 @@ mod tests {
         .unwrap();
         conn.execute_batch(&current_draft_sql("local_planning"))
             .unwrap();
+        super::import_registered_workflows(&conn).unwrap();
+        std::fs::write(&workflow_path, "later source edit").unwrap();
         super::import_registered_workflows(&conn).unwrap();
         assert_eq!(
             conn.query_row(

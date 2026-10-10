@@ -65,7 +65,7 @@ fn context_budget_preview_reads_checkout_wave_and_refreshes_local_edits() {
     .unwrap();
     fs::write(&scratch, "Pending work. ".repeat(500)).unwrap();
     let store = SqliteStore::new(&home.path().join(".lf/loopflow.db")).unwrap();
-    let _wave = store
+    store
         .ensure_wave(
             repo.path().canonicalize().unwrap().to_str().unwrap(),
             "local",

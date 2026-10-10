@@ -6,15 +6,6 @@ use tracing::warn;
 
 use crate::engine::context_budget::BudgetKey;
 
-/// Read the invoking checkout, never a stored copy or another worktree.
-pub(crate) fn read_wave_document(
-    repo: &Path,
-    name: &str,
-    document: &str,
-) -> std::io::Result<String> {
-    std::fs::read_to_string(repo.join("wave").join(name).join(document))
-}
-
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum WaveConfigError {
     #[error("failed to read {path}: {source}")]
@@ -79,7 +70,7 @@ pub struct WaveConfig {
     pub chat: Option<WaveChatConfig>,
 }
 
-pub(crate) fn parse_wave_config(content: &str) -> Result<WaveConfig, serde_yaml_ng::Error> {
+fn parse_wave_config(content: &str) -> Result<WaveConfig, serde_yaml_ng::Error> {
     match split_frontmatter(content) {
         Some((frontmatter, _)) => serde_yaml_ng::from_str(&frontmatter),
         None => Ok(WaveConfig::default()),
@@ -104,7 +95,7 @@ pub(crate) fn try_read_wave_config(
     name: &str,
 ) -> Result<Option<WaveConfig>, WaveConfigError> {
     let path = goal_path(repo, name);
-    let content = match read_wave_document(repo, name, "GOAL.md") {
+    let content = match std::fs::read_to_string(&path) {
         Ok(content) => content,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(source) => return Err(WaveConfigError::Read { path, source }),
@@ -121,7 +112,7 @@ pub(crate) fn try_read_wave_chat_config(
     name: &str,
 ) -> Result<Option<WaveChatConfig>, WaveConfigError> {
     let path = goal_path(repo, name);
-    let content = match read_wave_document(repo, name, "GOAL.md") {
+    let content = match std::fs::read_to_string(&path) {
         Ok(content) => content,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(source) => return Err(WaveConfigError::Read { path, source }),
@@ -152,14 +143,14 @@ pub(crate) fn try_read_wave_chat_config(
 /// `## Objective`, falling back to the first prose paragraph when that section
 /// is absent.
 pub fn read_wave_summary(repo: &Path, name: &str) -> std::io::Result<String> {
-    match read_wave_document(repo, name, "GOAL.md") {
+    match std::fs::read_to_string(goal_path(repo, name)) {
         Ok(content) => Ok(wave_summary(&content)),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
         Err(error) => Err(error),
     }
 }
 
-pub(crate) fn wave_summary(content: &str) -> String {
+fn wave_summary(content: &str) -> String {
     let body = split_frontmatter(content)
         .map(|(_, body)| body)
         .unwrap_or_else(|| content.to_string());
@@ -228,7 +219,7 @@ fn first_prose_paragraph(content: &str) -> String {
 
 fn goal_value_from_content(repo: &Path, name: &str) -> Result<(Value, String), String> {
     let path = goal_path(repo, name);
-    let content = read_wave_document(repo, name, "GOAL.md")
+    let content = std::fs::read_to_string(&path)
         .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
     let Some((frontmatter, body)) = split_frontmatter(&content) else {
         return Ok((Value::Mapping(Mapping::new()), content));
@@ -254,42 +245,8 @@ fn wave_config_map<'a>(value: &'a mut Value, path: &Path) -> Result<&'a mut Mapp
     })
 }
 
-fn remove_or_set_string(map: &mut Mapping, field: &str, value: Option<String>) {
-    let key = Value::String(field.to_string());
-    match value {
-        Some(value) if !value.trim().is_empty() => {
-            map.insert(key, Value::String(value));
-        }
-        Some(_) => {
-            map.remove(&key);
-        }
-        None => {}
-    }
-}
-
-fn remove_or_set_skill_agents(
-    map: &mut Mapping,
-    skill_agents: Option<HashMap<String, String>>,
-) -> Result<(), String> {
-    let key = Value::String("skill_agents".to_string());
-    match skill_agents {
-        Some(skill_agents) if !skill_agents.is_empty() => {
-            map.insert(
-                key,
-                serde_yaml_ng::to_value(skill_agents)
-                    .map_err(|err| format!("failed to encode skill_agents: {err}"))?,
-            );
-        }
-        Some(_) => {
-            map.remove(&key);
-        }
-        None => {}
-    }
-    Ok(())
-}
-
 /// Update checkout Wave frontmatter, preserving its objective body.
-pub fn update_wave_goal_config(
+pub(crate) fn update_wave_goal_config(
     repo: &Path,
     name: &str,
     update: impl FnOnce(&mut Mapping) -> Result<(), String>,
@@ -305,35 +262,21 @@ pub fn update_wave_goal_config(
     Ok(())
 }
 
-/// Update saved agent fields, preserving unrelated frontmatter.
-pub fn update_wave_agent_config(
-    repo: &Path,
-    name: &str,
-    agent: Option<String>,
-    skill_agents: Option<HashMap<String, String>>,
-) -> Result<(), String> {
-    update_wave_goal_config(repo, name, |map| {
-        remove_or_set_string(map, "agent", agent);
-        remove_or_set_skill_agents(map, skill_agents)
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
         read_wave_config, read_wave_summary, try_read_wave_chat_config, try_read_wave_config,
-        update_wave_agent_config, WaveChatConfig, WaveConfigError,
+        update_wave_goal_config, WaveChatConfig, WaveConfigError,
     };
-    use std::collections::HashMap;
     use std::path::Path;
 
     struct ConfigRepo {
-        repo: loopflow_test_support::TestRepo,
+        repo: tempfile::TempDir,
     }
 
     impl ConfigRepo {
         fn new() -> Self {
-            let repo = loopflow_test_support::TestRepo::new();
+            let repo = tempfile::tempdir().unwrap();
             std::fs::create_dir_all(repo.path().join("wave/scan")).unwrap();
             Self { repo }
         }
@@ -348,7 +291,7 @@ mod tests {
     #[test]
     fn frontmatter_edits_do_not_create_missing_goals() {
         let repo = ConfigRepo::new();
-        assert!(update_wave_agent_config(repo.path(), "scan", Some("codex".into()), None).is_err());
+        assert!(update_wave_goal_config(repo.path(), "scan", |_| Ok(())).is_err());
         assert!(!repo.path().join("wave/scan/GOAL.md").exists());
     }
 
@@ -471,51 +414,26 @@ mod tests {
     }
 
     #[test]
-    fn update_wave_agent_config_writes_agent_fields() {
-        let temp = ConfigRepo::new();
-        temp.write("---\narea: ['.']\n---\nDrive the work.\n")
-            .expect("write");
-
-        update_wave_agent_config(
-            temp.path(),
-            "scan",
-            Some("codex:o3".to_string()),
-            Some(HashMap::from([(
-                "implement".to_string(),
-                "claude:sonnet".to_string(),
-            )])),
-        )
-        .expect("update config");
-
-        let config = read_wave_config(temp.path(), "scan").expect("config should parse");
-        assert_eq!(config.agent.as_deref(), Some("codex:o3"));
+    fn frontmatter_edits_preserve_the_authored_body_and_unrelated_fields() {
+        let repo = ConfigRepo::new();
+        let body = "\n## Objective\n\nKeep tokens λ.\n";
+        repo.write(&format!("---\nagent: codex\n---\n{body}"))
+            .unwrap();
+        update_wave_goal_config(repo.path(), "scan", |map| {
+            map.insert(
+                "pm".into(),
+                serde_yaml_ng::from_str("linear_initiative: lin-123").unwrap(),
+            );
+            Ok(())
+        })
+        .unwrap();
+        let content = std::fs::read_to_string(repo.path().join("wave/scan/GOAL.md")).unwrap();
+        assert!(content.ends_with(body));
+        let config = read_wave_config(repo.path(), "scan").unwrap();
+        assert_eq!(config.agent.as_deref(), Some("codex"));
         assert_eq!(
-            config.skill_agents,
-            Some(HashMap::from([(
-                "implement".to_string(),
-                "claude:sonnet".to_string(),
-            )]))
+            config.pm.unwrap().linear_initiative.as_deref(),
+            Some("lin-123")
         );
-    }
-
-    #[test]
-    fn update_wave_agent_config_removes_fields_on_empty_values() {
-        let temp = ConfigRepo::new();
-        temp.write(
-            "---\narea: ['.']\nagent: codex:o3\nskill_agents:\n  implement: claude:sonnet\n---\nDrive the work.\n",
-        )
-        .expect("write");
-
-        update_wave_agent_config(
-            temp.path(),
-            "scan",
-            Some(String::new()),
-            Some(HashMap::new()),
-        )
-        .expect("update config");
-
-        let config = read_wave_config(temp.path(), "scan").expect("config should parse");
-        assert!(config.agent.is_none());
-        assert!(config.skill_agents.is_none());
     }
 }

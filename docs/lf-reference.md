@@ -1451,7 +1451,7 @@ List Workflow definitions, including unavailable local files
 
 | Argument | What it does |
 |---|---|
-| `--project` | Include this Project's Wave files from the checkout |
+| `--project` | Include this Project's stored Wave Workflow definitions |
 | `--json` | json Default: false. |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |

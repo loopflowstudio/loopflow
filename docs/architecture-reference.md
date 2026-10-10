@@ -491,8 +491,7 @@ together; observed Linear conflicts retire losing intentions while preserving
 their receipts and local execution. Project ingestion stores
 editable content so KRs and targets survive the shared reader. Task creation/edits
 and Project creation/edits, rotation and refiling use common transactions and field
-receipts. Wave provisioning and document ingestion use common stored definitions;
-deletion commits local removal and its pending receipt without changing execution.
+receipts. Task deletion commits local removal and its pending receipt without changing execution.
 Observed conflicts adopt Linear; unchanged baselines preserve pending saves.
 Independent foreground loops deliver creation, fields, ordering, state, deletion
 and comments; receipt-backed CLI/Desktop projections expose pending and uncertain

@@ -15,6 +15,10 @@ files. Canonical repository identity must not redirect authoring into main.
 
 ## Delete — do not maintain
 
+The document-storage cut below is complete, including removal of the unused
+`update_wave_agent_config` writer, its field-edit helpers and exclusive tests;
+agent policy is authored in GOAL.md. PM metadata updates remain.
+
 - `wave_documents` table and revision triggers in `local_planning.sql`.
 - SQLite document getters/setter and document-import hooks/tests, including
   stored-document retirement comparisons. Preserve workflow import independently.
@@ -28,12 +32,12 @@ files. Canonical repository identity must not redirect authoring into main.
 - `work/wave/config.rs`: config, summary, chat and frontmatter readers; shared
   by launch budgets/agents, cron, metrics, PM and other Wave surfaces.
 - `lf/commands/waves.rs::snapshot_wave`: list/status/roadmap summary.
-- `ops/pm.rs`: legacy Team validation, PM test override; sync summary already
-  uses config reader. Frontmatter writers retain the objective body.
-- `store/sqlite/wave_documents.rs`: document CRUD; ensure/import (also workflows).
-- `store/sqlite.rs`: Wave registration import and retirement comparison.
-- `store/migrations.rs`: import existing registered Waves during draft application.
-- CLI edit dispatch is the only whole-document mutation API.
+- `ops/pm.rs`: legacy Team validation and sync summary use the config reader. Frontmatter writers retain the objective body.
+- `store/sqlite/wave_definitions.rs`: registration, missing-file creation and
+  retained Workflow import; document CRUD/import is deleted.
+- `store/sqlite.rs`: registration imports and retirement compares only Workflows.
+- `store/migrations.rs`: import registered Workflows during draft application.
+- Whole-document CLI edit dispatch is deleted.
 
 ## wave_workflows — retained, decision open
 
@@ -70,6 +74,11 @@ Config fixtures no longer need an artificial stored-document owner. Native launc
 fixtures still register Wave identity; deleting document storage does not remove
 launch attribution. Relocation keeps authored files unchanged (assumption above).
 
+Compression shares the goal-config reader with registration, removes the generic
+stored-document reader and file importer, and keeps config fixtures filesystem-only.
+Workflow import still prefers `.yaml` and preserves saved definitions; help now
+states that ownership rather than claiming checkout reads.
+
 Release child memory's operation-entry lesson informed native launch coverage;
 its remaining publication/schedule evidence is unrelated and unchanged. No other
 immediate Infrastructure child memory exists in this checkout.
@@ -82,5 +91,4 @@ Reconcile LOO-444's context-reader overlap when integrating its committed change
 no transport changes or installed-store access occurred here. `wave_workflows`
 removal remains Jack's open decision, not a dependency for this cut.
 
-Checks: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings` and focused `cargo test -p loopflow` filters (Wave files/draft upgrade/relocation, config, checkout context/list/status and consecutive native launches) pass; gate/CI own the broader suites.
-
+Checks: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, and network-isolated `cargo test --offline -p loopflow --lib` with `work::wave::config::tests` / `store::sqlite::wave_definitions::tests` pass (11 tests); gate/CI own broader acceptance. Earlier checkout/native-launch proofs remain at `3db1e0c00:scratch/read-wave-goals-and-memory.md`.

@@ -517,7 +517,7 @@ pub enum ProjectWorkflowCommand {
     Source { project: String, name: String },
     /// List Workflow definitions, including unavailable local files
     List {
-        /// Include this Project's Wave files from the checkout
+        /// Include this Project's stored Wave Workflow definitions
         #[arg(long)]
         project: Option<String>,
         #[arg(long)]

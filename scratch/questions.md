@@ -61,9 +61,10 @@ dispatch; an unscoped ambiguous prefix still fails.
 
 ## Context budget
 
-Generated Work-seed/inventory overflow cannot be repaired by authored-note
-curation; limits remain unchanged. Original diagnosis and source pointer:
-`e4a324636:scratch/questions.md`, **Context budget — October 9**.
+`lf context --skill compress` reports the generated Work seed at 35,087/16,000
+tokens (19,087 over). It includes stored steers and inventory, not authored scratch.
+The complete launch source is `.lf/tmp/context/597148829112ee8ab26eeb619fd725e98db8550675d963aeade69b2ec91270f3.md`.
+Deleting local notes cannot repair that source; limits and historical steers stay unchanged.
 
 ## Admission authority — October 9, unresolved
 

@@ -56,14 +56,16 @@ not process/window shutdown. No code, native demo or new runtime proof is claime
 
 ## Split correction — October 10
 
-Jack Heart selected shell-by-default splitting. All native Split entry points and
-exact-target CLI dispatch now use the existing shell-location owner before the
-multiplexer mutation. Review caught that a remote refusal on an occupied pane
-would otherwise be invisible: errors now use the pane alert, not an empty-pane
-message. The shell command and leaf publish together; stale requests still refuse.
-Initial checks exposed old empty-split/count assumptions and an unnamed local
-Machine fixture; fixtures now assert retained shells, with the actual local identity.
-This is not the Work-tab cutover: registry rekeying, contents' locations, outer-tree
-deletion, navigation and wire cutover all remain in the plan.
+Jack Heart selected shell-by-default splitting. Native controls and exact-target
+CLI dispatch resolve shell location before layout mutation; an alert exposes remote
+refusal even on occupied panes. Commands publish with their leaves. Failed old
+empty-split/count assumptions, the unnamed local-Machine fixture and passing
+reruns remain at `270e29bdc:scratch/findings.md`, this heading.
 
-Check: `scripts/test_desktop.sh --filter 'MultiplexerStoreTests|DesktopPaneControlTests|WorkDestinationTests/remote' -Xswiftc -gnone --no-parallel` — 44 passed, one stale empty-pane assertion repaired and its exact test rerun PASS; `cargo fmt`/Clippy PASS; native: demo, broader suites: gate/CI.
+Compression replaces duplicate horizontal/vertical rectangle construction in the
+surviving multiplexer with CoreGraphics division. Focus/close coverage exercises
+both axes and hidden panes. The Work-keyed registry, per-pane locations, outer-tree
+deletion, navigation and DTO cutover remain unimplemented; no predecessor layout
+was extended. Native acceptance remains with demo.
+
+Check: `scripts/test_desktop.sh --filter MultiplexerStoreTests -Xswiftc -gnone --no-parallel` — build and 26 tests PASS; `cargo fmt --check`/Clippy PASS; broader suites: gate/CI, native: demo.

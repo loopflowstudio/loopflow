@@ -340,52 +340,13 @@ public final class MultiplexerStore {
         case .leaf(let pane):
             frames[pane.id] = rect
         case .split(let axis, let first, let second, let ratio):
-            switch axis {
-            case .vertical:
-                let firstWidth = rect.width * ratio
-                _collectFrames(
-                    first,
-                    rect: CGRect(
-                        x: rect.minX,
-                        y: rect.minY,
-                        width: firstWidth,
-                        height: rect.height
-                    ),
-                    into: &frames
-                )
-                _collectFrames(
-                    second,
-                    rect: CGRect(
-                        x: rect.minX + firstWidth,
-                        y: rect.minY,
-                        width: rect.width - firstWidth,
-                        height: rect.height
-                    ),
-                    into: &frames
-                )
-            case .horizontal:
-                let firstHeight = rect.height * ratio
-                _collectFrames(
-                    first,
-                    rect: CGRect(
-                        x: rect.minX,
-                        y: rect.minY,
-                        width: rect.width,
-                        height: firstHeight
-                    ),
-                    into: &frames
-                )
-                _collectFrames(
-                    second,
-                    rect: CGRect(
-                        x: rect.minX,
-                        y: rect.minY + firstHeight,
-                        width: rect.width,
-                        height: rect.height - firstHeight
-                    ),
-                    into: &frames
-                )
-            }
+            let vertical = axis == .vertical
+            let (firstRect, secondRect) = rect.divided(
+                atDistance: (vertical ? rect.width : rect.height) * ratio,
+                from: vertical ? .minXEdge : .minYEdge
+            )
+            _collectFrames(first, rect: firstRect, into: &frames)
+            _collectFrames(second, rect: secondRect, into: &frames)
         }
     }
 

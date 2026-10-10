@@ -459,8 +459,8 @@ struct MultiplexerStoreTests {
         }
     }
 
-    @Test("focus left follows visual geometry instead of tree order")
-    func focusLeftIsSpatial() {
+    @Test("Focus and close follow split geometry instead of tree order")
+    func spatialFocusAndClose() {
         let left = PaneState(id: "left", content: .shell)
         let upperRight = PaneState(id: "upper-right", content: .shell)
         let lowerRight = PaneState(id: "lower-right", content: .shell)
@@ -481,6 +481,18 @@ struct MultiplexerStoreTests {
 
         store.focus(.left)
 
+        #expect(store.focusedPaneId == left.id)
+        store.setFocusedPane(upperRight.id)
+        store.focus(.down)
+        #expect(store.focusedPaneId == lowerRight.id)
+        store.focus(.up)
+        #expect(store.focusedPaneId == upperRight.id)
+        store.focus(.left)
+        #expect(store.focusedPaneId == left.id)
+        store.setCollapsed(paneId: upperRight.id, collapsed: true)
+        store.focus(.right)
+        #expect(store.focusedPaneId == lowerRight.id)
+        store.close(lowerRight.id)
         #expect(store.focusedPaneId == left.id)
     }
 }

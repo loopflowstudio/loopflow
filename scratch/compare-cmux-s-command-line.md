@@ -175,9 +175,8 @@ key chords including Ctrl-C. Neither is part of this slice.
 3. Demonstrate the rendered Work/tab/pane experience at the existing demo review
    boundary. Native judgment is separate from passing model tests.
 
-Sections 2–5 retain admission, mixed exchange, sharing/recovery, explanation and
-running-Flow/configured/native proof. Tab completion closes none; unavailable
-arbitration/rendering does not block this UI’s implementation/headless checks.
+Sections 2–5 remain independent obligations; neither admission nor rendering
+blocks this UI’s headless implementation.
 
 ### Checks and demo acceptance
 

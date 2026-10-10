@@ -465,3 +465,6 @@ make…" (growth memory, 2026-09-26), "You can zoom in and you can zoom out"
 (same), "empowering people, not delegating the thinking to robots" and "the
 stages that matter most to you" (this Task). The "you play it" extension is
 gone; his rule is that the noun is defined once and not extended.
+Jack Heart on "It doesn't make the software for you; you make the software
+through it.": "I like that yeah". It stays as the first line under the
+subheader.

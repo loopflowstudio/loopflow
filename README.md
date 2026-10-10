@@ -142,6 +142,11 @@ lf pr reconcile                                      # check recorded deliveries
 lf ci watch                                          # watch PR checks; start a ci-fix when a landing fails
 ```
 
+Wave and narrower assignments travel through selected Git planning destinations,
+including offline edits. Existing Tasks keep their recorded checkout Machine;
+shared first starts remain unavailable until exclusive admission is implemented.
+Connection settings and execution records never travel with planning.
+
 Task comments in Linear also reach the Task's running Flow. Steering never starts
 an idle Task or broadcasts to independent conversations. A stopped Flow is
 history: `task run` never continues it, so inspect `lf task status` first.

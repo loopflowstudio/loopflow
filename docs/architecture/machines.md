@@ -78,9 +78,8 @@ the CLI under [`lf/`](../../rust/loopflow/src/lf/).
 
 `Placement` maps one `WorkRef` to one `MachineId`. It records where Work belongs,
 not whether a process exists. `lf wave place` sets the Machine used by Wave schedules.
-The current LOO-427 working tree prototypes nearest-assignment resolution through
-Task, Project and ancestor Waves; this inheritance rule is still under design,
-not an accepted routing contract. New children store no assignment copy, so later
+Resolve the nearest assignment through Task, Project and ancestor Waves.
+New children store no assignment copy, so later
 delegation applies to existing
 unassigned children as well as future ones. An explicit narrower assignment wins,
 even when it selected the same Machine as its parent. The read exposes `source`
@@ -106,10 +105,14 @@ planning destination and publishes nothing. A shared code remote
 or equal clone name supplies no identity. `--repository ID` resolves at the target
 before Process admission, so SSH need not change the Machine's saved default.
 LOO-412 supplies user/shared destination selection and portable Work exchange.
-That journal does not carry RepositoryId or delegation: unbound import creates
-a local repository ID. Explicit association converges established roots on a
-selected ID without rewriting Work; delegation exchange and live-window
-reassociation remain unfinished. This associates repository roots, not divergent
+The journal carries authored delegation as Machine ID, placement time and
+explicit/legacy provenance, not connections or execution locations. Missing
+assignments retain inheritance. Concurrent losing assignments remain in the journal;
+imports project into the same Placement owner without echoing a local save. An
+unknown Machine remains an assignment reference, never an invented SSH route.
+The journal does not carry RepositoryId: unbound import creates a local repository
+ID. Explicit association converges established roots on a selected ID without
+rewriting Work; Desktop reassociates retained windows on opening/restoration. This associates repository roots, not divergent
 Task/Project IDs for one provider object; provider correspondence and uncertain
 effect ownership remain with the common planning writer.
 

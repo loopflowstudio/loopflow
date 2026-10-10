@@ -1292,3 +1292,179 @@ fn peer_frame(home: &Path, repo: &Path) -> Option<PeerPlanningStatus> {
             _ => None,
         })
 }
+
+#[test]
+fn public_delegation_exchange_keeps_execution_local() {
+    use loopflow::durable::{PlacementProvenance, WorkRef};
+    use loopflow::id::WaveId;
+    use loopflow::work::wave::Wave;
+
+    let repo = TestRepo::new();
+    let other = TestRepo::new();
+    let left = tempfile::tempdir().unwrap();
+    let right = tempfile::tempdir().unwrap();
+    let source = repo.path().canonicalize().unwrap();
+    let target = other.path().canonicalize().unwrap();
+    let fixture = support::register_task_with_pr(left.path(), &source, "main", &repo.head_sha());
+    let a = SqliteStore::new(&left.path().join("loopflow.db")).unwrap();
+    let b = open_store(right.path());
+    let machine_a = a.local_machine().unwrap().id;
+    let machine_b = b.local_machine().unwrap().id;
+    let root = &fixture.task.wave_id;
+    let child = Wave::new(
+        WaveId::new(),
+        "child".into(),
+        source.to_str().unwrap().into(),
+    )
+    .with_parent(root.clone());
+    a.create_wave(&child).unwrap();
+    run(
+        &source,
+        left.path(),
+        &["wave", "ensure", "task-pr-tests/child", "--json"],
+    );
+    let inherited = create(&source, left.path(), "task-pr-tests");
+    let narrower = create(&source, left.path(), child.id().as_str());
+    let conn = Connection::open(left.path().join("loopflow.db")).unwrap();
+    conn.busy_timeout(Duration::from_secs(5)).unwrap();
+    seed_execution(&conn, &fixture.task, &source, "review");
+    let before = execution(&conn, fixture.task.id.as_str());
+    let route = a.task_execution_route(&fixture.task.id).unwrap();
+    let binding = PlanningDestination::resolve(
+        &source,
+        "origin",
+        "refs/loopflow/planning/shared/delegation",
+    )
+    .unwrap();
+    a.bind_peer_planning(source.to_str().unwrap(), &binding)
+        .unwrap();
+    a.select_peer_waves(
+        source.to_str().unwrap(),
+        &binding.id(),
+        std::slice::from_ref(root),
+    )
+    .unwrap();
+    b.bind_peer_planning(target.to_str().unwrap(), &binding)
+        .unwrap();
+    let source_watch = Watch::start(&source, left.path());
+    let worker_watch = Watch::start(&target, right.path());
+    let settled = || {
+        [&a, &b]
+            .into_iter()
+            .zip([&source, &target])
+            .all(|(store, repo)| {
+                let status = status(store, repo.to_str().unwrap());
+                status.pending_local == Some(false)
+                    && status.publication_state.as_deref() == Some("confirmed")
+                    && status.acquisition_error.is_none()
+            })
+    };
+    wait_for(|| b.task(&narrower.parse().unwrap()).unwrap().is_some() && settled());
+
+    let remote = Path::new(binding.endpoint());
+    let disconnected = remote.with_extension("disconnected");
+    fs::rename(remote, &disconnected).unwrap();
+    run(
+        &source,
+        left.path(),
+        &["wave", "place", root.as_str(), machine_a.as_str(), "--json"],
+    );
+    run(
+        &target,
+        right.path(),
+        &["wave", "place", root.as_str(), machine_b.as_str(), "--json"],
+    );
+    run(
+        &target,
+        right.path(),
+        &[
+            "wave",
+            "place",
+            child.id().as_str(),
+            machine_b.as_str(),
+            "--json",
+        ],
+    );
+    assert_eq!(
+        status(&a, source.to_str().unwrap()).pending_local,
+        Some(true)
+    );
+    assert_eq!(
+        status(&b, target.to_str().unwrap()).pending_local,
+        Some(true)
+    );
+    let saved_a = a
+        .export_peer_planning(source.to_str().unwrap(), &binding.id())
+        .unwrap();
+    let saved_b = b
+        .export_peer_planning(target.to_str().unwrap(), &binding.id())
+        .unwrap();
+    fs::rename(disconnected, remote).unwrap();
+    let work = WorkRef::Task(inherited.parse().unwrap());
+    wait_for(|| a.placement(&work).unwrap() == b.placement(&work).unwrap() && settled());
+    let assignment = a.placement(&work).unwrap();
+    assert_eq!(assignment.source, WorkRef::Wave(root.clone()));
+    assert_eq!(assignment.provenance, PlacementProvenance::Explicit);
+    let narrow_work = WorkRef::Task(narrower.parse().unwrap());
+    for store in [&a, &b] {
+        let selected = store.placement(&narrow_work).unwrap();
+        assert_eq!(selected.source, WorkRef::Wave(child.id().clone()));
+        assert_eq!(selected.machine_id, machine_b);
+    }
+    assert!(a.machine_by_id(&machine_b).unwrap().is_none());
+    assert!(b.machine_by_id(&machine_a).unwrap().is_none());
+    assert_eq!(a.task_execution_route(&fixture.task.id).unwrap(), route);
+    assert_eq!(execution(&conn, fixture.task.id.as_str()), before);
+    assert!(b
+        .task(&fixture.task.id)
+        .unwrap()
+        .unwrap()
+        .worktree
+        .is_none());
+
+    let retained = a
+        .export_peer_planning(source.to_str().unwrap(), &binding.id())
+        .unwrap();
+    for saved in [&saved_a, &saved_b] {
+        for (id, change) in &saved.changes {
+            assert_eq!(retained.changes.get(id), Some(change));
+        }
+    }
+    let competing: Vec<_> = retained
+        .heads()
+        .filter(|(_, change)| change.object.id == root.as_str() && change.field == "delegation")
+        .collect();
+    assert_eq!(
+        competing.len(),
+        2,
+        "concurrent losing intent remains recoverable"
+    );
+    let future = create(&target, right.path(), child.id().as_str());
+    wait_for(|| a.task(&future.parse().unwrap()).unwrap().is_some());
+    assert_eq!(
+        a.placement(&WorkRef::Task(future.parse().unwrap()))
+            .unwrap()
+            .machine_id,
+        machine_b
+    );
+    assert!(!b.task_started(&future.parse().unwrap()).unwrap());
+    // Assignment supplies no exclusive admission, even on its selected Machine.
+    let refused = command(&target, right.path())
+        .args(["task", "checkout", &future])
+        .output()
+        .unwrap();
+    assert!(!refused.status.success());
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains("admission"),
+        "{}",
+        String::from_utf8_lossy(&refused.stderr)
+    );
+    assert!(b
+        .task(&future.parse().unwrap())
+        .unwrap()
+        .unwrap()
+        .worktree
+        .is_none());
+    drop(worker_watch);
+    drop(source_watch);
+}

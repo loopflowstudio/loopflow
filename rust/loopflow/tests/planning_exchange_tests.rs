@@ -369,3 +369,25 @@ fn peer_authored_predecessors_require_one_matching_provider_mapping() {
     unknown.changes.remove("peer-mapping");
     assert!(unknown.to_bytes().is_err());
 }
+
+#[test]
+fn delegation_is_intent_not_connection_or_execution_authority() {
+    let mut snapshot = PlanningSnapshot::default();
+    let machine = loopflow::durable::MachineId::new();
+    let assignment = json!({"machine_id":machine,"placed_at":1,"provenance":"explicit"});
+    write(&mut snapshot, "assignment", "delegation", "", 1, false);
+    snapshot.changes.get_mut("assignment").unwrap().value = assignment.clone();
+    assert!(snapshot.to_bytes().is_ok());
+    for invalid in [
+        json!({"machine_id":machine,"placed_at":1,"provenance":"local_default"}),
+        json!({"machine_id":"local","placed_at":1,"provenance":"explicit"}),
+        json!({"machine_id":machine,"placed_at":-1,"provenance":"legacy"}),
+        json!({"machine_id":machine,"placed_at":1,"provenance":"explicit","route":"ssh worker"}),
+        json!({"machine_id":machine,"placed_at":1,"provenance":"explicit","checkout":"/private/work"}),
+    ] {
+        snapshot.changes.get_mut("assignment").unwrap().value = invalid;
+        assert!(snapshot.to_bytes().is_err());
+    }
+    snapshot.changes.get_mut("assignment").unwrap().value = serde_json::Value::Null;
+    assert!(snapshot.to_bytes().is_ok(), "null restores inheritance");
+}

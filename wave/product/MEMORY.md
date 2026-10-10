@@ -145,20 +145,23 @@ Scoped alias resolution does not replace repository checks for historical branch
 selectors, which can resolve only later through retained placement.
 No preview endpoint probes, takeover or end-intent completion/cleanup; native proof remains.
 
-October 9 integration lesson: unchanged execution rows did not prove completion-intent
-supersession (`37cd026a7`). `e79451d05`/`2a2379913` add public complete/reopen
-exchange and end retry. Git projection supersedes intent by newly accepted winning
-mutation, not changed bytes: offline complete/reopen can return to the same open
-value. Replay preserves newer requests. Supersession and state-delivery receipts
-share a savepoint; receipt failure preserves both planning and intent. Linear
-retains its status-change owner: the first repair wrongly let a title-only revision
-cancel intent.
-The file-Git fixture retains seeded Workflow/PR/placement, disk drafts
-and one owned fake provider. It does not run a Task Flow or prove native input or
-configured providers. Explicit complete authors new intent; end retry cannot revive
-superseded intent. Requests never synchronize. Delegation exchange and exclusive
-admission remain unfinished; neither this proof nor assignment
-authorizes first start. Mixed-provider and native acceptance remain unproved.
+October 9 completion exchange: `e79451d05`/`2a2379913` repair the `37cd026a7`
+counterexample. Newly accepted Git mutations supersede intent even when offline
+complete/reopen returns to the same value; replay preserves newer requests. Supersession
+and delivery receipts share a savepoint. Linear retains status-change ownership:
+title-only revisions cannot cancel intent. Explicit complete authors new intent;
+end retry cannot revive superseded requests, which never synchronize. Seeded
+Workflow/PR/placement, disk drafts and one fake provider prove no running Task Flow
+or native acceptance. Earlier failures: `b2add0cf8`, this heading.
+
+October 9 delegation exchanges grouped Machine ID/time/explicit-or-legacy provenance
+through the existing journal and Placement. Null restores inheritance. A planning
+reference needs no local connection: importing an unknown Machine creates no route.
+Two isolated Homes, public Wave saves and file-Git work-watch prove offline convergence, narrower
+sub-Wave overrides, future inheritance and retained losing inputs. Store fixtures add
+Task/Project overrides and no-echo replay. Assignment grants neither execution location
+nor exclusive admission; shared first-start refusal remains. Mixed-provider, remote
+opening and native acceptance remain unfinished.
 
 ## Task delivery boundary (LOO-418, reconciled 2026-10-09)
 
@@ -950,12 +953,10 @@ lfd and resident-cron contracts remain in
 
 ## Shared planning and runtime vocabulary
 
-Wave → Task is public planning; Chapter/Project identity stays internal and
-historical. Shared status, roadmap, cached plan and Rust/Swift fixtures change
-together. LfSession owns interactive Session/headless Run continuity and
-history; Process owns an lf invocation; FlowProcess records one Flow driver's graph
-and steps. A Task run may start several Flow processes. No separate Run owner is
-restored because identifiers happen to coincide.
+Wave → Task is public; Chapter/Project stays internal and historical. Update Rust/Swift
+projections and fixtures together. LfSession owns Session/Run continuity, Process an
+invocation, FlowProcess one driver's graph/steps. Several Flows may serve one Task;
+coincident IDs restore no separate Run owner.
 
 ## Swift data path — RegistryQuery is the single reader
 
@@ -981,13 +982,11 @@ text first; that latency has no owning Task (LOO-375 owns `wt list` only).
   reads. A view that builds its own model reopens the blocking path.
 - Jack's delivery contract (2026-10-04): land on autonomous checks and honest
   benchmark evidence; rendered startup is post-merge validation, not a gate.
-- Measurements: `77c9f9273:wave/product/MEMORY.md`, this heading, and
-  `scripts/benchmarks/desktop-performance/`. Path normalization dominated drawing;
-  reopening hid first-update launch cost. Stripping with a retained dSYM remains
-  Jack's open choice; its measured gain traded away crash-frame names.
-- October 7: Jack retired LOO-376's performance acceptance; LOO-408 owns its
-  installed settlement. Prior cold-cache/refresh and duplicate-read observations
-  remain evidence, not new optimization obligations.
+- Measurements, normalization/dSYM findings, failed cold-cache/refresh and
+  duplicate-read observations: `b2add0cf8:wave/product/MEMORY.md`, this heading,
+  and `scripts/benchmarks/desktop-performance/`. October 7 retired LOO-376's
+  numeric acceptance; LOO-408 owns installed settlement. Stripping with a retained
+  dSYM remains Jack's open choice, not an optimization instruction.
 
 ## Sessions projection and native resume (reconciled 2026-09-24)
 

@@ -2394,7 +2394,24 @@ fn project_fields<'a>(
         .collect::<StoreResult<Vec<_>>>()?;
     let mut columns = BTreeMap::new();
     for (field, value) in &fields {
-        if *field == "disposition" {
+        if *field == "delegation" {
+            // Assignment intent uses the Placement owner, never Task checkout or
+            // Machine connection rows. Import suppression prevents journal echo.
+            let column = format!("{}_id", object.kind.as_str());
+            if value.is_null() {
+                conn.execute(
+                    &format!("DELETE FROM work_placements WHERE {column}=?1"),
+                    [&object.id],
+                )?;
+            } else {
+                conn.execute(&format!("INSERT INTO work_placements({column},machine_id,placed_at,provenance)
+                    VALUES(?1,?2,?3,?4) ON CONFLICT({column}) DO UPDATE SET
+                    machine_id=excluded.machine_id,placed_at=excluded.placed_at,provenance=excluded.provenance
+                    WHERE machine_id IS NOT excluded.machine_id OR placed_at IS NOT excluded.placed_at
+                        OR provenance IS NOT excluded.provenance"),
+                    params![object.id,value["machine_id"].as_str(),value["placed_at"].as_i64(),value["provenance"].as_str()])?;
+            }
+        } else if *field == "disposition" {
             // The merged snapshot has already validated names and grouped values.
             columns.extend(
                 value
@@ -2505,6 +2522,121 @@ mod tests {
             .select_peer_waves(repo, &destination(), std::slice::from_ref(wave.id()))
             .unwrap();
         task
+    }
+
+    #[test]
+    fn delegation_exchange_retains_overrides_provenance_and_recorded_execution() {
+        use crate::durable::{PlacementProvenance, TaskExecutionSource, WorkRef};
+        let (_left_home, left) = store();
+        let (_right_home, right) = store();
+        let id = seed(&left);
+        let task = left.task(&id).unwrap().unwrap();
+        let work = WorkRef::Task(id.clone());
+        let wave = WorkRef::Wave(task.wave_id.clone());
+        let project = WorkRef::Project(task.project_id.clone());
+        let a = left.local_machine().unwrap().id;
+        let b = right.local_machine().unwrap().id;
+        left.place_work(&wave, &a).unwrap();
+        import(&right, "/target", "initial", &export(&left, "/source"));
+        assert_eq!(
+            right.placement(&work).unwrap(),
+            left.placement(&work).unwrap()
+        );
+        assert!(
+            right.machine_by_id(&a).unwrap().is_none(),
+            "assignment grants no connection"
+        );
+
+        // Each peer writes while disconnected. Concurrent values and their
+        // original provenance stay recoverable in the existing journal.
+        left.place_work(&project, &a).unwrap();
+        right.place_work(&project, &b).unwrap();
+        let offline = export(&left, "/source")
+            .merge(&export(&right, "/target"))
+            .unwrap();
+        import(&left, "/source", "joined", &offline);
+        import(&right, "/target", "joined", &offline);
+        let winner = left.placement(&work).unwrap().machine_id;
+        assert!(winner == a || winner == b);
+        for store in [&left, &right] {
+            let placement = store.placement(&work).unwrap();
+            assert_eq!(placement.source, project);
+            assert_eq!(placement.machine_id, winner);
+            assert_eq!(placement.provenance, PlacementProvenance::Explicit);
+        }
+        let heads: Vec<_> = offline
+            .heads()
+            .filter(|(_, change)| {
+                change.object.id == task.project_id.as_str() && change.field == "delegation"
+            })
+            .collect();
+        assert_eq!(heads.len(), 2);
+        assert!(heads
+            .iter()
+            .all(|(_, change)| change.value["provenance"] == "explicit"));
+        assert!(heads
+            .iter()
+            .any(|(_, change)| change.value["machine_id"] == a.as_str()));
+        assert!(heads
+            .iter()
+            .any(|(_, change)| change.value["machine_id"] == b.as_str()));
+
+        // A legacy Task override is neither guessed inherited nor rewritten by
+        // an ancestor save. Imported intent never changes a retained checkout.
+        left.conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO work_placements(task_id,machine_id,placed_at) VALUES(?1,?2,1)",
+                params![id.as_str(), a.as_str()],
+            )
+            .unwrap();
+        right.conn.lock().unwrap().execute("INSERT INTO task_events(task_id,kind_json,created_at) VALUES(?1,'{\"kind\":\"started\"}',1)", [id.as_str()]).unwrap();
+        right.conn.lock().unwrap().execute("UPDATE tasks SET worktree='/retained',checkout_machine_id=?2,started_at=1 WHERE id=?1",
+            params![id.as_str(),b.as_str()]).unwrap();
+        import(&right, "/target", "legacy", &export(&left, "/source"));
+        assert_eq!(
+            right.placement(&work).unwrap().provenance,
+            PlacementProvenance::Legacy
+        );
+        assert_eq!(right.placement(&work).unwrap().machine_id, a);
+        assert_eq!(right.task_execution_route(&id).unwrap().machine_id, b);
+        assert_eq!(
+            right.task_execution_route(&id).unwrap().source,
+            TaskExecutionSource::RecordedCheckout
+        );
+        left.place_work(&work, &a).unwrap();
+        import(&right, "/target", "explicit", &export(&left, "/source"));
+        assert_eq!(
+            right.placement(&work).unwrap().provenance,
+            PlacementProvenance::Explicit
+        );
+        assert_eq!(
+            right.task(&id).unwrap().unwrap().worktree.as_deref(),
+            Some(std::path::Path::new("/retained"))
+        );
+        assert_eq!(right.task_execution_route(&id).unwrap().machine_id, b);
+
+        // Removing only the narrower intent restores nearest-ancestor selection.
+        left.conn
+            .lock()
+            .unwrap()
+            .execute(
+                "DELETE FROM work_placements WHERE task_id=?1",
+                [id.as_str()],
+            )
+            .unwrap();
+        import(&right, "/target", "inherit", &export(&left, "/source"));
+        assert_eq!(right.placement(&work).unwrap().source, project);
+        assert_eq!(right.placement(&work).unwrap().machine_id, winner);
+        assert_eq!(right.task_execution_route(&id).unwrap().machine_id, b);
+        let before = export(&right, "/target");
+        import(&right, "/target", "repeat", &export(&left, "/source"));
+        assert_eq!(
+            export(&right, "/target"),
+            before,
+            "import must not echo assignment"
+        );
     }
 
     fn linear_seed(store: &SqliteStore) -> (WaveId, crate::store::PmSnapshotRow, TaskId) {

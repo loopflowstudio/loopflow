@@ -1387,6 +1387,7 @@ mod tests {
                 SELECT 't',id,1 FROM machines WHERE route='local';
             INSERT INTO work_placements(task_id,machine_id,placed_at)
                 SELECT 'no-checkout',id,1 FROM machines WHERE route='local';
+            UPDATE tasks SET branch='proof',base_commit='abc' WHERE id='t';
             INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,created_at,updated_at)
                 VALUES('pr','t',1,'proof','proof','abc',1,1);
             INSERT INTO processes(lfid,trace_id,command,cwd,started_at)
@@ -1432,7 +1433,7 @@ mod tests {
             locations,
             vec![
                 ("no-checkout".into(), "".into(), None),
-                ("t".into(), "/repo/task".into(), Some(local)),
+                ("t".into(), "/repo/task".into(), Some(local.clone())),
                 ("unknown".into(), "/repo/unknown".into(), None),
             ]
         );
@@ -1444,6 +1445,29 @@ mod tests {
             )
             .unwrap();
         assert_eq!(provenance, "legacy");
+        let seeded: String = conn.query_row(
+            "SELECT value FROM planning_peer_changes WHERE object_id='t' AND field='delegation' AND clock=0",
+            [], |row| row.get(0),
+        ).unwrap();
+        let seeded: serde_json::Value = serde_json::from_str(&seeded).unwrap();
+        assert_eq!(seeded["provenance"], "legacy");
+        assert_eq!(seeded["machine_id"], local);
+        // An unconfigured destination can be retained without a Machine row;
+        // the recorded execution location and local enablement stay unchanged.
+        conn.execute(
+            "UPDATE work_placements SET machine_id='unconfigured' WHERE task_id='t'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            conn.query_row(
+                "SELECT count(*) FROM machines WHERE id='unconfigured'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
         let repository: String = conn
             .query_row(
                 "SELECT id FROM repository_plans WHERE repo='/repo'",

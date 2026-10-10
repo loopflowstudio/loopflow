@@ -30,8 +30,9 @@ impl PlanningKind {
     /// The portable allowlist deliberately excludes execution, paths and controls.
     pub fn fields(self) -> &'static [&'static str] {
         match self {
-            Self::Wave => &["name", "parent_wave_id", "current_project_id"],
+            Self::Wave => &["name", "parent_wave_id", "current_project_id", "delegation"],
             Self::Project => &[
+                "delegation",
                 "wave_id",
                 "external_project_id",
                 "project_slug",
@@ -46,6 +47,7 @@ impl PlanningKind {
                 "planning_teams",
             ],
             Self::Task => &[
+                "delegation",
                 "project_id",
                 "external_issue_id",
                 "issue_identifier",
@@ -489,6 +491,24 @@ fn validate_value(change: &PlanningMutation) -> Result<(), PlanningExchangeError
         "planning_initiatives" | "planning_teams" => value
             .as_str()
             .is_some_and(|text| serde_json::from_str::<Vec<String>>(text).is_ok()),
+        "delegation" => {
+            value.is_null()
+                || value.as_object().is_some_and(|group| {
+                    group.len() == 3
+                        && group
+                            .get("machine_id")
+                            .and_then(Value::as_str)
+                            .is_some_and(|id| crate::durable::MachineId::parse(id).is_ok())
+                        && group
+                            .get("placed_at")
+                            .and_then(Value::as_i64)
+                            .is_some_and(|at| at >= 0)
+                        && matches!(
+                            group.get("provenance").and_then(Value::as_str),
+                            Some("explicit" | "legacy")
+                        )
+                })
+        }
         "disposition" => value.as_object().is_some_and(|group| {
             group.len() == 3
                 && group.get("planning_state").is_some_and(text)

@@ -213,7 +213,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let saved: Option<(String, bool)> = conn
             .query_row(
-                "SELECT e.payload, EXISTS(SELECT 1 FROM session_events done
+                "SELECT json_extract(e.payload,'$.request_origin'), EXISTS(SELECT 1 FROM session_events done
                 WHERE done.session_id=e.session_id AND done.provider_thread=e.provider_thread
                   AND done.provider_turn=e.provider_turn AND done.kind='completed')
              FROM session_events e WHERE e.session_id=?1 AND e.provider_thread=?2
@@ -224,13 +224,7 @@ impl SqliteStore {
             )
             .optional()?;
         saved
-            .map(|(payload, completed)| {
-                let payload: Value = serde_json::from_str(&payload)?;
-                Ok((
-                    serde_json::from_value(payload["request_origin"].clone())?,
-                    completed,
-                ))
-            })
+            .map(|(payload, completed)| Ok((serde_json::from_str(&payload)?, completed)))
             .transpose()
     }
 

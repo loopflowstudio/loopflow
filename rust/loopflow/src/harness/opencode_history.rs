@@ -1,7 +1,7 @@
 //! OpenCode user messages correlate requests; assistant steps remain subordinate.
 
 use crate::id::AgentSessionId;
-use std::collections::BTreeMap;
+use std::collections::{btree_map::Entry, BTreeMap};
 
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -49,7 +49,7 @@ impl History {
         }
     }
 
-    pub(super) fn request(&mut self, thread: &AgentSessionId) -> Result<String> {
+    pub(super) fn request(&self, thread: &AgentSessionId) -> Result<String> {
         let id = format!("msg_{}", uuid::Uuid::new_v4().simple());
         let (store, session, attachment) = self.owner()?;
         let origin = store.session_turn_origin(&session, &attachment)?;
@@ -65,7 +65,12 @@ impl History {
         let mut events = Vec::new();
         let receipts = native_receipts(thread, messages);
         for (request, receipt) in receipts {
-            if let Some((store, session, attachment)) = &self.owner {
+            // Origins are immutable. Recover once; subsequent observations only
+            // advance native receipts and this reader's emitted boundaries.
+            if let Entry::Vacant(entry) = self.requests.entry(request.clone()) {
+                let Some((store, session, attachment)) = &self.owner else {
+                    continue;
+                };
                 if let Some((origin, completed)) =
                     store.session_request(session, thread, &request)?
                 {
@@ -73,26 +78,24 @@ impl History {
                     // this same surviving provider belong to the live reader.
                     if origin.agent_process_id == attachment.agent_process_id {
                         store.record_session_turn_origin(thread, &request, &origin)?;
-                        self.requests.entry(request.clone()).or_insert(Request {
+                        entry.insert(Request {
                             started: completed,
                             completed,
                         });
                     }
                 }
             }
-            let submitted = self.requests.get_mut(&request);
-            if submitted
-                .as_ref()
-                .is_some_and(|submitted| !submitted.started)
-            {
+            if let Some((store, session, _)) = &self.owner {
+                record_receipts(store, session, thread, &request, &receipt)?;
+            }
+            let Some(submitted) = self.requests.get_mut(&request) else {
+                continue;
+            };
+            if !submitted.started {
                 events.push(ConversationEvent::TurnStarted {
                     turn_id: request.clone(),
                 });
             }
-            if let Some((store, session, _)) = &self.owner {
-                record_receipts(store, session, thread, &request, &receipt)?;
-            }
-            let Some(submitted) = submitted else { continue };
             submitted.started = true;
             if !receipt.completion.is_null() && !submitted.completed {
                 submitted.completed = true;
@@ -314,7 +317,7 @@ mod tests {
         let attachment = store
             .claim_session_attachment("session", None, &process, false)
             .unwrap();
-        let mut history = History::new(Some((store.clone(), "session".into(), attachment.clone())));
+        let history = History::new(Some((store.clone(), "session".into(), attachment.clone())));
         let request = history.request(&"thread".into()).unwrap();
         let message = |id: &str, input: u64, finish: &str| {
             json!({

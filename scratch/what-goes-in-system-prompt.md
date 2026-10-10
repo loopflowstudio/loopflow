@@ -12,12 +12,13 @@ same bytes. The launch cut now wires fixed additions and whole-file callbacks; t
 provider/resume/compaction matrix remains for gate. Jack's later `e1fdb81b-75ff-4cca-b789-243ad84bad14` steer authorizes
 that production cut. Option A below resolves first-turn transport; no fixed-slot
 or transport decision remains open.
-Prior reconciliation: `d3c01464e` against main `906576f39`, including
-`3e1e6245c` (#1512) and `e69d5103f` (#1511).
-Local main and origin/main both name `906576f39`; no remote fetch or newer
-upstream inspection is claimed.
+Reconciled through `17c1a2909` on 2026-10-09 against locally available main
+`906576f39`, including `3e1e6245c` (#1512) and `e69d5103f` (#1511). No newer
+remote inspection is claimed. `5e8fdde2f` implements the checkout Wave-source
+decision; `17c1a2909` removes obsolete SQLite fixture setup while retaining
+stale-store counterexamples at the callback and CLI boundaries.
 
-The supplied callback-only review describes the pre-production checkpoint.
+The earlier callback-only review describes the pre-production checkpoint.
 `494210e37` connects the launchers and removes inlining/overrides;
 `d3c01464e` reduces callbacks to saved delivery and preserves OpenCode resume
 settings. Source inspection confirms those changes, not native acceptance.
@@ -61,7 +62,7 @@ agent guide, its compaction, its titles.
 | Content | Channel | Status |
 |---|---|---|
 | Operating guide, surface instructions, user name, reply guidance | Added-instructions slot, byte-identical within a launch profile (surface, reply settings, participant) | Accepted |
-| The skill, then any launch message | First user turn | Combined turn accepted; skill-first order is the proposed default under the later steer |
+| The skill, then any launch message | First user turn | Accepted by Jack's later option-A steer (`c9b19504`): skill then message |
 | Paths to `scratch/` and `wave/<address>/`; as much of Wave memory and scratch as fits; a listing with sizes for the rest and a line saying to read it | Context block | Accepted: "This seems fine" |
 | The active skill, again | Context block, after compaction only | Accepted: "I like this" |
 | Diff, `-d` docs | Not inlined; command or paths | Proposal |
@@ -74,7 +75,8 @@ Reserve space for paths, the complete listing and (after compaction) the skill
 before choosing file bodies. A listing or skill can itself exceed the cap:
 complete manifest/saved-skill files with pointers are a proposed extension,
 not accepted replacement of the promised listing/skill. Pointer-read behavior
-and the channel choice remain unresolved in `scratch/questions.md`.
+and acceptance of the overflow pointers remain unresolved in `scratch/questions.md`;
+the instruction-slot channel is settled by option B.
 
 ## The demo
 
@@ -210,7 +212,10 @@ this is not native OpenCode integration acceptance.
   listings and skill; verify exact trusted hashes against supported native Codex.
   Saved delivery rereads the captured checkout and Wave path; native continuation
   remains unproved. Checkout edits, ancestors, real listing paths and stale stored
-  documents are covered by focused source/callback fixtures.
+  documents are covered by focused source/callback fixtures. Wave configuration
+  still reads saved GOAL frontmatter; changing that reader belongs to LOO-449,
+  not this context-source cut. Checkout content refresh does not prove configuration
+  refresh or native hook delivery.
 - Demo: cmux's 200 KB launch, native resume-list text, whole-pointer reads and the
   proposed OpenCode native-guide interpretation. No transport probes or new size
   refusals are selected.
@@ -232,7 +237,7 @@ follow checkout paths under Jack's later source decision. No installation, publi
 The pre-cut implementation plan and complete older checks remain at
 `6149952c8:scratch/what-goes-in-system-prompt.md`.
 
-Checks: network-isolated `cargo test -p loopflow --test context_tests --test context_block_tests`, `--test global_commands context_targets`, and separate `--lib implement_launch_treats_kickoff` / `--lib context_delivery_supplies_one_goal` runs pass (20 tests); `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` pass; `lf context --json` fits; gate owns native acceptance and demo owns presentation. Earlier block-only results: `5e8fdde2f:scratch/what-goes-in-system-prompt.md`.
+Checks: prose-only reconciliation; `git diff --check` and `lf context --json` pass; unchanged-code focused tests/fmt/Clippy retained at `17c1a2909:scratch/what-goes-in-system-prompt.md`; native integration remains with gate and presentation with demo.
 
 ### Integrated upstream boundary
 

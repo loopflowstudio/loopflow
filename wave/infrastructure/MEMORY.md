@@ -1003,12 +1003,12 @@ archives authorize no work.
 
 ## Direct invocation and large inputs (curated 2026-10-09)
 
-Jack Heart's LOO-444: native prompts/guides, skill/request first, whole-file
+Jack Heart's LOO-444: native prompts/guides, skill then request, whole-file
 start/compact context. Option B fixes additions per surface/reply/participant.
-Production authorized; native-guide wording proposed. Preserve attribution and titles.
-Jack's October 9 `cbc13fa5` selects checkout Wave Markdown and path-segment ancestors
-for launch/callback context, with real listing paths. Delete saved Wave-ID lookup
-and snapshots; LOO-449 owns the table, `lf wave edit` and other readers.
+Production authorized; native-guide wording proposed. Preserve attribution/titles.
+Jack's October 9 `cbc13fa5`: checkout Wave Markdown and path-segment ancestors.
+`5e8fdde2f` supplies real paths, deleting Wave-ID lookup/snapshots.
+GOAL config still reads SQLite; LOO-449 owns it, the table and other readers.
 Clipboard-first-turn and shrinking memory to 10,000 bytes remain undecided.
 
 Claude 2.1.295/Codex 0.161.0 fake APIs preserve 10 KB ASCII hooks, truncate

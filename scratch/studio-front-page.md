@@ -426,3 +426,6 @@ Jack Heart: "thats where \"Loopflow is a software instrument\" came from.
 Still a little forced maybe, but it communicates that idea of enhancing YOUR
 creavitiy". The phrase is now inside the `x7` thesis with its reason beside
 it, not standing alone as a label.
+Jack Heart on figure 1: "goals can be long or short. Not good enough.
+persistent workstream and objective?" Figure 1 is now "A Wave": a persistent
+workstream with an objective.

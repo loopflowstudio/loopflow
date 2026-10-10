@@ -14,7 +14,7 @@ def row(chip, cls=""):
 def fig(n, title, text, card):
     return f'<li><div class="capt"><span>Fig. {n}</span><h3>{title}</h3><p>{text}</p></div><div class="card">{card}</div></li>'
 FIGS = "\n".join([
-fig(1, "A goal", "A Wave is a goal that outlasts any one conversation. It keeps its key results, its plan, and its memory.",
+fig(1, "A Wave", "A Wave is a persistent workstream with an objective. Tasks come and go under it, and the Wave keeps its key results, its plan, and its memory.",
     '<p class="wname">Exports</p><p class="wobj">People can get their data out of the app in the form they need it, without asking us.</p><p class="lab">Key results</p><ul class="krs"><li>Half of active accounts export something each month.</li><li>No support request asks us for a data dump.</li></ul>'),
 fig(2, "A Task", "You name one outcome. It will end in one pull request, and it is done when that merges.",
     row("start") + strip("start")),

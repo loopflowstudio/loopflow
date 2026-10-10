@@ -124,7 +124,7 @@ or native acceptance. Earlier evidence: `829c9b993`, this heading.
 `e3ca861b1`: mounted-page/visibility observation replaces callbacks; request IDs
 fence registration only. Pre-registration failures survive; native proof remains.
 
-Preview/launch share selection and assembly; only launch prepares Work/excerpts.
+Preview/launch share assembly; only launch prepares Work/excerpts.
 Read-only SQLite and fallback suppression prevent hidden writes. Explicit-Machine
 previews skip credential/identity probes. WAL, registry and Flow counterexamples:
 `829c9b993:wave/product/MEMORY.md`, this heading; no configured SSH or admission proof.
@@ -157,12 +157,16 @@ authors a save. Two-Home/file-Git and Store fixtures cover conflicts, narrower/f
 inheritance, clearing/no-echo and unchanged seeded execution, not running Flows.
 Earlier evidence/failed attempts: `829c9b993:wave/product/MEMORY.md`, this heading.
 
-Recorded-location reads observe owners, never exchange execution. Nonces fence
-stale replies without peer-clock comparison; added peers are not a global inventory.
-Two-CLI/import fixtures retain the owner across delegation edits without copying
-checkouts. Task/Desktop share provenance and unavailable paths for retained Started.
-Remote opening, native proof, admission and mixed-provider exchange remain;
-seeded history proves no running Flow or configured SSH.
+`9cc0707b0`/`92d95edfe`: recorded-location reads observe owners, never exchange
+execution. Nonces fence stale replies without peer-clock comparison; deadlines
+bound each peer, not the whole sequential scan. Added peers are not a global
+inventory. One positive owner survives another peer's unavailability; conflicting
+positives refuse. No negative observation authorizes first start.
+Two-CLI/import proof routes retained checkout after delegation edits without copying
+it; run/move/Desktop share preview provenance, including Started without a path.
+Swift decoding is not remote opening: its native consumers remain unbuilt.
+Mixed-provider exchange, admission and native proof remain; seeded history proves
+no running Flow or configured SSH.
 
 ## Task delivery boundary (LOO-418, reconciled 2026-10-09)
 
@@ -961,13 +965,9 @@ coincident IDs restore no separate Run owner.
 
 ## Swift data path — RegistryQuery is the single reader
 
-- **All data reads converge on `RegistryQuery`** (subprocess `lf … --json`,
-  daemon-less) — including Waves, status, roadmap, Sessions, Activity, usage,
-  and recent Runs. The
-  HTTP-to-lfd-as-API path is **deleted**: `LocalWaveService` (~1500 lines) and
-  `WaveServiceProtocol` are gone; ~22 consumers rerouted onto RegistryQuery.
-- Unknown wire status must surface explicitly, never silently become pending.
-  The former lfd integer-enum comparison is retired with that API.
+Swift reads through `RegistryQuery` (`lf … --json`), never the removed lfd API.
+Unknown wire status stays explicit. Migration detail: `92d95edfe:wave/product/MEMORY.md`,
+this heading.
 
 ## Performance — launch renders before any read (2026-10-04)
 

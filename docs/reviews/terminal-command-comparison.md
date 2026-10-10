@@ -63,6 +63,16 @@ follow-up, abandon/delete, interrupt, `history show` and
 skill/Flow/inline invocations still have identity-only `--explain`, not mutation
 validation or a complete action plan. Agent `--context` is a separate input preview. These source
 boundaries do not add native, configured-peer or installed acceptance.
+`9cc0707b0`/`92d95edfe` add recorded execution-location observation through
+`lf task location TASK --peers --json`. Shared Task routing consults owning Machines,
+not imported checkout state or later delegation. Nonces reject stale replies;
+missing/conflicting owners remain unavailable and cannot admit first start.
+Task run/move/checkout and Desktop opening share location provenance, including
+Started without a checkout path. Two-CLI/simulated-SSH evidence covers retained
+checkout routing and effect-free previews, not running Flows or configured SSH.
+Desktop still refuses a remote owner before app launch; Swift's location DTO has
+no native opening consumer yet. Remote opening remains implementation work, not
+just an unexecuted demo. The original host judgments remain unchanged.
 Earlier command names below are dated evidence, not compatibility aliases.
 
 ## Evidence and version boundary

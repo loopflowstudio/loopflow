@@ -557,3 +557,9 @@ card: "dont know what this is trying to do".
 (hands-on, one stop, autonomous loop) beside "Scale back as the work
 matures." The autonomous row's `optimize` Flow is an example name, not a
 built-in, and the Manabot simulator loop is cited on Jack Heart's word.
+
+Jack Heart: "cut the loopflow is a software instrument seciton. keep the
+works with foooter". Done in `x9`: the page is header, video slot, the
+what/how section, Works with, the closing list, download. The instrument
+definition and the three "your mark" figures are off the page; they remain in
+`x8` and in git.

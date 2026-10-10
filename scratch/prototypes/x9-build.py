@@ -128,14 +128,6 @@ main = f'''
   </div>
   <p class="more"><a href="/docs/waves">Tasks and Waves ↗</a><a href="/docs/authoring#workflows">Write a workflow ↗</a><a href="/cli">Underneath, it is all <code>lf</code> ↗</a></p>
 </section>
-<section class="walk">
-  <h2>Loopflow is a software instrument.</h2>
-  <p class="say">It doesn’t make the software for you; you make the software through it.</p>
-  <p class="say">You have to stay involved. You still need to understand what gets built, experience using it yourself, and be the designer. You don’t have to micromanage the coding.</p>
-  <ol class="figs">
-{FIGS}
-  </ol>
-</section>
 <section id="works" class="works">
   <p class="eyebrow">Works with</p>
   <ul>

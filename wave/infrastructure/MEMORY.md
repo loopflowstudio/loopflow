@@ -79,9 +79,9 @@ removes draft storage and preserves creation/relocation bytes. SQLite owns
 identity/execution; `wave_workflows` keeps Project selection and Task capture.
 Preserve LOO-444 at integration.
 Jack Heart's October 10 decision selects committed default-branch goals for
-Linear sync; local views stay checkout-based. Sync pins the local default ref,
-without fetching or fallback.
-Mocked default-branch proof passes. Publication is authorized, not landing.
+Linear sync; local views stay checkout-based. Pin one local default-branch commit,
+not mutable checkout files; never fetch or fall back. After main integration,
+`bfba1d78f` records the mocked sync pass. Publication is authorized, not landing.
 Plan: `scratch/read-wave-goals-and-memory.md`.
 
 LOO-406's common writer boundary is `84664e661`; `e68f2a423` exports saved UUIDs.

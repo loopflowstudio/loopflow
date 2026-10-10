@@ -33,7 +33,7 @@ uses one commit helper for default and feature branches.
 
 ## Surviving readers and writers
 
-- `engine/prompt.rs::gather_wave_docs`: fresh checkout/ancestor Markdown.
+- `prompt/mod.rs::gather_wave_docs`: fresh checkout/ancestor Markdown.
 - `work/wave/config.rs`: checkout config, summary, chat and PM frontmatter;
   shared by launch policy, cron, metrics and PM.
 - `lf/commands/waves.rs`: list/status/roadmap summaries and PM validation use
@@ -83,8 +83,11 @@ Review retained one pinned Git revision rather than reading another checkout's
 mutable files, preventing dirty default-checkout text from leaking to Linear.
 
 Gate owns broader affected suites, public dispatch and migration acceptance;
-CI owns the platform matrix. Reconcile LOO-444's context reader at integration;
-no integrated or installed acceptance is claimed. Creation/relocation must retain
+CI owns the platform matrix. Main `be4a2b2af` is integrated; its module move
+places the context reader in `prompt/mod.rs` and Git helpers in `git/mod.rs`.
+The retained revision-file reader and updated calls pass the focused sync proof
+(recorded at `bfba1d78f`). LOO-444's composed launch acceptance and installed
+acceptance remain unproved. Creation/relocation must retain
 IDs, execution and Workflow import; deletion must not resurrect stored text.
 Earlier checkout/native-launch proofs: `3db1e0c00:scratch/read-wave-goals-and-memory.md`.
 Canonicalization fixes and Release's operation-entry lesson:
@@ -95,6 +98,4 @@ Release is the only immediate child directory with memory. Its top-level goal
 and full memory were read; the operation-entry lesson above remains applicable,
 with release-specific history retained there.
 
-Checks: `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, and `cargo test -p loopflow --lib <filter> -- --test-threads=1` with `work::wave::config::tests` (8) and `wave_summary_sync_reads_committed_default_branch` (1) pass; broader/platform/installed acceptance remains with gate/CI.
-
-Sync check: `cargo test -p loopflow --lib wave_summary_sync_reads_committed_default_branch -- --test-threads=1` (LF_* unset, stdin closed) passes after reconciling main’s Git module move and retaining the revision-file reader; broader checks remain with gate/CI.
+Checks: `cargo test -p loopflow --lib wave_summary_sync_reads_committed_default_branch -- --test-threads=1` passed after main integration (`bfba1d78f`, LF_* unset, stdin closed); earlier fmt/Clippy and 8 config tests passed before integration; prose-only reconciliation adds no rerun; broader/public-dispatch/migration/platform checks remain with gate/CI.

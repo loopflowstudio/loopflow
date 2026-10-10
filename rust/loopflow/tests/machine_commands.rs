@@ -196,6 +196,113 @@ fn assert_success(output: &Output) {
 }
 
 #[test]
+fn remote_file_input_reaches_the_command_without_replacing_the_transport_script() {
+    let fixture = Machines::new();
+    fixture.json(&[
+        "machine",
+        "add",
+        "mini",
+        "--repo",
+        "project's checkout",
+        "--json",
+    ]);
+    executable(
+        &fixture.root.path().join("remote/.local/bin/lf"),
+        "#!/bin/sh\ncat\n",
+    );
+    let mut child = fixture
+        .command(&[
+            "--machine",
+            "mini",
+            "task",
+            "save",
+            "task_00000000000000000000000000000001",
+            "draft.txt",
+            "--revision",
+            "observed",
+            "--json",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let draft = "Unicode λ; literal $(not-a-command)\nsecond line\n";
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(draft.as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert_success(&output);
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), draft);
+}
+
+#[test]
+fn remote_session_open_returns_an_owner_pinned_terminal_command() {
+    let fixture = Machines::new();
+    let machine = fixture.json(&[
+        "machine",
+        "add",
+        "mini",
+        "--repo",
+        "project's checkout",
+        "--json",
+    ]);
+    let mut record: Value = serde_json::from_str::<Vec<Value>>(include_str!(
+        "../../../tests/fixtures/dto/sessions.json"
+    ))
+    .unwrap()
+    .remove(0);
+    record["workspace"]["machine_id"] = machine["id"].clone();
+    record["open_argv"] = serde_json::json!([
+        "/usr/bin/env",
+        "LF_HOME=/remote/private home",
+        "/bin/sh",
+        "-c",
+        "printf '%s\\n' \"$LF_HOME\" \"$1\"; cat",
+        "fixture",
+        "literal ' quote"
+    ]);
+    let id = record["id"].as_str().unwrap().to_string();
+    executable(
+        &fixture.root.path().join("remote/.local/bin/lf"),
+        &format!("#!/bin/sh\ncat <<'RECORD'\n{record}\nRECORD\n"),
+    );
+    let opened = fixture.json(&["--machine", "mini", "session", "connect", &id, "--json"]);
+    let argv = opened["open_argv"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(argv[0], "ssh");
+    assert!(argv.contains(&"-tt"));
+    assert!(!argv.contains(&"--replace"));
+    let mut command = Command::new(fixture.root.path().join("bin/ssh"));
+    command
+        .args(&argv[1..])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command.spawn().unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all("unfinished draft\n".as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert_success(&output);
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "/remote/private home\nliteral ' quote\nunfinished draft\n"
+    );
+    assert_eq!(opened["workspace"], record["workspace"]);
+}
+
+#[test]
 fn add_alias_rename_connect_and_remove_preserve_identity() {
     let fixture = Machines::new();
     let added = fixture.json(&[
@@ -1290,15 +1397,25 @@ fn imported_execution_location_survives_delegation_and_rejects_stale_peer_reads(
                 assert_eq!(report["resolution"][fact], run["resolution"][fact]);
             }
             if command[0] == "desktop" {
-                assert!(report["url"].is_null());
-                assert!(report["impediments"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .any(|value| value
-                        .as_str()
+                if checkout.is_some() {
+                    let url = reqwest::Url::parse(report["url"].as_str().unwrap()).unwrap();
+                    let query = url
+                        .query_pairs()
+                        .collect::<std::collections::BTreeMap<_, _>>();
+                    assert_eq!(query["machine"], owner.as_str());
+                    assert_eq!(query["repository"], repository.as_str());
+                    assert_eq!(query["repo"], local_path.to_str().unwrap());
+                } else {
+                    assert!(report["url"].is_null());
+                    assert!(report["impediments"]
+                        .as_array()
                         .unwrap()
-                        .contains("remote Desktop opening is unavailable")));
+                        .iter()
+                        .any(|value| value
+                            .as_str()
+                            .unwrap()
+                            .contains("Recorded checkout unavailable")));
+                }
             } else {
                 assert!(report["action"].is_null());
             }

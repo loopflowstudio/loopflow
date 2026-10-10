@@ -20,12 +20,16 @@ struct TaskLink: Equatable, Sendable {
     let repo: String?
     let session: String?
     let diff: Bool
+    let machine: String?
+    let repository: String?
 
-    init(issue: String, repo: String?, session: String? = nil, diff: Bool = false) {
+    init(issue: String, repo: String?, session: String? = nil, diff: Bool = false, machine: String? = nil, repository: String? = nil) {
         self.issue = issue
         self.repo = repo
         self.session = session
         self.diff = diff
+        self.machine = machine
+        self.repository = repository
     }
 
     var url: URL? {
@@ -33,7 +37,7 @@ struct TaskLink: Equatable, Sendable {
         components.scheme = "loopflow"
         components.host = "task"
         components.path = "/" + issue
-        components.queryItems = [("repo", repo), ("session", session), ("diff", diff ? "true" : nil)].compactMap { name, value in
+        components.queryItems = [("repo", repo), ("session", session), ("diff", diff ? "true" : nil), ("machine", machine), ("repository", repository)].compactMap { name, value in
             value.map { URLQueryItem(name: name, value: $0) }
         }
         return components.url
@@ -54,11 +58,16 @@ struct TaskLink: Equatable, Sendable {
             throw RegistryQueryError("Task links require one issue identifier")
         }
         let items = components.queryItems ?? []
-        guard items.allSatisfy({ ["repo", "session", "diff"].contains($0.name) && $0.value?.isEmpty == false }),
+        guard items.allSatisfy({ ["repo", "session", "diff", "machine", "repository"].contains($0.name) && $0.value?.isEmpty == false }),
               Set(items.map(\.name)).count == items.count,
               items.first(where: { $0.name == "diff" }).map({ $0.value == "true" }) ?? true else {
             throw RegistryQueryError("Task links accept one optional repo, session and diff=true query")
         }
+        guard items.contains(where: { $0.name == "machine" }) == items.contains(where: { $0.name == "repository" }) else {
+            throw RegistryQueryError("Remote Task links require both Machine and repository identity")
+        }
+        machine = items.first(where: { $0.name == "machine" })?.value
+        repository = items.first(where: { $0.name == "repository" })?.value
         self.issue = issue
         repo = items.first(where: { $0.name == "repo" })?.value
         session = items.first(where: { $0.name == "session" })?.value

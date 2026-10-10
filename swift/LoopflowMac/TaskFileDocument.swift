@@ -305,7 +305,7 @@ final class TaskFilesStore {
     }
 
     func observeFiles() {
-        guard observation == nil else { return }
+        guard observation == nil, query.remoteMachine == nil else { return }
         do {
             observation = try TaskFileObservation(path: cwd) { [weak self] paths in
                 self?.invalidate(paths)

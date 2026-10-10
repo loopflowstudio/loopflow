@@ -367,27 +367,18 @@ fn opening_context(
         };
         return Ok(resolution);
     }
-    let mut resolution = if let Some(session) = session {
-        let resolved = super::context::explain(None, None, Some(session), None)?;
-        if cli.task.is_some() || cli.wave.is_some() {
-            let work =
-                super::context::explain(cli.wave.as_deref(), cli.task.as_deref(), None, None)?;
-            fn value(fact: &crate::ops::context::ContextFact) -> Option<&str> {
-                match fact {
-                    crate::ops::context::ContextFact::Bound { value, .. } => Some(value),
-                    _ => None,
-                }
-            }
+    use crate::ops::context::ContextFact;
+    let mut resolution = if cli.task.is_none() && session.is_some() {
+        let selected = super::context::explain(None, None, session, None)?;
+        if let Some(wave) = cli.wave.as_deref() {
+            let work = super::context::explain(Some(wave), None, None, None)?;
             anyhow::ensure!(
-                (cli.task.is_none()
-                    || value(&work.task).is_some() && value(&work.task) == value(&resolved.task))
-                    && (cli.wave.is_none()
-                        || value(&work.wave).is_some()
-                            && value(&work.wave) == value(&resolved.wave)),
+                matches!((&work.wave, &selected.wave),
+                (ContextFact::Bound { value: wave, .. }, ContextFact::Bound { value: session_wave, .. }) if wave == session_wave),
                 "Session does not belong to the selected Work. No app was opened."
             );
         }
-        resolved
+        selected
     } else {
         super::context::explain(cli.wave.as_deref(), cli.task.as_deref(), None, None)?
     };
@@ -412,6 +403,27 @@ fn opening_context(
                 &task,
                 &mut resolution,
             ));
+        }
+    }
+    if let Some(session) = session.filter(|_| cli.task.is_some()) {
+        let remote = matches!((&resolution.execution_machine, &resolution.machine),
+            (ContextFact::Bound { value: owner, .. }, ContextFact::Bound { value: local, .. }) if owner != local);
+        if remote {
+            // Native opening validates membership on this owner. A Session ID
+            // absent from the presentation Machine is not a missing conversation.
+            resolution.session = ContextFact::Bound {
+                value: session.into(),
+                source: "explicit_session_on_execution_machine".into(),
+            };
+        } else {
+            let selected = super::context::explain(None, None, Some(session), None)?;
+            anyhow::ensure!(
+                matches!((&resolution.task, &selected.task),
+                (ContextFact::Bound { value: task, .. }, ContextFact::Bound { value: session_task, .. }) if task == session_task),
+                "Session does not belong to the selected Work. No app was opened."
+            );
+            resolution.session = selected.session;
+            resolution.process = selected.process;
         }
     }
     Ok(resolution)
@@ -444,12 +456,19 @@ fn opening_url(
         "--diff needs a Task; select --task or a Task-associated --session. No app was opened."
     );
     anyhow::ensure!(session.is_none() || task.is_some(), "This Session has no single Task workspace; use `lf session connect` in a terminal. No app was opened.");
-    if let Some(task) = task {
+    if task.is_some() {
         match (&resolution.execution_machine, &resolution.machine) {
             (ContextFact::Bound { value: owner, .. }, ContextFact::Bound { value: local, .. })
                 if owner != local =>
             {
-                bail!("Task execution resolves to Machine {owner}; remote Desktop opening is unavailable. Use `lf --machine {owner} task status {}` in a terminal. No app was opened.", task);
+                anyhow::ensure!(
+                    matches!(&resolution.repository, ContextFact::Bound { .. }),
+                    "Shared repository identity unavailable; no app was opened."
+                );
+                anyhow::ensure!(
+                    matches!(&resolution.checkout, ContextFact::Bound { .. }),
+                    "Recorded checkout unavailable on Machine {owner}; no app was opened."
+                );
             }
             (ContextFact::Unavailable { reason }, _) => {
                 bail!("Task execution location unavailable: {reason}. No app was opened.");
@@ -468,6 +487,23 @@ fn opening_url(
             .push(task);
     }
     url.query_pairs_mut().append_pair("repo", repo);
+    if let (
+        ContextFact::Bound { value: owner, .. },
+        ContextFact::Bound { value: local, .. },
+        ContextFact::Bound {
+            value: repository, ..
+        },
+    ) = (
+        &resolution.execution_machine,
+        &resolution.machine,
+        &resolution.repository,
+    ) {
+        if task.is_some() && owner != local {
+            url.query_pairs_mut()
+                .append_pair("machine", owner)
+                .append_pair("repository", repository);
+        }
+    }
     if let Some(session) = session {
         url.query_pairs_mut().append_pair("session", session);
     }

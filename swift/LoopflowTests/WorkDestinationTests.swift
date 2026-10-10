@@ -21,6 +21,94 @@ struct WorkDestinationTests {
             == TaskLink(issue: "LOO-427", repo: nil))
     }
 
+    @Test(arguments: ["recorded", "stale", "unavailable", "unrecorded", "wrong-checkout"])
+    func remoteOpeningKeepsLocalPlanningAndRetainedDrafts(outcome: String) async throws {
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(try fixture().utf8))
+        let wave = try #require(snapshot.waves.first)
+        let task = try #require(wave.tasks.items.first)
+        let taskID = try #require(task.runtime?.workId)
+        let localIdentity = try #require(task.reference.workspace?.identity)
+        let remoteID = "task_remote_correspondence"
+        let remoteIdentity = WorkspaceIdentity(machineId: "peer", worktree: "/peer/retained-checkout")
+        var record = try renameFixtureRecord("peer-session", title: "Remote review", work: .task(id: remoteID))
+        record.workspace = try JSONDecoder().decode(SessionWorkspace.self, from: JSONSerialization.data(withJSONObject: [
+            "machine_id": "peer", "worktree": outcome == "wrong-checkout" ? "/changed" : remoteIdentity.worktree,
+            "task_id": remoteID
+        ]))
+        var surface = try JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as! [String: Any]
+        surface["actions"] = sessionActionFixture(state: "closed")
+        surface["open_argv"] = ["ssh", "-tt", "peer", "owned-fixture"]
+        record = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: surface))
+        let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
+        let query = RegistryQuery { args, cwd in
+            if args.starts(with: ["repo", "identity"]) { return #"{"id":"repository","locators":["repository"]}"# }
+            guard args.starts(with: ["--machine", "peer", "--repository", "repository"]), cwd == nil else {
+                throw RegistryQueryError("Remote paths must never become local working directories")
+            }
+            let command = Array(args.dropFirst(4))
+            if command.starts(with: ["task", "location"]) {
+                let requestIndex = try #require(command.firstIndex(of: "--request"))
+                let request = outcome == "stale" ? "previous-request" : command[requestIndex + 1]
+                let location: [String: Any] = outcome == "unavailable" ? ["state": "unavailable", "reason": "Offline"]
+                    : outcome == "unrecorded" ? ["state": "unrecorded"]
+                    : ["state": "recorded", "task_id": remoteID, "checkout": remoteIdentity.worktree]
+                return String(decoding: try JSONSerialization.data(withJSONObject: [[
+                    "request": request, "repository_id": "repository", "task_id": taskID,
+                    "machine_id": "peer", "observed_at": 1, "location": location
+                ]]), as: UTF8.self)
+            }
+            if command.starts(with: ["session", "list"]) { return #"{"entries":[\#(encoded)],"next":null}"# }
+            if command.starts(with: ["session", "connect"]) { return encoded }
+            throw RegistryQueryError("No checkout, provider launch or transfer permitted")
+        }
+        let model = WorkModel(query: query, repoPath: wave.wave.repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        let registry = SessionsWorkspaceRegistry(localMachineId: localIdentity.machineId)
+        let local = registry.workspace(for: localIdentity)
+        local.multiplexer.newShell(command: ["retained-local-shell"])
+        let layout = local.multiplexer.layout
+        let files = local.files(taskId: task.id, issue: taskID, cwd: localIdentity.worktree, query: query)
+        let document = files.document("draft.txt")
+        document.editor.string = "unfinished local draft"
+        let link = TaskLink(issue: taskID, repo: wave.wave.repo, session: record.id, diff: true,
+                            machine: "peer", repository: "repository")
+        #expect(try TaskLink(url: #require(link.url)) == link)
+        await model.openTaskLink(try #require(link.url))
+        #expect(model.repoPath == wave.wave.repo)
+        #expect(model.roadmap.value == snapshot)
+        #expect(local.multiplexer.layout == layout)
+        #expect(document.editor.string == "unfinished local draft")
+        if outcome == "recorded" {
+            let request = try #require(model.linkedSession)
+            #expect(request.record.id == record.id)
+            #expect(request.location?.machineID == "peer")
+            #expect(model.selection == .task(id: task.id))
+            #expect(model.navigation.preparedTaskWorktrees[task.id] == remoteIdentity)
+            #expect(model.taskOpening?.status == .opening)
+            let remote = registry.workspace(for: remoteIdentity)
+            remote.multiplexer.load(sessionId: record.id)
+            let companion = registry.showChanges(task: task, in: remoteIdentity,
+                query: query.onMachine("peer", repository: "repository"), executionTask: remoteID)
+            let sessions = local.sessionStore(repoPath: wave.wave.repo, query: query)
+            sessions.retainLocation(try #require(request.location), for: record)
+            sessions.reconcile([record])
+            await sessions.select(record.id)
+            #expect(sessions.sessions.first?.state == .prepared)
+            #expect(sessions.sessions.first?.record.openArgv.first == "ssh")
+            #expect(sessions.presentationDirectory(for: record, checkout: remoteIdentity.worktree) == wave.wave.repo)
+            #expect(sessions.taskSubject(for: record) == .task(id: taskID))
+            #expect(companion.issue == remoteID)
+            #expect(companion.query.remoteMachine == "peer")
+            #expect(remote.multiplexer.layout.allPanes.count == 2)
+            #expect(local.multiplexer.layout == layout)
+        } else {
+            #expect(model.linkedSession == nil)
+            #expect(model.taskOpening?.status == .failed)
+            #expect(model.navigation.preparedTaskWorktrees[task.id] == nil)
+            #expect(registry.paths == [localIdentity])
+        }
+    }
+
     @Test func resolvingTaskKeepsTheWorkspaceVisible() async throws {
         let data = try fixture()
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
@@ -820,6 +908,31 @@ struct WorkDestinationTests {
         #expect(report.openings.count == 1)
         #expect(report.openings[0].status == .failed)
         #expect(report.openings[0].reason?.contains("not an available local Git repository") == true)
+    }
+
+    @Test func remoteTaskLinksReuseTheLocalRepositoryWindow() async throws {
+        let router = WorkLinkRouter()
+        let query = RegistryQuery { _, _ in #"{"id":"plan","locators":["plan"]}"# }
+        let path = repositoryFixturePath()
+        let workspace = try await router.openRepository(path: path, link: nil, query: query) { _ in }
+        let window = UUID()
+        var received: [TaskLink] = []
+        router.register(window, repository: workspace.id, focus: {}, inspect: windowInspection,
+            controlPane: { _ in }, readText: { _ in throw RegistryQueryError("No terminal") }) { url in
+            do { received.append(try TaskLink(url: url)) } catch { Issue.record(error) }
+        }
+        for machine in ["local-owner", "peer-owner"] {
+            let link = TaskLink(issue: "task-\(machine)", repo: path, session: "session-\(machine)", diff: true,
+                                machine: machine, repository: "plan")
+            let url = try #require(link.url)
+            _ = try await router.openRepository(path: path, link: url, query: query) { _ in
+                Issue.record("Execution Machine must not create another repository window")
+            }
+        }
+        while received.count < 2 { await Task.yield() }
+        #expect(received.map(\.machine) == ["local-owner", "peer-owner"])
+        #expect(received.allSatisfy { $0.repository == "plan" && $0.diff })
+        #expect(router.inspect().windows.map(\.window) == [window.uuidString])
     }
 
     @Test func plainRepositoryWaitsForRegistrationAndReusesTheWindow() async throws {

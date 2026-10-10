@@ -83,7 +83,9 @@ Closing the pane keeps its drafts in this window.
 shows the draft comparison read-only. Task headers show the recorded checkout;
 terminal and files follow that Task without a separate worktree selector.
 Changing Work assignment leaves the recorded checkout Machine and path intact.
-Files on another or unknown Machine remain unavailable to the local file reader.
+Remote Task links route Files through the recorded owner; unknown owners stay unavailable.
+Remote paths are never opened or watched on the presentation Mac. Peer file changes
+are read on selection/refresh; continuous remote file observation is not implemented.
 Switching files, hiding Files and returning to the Task keeps the draft.
 Files reached through symlinks remain readable within the checkout and show a
 read-only explanation. If a regular file becomes a symlink, its retained draft
@@ -584,8 +586,13 @@ Top-level `openings` records the latest repository-opening request per local loc
 including lookup/validation failures before any window registers. A plain repository
 becomes usable when its validated workspace receiver registers, even while planning
 loads. Registered Task links report their page/Session outcome on the window instead.
-These are transient receipts, not opening history or Work identity. Remote opening
-remains separate.
+These are transient receipts, not opening history or Work identity. Remote Task links
+retain the local repository window and re-observe the named execution Machine before
+opening its Session and optional Changes pane. A remote link without `--session`
+uses that Task's primary Session. Missing, changed or unavailable recorded locations
+never prepare another checkout. The CLI transports native Session argv over SSH,
+keeping the owner's data directory and explicit takeover behavior. Local panes and
+drafts remain retained; no remote planning tree or execution record is imported.
 
 `lf desktop hide --target "$target"` and `lf desktop restore --target "$target"`
 change retained pane visibility. Focus, split, move, resize and zoom use that same

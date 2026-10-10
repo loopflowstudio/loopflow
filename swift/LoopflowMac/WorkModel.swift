@@ -94,6 +94,7 @@ struct LinkedSession: Equatable {
     let generation: Int
     let record: SessionRecord
     let changesTask: RoadmapTask?
+    var location: TaskLocationObservation? = nil
 }
 
 struct LinkedTaskPage: Equatable {
@@ -213,30 +214,53 @@ final class WorkModel {
             openRepository(wave.wave.repo, taskLinkURL)
             return
         }
-        guard link.session != nil || link.diff else {
+        var location: TaskLocationObservation?
+        var executionQuery = query
+        var executionTask = task.runtime?.workId ?? task.id
+        var executionIdentity = navigation.preparedTaskWorktrees[task.id] ?? task.reference.workspace?.identity
+        if let machine = link.machine, let repository = link.repository {
+            let identity = try await query.repositoryIdentity(cwd: wave.wave.repo)
+            guard identity.id == repository else {
+                throw RegistryQueryError("The repository identity changed; nothing was opened.")
+            }
+            executionQuery = query.onMachine(machine, repository: repository)
+            let reading = try await executionQuery.taskLocation(task: executionTask, repository: repository, machine: machine)
+            guard !Task.isCancelled, destinationGeneration == generation else { return }
+            guard case .recorded(let remoteTask, let checkout) = reading.location, let checkout else {
+                throw RegistryQueryError("The execution owner has no available recorded checkout; nothing was prepared or opened.")
+            }
+            location = reading
+            executionTask = remoteTask
+            executionIdentity = WorkspaceIdentity(machineId: machine, worktree: checkout)
+        }
+        guard link.session != nil || link.diff || location != nil else {
             openTaskDestination(wave: wave, task: task, preservingOpening: true)
             linkedTaskPage = LinkedTaskPage(generation: generation, taskID: task.id, repo: wave.wave.repo.normalizedFilePath)
             return
         }
         let sameRepo = repoPath?.normalizedFilePath == wave.wave.repo.normalizedFilePath
-        var records = sameRepo ? sessions.value ?? [] : []
+        var records = sameRepo && location == nil ? sessions.value ?? [] : []
         let sessionID: String
         if let selected = link.session {
             sessionID = selected
         } else {
             // Reuse the primary-Session owner rather than creating another
             // conversation or replaying a retained terminal's launch command.
-            let record = try await query.ensureTaskSession(issue: task.runtime?.workId ?? task.task.identifier, cwd: wave.wave.repo)
+            let record = try await executionQuery.ensureTaskSession(issue: executionTask, cwd: wave.wave.repo)
             guard !Task.isCancelled, destinationGeneration == generation else { return }
             sessionID = record.id
             // Preparation may have supplied a checkout/runtime absent from the
             // planning read. Refresh this exact Task, never the current selection.
-            let refreshed = try await query.taskDestination(issue: task.task.identifier, repo: wave.wave.repo)
-            guard !Task.isCancelled, destinationGeneration == generation else { return }
-            guard let current = refreshed.waves.flatMap({ $0.tasks.items }).first(where: { $0.id == task.id }) else {
-                throw RegistryQueryError("The prepared Task is no longer available; its Session was not retargeted.")
+            if location == nil {
+                let refreshed = try await query.taskDestination(issue: task.task.identifier, repo: wave.wave.repo)
+                guard !Task.isCancelled, destinationGeneration == generation else { return }
+                guard let current = refreshed.waves.flatMap({ $0.tasks.items }).first(where: { $0.id == task.id }) else {
+                    throw RegistryQueryError("The prepared Task is no longer available; its Session was not retargeted.")
+                }
+                task = current
+                executionTask = current.runtime?.workId ?? current.id
+                executionIdentity = navigation.preparedTaskWorktrees[task.id] ?? task.reference.workspace?.identity
             }
-            task = current
             // Do not publish the single ensured record as a complete inventory.
             records = []
         }
@@ -246,29 +270,40 @@ final class WorkModel {
             records = []
             var after: String?
             repeat {
-                let page = try await query.sessionPage(includingHeadless: true, after: after, cwd: wave.wave.repo)
+                let page = try await executionQuery.sessionPage(includingHeadless: true, after: after, cwd: wave.wave.repo)
                 guard !Task.isCancelled, destinationGeneration == generation else { return }
                 records += page.entries
                 after = page.next
             } while after != nil
         }
-        guard let taskID = task.runtime?.workId,
-              let record = records.first(where: { $0.id == sessionID }),
+        let taskID = executionTask
+        guard let record = records.first(where: { $0.id == sessionID }),
               record.taskIds.contains(taskID) || record.workspace?.taskId == taskID else {
             throw RegistryQueryError("Session \(sessionID) was not found in Task \(task.task.identifier). Retry after its Session is available.")
         }
+        if location != nil {
+            guard record.workspace?.identity == executionIdentity, record.workspace?.unavailable == nil else {
+                throw RegistryQueryError("The Session no longer belongs to the observed Machine/checkout; nothing was opened.")
+            }
+        }
         if link.diff {
             guard let identity = record.workspace?.identity,
-                  identity == (navigation.preparedTaskWorktrees[task.id] ?? task.reference.workspace?.identity) else {
+                  identity == executionIdentity else {
                 throw RegistryQueryError("The Session and Task do not share a recorded checkout; no Changes pane was opened.")
             }
         }
+        if location != nil, let executionIdentity { navigation.preparedTaskWorktrees[task.id] = executionIdentity }
         openTaskDestination(wave: wave, task: task, preservingOpening: true)
         supersedeSessions()
+        if location != nil {
+            // This is one explicitly opened remote Session, not a replacement
+            // inventory for any Machine or a second planning hierarchy.
+            records = [record] + (sessions.value ?? []).filter { $0.id != record.id }
+        }
         sessions = .available(records)
         navigation.selectedSessionId = record.id
         navigation.content = .terminals
-        linkedSession = LinkedSession(generation: generation, record: record, changesTask: link.diff ? task : nil)
+        linkedSession = LinkedSession(generation: generation, record: record, changesTask: link.diff ? task : nil, location: location)
     }
 
     /// Called by the requested Task's mounted page (or its unavailable surface).
@@ -925,7 +960,8 @@ final class WorkModel {
             }
             guard body.repo.normalizedFilePath == repoPath.normalizedFilePath,
                   body.includesHeadless == navigation.showsHeadlessSessions else { return }
-            let next = WorkReading.available(body.entries)
+            let remote = (sessions.value ?? []).filter { $0.workspace?.machineId != nil && $0.workspace?.machineId != frame.home }
+            let next = WorkReading.available(body.entries + remote)
             if sessions != next { sessions = next }
             if savedSessionRepos.remove(repositoryReadingKey(repoPath)) != nil {
                 LaunchJournal.home.refreshed("sessions", ms: workOpened.elapsedMs, ok: true)
@@ -1309,7 +1345,7 @@ final class WorkModel {
                 // Keep prior rows until enumeration finishes, and preserve records
                 // added locally during this read. Native panes have their own lifetime.
                 let retained = (sessions.value ?? []).filter {
-                    !seen.contains($0.id) && (page.next != nil || !initialIDs.contains($0.id))
+                    !seen.contains($0.id) && (page.next != nil || !initialIDs.contains($0.id) || (workMachine != nil && $0.workspace?.machineId != nil && $0.workspace?.machineId != workMachine))
                 }
                 let next = WorkReading.available(records + retained)
                 if sessions != next { sessions = next }

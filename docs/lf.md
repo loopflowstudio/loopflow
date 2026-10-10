@@ -690,8 +690,10 @@ JSON returns `opening`, not `usable`: macOS accepting a link proves no native
 endpoint. `desktop list --json` includes each window's latest Task `opening`
 reading and lookup failures. Native usability and connection/comparison failure
 receipts are not yet composed; an `opening` receipt must not authorize pane input.
-Display opening does not automatically route to the Task's execution Machine or
-prepare its checkout in the CLI. Bare `open` is ambiguous with `pr open`;
+Display opening stays on the Mac. For a recorded remote owner, the Task link carries
+Machine and repository identity into the same repository window; Session and Files
+operations run on that owner after a fresh location read. Missing owners never create
+a local checkout or transfer execution. Bare `open` is ambiguous with `pr open`;
 Sessions use `session connect`.
 
 Desktop inspection reports registered repository/window identities, selection,

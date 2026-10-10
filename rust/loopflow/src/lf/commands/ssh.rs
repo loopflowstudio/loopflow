@@ -6,7 +6,7 @@ use crate::lf::Cli;
 use crate::provider_account::selection::AccountSelection;
 use anyhow::{anyhow, Context};
 use clap::Parser;
-use std::io::Write;
+use std::io::IsTerminal;
 use std::process::{Command, Stdio};
 
 pub const EXPECTED_MACHINE_ID_ENV: &str = "LF_EXPECTED_MACHINE_ID";
@@ -26,11 +26,29 @@ pub fn run(
                 cmd: crate::lf::TaskCommand::Location { .. }
             })
         );
+    // These operations use the addressed Machine's own records and accounts.
+    // Inspection and file editing must never prepare or transfer a provider login.
+    let resident_operation = matches!(
+        &cli.command,
+        Some(crate::lf::Commands::Session {
+            cmd: crate::lf::SessionCommand::List { .. }
+                | crate::lf::SessionCommand::Open { .. }
+                | crate::lf::SessionCommand::Ensure { .. }
+        }) | Some(crate::lf::Commands::Task {
+            cmd: crate::lf::TaskCommand::Location { .. }
+                | crate::lf::TaskCommand::Files { .. }
+                | crate::lf::TaskCommand::File { .. }
+                | crate::lf::TaskCommand::Diff { .. }
+                | crate::lf::TaskCommand::Save { .. }
+        }) | Some(crate::lf::Commands::Wave {
+            cmd: crate::lf::WaveCommand::Show { .. }
+        })
+    );
     if !preview && matches!(cli.command, Some(crate::lf::Commands::Desktop { .. })) {
         super::desktop::require_supported()?;
     }
     let runtime = tokio::runtime::Runtime::new()?;
-    let target = if preview {
+    let target = if preview || resident_operation {
         let store = crate::store::read_existing_registry()?
             .ok_or_else(|| anyhow!("Machine unavailable: local registry is absent"))?;
         runtime.block_on(super::machine::find_machine(&store, target))?
@@ -61,7 +79,7 @@ pub fn run(
         .or(work_route.as_ref().map(|route| &route.repository_id));
     // Preview forwards only authored selectors. Account lookup/connection and
     // isolation preparation belong to launch, on neither side of this read.
-    let selection = if preview {
+    let selection = if preview || resident_operation {
         None
     } else {
         Some(
@@ -101,6 +119,44 @@ pub fn run(
     } else {
         resident_args(lf_args, cli, routed)
     });
+    if matches!(
+        &cli.command,
+        Some(crate::lf::Commands::Task {
+            cmd: crate::lf::TaskCommand::Location { .. }
+        })
+    ) {
+        let bytes = runtime.block_on(read(&target, &cmd[1..]))?;
+        print!("{}", String::from_utf8(bytes)?);
+        return Ok(());
+    }
+    if matches!(
+        &cli.command,
+        Some(crate::lf::Commands::Session {
+            cmd: crate::lf::SessionCommand::Open { json: true, .. }
+        })
+    ) && !preview
+    {
+        let bytes = runtime.block_on(read(&target, &cmd[1..]))?;
+        let mut record: crate::ops::human_session::SessionRecord = serde_json::from_slice(&bytes)?;
+        anyhow::ensure!(
+            record
+                .workspace
+                .as_ref()
+                .is_some_and(|workspace| workspace.machine_id == target.id),
+            "Session reply does not belong to the addressed Machine"
+        );
+        if !record.open_argv.is_empty() {
+            let script = build_preamble(
+                &target.route,
+                None,
+                &record.open_argv,
+                &[(EXPECTED_MACHINE_ID_ENV, target.id.as_str())],
+            );
+            record.open_argv = ssh_argv(&target.route, forward_agent, &script, true)?;
+        }
+        println!("{}", serde_json::to_string(&record)?);
+        return Ok(());
+    }
     let preamble = build_preamble(
         &target.route,
         if repository.is_some() || cli.repo.is_some() {
@@ -261,33 +317,42 @@ fn command_result(dest: &str, code: Option<i32>) -> anyhow::Result<()> {
     }
 }
 
-/// Pipe the preamble into `ssh [-A] <host> bash -s`, streaming stdout/stderr and
-/// classifying the remote exit code. Agent forwarding (`-A`) is opt-in. Bounded
-/// so an unreachable or misconfigured host fails fast instead of hanging.
+/// Carry the script as an argument: stdin belongs to file drafts or terminal input.
+fn ssh_argv(
+    dest: &str,
+    forward_agent: bool,
+    preamble: &str,
+    terminal: bool,
+) -> anyhow::Result<Vec<String>> {
+    let mut args = crate::engine::machine_route::bounded_ssh_args(dest, forward_agent)?;
+    if terminal {
+        for arg in &mut args {
+            if arg == "-T" {
+                *arg = "-tt".into();
+            }
+        }
+    }
+    let mut argv = vec!["ssh".into()];
+    argv.extend(args);
+    argv.push(preamble.into());
+    Ok(argv)
+}
+
 fn run_ssh(dest: &str, forward_agent: bool, preamble: &str) -> anyhow::Result<()> {
-    let mut child = Command::new("ssh")
-        .args(crate::engine::machine_route::bounded_ssh_args(
-            dest,
-            forward_agent,
-        )?)
-        .arg("bash -s")
-        .stdin(Stdio::piped())
+    let argv = ssh_argv(
+        dest,
+        forward_agent,
+        preamble,
+        std::io::stdin().is_terminal(),
+    )?;
+    let status = Command::new(&argv[0])
+        .args(&argv[1..])
+        .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
-        .spawn()
-        .context("failed to spawn ssh")?;
-
-    let written = child
-        .stdin
-        .take()
-        .ok_or_else(|| anyhow!("ssh stdin unavailable"))?
-        .write_all(preamble.as_bytes());
-    if written.is_err() {
-        let _ = child.kill();
-    }
-    let status = child.wait().context("ssh did not complete");
-    written.context("failed to write preamble to ssh")?;
-    command_result(dest, status?.code())
+        .status()
+        .context("ssh did not complete")?;
+    command_result(dest, status.code())
 }
 
 /// One bounded read through the ordinary SSH envelope. No probes, credentials,
@@ -316,10 +381,10 @@ pub(crate) async fn read(
         .kill_on_drop(true);
     let output = tokio::time::timeout(std::time::Duration::from_secs(20), child.output())
         .await
-        .context("execution-location observation unavailable: peer timed out")??;
+        .context("Machine command unavailable: peer timed out")??;
     anyhow::ensure!(
         output.status.success(),
-        "execution-location observation unavailable: {}",
+        "Machine command unavailable: {}",
         String::from_utf8_lossy(&output.stderr).trim()
     );
     Ok(output.stdout)

@@ -124,10 +124,9 @@ or native acceptance. Earlier evidence: `829c9b993`, this heading.
 `e3ca861b1`: mounted-page/visibility observation replaces callbacks; request IDs
 fence registration only. Pre-registration failures survive; native proof remains.
 
-Preview/launch share assembly; only launch prepares Work/excerpts.
-Read-only SQLite and fallback suppression prevent hidden writes. Explicit-Machine
-previews skip credential/identity probes. WAL, registry and Flow counterexamples:
-`829c9b993:wave/product/MEMORY.md`, this heading; no configured SSH or admission proof.
+Preview counterexamples (WAL, registry and Flow):
+`829c9b993:wave/product/MEMORY.md`, this heading. Explicit-Machine previews skip
+credential/identity probes; configured SSH/admission remain unproved.
 
 Identity is not action validation. Shared validators recheck writes; `--context`
 rejects non-agent commands before stdin. Refile resolves IDs before initialization;
@@ -162,11 +161,13 @@ execution. Nonces fence stale replies without peer-clock comparison; deadlines
 bound each peer, not the whole sequential scan. Added peers are not a global
 inventory. One positive owner survives another peer's unavailability; conflicting
 positives refuse. No negative observation authorizes first start.
-Two-CLI/import proof routes retained checkout after delegation edits without copying
-it; run/move/Desktop share preview provenance, including Started without a path.
-Swift decoding is not remote opening: its native consumers remain unbuilt.
-Mixed-provider exchange, admission and native proof remain; seeded history proves
-no running Flow or configured SSH.
+Two-CLI/import fixtures route retained checkout after delegation edits; run/move/Desktop
+share provenance, including Started without a path.
+Remote Task links retain one scene and scope Session/Files to nonce-validated
+owners. SSH script arguments preserve stdin/native Home; peer paths never become
+local watches/cwd. Headless fixtures retain drafts, not native acceptance. Mixed
+exchange, admission, remote shells/live file observation and running-Flow/configured-SSH
+proof remain.
 
 ## Task delivery boundary (LOO-418, reconciled 2026-10-09)
 

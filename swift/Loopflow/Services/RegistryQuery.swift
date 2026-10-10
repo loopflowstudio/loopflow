@@ -38,6 +38,7 @@ public struct DiscoveryEntry: Codable, Equatable, Sendable, Identifiable {
 }
 
 public struct RegistryQuery: Sendable {
+    public private(set) var remoteMachine: String?
     private let run: RegistryRunner
     private let runWithInput: @Sendable ([String], String?, String) async throws -> String
     private let start: RegistryStarter?
@@ -55,6 +56,35 @@ public struct RegistryQuery: Sendable {
         self.run = run
         self.start = start
         self.observeWork = watchWork
+    }
+
+    /// Keep execution selectors off local filesystem paths. The existing CLI owns
+    /// connection identity, repository lookup and every operation on that Machine.
+    public func onMachine(_ machine: String, repository: String) -> RegistryQuery {
+        let prefix = ["--machine", machine, "--repository", repository]
+        var query = RegistryQuery(runWithInput: { [runWithInput] args, _, input in
+            try await runWithInput(prefix + args, nil, input)
+        }, start: { [run, start] args, _ in
+            if let start { try await start(prefix + args, nil) }
+            else { _ = try await run(prefix + args, nil) }
+        }) { [run] args, _ in
+            try await run(prefix + args, nil)
+        }
+        query.remoteMachine = machine
+        return query
+    }
+
+    /// A request-bound observation, not admission or checkout preparation.
+    public func taskLocation(task: String, repository: String, machine: String) async throws -> TaskLocationObservation {
+        let request = UUID().uuidString
+        let readings = try Self.decode([TaskLocationObservation].self, from: await run(
+            ["task", "location", task, "--request", request, "--json"], nil))
+        guard readings.count == 1, let reading = readings.first,
+              reading.request == request, reading.repositoryID == repository,
+              reading.taskID == task, reading.machineID == machine else {
+            throw RegistryQueryError("Stale or mismatched execution-location observation; nothing was opened.")
+        }
+        return reading
     }
 
     /// A copy that also reports each successful read's wire text, so a caller

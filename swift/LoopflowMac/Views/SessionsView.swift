@@ -134,10 +134,10 @@ final class SessionsWorkspaceRegistry {
     /// Shares the Files pane and document cache with toolbar/CLI companions.
     /// Repeated opens retain both the conversation draft and file selection.
     @discardableResult
-    func showChanges(task: RoadmapTask, in identity: WorkspaceIdentity, query: RegistryQuery) -> TaskFilesStore {
+    func showChanges(task: RoadmapTask, in identity: WorkspaceIdentity, query: RegistryQuery, executionTask: String? = nil) -> TaskFilesStore {
         let workspace = workspace(for: identity)
         let key = task.runtime?.workId ?? task.task.identifier
-        let files = workspace.files(taskId: key, issue: key, cwd: identity.worktree, query: query)
+        let files = workspace.files(taskId: key, issue: executionTask ?? key, cwd: identity.worktree, query: query)
         files.showsChanges = true
         workspace.multiplexer.show(.files(taskId: task.id), focus: false)
         return files
@@ -289,6 +289,25 @@ final class SessionsStore {
 
     let repoPath: String
     let query: RegistryQuery
+    private var executionLocations: [String: TaskLocationObservation] = [:]
+
+    func retainLocation(_ location: TaskLocationObservation, for record: SessionRecord) {
+        executionLocations[record.id] = location
+    }
+
+    func query(for record: SessionRecord) -> RegistryQuery {
+        guard let location = executionLocations[record.id] else { return query }
+        return query.onMachine(location.machineID, repository: location.repositoryID)
+    }
+
+    func taskSubject(for record: SessionRecord) -> WorkReference? {
+        executionLocations[record.id].map { .task(id: $0.taskID) }
+    }
+
+    func presentationDirectory(for record: SessionRecord, checkout: String) -> String {
+        executionLocations[record.id] == nil ? checkout : repoPath
+    }
+
     private let metrics: SessionsLatencyMetrics
     @ObservationIgnored private var hasRecordedSessionsLoad = false
 
@@ -346,7 +365,15 @@ final class SessionsStore {
             return
         }
         do {
-            let surface = try await query.openSession(
+            let record = sessions[index].record
+            let executionQuery = query(for: record)
+            if let location = executionLocations[id] {
+                let current = try await executionQuery.taskLocation(task: location.taskID, repository: location.repositoryID, machine: location.machineID)
+                guard current.location == location.location else {
+                    throw RegistryQueryError("The recorded execution location changed; reopen the Task before connecting.")
+                }
+            }
+            let surface = try await executionQuery.openSession(
                 id: id,
                 replacing: replacing,
                 cwd: repoPath
@@ -841,11 +868,24 @@ struct SessionsContentView: View {
               model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath else { return }
         let record = destination.record
         model.linkedSession = nil
+        if let location = destination.location {
+            store.retainLocation(location, for: record)
+            if case .recorded(let taskID, _) = location.location,
+               let identity = record.workspace?.identity {
+                // Cache the existing Files owner even without a requested pane:
+                // later toolbar/CLI opens must not interpret this peer path locally.
+                _ = workspaces.workspace(for: identity).files(taskId: location.taskID, issue: taskID,
+                    cwd: identity.worktree, query: store.query(for: record))
+            }
+        }
         store.reconcile(model.sessions.value ?? [])
         openSession(record, preservingOpening: true)
         var files: TaskFilesStore?
         if let task = destination.changesTask, let identity = record.workspace?.identity {
-            files = workspaces.showChanges(task: task, in: identity, query: query)
+            let executionTask: String?
+            if case .recorded(let taskID, _) = destination.location?.location { executionTask = taskID }
+            else { executionTask = nil }
+            files = workspaces.showChanges(task: task, in: identity, query: store.query(for: record), executionTask: executionTask)
         }
         let openingWorkspace = workspace
         if files != nil, let zoomed = openingWorkspace.multiplexer.zoomedPaneId {
@@ -859,8 +899,8 @@ struct SessionsContentView: View {
     }
 
     private func openSession(_ record: SessionRecord, preservingOpening: Bool) {
-        let subject = model.projection.subject(for: record.id)
-        model.select(subject, preservingOpening: preservingOpening)
+        let subject = store.taskSubject(for: record) ?? model.projection.subject(for: record.id)
+        if !preservingOpening { model.select(subject, preservingOpening: false) }
         Perf.begin(Perf.taskWorkspaceReady, "session", id: record.id)
         navigation.selectedSessionId = record.id
         navigation.content = .terminals
@@ -1664,7 +1704,7 @@ private struct SessionPaneView: View {
     private func _terminal(item: SessionItem, surface: SessionRecord) -> some View {
         if let machineId = surface.workspace?.machineId {
             GhosttyTerminalView(
-                workingDirectory: workingDirectory,
+                workingDirectory: sessions.presentationDirectory(for: surface, checkout: workingDirectory),
                 argv: surface.openArgv,
                 terminal: .session(surface.id, machineId: machineId),
                 surfacePool: sessions.surfaces,

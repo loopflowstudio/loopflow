@@ -244,12 +244,12 @@ watchdog. OpenCode saves endpoint/attempts before effects; creation carries rule
 not PATCH. Its reader owns History; writers save origins in SQLite, not shared
 reader state. Unknown identity stays uncertain; shell lacks IDs. Prior proofs:
 `7fec3b53f:wave/infrastructure/MEMORY.md`, this heading.
-`4834c18f4` retains Claude origins, not pipes. Display follows current attachment;
-caller authority stays frozen. SQLite atomically correlates UUID results and retains
-uncorrelated evidence; replay cannot consume later work. Client completion counters remain independent; deduplication alone cannot protect
-projection. Transport needs ordered draining without fence reacquisition or
-permanent custody. EOF/history/write errors grant no settlement or teardown.
-Public death orders remain unproved.
+`4834c18f4` retains origins, not pipes. Display follows the current attachment;
+caller authority stays frozen. Atomic UUID result receipts retain uncorrelated
+output and return their original sequence/disposition on replay. Client counters
+still ignore them. Independent ordered transport, receipt-based projection and
+public death orders remain unfinished. No fence reacquisition or permanent custody;
+EOF/history/write errors grant no settlement or teardown.
 Plan: `scratch/stop-and-take-over-claude.md`.
 
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)

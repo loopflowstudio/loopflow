@@ -275,6 +275,8 @@ impl SqliteStore {
     /// all result receipts commit together, so reopened or concurrent readers
     /// cannot consume the next admission with the same result. Results without
     /// an admission retain that disposition; later input cannot claim old output.
+    /// Return the committed completion/observation sequence, including on replay.
+    /// Consumers project that receipt, never infer completion from a successful call.
     pub(crate) fn record_ordered_session_result(
         &self,
         session: &str,
@@ -282,7 +284,7 @@ impl SqliteStore {
         thread: Option<&AgentSessionId>,
         events: &[(SessionEventKind, Value)],
         completed: &Value,
-    ) -> StoreResult<()> {
+    ) -> StoreResult<i64> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let result_id = completed["result_id"]
@@ -295,15 +297,15 @@ impl SqliteStore {
             "uncorrelated_result": completed,
             "events": events,
         });
-        let uncorrelated: Option<(Option<AgentSessionId>, String)> = tx
+        let uncorrelated: Option<(i64, Option<AgentSessionId>, String)> = tx
             .query_row(
-                "SELECT provider_thread,payload FROM session_events
+                "SELECT seq,provider_thread,payload FROM session_events
              WHERE session_id=?1 AND kind='observed' AND receipt_key=?2",
                 params![session, receipt],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .optional()?;
-        if let Some((saved_thread, payload)) = uncorrelated {
+        if let Some((seq, saved_thread, payload)) = uncorrelated {
             if saved_thread.as_ref() != thread
                 || serde_json::from_str::<Value>(&payload)? != observation
             {
@@ -311,7 +313,7 @@ impl SqliteStore {
                     "Conflicting uncorrelated result".into(),
                 ));
             }
-            return Ok(());
+            return Ok(seq);
         }
         let repeated: Option<(AgentSessionId, String)> = tx.query_row(
             "SELECT done.provider_thread,done.provider_turn FROM session_events done
@@ -347,8 +349,9 @@ impl SqliteStore {
                 params![session, thread, receipt, time::OffsetDateTime::now_utc().unix_timestamp(),
                     serde_json::to_string(&observation)?],
             )?;
+            let seq = tx.last_insert_rowid();
             tx.commit()?;
-            return Ok(());
+            return Ok(seq);
         };
         if thread != Some(&saved_thread) {
             return Err(StoreError::InvalidData(
@@ -358,7 +361,7 @@ impl SqliteStore {
         for (kind, payload) in events {
             record_event_in(&tx, session, Some(&saved_thread), &turn, *kind, payload)?;
         }
-        record_event_in(
+        let seq = record_event_in(
             &tx,
             session,
             Some(&saved_thread),
@@ -367,7 +370,7 @@ impl SqliteStore {
             completed,
         )?;
         tx.commit()?;
-        Ok(())
+        Ok(seq)
     }
 
     /// Retain correlated origin after takeover without reading current assignment.

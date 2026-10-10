@@ -641,10 +641,10 @@ Private owners acknowledge selected origins without settling divergent UUIDs
 or exporting private history. Seeded attempts prove no dispatch/exactly-once;
 attachment can race acquisition.
 
-`2e346a052`: Git/HTTPS order/removal and Codex 0.161.0 resume pass:
+`6bc57aefc`: Git/HTTPS order/removal and Codex 0.161.0 resume pass:
 only complete lists settle order; trash settles deletion. Replay preserves times,
 receipts, edits and execution; exchange launches no engine/turn. Fixtures
-prove no UI/account/installed acceptance. Cold Linear delivery needs local Wave
+prove no UI/account/installed acceptance. Linear delivery needs local Wave
 documents. Gate owns broader/materialized checks.
 
 ## Driver recovery

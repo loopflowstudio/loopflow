@@ -158,6 +158,18 @@ async fn observe(
             );
             return Ok(());
         }
+        if status == WorkStatus::Done {
+            let Some(pr) = store.active_task_pr(&task.id).await.map_err(error)? else {
+                retain(decision, "completed Task has a PR-less checkout");
+                return Ok(());
+            };
+            let follow_through = store.sqlite.task_follow_through(&task.id).map_err(error)?;
+            let gate = crate::ops::task::CompletionGate::from_delivery(Some(&pr), &follow_through);
+            if !gate.blockers.is_empty() {
+                retain(decision, format!("unresolved delivery: {}", gate.reason()));
+                return Ok(());
+            }
+        }
         if open.for_task(&task.id).iter().any(|process| {
             process_evidence(&store.sqlite, &process.lfid) != ProcessIdentityEvidence::Dead
         }) {
@@ -595,12 +607,59 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cleanup_requires_completed_task_delivery_even_with_a_settled_landing() {
+        let (_guard, (repo, _directory, store, path)) =
+            (crate::journal::TestLedgerGuard::new(), fixture().await);
+        let task = crate::durable::TaskId::new();
+        let wave = crate::id::WaveId::new();
+        let project = crate::durable::ProjectId::new();
+        let pr = crate::work::task::TaskPrId::new();
+        let head = rev_parse(&path, "HEAD").unwrap();
+        {
+            let conn = rusqlite::Connection::open(_directory.path().join("store.db")).unwrap();
+            conn.execute(
+                "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'cleanup',?2,1)",
+                rusqlite::params![wave, repo.path().to_string_lossy()],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)",
+                rusqlite::params![project.as_str(), wave],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,workspace_slug,branch,base_commit,created_at,updated_at,issue_title,issue_description,pm_snapshot_synced_at,planning_completed) VALUES(?1,?2,'issue','CLEAN-1',?3,'landed','landed',?4,1,1,'Findings','Accepted findings',1,1)",
+                rusqlite::params![task.as_str(), project.as_str(), path.to_string_lossy(), head],
+            )
+            .unwrap();
+        }
+        retained(&decision(&store, &repo, &path).await, "PR-less");
+        {
+            let conn = rusqlite::Connection::open(_directory.path().join("store.db")).unwrap();
+            conn.execute(
+                "INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,publication_requested_at,github_number,github_url,github_head_sha,merge_commit,created_at,updated_at) VALUES(?1,?2,1,'landed','landed',?3,1,1,'https://github.com/example/repo/pull/1',?3,?3,1,1)",
+                rusqlite::params![pr.as_str(), task.as_str(), head],
+            )
+            .unwrap();
+        }
+        retained(&decision(&store, &repo, &path).await, "unresolved delivery");
+        store
+            .sqlite
+            .finish_follow_through(&task, "No remaining scope", true)
+            .unwrap();
+        assert_eq!(
+            decision(&store, &repo, &path).await.action,
+            CleanupAction::RemoveCheckout
+        );
+    }
+
+    #[tokio::test]
     async fn cleanup_retries_unknown_execution_then_removes_once_without_deleting_remote() {
         let _guard = crate::journal::TestLedgerGuard::new();
         let _external = ExternalInspection::idle();
         let (repo, _directory, store, path) = fixture().await;
         git(&path, &["push", "origin", "landed"]).unwrap();
-        let mut process = crate::process::Process {
+        let mut process = crate::process::LfProcess {
             lfid: crate::id::ProcessLfid::new(),
             pid: None,
             trace_id: crate::id::TraceId::new(),

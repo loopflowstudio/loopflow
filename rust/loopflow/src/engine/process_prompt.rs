@@ -474,18 +474,6 @@ Test skill body.
             "Jack previously invoked $kickoff.",
         )
         .unwrap();
-        let store = crate::store::sqlite::SqliteStore::new(
-            &crate::store::database_path_from_env().unwrap(),
-        )
-        .unwrap();
-        store
-            .ensure_wave(
-                &crate::repository::CanonicalRepo::discover(tmp.path())
-                    .unwrap()
-                    .to_string(),
-                "product",
-            )
-            .unwrap();
         let prepared = prepare_process_prompt(
             &default_test_config(),
             ProcessPromptInput {

@@ -398,21 +398,10 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let _home =
             crate::lf::commands::flow::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
-        let store =
-            crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join("loopflow.db"))
-                .unwrap();
         let tmp = loopflow_test_support::TestRepo::new();
         std::fs::create_dir_all(tmp.path().join("wave/release")).unwrap();
         let goal = "---\ncrons: []\n---\n## Objective\nShip a reliable release.\n\n## Bounds\nKeep rollback available.\n";
         std::fs::write(tmp.path().join("wave/release/GOAL.md"), goal).unwrap();
-        store
-            .ensure_wave(
-                &crate::repository::CanonicalRepo::discover(tmp.path())
-                    .unwrap()
-                    .to_string(),
-                "release",
-            )
-            .unwrap();
         let seed = super::render_wave_context(tmp.path(), "release", "");
         for message in [None, Some(seed)] {
             let prepared = crate::engine::process_prompt::prepare_process_prompt(

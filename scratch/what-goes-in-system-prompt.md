@@ -232,7 +232,7 @@ follow checkout paths under Jack's later source decision. No installation, publi
 The pre-cut implementation plan and complete older checks remain at
 `6149952c8:scratch/what-goes-in-system-prompt.md`.
 
-Checks: network-isolated `cargo test -p loopflow --lib engine::context_block::tests` (8) and `cargo test -p loopflow --test context_block_tests --test context_tests checkout` (3), `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` pass; `lf context --json` fits (memory 15,998/16,000 tokens); gate owns native acceptance and demo owns presentation.
+Checks: network-isolated `cargo test -p loopflow --test context_tests --test context_block_tests`, `--test global_commands context_targets`, and separate `--lib implement_launch_treats_kickoff` / `--lib context_delivery_supplies_one_goal` runs pass (20 tests); `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` pass; `lf context --json` fits; gate owns native acceptance and demo owns presentation. Earlier block-only results: `5e8fdde2f:scratch/what-goes-in-system-prompt.md`.
 
 ### Integrated upstream boundary
 
@@ -288,6 +288,13 @@ settings in `launch.py` remain used by context-delivery and skill-fidelity probe
   Checkout-source fixtures retain ancestor ordering, sibling/child exclusion,
   stale database rejection, refresh and readable real paths. Review also corrected
   these fixtures to inspect gathered documents, not obsolete diagnostic inlining.
+- Removed: `context_tests::import_wave` and registry/Git/skill setup used only
+  by Wave document filtering. Exact path/content assertions retain Markdown order
+  and exclusion coverage; launch and stale-store callback fixtures stay separate.
+  The repository-memory assertion now reads the conversation block, not diagnostics.
+  `lf context` refresh edits checkout memory while the imported copy stays stale.
+  Wave configuration still uses saved GOAL frontmatter (LOO-449), so its CLI fixture
+  retains registration: removing it yielded the repo limit 700, not Wave limit 400.
 - Removed: duplicate context listing/header metadata and the separate long-root
   fallback. The complete manifest now owns both inline and pointed metadata.
 - Removed: `INITIAL_TURN_PROMPT`, its naming special cases and exclusive tests.

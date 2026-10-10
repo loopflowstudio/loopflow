@@ -221,7 +221,7 @@ unpublished code retained, without deletion or delivery authorization.
 
 ## AgentProcess (LOO-443/447, 2026-10-10)
 
-Jack Heart accepted #1519 (`71741bd4`); retain uncertainty and retry history.
+Jack Heart accepted #1519 (`71741bd4`); preserve uncertainty/history.
 LOO-447 owns Claude/OpenCode takeover/stop; two-second removal, three orphans
 and configured-provider runs are accepted unproven.
 
@@ -237,8 +237,8 @@ OpenCode persists reachability and attempts before effects. v1.2.0 supports
 permissions at creation, not PATCH; prior fixtures were wrong (`894bc61e5`).
 Creation retains rules and a correlation title for no-replay identity readback.
 Missing/ambiguous matches remain uncertain.
-`196b57ac2`: ordered readback, fenced replies.
-Claude transport and public takeover remain open.
+`07529ac3d`: creation-worker death/readback, no replay; not public takeover.
+Claude transport/public takeover remain open.
 Plan: `scratch/stop-and-take-over-claude.md`.
 
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)

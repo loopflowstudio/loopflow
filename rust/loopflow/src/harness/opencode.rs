@@ -73,6 +73,29 @@ impl OpenCodeHarness {
         self.server_base_url = None;
     }
 
+    /// Both ordinary input and steering enqueue one saved request. Completion
+    /// arrives through native history, never through this HTTP acknowledgement.
+    async fn submit_prompt(&self, mut payload: Value) -> Result<String> {
+        let base_url = self
+            .server_base_url
+            .as_ref()
+            .ok_or_else(|| anyhow!("opencode server not started"))?;
+        let agent_session = self
+            .agent_session
+            .as_ref()
+            .ok_or_else(|| anyhow!("opencode provider session id is not available"))?;
+        let (request, owner) = {
+            let history = self.history.lock().expect("OpenCode history lock poisoned");
+            (history.request(agent_session)?, history.owner()?)
+        };
+        payload["messageID"] = json!(request);
+        // The blocking /message route would prevent mid-turn steering while
+        // send_input holds &mut self. prompt_async only enqueues the request.
+        let url = format!("{base_url}/session/{agent_session}/prompt_async");
+        opencode_history::post(owner, url, payload).await?;
+        Ok(request)
+    }
+
     async fn start_inner(&mut self, config: &AgentConfig) -> Result<()> {
         let owner = super::agent_process::open_owner(config.session_attachment.as_ref())?;
         self.history = Arc::new(Mutex::new(opencode_history::History::new(Some(
@@ -464,30 +487,8 @@ impl Harness for OpenCodeHarness {
         }
         let mut turn_guard = TurnInProgressGuard::new(self.turn_in_progress.clone());
 
-        let base_url = self
-            .server_base_url
-            .clone()
-            .ok_or_else(|| anyhow!("opencode server not started"))?;
-        let agent_session = self
-            .agent_session
-            .clone()
-            .ok_or_else(|| anyhow!("opencode provider session id is not available"))?;
-
-        let mut payload = build_turn_payload(&turn_content, config, first_turn);
-        let (request, owner) = {
-            let history = self.history.lock().expect("OpenCode history lock poisoned");
-            (history.request(&agent_session)?, history.owner()?)
-        };
-        payload["messageID"] = json!(request);
-
-        // `prompt_async` enqueues the turn and returns immediately (204); the
-        // turn's boundary and output arrive over the `/event` SSE stream. The
-        // blocking `/message` endpoint holds the HTTP response open until the
-        // whole turn finishes, which would keep `send_input` (and its `&mut
-        // self` borrow) from returning — leaving no window to call
-        // `send_current` mid-turn.
-        let message_url = format!("{base_url}/session/{agent_session}/prompt_async");
-        opencode_history::post(owner, message_url, payload).await?;
+        self.submit_prompt(build_turn_payload(&turn_content, config, first_turn))
+            .await?;
 
         self.should_seed_prompt = false;
         turn_guard.disarm();
@@ -506,30 +507,17 @@ impl Harness for OpenCodeHarness {
         if !self.turn_in_progress.load(Ordering::SeqCst) {
             return SendCurrentOutcome::NotSteerable;
         }
-        let (Some(base_url), Some(agent_session), Some(config)) = (
-            self.server_base_url.clone(),
-            self.agent_session.clone(),
-            self.config.clone(),
-        ) else {
+        let (Some(_), Some(_), Some(config)) =
+            (&self.server_base_url, &self.agent_session, &self.config)
+        else {
             return SendCurrentOutcome::NotSteerable;
         };
 
-        let mut payload = build_turn_payload(text, &config, false);
-        let (provider_turn_id, owner) = {
-            let history = self.history.lock().expect("OpenCode history lock poisoned");
-            match (history.request(&agent_session), history.owner()) {
-                (Ok(request), Ok(owner)) => (request, owner),
-                (Err(error), _) | (_, Err(error)) => {
-                    return SendCurrentOutcome::Failed {
-                        error: error.to_string(),
-                    }
-                }
-            }
-        };
-        payload["messageID"] = json!(provider_turn_id);
-        let steer_url = format!("{base_url}/session/{agent_session}/prompt_async");
-        match opencode_history::post(owner, steer_url, payload).await {
-            Ok(()) => SendCurrentOutcome::Sent { provider_turn_id },
+        match self
+            .submit_prompt(build_turn_payload(text, config, false))
+            .await
+        {
+            Ok(provider_turn_id) => SendCurrentOutcome::Sent { provider_turn_id },
             Err(error) => SendCurrentOutcome::Failed {
                 error: format!("failed to send opencode steer: {error}"),
             },
@@ -1210,11 +1198,6 @@ mod tests {
                         let mut line = String::new();
                         socket.read_line(&mut line).await.unwrap();
                         requests.lock().unwrap().push(line.clone());
-                        if line.starts_with("GET /session/native ") {
-                            let body = json!({"id":"native","permission":[{"permission":"*","pattern":"*","action":"ask"}]}).to_string();
-                            socket.get_mut().write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
-                            return;
-                        }
                         if line.starts_with("GET /event ") {
                             subscribed.store(true, Ordering::SeqCst);
                             socket.get_mut().write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n").await.unwrap();

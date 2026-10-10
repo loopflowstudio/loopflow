@@ -2301,24 +2301,22 @@ fn parse_shortstat(raw: &str) -> String {
 fn wt_prune(dry_run: bool, json: bool) -> Result<()> {
     let repo = find_repo_root()?;
     let runtime = tokio::runtime::Runtime::new()?;
-    let report = runtime.block_on(async {
-        let store = std::sync::Arc::new(
-            crate::store::open_registry_for_authority()
-                .await
-                .map_err(registry_error)?,
-        );
-        let plan = plan_cleanup(&store, &repo).await?;
-        if dry_run {
-            Ok::<_, anyhow::Error>(CleanupReport {
-                planned: plan,
-                removed: Vec::new(),
-                deferred: Vec::new(),
-                failed: Vec::new(),
-            })
-        } else {
-            Ok(apply_cleanup(&store, &repo, plan, CleanupBudget::default()).await?)
+    let store = std::sync::Arc::new(
+        runtime
+            .block_on(crate::store::open_registry_for_authority())
+            .map_err(registry_error)?,
+    );
+    let plan = plan_cleanup(&store, &repo)?;
+    let report = if dry_run {
+        CleanupReport {
+            planned: plan,
+            removed: Vec::new(),
+            deferred: Vec::new(),
+            failed: Vec::new(),
         }
-    })?;
+    } else {
+        apply_cleanup(&store, &repo, plan, CleanupBudget::default())?
+    };
     if json {
         println!("{}", serde_json::to_string(&report)?);
     } else {

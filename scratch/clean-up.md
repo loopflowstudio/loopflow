@@ -150,7 +150,10 @@ the now-unused `task_open_work` history loader is removed too. No known deletion
 remain; targeted missing-registration repair is still unimplemented, not a reason
 to restore broad metadata pruning. The release-only `read_nonterminal_task_worktrees`
 reader and its exclusive fixture are also removed: shared checkout links, delivery
-facts and Process evidence now protect release-owned work.
+facts and Process evidence now protect release-owned work. The separate
+`release_blocker` policy and per-query asynchronous collector dispatch are gone:
+both registry snapshots use one synchronous retention policy. Async lifecycle
+callers dispatch the complete filesystem attempt to one blocking worker.
 
 ## Forbidden outcomes
 
@@ -170,11 +173,13 @@ and orphan engine create/remove helpers are removed. Explicit abandonment keeps
 its separate authority. This is an internal checkpoint, not a shipping boundary.
 
 Targeted lifecycle cleanup filters registrations before observing candidates.
-Planning shares registered paths, stable Task checkout links, unfinished Processes,
-default branch and protected evidence roots. Removal refreshes those observations
-under checkout admission and Git leases. Planning and removal share one admission
-deadline; an already-started observation or removal finishes. Hard subprocess/SQL
-deadlines and release-registry batching remain below.
+Planning reads registrations once and shares Task checkout links, unfinished
+Process membership and protected homes once per registry. Selected and release
+stores use the same retention policy and their own Process-receipt homes; release
+facts can veto removal but cannot settle experimental source. Removal refreshes
+those observations under checkout admission and Git leases. Planning and removal
+share one admission deadline; an already-started observation or removal finishes.
+Hard subprocess/SQL deadlines remain below.
 
 Main `906576f39` separates planning completion from delivery and follow-through.
 The synced collector (`237d1a31a`, fixture correction `e1be31600`) preserves
@@ -228,8 +233,8 @@ loading demonstration.
 
 1. **Whole-pass timing and fairness:** the shared admission deadline stops starting
    candidate observations and removals, but a started Git/SQL observation can still
-   overrun it. Bound individual observations, batch release-registry facts, add
-   hourly full reconciliation and oldest-deferred ordering. Background size
+   overrun it. Bound individual observations, add hourly full reconciliation and
+   oldest-deferred ordering. Background size
    estimates remain null; no foreground recursive scan was added. Scheduled
    reports now preserve deferred reasons in JSON/logs, but cron receipt scan
    timestamps and dedicated summary fields remain unimplemented.
@@ -300,4 +305,4 @@ allocated bytes by category; observed free-space delta after collection; oldest
 eligible retention age. APFS sharing, hardlinks and concurrent writers mean
 directory sums are estimates, not guaranteed reclaimed bytes.
 
-Check: `cargo test -p loopflow --lib <filter> -- --test-threads=1` passed for `ops::wt::cleanup::tests` (15), `repository_tick` (2), and `repository_fallback_is_throttled_and_respects_disable` (1); `cargo test -p loopflow --test cleanup_schedule -- --test-threads=1` passed (2); `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check` passed; full acceptance and OS-schedule experience remain with gate/demo.
+Check: `cargo test -p loopflow --lib cleanup -- --test-threads=1` (18), `cargo test -p loopflow --lib task_decision_preserves_unknown_history_and_live_process_protection -- --test-threads=1` (1), and `cargo test -p loopflow --test cleanup_schedule --test dto_fixtures cleanup -- --test-threads=1` (3) passed; `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check` passed; full acceptance and OS-schedule experience remain with gate/demo.

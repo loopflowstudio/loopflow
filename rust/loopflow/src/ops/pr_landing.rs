@@ -1506,9 +1506,7 @@ pub fn reconcile_repository(repo: &Path) -> OpsResult<DeliveryCheck> {
             &store,
             repo,
             crate::ops::wt::cleanup::CleanupBudget::default(),
-        )
-        .await
-        {
+        ) {
             Ok(cleanup) => {
                 for decision in &cleanup.deferred {
                     if let crate::ops::wt::cleanup::CleanupAction::Retain(reason) = &decision.action

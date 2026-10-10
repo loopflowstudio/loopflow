@@ -4251,12 +4251,7 @@ mod tests {
             .canonicalize()
             .unwrap();
         let fixture = runtime.block_on(task_fixture_at("CLEANUP-ACTIVE", path.clone()));
-        let plan = runtime
-            .block_on(crate::ops::wt::cleanup::plan_cleanup(
-                &fixture.store,
-                repo.path(),
-            ))
-            .unwrap();
+        let plan = crate::ops::wt::cleanup::plan_cleanup(&fixture.store, repo.path()).unwrap();
         let decision = plan.iter().find(|item| item.path == path).unwrap();
         assert!(matches!(&decision.action,
             crate::ops::wt::cleanup::CleanupAction::Retain(reason) if reason.contains("unfinished Task CLEANUP-ACTIVE")));

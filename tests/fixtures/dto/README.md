@@ -73,5 +73,6 @@ capture, so every source is `null` rather than zero. Rust round-trips it and
 Swift decodes it for the Task's Session history.
 
 `cleanup_report.json` pins `lf wt prune --json`: planned decisions, actual removals,
-retention reasons and failures. Unknown byte estimates remain null. This CLI-only
-contract has no Swift or Python consumer.
+retention reasons and failures. `repository_reconciliation.json` embeds that report
+in `lf task reconcile --json`. Unknown byte estimates remain null. These CLI-only
+contracts have no Swift or Python consumer.

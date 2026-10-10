@@ -746,3 +746,18 @@ fn cleanup_report_keeps_retention_reasons_and_unknown_sizes() {
         .remove("action");
     assert!(serde_json::from_value::<loopflow::ops::wt::cleanup::CleanupReport>(missing).is_err());
 }
+
+#[test]
+fn cleanup_report_json_preserves_deferred_reasons_and_unknown_sizes() {
+    let value: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/repository_reconciliation.json"
+    ))
+    .unwrap();
+    let report: loopflow::ops::pr_landing::DeliveryCheck =
+        serde_json::from_value(value.clone()).unwrap();
+    let cleanup = report.cleanup.as_ref().unwrap();
+    assert_eq!(cleanup.deferred[0].estimated_bytes, None);
+    assert!(matches!(&cleanup.deferred[0].action,
+        loopflow::ops::wt::cleanup::CleanupAction::Retain(reason) if reason == "running external process"));
+    assert_eq!(serde_json::to_value(report).unwrap(), value);
+}

@@ -72,3 +72,24 @@ pub fn run(json: bool, wave: Option<&str>, task: Option<&str>) -> Result<()> {
     }
     Ok(())
 }
+
+/// A hook emits only the provider's JSON envelope; no launch or store mutation.
+pub fn emit_block(
+    repo: &std::path::Path,
+    wave: Option<&str>,
+    moment: crate::engine::context_block::ContextMoment,
+    skill_file: Option<&std::path::Path>,
+    references: &[std::path::PathBuf],
+) -> Result<()> {
+    let block = crate::engine::context_block::build_context_block(
+        repo, wave, moment, skill_file, references,
+    )?;
+    println!(
+        "{}",
+        serde_json::json!({"hookSpecificOutput": {
+            "hookEventName": "SessionStart",
+            "additionalContext": block.text,
+        }})
+    );
+    Ok(())
+}

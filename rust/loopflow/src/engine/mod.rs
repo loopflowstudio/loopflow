@@ -3,6 +3,7 @@ pub mod builtins;
 pub mod clipboard;
 pub mod command;
 pub mod config;
+pub mod context_block;
 pub mod context_budget;
 pub mod definition_name;
 pub mod error;

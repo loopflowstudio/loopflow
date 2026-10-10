@@ -962,17 +962,21 @@ fn gather_md_files_from(
         if path.is_dir() {
             gather_md_files_from(root, &path, docs, source)?;
         } else if path.extension().map(|e| e == "md").unwrap_or(false) {
-            if let Ok(content) = fs::read_to_string(&path) {
-                docs.push(Document {
-                    path: path
-                        .strip_prefix(root.parent().unwrap_or(root))
-                        .unwrap_or(&path)
-                        .to_string_lossy()
-                        .to_string(),
-                    content,
-                    source,
-                });
-            }
+            let content = fs::read_to_string(&path).map_err(|error| {
+                CoreError::IoError(format!(
+                    "cannot read context file {}: {error}",
+                    path.display()
+                ))
+            })?;
+            docs.push(Document {
+                path: path
+                    .strip_prefix(root.parent().unwrap_or(root))
+                    .unwrap_or(&path)
+                    .to_string_lossy()
+                    .to_string(),
+                content,
+                source,
+            });
         }
     }
 

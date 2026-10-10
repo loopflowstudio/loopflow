@@ -341,6 +341,18 @@ pub enum Commands {
     /// Internal provider callback that records one native interactive session.
     #[command(name = "__provider-session", hide = true)]
     ProviderSession,
+    /// Internal conversation context for native startup/compaction hooks.
+    #[command(name = "__context-block", hide = true)]
+    ContextBlock {
+        #[arg(long)]
+        repo: std::path::PathBuf,
+        #[arg(long, value_enum)]
+        moment: crate::engine::context_block::ContextMoment,
+        #[arg(long)]
+        skill_file: Option<std::path::PathBuf>,
+        #[arg(long)]
+        reference: Vec<std::path::PathBuf>,
+    },
     /// Native provider naming callback.
     #[command(name = "__session-title", hide = true)]
     SessionTitle {

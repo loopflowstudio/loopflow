@@ -584,19 +584,16 @@ Unshipped branch evidence: `986be7988:wave/infrastructure/MEMORY.md`.
 
 ## One main Home (LOO-342, curated 2026-10-07)
 
-Jack Heart approved the one-Home cutover: ordinary commands, Task workers and
-Flow steps use installed `lf` and `~/.lf`; explicit `LF_HOME` experiments need a
-fresh directory after schema changes. PR #1381 merged as `6c73356074c4`; installed
-v0.12.31 acceptance passed and LOO-342 is done. Current mechanics:
-[CLI docs](../../docs/lf.md#use-one-machine) and
-[Machines](../../docs/architecture/machines.md#one-main-machine).
-
-Jack authorized legacy retirement on October 4. All 37 identified processes
-exited after SIGTERM; retained databases and exact signal/path receipts remain
+Jack Heart approved one installed `lf` / `~/.lf` for ordinary commands and workers;
+explicit schema experiments use fresh `LF_HOME` directories. PR #1381 merged as
+`6c73356074c4`; installed v0.12.31 passed and LOO-342 is done.
+[CLI](../../docs/lf.md#use-one-machine) and
+[Machines](../../docs/architecture/machines.md#one-main-machine) own the contract.
+Jack's October 4 legacy retirement retained databases and signal/path receipts
 under `~/.lf-retired/20261004T161815Z/`, earlier snapshots under
-`~/.lf-retired/20261002T191224Z/worktrees/`. Main identity stayed unchanged.
-Release recovery, acceptance and retirement details:
-`173d649cf:wave/infrastructure/MEMORY.md` under “One main Home.”
+`~/.lf-retired/20261002T191224Z/worktrees/`; main identity stayed unchanged.
+All 37 identified processes exited after SIGTERM. Exact history:
+`9c4d866df:wave/infrastructure/MEMORY.md`, this heading.
 
 ## Worktree listing and fenced dispatch (LOO-375, reconciled 2026-10-07)
 
@@ -1020,11 +1017,13 @@ Jack's October 9 option A
 supersedes the transport blocker: terminal argv, no editor/paste/stdin/envelopes
 or further transport probes; the rejected runner/tests are deleted. Only an oversized
 first turn may refuse with size/cap.
-Rust removes the trigger and bounding; builtin skill precedes request. Size-target
-measurement belongs to inspection, not launch; no skill preview or duplicate counts.
-App-server Codex is additive; fixed-slot/context refresh and terminal Codex remain
-unfinished. Focused checks pass; provider/resume/compaction/OpenCode/cmux
-acceptance remains open. Rejected transport detail: `77ec4d000`, this heading;
+Rust removes the trigger/bounding; builtin skill precedes request. Measurement
+belongs to inspection, not launch. The Rust refresh callback reads live scratch
+and SQLite Wave/ancestor bytes, retaining complete snapshots/listings. Its 10,000-byte
+budget prevents partial files; overflow pointers remain proposed UX. No launcher
+installs it yet. App-server Codex is additive; fixed slots, native delivery/trust,
+terminal Codex and provider/resume/compaction/OpenCode/cmux acceptance remain open.
+Rejected transport detail: `77ec4d000`, this heading;
 [Evidence](../../scripts/benchmarks/skill-invocation/README.md).
 
 Main `3e1e6245c` (#1512): driver lifelines own engines. Replacement resumes native

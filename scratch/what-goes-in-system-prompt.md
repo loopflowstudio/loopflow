@@ -8,13 +8,13 @@ Channel contract resolved (Jack, 2026-10-09, "option B"): the added-instructions
 slot is byte-identical within a launch profile, and surface instructions,
 participant name and reply guidance stay in it. A launch profile is the surface,
 the reply settings and the participant; two launches sharing all three send the
-same bytes. The first production slice below is implemented; the fixed slot
-and refreshed conversation block remain unfinished. Jack's later `e1fdb81b-75ff-4cca-b789-243ad84bad14` steer authorizes
+same bytes. First-turn preparation and the whole-file refresh operation are implemented; the
+fixed slot and provider delivery remain unfinished. Jack's later `e1fdb81b-75ff-4cca-b789-243ad84bad14` steer authorizes
 that production cut. Implementation inspection found a native-terminal transport
 boundary below; no fixed-slot decision remains open.
-Reconciled 2026-10-09 against `d81f12c42`, including main `3e1e6245c` (#1512).
-Local main and origin/main still name that integrated commit; no remote fetch
-or newer upstream inspection is claimed.
+Reconciled 2026-10-09 against main `906576f39`, including `3e1e6245c` (#1512).
+Local main and origin/main both name `906576f39`; no remote fetch or newer
+upstream inspection is claimed.
 
 First-turn transport resolved (Jack, 2026-10-09, "A is fine"): the first turn
 stays a command-line argument on terminal launches. No editor, paste or stdin
@@ -67,8 +67,8 @@ current scratch are back. On Codex the native base instructions remain alongside
 instructions; test preservation rather than a model-specific opening sentence.
 
 `AgentConfig.system_prompt` holds only additions; `task_prompt` holds skill/request.
-The proposed context block carries paths, whole documents, listed file sizes,
-over-target folders and the compact-only active skill.
+The context-block operation carries paths, whole documents, listed UTF-8 sizes
+and the compact-only saved active skill. Provider delivery is not connected yet.
 
 ## Key functions
 
@@ -107,13 +107,14 @@ over-target folders and the compact-only active skill.
 
 ## Done when
 
-Planned focused checks (one Cargo filter per invocation; `context_block` tests
-do not exist yet):
+Focused block checks exist; complete-channel checks remain with gate (one Cargo
+filter per invocation):
 
 ```sh
 cargo test -p loopflow process_prompt
 cargo test -p loopflow --test context_launch_tests
-cargo test -p loopflow context_block
+cargo test -p loopflow --lib context_block
+cargo test -p loopflow --test context_block_tests
 cargo test -p loopflow generated_titles
 cargo test -p loopflow native_hooks_name_requests
 ```
@@ -160,21 +161,46 @@ those safely requires the fixed slot and conversation block together. Native
 installed skills retain their invocation/argument/declaration path. No launch
 flag selects old versus new behavior. No installed or provider acceptance is claimed.
 
+The whole-file refresh operation now exists in Rust as `build_context_block`
+and `lf --wave <address> __context-block --repo <checkout> --moment start|compact`.
+It reads current scratch and the existing SQLite Wave/ancestor owner, snapshots
+complete Wave bytes privately under `.lf/prompts/`, and reserves metadata and the
+compact-only saved skill before selecting whole file bodies. The selected Wave's
+memory precedes the branch plan, then remaining scratch by byte size; ties use
+path order. Other inherited documents follow. Complete reference files are listed,
+not inlined. The callback returns only a SessionStart `additionalContext` envelope.
+**No launcher installs this hook yet.** Its CLI/source proof is not provider delivery.
+
+The shared ceiling is 10,000 rendered UTF-8 bytes: Codex 0.161.0's default
+2,500 approximate-token limit uses [ceil(UTF-8 bytes / 4)](https://github.com/openai/codex/blob/rust-v0.161.0/codex-rs/utils/string/src/truncate.rs),
+and this also avoids the observed Claude Unicode spill. JSON metadata, reference escaping, paths and skill text
+all count. If reserved metadata does not fit alongside the skill, a complete
+private manifest replaces the inline listing; an oversized skill stays whole at
+its saved path with an explicit read instruction. This includes combined overflow,
+not only a listing that individually exceeds the cap. An unusually long path
+uses a repository-relative manifest pointer rather than refusing for size.
+These remain proposed defaults to demonstrate, not accepted UX. Unreadable scratch
+now reports the exact failed file instead of silently claiming a complete listing.
+This repairs the review finding in the shared scratch reader; no alternate reader
+or filesystem Wave fallback was added.
+
 Remaining production work:
-1. Replace `format_content_sections` / `format_wave_sections` and their system
-   consumers with the provider-unit whole-file block and complete readable snapshots
-   of SQLite-owned Wave/ancestor content; current scratch is read at hook time.
-2. Add start/compact delivery and saved hook configuration/trust to Claude, Codex
-   terminal/app-server and OpenCode. Cover supported replacement/native resume,
-   without launch-input replay. Complete-list and skill overflow use readable files.
+1. Connect this operation to saved native hook settings/trust on Claude and Codex
+   terminal/app-server, plus proven OpenCode terminal/compaction delivery. Retain
+   capture/naming hooks, native resume and engine replacement without replaying
+   the launch request. No launch flag may select old versus new delivery.
+2. Replace `format_content_sections` / `format_wave_sections` and their consumers
+   with the block, then delete their old inlining. Diagnostic formatting must use
+   the final channels too. The operation alone does not remove old assembly.
 3. Make additions byte-identical per accepted profile, move participant context into
    that slot for native skills too, replace the two remaining Codex terminal writers,
    and remove the installed-skill context split. Preserve assets and exact arguments.
-4. Move Task briefs/steers, clipboard and summaries into complete private files;
-   diff/docs become commands/paths. Preserve request attribution and context usage.
-5. Gate owns the completed cut's real lf/fake-API integration and affected suites;
-   demo owns cmux and native resume-list judgment. Focused slice checks do not
-   establish the missing conversation delivery.
+4. Save Task briefs/steers, clipboard and summaries as complete private files and
+   pass their paths to the callback (`--reference`); pass the captured active skill
+   as `--skill-file`. Diff/docs become commands/paths. Preserve attribution and usage.
+5. Gate owns real lf/fake-API integration and affected suites; demo owns cmux,
+   pointer-read behavior and native resume-list judgment. Source callback checks
+   establish neither automatic delivery nor the fixed-slot contract.
 
 Review removed launch-only budgeting/report state and the retired transport runner;
 Clippy also exposed its now-unused skill instruction accessor, deleted with the
@@ -182,7 +208,7 @@ translation test retained on the surviving path. Review previously found a maske
 instead of the provider's turn. Their stand-in now records both actual thread
 and turn requests. That is source coverage, not an executed pass.
 
-Checks: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test --offline -p loopflow` (context-budget/usage/ported-skill filters; global-command, DTO, golden and context-launch targets: 11 tests), focused `pytest` (38), `scripts/test_desktop.sh -j 4 -Xswiftc -gnone --filter DTOFixtureTests` (23), `git diff --check` and installed `lf context` pass; execution was network-isolated/headless, no native-provider probes ran; full acceptance remains with gate/demo.
+Checks: `cargo test --offline -p loopflow --lib context_block` (7), `cargo test --offline -p loopflow --test context_block_tests` (1), fmt, Clippy, `git diff --check` and installed `lf context` pass; provider delivery/affected suites remain with gate and cmux/pointer-read judgment with demo.
 
 ### Integrated upstream boundary
 
@@ -252,13 +278,12 @@ cut in Rust; further probe work happens only where the cut needs a fact it lacks
 0. Fixed-slot metadata is resolved by option B; implement its accepted profile
    rule. Interpret native-guide wording as no Loopflow-added repository text,
    retaining harness guide loading; name that proposed default at demo.
-1. First turn is the skill then the message, passed as an argument (Jack, option
-   A). Delete the constant turn, inlining and bounding; refuse only a first turn
-   over the argument cap. No short trigger or native skill expansion. Prove
-   supported resume without launch-input replay. `This slice`
-2. Implement provider-unit whole-file budgeting from the size counterexamples
-   below; complete OpenCode terminal/compaction proofs and oversized-list/skill
-   handling. A passing marker can survive native middle truncation.
+1. First turn is skill then message, passed as an argument (Jack, option A).
+   The constant turn and launch bounding are removed; only an oversized first
+   turn may refuse. Native skills retain their accepted invocation path.
+   Supported resume without launch-input replay still needs the complete cut.
+2. Whole-file byte budgeting, overflow pointers and the callback now exist.
+   Connect native hooks/trust and complete OpenCode terminal/compaction proofs. A passing marker can survive native middle truncation.
    Codex app-server hook trust needs production
    integration that preserves saved settings and existing capture hooks, on both
    thread start and supported resume after engine replacement.
@@ -364,8 +389,9 @@ checks despite cutting the middle, invalidating marker-only acceptance. A
 2,500-scalar / 9,901-byte Codex block arrives intact (`codex-dhdmg8w5`). These
 samples require provider-unit budgeting; they do not establish every boundary
 or automatic compaction. Native spill files do not satisfy whole-file inlining.
-The production cut, OpenCode proofs, complete-list/skill overflow and lf integration
-remain unfinished; the deletion list is unchanged.
+The callback implements complete-list/skill overflow with readable pointers;
+provider pointer-read behavior, OpenCode and launch integration remain unfinished.
+The old assembly deletion list is unchanged.
 
 Historical probe/check results predate the Rust cut; they are not production verification.
 
@@ -381,8 +407,6 @@ under `/tmp/loo444-compress-context-proof/` and `/tmp/loo444-compress-transport-
 Earlier probe checkpoint: `87ae76eaf`. Complete pre-reconciliation scratch,
 including original evidence paths and archived transcript, is preserved at
 `/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo444-realign-saved-40zhwtws/`.
-Scratch remains local/untracked. Pre-compression notes are also preserved at
+Those snapshots preserve the earlier local scratch. Pre-compression notes are also preserved at
 `/tmp/loo444-compress-notes-SaPexN/`; pre-reconciliation notes at
 `/tmp/loo444-realign-notes-8VzCoo/`.
-
-Sync check (2026-10-09, main `906576f39`): `cargo test --offline -p loopflow --lib harness::codex::tests::start_and_resume_add_instructions_without_replacing_native_base -- --exact` passed (1 test); retained additive instructions with typed AgentSessionId; broader verification remains with gate/CI.

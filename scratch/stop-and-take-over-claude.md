@@ -2,7 +2,7 @@
 
 Jack Heart requested provider-independent takeover and stop on 2026-10-09.
 The outcome is accepted; the transport design below remains a draft (2026-10-10).
-Source reconciliation: `1ce7d0119` (2026-10-10), including native permission
+Source reconciliation: native command dispatch (2026-10-10), after `ead3fa64a`, including native permission
 choices at `157a29596`, exact reply receipts and shared mutation decoding.
 Local main remains `df5169ab9` (#1521). Creation recovery, shared prompt
 submission and ordered readback remain implemented. Earlier iteration feedback's
@@ -70,11 +70,11 @@ Public `ops/human_session.rs::open` now dispatches Codex and OpenCode through
 the same custody-before-claim and client-only settlement path. OpenCode reuses
 the existing harness reader and native `attach` through an authenticated local
 HTTP relay. Pending native identity reaches saved-creation readback before
-ordinary resume. Prompts and abort are fenced; answer streaming is outside
-the fence. Repeated prompt IDs refuse replay. Native reads preserve queries
+ordinary resume. Prompts, commands and abort are fenced through the complete socket write;
+response headers and answer streaming are outside the fence. Repeated prompt IDs refuse replay. Native reads preserve queries
 while pinning the saved working directory. Manual permission replies now share the saved-origin, no-replay writer with
 headless recovery. The native reader leaves choices pending for its UI; stale,
-foreign and repeated replies refuse. Command/shell mutations still refuse;
+foreign and repeated replies refuse. Native commands share saved message IDs and the dispatch fence. Shell mutations still refuse;
 rendered native permission UX is unproved.
 The public stand-in fixture covers identity recovery and client-only exit,
 not process-death orders. Retain the implemented permission recovery above.
@@ -110,15 +110,17 @@ death orders. Preserve frozen authority for prompts, replies, abort and stop.
    tied to the launcher. Transport extraction must preserve original turn origins
    while accepting only the current attachment for new writes; custody is not
    write authority.
-2. **Revise OpenCode command/shell dispatch before implementing it.** The pinned
-   v1.2.0 routes await execution before sending headers, unlike message/prompt_async.
-   The current relay fence would block takeover/stop until execution or timeout;
-   merely admitting these routes is unsafe. Separate proven dispatch from response
-   collection, retaining frozen authority and no replay. Native shell also omits
-   messageID; its correlation needs a supported solution. Manual permission replies
-   are implemented through the existing receipt writer, and native readers no longer
-   auto-approve. Command/shell remain required, not accepted exclusions. Public
-   process-death proofs remain in step 4, distinct from creation-worker death.
+2. **Finish OpenCode shell correlation.** Command dispatch is implemented: one
+   HTTP/1 connection is polled under the fence until the complete fixed-length
+   request reaches the socket, then response collection continues outside it.
+   Timeout drops the unspawned connection, so a partial write cannot finish after
+   authority transfers. Native command IDs retain origins and refuse replay.
+   ShellInput has no messageID field, not merely an omitted native-client argument;
+   injecting one cannot correlate its native history. Shell remains required and
+   explicitly refused until supported correlation preserves uncertain attempts
+   without borrowing another turn. The response alone is insufficient after loss.
+   Manual permission replies retain their existing receipt writer. Public
+   process-death proofs remain in step 4, distinct from dispatch tests.
 3. **Carry common custody through new public transports.** The anonymous
    lifelines, optional launch path, endpoint-derived FIFO and `HELD_LIFELINES`
    are deleted. Codex/OpenCode public connection acquires common custody before
@@ -158,8 +160,9 @@ exclusive fixtures; saved native permissions survive on creation/reconnect.
 The shared public attachment path owns custody, claims and client-only settlement;
 Codex and OpenCode transports have separate client functions. OpenCode's discard-only
 event-drain task is deleted: its native UI renders output while the reader retains
-history and permission recovery. GET and prompt/abort responses share one streaming
-translation, preserving status/content type and leaving answers outside the fence.
+history and permission recovery. The native relay's response-header fence is
+deleted: GET responses retain reqwest streaming; input/abort responses use Hyper
+after fenced socket dispatch, preserving HTTP responses outside the fence.
 Permission replies instead return a boolean after the receipt writer confirms
 HTTP success or pending-list readback; they do not forward the upstream body.
 The native permission path reuses the existing reply writer. Its retained response
@@ -229,6 +232,13 @@ Full protocol correction and replaced PATCH evidence:
 `b10b6ff065:scratch/stop-and-take-over-claude.md`, “Startup protocol correction”
 and “Public OpenCode transport.”
 
+The command fixture withholds headers through A → B → A, preserving exact
+arguments and original request ownership while refusing repeats and stale writes.
+Transport tests cover empty-body responses and cancellation during a partial
+16 MiB write; they prove no launcher death or native shell correlation.
+Review: a flush can precede a body, so dispatch counts actual header/body bytes;
+response collection must not poll an already-completed connection again.
+
 ## Checks
 
-Checks: `git diff --check` passes (prose-only reconciliation); `1ce7d0119`'s recorded build/fmt/Clippy and focused permission/recovery/prompt-stream tests remain applicable, not rerun; public death-order acceptance remains unfinished and Linux acceptance CI-owned.
+Checks: `cargo check -p loopflow`, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, focused `cargo test -p loopflow --lib harness::opencode_connection::tests` (3) and `harness::opencode_dispatch::tests` (2), and `git diff --check` pass; public death-order acceptance remains unfinished and Linux acceptance CI-owned.

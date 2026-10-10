@@ -133,7 +133,9 @@ hold the frozen attachment fence through dispatch, not through streamed answers.
 Repeated prompt identities refuse replay. Native permission choices use the same
 saved-origin and no-replay writer as headless recovery; their reader leaves pending
 choices for the native UI instead of automatically approving. Reads retain native
-streaming; command/shell and other mutations still refuse explicitly. Client exit
+streaming. Native commands use the same saved message identity and dispatch fence;
+shell and other mutations still refuse explicitly. The fence ends after the full
+request reaches the socket, not after response headers or execution. Client exit
 settles only its attachment, not the provider.
 Claude still lacks launcher-independent pipes and public live connection.
 OpenCode saves request IDs and frozen origins in Session history before HTTP

@@ -247,8 +247,8 @@ missing/ambiguous identity stays uncertain.
 `b10b6ff065`: pending-identity recovery/fenced relay; answers drain outside the
 fence. `9df773fa3` separates clients from attachment ownership. `1ce7d0119` retains
 native permission choices/explanations; readers leave choices to the UI.
-Claude transport remains launcher-owned. Command/shell await headers after
-execution: the prompt fence cannot be reused. Public death orders remain unproved.
+Claude transport remains launcher-owned. Commands fence complete socket writes,
+not response headers; shell lacks native request IDs. Public death orders remain unproved.
 Plan: `scratch/stop-and-take-over-claude.md`.
 
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)

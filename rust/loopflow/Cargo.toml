@@ -67,6 +67,9 @@ gethostname = "1.1"
 ipnet = "2"
 libc = "0.2"
 axum = "0.8"
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
 reqwest = { version = "0.13", features = ["blocking", "json", "stream"] }
 rusqlite = { version = "0.40", features = ["backup", "bundled", "trace"] }
 fs2 = "0.4"

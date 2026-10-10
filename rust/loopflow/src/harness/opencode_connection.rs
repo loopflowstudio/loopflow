@@ -115,46 +115,45 @@ impl OpenCodeConnection {
         let prefix = format!("/session/{}/", self.thread);
         let operation = path.strip_prefix(&prefix).unwrap_or_default();
         ensure!(
-            matches!(operation, "message" | "prompt_async" | "abort"),
+            matches!(operation, "message" | "prompt_async" | "command" | "abort"),
             "Native mutation is not supported by this conversation connection"
         );
         let thread = self.thread.clone();
         let directory = self.directory.clone();
-        let prompt = matches!(operation, "message" | "prompt_async");
+        let input = matches!(operation, "message" | "prompt_async" | "command");
         let owner = self.owner.clone();
-        let client = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .build()?;
-        // The provider streams response headers before generation. Only request
-        // dispatch is fenced and timed; draining the answer cannot prevent stop
-        // or takeover. Cancellation leaves the blocking writer holding its fence.
+        // Write the entire request under the fence, but never wait for response
+        // headers there: native command routes send headers after execution.
         let response = tokio::task::spawn_blocking(move || {
             let (store, session, attachment) = &owner;
             store.with_session_attachment(session, attachment, || {
                 Ok((|| -> Result<_> {
-                    if prompt {
+                    if input {
                         let request = payload["messageID"]
                             .as_str()
-                            .ok_or_else(|| anyhow!("Native prompt has no message identity"))?;
+                            .ok_or_else(|| anyhow!("Native input has no message identity"))?;
                         ensure!(
                             store.session_request(session, &thread, request)?.is_none(),
-                            "Native prompt already attempted; not replaying"
+                            "Native input already attempted; not replaying"
                         );
                         let origin = store.session_turn_origin(session, attachment)?;
                         store.record_session_request(&thread, request, &origin)?;
                     }
-                    let mut request = client.post(url).header("x-opencode-directory", directory);
-                    if !payload.is_null() {
-                        request = request.json(&payload);
-                    }
-                    super::dispatch::within(std::time::Duration::from_secs(10), request.send())
-                        .ok_or_else(|| anyhow!("Native dispatch timed out; outcome is unknown"))?
-                        .map_err(Into::into)
+                    let payload = if payload.is_null() {
+                        Vec::new()
+                    } else {
+                        serde_json::to_vec(&payload)?
+                    };
+                    super::dispatch::within(
+                        std::time::Duration::from_secs(10),
+                        super::opencode_dispatch::send(url, directory, payload),
+                    )
+                    .ok_or_else(|| anyhow!("Native dispatch timed out; outcome is unknown"))?
                 })())
             })?
         })
         .await??;
-        stream_response(response)
+        response.await
     }
 }
 
@@ -195,10 +194,21 @@ mod tests {
     struct Provider {
         prompts: Arc<Mutex<Vec<Value>>>,
         body: Arc<Mutex<Option<Body>>>,
+        headers: Arc<tokio::sync::Notify>,
+        delay_headers: bool,
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn native_prompt_stream_does_not_hold_authority_and_stale_clients_cannot_write() {
+        native_input_does_not_hold_authority("message").await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn native_command_execution_does_not_hold_authority_and_cannot_replay() {
+        native_input_does_not_hold_authority("command").await;
+    }
+
+    async fn native_input_does_not_hold_authority(operation: &str) {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("store.db");
         let store = SqliteStore::open_ephemeral(&path).unwrap();
@@ -221,16 +231,22 @@ mod tests {
         let body = Arc::new(Mutex::new(Some(Body::from_stream(
             tokio_stream::wrappers::ReceiverStream::new(receiver),
         ))));
+        let headers = Arc::new(tokio::sync::Notify::new());
         let state = Provider {
             prompts: prompts.clone(),
             body,
+            headers: headers.clone(),
+            delay_headers: operation == "command",
         };
         let server = axum::Router::new()
             .route(
-                "/session/thread/message",
+                &format!("/session/thread/{operation}"),
                 post(
                     |State(provider): State<Provider>, Json(value): Json<Value>| async move {
                         provider.prompts.lock().await.push(value);
+                        if provider.delay_headers {
+                            provider.headers.notified().await;
+                        }
                         let body = provider.body.lock().await.take().unwrap();
                         Response::builder()
                             .header("content-type", "application/json")
@@ -256,7 +272,7 @@ mod tests {
             .serve(relay_listener),
         );
         let client = reqwest::Client::new();
-        let url = format!("{relay_url}/session/thread/message");
+        let url = format!("{relay_url}/session/thread/{operation}");
         let refused = client
             .post(&url)
             .json(&json!({"messageID":"unauthenticated"}))
@@ -264,14 +280,23 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(refused.status(), 401);
-        let response = client
+        let payload = if operation == "command" {
+            json!({"messageID":"request", "command":"review", "arguments":"keep\nall arguments", "agent":"build"})
+        } else {
+            json!({"messageID":"request", "parts":[{"type":"text","text":"kept"}]})
+        };
+        let request = client
             .post(&url)
             .basic_auth("opencode", Some("fixture"))
-            .json(&json!({"messageID":"request", "parts":[{"type":"text","text":"kept"}]}))
-            .send()
-            .await
-            .unwrap();
-        assert!(response.status().is_success());
+            .json(&payload);
+        let response = tokio::spawn(async move { request.send().await.unwrap() });
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while prompts.lock().await.is_empty() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
         let repeated = client
             .post(&url)
             .basic_auth("opencode", Some("fixture"))
@@ -280,8 +305,8 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(repeated.status(), 409, "uncertain input was replayed");
-        // Response headers arrived; the answer is still withheld. A transfer
-        // must not wait for model output or the response body to finish.
+        // Command headers and all response bodies remain withheld. Transfer
+        // must finish before either is released, not at the dispatch timeout.
         let transfer_store = store.clone();
         let original = first.clone();
         let second = tokio::time::timeout(
@@ -322,10 +347,13 @@ mod tests {
             .session_request("conversation", &"thread".into(), "stale")
             .unwrap()
             .is_none());
-        assert_eq!(
-            prompts.lock().await.as_slice(),
-            &[json!({"messageID":"request", "parts":[{"type":"text","text":"kept"}]})]
-        );
+        assert_eq!(prompts.lock().await.as_slice(), &[payload]);
+        headers.notify_one();
+        let response = tokio::time::timeout(Duration::from_secs(2), response)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(response.status().is_success());
         finish
             .send(Ok("{\"result\":\"preserved\"}".into()))
             .await

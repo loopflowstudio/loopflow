@@ -15,22 +15,23 @@ identity; absent/ambiguous evidence remains uncertain without replay. A title
 changed externally before recovery cannot establish identity. Existing native
 conversations retain their rules. This replaces the draft's separate setup phase;
 the correction and process-death creation readback are implemented at
-`07529ac3d`. Public prompt/abort transport followed at `b10b6ff065`; command/shell
-dispatch and public death-order proofs remain.
+`07529ac3d`. Public prompt/abort transport followed at `b10b6ff065`; current
+command dispatch and remaining shell correlation are below.
 
 2026-10-10: OpenCode native attachment uses an ephemeral authenticated loopback
 HTTP relay and the existing headless history/permission reader. Prompt and abort
 were the initial write surface. `157a29596` adds manual permission replies;
-`1ce7d0119` retains exact choices and explanations. Other native mutations still
-refuse. Command/shell implementation and rendered permission UX remain open,
+`1ce7d0119` retains exact choices and explanations. Shell implementation and
+rendered permission UX remain open,
 not accepted exclusions. The pinned native prompt route streams
 headers before generation, so only dispatch holds the fence; the answer drains
 outside it. Claude's separate transport proposal remains unchanged.
 
-2026-10-10: pinned OpenCode v1.2.0 command/shell routes return headers only after
-execution, unlike message/prompt_async. Extending the current dispatch fence to
-those routes would hold takeover/stop through execution (or the ten-second timeout).
-Do not extend that path. Remaining design must separate proven request dispatch
-from response collection without permitting stale dispatch or replay; shell's
-native client also omits messageID. Manual permission replies are independent:
-the native UI owns choices while its history reader does not auto-approve.
+2026-10-10: OpenCode command/shell headers arrive after execution. Native command
+writes now finish under the fence at the last socket byte; headers/body drain
+outside it, with no background writer after cancellation. Commands retain native
+messageID receipts. ShellInput itself excludes messageID in pinned v1.2.0
+[ShellInput](https://github.com/anomalyco/opencode/blob/v1.2.0/packages/opencode/src/session/prompt.ts),
+so adding a generated field cannot solve correlation.
+Shell remains unfinished, not excluded; preserve uncertainty without guessing an
+origin from concurrent native messages or replaying after response loss.

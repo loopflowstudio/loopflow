@@ -19,6 +19,7 @@ pub(crate) mod native_titles;
 pub mod opencode;
 pub(crate) mod opencode_connection;
 
+mod opencode_dispatch;
 pub(crate) mod opencode_history;
 mod opencode_mapping;
 

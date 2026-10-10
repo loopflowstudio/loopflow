@@ -1243,45 +1243,74 @@ fn imported_execution_location_survives_delegation_and_rejects_stale_peer_reads(
         reading[1]["location"]["checkout"],
         remote_path.to_str().unwrap()
     );
-    let explanation = fixture.json(&[
-        "--repository",
-        repository.as_str(),
-        "task",
-        "run",
-        task.id.as_str(),
-        "--explain",
-        "--json",
-    ]);
-    assert_eq!(
-        explanation["resolution"]["execution_machine"]["value"],
-        owner.as_str()
-    );
-    assert_eq!(
-        explanation["resolution"]["checkout"]["value"],
-        remote_path.to_str().unwrap()
-    );
-    assert!(explanation["action"].is_null());
-    let desktop = fixture.json(&[
-        "--repository",
-        repository.as_str(),
-        "--task",
-        task.id.as_str(),
-        "desktop",
-        "open",
-        "--explain",
-        "--json",
-    ]);
-    assert!(desktop["url"].is_null());
-    assert!(desktop["impediments"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|value| value
-            .as_str()
-            .unwrap()
-            .contains("remote Desktop opening is unavailable")));
     assert_eq!(checkpoint_bytes(&local_db), local_before);
     assert_eq!(checkpoint_bytes(&remote_db), remote_before);
+    let explain = |command: &[&str]| {
+        let mut args = vec![
+            "--repository",
+            repository.as_str(),
+            "--task",
+            task.id.as_str(),
+        ];
+        args.extend_from_slice(command);
+        args.extend(["--explain", "--json"]);
+        fixture.json(&args)
+    };
+    // Every presentation uses the same observed owner and checkout provenance.
+    // Started history without a path is unavailable, not an unstarted Task or a
+    // reason to retain the previous checkout reading.
+    for checkout in [Some(remote_path.to_str().unwrap()), None] {
+        db.execute(
+            "UPDATE tasks SET worktree=?2 WHERE id=?1",
+            rusqlite::params![task.id.as_str(), checkout],
+        )
+        .unwrap();
+        let remote_before = checkpoint_bytes(&remote_db);
+        let run = explain(&["task", "run"]);
+        assert_eq!(
+            run["resolution"]["execution_machine"]["value"],
+            owner.as_str()
+        );
+        assert_eq!(
+            run["resolution"]["execution_machine"]["source"],
+            "peer_recorded_checkout"
+        );
+        match checkout {
+            Some(path) => assert_eq!(run["resolution"]["checkout"]["value"], path),
+            None => assert_eq!(run["resolution"]["checkout"]["state"], "unavailable"),
+        }
+        assert!(run["action"].is_null());
+        for command in [
+            vec!["task", "checkout"],
+            vec!["task", "move", task.id.as_str(), "start"],
+            vec!["desktop", "open"],
+        ] {
+            let report = explain(&command);
+            for fact in ["execution_machine", "checkout"] {
+                assert_eq!(report["resolution"][fact], run["resolution"][fact]);
+            }
+            if command[0] == "desktop" {
+                assert!(report["url"].is_null());
+                assert!(report["impediments"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|value| value
+                        .as_str()
+                        .unwrap()
+                        .contains("remote Desktop opening is unavailable")));
+            } else {
+                assert!(report["action"].is_null());
+            }
+        }
+        assert_eq!(checkpoint_bytes(&local_db), local_before);
+        assert_eq!(checkpoint_bytes(&remote_db), remote_before);
+    }
+    db.execute(
+        "UPDATE tasks SET worktree=?2 WHERE id=?1",
+        rusqlite::params![task.id.as_str(), remote_path.to_str().unwrap()],
+    )
+    .unwrap();
     assert!(!fixture.root.path().join("forbidden-effect").exists());
 
     let checkout = fixture.json(&[
@@ -1315,24 +1344,29 @@ fn imported_execution_location_survives_delegation_and_rejects_stale_peer_reads(
         .as_str()
         .unwrap()
         .contains("stale or mismatched"));
-    let explanation = fixture.json(&[
-        "--repository",
-        repository.as_str(),
-        "task",
-        "run",
-        task.id.as_str(),
-        "--explain",
-        "--json",
-    ]);
-    assert_eq!(
-        explanation["resolution"]["execution_machine"]["state"],
-        "unavailable"
-    );
-    assert_eq!(
-        explanation["resolution"]["checkout"]["state"],
-        "unavailable"
-    );
-    assert!(explanation["action"].is_null());
+    for command in [
+        vec!["task", "run"],
+        vec!["task", "checkout"],
+        vec!["desktop", "open"],
+    ] {
+        let report = explain(&command);
+        for fact in ["execution_machine", "checkout"] {
+            assert_eq!(report["resolution"][fact]["state"], "unavailable");
+        }
+        assert!(report["action"].is_null());
+        assert!(report["url"].is_null());
+    }
+
+    // A peer reply represents exactly one local observer, never a peer inventory.
+    for readings in [vec![], vec![reading[1].clone(); 2]] {
+        fs::write(&replay, serde_json::to_vec(&readings).unwrap()).unwrap();
+        let malformed = fixture.json(&args);
+        assert_eq!(malformed[1]["location"]["state"], "unavailable");
+        assert!(malformed[1]["location"]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("one local execution-location reading"));
+    }
 
     executable(
         &fixture.root.path().join("bin/ssh"),

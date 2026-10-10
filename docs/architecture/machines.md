@@ -139,9 +139,10 @@ inventory, and an observation reserves nothing. The destination re-resolves Work
 and retains its preparation/admission checks. Local-only work still inherits its
 nearest assignment. No execution-location cache or second placement writer exists.
 
-Task-run/checkout and Desktop opening explanations share this read. Desktop
-currently reports a remote execution owner but refuses remote opening before app
-launch, with a terminal alternative; native remote opening remains unfinished.
+Task-run, move, checkout and Desktop opening explanations share one location
+projection, including local/peer provenance and unavailable checkout paths for
+retained execution. Desktop reports a remote owner but refuses remote opening
+before app launch, with a terminal alternative; native remote opening remains unfinished.
 
 Exclusive first-start admission is still unavailable. Tasks selected into any Git
 destination without a retained checkout refuse first start, including user refs.

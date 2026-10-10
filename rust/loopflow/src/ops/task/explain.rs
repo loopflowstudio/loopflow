@@ -3,7 +3,6 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::durable::TaskExecutionSource;
 use crate::ops::context::{ContextExplanation, ContextFact};
 use crate::ops::run::WorkSelection;
 use crate::store::SharedStore;
@@ -300,38 +299,8 @@ pub(super) async fn read_local_task(
         .get_task(&id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("Task {id} is missing"))?;
-    let route = match crate::ops::task_location::resolve(&store.sqlite, &id).await {
-        Ok(route) => route,
-        Err(error) => {
-            resolution.execution_machine = ContextFact::Unavailable {
-                reason: error.to_string(),
-            };
-            resolution.checkout = ContextFact::Unavailable {
-                reason: "no fresh execution-location observation".into(),
-            };
-            return Err(error);
-        }
-    };
+    let route = crate::ops::task_location::explain(&store.sqlite, &id, resolution).await?;
     let local_machine = store.local_machine().await?.id;
-    let recorded_source = if route.machine_id == local_machine {
-        "recorded_checkout"
-    } else {
-        "peer_recorded_checkout"
-    };
-    if let Some(checkout) = &route.checkout {
-        resolution.checkout = ContextFact::Bound {
-            value: checkout.clone(),
-            source: recorded_source.into(),
-        };
-    }
-    resolution.execution_machine = ContextFact::Bound {
-        value: route.machine_id.to_string(),
-        source: match route.source {
-            TaskExecutionSource::RecordedCheckout => recorded_source,
-            TaskExecutionSource::EffectiveDelegation => "effective_delegation",
-        }
-        .into(),
-    };
     if route.machine_id != local_machine {
         anyhow::bail!(
             "Execution state belongs to Machine {}; no remote preparation was performed",

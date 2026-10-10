@@ -1,12 +1,13 @@
 //! Execution location is observed from its Machine, never imported as planning.
 //! A fresh positive reading can route retained work. No negative reading admits
 //! first start, and no observation is written into the receiving Task's checkout.
-use anyhow::{anyhow, ensure, Result};
+use anyhow::{anyhow, ensure, Context, Result};
 
 use crate::durable::{
     Machine, RepositoryId, TaskExecutionRoute, TaskExecutionSource, TaskId, TaskLocation,
     TaskLocationObservation,
 };
+use crate::ops::context::{ContextExplanation, ContextFact};
 use crate::store::sqlite::SqliteStore;
 
 pub async fn observe(
@@ -50,12 +51,8 @@ async fn observe_peer(
             ],
         )
         .await?;
-        let mut readings: Vec<TaskLocationObservation> = serde_json::from_slice(&bytes)?;
-        ensure!(
-            readings.len() == 1,
-            "peer did not return one local execution-location reading"
-        );
-        let reading = readings.remove(0);
+        let [reading]: [TaskLocationObservation; 1] = serde_json::from_slice(&bytes)
+            .context("peer did not return one local execution-location reading")?;
         validate_reply(&reading, machine, repository, task, request)?;
         Ok::<_, anyhow::Error>(reading)
     }
@@ -133,7 +130,7 @@ fn recorded_route(
     repository: &RepositoryId,
     readings: &[TaskLocationObservation],
 ) -> Result<TaskExecutionRoute> {
-    let recorded = readings
+    let mut recorded = readings
         .iter()
         .filter_map(|reading| match &reading.location {
             TaskLocation::Recorded { task_id, checkout } => Some(TaskExecutionRoute {
@@ -144,13 +141,13 @@ fn recorded_route(
                 source: TaskExecutionSource::RecordedCheckout,
             }),
             _ => None,
-        })
-        .collect::<Vec<_>>();
+        });
+    let first = recorded.next();
     ensure!(
-        recorded.len() <= 1,
+        recorded.next().is_none(),
         "conflicting recorded execution Machines; no checkout or launch was prepared"
     );
-    recorded.into_iter().next().ok_or_else(|| {
+    first.ok_or_else(|| {
         let unavailable = readings.iter().filter_map(|reading| match &reading.location {
             TaskLocation::Unavailable { reason } => Some(format!("{}: {reason}", reading.machine_id)),
             _ => None,
@@ -185,38 +182,11 @@ pub fn render(readings: &[TaskLocationObservation]) -> String {
 /// Enrich presentation without copying a peer checkout into local execution.
 pub async fn explain(
     store: &SqliteStore,
-    resolution: &mut crate::ops::context::ContextExplanation,
-) {
-    use crate::ops::context::ContextFact;
-    let ContextFact::Bound { value, .. } = &resolution.task else {
-        return;
-    };
-    let Ok(task) = TaskId::parse(value) else {
-        return;
-    };
-    match resolve(store, &task).await {
-        Ok(route) if route.source == TaskExecutionSource::RecordedCheckout => {
-            let source = "observed_recorded_checkout";
-            resolution.execution_machine = ContextFact::Bound {
-                value: route.machine_id.to_string(),
-                source: source.into(),
-            };
-            resolution.checkout = match route.checkout {
-                Some(value) => ContextFact::Bound {
-                    value,
-                    source: source.into(),
-                },
-                None => ContextFact::Unavailable {
-                    reason: "execution owner retains no checkout path".into(),
-                },
-            };
-        }
-        Ok(route) => {
-            resolution.execution_machine = ContextFact::Bound {
-                value: route.machine_id.to_string(),
-                source: "effective_delegation".into(),
-            };
-        }
+    task: &TaskId,
+    resolution: &mut ContextExplanation,
+) -> Result<TaskExecutionRoute> {
+    let route = match resolve(store, task).await {
+        Ok(route) => route,
         Err(error) => {
             resolution.execution_machine = ContextFact::Unavailable {
                 reason: error.to_string(),
@@ -224,8 +194,36 @@ pub async fn explain(
             resolution.checkout = ContextFact::Unavailable {
                 reason: "no fresh execution-location observation".into(),
             };
+            return Err(error);
         }
+    };
+    let source = match route.source {
+        TaskExecutionSource::EffectiveDelegation => "effective_delegation",
+        TaskExecutionSource::RecordedCheckout => {
+            if matches!(&resolution.machine, ContextFact::Bound { value, .. } if value == route.machine_id.as_str())
+            {
+                "recorded_checkout"
+            } else {
+                "peer_recorded_checkout"
+            }
+        }
+    };
+    resolution.execution_machine = ContextFact::Bound {
+        value: route.machine_id.to_string(),
+        source: source.into(),
+    };
+    if route.source == TaskExecutionSource::RecordedCheckout {
+        resolution.checkout = match &route.checkout {
+            Some(value) => ContextFact::Bound {
+                value: value.clone(),
+                source: source.into(),
+            },
+            None => ContextFact::Unavailable {
+                reason: "execution owner retains no checkout path".into(),
+            },
+        };
     }
+    Ok(route)
 }
 
 #[cfg(test)]

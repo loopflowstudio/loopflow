@@ -157,13 +157,12 @@ authors a save. Two-Home/file-Git and Store fixtures cover conflicts, narrower/f
 inheritance, clearing/no-echo and unchanged seeded execution, not running Flows.
 Earlier evidence/failed attempts: `829c9b993:wave/product/MEMORY.md`, this heading.
 
-Recorded-location reads observe owning Machines, never exchange execution. Request
-nonces fence stale replies without peer-clock comparison; added peers are not a
-global inventory. The two-CLI/import fixture follows retained execution after
-delegation changes and refuses stale/unreachable fallback without copying checkouts.
-Desktop reports ownership but refuses remote opening. Remote/native composition,
-exclusive admission and mixed-provider exchange remain. Seeded history proves no
-running Flow or configured SSH.
+Recorded-location reads observe owners, never exchange execution. Nonces fence
+stale replies without peer-clock comparison; added peers are not a global inventory.
+Two-CLI/import fixtures retain the owner across delegation edits without copying
+checkouts. Task/Desktop share provenance and unavailable paths for retained Started.
+Remote opening, native proof, admission and mixed-provider exchange remain;
+seeded history proves no running Flow or configured SSH.
 
 ## Task delivery boundary (LOO-418, reconciled 2026-10-09)
 

@@ -402,11 +402,17 @@ fn opening_context(
             );
         }
     }
-    if let Some(store) = crate::store::read_existing_registry()? {
-        tokio::runtime::Runtime::new()?.block_on(crate::ops::task_location::explain(
-            &store.sqlite,
-            &mut resolution,
-        ));
+    if let crate::ops::context::ContextFact::Bound { value, .. } = &resolution.task {
+        let task = crate::durable::TaskId::parse(value)?;
+        if let Some(store) = crate::store::read_existing_registry()? {
+            // The shared reader retains failures in the explanation; opening_url
+            // refuses unavailable execution without losing the other Work facts.
+            let _ = tokio::runtime::Runtime::new()?.block_on(crate::ops::task_location::explain(
+                &store.sqlite,
+                &task,
+                &mut resolution,
+            ));
+        }
     }
     Ok(resolution)
 }

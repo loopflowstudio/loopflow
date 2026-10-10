@@ -271,26 +271,66 @@ impl SqliteStore {
             .transpose()
     }
 
-    /// Native admissions still awaiting results from this exact AgentProcess.
-    /// Observation order, not the replacement attachment's input, orders results.
-    pub(crate) fn pending_session_turns(
+    /// Correlate an ordered, UUID-keyed result with one admission. Selection and
+    /// all result receipts commit together, so reopened or concurrent readers
+    /// cannot consume the next admission with the same result.
+    pub(crate) fn record_ordered_session_result(
         &self,
         session: &str,
         agent_process: &crate::id::LfProcessId,
-    ) -> StoreResult<Vec<(AgentSessionId, String)>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(
-            "SELECT e.provider_thread,e.provider_turn FROM session_events e
-             WHERE e.session_id=?1 AND e.agent_process_id=?2 AND e.kind='started'
-               AND NOT EXISTS(SELECT 1 FROM session_events done
-                 WHERE done.session_id=e.session_id AND done.provider_thread=e.provider_thread
-                   AND done.provider_turn=e.provider_turn AND done.kind='completed')
-             ORDER BY e.seq",
+        thread: Option<&AgentSessionId>,
+        events: &[(SessionEventKind, Value)],
+        completed: &Value,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let result_id = completed["result_id"].as_str().filter(|id| !id.is_empty());
+        let repeated: Option<(AgentSessionId, String)> = tx.query_row(
+            "SELECT done.provider_thread,done.provider_turn FROM session_events done
+             JOIN session_events start ON start.session_id=done.session_id
+               AND start.provider_thread=done.provider_thread AND start.provider_turn=done.provider_turn
+               AND start.kind='started' AND start.agent_process_id=?2
+             WHERE done.session_id=?1 AND done.kind='completed'
+               AND json_extract(done.payload,'$.result_id')=?3",
+            params![session, agent_process, result_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).optional()?;
+        let selected = match repeated {
+            Some(turn) => Some(turn),
+            None => tx
+                .query_row(
+                    "SELECT e.provider_thread,e.provider_turn FROM session_events e
+                 WHERE e.session_id=?1 AND e.agent_process_id=?2 AND e.kind='started'
+                   AND NOT EXISTS(SELECT 1 FROM session_events done
+                     WHERE done.session_id=e.session_id AND done.provider_thread=e.provider_thread
+                       AND done.provider_turn=e.provider_turn AND done.kind='completed')
+                 ORDER BY e.seq LIMIT 1",
+                    params![session, agent_process],
+                    |row| Ok((row.get::<_, AgentSessionId>(0)?, row.get::<_, String>(1)?)),
+                )
+                .optional()?,
+        };
+        let Some((saved_thread, turn)) = selected else {
+            return Ok(());
+        };
+        if result_id.is_none() || thread != Some(&saved_thread) {
+            return Err(StoreError::InvalidData(
+                "Ordered result lacks its identity or changed conversation".into(),
+            ));
+        }
+        for (kind, payload) in events {
+            record_event_in(&tx, session, Some(&saved_thread), &turn, *kind, payload)?;
+        }
+        record_event_in(
+            &tx,
+            session,
+            Some(&saved_thread),
+            &turn,
+            SessionEventKind::Completed,
+            completed,
         )?;
-        let rows = query.query_map(params![session, agent_process], |row| {
-            Ok((row.get(0)?, row.get(1)?))
-        })?;
-        Ok(rows.collect::<Result<_, _>>()?)
+        tx.commit()?;
+        Ok(())
     }
 
     /// Retain correlated origin after takeover without reading current assignment.

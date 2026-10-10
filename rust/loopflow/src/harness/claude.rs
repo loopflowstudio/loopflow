@@ -150,7 +150,7 @@ impl ClaudeHarness {
             .take()
             .ok_or_else(|| anyhow!("failed to capture claude stderr"))?;
 
-        self.spawn_reader(stdout, super::claude_history::History::new(owner)?);
+        self.spawn_reader(stdout, super::claude_history::History::new(owner));
         self.stderr_task = Some(spawn_stderr_logger(stderr, "claude_harness"));
         self.stdin = Some(stdin);
         self.child = Some(child);

@@ -1,9 +1,9 @@
 //! Stream input UUIDs, echoed by Claude, correlate each native result.
 use crate::id::{AgentSessionId, LfProcessId};
-use std::collections::VecDeque;
 
 use anyhow::Result;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 
 use crate::session::SessionEventKind;
 
@@ -12,24 +12,19 @@ pub(super) struct History {
     store: crate::store::sqlite::SqliteStore,
     session: String,
     agent_process_id: LfProcessId,
-    pending: VecDeque<(AgentSessionId, String)>,
     attention: super::attention::Attention,
 }
 
 impl History {
-    pub(super) fn new(owner: super::agent_process::AttachmentOwner) -> Result<Self> {
+    pub(super) fn new(owner: super::agent_process::AttachmentOwner) -> Self {
         let (store, session, attachment) = owner;
         let agent_process_id = attachment.agent_process_id;
-        let pending = store
-            .pending_session_turns(&session, &agent_process_id)?
-            .into();
-        Ok(Self {
+        Self {
             store,
             session,
             agent_process_id,
-            pending,
             attention: Default::default(),
-        })
+        }
     }
 
     pub fn record(&mut self, line: &str) -> Result<()> {
@@ -70,57 +65,33 @@ impl History {
                 return Ok(());
             }
             store.record_session_turn_origin(&thread, turn, &origin)?;
-            let pending = (thread, turn.to_owned());
-            if !self.pending.contains(&pending) {
-                self.pending.push_back(pending);
-            }
         } else if value["type"] == "result" {
-            let Some((thread, turn)) = self.pending.front() else {
-                return Ok(());
-            };
-            anyhow::ensure!(
-                value["session_id"] == thread.as_str(),
-                "Claude result changed conversation"
-            );
+            let thread = value["session_id"].as_str().map(AgentSessionId::from);
+            let mut events = Vec::new();
             let status = if value["subtype"] == "success" && value["is_error"] != true {
                 "completed"
             } else {
                 "failed"
             };
             if let Some(output) = value.get("structured_output").filter(|v| !v.is_null()) {
-                store.record_session_event(
-                    session,
-                    thread,
-                    turn,
-                    SessionEventKind::Output,
-                    &json!({"value": output}),
-                )?;
+                events.push((SessionEventKind::Output, json!({"value": output})));
             } else if let Some(text) = value["result"].as_str() {
-                store.record_session_event(
-                    session,
-                    thread,
-                    turn,
-                    SessionEventKind::Output,
-                    &json!({"text": text}),
-                )?;
+                events.push((SessionEventKind::Output, json!({"text": text})));
             }
             if !value["usage"].is_null() {
-                store.record_session_event(
-                    session,
-                    thread,
-                    turn,
+                events.push((
                     SessionEventKind::Usage,
-                    &json!({"provider":"claude","usage":value["usage"]}),
-                )?;
+                    json!({"provider":"claude","usage":value["usage"]}),
+                ));
             }
-            store.record_session_event(
+            let result_digest = format!("{:x}", Sha256::digest(value.to_string().as_bytes()));
+            store.record_ordered_session_result(
                 session,
-                thread,
-                turn,
-                SessionEventKind::Completed,
-                &json!({"status":status,"result_id":value["uuid"],"errors":value["errors"],"subtype":value["subtype"]}),
+                &self.agent_process_id,
+                thread.as_ref(),
+                &events,
+                &json!({"status":status,"result_id":value["uuid"],"result_digest":result_digest,"errors":value["errors"],"subtype":value["subtype"]}),
             )?;
-            self.pending.pop_front();
         }
         Ok(())
     }
@@ -134,6 +105,103 @@ mod tests {
     use crate::session::SessionEventKind;
     use crate::store::sqlite::SqliteStore;
     use serde_json::json;
+
+    fn pending_pair(path: &std::path::Path) -> super::super::agent_process::AttachmentOwner {
+        let store = SqliteStore::open_ephemeral(path).unwrap();
+        store.test_session("conversation", "run_00000000000000000000000000000001");
+        let process = LfProcessId::new();
+        rusqlite::Connection::open(path)
+            .unwrap()
+            .execute(
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+                [&process],
+            )
+            .unwrap();
+        let attachment = store
+            .claim_session_attachment("conversation", None, &process, false)
+            .unwrap();
+        let owner = (store.clone(), "conversation".into(), attachment.clone());
+        let origin = store
+            .session_turn_origin("conversation", &attachment)
+            .unwrap();
+        let mut history = History::new(owner.clone());
+        for request in ["first", "second"] {
+            store
+                .record_session_request(None, request, &origin)
+                .unwrap();
+            history
+                .record(&json!({"type":"user","uuid":request,"session_id":"thread"}).to_string())
+                .unwrap();
+        }
+        owner
+    }
+
+    #[test]
+    fn reopened_readers_cannot_assign_a_repeated_result_to_the_next_turn() {
+        let home = tempfile::tempdir().unwrap();
+        let owner = pending_pair(&home.path().join("history.db"));
+        // Both readers reconstruct before the first result commits.
+        let mut first = History::new(owner.clone());
+        let mut second = History::new(owner.clone());
+        let result = json!({"type":"result","uuid":"result-one","session_id":"thread","subtype":"success","result":"first answer"}).to_string();
+        first.record(&result).unwrap();
+        second.record(&result).unwrap();
+        History::new(owner.clone()).record(&result).unwrap();
+        let completed = || {
+            owner
+                .0
+                .session_history("conversation", 0, 0)
+                .unwrap()
+                .into_iter()
+                .filter(|event| event.kind == SessionEventKind::Completed)
+                .collect::<Vec<_>>()
+        };
+        // Same result identity with changed usage is conflicting evidence,
+        // not another usage receipt or permission to consume the next turn.
+        assert!(second.record(&json!({"type":"result","uuid":"result-one","session_id":"thread","subtype":"success","result":"first answer","usage":{"input_tokens":99}}).to_string()).is_err());
+        assert!(second.record(&json!({"type":"result","session_id":"thread","subtype":"success","result":"no identity"}).to_string()).is_err());
+        let events = completed();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].provider_turn.as_deref(), Some("first"));
+        second.record(&json!({"type":"result","uuid":"result-two","session_id":"thread","subtype":"success","result":"second answer"}).to_string()).unwrap();
+        let events = completed();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[1].provider_turn.as_deref(), Some("second"));
+    }
+
+    #[test]
+    fn failed_result_recording_leaves_no_partial_output_or_completion() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("history.db");
+        let owner = pending_pair(&path);
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "CREATE TRIGGER fail_completion BEFORE INSERT ON session_events
+            WHEN NEW.kind='completed' BEGIN SELECT RAISE(ABORT,'lost recording'); END;",
+        )
+        .unwrap();
+        let mut history = History::new(owner.clone());
+        let result = json!({"type":"result","uuid":"result-one","session_id":"thread","subtype":"success","result":"answer","usage":{"input_tokens":10}}).to_string();
+        assert!(history.record(&result).is_err());
+        assert!(owner
+            .0
+            .session_history("conversation", 0, 0)
+            .unwrap()
+            .iter()
+            .all(|event| !matches!(
+                event.kind,
+                SessionEventKind::Output | SessionEventKind::Usage | SessionEventKind::Completed
+            )));
+        conn.execute_batch("DROP TRIGGER fail_completion").unwrap();
+        History::new(owner.clone()).record(&result).unwrap();
+        let events = owner.0.session_history("conversation", 0, 0).unwrap();
+        let completed = events
+            .iter()
+            .filter(|event| event.kind == SessionEventKind::Completed)
+            .collect::<Vec<_>>();
+        assert_eq!(completed.len(), 1);
+        assert_eq!(completed[0].provider_turn.as_deref(), Some("first"));
+    }
 
     #[test]
     fn reconstructed_reader_retains_pending_origins_across_takeover_and_new_input() {
@@ -172,8 +240,7 @@ mod tests {
             .is_err());
         drop(store);
         let store = SqliteStore::open_ephemeral(&path).unwrap();
-        let mut history =
-            History::new((store.clone(), "conversation".into(), current.clone())).unwrap();
+        let mut history = History::new((store.clone(), "conversation".into(), current.clone()));
         history
             .record(&json!({"type":"user","uuid":"old","session_id":"thread"}).to_string())
             .unwrap();
@@ -204,8 +271,7 @@ mod tests {
         drop(history);
         drop(store);
         let store = SqliteStore::open_ephemeral(&path).unwrap();
-        let mut history =
-            History::new((store.clone(), "conversation".into(), current.clone())).unwrap();
+        let mut history = History::new((store.clone(), "conversation".into(), current.clone()));
         history
             .record(&json!({"type":"user","uuid":"request","session_id":"thread"}).to_string())
             .unwrap();
@@ -226,10 +292,6 @@ mod tests {
         assert!(events
             .iter()
             .all(|event| event.lf_process_id.as_deref() == Some(process.as_str())));
-        assert!(store
-            .pending_session_turns("conversation", &current.agent_process_id)
-            .unwrap()
-            .is_empty());
         let count = store.session_history("conversation", 0, 0).unwrap().len();
         history
             .record(&json!({"type":"user","uuid":"request","session_id":"thread"}).to_string())
@@ -282,8 +344,7 @@ mod tests {
         let first = store
             .claim_session_attachment("conversation", None, &a, false)
             .unwrap();
-        let mut reader =
-            History::new((store.clone(), "conversation".into(), first.clone())).unwrap();
+        let mut reader = History::new((store.clone(), "conversation".into(), first.clone()));
         let waiting = || {
             store
                 .session_summary(
@@ -370,7 +431,7 @@ mod tests {
             .unwrap();
         assert_ne!(replacement.agent_process_id, first.agent_process_id);
         let mut replacement_reader =
-            History::new((store.clone(), "conversation".into(), replacement)).unwrap();
+            History::new((store.clone(), "conversation".into(), replacement));
         replacement_reader
             .record(
                 &json!({"type":"assistant","message":{"content":[
@@ -412,7 +473,7 @@ mod tests {
         store
             .record_session_request(None, "foreign", &origin)
             .unwrap();
-        let mut history = History::new((store.clone(), "conversation".into(), attachment)).unwrap();
+        let mut history = History::new((store.clone(), "conversation".into(), attachment));
         history
             .record(&json!({"type":"user","uuid":"foreign","session_id":"thread"}).to_string())
             .unwrap();

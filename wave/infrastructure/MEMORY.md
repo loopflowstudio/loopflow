@@ -244,11 +244,12 @@ external watchdog. OpenCode saves endpoint/attempts before effects; v1.2.0
 creation carries rules/title, not PATCH. Unknown identity stays uncertain.
 Creation recovery, relay, native launch, permission choices and dispatch proofs:
 `7fec3b53f:wave/infrastructure/MEMORY.md`, this heading. Shell lacks IDs.
-`4834c18f4` retains Claude origins/admissions, not unread pipes. The reader follows current-owner display activity for the same AgentProcess,
-without refreshing caller dispatch/stop authority; replacement providers are isolated.
-EOF, history-write failure and uncertain input grant no settlement/teardown.
-Transport must not reacquire caller-held dispatch fences or retain custody forever.
-Public death orders remain unproved; client loss grants no authority.
+`4834c18f4` retains Claude origins, not pipes. Display follows current attachment;
+caller authority stays frozen. SQLite atomically correlates UUID-keyed results,
+rejecting conflicting repeats and rolling back failed receipts. Transport still
+needs ordered uncorrelated output; no caller-held fence reacquisition or permanent
+custody. EOF/history/write errors grant no settlement or teardown. Public death
+orders remain unproved.
 Plan: `scratch/stop-and-take-over-claude.md`.
 
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)

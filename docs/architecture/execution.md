@@ -126,8 +126,11 @@ detach without signaling or erasing admitted providers and uncertain effects.
 ### Provider communication
 
 Claude persists input UUID origins before pipe writes. Native echoes admit requests;
-reopened readers recover unfinished turns in observation order for the same
-AgentProcess. Display activity follows that provider's current attachment,
+SQLite selects unfinished turns in observation order for the same AgentProcess.
+Durable result UUID correlation, output, usage and completion commit together.
+Repeated history observations cannot consume another turn; conflicting payloads refuse without changing
+saved receipts. This does not supply a cursor for replaying uncorrelated output.
+Display activity follows that provider's current attachment,
 retaining tools while detached and ignoring replacement providers. Dispatch and
 stop retain frozen caller authority. Saved origins cannot recover unread pipe
 output: launcher-independent Claude transport and public live connection remain

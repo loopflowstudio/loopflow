@@ -529,3 +529,11 @@ conversation (Session / Skill), where it lives (Linear and the app / files in
 your repository). Two cards sit under it, the ramble becoming Tasks and the
 built-in workflows. Then "Loopflow is a software instrument." with three
 figures of one Task on one workflow. `x8` is kept.
+
+Jack Heart on `x9`: "ok i think this is closer. now we need to redesign the
+\"loopflow is a software instrument\". the 3 parts dont tell that story. what
+WOULD tell that story?" The section now shows the person's mark on the work
+instead of the Task moving: three figures titled with his three duties (be
+the designer, experience using it yourself, understand what gets built), the
+first two as an exchange where what he says changes what is built, then a
+two-column ledger of what stays with you and what is off your hands.

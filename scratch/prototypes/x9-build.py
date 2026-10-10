@@ -13,13 +13,22 @@ def row(chip, cls=""):
     return f'<p class="trow"><b>Add CSV export</b><span class="pos {cls}">{chip}</span><span class="id">EXP-12</span></p>'
 def fig(n, title, text, card):
     return f'<li><div class="capt"><span>Fig. {n}</span><h3>{title}</h3><p>{text}</p></div><div class="card">{card}</div></li>'
+def turn(who, text, cls=""):
+    return f'<p class="turn {cls}"><span>{who}</span>{text}</p>'
 FIGS = "\n".join([
-fig(1, "You jam on the design.", "Your agent drafts a plan and brings it to you. You go back and forth: push on it, answer its questions, change your mind. It redrafts until the design is yours.",
-    row("design · waiting on you", "w") + strip("design") + '<div class="doc"><b>Plan</b><p>An Export button in the table header. Rows stream as CSV, so large tables do not time out.</p><p><i>Open question:</i> should archived rows be included?</p></div>'),
-fig(2, "It gets built, and you try it.", "Your agent implements the plan, tidies it, catches up with the rest of the code, and opens the pull request, each step a Session of its own. Then the Task waits, marked, until you have tried the change.",
-    row("demo · waiting on you", "w") + strip("demo") + '<pre class="steps"><span class="ok">✓ implement   ✓ compress   ✓ flow: refresh   ✓ loop: implement   ✓ pr-publish</span></pre><div class="doc"><b>Pull request #84 is open</b><p>Try it: open any table, press Export, and check the dates in the file.</p></div>'),
-fig(3, "It ships.", "Checks run, then it merges. Every Session that got it there stays under the Task, whichever agent ran it.",
-    row("landed", "ok") + strip("end") + '<p class="sess"><b>9 Sessions</b> kickoff · design · implement · compress · realign · implement · pr-publish · demo · gate</p>'),
+fig(1, "Be the designer.", "Your agent drafts the plan. What gets built is what you made of it.",
+    row("design · waiting on you", "w")
+    + turn("Agent", "Plan: an Export button that downloads every row in the table.")
+    + turn("You", "only what’s on screen, with their filters on. and some of these tables are huge, it can’t just hang", "you")
+    + turn("Agent", "Redrafted: Export downloads the filtered view. Rows stream, so a large table starts downloading at once.", "new")),
+fig(2, "Experience using it yourself.", "It is built and waiting. You try it like a user would, and what you notice goes back in.",
+    row("demo · waiting on you", "w")
+    + turn("Agent", "Pull request #84 is open. Try it: open any table, press Export.")
+    + turn("You", "tried it. dates come out in UTC, should be the account’s timezone", "you")
+    + turn("Agent", "Fixed and rebuilt. Dates now use the account’s timezone. Ready to try again.", "new")),
+fig(3, "Understand what gets built.", "Nothing is hidden from you and nothing is lost. The design you agreed, the change itself, and every conversation behind it stay with the Task.",
+    row("landed", "ok")
+    + '<ul class="kept"><li><b>Design</b>the plan as you left it</li><li><b>Pull request #84</b>the change, merged</li><li><b>9 Sessions</b>each step your agent took, whichever agent ran it</li></ul>'),
 ])
 def wf(name, note, *parts):
     out = ""
@@ -116,10 +125,13 @@ main = f'''
   <h2>Loopflow is a software instrument.</h2>
   <p class="say">It doesn’t make the software for you; you make the software through it.</p>
   <p class="say">You have to stay involved. You still need to understand what gets built, experience using it yourself, and be the designer. You don’t have to micromanage the coding.</p>
-  <p class="say lead">Here are the two together: one Task, on one workflow.</p>
   <ol class="figs">
 {FIGS}
   </ol>
+  <div class="ledger">
+    <div><p class="eyebrow">Stays with you</p><ul><li>What to make</li><li>How it should work</li><li>Whether the design is right</li><li>Whether it works when you use it</li><li>When it is done</li></ul></div>
+    <div><p class="eyebrow">Off your hands</p><ul><li>Writing the code</li><li>Keeping it tidy</li><li>Keeping up with the rest of the code</li><li>Opening the pull request</li><li>Running the checks and merging</li></ul></div>
+  </div>
 </section>
 <section id="works" class="works">
   <p class="eyebrow">Works with</p>
@@ -149,6 +161,20 @@ main = f'''
 </section>
 '''
 extra = '''
+.walk .turn{margin-top:12px!important;padding:10px 14px;border-radius:8px;background:#fff;border:1px solid var(--border);font-size:14px;line-height:1.55;color:#333}
+.walk .turn span{display:block;font:500 10.5px var(--font-mono);text-transform:uppercase;letter-spacing:.1em;color:var(--text-secondary);margin-bottom:3px}
+.walk .turn.you{background:#fbf2f4;border-color:#ecd3da;font:16px/1.5 var(--font-serif);color:#3a3532;margin-left:28px!important}.walk .turn.you span{color:var(--wine)}
+.walk .turn.new{box-shadow:inset 3px 0 0 #1f6b36}
+.walk .kept{list-style:none;margin:12px 0 0;padding:0;border:1px solid var(--border);border-radius:8px;background:#fff}
+.walk .kept li{list-style:none;margin:0;padding:10px 14px;border-bottom:1px solid var(--border);font-size:13.5px;color:#444;display:grid;grid-template-columns:150px 1fr;gap:10px}.walk .kept li:last-child{border-bottom:0}.walk .kept b{color:var(--text);font-weight:600}
+.walk .ledger{display:grid;grid-template-columns:1fr 1fr;gap:0 56px;margin-top:34px}
+.home-page .walk .ledger .eyebrow{color:var(--burgundy);margin:0 0 10px}
+.walk .ledger ul{list-style:none;margin:0;padding:0;border-top:1px solid var(--border)}
+.walk .ledger li{list-style:none;margin:0;padding:10px 0;border-bottom:1px solid var(--border);font-size:16px}
+.walk .ledger div+div li{color:var(--text-secondary)}
+.walk .figs{margin-top:26px!important}
+@media (max-width:620px){.walk .ledger{grid-template-columns:1fr;gap:26px}.walk .kept li{grid-template-columns:1fr;gap:2px}.walk .turn.you{margin-left:12px!important}}
+
 .wh{width:100%;border-collapse:collapse;margin:30px 0 0;font-size:14.5px;line-height:1.55;background:none}
 .home-page .wh th,.home-page .wh td{background:none;border:0;border-bottom:1px solid var(--border);padding:14px 22px 14px 0;text-align:left;vertical-align:top;color:#333}
 .home-page .wh thead th{font:400 26px/1.1 var(--font-serif);color:var(--burgundy);border-bottom:1px solid #b9b1a6;padding-bottom:12px}

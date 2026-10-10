@@ -2122,14 +2122,14 @@ async fn pm_sync_async(
         }
     }
 
-    let default_branch = crate::engine::git::get_default_branch(repo)?;
+    let default_branch = crate::git::get_default_branch(repo)?;
     let summary_revision =
-        crate::engine::git::rev_parse(repo, &format!("refs/heads/{default_branch}^{{commit}}"))?;
+        crate::git::rev_parse(repo, &format!("refs/heads/{default_branch}^{{commit}}"))?;
     let mut wave_updates = Vec::new();
     let mut seen_projects: BTreeMap<String, String> = BTreeMap::new();
     for wave in &waves {
         let goal = format!("wave/{wave}/GOAL.md");
-        let Some(content) = crate::engine::git::show_file(repo, &summary_revision, &goal)? else {
+        let Some(content) = crate::git::show_file(repo, &summary_revision, &goal)? else {
             let message = format!(
                 "{goal} is missing on default branch {default_branch}; cannot sync its summary"
             );

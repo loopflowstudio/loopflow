@@ -288,19 +288,21 @@ no conversation-expiry or one-off deletion authority.
 
 Cleanup requires ownership, exact-head settlement, idle execution and classified
 content—not age, remote disappearance, ignored status or planning completion.
-Main #1499 separates completion from delivery: PR-less Tasks and unresolved
-follow-through retain checkouts despite settled landings. Unknown execution retains
-work; local refs use compare-and-delete. Cache tags never override Session history.
+PR-less Tasks, unresolved follow-through and unknown execution retain checkouts.
+Local refs use compare-and-delete. Cache tags never override Session history.
 
-Reuse repository reconciliation. Release's incident distinguishes gate-based jobs
-following promotion from immutable paths needing repair. `341615ba8` enables ticks, persists disable and
-fences release checkout admission; promotion-time repair remains open. Admission
-deadlines do not bound started reads or prevent starvation in fixed scan order.
-The scheduled CLI proof uses an unknown Process row, not live execution. Cross-store
-acceptance needs a disposable OS account: `LF_HOME` does not isolate release reads.
-Cache-tag survival proves pre-Git interruption recovery, not historical payload
-protection. Whole-pass bounds, payload coverage and installed operation remain
-unproved. Plan: `scratch/clean-up.md`; artifact eviction/history rotation follow.
+Release's incident requires schedule repair before binary pruning.
+`c99c18972` adds gate-based installation repair, preserving disable and binaries on
+failure. Historical references and provider homes veto both registries' cleanup,
+including recheck; native resume and complete payload coverage remain unproved.
+
+Scheduled reconciliation observes a real shell child's exit with seeded merged
+Task delivery, preserving an unfinished neighbor. Cross-store proof holds admission
+directly, not through a release CLI writer; disposable OS accounts isolate release
+reads, `LF_HOME` does not. Cache-tag survival proves only pre-Git interruption.
+Admission bounds leave started reads unbounded; ordering/planning can starve
+removals. Hourly/fair scans, missing-path recovery and installed acceptance remain.
+Plan: `scratch/clean-up.md`.
 
 ## Project configuration and review direction (2026-10-05)
 

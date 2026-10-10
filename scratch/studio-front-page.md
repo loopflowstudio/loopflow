@@ -457,3 +457,11 @@ Wave and its four Tasks written down, with "Add CSV export" picked to follow.
 Jack Heart on figure 2: "Wave is not a word you already use". The caption now
 says Tasks are in words you already use, and introduces Wave last as "our
 word for a persistent workstream with an objective".
+
+Jack Heart on the `x7` thesis: "Nah, go back to the previous ~week or two of
+iteration on this and find more of my language for this". Rebuilt from his
+own sentences: the instrument definition and "Bring something you want to
+make…" (growth memory, 2026-09-26), "You can zoom in and you can zoom out"
+(same), "empowering people, not delegating the thinking to robots" and "the
+stages that matter most to you" (this Task). The "you play it" extension is
+gone; his rule is that the noun is defined once and not extended.

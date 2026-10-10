@@ -75,7 +75,8 @@ main = f'''
 </section>
 <section class="walk">
   <h2>Loopflow is a software instrument.</h2>
-  <p class="say">Coding with agents is about empowering people, not delegating the thinking to robots. An instrument is something you play, and what comes out is yours. Your agent does the building. You decide what to make, and whether it is right.</p>
+  <p class="say">It doesn’t make the software for you; you make the software through it. Coding with agents is about empowering people, not delegating the thinking to robots.</p>
+  <p class="say">Bring something you want to make. Loopflow helps you work through it, with a plan, checks along the way, and room to change your mind. You can zoom in and you can zoom out, and focus on the stages that matter most to you.</p>
   <p class="say lead">Here is how it goes, from a rambling idea to a set of merged pull requests.</p>
   <ol class="figs">
 {FIGS}

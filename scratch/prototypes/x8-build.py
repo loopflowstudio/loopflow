@@ -90,16 +90,6 @@ main = f'''
     </div>
   </div>
 </section>
-<section class="walk">
-  <h2>Loopflow is a software instrument.</h2>
-  <p class="say">It doesn’t make the software for you; you make the software through it.</p>
-  <p class="say">You share what you want to make and how it should work. Loopflow turns that into a plan you can read and change, and carries that plan out, stopping to talk with you according to how you like to work.</p>
-  <p class="say">You have to stay involved. You still need to understand what gets built, experience using it yourself, and be the designer. You don’t have to micromanage the coding.</p>
-  <p class="say lead">Here is how it goes, from a rambling idea to a set of merged pull requests.</p>
-  <ol class="figs">
-{FIGS}
-  </ol>
-</section>
 <section id="yours-to-change" class="conf">
   <h2>How your team works with agents, written down.</h2>
   <p class="say"><b>Every Task ends shipped.</b> Loopflow uses configurable workflows to ensure that Tasks are designed thoughtfully, built simply, shipped, and validated thoroughly, all automatically.</p>
@@ -117,6 +107,16 @@ main = f'''
     </ul>
   </div>
   <p class="more"><a href="/docs/authoring#workflows">Write a workflow ↗</a><a href="/docs/authoring#flows">Skills and Flows ↗</a><a href="/cli">Underneath, it is all <code>lf</code> ↗</a></p>
+</section>
+<section class="walk">
+  <h2>Loopflow is a software instrument.</h2>
+  <p class="say">It doesn’t make the software for you; you make the software through it.</p>
+  <p class="say">You share what you want to make and how it should work. Loopflow turns that into a plan you can read and change, and carries that plan out, stopping to talk with you according to how you like to work.</p>
+  <p class="say">You have to stay involved. You still need to understand what gets built, experience using it yourself, and be the designer. You don’t have to micromanage the coding.</p>
+  <p class="say lead">Here is how it goes, from a rambling idea to a set of merged pull requests.</p>
+  <ol class="figs">
+{FIGS}
+  </ol>
 </section>
 <section id="works" class="works">
   <p class="eyebrow">Works with</p>
@@ -147,7 +147,7 @@ main = f'''
 '''
 extra = '''
 .walk .lab.down{margin-top:14px!important}.walk .steps{white-space:pre-wrap}
-.conf{padding-top:72px}.conf h2{font-size:clamp(30px,3.2vw,42px);margin:0 0 14px}
+.conf{padding-top:64px}.conf h2{font-size:clamp(30px,3.2vw,42px);margin:0 0 14px}
 .home-page .conf .say{font-size:18px;line-height:1.6;color:#333;max-width:720px;margin:0 0 12px}.conf .say b{color:var(--text);font-weight:600}
 .conf .shared{list-style:none;margin:22px 0 0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));border-top:1px solid var(--border);border-bottom:1px solid var(--border)}.conf .shared li{list-style:none;margin:0;padding:16px 18px 16px 0;display:grid;gap:5px}.conf .shared code{font:500 13px var(--font-mono);color:var(--text);background:none;padding:0}.conf .shared span{font-size:13.5px;line-height:1.5;color:#444}.conf .two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:28px 40px;align-items:start;margin:28px 0 22px}
 .conf .term{margin:0;font-size:12.5px}

@@ -513,3 +513,6 @@ is" is gone, since it said the opposite.
 Jack Heart: "You still need to understand what gets build and experience
 using ityourself and be the designer". Added to the `x8` thesis between "You
 have to stay involved." and "You don't have to micromanage the coding."
+Jack Heart: "How your team works with agents, written down. I think this
+might be the first thing after the video?" In `x8` that section now follows
+the mock directly; the instrument thesis and the four figures come after it.

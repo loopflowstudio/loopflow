@@ -822,10 +822,11 @@ impl Harness for CodexHarness {
         let thread_id = self
             .agent_session()
             .ok_or_else(|| anyhow!("codex thread not started"))?;
-        let mut input = vec![json!({ "type": "text", "text": turn_text })];
+        let mut input = Vec::new();
         if let Some(invocation) = invocation {
             input.push(json!({ "type": "text", "text": invocation.codex_prompt() }));
         }
+        input.push(json!({ "type": "text", "text": turn_text }));
 
         let params = json!({ "threadId": thread_id, "input": input });
         self.send_request("turn/start", params).await?;
@@ -1465,6 +1466,66 @@ impl CodexHarness {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn native_skill_precedes_request_and_clipboard_without_continuation_replay() {
+        use crate::skills::catalog::{SkillDialect, SkillSource};
+        use crate::skills::invocation::SkillInvocation;
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("SKILL.md");
+        let source = "---\nname: probe\ndescription: Inspect the supplied asset\n---\nRead ./asset.txt before answering.\n";
+        std::fs::write(&path, source).unwrap();
+        std::fs::write(directory.path().join("asset.txt"), "Native asset.").unwrap();
+        let skill = SkillSource {
+            name: "probe".into(),
+            path: Some(path.clone()),
+            dialect: SkillDialect::Codex,
+        }
+        .load()
+        .unwrap();
+        let request = "Find the bug.\n\n<lf:clipboard>\nPasted evidence.\n</lf:clipboard>";
+        let (mut harness, mut outbound, _, _, _events) = steerable_harness();
+        harness.turn_in_progress.store(false, Ordering::Relaxed);
+        harness.launch = Some(AgentConfig {
+            skill_invocation: Some(SkillInvocation {
+                skill,
+                arguments: "exact \"two words\" 雪".into(),
+            }),
+            ..AgentConfig::default()
+        });
+
+        harness.send_input(request).await.unwrap();
+        let OutboundRpc::Request { method, params, .. } = outbound.recv().await.unwrap() else {
+            panic!("expected first turn request");
+        };
+        assert_eq!(method, "turn/start");
+        assert_eq!(params["threadId"], "thread_1");
+        assert_eq!(
+            params["input"],
+            json!([
+                { "type": "text", "text": format!("[$probe]({}) exact \"two words\" 雪", path.display()) },
+                { "type": "text", "text": request }
+            ])
+        );
+        // The reference still selects the original declarations and adjacent assets.
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), source);
+        assert_eq!(
+            std::fs::read_to_string(path.parent().unwrap().join("asset.txt")).unwrap(),
+            "Native asset."
+        );
+
+        harness.send_input("Now explain the fix.").await.unwrap();
+        let OutboundRpc::Request { method, params, .. } = outbound.recv().await.unwrap() else {
+            panic!("expected continuation request");
+        };
+        assert_eq!(method, "turn/start");
+        assert_eq!(params["threadId"], "thread_1");
+        assert_eq!(
+            params["input"],
+            json!([{ "type": "text", "text": "Now explain the fix." }])
+        );
+    }
 
     #[tokio::test]
     async fn failed_startup_retains_the_group_until_stop() {

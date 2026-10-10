@@ -81,8 +81,7 @@ pub(crate) fn task_execution_blockers(
     task: &crate::durable::TaskId,
 ) -> OpsResult<Vec<String>> {
     let open = store.open_processes().map_err(error)?;
-    let work = store.task_open_work(task, &open).map_err(error)?;
-    execution_blockers(store, &work.processes)
+    execution_blockers(store, open.for_task(task))
 }
 
 pub(crate) async fn repository_tasks(

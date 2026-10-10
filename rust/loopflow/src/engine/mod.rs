@@ -30,7 +30,6 @@ pub mod target;
 pub(crate) mod terminal_title;
 pub mod transitions;
 pub mod workflow;
-pub mod worktree;
 pub mod worktrees;
 
 pub use crate::repo::find_repo_root;

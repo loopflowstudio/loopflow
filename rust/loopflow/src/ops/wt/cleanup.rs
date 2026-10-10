@@ -102,6 +102,8 @@ async fn observe(
     decision: &mut CleanupDecision,
     external: &OpsResult<HashSet<PathBuf>>,
 ) -> OpsResult<()> {
+    // Each observation stands alone, including a recheck after planning.
+    decision.evidence.clear();
     let path = &decision.path;
     if normalized(path) == normalized(repo) {
         retain(decision, "primary checkout");
@@ -134,6 +136,9 @@ async fn observe(
         .join("lf-created")
         .is_file();
     let mut settled = false;
+    // Use the same unfinished-Process snapshot for Task membership and cwd
+    // protection; neither needs the Task's full Session or Flow history.
+    let open = store.sqlite.open_processes().map_err(error)?;
     for task in store.list_tasks(None).await.map_err(error)? {
         let Some(worktree) = &task.worktree else {
             continue;
@@ -153,14 +158,8 @@ async fn observe(
             );
             return Ok(());
         }
-        let open = store.sqlite.open_processes().map_err(error)?;
-        let work = store
-            .sqlite
-            .task_open_work(&task.id, &open)
-            .map_err(error)?;
-        if work.processes.iter().any(|process| {
-            process.completed_at.is_none()
-                && process_evidence(&store.sqlite, &process.lfid) != ProcessIdentityEvidence::Dead
+        if open.for_task(&task.id).iter().any(|process| {
+            process_evidence(&store.sqlite, &process.lfid) != ProcessIdentityEvidence::Dead
         }) {
             retain(decision, "Task has live or unknown execution");
             return Ok(());
@@ -208,7 +207,7 @@ async fn observe(
         retain(decision, "current head has no recorded settlement");
         return Ok(());
     }
-    for process in store.sqlite.unfinished_processes().map_err(error)? {
+    for process in &open.all {
         if process
             .cwd
             .as_deref()
@@ -329,12 +328,25 @@ fn remove_artifact(root: &Path) -> OpsResult<()> {
 }
 
 pub async fn plan_cleanup(store: &SharedStore, repo: &Path) -> OpsResult<Vec<CleanupDecision>> {
+    plan_selected(store, repo, None).await
+}
+
+async fn plan_selected(
+    store: &SharedStore,
+    repo: &Path,
+    selected: Option<&Path>,
+) -> OpsResult<Vec<CleanupDecision>> {
     let repo = main_repo_root(repo)?;
+    let selected = selected.map(normalized);
     let external = running_paths();
     let mut plan = Vec::new();
     for (path, branch) in list_porcelain(&repo)? {
+        let path = normalized(&path);
+        if selected.as_ref().is_some_and(|selected| *selected != path) {
+            continue;
+        }
         let mut decision = CleanupDecision {
-            path: normalized(&path),
+            path,
             branch,
             observed_head: None,
             action: CleanupAction::Retain("not observed".into()),
@@ -378,7 +390,6 @@ pub async fn apply_cleanup(
             let lease = acquire_worktree_lease(&repo, &decision.path, "checkout cleanup")?;
             let expected_head = decision.observed_head.clone();
             let expected_branch = decision.branch.clone();
-            decision.evidence.clear();
             // Refresh all authority and filesystem facts under both locks.
             observe(store, &repo, &mut decision, &running_paths()).await?;
             if decision.observed_head != expected_head || decision.branch != expected_branch {
@@ -449,11 +460,7 @@ pub async fn run_cleanup_pass(
 }
 
 pub(crate) async fn cleanup_path(store: &SharedStore, repo: &Path, path: &Path) -> OpsResult<()> {
-    let plan = plan_cleanup(store, repo)
-        .await?
-        .into_iter()
-        .filter(|decision| decision.path == normalized(path))
-        .collect();
+    let plan = plan_selected(store, repo, Some(path)).await?;
     let report = apply_cleanup(store, repo, plan, CleanupBudget::default()).await?;
     for decision in report.deferred {
         if let CleanupAction::Retain(reason) = decision.action {
@@ -781,6 +788,30 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(item.action, CleanupAction::RemoveCheckout);
+        assert_eq!(item.evidence, ["landing: exact merged head"]);
+    }
+
+    #[tokio::test]
+    async fn cleanup_targeted_pass_only_plans_the_selected_checkout() {
+        let _guard = crate::journal::TestLedgerGuard::new();
+        let _external = ExternalInspection::idle();
+        let (repo, _directory, store, path) = fixture().await;
+        let neighbor = repo.create_named_worktree("unfinished");
+        std::fs::write(neighbor.join("notes"), "keep me").unwrap();
+
+        let plan = super::plan_selected(&store, repo.path(), Some(&path))
+            .await
+            .unwrap();
+        assert_eq!(plan.len(), 1);
+        assert_eq!(plan[0].path, path);
+        let report = apply_cleanup(&store, repo.path(), plan, CleanupBudget::default())
+            .await
+            .unwrap();
+        assert_eq!(report.removed, [path]);
+        assert_eq!(
+            std::fs::read_to_string(neighbor.join("notes")).unwrap(),
+            "keep me"
+        );
     }
 
     #[tokio::test]

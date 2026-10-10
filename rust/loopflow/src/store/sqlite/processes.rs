@@ -232,13 +232,6 @@ fn record_provider_launch(
 }
 
 impl SqliteStore {
-    pub(crate) fn unfinished_processes(&self) -> StoreResult<Vec<Process>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(&format!("{PROCESS_SELECT} WHERE e.completed_at IS NULL"))?;
-        let rows = query.query_map([], read_process)?;
-        Ok(rows.collect::<Result<Vec<_>, _>>()?)
-    }
-
     pub fn processes_since(&self, since: i64) -> StoreResult<Vec<Process>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!(

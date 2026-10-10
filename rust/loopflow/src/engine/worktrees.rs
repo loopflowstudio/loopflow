@@ -876,8 +876,7 @@ fn local_states(
 
 #[derive(Debug)]
 struct RemoteFacts {
-    /// `None` when GitHub was applicable but unavailable.
-    pull_requests: Option<HashMap<String, PullRequestState>>,
+    pull_requests: HashMap<String, PullRequestState>,
     /// Empty when the remote could not be read.
     branches: HashSet<String>,
     outcome: RemoteOutcome,
@@ -902,16 +901,15 @@ fn remote_facts(
         .collect();
     if branch_heads.is_empty() {
         return RemoteFacts {
-            pull_requests: Some(HashMap::new()),
+            pull_requests: HashMap::new(),
             branches: HashSet::new(),
             outcome: RemoteOutcome::NotAsked,
         };
     }
     let Some(nwo) = github_repo_nwo(repo) else {
-        // A non-GitHub remote has no GitHub PR state: known, and empty.
         let listed = list_remote_branches(repo);
         return RemoteFacts {
-            pull_requests: Some(HashMap::new()),
+            pull_requests: HashMap::new(),
             outcome: listed
                 .as_ref()
                 .map_or_else(|failure| (*failure).into(), |_| RemoteOutcome::Answered),
@@ -924,7 +922,7 @@ fn remote_facts(
             // so a set naming no worktree branch still means "all gone".
             github.existing.insert(default_branch.to_string());
             RemoteFacts {
-                pull_requests: Some(github.pull_requests),
+                pull_requests: github.pull_requests,
                 branches: github.existing,
                 outcome: RemoteOutcome::Answered,
             }
@@ -932,7 +930,7 @@ fn remote_facts(
         // PR state stays unknown whatever the fallback learns about branches.
         // A GitHub that used the whole limit leaves none for a second call.
         Err(failure) => RemoteFacts {
-            pull_requests: None,
+            pull_requests: HashMap::new(),
             branches: match failure {
                 RemoteFailure::Unavailable => list_remote_branches(repo).unwrap_or_default(),
                 RemoteFailure::TimedOut => HashSet::new(),
@@ -1010,17 +1008,15 @@ pub fn list_worktrees_timed(repo: &Path) -> Result<Listing, GitError> {
             local_git,
         )
     });
-    let pull_requests_known = remote.pull_requests.is_some();
     apply_network_enrichment(
         &mut worktrees,
         &default_branch,
-        &remote.pull_requests.unwrap_or_default(),
+        &remote.pull_requests,
         &remote.branches,
     );
     Ok(Listing {
         default_branch,
         worktrees,
-        pull_requests_known,
         local_git,
         remote: remote_time,
         remote_outcome: remote.outcome,
@@ -1033,9 +1029,6 @@ pub struct Listing {
     /// The branch every worktree was compared against.
     pub default_branch: String,
     pub worktrees: Vec<WorktreeState>,
-    /// False when GitHub was applicable but unavailable: an absent
-    /// `pull_request` then proves nothing about an open PR.
-    pub pull_requests_known: bool,
     /// Wall time of the local Git reads, which run beside the remote.
     pub local_git: Duration,
     /// Wall time until the remote answered, failed, or was stopped.
@@ -1614,7 +1607,7 @@ mod tests {
     }
 
     #[test]
-    fn network_enrichment_keeps_squash_fresh_branch_unprunable() {
+    fn network_enrichment_preserves_fresh_branches_without_merged_prs() {
         let mut states = vec![
             WorktreeState {
                 branch: Some("old".to_string()),

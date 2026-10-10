@@ -356,11 +356,18 @@ fn open_process_tasks() -> String {
     )
 }
 
-/// The unfinished Processes of every Task, read once for a reading of many Tasks.
+/// All unfinished Processes and their Task memberships, read in one snapshot.
 /// Unfinished Processes are few; a checkout's Process history grows without bound.
 #[derive(Debug)]
 pub(crate) struct OpenProcesses {
+    pub all: Vec<Process>,
     by_task: HashMap<String, Vec<Process>>,
+}
+
+impl OpenProcesses {
+    pub(crate) fn for_task(&self, task: &TaskId) -> &[Process] {
+        self.by_task.get(task.as_str()).map_or(&[], Vec::as_slice)
+    }
 }
 
 fn members(
@@ -457,34 +464,14 @@ impl SqliteStore {
         tx.commit()?;
         let mut by_task: HashMap<String, Vec<Process>> = HashMap::new();
         // Each Task's Processes keep the newest-first order they were read in.
-        for process in processes {
+        for process in &processes {
             for task in tasks.remove(&process.lfid).unwrap_or_default() {
                 by_task.entry(task).or_default().push(process.clone());
             }
         }
-        Ok(OpenProcesses { by_task })
-    }
-
-    /// Sessions and Flows in full, with only the Processes still unfinished.
-    /// Completion and recovery ask nothing of finished execution.
-    pub(crate) fn task_open_work(
-        &self,
-        task: &TaskId,
-        open: &OpenProcesses,
-    ) -> StoreResult<TaskWork> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction()?;
-        let (sessions, flows) = members(&tx, task)?;
-        let workflow = workflow_row(&tx, task)?;
-        let history = workflow_moves(&tx, task)?;
-        tx.commit()?;
-        drop(conn);
-        let workflow = workflow.map(|row| self.read_workflow(row, history));
-        Ok(TaskWork {
-            workflow,
-            sessions,
-            flow_processes: flows,
-            processes: open.by_task.get(task.as_str()).cloned().unwrap_or_default(),
+        Ok(OpenProcesses {
+            all: processes,
+            by_task,
         })
     }
 
@@ -636,7 +623,6 @@ mod tests {
     use crate::process::{ProcessFilter, ProcessWorkFilter};
     use crate::session::SessionFilter;
     use crate::store::sqlite::SqliteStore;
-    use crate::task_work::TaskWork;
 
     #[test]
     fn process_membership_does_not_read_events_that_name_no_process() {
@@ -924,14 +910,21 @@ mod tests {
         assert_eq!(work.flow_processes[0].summary.task_id.as_ref(), Some(&task));
         assert_eq!(work.processes.len(), 4);
         // The open reading agrees with the full one about unfinished Processes.
-        let initial_open = store
-            .task_open_work(&task, &store.open_processes().unwrap())
-            .unwrap();
-        assert_eq!(initial_open.processes.len(), 2);
-        assert!(initial_open
-            .processes
+        let snapshot = store.open_processes().unwrap();
+        assert!(snapshot
+            .all
             .iter()
-            .all(|process| process.completed_at.is_none()));
+            .any(|p| p.cwd.as_deref() == Some("/other")));
+        assert!(snapshot.all.iter().all(|p| p.completed_at.is_none()));
+        assert_eq!(snapshot.for_task(&task).len(), 2);
+        assert_eq!(
+            snapshot.for_task(&task),
+            work.processes
+                .iter()
+                .filter(|process| process.completed_at.is_none())
+                .cloned()
+                .collect::<Vec<_>>()
+        );
         let unfinished = ProcessLfid::new();
         {
             let conn = store.conn.lock().unwrap();
@@ -942,13 +935,10 @@ mod tests {
             .unwrap();
             conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,process_lfid,observed_at,payload) VALUES('history','started','open',?1,1,'{}')", [&unfinished]).unwrap();
         }
-        let open = store
-            .task_open_work(&task, &store.open_processes().unwrap())
-            .unwrap();
-        assert_eq!(open.sessions, store.task_work(&task).unwrap().sessions);
-        assert_eq!(open.processes.len(), 3);
+        let open = store.open_processes().unwrap();
+        assert_eq!(open.for_task(&task).len(), 3);
         assert!(open
-            .processes
+            .for_task(&task)
             .iter()
             .any(|process| process.lfid == unfinished));
         // With every Process unfinished, each membership path agrees: checkout,
@@ -962,20 +952,9 @@ mod tests {
              UPDATE processes SET completed_at=NULL;",
             )
             .unwrap();
-        let ids = |work: TaskWork| {
-            work.processes
-                .into_iter()
-                .map(|process| process.lfid)
-                .collect::<Vec<_>>()
-        };
-        let all = ids(store.task_work(&task).unwrap());
+        let all = store.task_work(&task).unwrap().processes;
         assert_eq!(all.len(), 5);
-        assert_eq!(
-            ids(store
-                .task_open_work(&task, &store.open_processes().unwrap())
-                .unwrap()),
-            all
-        );
+        assert_eq!(store.open_processes().unwrap().for_task(&task), all);
         store.conn.lock().unwrap().execute_batch(
             "UPDATE processes SET completed_at=(SELECT completed_at FROM finished WHERE finished.lfid=processes.lfid);
              DROP TABLE finished;",

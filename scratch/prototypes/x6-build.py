@@ -51,6 +51,7 @@ main = f'''
   </div>
 </section>
 <section class="reading">
+  <h2>From a goal to a merged pull request.</h2>
   <ul class="plain">
 {items([
 ("Every Task ends shipped", "Loopflow uses configurable workflows to ensure that Tasks are designed thoughtfully, built simply, shipped, and validated thoroughly, all automatically."),

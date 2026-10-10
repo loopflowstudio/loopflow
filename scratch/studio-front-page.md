@@ -404,3 +404,5 @@ Jack Heart: "Sorry every task ends shipped is just a single line in the
 section. its not the overall title for the seciton". It is now the first item
 of the list, with his sentence as its text; the section has no heading. "It
 ships" became "Sessions stay with the work".
+Jack Heart: "i do think we need a subheader still". Placed over the list in
+`x6`: "From a goal to a merged pull request." Wording open.

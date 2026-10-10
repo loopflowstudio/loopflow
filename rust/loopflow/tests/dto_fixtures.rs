@@ -776,6 +776,13 @@ fn cleanup_receipt_preserves_partial_scan_progress() {
         progress.fairness_after.as_deref(),
         Some(std::path::Path::new("/src/repo.deferred"))
     );
+    assert_eq!(
+        progress.registration_after.as_deref(),
+        Some(std::path::Path::new("/src/repo/.git/worktrees/deferred"))
+    );
+    assert_eq!(progress.registrations_observed, 12);
+    assert!(progress.full_scan_pending);
+    assert!(progress.fairness_next);
     assert_eq!(progress.full_scan_at, None);
     assert_eq!(progress.observed, 8);
     assert_eq!(progress.removed, 2);

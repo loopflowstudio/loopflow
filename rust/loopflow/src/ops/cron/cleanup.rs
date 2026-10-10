@@ -99,7 +99,7 @@ impl CleanupReceipt {
         error: Option<String>,
     ) -> OpsResult<()> {
         let error = error.or_else(|| {
-            (progress.failed > 0).then(|| format!("{} checkout removals failed", progress.failed))
+            (progress.failed > 0).then(|| format!("{} cleanup operations failed", progress.failed))
         });
         self.receipt.finished_at = Some(chrono::Utc::now().timestamp());
         self.receipt.outcome = if error.is_some() {

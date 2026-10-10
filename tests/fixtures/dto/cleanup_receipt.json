@@ -8,6 +8,10 @@
     "full_scan_at": null,
     "full_scan_started": 1791500000000000,
     "fairness_after": "/src/repo.deferred",
+    "fairness_next": true,
+    "registration_after": "/src/repo/.git/worktrees/deferred",
+    "registrations_observed": 12,
+    "full_scan_pending": true,
     "observed": 8,
     "removed": 2,
     "deferred": 5,
@@ -26,5 +30,5 @@
   "finished_at": 1791500001,
   "outcome": "failed",
   "exit_code": 1,
-  "error": "1 checkout removals failed"
+  "error": "1 cleanup operations failed"
 }

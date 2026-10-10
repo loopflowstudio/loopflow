@@ -37,9 +37,10 @@
   initial normalization, registry filesystem I/O, lease discovery and aggregate locked
   observation remain unbounded. Hint/receipt requests use isolated children
   with two-second deadlines plus bounded reaping; descriptor enumeration and spawn
-  precede that clock. Setup still visits all registrations before the 32-candidate
-  cap applies. No aggregate setup bound is proved. An admitted destructive removal
-  is never canceled by these budgets.
+  precede that clock. Per-registration setup now has its own 32-entry window,
+  capped at five seconds admitting work and durably resumed before each read.
+  Initial listing/normalization remains outside that bound. An admitted destructive
+  removal is never canceled by these budgets.
 - Implementation choice, 2026-10-09: retain the 32-observation/eight-removal caps,
   using last-attempt timestamps and a fixed hourly cohort. A receipt-owned fairness
   sweep now interleaves with oldest-first scheduling because failed hint writes cannot
@@ -70,9 +71,17 @@
   view. Neither is selected here; no preservation constraint has been relaxed.
 - Implementation choice, 2026-10-09: read-only registration/hint/receipt requests
   and atomic scheduling writes use distinct subprocess operations, with neither
-  checkout admission nor source-removal capability. Two-second request timeouts do
-  not bound aggregate setup. Lost receipt-write acknowledgments end that receipt's
+  checkout admission nor source-removal capability. Two-second request timeouts
+  do not bound the initial snapshot I/O. Lost receipt-write acknowledgments end that receipt's
   writer; later passes resume published progress under a new receipt. This does not
   select a final-history mechanism, cancel admitted removal, or bound inline lock
   discovery. Interrupted writes may leave administrative temporaries; retained-root
   artifact reclamation remains a follow-up.
+
+- Implementation choice, 2026-10-09: last-attempt priority now applies within bounded
+  registration windows, with receipt-owned continuation between them. A failed hint
+  writer yields the first candidate slot to the fairness sweep on the next pass.
+  Eight stalled hint FIFOs plus three arrivals per tick demonstrate eventual healthy
+  collection and interrupted-entry retry; arbitrary arrival rates remain unproved.
+  Hints first discovered after the hourly cutoff enter settled-owner retries or the
+  next hourly cohort. This changes scheduling only, never source disposition.

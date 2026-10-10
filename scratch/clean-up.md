@@ -183,7 +183,11 @@ manual previews still explain primary retention. Each registration read now feed
 its explicit hint initialization directly, without a second staging inventory.
 Worker replies deserialize directly to the requested type. Tests share canonical
 receipt setup and Git-delay wrappers while retaining their behavioral assertions.
-No known deletion targets remain. Explicit abandonment and persistent-branch
+The unbounded all-registration hint loop is replaced by receipt-resumed setup
+windows; unconditional oldest-first admission after a failed hint write is also
+removed. Registration scheduling still uses Git registrations and constant-size
+receipt progress, not another checkout inventory. No known deletion targets remain.
+Explicit abandonment and persistent-branch
 restart retain their separate authority; missing-registration repair does not
 justify restoring broad metadata pruning.
 
@@ -310,18 +314,48 @@ now use canonical main-repository keys; earlier alias-key fixtures did not
 establish resumption by the real maintenance pass. The repaired 41-failure
 fixture passes with that shared key.
 
+### Bounded registration setup — 2026-10-09
+
+Registration hint setup now admits at most 32 entries in a separate window of
+`min(admission_time, 5 seconds)`. An admitted receipt/read/initialization sequence
+finishes under the existing per-request limits; this is not an end-to-end five-second
+bound. The receipt saves `registration_after` before each entry's I/O, so failed
+reads and interruption cannot restart every tick at the same stalled registrations.
+Only successfully read entries enter candidate scheduling. No unread registration
+receives removal authority. The candidate admission window remains separate, and
+admitted destructive removal is still uncanceled.
+
+Last-attempt priority operates within each setup window; the durable registration
+sweep reaches other windows. The existing candidate sweep now gets the first slot
+after a failed/interrupted hint publication. This closes the case where one stalled
+oldest hint consumed every admission window before its fairness lane could run.
+Receipt `full_scan_pending` conservatively records incomplete hourly coverage across
+windows and interruption. Newly discovered hints after the fixed timestamp enter
+ordinary settled-owner retries immediately, or the next hourly cohort otherwise.
+Setup failures now identify the affected Git administrative path in the report;
+receipt counts distinguish registration reads from checkout observations. The
+Rust-only receipt DTO fixture covers the added scheduling fields.
+
+Real-FIFO evidence: eight stalled registrations, interruption after durable setup
+admission, and three arrivals per tick beside a one-removal cap. Each pass remains
+below six seconds in this fixture, all stalled registrations get retries (including
+the interrupted entry), and the healthy checkout is eventually removed. A separate
+stalled hint-writer fixture uses a shorter admission window than the write timeout
+and proves its healthy neighbor still collects. These are finite-workload proofs,
+not arbitrary arrival-rate or kernel-uninterruptible-I/O guarantees.
+
 ### Remaining in this PR
 
-Reconciled 2026-10-09 through `467951af7`, including `5d197652a`: setup I/O
-isolation now joins failed-hint fairness, cheap previews and composed backfill
-coverage. Exact-head settlement and fail-closed locked evidence checks are unchanged.
-Neither setup isolation nor early protection matches resolves the final-observation
-counterexample below. The locally available `origin/main` has no commits absent from this branch; no remote refresh is claimed.
+Implementation update 2026-10-09 builds on reconciliation at `f800facfa` and
+setup-I/O isolation in `5d197652a` / `467951af7`. Bounded registration hint setup
+and its retry proofs are above. Exact-head settlement and fail-closed locked
+evidence checks are unchanged. Item 2 remains a mechanism-review boundary.
 
-1. **Finish bounded observation and failure isolation.** The requested separation
-   of setup reads, scheduling writes and checkout admission exists in `5d197652a`
-   and `467951af7`; the completed slice and its FIFO proofs are above. It does not
-   finish the bounded-pass requirement.
+1. **Finish bounded observation and failure isolation.** Per-registration setup
+   no longer visits every hint before candidate limits: it has its own count/time
+   admission limits and durable continuation. Setup-window ordering replaces global
+   oldest-first sorting; old deferrals retain priority within a window, and the sweep
+   carries coverage across windows. Arbitrary sustained arrival rates remain unproved.
 
    Global lock-file creation, initial registration normalization, registry filesystem
    opens/normalization, checkout/Git lease discovery and aggregate locked observation
@@ -330,16 +364,15 @@ counterexample below. The locally available `origin/main` has no commits absent 
    reaping before handing off an OS-stuck child. A two-second request deadline is
    therefore not a two-second end-to-end request guarantee.
 
-   `checkout_attempts` visits every registration before candidate admission starts.
-   The 32-observation cap limits admitted candidates, not these setup reads or missing
-   hint writes. Bound aggregate setup with durable progress and preserve retry
-   fairness; also isolate remaining preparatory I/O without giving canceled workers
-   checkout locks or a continuation into deletion. Directory enumeration failure
-   can still defer the repository. The 41-failure fixture covers immediate write
-   failures, not many stalled paths or a whole-pass time bound; FIFO fixtures do not
-   simulate kernel-uninterruptible calls. Destructive removal must remain outside
+   The initial Git registration snapshot and administrative-directory enumeration
+   remain repository-wide reads. Their failures can still defer the repository;
+   hint-FIFO fixtures do not prove healthy progress through a stalled Git `gitdir`
+   read or a stalled canonicalization in that snapshot. The new setup window bounds
+   admission of per-registration reads/writes, not these remaining aggregate costs.
+   Isolate remaining preparatory I/O without giving canceled workers checkout locks
+   or a continuation into deletion. Destructive removal must remain outside
    cancellation. Dependent final-history changes still require item 2's mechanism
-   review; no replacement is selected by this reconciliation.
+   review; no replacement is selected here.
 2. **Revise final evidence observation before dependent implementation.** The
    opt-in `cleanup_evidence_cost_probe` measures already-complete raw projection,
    fresh path resolution and native traversal separately—no backfill is timed.
@@ -447,4 +480,4 @@ allocated bytes by category; observed free-space delta after collection; oldest
 eligible retention age. APFS sharing, hardlinks and concurrent writers mean
 directory sums are estimates, not guaranteed reclaimed bytes.
 
-Check: realign `git diff --check` — passed (prose only); prior `cargo test -p loopflow --lib cleanup_setup_` — 7 passed; focused failed-hint fairness, oldest-deferral, slow-candidate, slow-registration and receipt tests — 5 passed; real CLI I/O protocol smoke, `cargo build -p loopflow --bin lf`, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check` — passed; full acceptance/provider resume: gate; installed scheduler/upgrade: demo.
+Check: `cargo test -p loopflow --lib cleanup_setup_stalled_` — 4 passed; focused oldest-deferral, failed-hint-window and slow-candidate/hourly tests — 3 passed; `cargo test -p loopflow --test dto_fixtures cleanup_receipt_preserves_partial_scan_progress` — passed; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` — passed; full acceptance/provider resume: gate; installed scheduler/upgrade: demo.

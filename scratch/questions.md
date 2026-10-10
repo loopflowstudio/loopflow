@@ -82,20 +82,21 @@ These lookup choices grant no shared identity or publication.
 Primary and stack-parent Task selectors now carry repository-scoped full IDs through
 dispatch; an unscoped ambiguous prefix still fails.
 
-October 9 admission pass: complete launch source
-`.lf/tmp/context/3cd5d164677da41865fc1946879990300baef07faf077ea16966ddef54b9b947.md`
-contains the directive, steers and 266 clean committed inventory records. Current
-`lf context --skill implement` reports 34,560 generated Work-seed tokens (18,560
-over 16,000); authored-note curation cannot remove that generated inventory.
-Limits remain unchanged.
+## Context budget — October 9
+
+`lf context --skill compress` reports 34,459 generated Work-seed tokens, 18,459
+above the 16,000-token goal limit. The complete launch source
+`.lf/tmp/context/1a1d1aa2d9e3d58f7fd882ca72ac0a3b4e1b55b528f03b726667cb9fb02a92eb.md`
+contains the directive and 266-file committed inventory. Authored-note curation
+cannot remove that generated inventory; limits remain unchanged.
 
 ## Admission authority — October 9, unresolved
 
-The plan's admission counterexample requires a shared arbitration domain, not
-another routing check. The proposed pinned admission Machine/key is unreviewed;
-its establishment, identity association and unavailable-Machine recovery need a
-decision. No coordinator was inferred from delegation, Git destinations or local
-absence. First-start refusal remains; the requested working path is unfinished.
+The [plan's admission boundary](compare-cmux-s-command-line.md#admission-authority--unresolved-october-9)
+owns the counterexample, unreviewed Machine/key proposal and required proof.
+Who establishes the arbitration binding, how associated identities share it, and
+how unavailable-Machine recovery works remain undecided. No coordinator is inferred;
+first-start refusal stays, without claiming the requested path is complete.
 
 ## Explicit repository association — October 9
 

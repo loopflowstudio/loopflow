@@ -193,6 +193,14 @@ Reuse these owners.
 
 ## Delete — do not maintain
 
+- Retire `scratch/design-walkthrough.html`: its October 8 simulation duplicates
+  this plan and still calls implemented routing/preview work proposed. The reviewed
+  artifact remains at `4c43550c2:scratch/design-walkthrough.html`; it is neither
+  current status nor native acceptance. The command comparison stays maintained.
+- Delete the duplicate sharing query in `children::require_task_planning`;
+  routing and transactional preparation use `repositories::task_is_shared_in`.
+  Both refusal boundaries remain until exclusive admission has an accepted owner.
+
 Completed removal details and preserved behaviors: `5825f95d9:scratch/compare-cmux-s-command-line.md`,
 this heading; pre-edit reconciled notes: `/tmp/loo427-shell-files-before/`.
 - Keep `TaskSource`, started-Task transfer, copied child assignments and remote callback
@@ -223,55 +231,47 @@ then finish exclusive first-start admission. Existing delegation exchange and re
 observation must not be redone. Stacking on LOO-412 is authorized if necessary: inspect
 its committed API/integration state and use supported lf operations, never dirty peer code.
 
-Remote companions are checkpointed at `7aa8a5eb5`, selectors at `2c5610ca4`,
-and inspected-owner simplification at `1f0f64150`. These supersede the earlier
-step feedback naming remote shells/file observation as the next missing behavior.
-Existing Work resolution plus one Desktop inspection captures internal lifetime tokens.
-LOO-412 frontier `a60d5594a` has identical `planning_git.rs`: publication/readback,
-not exclusive admission. No stack/sync or dirty-checkout edit occurred.
+Remote companions (`7aa8a5eb5`) and selectors (`2c5610ca4`/`1f0f64150`) are
+checkpointed. Work resolution plus one Desktop inspection captures lifetime tokens;
+older feedback naming these as unimplemented is superseded. No stack/sync or
+dirty-checkout edit occurred.
 
-**Admission needs an authority decision before implementation can continue (October 9).**
-Both `task_location::resolve` and `require_task_planning` need the same exclusive
-result before Git preparation. Required proof remains: two independent Machines
-allocate/start exactly once; lost replies and disconnects retain the winner;
-later delegation cannot move it; repeat import cannot replay execution. No runtime
-replication, Task transfer, duplicate Flow, publication or merge is authorized.
+#### Admission authority — unresolved October 9
 
-#### Admission counterexample and revised design boundary — October 9
+`task_location::resolve` and `require_task_planning` still refuse shared first
+start. The shared membership predicate removes duplicated SQL, not either
+boundary. Local-only work, planning saves/acquisition and retained execution
+remain usable. Jack Heart's requested delegated-start outcome is unfinished.
 
-The implementation pass stopped at this boundary; Jack Heart's requested outcome
-is unchanged. `planning_git_tests` now demonstrates both failures of using planning
-confirmation as admission: divergent revisions both confirm after reconciliation,
-and two independent clones concurrently confirm conflicting delegation for the
-same Task through different refs. These are opaque transport documents, not Task
-allocation or running-Flow proof. Local checkout locks live beside each database;
-`place_task` serializes only that Machine. Peer observation has no reservation.
-The inspected LOO-412 `a60d5594a` transport is byte-identical to this checkout.
-No stack operation or peer-checkout edit supplies a missing arbitration operation.
+**Contrary evidence:** `4c43550c2`'s `planning_git_tests` shows divergent revisions
+both confirming after reconciliation, and independent clones concurrently
+confirming conflicting delegation through different refs. These are transport
+counterexamples, not Task allocation or running-Flow proof. LOO-412 `a60d5594a`
+has identical transport code; stacking supplies no missing arbitration operation.
 
-A deterministic choice among locally visible destinations does not repair this:
-Machines may see different destination sets, and delegation can change while an
-older claimant is disconnected. A late conflict cannot undo an already started
-Flow. Putting a winning claim into exchanged planning would violate the accepted
-execution boundary. The temporary refusal therefore remains, not as completion.
+Local locks/transactions and negative peer readings cannot reserve cross-Machine
+execution. Choosing among visible destinations also fails: Machines can see
+unequal sets, or an older claimant can disconnect before delegation changes.
+A late conflict cannot undo a running Flow; exchanging the winner as planning
+would violate the accepted execution boundary.
 
-**Unreviewed proposal:** pin one admission Machine and stable admission key for
-shared Task identity, independent of mutable delegation, repository locators and
-planning destinations. That Machine would serialize an explicit admission command
-in its existing local store and retain the winning execution Machine before either
-checkout preparation or launch. The execution Machine would retain its own Workflow,
-checkout and processes; ordinary import would never run admission or copy claims.
-Lost responses would read the same decision; unavailable arbitration could not
-permit a replacement winner. This is a new execution coordination contract, not
-an accepted planner callback or a reversible selector default.
+**Unreviewed proposal:** pin one admission Machine/key for shared Task identity,
+independent of delegation, repository locators and planning destinations. Its
+existing store serializes an explicit admission operation and retains the winner
+before checkout preparation. Execution stays on the winning Machine; import
+copies no claims and starts nothing. Lost replies read the same decision;
+unavailability cannot elect a replacement.
 
-The design must settle who establishes that immutable binding, how historical and
-explicitly associated Task identities converge on it, and recovery when its Machine
-is unavailable. No existing provider receipt, Machine registry or destination
-selection establishes that authority. Choosing a coordinator silently would add a
-permanent availability dependency. Review must select this contract or another
-single arbitration domain before the two refusal boundaries can be replaced.
-Required concurrency/retry/delegation/import fixtures above remain unfinished.
+Review must settle who establishes that immutable binding, how historical and
+explicitly associated identities converge on it, and unavailable-Machine recovery,
+or choose another single arbitration domain. No current receipt, registry or
+destination selection supplies that authority. Silently choosing one adds a
+permanent availability dependency, not a reversible default.
+
+**Required proof:** two independent Machines allocate/start exactly once; retries
+and disconnects retain the winner; later delegation cannot move it; repeat import
+cannot replay execution. No runtime replication, Task transfer, duplicate Flow,
+publication or merge is authorized. Earlier design: `4c43550c2`, this section.
 
 ### 2. Shared Work identity, delegation and routing
 
@@ -521,4 +521,4 @@ identity/delegation, open them, add shell/Files panes, retain an unfinished draf
 change focus, target a harmless command, read output, hide/restore, and verify the
 original input target and draft survive. Demo owns native usability; preserve comparison evidence and use no real accounts or live user terminals.
 
-Check: `cargo test -p loopflow --test planning_git_tests` — 9 PASS; `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` — PASS. Earlier checks: `1f0f64150`/`7aa8a5eb5`; broader gate/CI and configured/native demo remain.
+Check: `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`, lib-test build, `git diff --check` — PASS; network-isolated lib tests `independent_peer_tasks_converge_without_transferring_execution` and `conflicting_and_negative_location_readings_never_choose_a_launch_destination` — 2 PASS. Planning transport's 9-test pass: `4c43550c2`; broader checks remain with gate/CI, configured/native proof with demo.

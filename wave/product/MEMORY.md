@@ -43,9 +43,8 @@ authorized through demo review. Owned cmux probe cleaned up.
 
 October 8: LOO-427 leaves unknown checkout location unavailable. `92cafe61d`
 removes copied placements, preserves legacy overrides and routes known Tasks
-without rewriting Machine defaults. Placement suites remain with gate.
-Neither negative peer observation nor local SQLite reserves first start; runtime
-must not synchronize. Seeded IDs prove routing, not exchange/admission.
+without rewriting Machine defaults. Gate retains placement suites;
+seeded IDs prove routing, not exchange/admission.
 
 `desktop text/key` reuse existing owners: Jack selected cursor insertion into
 drafts with Enter separate; control-text/IME limits are reversible. Verified lf3
@@ -166,16 +165,18 @@ Session-only/Changes links share Files preparation; recording copies transport
 classification as well as closures, or remote paths regain local affordances.
 SSH preserves stdin/native Home. Mixed exchange, admission and running-Flow/configured-SSH/native proof remain.
 
-October 9: `7aa8a5eb5` composes owner-pinned shells/file invalidations over SSH.
-Fencing retains drafts; no local fallback, shell replay or filesystem CAS.
-Jack Heart ordered companions, selectors, then exclusive first-start admission.
-`2c5610ca4`/`1f0f64150` replace public JSON targets/tokens with
-`--repo`/`--task` and optional `--pane`. One eligible pane is implicit; ambiguity
-lists choices, absence dispatches nothing. Move/resize retain the inspected workspace;
-focus cannot retarget. Native acceptance remains unproved. Admission remains
-unimplemented: planning confirmation establishes ancestry, not an execution winner. Jack authorized stacking
-on committed LOO-412 if needed, never dirty peer work or runtime replication.
-Delegation exchange and recorded-owner observation remain composed.
+`7aa8a5eb5`: owner-pinned SSH shells/file invalidations retain drafts; no local
+fallback, replay or filesystem CAS. Jack Heart ordered companions, selectors, then
+admission (October 9).
+`2c5610ca4`/`1f0f64150` replace public JSON targets/tokens with `--repo`/`--task`
+and optional `--pane`. Unique panes are implicit; ambiguity/absence dispatches
+nothing. Arrangement stays owner-pinned; native acceptance remains unproved.
+
+**Confirmation cannot elect execution.** `4c43550c2`: divergent revisions and
+independent refs both confirm, without Task-allocation proof. Admission remains
+unimplemented; a pinned Machine/key is unreviewed. Establishment, associated
+identity and unavailable-Machine recovery need a decision. Jack authorized committed
+LOO-412 stacking, never dirty peer work or runtime replication.
 
 ## Task delivery boundary (LOO-418, reconciled 2026-10-09)
 

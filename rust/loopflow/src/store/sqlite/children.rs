@@ -1021,13 +1021,7 @@ pub(super) fn require_task_not_deleted(conn: &Connection, task: &Task) -> StoreR
 /// evidence still applies; missing inventory cannot erase the saved Task.
 pub(super) fn require_task_planning(conn: &Connection, task: &Task) -> StoreResult<()> {
     require_task_planning_identity(conn, task)?;
-    if task.worktree.is_none()
-        && conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM planning_members WHERE kind='task' AND object_id=?1)",
-            [task.id.as_str()],
-            |row| row.get::<_, bool>(0),
-        )?
-    {
+    if task.worktree.is_none() && super::repositories::task_is_shared_in(conn, &task.id)? {
         // Planning exchange excludes execution. Neither a local absence nor a
         // negative peer reading can reserve first start across Machines.
         return Err(StoreError::InvalidAuthority(

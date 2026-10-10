@@ -32,6 +32,16 @@ pub(super) fn repository_id_in(conn: &Connection, repo: &str) -> StoreResult<Opt
     .transpose()
 }
 
+/// Routing and transactional preparation use the same sharing boundary.
+/// Membership is planning evidence, never an execution reservation.
+pub(super) fn task_is_shared_in(conn: &Connection, task: &TaskId) -> StoreResult<bool> {
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM planning_members WHERE kind='task' AND object_id=?1)",
+        [task.as_str()],
+        |row| row.get(0),
+    )?)
+}
+
 impl SqliteStore {
     /// Read execution only on its owning Machine. Foreign cached placements do
     /// not become another authority; peers must read that Machine themselves.
@@ -88,11 +98,7 @@ impl SqliteStore {
 
     pub fn task_is_shared(&self, task: &TaskId) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM planning_members WHERE kind='task' AND object_id=?1)",
-            [task.as_str()],
-            |row| row.get(0),
-        )?)
+        task_is_shared_in(&conn, task)
     }
 
     pub fn task_execution_route(&self, task: &TaskId) -> StoreResult<TaskExecutionRoute> {

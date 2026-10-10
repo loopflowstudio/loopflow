@@ -1,7 +1,7 @@
 {
   "base": "906576f39d4f0dc0c1c7e87c6ecbc178a44fb3e8",
-  "head": "a60d5594a821a780854ca3955bbd56e8a49910f9",
-  "working_tree": true,
+  "head": "2588b1ca277e1a1a080488b3a31abaae82505685",
+  "working_tree": false,
   "sources": [
     {
       "path": "rust/loopflow/src/engine/config.rs",

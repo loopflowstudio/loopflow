@@ -539,6 +539,24 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// Select the native conversation observed by the currently attached provider.
+    pub fn record_session_agent_session(
+        &self,
+        session: &str,
+        expected: &SessionAttachment,
+        thread: &AgentSessionId,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        require_attachment_in(&tx, session, expected)?;
+        tx.execute(
+            "UPDATE agent_sessions SET provider_thread=?2 WHERE id=?1",
+            params![session, thread],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn record_session_connection(
         &self,
         session: &str,
@@ -1689,6 +1707,12 @@ mod attachment_tests {
         assert_eq!(first.provider_lf_process_id, third.provider_lf_process_id);
         assert_eq!(first.agent_process_id, third.agent_process_id);
         assert_ne!(first.token, third.token);
+        assert!(store
+            .record_session_agent_session("conversation", &first, &"stale-history".into())
+            .is_err());
+        store
+            .record_session_agent_session("conversation", &third, &"native-history".into())
+            .unwrap();
         assert_eq!(
             store.session_connection("conversation").unwrap(),
             Some(("endpoint".into(), "native-history".into()))

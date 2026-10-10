@@ -238,6 +238,9 @@ A draft must `depends_on` main's unreleased drafts: name order broke their
 frontier fixtures in the materialized run only. PR CI defers every job while
 `scratch/` holds files: no hosted proof before landing.
 
+LOO-450 unifies headless Claude with native turn recording and schema delivery.
+Configured Flow acceptance remains unproved.
+
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)
 
 Jack Heart selected LfSession/LfProcess (#1516) and AgentSession (#1517), both

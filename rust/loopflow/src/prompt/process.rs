@@ -198,6 +198,7 @@ pub(crate) fn preview_process_prompt(
         system_prompt,
         task_prompt,
         skill_invocation,
+        output_schema: None,
         agent: Some(agent),
         max_turns,
         resume_token: None,

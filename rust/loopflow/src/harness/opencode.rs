@@ -904,6 +904,7 @@ mod tests {
             &AgentConfig {
                 task_prompt: "task".to_string(),
                 skill_invocation: None,
+                output_schema: None,
                 ..Default::default()
             },
             true,
@@ -1045,6 +1046,7 @@ mod tests {
             system_prompt: String::new(),
             task_prompt: String::new(),
             skill_invocation: None,
+            output_schema: None,
             agent: Some("opencode".to_string()),
             cwd: Some(std::env::temp_dir()),
             max_turns: None,

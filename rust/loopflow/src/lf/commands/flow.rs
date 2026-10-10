@@ -623,6 +623,7 @@ impl SkillExecutor for &RunningFlow<'_> {
         let mut step_cli = self.launcher.process_options();
         // spawn carries verbosity for skills, operations, and correction turns.
         step_cli.verbose = false;
+        step_cli.output_schema = output.as_ref().map(FlowOutput::schema);
         step_cli.account.clear();
         step_cli.only_account.clear();
         step_cli.isolate = false;
@@ -684,6 +685,8 @@ impl SkillExecutor for &RunningFlow<'_> {
             );
             args = vec![
                 "--batch".to_owned(),
+                "--output-schema".to_owned(),
+                output.schema().to_string(),
                 "session".to_owned(),
                 "resume".to_owned(),
                 conversation,

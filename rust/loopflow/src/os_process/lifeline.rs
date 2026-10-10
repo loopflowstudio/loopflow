@@ -23,7 +23,7 @@ kill -s KILL -- "-$1" 2>/dev/null"#;
 pub(crate) fn spawn_agent_process(
     mut command: tokio::process::Command,
     path: &Path,
-    record: impl FnOnce(u32) -> std::io::Result<()> + Send,
+    record: impl FnOnce(u32, i64) -> std::io::Result<()> + Send,
 ) -> std::io::Result<tokio::process::Child> {
     let (reader, writer) = open_lifeline(path)?;
     let null = above_stdio(File::options().write(true).open("/dev/null")?)?;
@@ -38,11 +38,8 @@ pub(crate) fn spawn_agent_process(
     })?;
     let mut identity = None;
     let child = recording.spawn(
-        |pid| {
-            let started = crate::journal::process_started_at(pid)?.ok_or_else(|| {
-                std::io::Error::other("AgentProcess birth unavailable before exec")
-            })?;
-            record(pid)?;
+        |pid, started| {
+            record(pid, started)?;
             identity = Some((pid, started));
             Ok(())
         },
@@ -61,7 +58,7 @@ pub(crate) fn spawn_agent_process(
 /// process group, controlling terminal, stdio or signal behavior.
 pub(crate) fn spawn_native_agent_process(
     mut command: std::process::Command,
-    record: impl FnOnce(u32) -> std::io::Result<()> + Send,
+    record: impl FnOnce(u32, i64) -> std::io::Result<()> + Send,
 ) -> std::io::Result<std::process::Child> {
     let recording = SpawnRecording::prepare(&mut command, || Ok(()))?;
     recording.spawn(record, move || {
@@ -103,7 +100,7 @@ impl SpawnRecording {
 
     fn spawn<T>(
         self,
-        record: impl FnOnce(u32) -> std::io::Result<()> + Send,
+        record: impl FnOnce(u32, i64) -> std::io::Result<()> + Send,
         spawn: impl FnOnce() -> std::io::Result<T>,
     ) -> std::io::Result<T> {
         // Command::spawn waits for exec; recording on its thread would deadlock.
@@ -121,7 +118,13 @@ impl SpawnRecording {
                         }
                         Err(error) => return Err(error),
                     }
-                    record(u32::from_ne_bytes(pid))?;
+                    let pid = u32::from_ne_bytes(pid);
+                    // Capture birth once while the child waits before exec. Custody
+                    // and the durable record must use this same observation.
+                    let started = crate::journal::process_started_at(pid)?.ok_or_else(|| {
+                        std::io::Error::other("AgentProcess birth unavailable before exec")
+                    })?;
+                    record(pid, started)?;
                     parent.write_all(b".")
                 })?;
             let spawned = spawn();
@@ -389,7 +392,11 @@ mod tests {
             .stdout(slave.try_clone().unwrap())
             .stderr(slave);
         let mut recorded = None;
-        let mut child = spawn_native_agent_process(command, |pid| {
+        let mut child = spawn_native_agent_process(command, |pid, started| {
+            assert_eq!(
+                crate::journal::process_started_at(pid).unwrap(),
+                Some(started)
+            );
             assert!(!marker.exists(), "provider code ran before recording");
             // SAFETY: queries only; no process is signalled or modified.
             unsafe {
@@ -414,13 +421,14 @@ mod tests {
             .env_clear()
             .args(["-c", "printf executed > \"$1\"", "fixture"])
             .arg(&marker);
-        let error =
-            spawn_native_agent_process(command, |_| Err(std::io::Error::other("record refused")))
-                .unwrap_err();
+        let error = spawn_native_agent_process(command, |_, _| {
+            Err(std::io::Error::other("record refused"))
+        })
+        .unwrap_err();
         assert_eq!(error.to_string(), "record refused");
         assert!(!marker.exists());
         let error =
-            spawn_native_agent_process(Command::new(root.path().join("absent")), |_| Ok(()))
+            spawn_native_agent_process(Command::new(root.path().join("absent")), |_, _| Ok(()))
                 .unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
     }
@@ -486,7 +494,7 @@ mod tests {
             .stderr(Stdio::null());
         let fifo = std::env::var_os(ATTACHED_FIFO).unwrap();
         let out = std::env::var(ATTACHED_OUT).unwrap();
-        let agent = spawn_agent_process(command, Path::new(&fifo), |pid| {
+        let agent = spawn_agent_process(command, Path::new(&fifo), |pid, _| {
             if mode == "before_exec" {
                 // The parent recorder stalls after watchdog readiness, before
                 // exec. Killing this lf must end the waiting child too.
@@ -511,7 +519,7 @@ mod tests {
     }
 
     /// Start the throwaway lf process and return it with its agent's group.
-    fn spawn_attached_lf(mode: &str, dir: &Path, fifo: Option<&Path>) -> (Child, u32) {
+    fn spawn_attached_lf(mode: &str, dir: &Path, fifo: &Path) -> (Child, u32) {
         let out = dir.join(format!("agent-{mode}"));
         let mut command = Command::new(std::env::current_exe().unwrap());
         command
@@ -525,11 +533,7 @@ mod tests {
             .env(ATTACHED_OUT, &out)
             .stdout(Stdio::null())
             .stderr(Stdio::null());
-        command.env(
-            ATTACHED_FIFO,
-            fifo.map(Path::to_path_buf)
-                .unwrap_or_else(|| dir.join(format!("{mode}.lifeline"))),
-        );
+        command.env(ATTACHED_FIFO, fifo);
         let attached_lf = command.spawn().unwrap();
         assert!(
             wait_until(|| out.exists()),
@@ -541,7 +545,8 @@ mod tests {
 
     fn agent_dies_when_attached_lf_ends(mode: &str, signal: Option<libc::c_int>) {
         let dir = tempfile::tempdir().unwrap();
-        let (mut attached_lf, agent) = spawn_attached_lf(mode, dir.path(), None);
+        let (mut attached_lf, agent) =
+            spawn_attached_lf(mode, dir.path(), &dir.path().join("lifeline"));
         if let Some(signal) = signal {
             assert!(group_alive(agent));
             // SAFETY: signals only the throwaway lf process this test spawned.
@@ -577,7 +582,7 @@ mod tests {
     fn agent_survives_its_first_attached_lf_while_another_holds_the_lifeline() {
         let dir = tempfile::tempdir().unwrap();
         let fifo = dir.path().join("agent.lifeline");
-        let (mut attached_lf, agent) = spawn_attached_lf("handoff", dir.path(), Some(&fifo));
+        let (mut attached_lf, agent) = spawn_attached_lf("handoff", dir.path(), &fifo);
         // Acquire before the claim: launcher death in that interval is safe.
         let custody = hold_agent_process_lifeline(&fifo).unwrap();
         let started = crate::journal::process_started_at(agent).unwrap().unwrap();
@@ -598,7 +603,7 @@ mod tests {
         for launcher_first in [true, false] {
             let dir = tempfile::tempdir().unwrap();
             let fifo = dir.path().join("agent.lifeline");
-            let (mut launcher, agent) = spawn_attached_lf("launcher", dir.path(), Some(&fifo));
+            let (mut launcher, agent) = spawn_attached_lf("launcher", dir.path(), &fifo);
             // A failed attachment drops only its prospective custody.
             drop(hold_agent_process_lifeline(&fifo).unwrap());
             let ready = dir.path().join("holder-ready");
@@ -641,7 +646,7 @@ mod tests {
         let fifo = dir.path().join("lifeline");
         let mut command = tokio::process::Command::new("/bin/sh");
         command.env_clear().args(["-c", "/bin/sleep 60 & exit 0"]);
-        let mut child = spawn_agent_process(command, &fifo, |_| Ok(())).unwrap();
+        let mut child = spawn_agent_process(command, &fifo, |_, _| Ok(())).unwrap();
         let pid = child.id().unwrap();
         assert!(child.wait().await.unwrap().success());
         std::thread::sleep(Duration::from_secs(3));
@@ -660,7 +665,7 @@ mod tests {
         let fifo = dir.path().join("lifeline");
         let mut command = tokio::process::Command::new("/bin/sh");
         command.args(["-c", "exit 0"]);
-        let mut child = spawn_agent_process(command, &fifo, |_| Ok(())).unwrap();
+        let mut child = spawn_agent_process(command, &fifo, |_, _| Ok(())).unwrap();
         let pid = child.id().unwrap();
         assert!(child.wait().await.unwrap().success());
         assert!(wait_until(|| !group_alive(pid)));
@@ -683,7 +688,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let fifo = dir.path().join("lifeline");
         let command = tokio::process::Command::new(dir.path().join("absent-provider"));
-        let error = spawn_agent_process(command, &fifo, |_| Ok(())).unwrap_err();
+        let error = spawn_agent_process(command, &fifo, |_, _| Ok(())).unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
         assert!(
             wait_until(|| {
@@ -711,13 +716,18 @@ mod tests {
             ])
             .arg(&record)
             .arg(&executed);
-        let mut child = spawn_agent_process(command, &dir.path().join("lifeline"), |pid| {
-            assert!(!executed.exists());
-            // SAFETY: read metadata of the throwaway child supplied by spawn.
-            assert_eq!(unsafe { libc::getpgid(pid as i32) }, pid as i32);
-            std::fs::write(&record, pid.to_string())
-        })
-        .unwrap();
+        let mut child =
+            spawn_agent_process(command, &dir.path().join("lifeline"), |pid, started| {
+                assert_eq!(
+                    crate::journal::process_started_at(pid).unwrap(),
+                    Some(started)
+                );
+                assert!(!executed.exists());
+                // SAFETY: read metadata of the throwaway child supplied by spawn.
+                assert_eq!(unsafe { libc::getpgid(pid as i32) }, pid as i32);
+                std::fs::write(&record, pid.to_string())
+            })
+            .unwrap();
         assert!(child.wait().await.unwrap().success());
         assert_eq!(std::fs::read(&executed).unwrap(), b"recorded");
     }
@@ -731,7 +741,7 @@ mod tests {
         command
             .args(["-c", "printf executed > \"$1\"", "fixture"])
             .arg(&executed);
-        let error = spawn_agent_process(command, &fifo, |_| {
+        let error = spawn_agent_process(command, &fifo, |_, _| {
             Err(std::io::Error::new(
                 std::io::ErrorKind::PermissionDenied,
                 "attachment changed",
@@ -754,7 +764,7 @@ mod tests {
         let record = dir.path().join("record");
         let mut command = tokio::process::Command::new("/bin/sh");
         command.current_dir(dir.path().join("absent"));
-        let error = spawn_agent_process(command, &dir.path().join("lifeline"), |pid| {
+        let error = spawn_agent_process(command, &dir.path().join("lifeline"), |pid, _| {
             std::fs::write(&record, pid.to_string())
         })
         .unwrap_err();
@@ -778,7 +788,7 @@ mod tests {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         let mut child =
-            spawn_agent_process(command, &dir.path().join("lifeline"), |_| Ok(())).unwrap();
+            spawn_agent_process(command, &dir.path().join("lifeline"), |_, _| Ok(())).unwrap();
         child
             .stdin
             .take()

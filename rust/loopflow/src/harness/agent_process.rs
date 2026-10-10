@@ -2,8 +2,7 @@
 //! Unknown identity, duplicate PID/birth and unknown attachment life grant no signal authority.
 use crate::id::LfProcessId;
 use crate::journal::{
-    process_evidence, process_identity_evidence, process_started_at, OsProcess,
-    ProcessIdentityEvidence,
+    process_evidence, process_identity_evidence, OsProcess, ProcessIdentityEvidence,
 };
 use crate::os_process::terminate_process_group;
 use crate::process::SessionAttachment;
@@ -34,10 +33,8 @@ pub(super) fn open_owner(
 /// reach its record under the owner's attachment before the provider runs.
 fn record_identity(
     (store, session, attachment): &AttachmentOwner,
-) -> impl FnOnce(u32) -> std::io::Result<()> + Send + '_ {
-    move |pid| {
-        let started_at = process_started_at(pid)?
-            .ok_or_else(|| std::io::Error::other("AgentProcess birth unavailable before exec"))?;
+) -> impl FnOnce(u32, i64) -> std::io::Result<()> + Send + '_ {
+    move |pid, started_at| {
         store
             .record_agent_process_identity(session, attachment, pid, started_at)
             .map_err(std::io::Error::other)

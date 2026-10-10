@@ -48,8 +48,9 @@ Jack has not selected its removal.
 The October 9 draft is implemented. `sync_planning` preserves its supplied
 checkout through `pm_sync_async`; preflight captures summaries before mutations,
 using creation's description normalization. Initiative observations retain their
-summaries. Only changed name/description fields are sent through the existing
-update operation; standalone rename omits description. Provider errors or missing
+summaries. Preflight carries the checked Initiative and changed fields directly
+into apply, removing repeated binding reads, comparisons and map indexing.
+Only changed name/description fields are sent through the existing update operation; standalone rename omits description. Provider errors or missing
 success acknowledgements return failure, without automatic write retry.
 
 Missing GOAL.md is diagnosed before mutation; an existing empty objective can
@@ -86,4 +87,4 @@ Release is the only immediate child directory with memory. Its top-level goal
 and full memory were read; the operation-entry lesson above remains applicable,
 with release-specific history retained there.
 
-Checks: `cargo check -p loopflow --lib`, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, and three focused sync tests pass; gate/CI own broader and installed acceptance.
+Checks: `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, and `cargo test -p loopflow --lib wave_summary_sync_reads_direct_checkout_edits -- --test-threads=1` pass after compression; gate/CI own broader and installed acceptance.

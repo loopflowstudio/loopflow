@@ -6,7 +6,9 @@
   new files as explicitly required. No stored-document compatibility path remains.
 - Relocation remains a registry-address operation; authored directories are not
   silently moved or overwritten. Direct file authoring owns their placement too.
-- 2026-10-09: Jack Heart requested a test proving sync sends the edited summary,
-  but `pm_sync_async` has no summary writer; only Initiative creation sends it.
-  Adding that behavior needs reconciliation with the narrow test-only scope.
-  Branch-versus-main selection remains explicitly open, not chosen here.
+- 2026-10-09: Jack Heart's mocked-sync acceptance requires a missing summary
+  writer. The plan now sketches that narrow implementation, without treating a
+  creation/config-reader test as acceptance. Branch-versus-main policy stays
+  open; the draft preserves sync's supplied checkout path rather than choosing
+  another checkout. Missing GOAL.md is diagnosed before outbound mutation, not
+  treated as permission to clear the provider summary.

@@ -54,11 +54,35 @@ accept only ID/name. `pm_init_async` sends the summary only on creation, not
 reconnection. The requested mocked sync test therefore needs missing behavior,
 not merely verification; testing creation or the config reader would not satisfy it.
 
-Publication remains withheld pending a sync-writing design. Branch-versus-main
-selection remains open for Jack; currently sync publishes neither summary.
-After resolving the writer, prove two sync invocations around a direct GOAL.md
-edit against a mocked provider, with no import/save. Preserve distinct main and
-worktree bytes and report observed selection without claiming Jack chose it.
+### Narrow writer design (draft, October 9)
+
+Jack's requested behavior requires an outbound summary update, not a different
+reader test. The implementation remains outstanding; a new storage owner, import
+step or broad planning rewrite is unnecessary.
+
+- Keep `sync_planning`'s supplied checkout path through `pm_sync_async`. Read
+  each selected GOAL.md summary during preflight, before any provider mutation.
+  Preserve existing Team/Initiative ownership checks and `--plan`'s no-write rule.
+- Retain the summary already returned by `LinearClient::list_waves` instead of
+  projecting only ID/name. Compare the checkout summary using the same provider
+  description normalization as creation; report and write only changed values.
+- Extend the existing Initiative update operation to accept a description without
+  making standalone rename erase it. Send only name/description, preserving
+  membership, Projects, execution and `wave_workflows`. Surface provider errors;
+  do not add automatic write retries or claim successful sync after failure.
+- Missing GOAL.md must not become a destructive empty-summary write: report its
+  absence before mutation. An existing, intentionally empty objective is distinct.
+  This preservation choice is a draft assumption, not a new stored fallback.
+- Prove two real sync invocations against a stateful mocked provider around a
+  direct file edit. Assert the provider's resulting summary, with distinct main
+  and checkout text; also cover unchanged sync, plan-only, missing file and
+  failed update. Isolate credentials/store and exercise public checkout dispatch.
+
+Current behavior: sync receives the caller's checkout for file bindings but sends
+no summary; creation alone sends its checkout summary. The proposed writer uses
+that existing path, without claiming Jack selected branch-over-main policy.
+That policy stays explicitly open for Jack in PR notes. Publication remains
+withheld until the mocked sync acceptance passes; this realign does not publish.
 
 Gate owns broader affected suites, public dispatch and migration acceptance;
 CI owns the platform matrix. Reconcile LOO-444's context reader at integration;
@@ -69,4 +93,8 @@ Canonicalization fixes and Release's operation-entry lesson:
 `45c184227:scratch/read-wave-goals-and-memory.md`; a config-reader proof alone
 cannot establish public sync behavior.
 
-Checks: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` pass; documentation/comment-only edits reuse the prior 11 focused config/registration passes; gate/CI own broader acceptance and the missing sync proof.
+Release is the only immediate child directory with memory. Its top-level goal
+and full memory were read; the operation-entry lesson above remains applicable,
+with release-specific history retained there.
+
+Checks: `git diff --check` passes; source trace confirms the absent sync writer and existing provider summary read; no code changed or suites rerun. Prior fmt/Clippy and 11 focused config/registration passes remain applicable; gate/CI own broader acceptance.

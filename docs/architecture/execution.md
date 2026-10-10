@@ -129,8 +129,12 @@ Runtime settlement alone does not establish takeover safety. Public live connect
 currently dispatches only to Codex; Claude and OpenCode still take native resume.
 OpenCode saves request IDs and frozen origins in Session history before HTTP
 submission. Native receipts recover pending correlation after launcher loss;
-submission evidence alone proves neither admission nor completion. Reconnect still
-needs server reuse and pending-permission acquisition through the public path.
+submission evidence alone proves neither admission nor completion. Harness reconnect
+reuses the saved server/native Session, subscribes before message readback and
+never replays an uncertain request. Reader setup failure and drop leave that
+provider running. New OpenCode servers own a private stderr file beside their
+lifeline FIFO instead of a launcher-owned pipe. Public connection and initial
+pending-permission acquisition remain unfinished.
 
 Owned native launches use the same pre-exec recording channel under the attachment
 lock, but no headless group/watchdog setup. Failed recording prevents provider code

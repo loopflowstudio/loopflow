@@ -13,7 +13,7 @@ use tokio::task::JoinHandle;
 use crate::agent::{opencode_worktree_config, AgentConfig, AgentWriteScope};
 use crate::chat::types::{ConversationEvent, FailureEvidence};
 use crate::config::parse_agent;
-use crate::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
+use crate::harness::common::TurnInProgressGuard;
 use crate::harness::{
     opencode_history, opencode_mapping, ApprovalPolicy, Harness, HarnessError, RawProviderEvent,
     SendCurrentOutcome,
@@ -32,7 +32,6 @@ pub struct OpenCodeHarness {
     turn_in_progress: Arc<AtomicBool>,
     shutdown_requested: Arc<AtomicBool>,
     child: Option<Child>,
-    stderr_task: Option<JoinHandle<()>>,
     sse_task: Option<JoinHandle<()>>,
     server_base_url: Option<String>,
     agent_session: Option<AgentSessionId>,
@@ -59,11 +58,20 @@ impl OpenCodeHarness {
             turn_in_progress: Arc::new(AtomicBool::new(false)),
             shutdown_requested: Arc::new(AtomicBool::new(false)),
             child: None,
-            stderr_task: None,
             sse_task: None,
             server_base_url: None,
             agent_session: None,
         }
+    }
+
+    fn disconnect(&mut self) {
+        self.shutdown_requested.store(true, Ordering::SeqCst);
+        if let Some(task) = self.sse_task.take() {
+            task.abort();
+        }
+        self.turn_in_progress.store(false, Ordering::SeqCst);
+        // Keep native history available after detaching the reader.
+        self.server_base_url = None;
     }
 
     async fn start_inner(&mut self, config: &AgentConfig) -> Result<()> {
@@ -71,52 +79,81 @@ impl OpenCodeHarness {
         self.history = Arc::new(Mutex::new(opencode_history::History::new(Some(
             owner.clone(),
         ))));
-        let port = allocate_port()?;
-        let mut command = Command::new("opencode");
-        command
-            .arg("serve")
-            .arg("--port")
-            .arg(port.to_string())
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::piped())
-            // Lifetime belongs to the lifeline; dropping a superseded harness
-            // must never signal the provider now held by another attachment.
-            .kill_on_drop(false);
-        if let Some(cwd) = &config.cwd {
-            command.current_dir(cwd);
-        }
-        super::configure_agent_env(&mut command, config);
-        if config.write_scope == AgentWriteScope::Worktree {
-            command.env("OPENCODE_CONFIG_CONTENT", opencode_worktree_config());
-        }
-        super::configure_vendor_std_env(command.as_std_mut())?;
-        self.child = Some(super::agent_process::spawn(command, &owner)?);
-        let child = self.child.as_mut().expect("admitted OpenCode child");
-        let stderr = child
-            .stderr
-            .take()
-            .ok_or_else(|| anyhow!("missing opencode stderr"))?;
-
-        let base_url = format!("http://127.0.0.1:{port}");
-        wait_for_server(&self.client, &base_url, child).await?;
-        let agent_session =
-            open_agent_session(&self.client, &base_url, self.agent_session.as_ref()).await?;
-        // The dedicated server answers each native permission once, after the
-        // originating user message has been selected under the Session owner.
-        let mut permissions = vec![json!({"permission":"*","pattern":"*","action":"ask"})];
-        if config.write_scope == AgentWriteScope::Worktree {
-            permissions
-                .push(json!({"permission":"external_directory","pattern":"*","action":"deny"}));
-        }
-        self.client
-            .patch(format!("{base_url}/session/{agent_session}"))
-            .json(&json!({"permission":permissions}))
-            .send()
-            .await?
-            .error_for_status()?;
         let (store, session, attachment) = &owner;
-        store.record_session_connection(session, attachment, &base_url, &agent_session)?;
+        let connection = store.session_connection(session)?;
+        let (base_url, agent_session) = if let Some((endpoint, thread)) = connection {
+            if self.agent_session.as_ref() != Some(&thread) {
+                return Err(anyhow!(
+                    "Saved OpenCode conversation differs; reconnect with its recorded provider"
+                ));
+            }
+            // Startup consumes an already admitted attachment. Public attachment
+            // must acquire custody before claiming, independently of this reader.
+            let custody = crate::os_process::hold_agent_process_lifeline(
+                &store.agent_process_lifeline_path(&attachment.agent_process_id)?,
+            )?;
+            let (pid, birth) = store
+                .agent_process_identity(session)?
+                .ok_or_else(|| anyhow!("OpenCode AgentProcess identity is unavailable"))?;
+            store.with_session_attachment(session, attachment, || Ok(()))?;
+            custody.retain(pid, birth);
+            self.should_seed_prompt = false;
+            (endpoint, thread)
+        } else {
+            let port = allocate_port()?;
+            // The provider owns this file descriptor, not a pipe reader in its
+            // launcher. It remains writable through launcher death and takeover.
+            use std::os::unix::fs::OpenOptionsExt;
+            let stderr = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(
+                    store
+                        .agent_process_lifeline_path(&attachment.agent_process_id)?
+                        .with_extension("stderr"),
+                )?;
+            let mut command = Command::new("opencode");
+            command
+                .arg("serve")
+                .arg("--port")
+                .arg(port.to_string())
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(stderr)
+                // Lifetime belongs to the lifeline; dropping a superseded harness
+                // must never signal the provider now held by another attachment.
+                .kill_on_drop(false);
+            if let Some(cwd) = &config.cwd {
+                command.current_dir(cwd);
+            }
+            super::configure_agent_env(&mut command, config);
+            if config.write_scope == AgentWriteScope::Worktree {
+                command.env("OPENCODE_CONFIG_CONTENT", opencode_worktree_config());
+            }
+            super::configure_vendor_std_env(command.as_std_mut())?;
+            self.child = Some(super::agent_process::spawn(command, &owner)?);
+            let child = self.child.as_mut().expect("admitted OpenCode child");
+            let base_url = format!("http://127.0.0.1:{port}");
+            wait_for_server(&self.client, &base_url, child).await?;
+            let agent_session =
+                open_agent_session(&self.client, &base_url, self.agent_session.as_ref()).await?;
+            // The dedicated server answers each native permission once, after the
+            // originating user message has been selected under the Session owner.
+            let mut permissions = vec![json!({"permission":"*","pattern":"*","action":"ask"})];
+            if config.write_scope == AgentWriteScope::Worktree {
+                permissions
+                    .push(json!({"permission":"external_directory","pattern":"*","action":"deny"}));
+            }
+            self.client
+                .patch(format!("{base_url}/session/{agent_session}"))
+                .json(&json!({"permission":permissions}))
+                .send()
+                .await?
+                .error_for_status()?;
+            store.record_session_connection(session, attachment, &base_url, &agent_session)?;
+            (base_url, agent_session)
+        };
 
         let event_tx = self.events.clone();
         let raw_provider = self.raw_provider.clone();
@@ -171,13 +208,35 @@ impl OpenCodeHarness {
                 return;
             }
 
-            let _ = ready_tx.send(());
             let mut parser = SseParser::default();
             let mut state = opencode_mapping::ReaderState::new(
                 reader_session_id.clone(),
                 reader_model,
                 "opencode",
             );
+
+            // Subscribe first: changes during readback remain queued on SSE.
+            // Native history, not another wake edge, recovers accepted requests.
+            if let Err(error) = observe_native_messages(
+                &client,
+                &reader_base_url,
+                &reader_session_id,
+                &history,
+                &mut state,
+                &event_tx,
+                &turn_in_progress,
+            )
+            .await
+            {
+                send_disconnect_error(
+                    &event_tx,
+                    &shutdown_requested,
+                    format!("OpenCode native history: {error}"),
+                    None,
+                );
+                return;
+            }
+            let _ = ready_tx.send(());
 
             // Track how the stream ended so the disconnect evidence names the
             // root cause class: `stream_eof` (clean EOF, chunk == None) vs
@@ -242,21 +301,7 @@ impl OpenCodeHarness {
                         )
                     ) {
                         let observation = async {
-                            let messages = opencode_history::read_messages(&client, &reader_base_url, &reader_session_id).await?;
-                            let events = history.lock().expect("OpenCode history lock poisoned").observe(&reader_session_id, &messages)?;
-                            // Emit native-correlated output before its completion,
-                            // even when a snapshot gets ahead of queued SSE deltas.
-                            for event in events.iter().filter(|event| matches!(event, ConversationEvent::TurnStarted { .. })) {
-                                state.observe_lifecycle(event);
-                                let _ = event_tx.send(event.clone());
-                            }
-                            let current_messages: Vec<_> = messages.iter().filter(|message| message["info"]["parentID"].as_str().is_some_and(|request| history.lock().expect("OpenCode history lock poisoned").admitted(request))).cloned().collect();
-                            for event in state.observe_messages(&current_messages) { let _ = event_tx.send(event); }
-                            for event in events {
-                                if !matches!(event, ConversationEvent::TurnStarted { .. }) { state.observe_lifecycle(&event); }
-                                if matches!(event, ConversationEvent::TurnCompleted { .. }) { turn_in_progress.store(false, Ordering::SeqCst); }
-                                if !matches!(event, ConversationEvent::TurnStarted { .. }) { let _ = event_tx.send(event); }
-                            }
+                            let messages = observe_native_messages(&client, &reader_base_url, &reader_session_id, &history, &mut state, &event_tx, &turn_in_progress).await?;
                             for request_id in &mapped.permission_requests {
                                 let assistant = raw["properties"]["tool"]["messageID"].as_str()
                                     .ok_or_else(|| anyhow!("OpenCode permission has no originating assistant message"))?;
@@ -315,9 +360,6 @@ impl OpenCodeHarness {
             send_disconnect_error(&event_tx, &shutdown_requested, reason, Some(evidence));
         });
 
-        let stderr_task = spawn_stderr_logger(stderr, "harness::opencode");
-
-        self.stderr_task = Some(stderr_task);
         self.sse_task = Some(sse_task);
         self.server_base_url = Some(base_url);
         self.agent_session = Some(agent_session);
@@ -326,6 +368,65 @@ impl OpenCodeHarness {
             .map_err(|_| anyhow!("OpenCode event stream did not connect"))?;
         Ok(())
     }
+}
+
+impl Drop for OpenCodeHarness {
+    fn drop(&mut self) {
+        self.disconnect();
+    }
+}
+
+async fn observe_native_messages(
+    client: &reqwest::Client,
+    base_url: &str,
+    session: &AgentSessionId,
+    history: &Mutex<opencode_history::History>,
+    state: &mut opencode_mapping::ReaderState,
+    event_tx: &mpsc::UnboundedSender<ConversationEvent>,
+    turn_in_progress: &AtomicBool,
+) -> Result<Vec<Value>> {
+    let messages = opencode_history::read_messages(client, base_url, session).await?;
+    let events = history
+        .lock()
+        .expect("OpenCode history lock poisoned")
+        .observe(session, &messages)?;
+    // Emit native-correlated output before its completion,
+    // even when a snapshot gets ahead of queued SSE deltas.
+    for event in events
+        .iter()
+        .filter(|event| matches!(event, ConversationEvent::TurnStarted { .. }))
+    {
+        state.observe_lifecycle(event);
+        turn_in_progress.store(true, Ordering::SeqCst);
+        let _ = event_tx.send(event.clone());
+    }
+    let current_messages: Vec<_> = messages
+        .iter()
+        .filter(|message| {
+            message["info"]["parentID"].as_str().is_some_and(|request| {
+                history
+                    .lock()
+                    .expect("OpenCode history lock poisoned")
+                    .admitted(request)
+            })
+        })
+        .cloned()
+        .collect();
+    for event in state.observe_messages(&current_messages) {
+        let _ = event_tx.send(event);
+    }
+    for event in events {
+        if !matches!(event, ConversationEvent::TurnStarted { .. }) {
+            state.observe_lifecycle(&event);
+        }
+        if matches!(event, ConversationEvent::TurnCompleted { .. }) {
+            turn_in_progress.store(false, Ordering::SeqCst);
+        }
+        if !matches!(event, ConversationEvent::TurnStarted { .. }) {
+            let _ = event_tx.send(event);
+        }
+    }
+    Ok(messages)
 }
 
 #[async_trait]
@@ -342,7 +443,7 @@ impl Harness for OpenCodeHarness {
     }
 
     async fn start(&mut self, config: &AgentConfig) -> Result<()> {
-        if self.child.is_some() {
+        if self.server_base_url.is_some() {
             return Ok(());
         }
 
@@ -352,8 +453,14 @@ impl Harness for OpenCodeHarness {
 
         let start_result = self.start_inner(config).await;
         if let Err(err) = start_result {
-            if let Err(cleanup) = self.stop().await {
-                return Err(err.context(format!("OpenCode startup cleanup refused: {cleanup}")));
+            // A failed reader must not stop the provider it was connecting to.
+            // Only a new launch owns failed-startup provider cleanup.
+            if self.child.is_some() {
+                if let Err(cleanup) = self.stop().await {
+                    return Err(err.context(format!("OpenCode startup cleanup refused: {cleanup}")));
+                }
+            } else {
+                self.disconnect();
             }
             return Err(err);
         }
@@ -486,21 +593,7 @@ impl Harness for OpenCodeHarness {
             super::agent_process::stop(&owner)?;
             self.child = None;
         }
-        self.shutdown_requested.store(true, Ordering::SeqCst);
-
-        if let Some(task) = self.sse_task.take() {
-            task.abort();
-            let _ = task.await;
-        }
-        if let Some(task) = self.stderr_task.take() {
-            task.abort();
-            let _ = task.await;
-        }
-
-        self.turn_in_progress.store(false, Ordering::SeqCst);
-        // Keep `agent_session`: the runner persists it after stop so the
-        // next launch can resume the session (see `open_agent_session`).
-        self.server_base_url = None;
+        self.disconnect();
 
         Ok(())
     }
@@ -815,7 +908,7 @@ mod tests {
 
     #[tokio::test]
     #[allow(clippy::await_holding_lock)] // Isolate the disposable store selection.
-    async fn stop_and_drop_preserve_a_superseding_attachment() {
+    async fn reconnect_recovers_pending_input_without_spawning_or_replaying() {
         let _lock = crate::journal::test_env_lock();
         let _ambient = crate::test_ambient::EnvGuard::new();
         let original_path = std::env::var_os("PATH").unwrap_or_default();
@@ -849,7 +942,7 @@ mod tests {
         // Exercise the actual launch configuration, including its drop policy.
         // Cancel startup after admission but before this stand-in serves HTTP.
         let script = home.path().join("opencode");
-        std::fs::write(&script, "#!/bin/sh\nexec /bin/sleep 60\n").unwrap();
+        std::fs::write(&script, format!("#!/bin/sh\nwhile [ ! -f '{}' ]; do /bin/sleep 0.02; done\nprintf 'after detach\\n' >&2\nexec /bin/sleep 60\n", home.path().join("detached").display())).unwrap();
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
         let mut paths = vec![home.path().to_path_buf()];
@@ -870,6 +963,54 @@ mod tests {
             } => identity,
         };
         assert_eq!(harness.pid(), Some(pid));
+        let thread: AgentSessionId = "native".into();
+        let request = harness.history.lock().unwrap().request(&thread).unwrap();
+        // No SSE event follows connection: native readback alone must recover
+        // this request, accepted before the launcher observed any output.
+        let messages = json!([{"info":{"id":"assistant", "sessionID":"native",
+            "parentID":request, "role":"assistant", "time":{"created":1}},
+            "parts":[]}])
+        .to_string();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let subscribed = Arc::new(AtomicBool::new(false));
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let fail_readback = Arc::new(AtomicBool::new(true));
+        let server = {
+            let subscribed = subscribed.clone();
+            let requests = requests.clone();
+            let fail_readback = fail_readback.clone();
+            tokio::spawn(async move {
+                use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+                let mut clients = tokio::task::JoinSet::new();
+                loop {
+                    let (socket, _) = listener.accept().await.unwrap();
+                    let subscribed = subscribed.clone();
+                    let requests = requests.clone();
+                    let messages = messages.clone();
+                    let fail_readback = fail_readback.clone();
+                    clients.spawn(async move {
+                        let mut socket = BufReader::new(socket);
+                        let mut line = String::new();
+                        socket.read_line(&mut line).await.unwrap();
+                        requests.lock().unwrap().push(line.clone());
+                        if line.starts_with("GET /event ") {
+                            subscribed.store(true, Ordering::SeqCst);
+                            socket.get_mut().write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n").await.unwrap();
+                            std::future::pending::<()>().await;
+                        } else {
+                            assert!(subscribed.load(Ordering::SeqCst));
+                            assert!(line.starts_with("GET /session/native/message "));
+                            let status = if fail_readback.load(Ordering::SeqCst) { "503 Unavailable" } else { "200 OK" };
+                            socket.get_mut().write_all(format!("HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", messages.len(), messages).as_bytes()).await.unwrap();
+                        }
+                    });
+                }
+            })
+        };
+        store
+            .record_session_connection("opencode", &first, &endpoint, &thread)
+            .unwrap();
         let replacement = store
             .claim_session_attachment("opencode", Some(&first), &process, false)
             .unwrap();
@@ -892,14 +1033,84 @@ mod tests {
             crate::journal::process_identity_evidence(pid, birth),
             crate::journal::ProcessIdentityEvidence::Live
         );
-        let (tx, _rx) = mpsc::unbounded_channel();
+        // The old pipe reader is gone, but stderr is still a provider-owned file.
+        let stderr_path = store
+            .agent_process_lifeline_path(&first.agent_process_id)
+            .unwrap()
+            .with_extension("stderr");
+        assert_eq!(
+            std::fs::metadata(&stderr_path)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        std::fs::write(home.path().join("detached"), "").unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while std::fs::read_to_string(&stderr_path).unwrap() != "after detach\n" {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let (tx, mut rx) = mpsc::unbounded_channel();
         let mut current = OpenCodeHarness::new(tx, ApprovalPolicy::AutoApprove);
-        current.history = Arc::new(Mutex::new(opencode_history::History::new(Some((
-            store.clone(),
-            "opencode".into(),
-            replacement,
-        )))));
-        current.server_base_url = Some("http://127.0.0.1:1".into());
+        let config = AgentConfig {
+            session_attachment: Some(("opencode".into(), replacement.clone())),
+            ..Default::default()
+        };
+        // Wrong native selection refuses without killing the surviving provider.
+        assert!(current.start(&config).await.is_err());
+        assert_eq!(
+            store.agent_process_identity("opencode").unwrap(),
+            Some((pid, birth))
+        );
+        current.set_agent_session(Some(thread));
+        assert!(
+            tokio::time::timeout(Duration::from_secs(5), current.start(&config))
+                .await
+                .unwrap()
+                .is_err()
+        );
+        assert!(current.server_base_url.is_none());
+        assert_eq!(
+            crate::journal::process_identity_evidence(pid, birth),
+            crate::journal::ProcessIdentityEvidence::Live
+        );
+        assert_eq!(
+            store.session_connection("opencode").unwrap().unwrap().0,
+            endpoint
+        );
+        while rx.try_recv().is_ok() {}
+        fail_readback.store(false, Ordering::SeqCst);
+        tokio::time::timeout(Duration::from_secs(5), current.start(&config))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(current.child.is_none(), "reconnect must not spawn");
+        assert!(
+            !current.should_seed_prompt,
+            "reconnect must not seed the old prompt"
+        );
+        assert!(current.turn_in_progress.load(Ordering::SeqCst));
+        assert!(
+            matches!(rx.try_recv().unwrap(), ConversationEvent::TurnStarted { turn_id } if turn_id == request)
+        );
+        assert!(
+            requests
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|request| request.starts_with("GET ")),
+            "recovery must not replay or reconfigure the server"
+        );
+        assert_eq!(
+            store.agent_process_identity("opencode").unwrap(),
+            Some((pid, birth))
+        );
+        assert_eq!(replacement.agent_process_id, first.agent_process_id);
+        server.abort();
         current.stop().await.unwrap();
         assert!(current.server_base_url.is_none());
         assert!(!crate::journal::OsProcess::group_is_alive(pid).unwrap());

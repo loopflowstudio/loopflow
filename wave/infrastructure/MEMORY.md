@@ -236,10 +236,10 @@ Draft ordering and scratch-blocked CI evidence remain at
 
 LOO-447: fenced stop/abort; drop never signals. Custody precedes public Codex
 claims; standby cannot write. Group death releases custody; watchdog stays outside.
-OpenCode saves origins before HTTP; native receipts recover attribution, not
-public takeover. Endpoint reuse must preserve stdio: Claude pipes and
-OpenCode stderr remain launcher-owned. Connection/permission recovery and both
-public death orders remain unproved. Plan: `scratch/stop-and-take-over-claude.md`.
+OpenCode saves origins before HTTP; receipts recover attribution, not
+public takeover. OpenCode reuses endpoints with subscribed readback/private stderr;
+Claude pipes remain launcher-owned. Public connection/permission recovery and
+both death orders remain unproved. Plan: `scratch/stop-and-take-over-claude.md`.
 
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)
 

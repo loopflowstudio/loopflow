@@ -1677,9 +1677,9 @@ mod tests {
                 "INSERT INTO processes(id,trace_id,started_at,completed_at,outcome) VALUES(?1,?2,1,2,'succeeded')",
                 rusqlite::params![driver,crate::id::TraceId::new()],
             ).unwrap();
-            let definition = crate::engine::workflow::WorkflowDefinition {
+            let definition = crate::workflow::WorkflowDefinition {
                 name: "review".into(),
-                nodes: vec![crate::engine::workflow::WorkflowNode {
+                nodes: vec![crate::workflow::WorkflowNode {
                     name: "review".into(),
                     skill: "review".into(),
                     description: None,
@@ -2895,7 +2895,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl crate::harness::Harness for RecordingHarness {
-        async fn start(&mut self, _config: &crate::engine::AgentConfig) -> anyhow::Result<()> {
+        async fn start(&mut self, _config: &crate::agent::AgentConfig) -> anyhow::Result<()> {
             Ok(())
         }
         async fn send_input(&mut self, _content: &str) -> anyhow::Result<()> {

@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use tracing::{debug, warn};
 
-use crate::engine::worktrees::main_repo_root;
+use crate::git::worktrees::main_repo_root;
 use crate::id::{LfProcessId, TraceId};
 use crate::process::{AgentCaller, LfProcess, AGENT_CALLER_ENV};
 use crate::store::sqlite::SqliteStore;
@@ -280,7 +280,7 @@ pub fn with_process(run: impl FnOnce() -> anyhow::Result<()>) -> anyhow::Result<
     if current_context().is_none() {
         observe_process(&std::env::args().collect::<Vec<_>>());
     }
-    crate::engine::agent::wait_for_interrupt_cleanup();
+    crate::agent::wait_for_interrupt_cleanup();
     let receipts = if let Some(context) = current_context() {
         finish_runtime(&context.cwd, &result);
         let cost = *context
@@ -828,9 +828,7 @@ fn create_process_context(
     };
     set_context(context.clone());
     let interrupted = context.clone();
-    crate::engine::agent::register_interrupt_cleanup(move || {
-        record_process_interruption(&interrupted)
-    });
+    crate::agent::register_interrupt_cleanup(move || record_process_interruption(&interrupted));
     // Never write process-control receipts into a different inherited Machine.
     if same_store {
         if let Err(error) = write_process_receipt(&context) {
@@ -1264,7 +1262,7 @@ mod tests {
         emit, events_path, read_events, traces_root, LfEvent, LfEventFields, LfEventType, LfNode,
         ProcessIdentityEvidence, TestLedgerGuard,
     };
-    use crate::engine::git::is_clean;
+    use crate::git::is_clean;
     use crate::id::{LfProcessId, TraceId};
     use loopflow_test_support::TestRepo;
     use std::path::PathBuf;

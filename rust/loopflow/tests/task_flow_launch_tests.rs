@@ -295,7 +295,7 @@ fn running_flows_belong_to_the_target_checkout_and_retain_their_caller() {
         task.ok(&["wt", "create", "caller"]);
         // Worktree discovery is read-only and does not select an ambient Home.
         let caller = {
-            loopflow::engine::worktrees::list_worktrees(task.repo.path())
+            loopflow::git::worktrees::list_worktrees(task.repo.path())
                 .unwrap()
                 .into_iter()
                 .find(|wt| wt.path != task.repo.path().canonicalize().unwrap())

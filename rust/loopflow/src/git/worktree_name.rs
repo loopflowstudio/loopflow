@@ -4,7 +4,7 @@
 //! and `<author>/<name>` for the branch. It carries no Wave, Task, worker,
 //! timestamp, or ancestry semantics.
 
-use crate::engine::worktrees::WorktreeSegment;
+use crate::git::worktrees::WorktreeSegment;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorktreeName {
@@ -56,7 +56,7 @@ impl WorktreeName {
 #[cfg(test)]
 mod tests {
     use super::WorktreeName;
-    use crate::engine::worktrees::WorktreeSegment;
+    use crate::git::worktrees::WorktreeSegment;
 
     #[test]
     fn branch_and_directory_are_flat_projections() {

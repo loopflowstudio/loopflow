@@ -43,7 +43,7 @@ impl ProcessGroupGuard {
         assert!(pid > 1, "owned process group must have a child pid");
         let pid = Arc::new(AtomicU32::new(pid));
         let interrupt_pid = Arc::clone(&pid);
-        crate::engine::agent::register_interrupt_cleanup(move || {
+        crate::agent::register_interrupt_cleanup(move || {
             kill_process_group(interrupt_pid.swap(0, Ordering::AcqRel));
         });
         Self { pid }
@@ -81,7 +81,7 @@ pub(crate) fn kill_process_group(pid: u32) {
         }
     }
     #[cfg(not(unix))]
-    crate::engine::platform::kill_process(pid);
+    crate::platform::kill_process(pid);
 }
 
 const TERMINATE_GRACE: Duration = Duration::from_secs(2);
@@ -416,7 +416,7 @@ pub(crate) async fn start_tmux_session(
     for name in PROCESS_CONTEXT_ENV {
         command.env_remove(name);
     }
-    command.env_remove(crate::engine::config::USER_NAME_ENV);
+    command.env_remove(crate::config::USER_NAME_ENV);
     for name in SESSION_AUTH_ENV {
         command.env_remove(name);
     }
@@ -683,12 +683,12 @@ mod tests {
         ];
         for name in [None, Some("Maya")] {
             let env = name
-                .map(|name| vec![(crate::engine::config::USER_NAME_ENV, name)])
+                .map(|name| vec![(crate::config::USER_NAME_ENV, name)])
                 .unwrap_or_default();
             let command = lf_session_shell_command(std::path::Path::new("."), &argv, &env);
             let output = std::process::Command::new("sh")
                 .args(["-c", &command])
-                .env(crate::engine::config::USER_NAME_ENV, "Jack")
+                .env(crate::config::USER_NAME_ENV, "Jack")
                 .output()
                 .unwrap();
             assert!(output.status.success());

@@ -10,16 +10,16 @@ use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
+use crate::agent::{opencode_worktree_config, AgentConfig, AgentWriteScope};
 use crate::chat::types::{ConversationEvent, FailureEvidence};
-use crate::engine::agent::{opencode_worktree_config, AgentConfig, AgentWriteScope};
-use crate::engine::config::parse_agent;
-use crate::engine::process::kill_process_group;
+use crate::config::parse_agent;
 use crate::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
 use crate::harness::{
     opencode_history, opencode_mapping, ApprovalPolicy, Harness, HarnessError, RawProviderEvent,
     SendCurrentOutcome,
 };
 use crate::id::AgentSessionId;
+use crate::os_process::kill_process_group;
 
 pub(crate) const OPENCODE_DISCONNECTED_CODE: &str = "opencode_disconnected";
 

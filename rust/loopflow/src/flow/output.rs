@@ -2,8 +2,9 @@
 
 use serde_json::{json, Value};
 
-use crate::engine::transitions::{FlowDecision, FlowVerdict};
-use crate::engine::{ConcreteStep, SkillOutcome};
+use crate::flow::runner::SkillOutcome;
+use crate::flow::transitions::{FlowDecision, FlowVerdict};
+use crate::flow::ConcreteStep;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -45,7 +46,7 @@ impl FlowOutput {
         let mut instructions = output.instructions();
         if let ConcreteStep::Xor(branch) = step {
             instructions.push_str("\n\n");
-            instructions.push_str(&crate::engine::flow::build_xor_routing_suffix(branch));
+            instructions.push_str(&crate::flow::build_xor_routing_suffix(branch));
         }
         Some(instructions)
     }
@@ -132,8 +133,8 @@ impl FlowOutput {
 #[cfg(test)]
 mod tests {
     use super::FlowOutput;
-    use crate::engine::transitions::FlowDecision;
-    use crate::engine::SkillOutcome;
+    use crate::flow::runner::SkillOutcome;
+    use crate::flow::transitions::FlowDecision;
     use serde_json::json;
 
     #[test]

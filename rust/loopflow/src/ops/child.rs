@@ -1,8 +1,8 @@
 //! Shared recovery and execution helpers for Project and Task Work.
 
+use crate::config::load_config;
 use crate::durable::WorkRef;
-use crate::engine::config::load_config;
-use crate::engine::context_budget::{bound_message, ContextBudgets};
+use crate::prompt::context_budget::{bound_message, ContextBudgets};
 use crate::store::SharedStore;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

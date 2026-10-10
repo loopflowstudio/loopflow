@@ -1,10 +1,10 @@
 //! Launch and settle AgentProcesses in the inventory used by gates and live views.
 //! Unknown identity, duplicate PID/birth and unknown attachment life grant no signal authority.
-use crate::engine::process::terminate_process_group;
 use crate::journal::{
     process_evidence, process_identity_evidence, process_started_at, OsProcess,
     ProcessIdentityEvidence,
 };
+use crate::os_process::terminate_process_group;
 use crate::process::SessionAttachment;
 use crate::store::sqlite::SqliteStore;
 use crate::store::{StoreError, StoreResult};
@@ -42,7 +42,7 @@ pub(super) fn spawn(
             .into_owned();
         store.with_session_attachment(session, attachment, || {
             store.record_session_provider_launch(session, attachment, command.as_std())?;
-            let spawned = crate::engine::process::spawn_agent_process(command, lifeline, |pid| {
+            let spawned = crate::os_process::spawn_agent_process(command, lifeline, |pid| {
                 let started_at = process_started_at(pid)?.ok_or_else(|| {
                     std::io::Error::other("AgentProcess birth unavailable before exec")
                 })?;
@@ -72,7 +72,7 @@ pub(crate) fn spawn_native(
     store
         .with_session_attachment(session, attachment, || {
             store.record_session_provider_launch(session, attachment, &command)?;
-            let spawned = crate::engine::process::spawn_native_agent_process(command, |pid| {
+            let spawned = crate::os_process::spawn_native_agent_process(command, |pid| {
                 let started_at = process_started_at(pid)?.ok_or_else(|| {
                     std::io::Error::other("AgentProcess birth unavailable before exec")
                 })?;
@@ -659,7 +659,7 @@ mod tests {
             .unwrap();
         let report = super::reap_in(&store, false).unwrap();
         // Always clean up this fixture's own group before assertions.
-        crate::engine::process::terminate_process_group(pid);
+        crate::os_process::terminate_process_group(pid);
         let _ = child.wait();
         assert!(report.errors.is_empty(), "{:?}", report.errors);
         assert_eq!(report.orphaned, [pid]);

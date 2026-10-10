@@ -95,7 +95,7 @@ impl SqliteStore {
             [project.as_str()],
             |row| row.get(0),
         )?;
-        crate::engine::workflow::parse_workflow(name, definition, std::path::Path::new(&repo))
+        crate::workflow::parse_workflow(name, definition, std::path::Path::new(&repo))
             .map_err(StoreError::InvalidData)?;
         write_content(
             &tx,

@@ -679,7 +679,7 @@ not cover the prompts that generate their input. Update obsolete assertions to
 match the intended contract instead of restoring retired commands in the prose.
 
 ```bash
-cargo test -p loopflow --lib engine::builtins::tests
+cargo test -p loopflow --lib builtins::tests
 ```
 
 When changing the builtin catalog or Flow composition, also exercise discovery.
@@ -703,7 +703,7 @@ personal agent directories and pruning. `sync-skills --repo` exports repository
 skills and Flow recipes into the checkout; default sync exports globally.
 
 ```bash
-cargo test -p loopflow --lib engine::skills::tests
+cargo test -p loopflow --lib skills::tests
 ```
 
 After editing embedded skills, directions, surfaces, or prompt assembly, run
@@ -829,7 +829,7 @@ fix, verify the installation harness uses the same toolchain policy; a host lint
 pass does not verify the container build. Use `--image` to reproduce an older
 toolchain explicitly.
 
-CLI owner-tree changes must include `cargo test -p loopflow --lib engine::flow_graph::tests`
+CLI owner-tree changes must include `cargo test -p loopflow --lib flow::graph::tests`
 to verify builtin operation labels, plus the affected proofs above. The regular
 Rust suite skips those installation proofs; a skipped case is not verification.
 Task status reads a Flow from recorded command outcomes and OS liveness. Run

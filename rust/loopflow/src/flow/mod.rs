@@ -1,3 +1,9 @@
+pub mod graph;
+pub mod instructions;
+pub mod output;
+pub mod runner;
+pub mod transitions;
+
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -5,11 +11,11 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_yaml_ng::Value;
 
-use crate::engine::definition_name::{portable_name, resolve_name};
-use crate::engine::error::LoadError;
-use crate::engine::skill_catalog::{SkillCatalog, SkillOrigin};
-use crate::engine::target::{resolve_definition, DefinitionKind, Target};
-use crate::engine::workflow::names_workflow;
+use crate::definition::name::{portable_name, resolve_name};
+use crate::definition::{resolve_definition, DefinitionKind, Target};
+use crate::error::LoadError;
+use crate::skills::catalog::{SkillCatalog, SkillOrigin};
+use crate::workflow::names_workflow;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Skill {
@@ -299,9 +305,9 @@ pub fn customize(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
     if let Some(path) = find_flow_source_path(name, repo)? {
         return Ok(path);
     }
-    let name = crate::engine::builtins::resolve_builtin_flow(name)
+    let name = crate::builtins::resolve_builtin_flow(name)
         .ok_or_else(|| LoadError::FlowNotFound(name.to_string()))?;
-    let content = crate::engine::builtins::get_builtin_flow(name)
+    let content = crate::builtins::get_builtin_flow(name)
         .ok_or_else(|| LoadError::FlowNotFound(name.to_string()))?;
     let path = repo.join(format!(".lf/flows/{name}.yaml"));
     std::fs::create_dir_all(path.parent().expect("definition has a parent"))?;
@@ -310,7 +316,7 @@ pub fn customize(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
 }
 
 pub fn available_flow_names(repo: &Path) -> Result<Vec<String>, LoadError> {
-    let mut names: Vec<String> = crate::engine::builtins::builtin_flow_names()
+    let mut names: Vec<String> = crate::builtins::builtin_flow_names()
         .into_iter()
         .map(ToOwned::to_owned)
         .collect();
@@ -332,14 +338,14 @@ pub fn load_authored_flow(name: &str, repo: &Path) -> Result<FlowDefinition, Loa
 
 /// Retains the current composition path while resolving nested definitions.
 #[derive(Debug)]
-pub(super) struct DefinitionLoader<'a> {
+pub(crate) struct DefinitionLoader<'a> {
     repo: Option<&'a Path>,
     catalog: &'a SkillCatalog,
     sources: Vec<String>,
 }
 
 impl<'a> DefinitionLoader<'a> {
-    pub(super) fn new(repo: Option<&'a Path>, catalog: &'a SkillCatalog) -> Self {
+    pub(crate) fn new(repo: Option<&'a Path>, catalog: &'a SkillCatalog) -> Self {
         Self {
             repo,
             catalog,
@@ -347,7 +353,7 @@ impl<'a> DefinitionLoader<'a> {
         }
     }
 
-    pub(super) fn resolve(
+    pub(crate) fn resolve(
         &mut self,
         name: &str,
         kind: Option<DefinitionKind>,
@@ -356,7 +362,7 @@ impl<'a> DefinitionLoader<'a> {
             let catalog = self.catalog;
             let flows = match self.repo {
                 Some(repo) => available_flow_names(repo)?,
-                None => crate::engine::builtins::builtin_flow_names()
+                None => crate::builtins::builtin_flow_names()
                     .into_iter()
                     .map(str::to_string)
                     .collect(),
@@ -410,7 +416,7 @@ impl<'a> DefinitionLoader<'a> {
         }
     }
 
-    pub(super) fn load_flow(&mut self, name: &str) -> Result<FlowDefinition, LoadError> {
+    pub(crate) fn load_flow(&mut self, name: &str) -> Result<FlowDefinition, LoadError> {
         let (resolved_name, content) = match self
             .repo
             .map(|repo| find_repo_flow(name, repo))
@@ -419,10 +425,10 @@ impl<'a> DefinitionLoader<'a> {
         {
             Some((key, path)) => (key, fs::read_to_string(path)?),
             None => {
-                let key = crate::engine::builtins::resolve_builtin_flow(name)
+                let key = crate::builtins::resolve_builtin_flow(name)
                     .ok_or_else(|| LoadError::FlowNotFound(name.to_string()))?;
-                let content = crate::engine::builtins::get_builtin_flow(key)
-                    .expect("resolved builtin flow exists");
+                let content =
+                    crate::builtins::get_builtin_flow(key).expect("resolved builtin flow exists");
                 (key.to_string(), content.to_string())
             }
         };
@@ -447,7 +453,7 @@ pub fn compile_flow(flow: &FlowDefinition, repo: &Path) -> Result<Vec<ConcreteSt
     Ok(flatten_resolved(&resolve_flow(flow, repo)?))
 }
 
-pub(super) fn compile_flow_with_catalog(
+pub(crate) fn compile_flow_with_catalog(
     flow: &FlowDefinition,
     catalog: &SkillCatalog,
 ) -> Result<Vec<ConcreteStep>, LoadError> {
@@ -637,13 +643,13 @@ fn find_repo_flow(name: &str, repo: &Path) -> Result<Option<(String, PathBuf)>, 
     let names = sources
         .keys()
         .map(String::as_str)
-        .chain(crate::engine::builtins::builtin_flow_names());
+        .chain(crate::builtins::builtin_flow_names());
     let selected = resolve_name(name, names)
         .map_err(|names| {
             LoadError::InvalidFlow(format!("ambiguous flow {name:?}: {}", names.join(", ")))
         })?
         .map(str::to_string)
-        .or_else(|| crate::engine::builtins::resolve_builtin_flow(name).map(str::to_string));
+        .or_else(|| crate::builtins::resolve_builtin_flow(name).map(str::to_string));
     Ok(selected.and_then(|name| sources.remove_entry(&name)))
 }
 
@@ -1065,8 +1071,8 @@ mod tests {
         build_xor_routing_suffix, compile_branch, compile_flow, human_occurrence_ids, load_flow,
         load_skill, ConcreteStep, DefinitionLoader, FlowDefinition, Skill, Step, XorDef, XorPath,
     };
-    use crate::engine::error::LoadError;
-    use crate::engine::target::Target;
+    use crate::definition::Target;
+    use crate::error::LoadError;
     use tempfile::TempDir;
 
     fn parse_flow_items(value: &Value) -> Result<Vec<Step>, LoadError> {
@@ -1436,7 +1442,7 @@ mod tests {
     #[test]
     fn load_skill_finds_all_builtins() {
         let tmp = TempDir::new().unwrap();
-        for name in crate::engine::builtins::builtin_skill_names() {
+        for name in crate::builtins::builtin_skill_names() {
             let result = load_skill(name, tmp.path());
             assert!(
                 result.is_ok(),
@@ -1609,7 +1615,7 @@ Design the feature.
     #[test]
     fn load_flow_compiles_all_builtin_flows() {
         let tmp = TempDir::new().unwrap();
-        for name in crate::engine::builtins::builtin_flow_names() {
+        for name in crate::builtins::builtin_flow_names() {
             let flow = load_flow(name, tmp.path());
             assert!(
                 flow.is_ok(),

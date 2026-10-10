@@ -7,7 +7,7 @@ use std::num::NonZeroU32;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::durable::{FlowProcessFilter, FlowProcessInventoryEntry, FlowProcessPage, TaskId};
-use crate::engine::flow_graph::FlowGraph;
+use crate::flow::graph::FlowGraph;
 use crate::id::{LfProcessId, WaveId};
 use crate::ops::flow_process::{FlowProcess, FlowProcessStep};
 use crate::session::{FlowProcessSummary, FlowProcessSummaryState};
@@ -291,7 +291,9 @@ impl SqliteStore {
         steps: &[(&str, Option<&str>)],
         driver_outcome: Option<&str>,
     ) -> LfProcessId {
-        use crate::engine::{ConcreteSkill, ConcreteStep, Skill};
+        use crate::flow::ConcreteSkill;
+        use crate::flow::ConcreteStep;
+        use crate::flow::Skill;
         let driver = LfProcessId::new();
         let insert = |id: &LfProcessId,
                       parent: Option<&LfProcessId>,
@@ -377,7 +379,7 @@ mod tests {
             )
             .unwrap();
         }
-        let graph = crate::engine::flow_graph::FlowGraph::new("proof", &[]);
+        let graph = crate::flow::graph::FlowGraph::new("proof", &[]);
         let error = store
             .record_flow_process(&driver, &graph, Some(&task))
             .unwrap_err();

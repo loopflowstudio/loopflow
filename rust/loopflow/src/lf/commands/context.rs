@@ -3,10 +3,10 @@
 use anyhow::{anyhow, Result};
 use serde::Serialize;
 
-use crate::engine::config::load_config;
-use crate::engine::context_budget::ContextBudgetReport;
-use crate::engine::process_prompt::{preview_process_prompt, ProcessPromptInput};
-use crate::engine::prompt::Surface;
+use crate::config::load_config;
+use crate::prompt::context_budget::ContextBudgetReport;
+use crate::prompt::process::{preview_process_prompt, ProcessPromptInput};
+use crate::prompt::Surface;
 
 #[derive(Debug, Serialize)]
 struct ContextReport {
@@ -80,7 +80,7 @@ pub fn run(json: bool, wave: Option<&str>, task: Option<&str>, skill: &str) -> R
             skill: Some(skill.to_owned()),
             surface: Surface::Headless,
             // A query never reads the desktop clipboard.
-            source_overrides: crate::engine::process_prompt::ContextSourceOverrides {
+            source_overrides: crate::prompt::process::ContextSourceOverrides {
                 clipboard: Some(false),
                 ..Default::default()
             },

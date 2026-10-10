@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
-use base64::Engine;
+use base64::prelude::*;
 use loopflow_test_support::TestRepo;
 use serde_json::Value;
 
@@ -326,8 +326,8 @@ esac
     // Managed skill execution needs an agent account, independently of planning.
     let account_home = fixture.home.path().join("fixture-codex");
     std::fs::create_dir(&account_home).unwrap();
-    let claims = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .encode(r#"{"email":"fixture@example.com","sub":"fixture"}"#);
+    let claims =
+        BASE64_URL_SAFE_NO_PAD.encode(r#"{"email":"fixture@example.com","sub":"fixture"}"#);
     std::fs::write(
         account_home.join("auth.json"),
         serde_json::json!({"tokens":{"access_token":"fixture","id_token":format!("h.{claims}.s")}})

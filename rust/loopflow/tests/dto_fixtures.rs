@@ -462,7 +462,7 @@ fn task_status_preserves_planning_freshness_without_execution() {
 
 #[test]
 fn flow_compositions_round_trip_distinct_compositions_and_required_children() {
-    use loopflow::engine::flow_graph::FlowCatalogEntry;
+    use loopflow::flow::graph::FlowCatalogEntry;
     let json = include_str!("../../../tests/fixtures/dto/flow_composition.json");
     let entry: FlowCatalogEntry = serde_json::from_str(json).unwrap();
     let value: serde_json::Value = serde_json::from_str(json).unwrap();
@@ -619,7 +619,7 @@ fn separate_workflow_catalog_preserves_invalid_sources() {
         "../../../tests/fixtures/dto/workflow_catalog.json"
     ))
     .unwrap();
-    let entries: Vec<loopflow::engine::workflow::WorkflowCatalogEntry> =
+    let entries: Vec<loopflow::workflow::WorkflowCatalogEntry> =
         serde_json::from_value(value.clone()).unwrap();
     assert!(entries[0].workflow.is_some());
     assert!(entries[1].workflow.is_none() && entries[1].unavailable.is_some());

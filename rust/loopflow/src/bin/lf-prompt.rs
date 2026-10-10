@@ -2,9 +2,11 @@ use std::error::Error;
 use std::path::PathBuf;
 
 use clap::Parser;
-use loopflow::engine::{
-    drop_duplicate_docs, format_prompt, gather_context, GatherContextOpts, Surface,
-};
+use loopflow::prompt::drop_duplicate_docs;
+use loopflow::prompt::format_prompt;
+use loopflow::prompt::gather_context;
+use loopflow::prompt::GatherContextOpts;
+use loopflow::prompt::Surface;
 
 #[derive(Parser, Debug)]
 #[command(name = "lf-prompt")]

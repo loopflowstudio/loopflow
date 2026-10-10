@@ -4,7 +4,7 @@ use anyhow::{bail, Result};
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
-use crate::engine::flow::{return_target, ConcreteStep};
+use crate::flow::{return_target, ConcreteStep};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
 #[serde(rename_all = "snake_case")]
@@ -111,10 +111,10 @@ pub fn finish_step(
 
 #[cfg(test)]
 mod tests {
-    use crate::engine::flow::{Command, ConcreteCommand, ConcreteSkill, ConcreteStep, Skill};
-    use crate::engine::transitions::{
+    use crate::flow::transitions::{
         finish_step, FlowDecision, FlowProgress, FlowTransition, FlowVerdict,
     };
+    use crate::flow::{Command, ConcreteCommand, ConcreteSkill, ConcreteStep, Skill};
 
     fn step(id: &str, returns: Option<usize>) -> ConcreteStep {
         ConcreteStep::Skill(ConcreteSkill {

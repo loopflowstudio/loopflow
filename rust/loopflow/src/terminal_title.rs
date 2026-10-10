@@ -7,7 +7,7 @@ use std::io::{IsTerminal, Write};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use crate::engine::process::wait_for_exit;
+use crate::os_process::wait_for_exit;
 use crate::process::SessionAttachment;
 use crate::session::LfSession;
 use crate::store::{sqlite::SqliteStore, StoreResult};

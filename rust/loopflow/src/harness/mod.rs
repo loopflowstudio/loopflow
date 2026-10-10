@@ -31,21 +31,21 @@ use anyhow::Result;
 use async_trait::async_trait;
 use tokio::sync::mpsc;
 
+use crate::agent::AgentConfig;
 use crate::chat::types::ConversationEvent;
-use crate::engine::agent::AgentConfig;
 
 pub(crate) fn configure_vendor_std_env(command: &mut std::process::Command) -> Result<()> {
-    let context = crate::engine::process::execution_context()?;
+    let context = crate::os_process::execution_context()?;
     set_vendor_std_env(command, &context.lf_bin, &context.lf_home)
 }
 
 pub(crate) fn configure_agent_env(command: &mut tokio::process::Command, config: &AgentConfig) {
-    for name in crate::engine::agent::EXECUTION_IDENTITY_ENV {
+    for name in crate::agent::EXECUTION_IDENTITY_ENV {
         command.env_remove(name);
     }
     command
         .envs(&config.env)
-        .env_remove(crate::engine::process::DISCORD_TOKEN_ENV)
+        .env_remove(crate::os_process::DISCORD_TOKEN_ENV)
         .env_remove("LOOPFLOW_DIRECTIVE_FILE");
     if let Some(path) = &config.directive_relay {
         command.env("LOOPFLOW_DIRECTIVE_FILE", path);
@@ -87,7 +87,7 @@ fn set_vendor_std_env(
     command
         .env("LF_BIN", control_bin)
         .env("LF_HOME", control_home)
-        .env_remove(crate::engine::process::DISCORD_TOKEN_ENV);
+        .env_remove(crate::os_process::DISCORD_TOKEN_ENV);
     let mut paths = vec![control_bin
         .parent()
         .expect("absolute lf has a parent")
@@ -111,7 +111,7 @@ mod environment_tests {
     use std::path::Path;
 
     use super::{configure_agent_env, set_vendor_std_env};
-    use crate::engine::agent::AgentConfig;
+    use crate::agent::AgentConfig;
 
     #[test]
     fn conversation_tools_observe_sanitized_overrides_and_removals() {
@@ -152,10 +152,10 @@ mod environment_tests {
     async fn provider_child_cannot_read_the_bridge_token() {
         let mut command = tokio::process::Command::new("/bin/sh");
         command.args(["-c", "test -z \"${LF_DISCORD_TOKEN+x}\""]);
-        command.env(crate::engine::process::DISCORD_TOKEN_ENV, "fixture-token");
+        command.env(crate::os_process::DISCORD_TOKEN_ENV, "fixture-token");
         let mut config = AgentConfig::default();
         config.env.insert(
-            crate::engine::process::DISCORD_TOKEN_ENV.into(),
+            crate::os_process::DISCORD_TOKEN_ENV.into(),
             "fixture-override".into(),
         );
         configure_agent_env(&mut command, &config);
@@ -168,7 +168,7 @@ mod environment_tests {
         command
             .env(crate::session_record::CAPTURE_KEY_ENV, "run_stale")
             .env("LF_RUN_DIR", "/stale/run");
-        let mut config = crate::engine::agent::AgentConfig::default();
+        let mut config = crate::agent::AgentConfig::default();
         config.env.insert(
             crate::session_record::CAPTURE_KEY_ENV.to_string(),
             "run_fresh".to_string(),
@@ -248,7 +248,7 @@ pub enum ApprovalPolicy {
 pub trait Harness: Send + Sync {
     /// The invocation owner receives replacement attachment snapshots when a
     /// provider must respawn within the same capture.
-    fn set_capture(&mut self, _capture: Option<crate::engine::agent::AgentCapture>) {}
+    fn set_capture(&mut self, _capture: Option<crate::agent::AgentCapture>) {}
     async fn start(&mut self, config: &AgentConfig) -> Result<()>;
     /// Start the next provider Turn from durable seed input.
     async fn send_input(&mut self, content: &str) -> Result<()>;

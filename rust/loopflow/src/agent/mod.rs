@@ -3,6 +3,8 @@
 //! This module handles building commands and spawning subprocesses for each
 //! supported coding agent. Output can be captured or streamed.
 
+pub mod stream;
+
 use crate::id::AgentSessionId;
 use std::collections::BTreeMap;
 use std::env;
@@ -15,12 +17,12 @@ use std::sync::{mpsc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::engine::config::{default_agent, parse_agent};
-use crate::engine::error::CoreError;
-use crate::engine::platform::kill_process;
-use crate::engine::process::wait_for_exit;
-use crate::engine::stream::{format_event, ParseResult, StreamFormat, StreamParser};
-use crate::engine::structured_reply::{render_structured_reply_guidance, StructuredReply};
+use crate::agent::stream::{format_event, ParseResult, StreamFormat, StreamParser};
+use crate::config::{default_agent, parse_agent};
+use crate::error::CoreError;
+use crate::os_process::wait_for_exit;
+use crate::platform::kill_process;
+use crate::prompt::structured_reply::{render_structured_reply_guidance, StructuredReply};
 use crate::provider_account::{
     resolve_provider_account_exact_blocking, resolve_recorded_provider_account_blocking,
     ProviderAccountRoute, RateLimitSignal,
@@ -139,13 +141,13 @@ pub(crate) fn checkout_execution_boundary(
             "Agent execution unavailable: agent {agent:?} uses harness {harness:?}, which does not support a managed execution boundary; select codex or claude"
         )));
     }
-    let common_dir = crate::engine::worktrees::git_common_dir(repo).map_err(|error| {
+    let common_dir = crate::git::worktrees::git_common_dir(repo).map_err(|error| {
         anyhow::anyhow!(format!(
             "Agent execution unavailable: failed to resolve linked Git metadata from {}: {error}",
             repo.display()
         ))
     })?;
-    let control = crate::engine::process::execution_context().map_err(|error| {
+    let control = crate::os_process::execution_context().map_err(|error| {
         anyhow::anyhow!(format!(
             "Agent execution unavailable: Loopflow control-plane authority is unavailable: {error}"
         ))
@@ -174,7 +176,7 @@ pub struct AgentConfig {
     /// Task prompt content sent as the turn input.
     pub task_prompt: String,
     /// Native skill selection, kept separate from bounded user context.
-    pub skill_invocation: Option<crate::engine::skill_invocation::SkillInvocation>,
+    pub skill_invocation: Option<crate::skills::invocation::SkillInvocation>,
     /// Agent string (for example: "claude:opus" or "codex").
     pub agent: Option<String>,
     /// Max turn budget when supported by the harness.
@@ -326,7 +328,7 @@ pub(crate) fn write_system_prompt_file(
         .clone()
         .map(Ok)
         .unwrap_or_else(std::env::current_dir)?;
-    Ok(Some(crate::engine::prompt::write_prompt_log(
+    Ok(Some(crate::prompt::write_prompt_log(
         &cwd,
         &prompt,
         &format!("{name}.context"),
@@ -931,7 +933,7 @@ pub fn build_codex_thread_start_params(
 
 /// Extra workspace roots agents need for Git worktree metadata.
 pub fn workspace_add_dirs(cwd: &Path) -> Vec<PathBuf> {
-    let Ok(main_repo) = crate::engine::worktrees::main_repo_root(cwd) else {
+    let Ok(main_repo) = crate::git::worktrees::main_repo_root(cwd) else {
         return Vec::new();
     };
     if paths_equal(cwd, &main_repo) {
@@ -1887,7 +1889,7 @@ fn _run_agent_once(
     let title = if process.auto {
         None
     } else {
-        crate::engine::terminal_title::TerminalTitle::prepare(&launch.env, &harness, &mut cmd)
+        crate::terminal_title::TerminalTitle::prepare(&launch.env, &harness, &mut cmd)
     };
     cmd.args(args);
     if harness == "claude" && process.auto {
@@ -1940,7 +1942,7 @@ fn _run_agent_once(
         crate::ops::git_operation::prepare_agent_process(cwd, &launch.env)
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     }
-    cmd.env_remove(crate::engine::process::DISCORD_TOKEN_ENV);
+    cmd.env_remove(crate::os_process::DISCORD_TOKEN_ENV);
 
     // Shell integration sets LOOPFLOW_DIRECTIVE_FILE so top-level `lf` commands
     // can request parent-shell actions (for example auto-cd after `lf wt switch`).
@@ -2177,7 +2179,7 @@ fn run_interactive(
     timeout: Option<Duration>,
     capture: &CaptureHandle,
     activation: Option<std::fs::File>,
-    mut title: Option<crate::engine::terminal_title::TerminalTitle>,
+    mut title: Option<crate::terminal_title::TerminalTitle>,
 ) -> Result<AgentProcessResult, CoreError> {
     let start = Instant::now();
     let (mut child, attachment) = spawn_agent_child(cmd, capture, activation)?;
@@ -2391,7 +2393,7 @@ pub fn missing_agent_message(cli: &str) -> String {
 
 /// Check if a CLI is available.
 pub fn check_cli_available(cli: &str) -> bool {
-    crate::engine::process::which_on_path(Path::new(cli)).is_some()
+    crate::os_process::which_on_path(Path::new(cli)).is_some()
 }
 
 #[cfg(test)]

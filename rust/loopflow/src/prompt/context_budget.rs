@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
-use crate::engine::config::Config;
-use crate::engine::error::CoreError;
-use crate::engine::prompt::{count_tokens, Document, DocumentSource, PromptComponents};
+use crate::config::Config;
+use crate::error::CoreError;
+use crate::prompt::{count_tokens, Document, DocumentSource, PromptComponents};
 use crate::trace::{ContextAssetKind, ContextDecision, ContextDecisionKind, ContextScope};
 
 /// Keys in the existing `context_budgets` configuration block.
@@ -502,8 +502,8 @@ mod tests {
     use std::fs;
 
     use super::{bound_context, BudgetKey, ContextBudgetReport, ContextBudgets};
-    use crate::engine::config::{load_config, Config};
-    use crate::engine::prompt::{Document, DocumentSource, PromptComponents};
+    use crate::config::{load_config, Config};
+    use crate::prompt::{Document, DocumentSource, PromptComponents};
 
     #[test]
     fn default_memory_budget_keeps_large_memories_and_excerpts_outliers() {

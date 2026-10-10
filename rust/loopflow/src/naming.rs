@@ -1,9 +1,9 @@
 //! Session names, author slugs, and branch-safe sanitization.
 //!
-//! Branch/worktree identity itself lives in [`crate::engine::identity`]. This
+//! Branch/worktree identity itself lives in [`crate::git::worktree_name`]. This
 //! module only supplies the raw pieces it composes.
 
-use crate::engine::error::GitError;
+use crate::error::GitError;
 use std::path::Path;
 use std::process::Command;
 
@@ -80,7 +80,7 @@ fn session_request(context: &crate::trace::PreparedTurnContext) -> Option<&str> 
     }
     // Library callers have unassembled, separate system/task prompts.
     let task = &context.task;
-    (task.text != crate::engine::prompt::INITIAL_TURN_PROMPT
+    (task.text != crate::prompt::INITIAL_TURN_PROMPT
         && task
             .assets
             .iter()
@@ -171,7 +171,7 @@ mod tests {
         let cwd = std::path::Path::new("/repo/terminal-titles");
         let context = crate::trace::PreparedTurnContext::from_prompts(
             "# Loopflow operating guide",
-            crate::engine::prompt::INITIAL_TURN_PROMPT,
+            crate::prompt::INITIAL_TURN_PROMPT,
         );
         assert_eq!(
             super::generated_session_title(

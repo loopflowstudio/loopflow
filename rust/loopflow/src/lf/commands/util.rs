@@ -7,7 +7,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
 
-use crate::engine::{codex_permission_args, missing_agent_message, workspace_add_dirs};
+use crate::agent::codex_permission_args;
+use crate::agent::missing_agent_message;
+use crate::agent::workspace_add_dirs;
 use crate::id::AgentSessionId;
 use crate::journal::elapsed_seconds;
 use crate::provider_auth::Provider;
@@ -199,7 +201,7 @@ pub(crate) fn resume_session_with_env(
     remote: Option<NativeConnection>,
     attachment: Option<(String, crate::process::SessionAttachment)>,
 ) -> Result<()> {
-    let user_name = crate::engine::config::participant_name()?;
+    let user_name = crate::config::participant_name()?;
     let mut command =
         build_resume_session_command(harness, model, worktree, &provider_session.agent_session)?;
     command.attachment = attachment;
@@ -222,7 +224,7 @@ pub(crate) fn resume_session_with_env(
     )]);
     environment.extend(extra_environment.clone());
     environment.insert(
-        crate::engine::config::USER_NAME_ENV.to_string(),
+        crate::config::USER_NAME_ENV.to_string(),
         user_name.unwrap_or_default(),
     );
     // Fresh launches and native resumes share admission and settlement below.
@@ -748,11 +750,8 @@ fn run_native_session(
     process
         .env_remove("LOOPFLOW_DIRECTIVE_FILE")
         .envs(environment);
-    let mut title = crate::engine::terminal_title::TerminalTitle::prepare(
-        environment,
-        &command.program,
-        &mut process,
-    );
+    let mut title =
+        crate::terminal_title::TerminalTitle::prepare(environment, &command.program, &mut process);
     if let Some(route) = &account_route {
         process.args(route.provider_args());
     }
@@ -847,7 +846,7 @@ fn run_native_session(
         std::thread::spawn(move || observe_opencode_session(&capture_dir, stderr))
     });
     let status = if let Some(title) = &mut title {
-        crate::engine::process::wait_for_exit(&mut child, None, || title.refresh())?.0
+        crate::os_process::wait_for_exit(&mut child, None, || title.refresh())?.0
     } else {
         child.wait()?
     };
@@ -947,7 +946,7 @@ fn prepare_codex_capture(process: &mut Command) -> Result<tempfile::NamedTempFil
         .map_err(|error| anyhow!("cannot resolve lf for Codex session capture: {error}"))?;
     let command = format!(
         "{} __provider-session",
-        crate::engine::process::shell_escape(&executable.to_string_lossy())
+        crate::os_process::shell_escape(&executable.to_string_lossy())
     );
     let command = serde_json::to_string(&command).expect("shell command serializes as TOML string");
     write!(profile, "hooks={{ SessionStart = [{{ matcher = \"startup\", hooks = [{{ type = \"command\", command = {command}, timeout = 5 }}] }}] }}")?;
@@ -994,7 +993,7 @@ fn codex_supplies_hook_trust(process: &Command) -> Result<bool> {
         probe.process_group(0);
     }
     let mut child = probe.spawn()?;
-    let group = crate::engine::process::ProcessGroupGuard::new(child.id());
+    let group = crate::os_process::ProcessGroupGuard::new(child.id());
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     while child.try_wait()?.is_none() {
         if std::time::Instant::now() >= deadline {
@@ -1664,7 +1663,7 @@ mod tests {
         assert_eq!(launch.args.last().map(String::as_str), Some("fix it"));
         assert_eq!(
             launch.args.contains(&"--sandbox".to_string()),
-            crate::engine::codex_permission_args(Some(&path()), false, false)
+            crate::agent::codex_permission_args(Some(&path()), false, false)
                 .contains(&"--sandbox".to_string())
         );
     }
@@ -1672,7 +1671,7 @@ mod tests {
     #[test]
     fn bare_tui_harnesses_do_not_select_a_model() {
         for agent in ["claude", "codex", "opencode"] {
-            let (harness, model) = crate::engine::parse_agent(agent);
+            let (harness, model) = crate::config::parse_agent(agent);
             let launch =
                 build_session_command(&harness, model.as_deref(), &path(), "test", None, None)
                     .expect("build bare harness launch");

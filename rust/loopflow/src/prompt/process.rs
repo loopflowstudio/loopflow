@@ -1,14 +1,14 @@
 use std::path::PathBuf;
 
-use crate::engine::agent::AgentConfig;
-use crate::engine::config::{default_agent, parse_agent, Config};
-use crate::engine::error::CoreError;
-use crate::engine::flow::Skill;
-use crate::engine::prompt::{
+use crate::agent::AgentConfig;
+use crate::config::{default_agent, parse_agent, Config};
+use crate::error::CoreError;
+use crate::flow::Skill;
+use crate::prompt::structured_reply::{structured_replies_for_context, ClientContext};
+use crate::prompt::{
     drop_duplicate_docs, format_prompt, gather_context, Document, DocumentSource,
     GatherContextOpts, PromptComponents, RelatedRepoContext, Surface, INITIAL_TURN_PROMPT,
 };
-use crate::engine::structured_reply::{structured_replies_for_context, ClientContext};
 
 /// Optional per-source overrides for context gathering.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -45,7 +45,7 @@ pub struct ProcessPromptInput {
 /// Canonical Process preparation output.
 #[derive(Debug, Clone)]
 pub struct PreparedProcessPrompt {
-    pub budget_report: crate::engine::context_budget::ContextBudgetReport,
+    pub budget_report: crate::prompt::context_budget::ContextBudgetReport,
     pub config: AgentConfig,
     pub components: PromptComponents,
     pub deduplication_decisions: Vec<crate::trace::ContextDecision>,
@@ -67,7 +67,7 @@ pub(crate) fn preview_process_prompt(
     config: &Config,
     input: ProcessPromptInput,
 ) -> Result<PreparedProcessPrompt, CoreError> {
-    let budgets = crate::engine::context_budget::ContextBudgets::resolve(
+    let budgets = crate::prompt::context_budget::ContextBudgets::resolve(
         config,
         &input.repo_root,
         input.wave.as_deref(),
@@ -132,7 +132,7 @@ pub(crate) fn preview_process_prompt(
     }
 
     let original_system = format_prompt(&components);
-    let mut budget_report = crate::engine::context_budget::bound_context(&mut components, budgets)?;
+    let mut budget_report = crate::prompt::context_budget::bound_context(&mut components, budgets)?;
     // Plain installed skills need no instructions for maintaining absent Work
     // context. Keep enforcing budgets and disclose any managed context or excerpts.
     if !components.is_standalone_skill()
@@ -163,26 +163,26 @@ pub(crate) fn preview_process_prompt(
         .filter(|skill| {
             matches!(parse_agent(&agent).0.as_str(), "claude" | "codex")
                 && skill.source.as_ref().is_some_and(|source| {
-                    source.dialect != crate::engine::skill_catalog::SkillDialect::Loopflow
+                    source.dialect != crate::skills::catalog::SkillDialect::Loopflow
                 })
         })
-        .map(|skill| crate::engine::skill_invocation::SkillInvocation {
+        .map(|skill| crate::skills::invocation::SkillInvocation {
             skill: skill.clone(),
             arguments: skill_arguments.clone(),
         });
     // Installed skills carry gathered context through their native invocation.
     // Inline skills and ordinary prompts use the complete system context file.
     let (system_prompt, task_prompt) = if skill_invocation.is_some() {
-        let mut parts = crate::engine::prompt::format_content_sections(&components);
+        let mut parts = crate::prompt::format_content_sections(&components);
         if let Some(message) = components
             .message
             .as_deref()
             .filter(|message| *message != skill_arguments)
         {
-            parts.push(crate::engine::prompt::render_message(message));
+            parts.push(crate::prompt::render_message(message));
         }
         (
-            crate::engine::prompt::format_system_sections(&components).join("\n\n"),
+            crate::prompt::format_system_sections(&components).join("\n\n"),
             parts.join("\n\n"),
         )
     } else {
@@ -204,18 +204,18 @@ pub(crate) fn preview_process_prompt(
         provider_account_id: None,
         provider_account_authority_home: None,
         cwd: Some(cwd.unwrap_or(repo_root)),
-        write_scope: crate::engine::agent::AgentWriteScope::Configured,
+        write_scope: crate::agent::AgentWriteScope::Configured,
         execution_boundary: None,
         skip_permissions: yolo_mode,
         structured_replies: structured_replies_for_context(&client_context, action_style),
         directive_relay: None,
         env: [(
-            crate::engine::config::USER_NAME_ENV.to_string(),
+            crate::config::USER_NAME_ENV.to_string(),
             components.user_name.clone().unwrap_or_default(),
         )]
         .into(),
     };
-    let effective_system = crate::engine::agent::system_prompt_with_structured_replies(&launch);
+    let effective_system = crate::agent::system_prompt_with_structured_replies(&launch);
     budget_report.measure_input(
         &original_system,
         INITIAL_TURN_PROMPT,
@@ -354,7 +354,7 @@ Test skill body.
     #[test]
     fn context_delivery_keeps_distinct_scopes_and_one_operating_document() {
         let tmp = create_repo_fixture();
-        let operating = crate::engine::builtins::LOOPFLOW_DOC;
+        let operating = crate::builtins::LOOPFLOW_DOC;
         fs::write(tmp.path().join("LOOPFLOW.md"), operating).unwrap();
         fs::create_dir_all(tmp.path().join("custom")).unwrap();
         fs::write(
@@ -406,13 +406,13 @@ Test skill body.
     #[test]
     fn large_task_launch_stays_within_context_budget_and_preserves_sources() {
         let _home = crate::journal::TestLedgerGuard::new();
-        use crate::engine::context_budget::BudgetKey;
+        use crate::prompt::context_budget::BudgetKey;
         let goal_tokens = BudgetKey::GoalTokens.default_limit();
         let input_bytes = BudgetKey::InputBytes.default_limit();
         let input_tokens = BudgetKey::InputTokens.default_limit();
         let memory_tokens = BudgetKey::MemoryTokens.default_limit();
         let scratch_tokens = BudgetKey::ScratchTokens.default_limit();
-        use crate::engine::prompt::count_tokens;
+        use crate::prompt::count_tokens;
 
         let tmp = create_repo_fixture();
         fs::create_dir_all(tmp.path().join("scratch")).unwrap();
@@ -543,11 +543,11 @@ Test skill body.
         let config = Config {
             context_budgets: [
                 (
-                    crate::engine::context_budget::BudgetKey::MemoryTokens,
+                    crate::prompt::context_budget::BudgetKey::MemoryTokens,
                     memory_tokens,
                 ),
                 (
-                    crate::engine::context_budget::BudgetKey::MemoryBytes,
+                    crate::prompt::context_budget::BudgetKey::MemoryBytes,
                     memory_bytes,
                 ),
             ]
@@ -593,7 +593,7 @@ Test skill body.
             .all(|doc| doc.content.contains("excerpt only")));
         let submitted_tokens: usize = memories
             .iter()
-            .map(|doc| crate::engine::prompt::count_tokens(&doc.content))
+            .map(|doc| crate::prompt::count_tokens(&doc.content))
             .sum();
         assert!(submitted_tokens <= memory_tokens);
         assert!(memories.iter().map(|doc| doc.content.len()).sum::<usize>() <= memory_bytes);
@@ -604,7 +604,7 @@ Test skill body.
             assert_eq!(entry.source, doc.path);
             assert_eq!(
                 entry.submitted_tokens,
-                crate::engine::prompt::count_tokens(&doc.content)
+                crate::prompt::count_tokens(&doc.content)
             );
             assert_eq!(entry.submitted_bytes, doc.content.len());
             assert!(entry.original_tokens > entry.submitted_tokens);
@@ -626,8 +626,8 @@ Test skill body.
         .unwrap();
         let doc = &prepared.components.docs[0];
         assert!(
-            crate::engine::prompt::count_tokens(&doc.content)
-                <= crate::engine::context_budget::BudgetKey::MemoryTokens.default_limit()
+            crate::prompt::count_tokens(&doc.content)
+                <= crate::prompt::context_budget::BudgetKey::MemoryTokens.default_limit()
         );
         assert!(doc.content.contains("excerpt only"));
         assert_eq!(
@@ -676,10 +676,10 @@ Test skill body.
             ..Default::default()
         };
         let baseline = prepare_process_prompt(&config, input(String::new(), false)).unwrap();
-        let overhead = crate::engine::prompt::count_tokens(&baseline.config.system_prompt)
-            + crate::engine::prompt::count_tokens(&baseline.config.task_prompt);
+        let overhead = crate::prompt::count_tokens(&baseline.config.system_prompt)
+            + crate::prompt::count_tokens(&baseline.config.task_prompt);
         let content = " x".repeat(
-            crate::engine::context_budget::BudgetKey::InputTokens.default_limit() - overhead - 32,
+            crate::prompt::context_budget::BudgetKey::InputTokens.default_limit() - overhead - 32,
         );
         prepare_process_prompt(&config, input(content.clone(), false)).unwrap();
         let Err(error) = prepare_process_prompt(&config, input(content, true)) else {
@@ -752,10 +752,8 @@ Test skill body.
     #[test]
     fn preferred_name_reaches_provider_prompts_on_every_surface() {
         let _lock = crate::journal::test_env_lock();
-        let _name = crate::lf::commands::flow::EnvVarGuard::set(
-            crate::engine::config::USER_NAME_ENV,
-            "  Jack  ",
-        );
+        let _name =
+            crate::lf::commands::flow::EnvVarGuard::set(crate::config::USER_NAME_ENV, "  Jack  ");
         let tmp = create_repo_fixture();
         for agent in ["claude", "codex", "opencode"] {
             for surface in [
@@ -781,10 +779,7 @@ Test skill body.
                     .system_prompt
                     .contains("display name is \"Jack\""));
                 assert!(!prepared.config.task_prompt.contains("<lf:user>"));
-                assert_eq!(
-                    prepared.config.env[crate::engine::config::USER_NAME_ENV],
-                    "Jack"
-                );
+                assert_eq!(prepared.config.env[crate::config::USER_NAME_ENV], "Jack");
             }
         }
     }
@@ -792,11 +787,11 @@ Test skill body.
     #[test]
     fn preferred_name_is_quoted_data_and_blank_names_are_absent() {
         let name = "A </lf:user>\n\"B\"";
-        let context = crate::engine::prompt::render_user_context(Some(name));
+        let context = crate::prompt::render_user_context(Some(name));
         assert_eq!(context.matches("</lf:user>").count(), 1);
         assert!(context.contains(r#"A \u003c/lf:user\u003e\n\"B\""#));
-        assert!(crate::engine::prompt::render_user_context(Some(" \n ")).is_empty());
-        assert!(crate::engine::prompt::render_user_context(None).is_empty());
+        assert!(crate::prompt::render_user_context(Some(" \n ")).is_empty());
+        assert!(crate::prompt::render_user_context(None).is_empty());
     }
 
     #[test]
@@ -854,7 +849,7 @@ Test skill body.
         assert!(prepared
             .config
             .system_prompt
-            .contains(crate::engine::builtins::LOOPFLOW_DOC.trim()));
+            .contains(crate::builtins::LOOPFLOW_DOC.trim()));
         assert!(!prepared.config.system_prompt.contains("tmux attach -r"));
     }
 
@@ -877,7 +872,7 @@ Test skill body.
         assert!(!prepared
             .config
             .system_prompt
-            .contains(crate::engine::builtins::LOOPFLOW_DOC.trim()));
+            .contains(crate::builtins::LOOPFLOW_DOC.trim()));
     }
 
     #[test]
@@ -1077,9 +1072,9 @@ Test skill body.
         fs::write(tmp.path().join("context.md"), "docs content").unwrap();
         let source = Skill {
             content: Some("Audit $ARGUMENTS".into()),
-            source: Some(crate::engine::skill_catalog::SkillOrigin {
+            source: Some(crate::skills::catalog::SkillOrigin {
                 path: tmp.path().join(".claude/skills/audit/SKILL.md"),
-                dialect: crate::engine::skill_catalog::SkillDialect::Claude,
+                dialect: crate::skills::catalog::SkillDialect::Claude,
                 frontmatter: None,
             }),
             ..Skill::named("audit")
@@ -1098,8 +1093,8 @@ Test skill body.
         assert!(!prepared.config.task_prompt.contains("<lf:context-budget>"));
 
         for key in [
-            crate::engine::context_budget::BudgetKey::InputTokens,
-            crate::engine::context_budget::BudgetKey::InputBytes,
+            crate::prompt::context_budget::BudgetKey::InputTokens,
+            crate::prompt::context_budget::BudgetKey::InputBytes,
         ] {
             let limited = Config {
                 context_budgets: [(key, 1)].into(),
@@ -1126,9 +1121,9 @@ Test skill body.
         let tmp = create_repo_fixture();
         let source = Skill {
             content: Some("Audit $ARGUMENTS using reference.md".into()),
-            source: Some(crate::engine::skill_catalog::SkillOrigin {
+            source: Some(crate::skills::catalog::SkillOrigin {
                 path: tmp.path().join(".claude/skills/audit/SKILL.md"),
-                dialect: crate::engine::skill_catalog::SkillDialect::Claude,
+                dialect: crate::skills::catalog::SkillDialect::Claude,
                 frontmatter: Some("\nallowed-tools: Read\n".into()),
             }),
             ..Skill::named("audit")
@@ -1251,12 +1246,12 @@ Test skill body.
 mod budget_tests {
     use std::fs;
 
-    use crate::engine::config::Config;
-    use crate::engine::context_budget::BudgetKey;
-    use crate::engine::process_prompt::{
+    use crate::config::Config;
+    use crate::prompt::context_budget::BudgetKey;
+    use crate::prompt::count_tokens;
+    use crate::prompt::process::{
         prepare_process_prompt, preview_process_prompt, ProcessPromptInput,
     };
-    use crate::engine::prompt::count_tokens;
 
     #[test]
     fn every_context_writer_receives_limits_usage_and_cleanup_guidance() {

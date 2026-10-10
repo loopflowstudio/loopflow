@@ -14,8 +14,8 @@ use std::time::{Duration, Instant};
 
 use futures_util::future::try_join_all;
 
+use crate::config::load_repo_config;
 use crate::durable::WorkRef;
-use crate::engine::config::load_repo_config;
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
 use crate::ops::task_pm::ResolvedTask;
@@ -1745,7 +1745,7 @@ async fn apply_or_plan_repository_reteam(
             "repository has no Waves linked to Linear Initiatives".to_string(),
         ));
     }
-    if apply && repo.join(".git").exists() && !crate::engine::git::is_clean(repo)? {
+    if apply && repo.join(".git").exists() && !crate::git::is_clean(repo)? {
         return Err(OpsError::Message(
             "`lf repo reteam --apply` requires a clean Git checkout so its repository PM config and Wave bindings can commit atomically; commit or stash existing changes, then rerun the dry-run"
                 .to_string(),
@@ -2650,8 +2650,7 @@ async fn canonical_wave_title_path_with_store(
         return Ok(title_case(wave));
     };
 
-    let main =
-        crate::engine::worktrees::main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
+    let main = crate::git::worktrees::main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
     let main = std::fs::canonicalize(&main).unwrap_or(main);
     let mut seen = BTreeSet::new();
     let mut segments = Vec::new();

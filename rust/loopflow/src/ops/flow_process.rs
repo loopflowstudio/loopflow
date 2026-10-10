@@ -3,7 +3,7 @@
 //! row per step it starts. The record is append-only and only the driver writes
 //! it. Each step is an ordinary command that knows nothing of its Flow; whether
 //! the Flow or a step is running, finished or failed is read from their Processes.
-use crate::engine::flow_graph::FlowGraph;
+use crate::flow::graph::FlowGraph;
 use crate::id::LfProcessId;
 use crate::process::LfProcess;
 
@@ -55,7 +55,7 @@ impl FlowProcess {
     ) -> crate::durable::FlowProcessDetail {
         let finished = entry.summary.state == crate::session::FlowProcessSummaryState::Completed;
         let latest = self.latest();
-        let projection = crate::engine::flow_graph::project_position(
+        let projection = crate::flow::graph::project_position(
             &self.graph,
             latest.map_or(0, |step| step.key),
             latest.map_or(&[], |step| &step.iterations),

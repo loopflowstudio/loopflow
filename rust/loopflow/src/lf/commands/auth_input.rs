@@ -42,7 +42,7 @@ impl AuthInput {
         }
         let active = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
         let cleanup_active = active.clone();
-        crate::engine::agent::register_interrupt_cleanup(move || {
+        crate::agent::register_interrupt_cleanup(move || {
             if cleanup_active.swap(false, std::sync::atomic::Ordering::AcqRel) {
                 // SAFETY: the retained terminal fd and original attributes are valid.
                 unsafe {

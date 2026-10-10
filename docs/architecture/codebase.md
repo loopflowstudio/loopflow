@@ -42,8 +42,8 @@ subprocess edge to one concept.
 | Behavior | Begin at | Main object passed onward |
 | --- | --- | --- |
 | command parsing | [`lf/mod.rs`](../../rust/loopflow/src/lf/mod.rs) | command args and launch context |
-| Skill/Flow discovery | [`engine/target.rs`](../../rust/loopflow/src/engine/target.rs) | selected Skill or Flow |
-| prompt assembly | [`engine/prompt.rs`](../../rust/loopflow/src/engine/prompt.rs) | system/task prompt pair |
+| Skill/Flow discovery | [`definition/mod.rs`](../../rust/loopflow/src/definition/mod.rs) | selected Skill or Flow |
+| prompt assembly | [`prompt/mod.rs`](../../rust/loopflow/src/prompt/mod.rs) | system/task prompt pair |
 | provider routing | [`provider_account.rs`](../../rust/loopflow/src/provider_account.rs) | selected account route |
 | provider streams | [`harness/`](../../rust/loopflow/src/harness/) | normalized conversation and usage |
 | Session capture evidence | [`session_record.rs`](../../rust/loopflow/src/session_record.rs) | manifest, append events, terminal receipt |

@@ -1,11 +1,11 @@
-use crate::engine::error::GitError;
-use crate::engine::git::{
+use crate::error::GitError;
+use crate::git::worktree_name::WorktreeName;
+use crate::git::{
     current_branch, delete_local_branch, fetch, get_default_branch, has_commits_beyond, has_origin,
     is_clean, rev_parse, stash_including_untracked, stash_pop, worktree_add,
     worktree_add_inheriting, worktree_remove, WorktreeBranch,
 };
-use crate::engine::identity::WorktreeName;
-use crate::engine::naming::git_user;
+use crate::naming::git_user;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
@@ -30,7 +30,7 @@ impl WorktreeSegment {
         if trimmed.contains('.') {
             return Err(PlacementError::DotsReserved(trimmed.to_string()));
         }
-        Ok(Self(crate::engine::naming::sanitize_for_branch(trimmed)))
+        Ok(Self(crate::naming::sanitize_for_branch(trimmed)))
     }
 
     pub fn as_str(&self) -> &str {
@@ -171,7 +171,7 @@ pub struct AgentWorktree {
 }
 
 pub fn git_common_dir(repo: &Path) -> Result<PathBuf, GitError> {
-    let output = crate::engine::git::retained_output(
+    let output = crate::git::retained_output(
         repo,
         &["rev-parse", "--path-format=absolute", "--git-common-dir"],
     )?;
@@ -244,7 +244,7 @@ fn short_hash(value: &str, chars: usize) -> String {
 /// readable prefix and a hash of the complete slug so sanitization cannot
 /// collapse distinct Waves onto one checkout.
 pub fn wave_agent_segment(wave: &str) -> Result<WorktreeSegment, PlacementError> {
-    let readable = crate::engine::naming::sanitize_for_branch(wave).replace('.', "-");
+    let readable = crate::naming::sanitize_for_branch(wave).replace('.', "-");
     let name = if wave.contains('/') {
         format!("wave-{readable}-{}", short_hash(wave, 8))
     } else {
@@ -1830,7 +1830,7 @@ pub fn schedule_upstream_sync(worktree: PathBuf, branch: String) {
             if backoff_secs > 0 {
                 thread::sleep(Duration::from_secs(backoff_secs));
             }
-            if crate::engine::git::origin_branch(&worktree)
+            if crate::git::origin_branch(&worktree)
                 .ok()
                 .flatten()
                 .as_deref()
@@ -2238,8 +2238,8 @@ mod tests {
             serde_json::to_value(&listed).unwrap()
         );
         assert!(repo.join(".git/lf-commit-facts").is_file());
-        assert!(crate::engine::git::is_clean(&repo).unwrap());
-        assert!(crate::engine::git::is_clean(&active).unwrap());
+        assert!(crate::git::is_clean(&repo).unwrap());
+        assert!(crate::git::is_clean(&active).unwrap());
     }
 
     #[test]

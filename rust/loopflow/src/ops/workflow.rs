@@ -9,7 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::engine::workflow::{WorkflowDefinition, END, START};
+use crate::workflow::{WorkflowDefinition, END, START};
 
 /// One Task's Workflow as `lf task status --json` carries it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -219,7 +219,7 @@ fn leaving(definition: &WorkflowDefinition, node: &str) -> Vec<u32> {
 #[cfg(test)]
 mod tests {
     use super::{Workflow, WorkflowPosition};
-    use crate::engine::workflow::load_workflow;
+    use crate::workflow::load_workflow;
 
     #[test]
     fn a_stopped_edge_holds_the_task_and_guidance_names_every_edge() {

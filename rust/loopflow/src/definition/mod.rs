@@ -1,7 +1,14 @@
+pub mod name;
+
 use std::path::Path;
 
-use crate::engine::flow::DefinitionLoader;
-use crate::engine::{Command, FlowDefinition, LoadError, Skill, Step, XorDef};
+use crate::error::LoadError;
+use crate::flow::Command;
+use crate::flow::DefinitionLoader;
+use crate::flow::FlowDefinition;
+use crate::flow::Skill;
+use crate::flow::Step;
+use crate::flow::XorDef;
 use serde::{Deserialize, Serialize};
 
 /// Kind restriction for named-definition lookup; commands are selected by the CLI tree.
@@ -54,7 +61,7 @@ pub fn resolve_definition(
     name: &str,
     kind: Option<DefinitionKind>,
 ) -> Result<Target, LoadError> {
-    let catalog = crate::engine::skill_catalog::SkillCatalog::discover(Some(repo))?;
+    let catalog = crate::skills::catalog::SkillCatalog::discover(Some(repo))?;
     DefinitionLoader::new(Some(repo), &catalog).resolve(name, kind)
 }
 
@@ -75,7 +82,7 @@ mod tests {
             "Current instructions",
         )
         .unwrap();
-        let mut captured = crate::engine::Skill::named("review");
+        let mut captured = crate::flow::Skill::named("review");
         captured.content = Some("Retired captured instructions".into());
         std::env::set_var(
             "LF_HUMAN_SESSION",
@@ -172,7 +179,7 @@ mod tests {
         // A workflow is traversed by `lf task run`, never run as a Flow.
         for name in ["feature", "code"] {
             let error = resolve_definition(tmp.path(), name, None).unwrap_err();
-            assert!(matches!(error, crate::engine::LoadError::Workflow(_)));
+            assert!(matches!(error, crate::error::LoadError::Workflow(_)));
         }
     }
 }

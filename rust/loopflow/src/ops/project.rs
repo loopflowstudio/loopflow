@@ -183,9 +183,9 @@ async fn resolve_project(store: &Store, repo: &Path, selector: &str) -> OpsResul
 pub async fn workflow_catalog(
     repo: &Path,
     selector: Option<&str>,
-) -> OpsResult<Vec<crate::engine::workflow::WorkflowCatalogEntry>> {
+) -> OpsResult<Vec<crate::workflow::WorkflowCatalogEntry>> {
     let Some(selector) = selector else {
-        return crate::engine::workflow::workflow_catalog(repo).map_err(project_error);
+        return crate::workflow::workflow_catalog(repo).map_err(project_error);
     };
     let store = super::pm::pm_store().await?;
     let project = resolve_project(&store, repo, selector).await?;
@@ -195,8 +195,7 @@ pub async fn workflow_catalog(
         .map_err(project_error)?
         .into_iter()
         .collect();
-    let mut names =
-        crate::engine::workflow::available_workflow_names(repo).map_err(project_error)?;
+    let mut names = crate::workflow::available_workflow_names(repo).map_err(project_error)?;
     names.extend(stored.keys().cloned());
     names.sort();
     names.dedup();
@@ -206,20 +205,18 @@ pub async fn workflow_catalog(
             let content = stored
                 .get(&name)
                 .map(String::as_str)
-                .or_else(|| crate::engine::workflow::builtin_workflow(&name));
+                .or_else(|| crate::workflow::builtin_workflow(&name));
             let (workflow, unavailable) = match content {
-                Some(content) => {
-                    match crate::engine::workflow::parse_workflow(&name, content, repo) {
-                        Ok(workflow) => (Some(workflow), None),
-                        Err(error) => (None, Some(error)),
-                    }
-                }
+                Some(content) => match crate::workflow::parse_workflow(&name, content, repo) {
+                    Ok(workflow) => (Some(workflow), None),
+                    Err(error) => (None, Some(error)),
+                },
                 None => (
                     None,
                     Some("Import the repository definition with lf wave ensure".into()),
                 ),
             };
-            Ok(crate::engine::workflow::WorkflowCatalogEntry {
+            Ok(crate::workflow::WorkflowCatalogEntry {
                 source: stored.contains_key(&name).then(|| "stored".into()),
                 name,
                 workflow,
@@ -274,7 +271,7 @@ pub async fn workflow(
             None => read_workflow_source(&store, &project.wave_id, name)?
                 .ok_or_else(|| project_error(format!("Workflow {name:?} not found")))?,
         };
-        crate::engine::workflow::parse_workflow(name, &definition, repo).map_err(project_error)?;
+        crate::workflow::parse_workflow(name, &definition, repo).map_err(project_error)?;
         let wave = store
             .get_wave(&project.wave_id)
             .await
@@ -313,11 +310,9 @@ pub(crate) fn load_workflow(
     wave: &crate::id::WaveId,
     name: &str,
     repo: &Path,
-) -> OpsResult<Option<crate::engine::workflow::WorkflowDefinition>> {
+) -> OpsResult<Option<crate::workflow::WorkflowDefinition>> {
     read_workflow_source(store, wave, name)?
-        .map(|content| {
-            crate::engine::workflow::parse_workflow(name, &content, repo).map_err(project_error)
-        })
+        .map(|content| crate::workflow::parse_workflow(name, &content, repo).map_err(project_error))
         .transpose()
 }
 
@@ -332,6 +327,6 @@ fn read_workflow_source(
         .map_err(project_error)?
     {
         Some(content) => Ok(Some(content)),
-        None => Ok(crate::engine::workflow::builtin_workflow(name).map(str::to_string)),
+        None => Ok(crate::workflow::builtin_workflow(name).map(str::to_string)),
     }
 }

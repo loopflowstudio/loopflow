@@ -4,7 +4,7 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::process::{Command, Stdio};
 
-use loopflow::engine::worktrees::create_named_worktree;
+use loopflow::git::worktrees::create_named_worktree;
 use loopflow::ops::{
     arm as land, create_or_update_pr, submit, LandOptions, NullProgress, OpsError, PrOptions,
 };
@@ -540,9 +540,7 @@ fn final_preparation_keeps_published_history_when_the_base_changes() {
         }
         if advance_base {
             assert_ne!(repo.head_sha(), published_head);
-            assert!(
-                loopflow::engine::git::is_ancestor(repo.path(), &published_head, "HEAD").unwrap()
-            );
+            assert!(loopflow::git::is_ancestor(repo.path(), &published_head, "HEAD").unwrap());
             assert_eq!(
                 fs::read_to_string(repo.path().join("upstream.txt")).unwrap(),
                 "new upstream work"
@@ -2057,9 +2055,9 @@ fn persistent_submit_keeps_scratch_and_post_commit_edits() {
     let gh = gh_no_pr_script();
     let _env = EnvGuard::new(&[("gh", &gh)]);
     let repo = TestRepo::new();
-    let persistent = loopflow::engine::worktrees::ensure_agent_worktree(
+    let persistent = loopflow::git::worktrees::ensure_agent_worktree(
         repo.path(),
-        loopflow::engine::worktrees::WorktreeSegment::parse("repo").unwrap(),
+        loopflow::git::worktrees::WorktreeSegment::parse("repo").unwrap(),
     )
     .unwrap();
     fs::write(persistent.path.join("memory.md"), "accepted\n").unwrap();

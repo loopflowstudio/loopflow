@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::process::Command;
 
-use crate::engine::error::CoreError;
+use crate::error::CoreError;
 
 pub fn create_worktree(repo: &Path, worktree: &Path, branch: &str) -> Result<(), CoreError> {
     let status = Command::new("git")

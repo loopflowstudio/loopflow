@@ -9,9 +9,9 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use super::error::LoadError;
-use super::flow::{compile_flow, load_flow, load_skill};
-use super::skills::first_prose_line;
+use crate::error::LoadError;
+use crate::flow::{compile_flow, load_flow, load_skill};
+use crate::skills::first_prose_line;
 
 pub const START: &str = "start";
 pub const END: &str = "end";
@@ -415,9 +415,9 @@ mod tests {
                 .contains("no-such-flow")
         );
 
-        let flow = crate::engine::flow::customize("pursue", repo.path()).unwrap();
+        let flow = crate::flow::customize("pursue", repo.path()).unwrap();
         assert_eq!(flow, repo.path().join(".lf/flows/pursue.yaml"));
-        let pursue = crate::engine::flow_graph::flow_catalog(repo.path())
+        let pursue = crate::flow::graph::flow_catalog(repo.path())
             .unwrap()
             .into_iter()
             .find(|entry| entry.name == "pursue")

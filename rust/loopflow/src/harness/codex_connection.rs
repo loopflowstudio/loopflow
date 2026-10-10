@@ -80,7 +80,7 @@ pub(crate) fn close_agent_process(
     }
     // The leader may exit before its helpers. Use the same group-wide death
     // judgment as scheduled settlement rather than ending on leader death.
-    if crate::engine::process::terminate_process_group(pid) {
+    if crate::os_process::terminate_process_group(pid) {
         Ok(())
     } else {
         Err(anyhow!("AgentProcess group {pid} death is unresolved"))
@@ -380,7 +380,7 @@ mod tests {
 
     impl Drop for Group {
         fn drop(&mut self) {
-            crate::engine::process::terminate_process_group(self.0.id());
+            crate::os_process::terminate_process_group(self.0.id());
             let _ = self.0.wait();
         }
     }

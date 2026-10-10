@@ -9,8 +9,8 @@
 
 use std::time::Duration;
 
+use loopflow::agent::AgentConfig;
 use loopflow::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
-use loopflow::engine::agent::AgentConfig;
 use loopflow::harness::codex::CodexHarness;
 use loopflow::harness::{ApprovalPolicy, Harness};
 use loopflow::id::LfProcessId;

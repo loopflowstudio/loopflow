@@ -6,7 +6,7 @@ use std::fs;
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
-use base64::Engine;
+use base64::prelude::*;
 use loopflow::id::WaveId;
 use loopflow::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
 use loopflow::store::{PmSnapshotRow, StorageConfig, Store};
@@ -147,7 +147,7 @@ pub fn register_codex_account(home: &Path) {
     let account_home = home.join("accounts/codex/fixture");
     fs::create_dir_all(&account_home).unwrap();
     let email = "fixture@example.com";
-    let claims = base64::engine::general_purpose::URL_SAFE_NO_PAD
+    let claims = BASE64_URL_SAFE_NO_PAD
         .encode(serde_json::json!({"email": email, "sub": "fixture"}).to_string());
     fs::write(
         account_home.join("auth.json"),
@@ -615,7 +615,7 @@ fn write_executable(dir: &Path, name: &str, content: &str) {
 /// names the Flow.
 #[allow(dead_code)] // Shared helper compiled into integration tests that record no Flow.
 pub fn record_flow(home: &Path, cwd: &Path, flow: &str, label: &str, outcome: &str) -> String {
-    use loopflow::engine::flow::{ConcreteSkill, ConcreteStep, Skill};
+    use loopflow::flow::{ConcreteSkill, ConcreteStep, Skill};
     let db = rusqlite::Connection::open(home.join("loopflow.db")).expect("open test registry");
     let driver = loopflow::id::LfProcessId::new();
     let step = loopflow::id::LfProcessId::new();
@@ -641,7 +641,7 @@ pub fn record_flow(home: &Path, cwd: &Path, flow: &str, label: &str, outcome: &s
         )
         .expect("record Flow Process");
     }
-    let graph = loopflow::engine::flow_graph::FlowGraph::new(
+    let graph = loopflow::flow::graph::FlowGraph::new(
         flow,
         &[ConcreteStep::Skill(ConcreteSkill {
             skill: Skill::named(label),
@@ -688,9 +688,9 @@ pub fn recorded_flows(home: &Path) -> Vec<(Option<String>, Vec<serde_json::Value
         .expect("decode Flow drivers");
     rows.into_iter()
         .map(|(driver, outcome, flow, graph)| {
-            let graph: loopflow::engine::flow_graph::FlowGraph =
+            let graph: loopflow::flow::graph::FlowGraph =
                 serde_json::from_str(&graph).expect("a Flow graph");
-            fn label(nodes: &[loopflow::engine::flow_graph::FlowNode], key: u32) -> Option<String> {
+            fn label(nodes: &[loopflow::flow::graph::FlowNode], key: u32) -> Option<String> {
                 nodes.iter().find_map(|node| {
                     if node.key == key {
                         return Some(node.label.clone());

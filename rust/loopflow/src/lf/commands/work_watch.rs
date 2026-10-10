@@ -451,7 +451,7 @@ impl Reader {
         // Every one is asked again, not only up to the first that differs.
         let mut differs = false;
         for worktree in &changed {
-            differs |= crate::engine::git::reread_retained(worktree);
+            differs |= crate::git::reread_retained(worktree);
         }
         if differs {
             for part in [Part::Planning, Part::Wave] {
@@ -764,7 +764,7 @@ pub(super) fn run(watch: bool) -> Result<()> {
         .into_owned();
     if watch {
         // Every reading asks Git the same questions about the same checkouts.
-        crate::engine::git::retain_reads();
+        crate::git::retain_reads();
     }
     let shared: Shared = Arc::new((Mutex::new(Mailbox::default()), Condvar::new()));
     let mut reader = Reader {

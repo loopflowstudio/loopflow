@@ -1,12 +1,15 @@
+pub mod catalog;
+pub mod invocation;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::engine::definition_name::portable_name;
-use crate::engine::flow::{compile_flow_with_catalog, split_frontmatter, DefinitionLoader};
-use crate::engine::flow_instructions::render_flow_instructions;
-use crate::engine::skill_catalog::{is_generated, SkillCatalog, SkillDialect, SkillSource};
-use crate::engine::LoadError;
+use crate::definition::name::portable_name;
+use crate::error::LoadError;
+use crate::flow::instructions::render_flow_instructions;
+use crate::flow::{compile_flow_with_catalog, split_frontmatter, DefinitionLoader};
+use crate::skills::catalog::{is_generated, SkillCatalog, SkillDialect, SkillSource};
 
 const SKILL_FILE_NAME: &str = "SKILL.md";
 const LOOPFLOW_MARKER: &str = "loopflow: true";
@@ -55,14 +58,14 @@ pub fn sync_skills(options: &SkillSyncOptions) -> Result<SkillSyncReport, LoadEr
         options.global_home.is_none(),
     )?;
     let flows = match &options.repo {
-        Some(repo) => crate::engine::flow::repo_flow_names(repo)?,
-        None => crate::engine::builtins::builtin_flow_names()
+        Some(repo) => crate::flow::repo_flow_names(repo)?,
+        None => crate::builtins::builtin_flow_names()
             .into_iter()
             .map(str::to_string)
             .collect(),
     };
     let repo = options.repo.as_ref().map(std::path::absolute).transpose()?;
-    let mut all_flows = crate::engine::builtins::builtin_flow_names()
+    let mut all_flows = crate::builtins::builtin_flow_names()
         .into_iter()
         .map(str::to_string)
         .collect::<Vec<_>>();
@@ -472,7 +475,8 @@ fn prune_empty_skill_dir(skill_file: &Path, target_root: &Path) -> Result<(), Lo
 #[cfg(test)]
 mod tests {
     use super::{sync_skills, SkillSyncOptions, SKILL_FILE_NAME};
-    use crate::engine::{builtins, flow::split_frontmatter};
+    use crate::builtins;
+    use crate::flow::split_frontmatter;
     use std::fs;
     use tempfile::TempDir;
 

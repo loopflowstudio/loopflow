@@ -314,10 +314,10 @@ pub struct FlowProcessPage {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FlowProcessDetail {
     pub entry: FlowProcessInventoryEntry,
-    pub graph: crate::engine::flow_graph::FlowGraph,
+    pub graph: crate::flow::graph::FlowGraph,
     pub current: Option<u32>,
     pub completed: Vec<u32>,
-    pub returns: Vec<crate::engine::flow_graph::FlowReturn>,
+    pub returns: Vec<crate::flow::graph::FlowReturn>,
     /// Per-edge counts at each active nesting level, outermost first.
     pub iterations: Vec<Vec<u32>>,
     pub cwd: Option<std::path::PathBuf>,
@@ -341,7 +341,7 @@ pub struct FlowStepProcess {
 impl FlowStepProcess {
     /// The step's label with the pass any returned loop is on: "implement · pass 2".
     pub fn position(&self) -> String {
-        match crate::engine::flow_graph::loop_passes(&self.iterations) {
+        match crate::flow::graph::loop_passes(&self.iterations) {
             Some(passes) => format!("{} · {passes}", self.label),
             None => self.label.clone(),
         }

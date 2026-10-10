@@ -7,7 +7,7 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
 
-use loopflow::engine::prompt::INITIAL_TURN_PROMPT;
+use loopflow::prompt::INITIAL_TURN_PROMPT;
 use loopflow_test_support::TestRepo;
 
 #[test]

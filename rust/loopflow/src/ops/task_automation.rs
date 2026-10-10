@@ -126,7 +126,7 @@ pub struct DeliveryStatus {
 }
 
 pub fn status(repo: &Path) -> OpsResult<AutomationStatus> {
-    let root = crate::engine::worktrees::main_repo_root(repo).map_err(error)?;
+    let root = crate::git::worktrees::main_repo_root(repo).map_err(error)?;
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
         let store = super::pr_landing::landing_store().await?;

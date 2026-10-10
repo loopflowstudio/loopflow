@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::engine::error::{CoreError, GitError, LoadError};
+use crate::error::{CoreError, GitError, LoadError};
 
 pub type OpsResult<T> = Result<T, OpsError>;
 

@@ -124,7 +124,7 @@ When writing CLI code with Typer:
 - Pass args through to underlying tools rather than re-implementing
 - Default to sensible behavior (e.g., whole repo as context)
 
-When editing builtin skills (`engine/builtins/**`):
+When editing builtin skills (`builtins/**`):
 - Skills must be self-contained: never reference repo-relative docs or files —
   the skill runs in repos that don't have them. Inline the compressed guidance;
   the long form lives in this repo's docs for readers.

@@ -7,7 +7,7 @@ use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::engine::git::{absolute_git_dir, current_branch, intervention_state, rev_parse};
+use crate::git::{absolute_git_dir, current_branch, intervention_state, rev_parse};
 use crate::ops::error::{OpsError, OpsResult};
 
 pub(crate) const LF_GIT_OPERATION_ID_ENV: &str = "LF_GIT_OPERATION_ID";

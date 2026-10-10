@@ -312,7 +312,7 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use super::{hold_agent_process_lifeline, spawn_agent_process, spawn_native_agent_process};
-    use crate::engine::process::{kill_process_group, terminate_process_group};
+    use crate::os_process::{kill_process_group, terminate_process_group};
 
     #[test]
     fn native_spawn_records_before_exec_and_preserves_terminal_and_group() {
@@ -462,7 +462,7 @@ mod tests {
         command
             .args([
                 "--exact",
-                "engine::process::lifeline::tests::lifeline_attached_lf_process",
+                "os_process::lifeline::tests::lifeline_attached_lf_process",
                 "--nocapture",
                 "--test-threads=1",
             ])

@@ -4,8 +4,9 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use loopflow::engine::flow::{ConcreteStep, Skill, Step};
-use loopflow::engine::{compile_flow, load_flow};
+use loopflow::flow::compile_flow;
+use loopflow::flow::load_flow;
+use loopflow::flow::{ConcreteStep, Skill, Step};
 use support::{codex_app_server_script, register_codex_account};
 use tempfile::TempDir;
 
@@ -769,12 +770,12 @@ fn flow_parsing_parity() {
     assert_eq!(flow.name, "sample");
     assert_eq!(flow.items.len(), 2);
     assert!(
-        matches!(&flow.items[0].target, loopflow::engine::target::Target::Skill(skill) if skill.name == "implement")
+        matches!(&flow.items[0].target, loopflow::definition::Target::Skill(skill) if skill.name == "implement")
     );
     assert_eq!(
         flow.items[1],
         Step {
-            target: loopflow::engine::target::Target::Skill(Skill {
+            target: loopflow::definition::Target::Skill(Skill {
                 source: None,
                 name: "review".to_string(),
                 agent: None,
@@ -1766,12 +1767,12 @@ fn flow_names_load_into_targets() {
     assert_eq!(flow.items.len(), 2);
     assert!(matches!(
         &flow.items[0].target,
-        loopflow::engine::target::Target::Flow(_)
+        loopflow::definition::Target::Flow(_)
     ));
     assert!(matches!(
         flow.items[1],
         Step {
-            target: loopflow::engine::target::Target::Skill(_),
+            target: loopflow::definition::Target::Skill(_),
             ..
         }
     ));
@@ -1794,7 +1795,7 @@ fn command_item_parses_and_expands() {
     assert_eq!(flow.items.len(), 2);
     match &flow.items[1] {
         Step {
-            target: loopflow::engine::target::Target::Command(item),
+            target: loopflow::definition::Target::Command(item),
             ..
         } => {
             assert_eq!(item.command, "pr");
@@ -2407,7 +2408,7 @@ fn the_research_workflow_ends_on_its_edge_that_runs_nothing() {
 
 #[test]
 fn mixed_provider_flow_keeps_launch_accounts_across_steps() {
-    use base64::Engine;
+    use base64::prelude::*;
     use loopflow::store::{
         CredentialState, ProviderAccount, ProviderAccountId, RoutingState, StorageConfig,
     };
@@ -2431,7 +2432,7 @@ fn mixed_provider_flow_keeps_launch_accounts_across_steps() {
             let credential = if provider == "claude" {
                 serde_json::json!({"claudeAiOauth":{"accessToken":format!("fixture-{id}"),"expiresAt":4102444800000i64}}).to_string()
             } else {
-                let claims = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                let claims = BASE64_URL_SAFE_NO_PAD
                     .encode(serde_json::json!({"email":email,"sub":id}).to_string());
                 serde_json::json!({"tokens":{"access_token":"fixture", "id_token":format!("h.{claims}.s")}}).to_string()
             };

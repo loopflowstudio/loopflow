@@ -360,7 +360,7 @@ fn sync_conflict_returns_error() {
         "expected sync conflict, got {result:?}"
     );
     assert_eq!(
-        loopflow::engine::git::intervention_state(repo.path()).unwrap(),
+        loopflow::git::intervention_state(repo.path()).unwrap(),
         Some("merge"),
         "the owned conflict must remain available to the recovery child"
     );
@@ -374,7 +374,7 @@ fn second_identical_conflict_reuses_resolution_without_recovery() {
     let recovery = start_conflicting_recovery(&repo);
     recover_sync(recovery, |_context| {
         repo.create_file("conflict.txt", "reviewed resolution\n");
-        let result = loopflow::engine::git::continue_merge(repo.path(), None)?;
+        let result = loopflow::git::continue_merge(repo.path(), None)?;
         assert!(result.success, "the reviewed resolution must complete");
         Ok(())
     })
@@ -397,7 +397,7 @@ fn second_identical_conflict_reuses_resolution_without_recovery() {
         "reviewed resolution\n"
     );
     assert_eq!(
-        loopflow::engine::git::intervention_state(repo.path()).unwrap(),
+        loopflow::git::intervention_state(repo.path()).unwrap(),
         None
     );
 }
@@ -430,7 +430,7 @@ fn preexisting_sync_is_refused_without_abort_or_head_movement() {
     );
     assert_eq!(git(repo.path(), &["rev-parse", "HEAD"]), conflicted_head);
     assert_eq!(
-        loopflow::engine::git::intervention_state(repo.path()).unwrap(),
+        loopflow::git::intervention_state(repo.path()).unwrap(),
         Some("merge")
     );
 }
@@ -448,7 +448,7 @@ fn zero_exit_recovery_is_rejected_while_sequencer_remains() {
         "expected a postcondition failure, got {result:?}"
     );
     assert_eq!(
-        loopflow::engine::git::intervention_state(repo.path()).unwrap(),
+        loopflow::git::intervention_state(repo.path()).unwrap(),
         Some("merge")
     );
 }
@@ -549,7 +549,7 @@ fn stale_owned_sync_can_be_explicitly_continued() {
     continue_sync_for_resolution(repo.path(), false).expect("adopt and continue stale sync");
 
     assert_eq!(
-        loopflow::engine::git::intervention_state(repo.path()).unwrap(),
+        loopflow::git::intervention_state(repo.path()).unwrap(),
         None
     );
     assert_eq!(
@@ -869,7 +869,7 @@ fn long_branch_resolves_one_merge_and_keeps_the_resolution() {
             "merge never detaches or replays HEAD"
         );
         repo.create_file("conflict.txt", "reviewed final resolution\n");
-        assert!(loopflow::engine::git::continue_merge(repo.path(), None)?.success);
+        assert!(loopflow::git::continue_merge(repo.path(), None)?.success);
         Ok(())
     })
     .unwrap();
@@ -958,9 +958,7 @@ fn stacked_scratch_stays_with_child_across_parent_updates() {
         assert!(!repo.path().join("scratch/design.md").exists());
         assert!(!repo.path().join("scratch/renamed.md").exists());
         assert_eq!(git(repo.path(), &["rev-parse", "HEAD^2"]), target);
-        assert!(
-            loopflow::engine::git::is_ancestor(repo.path(), &first_child_commit, "HEAD").unwrap()
-        );
+        assert!(loopflow::git::is_ancestor(repo.path(), &first_child_commit, "HEAD").unwrap());
         if revision == 1 {
             assert!(!repo.path().join("scratch").exists());
             repo.create_file("scratch/new.md", "child's own notes\n");
@@ -1109,7 +1107,7 @@ fn squash_parent_conflict_retains_real_target_and_can_abort_or_continue() {
             );
         } else {
             // Simulate owner death before the temporary comparison target was replaced.
-            let directory = loopflow::engine::git::absolute_git_dir(repo.path()).unwrap();
+            let directory = loopflow::git::absolute_git_dir(repo.path()).unwrap();
             std::fs::write(directory.join("MERGE_HEAD"), format!("{child}\n")).unwrap();
             repo.create_file("shared.txt", "reviewed combined content\n");
             continue_sync_for_resolution(repo.path(), false).unwrap();
@@ -1122,7 +1120,7 @@ fn squash_parent_conflict_retains_real_target_and_can_abort_or_continue() {
 }
 
 /// Run an operation step the way a Flow's driver does: as its own `lf` command.
-fn run_flow_command(repo: &std::path::Path, command: &loopflow::engine::flow::Command) {
+fn run_flow_command(repo: &std::path::Path, command: &loopflow::flow::Command) {
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
         .args(&command.argv()[1..])
         .current_dir(repo)
@@ -1151,7 +1149,7 @@ fn saved_flow_command_migrates_and_merges_through_the_cli_path() {
     repo.push();
     let target = repo.head_sha();
     repo.checkout("feature");
-    let command: loopflow::engine::flow::Command =
+    let command: loopflow::flow::Command =
         serde_json::from_str(r#"{"command":"rebase","args":["origin/main"]}"#).unwrap();
     run_flow_command(repo.path(), &command);
     assert_eq!(
@@ -1252,7 +1250,7 @@ fn saved_flow_sync_follows_task_parent_and_skips_an_already_contained_head() {
         ""
     );
     assert_eq!(
-        loopflow::engine::git::intervention_state(&child_path).unwrap(),
+        loopflow::git::intervention_state(&child_path).unwrap(),
         None
     );
 
@@ -1267,7 +1265,7 @@ fn saved_flow_sync_follows_task_parent_and_skips_an_already_contained_head() {
         git(&child_path, &["show", "-s", "--format=%P", "HEAD"]),
         format!("{child_head} {parent_head}")
     );
-    assert!(!loopflow::engine::git::is_ancestor(&child_path, &main_head, "HEAD").unwrap());
+    assert!(!loopflow::git::is_ancestor(&child_path, &main_head, "HEAD").unwrap());
     assert_eq!(
         std::fs::read_to_string(child_path.join("shared.txt")).unwrap(),
         "child\n"
@@ -1294,9 +1292,9 @@ fn saved_flow_sync_follows_task_parent_and_skips_an_already_contained_head() {
 fn persistent_refresh_preserves_local_plans_and_followup_after_merge() {
     let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();
-    let persistent = loopflow::engine::worktrees::ensure_agent_worktree(
+    let persistent = loopflow::git::worktrees::ensure_agent_worktree(
         repo.path(),
-        loopflow::engine::worktrees::WorktreeSegment::parse("repo").unwrap(),
+        loopflow::git::worktrees::WorktreeSegment::parse("repo").unwrap(),
     )
     .unwrap();
     std::fs::write(persistent.path.join("memory.md"), "accepted\n").unwrap();
@@ -1357,9 +1355,9 @@ fn persistent_memory_conflict_keeps_private_scratch_and_recovery() {
     repo.stage_all();
     repo.commit("base memory");
     repo.push();
-    let persistent = loopflow::engine::worktrees::ensure_agent_worktree(
+    let persistent = loopflow::git::worktrees::ensure_agent_worktree(
         repo.path(),
-        loopflow::engine::worktrees::WorktreeSegment::parse("repo").unwrap(),
+        loopflow::git::worktrees::WorktreeSegment::parse("repo").unwrap(),
     )
     .unwrap();
     std::fs::write(persistent.path.join("memory.md"), "persistent\n").unwrap();

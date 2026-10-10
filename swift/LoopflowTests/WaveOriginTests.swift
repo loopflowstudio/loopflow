@@ -1,8 +1,8 @@
 // Origin resolution for wave state: a worktree resolves to its main checkout,
 // everything else to itself. Exercised against real git repos in a temp dir —
 // the helper's entire job is interpreting git output, so mocking git would
-// prove nothing. Mirrors Rust `wave_origin` (rust/loopflow/src/engine/
-// wave_context.rs); if these semantics move, move them in both places.
+// prove nothing. Mirrors Rust `wave_origin` (rust/loopflow/src/work/wave/
+// context.rs); if these semantics move, move them in both places.
 
 #if os(macOS)
 import Foundation

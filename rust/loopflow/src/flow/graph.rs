@@ -10,12 +10,12 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::engine::flow::{flatten_resolved, resolve_flow, return_target, ResolvedFlowItem};
+use crate::flow::{flatten_resolved, resolve_flow, return_target, ResolvedFlowItem};
 
 use std::path::Path;
 
-use crate::engine::execution::{ExecutionCursor, NestedCursor};
-use crate::engine::flow::ConcreteStep;
+use crate::flow::runner::{ExecutionCursor, NestedCursor};
+use crate::flow::ConcreteStep;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FlowGraph {
@@ -134,8 +134,8 @@ pub struct FlowCatalogEntry {
 
 /// Every Flow available in `repo`, each read through the shared
 /// loader. A file that does not load stays listed with the reason.
-pub fn flow_catalog(repo: &Path) -> Result<Vec<FlowCatalogEntry>, crate::engine::LoadError> {
-    crate::engine::available_flow_names(repo)?
+pub fn flow_catalog(repo: &Path) -> Result<Vec<FlowCatalogEntry>, crate::error::LoadError> {
+    crate::flow::available_flow_names(repo)?
         .into_iter()
         .map(|name| flow_catalog_entry(&name, repo))
         .collect()
@@ -145,9 +145,9 @@ pub fn flow_catalog(repo: &Path) -> Result<Vec<FlowCatalogEntry>, crate::engine:
 pub fn flow_catalog_entry(
     name: &str,
     repo: &Path,
-) -> Result<FlowCatalogEntry, crate::engine::LoadError> {
-    let compiled = match crate::engine::flow::load_authored_flow(name, repo) {
-        Err(error @ crate::engine::LoadError::FlowNotFound(_)) => return Err(error),
+) -> Result<FlowCatalogEntry, crate::error::LoadError> {
+    let compiled = match crate::flow::load_authored_flow(name, repo) {
+        Err(error @ crate::error::LoadError::FlowNotFound(_)) => return Err(error),
         loaded => loaded.and_then(|flow| {
             let resolved = resolve_flow(&flow, repo)?;
             let bytes = serde_json::to_vec(&(&flow.name, &resolved))
@@ -170,7 +170,7 @@ pub fn flow_catalog_entry(
         name: graph
             .as_ref()
             .map_or_else(|| name.to_string(), |graph| graph.name.clone()),
-        source: crate::engine::flow::find_flow_source_path(name, repo)?.map(|path| {
+        source: crate::flow::find_flow_source_path(name, repo)?.map(|path| {
             path.strip_prefix(repo)
                 .unwrap_or(&path)
                 .to_string_lossy()
@@ -596,7 +596,7 @@ mod tests {
     #[test]
     fn template_resolution_preserves_composition_and_execution() {
         use super::{flow_catalog, FlowCompositionItem, FlowGraph};
-        use crate::engine::flow::{compile_flow, load_flow};
+        use crate::flow::{compile_flow, load_flow};
         let repo = tempfile::tempdir().unwrap();
         let flows = repo.path().join(".lf/flows");
         let skills = repo.path().join(".lf/skills");
@@ -694,12 +694,13 @@ mod tests {
 
     use std::collections::{BTreeMap, HashMap};
 
-    use crate::engine::execution::{ExecutionCursor, NestedCursor};
-    use crate::engine::flow::{ConcretePath, ConcreteSkill, ConcreteStep, ConcreteXor, Skill};
-    use crate::engine::flow_graph::{
+    use crate::flow::compile_flow;
+    use crate::flow::graph::{
         flow_iterations, project_position, FlowGraph, FlowNodeKind, PositionProjection,
     };
-    use crate::engine::{compile_flow, load_flow};
+    use crate::flow::load_flow;
+    use crate::flow::runner::{ExecutionCursor, NestedCursor};
+    use crate::flow::{ConcretePath, ConcreteSkill, ConcreteStep, ConcreteXor, Skill};
 
     /// The projection of the step `cursor` selects, as its driver records it.
     fn project(steps: &[ConcreteStep], cursor: &ExecutionCursor) -> PositionProjection {
@@ -956,7 +957,7 @@ mod tests {
         let cursor = ExecutionCursor {
             index: 1,
             iteration: 3,
-            progress: crate::engine::transitions::FlowProgress {
+            progress: crate::flow::transitions::FlowProgress {
                 repeats: BTreeMap::from([("2".into(), 2), ("4".into(), 1)]),
                 ..Default::default()
             },
@@ -1026,7 +1027,7 @@ mod tests {
 
         let cursor = ExecutionCursor {
             index: 1,
-            progress: crate::engine::transitions::FlowProgress {
+            progress: crate::flow::transitions::FlowProgress {
                 repeats: BTreeMap::from([("xor:1:fix/1".into(), 4)]),
                 ..Default::default()
             },
@@ -1035,7 +1036,7 @@ mod tests {
                 cursor: ExecutionCursor {
                     index: 1,
                     iteration: 2,
-                    progress: crate::engine::transitions::FlowProgress {
+                    progress: crate::flow::transitions::FlowProgress {
                         repeats: BTreeMap::from([("1".into(), 2)]),
                         ..Default::default()
                     },
@@ -1147,7 +1148,7 @@ mod tests {
         assert_eq!(ids, (0..10).collect::<Vec<_>>());
         let cursor = ExecutionCursor {
             index: 1,
-            progress: crate::engine::transitions::FlowProgress {
+            progress: crate::flow::transitions::FlowProgress {
                 repeats: BTreeMap::from([("2".into(), 3)]),
                 ..Default::default()
             },
@@ -1159,7 +1160,7 @@ mod tests {
                         selected: "fix".into(),
                         cursor: ExecutionCursor {
                             index: 1,
-                            progress: crate::engine::transitions::FlowProgress {
+                            progress: crate::flow::transitions::FlowProgress {
                                 repeats: BTreeMap::from([("1".into(), 2)]),
                                 ..Default::default()
                             },

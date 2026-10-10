@@ -7,8 +7,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use serde::{Deserialize, Serialize};
 use serde_yaml_ng::Value;
 
-use crate::engine::definition_name::resolve_name;
-use crate::engine::{builtins, flow::split_frontmatter, LoadError, Skill};
+use crate::builtins;
+use crate::definition::name::resolve_name;
+use crate::error::LoadError;
+use crate::flow::split_frontmatter;
+use crate::flow::Skill;
 
 static RETIRED_INTERACTIVE_WARNING: AtomicBool = AtomicBool::new(false);
 
@@ -467,7 +470,7 @@ mod tests {
         let catalog = SkillCatalog::load(Some(repo.path()), None, false).unwrap();
         assert!(matches!(
             catalog.resolve("audit").unwrap().unwrap().load(),
-            Err(crate::engine::LoadError::InvalidSkill(_))
+            Err(crate::error::LoadError::InvalidSkill(_))
         ));
     }
 

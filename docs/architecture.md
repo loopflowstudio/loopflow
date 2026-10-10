@@ -58,8 +58,8 @@ The implementation follows the same order as the diagram:
 | Stage | Concrete owner | Produces |
 | --- | --- | --- |
 | Parse and dispatch | [`lf/mod.rs`](../rust/loopflow/src/lf/mod.rs) | One command and launch context |
-| Find the Skill | [`engine/skill_catalog.rs`](../rust/loopflow/src/engine/skill_catalog.rs) | One selected Skill source |
-| Assemble context | [`engine/prompt.rs`](../rust/loopflow/src/engine/prompt.rs) | System and task prompts |
+| Find the Skill | [`skills/catalog.rs`](../rust/loopflow/src/skills/catalog.rs) | One selected Skill source |
+| Assemble context | [`prompt/mod.rs`](../rust/loopflow/src/prompt/mod.rs) | System and task prompts |
 | Select credentials and route | [`provider_account.rs`](../rust/loopflow/src/provider_account.rs) | Harness, account, model, credential |
 | Launch and normalize | [`harness/`](../rust/loopflow/src/harness/) | Provider output and usage events |
 | Record command and conversation evidence | [`journal/`](../rust/loopflow/src/journal/) and the store | Process completion, LfSession history and immutable payloads |

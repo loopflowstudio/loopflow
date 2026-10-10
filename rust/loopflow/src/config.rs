@@ -11,9 +11,9 @@ use std::process::Command;
 use serde::{Deserialize, Serialize};
 
 #[cfg(not(test))]
-use crate::engine::agent::check_cli_available;
-use crate::engine::context_budget::BudgetKey;
-use crate::engine::error::LoadError;
+use crate::agent::check_cli_available;
+use crate::error::LoadError;
+use crate::prompt::context_budget::BudgetKey;
 
 /// Request participant carried across foreground launches, including SSH.
 /// Only a non-empty value overrides personal configuration and Git.

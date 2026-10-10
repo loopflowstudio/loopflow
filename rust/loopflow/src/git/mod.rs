@@ -1,3 +1,7 @@
+pub mod worktree;
+pub mod worktree_name;
+pub mod worktrees;
+
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
@@ -12,7 +16,7 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-use crate::engine::error::GitError;
+use crate::error::GitError;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct MergeResult {
@@ -1228,7 +1232,7 @@ pub fn merge(
         // Record the real target before either committing or handing off recovery.
         write_merge_target(worktree, target)?;
         let preserve_scratch =
-            fork_base.is_some() || crate::engine::worktrees::is_persistent_worktree(worktree)?;
+            fork_base.is_some() || crate::git::worktrees::is_persistent_worktree(worktree)?;
         if preserve_scratch {
             // Scratch belongs to the child, including deletions and cleanly
             // merged parent additions. Restoring changed scratch paths also resolves

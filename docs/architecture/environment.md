@@ -15,7 +15,7 @@ tmux show-environment -g | grep -E '^(LF|LOOPFLOW)_'       # what new tmux sessi
 | Variable | Set by | Read by | Policy |
 |---|---|---|---|
 | `LF_HOME` | A person, for an experiment; every lf launch path for its children; cron and CI-watch launchd plists; test fixtures | `store::lf_home_dir`, Desktop's observation client | Selects the data directory. Unset means `~/.lf`. The database is always `$LF_HOME/loopflow.db`. |
-| `LF_BIN` | lf launch paths, test fixtures | `engine::process::resolve_lf_binary`, only when `LF_HOME` selects an experiment | Names the experiment's binary. Under the main Machine lf ignores it and uses the installed CLI, so a stale value cannot choose the wrong binary for ordinary work. |
+| `LF_BIN` | lf launch paths, test fixtures | `os_process::resolve_lf_binary`, only when `LF_HOME` selects an experiment | Names the experiment's binary. Under the main Machine lf ignores it and uses the installed CLI, so a stale value cannot choose the wrong binary for ordinary work. |
 
 A source build with no explicit `LF_HOME` forwards to the installed CLI and
 main Machine before opening a store. Development builds refuse the main database.
@@ -40,7 +40,7 @@ drops it too, so sessions a person opens by hand inherit none of it.
 | `LF_INSTALL_SWITCH` | Published install | `installation` | One-shot capability; must equal the id of the switch receipt in progress. |
 | `LF_EXPECTED_MACHINE_ID` | `lf --machine` | `lf machine`, the remote preamble | Refuses a Machine-addressed command that reached a different Machine. |
 | `LF_TERMINAL_ID`, `LF_TERMINAL_TTY` | Desktop's terminal | Session capture | Attach a Session to the terminal showing it. |
-| `LF_USER_NAME` | lf launch paths | `engine::config::participant_name` | The participant's display name. Presentation only. |
+| `LF_USER_NAME` | lf launch paths | `config::participant_name` | The participant's display name. Presentation only. |
 | `LOOPFLOW_DIRECTIVE_FILE` | Shell integration, agent launch with a relay | `lf` commands that ask the parent shell to act | Removed for agents unless a scoped relay is supplied. |
 | `LOOPFLOW_FLOW_NAME` | Flow driver | Skill prose | Names the running Flow for the agent. |
 

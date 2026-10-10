@@ -1,8 +1,10 @@
 //! Render compiled Flow topology as a native chat skill's checklist.
 use clap::CommandFactory;
 
-use crate::engine::flow::{return_target, split_frontmatter};
-use crate::engine::{ConcreteStep, LoadError, Skill};
+use crate::error::LoadError;
+use crate::flow::ConcreteStep;
+use crate::flow::Skill;
+use crate::flow::{return_target, split_frontmatter};
 use crate::lf::navigation::resolve_child;
 
 pub fn render_flow_instructions(
@@ -32,8 +34,7 @@ fn conversational_skill(skill: &Skill) -> String {
 }
 
 fn is_builtin_decision(skill: &Skill, name: &str) -> bool {
-    let source =
-        crate::engine::builtins::get_builtin_skill(name).expect("known builtin decision skill");
+    let source = crate::builtins::get_builtin_skill(name).expect("known builtin decision skill");
     let body = split_frontmatter(source).map_or(source, |(_, body)| body);
     skill.name == name && skill.source.is_none() && skill.content.as_deref() == Some(body)
 }
@@ -128,7 +129,7 @@ fn render_steps(
 #[cfg(test)]
 mod tests {
     use super::render_flow_instructions;
-    use crate::engine::flow::{available_flow_names, compile_flow, load_authored_flow};
+    use crate::flow::{available_flow_names, compile_flow, load_authored_flow};
     use crate::lf::{navigation::normalize_args, Cli, Commands, SkillCommand};
     use clap::Parser;
     use std::fs;

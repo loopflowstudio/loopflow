@@ -126,8 +126,8 @@ pub(crate) async fn replace(store: &SharedStore, id: &str) -> Result<SessionReco
 pub(crate) fn ensure_scope_worktree(
     repo: &Path,
     scope: &PrimaryScope,
-) -> Result<crate::engine::worktrees::AgentWorktree> {
-    use crate::engine::worktrees::{ensure_agent_worktree, wave_agent_segment, WorktreeSegment};
+) -> Result<crate::git::worktrees::AgentWorktree> {
+    use crate::git::worktrees::{ensure_agent_worktree, wave_agent_segment, WorktreeSegment};
     let segment = match scope {
         PrimaryScope::Repository(_) => WorktreeSegment::parse("repo")?,
         PrimaryScope::Wave(id) => wave_agent_segment(id.as_str())?,
@@ -194,12 +194,8 @@ fn task_session(
         .sqlite
         .task(task)?
         .ok_or_else(|| anyhow!("Task {task} is unavailable"))?;
-    let title = crate::engine::naming::generated_session_title(
-        None,
-        None,
-        Some(&plan.plan.title),
-        &binding.cwd,
-    );
+    let title =
+        crate::naming::generated_session_title(None, None, Some(&plan.plan.title), &binding.cwd);
     Ok(LfSession {
         task_id: Some(task.clone()),
         wave_id: Some(binding.wave_id.clone()),
@@ -227,7 +223,7 @@ fn repository_session(repo: &crate::repository::CanonicalRepo) -> LfSession {
 
 fn conversation(cwd: &Path, agent: Option<&str>, skill: &str, title: String) -> LfSession {
     let agent = crate::ops::task::resolve_task_agent(cwd, agent, None);
-    let (provider, model) = crate::engine::config::parse_agent(&agent);
+    let (provider, model) = crate::config::parse_agent(&agent);
     LfSession {
         captured: None,
         id: uuid::Uuid::new_v4().simple().to_string(),
@@ -278,7 +274,7 @@ async fn start(store: &SharedStore, session: LfSession) -> Result<SessionRecord>
     if capture_is_prepared(&session.artifact_key)?
         && !conversation_process_is_running(&session.id).await?
     {
-        let lf = crate::engine::process::resolve_pinned_lf_binary()?;
+        let lf = crate::os_process::resolve_pinned_lf_binary()?;
         let argv = vec![
             lf.to_string_lossy().to_string(),
             "session".to_string(),

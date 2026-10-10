@@ -1,3 +1,7 @@
+pub mod clipboard;
+#[cfg(target_os = "macos")]
+pub(crate) mod fs_events;
+
 use std::process::Command;
 
 /// Open a URL in the default browser and report whether the platform opener succeeded.

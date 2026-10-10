@@ -1,11 +1,11 @@
 mod support;
 
-use base64::Engine;
+use base64::prelude::*;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use loopflow::engine::agent::{run_agent, AgentCapabilities, AgentConfig, ProcessConfig};
-use loopflow::engine::error::CoreError;
+use loopflow::agent::{run_agent, AgentCapabilities, AgentConfig, ProcessConfig};
+use loopflow::error::CoreError;
 use loopflow::profile::{ProviderRoute, RouteScope};
 use loopflow::provider_auth::Provider;
 use loopflow::store::{
@@ -258,7 +258,7 @@ while read -r line; do :; done
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     let account = |account_id: ProviderAccountId, path: std::path::PathBuf| {
         let email = format!("{account_id}@example.com");
-        let claims = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        let claims = BASE64_URL_SAFE_NO_PAD
             .encode(serde_json::json!({"email":email, "sub":account_id.as_str()}).to_string());
         std::fs::write(path.join("auth.json"), serde_json::json!({"tokens":{"access_token":"fixture", "id_token":format!("h.{claims}.s")}}).to_string()).unwrap();
         ProviderAccount {

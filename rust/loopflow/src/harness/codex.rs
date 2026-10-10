@@ -29,16 +29,16 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio_tungstenite::{client_async, tungstenite::Message};
 
+use crate::agent::{build_codex_thread_start_params, AgentConfig};
 use crate::chat::types::{ConversationEvent, ConversationItem, TurnUsage};
-use crate::engine::agent::{build_codex_thread_start_params, AgentConfig};
-use crate::engine::process::{
-    agent_process_lifeline_path, hold_agent_process_lifeline, kill_process_group,
-};
 use crate::harness::codex_mapping::ItemPhase;
 use crate::harness::common::spawn_stderr_logger;
 use crate::harness::lf_tag::LfTagParser;
 use crate::harness::{
     codex_mapping, ApprovalPolicy, Harness, HarnessError, RawProviderEvent, SendCurrentOutcome,
+};
+use crate::os_process::{
+    agent_process_lifeline_path, hold_agent_process_lifeline, kill_process_group,
 };
 use crate::provider_account::{resolve_provider_account_exact, ProviderAccountRoute};
 use crate::provider_auth::Provider;
@@ -1060,7 +1060,7 @@ impl CodexHarness {
         // The app-server can host another conversation. Only this thread receives
         // its caller/capture provenance; app-server defaults must not lend it to a
         // newly admitted sibling.
-        for name in crate::engine::agent::EXECUTION_IDENTITY_ENV {
+        for name in crate::agent::EXECUTION_IDENTITY_ENV {
             command.env_remove(name);
         }
 
@@ -1424,7 +1424,7 @@ impl CodexHarness {
             "allow_login_shell": false,
             "features.shell_snapshot": false,
         });
-        if let Some(path) = crate::engine::agent::write_system_prompt_file(launch, "session")? {
+        if let Some(path) = crate::agent::write_system_prompt_file(launch, "session")? {
             config["model_instructions_file"] = json!(path.to_string_lossy());
         }
         thread_params.insert("config".into(), config);

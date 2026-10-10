@@ -2367,8 +2367,8 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            serde_json::from_str::<crate::engine::workflow::WorkflowDefinition>(&placed.0).unwrap(),
-            crate::engine::workflow::unplanned()
+            serde_json::from_str::<crate::workflow::WorkflowDefinition>(&placed.0).unwrap(),
+            crate::workflow::unplanned()
         );
         assert_eq!((placed.1, placed.2, placed.3, placed.4), (25, None, 25, 1));
         assert_eq!(

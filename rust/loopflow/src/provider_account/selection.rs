@@ -2,8 +2,7 @@
 use crate::provider_account::{account_login, match_account, AccountMatch, ProviderAccountError};
 use crate::provider_auth::Provider;
 use crate::store::{ProviderAccount, ProviderAccountId};
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use base64::Engine;
+use base64::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 pub const ACCOUNT_SELECTION_ENV: &str = "LF_ACCOUNT_SELECTION";
@@ -134,7 +133,7 @@ impl AccountSelection {
     pub fn env_value(&self) -> Result<String, ProviderAccountError> {
         let bytes = serde_json::to_vec(self)
             .map_err(|error| ProviderAccountError::AccountSelection(error.to_string()))?;
-        Ok(URL_SAFE_NO_PAD.encode(bytes))
+        Ok(BASE64_URL_SAFE_NO_PAD.encode(bytes))
     }
 
     pub(crate) fn from_env() -> Result<Self, ProviderAccountError> {
@@ -146,7 +145,7 @@ impl AccountSelection {
                 "LF_ACCOUNT_SELECTION is not valid UTF-8".to_string(),
             )
         })?;
-        let bytes = URL_SAFE_NO_PAD
+        let bytes = BASE64_URL_SAFE_NO_PAD
             .decode(value.trim())
             .map_err(|error| ProviderAccountError::AccountSelection(error.to_string()))?;
         serde_json::from_slice(&bytes)

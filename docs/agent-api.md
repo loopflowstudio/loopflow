@@ -213,7 +213,7 @@ Every launched agent gets `LOOPFLOW.md` — the operating contract — in contex
 - Keep repeatable instructions with their skill, repository rules in its agent guide,
   and durable Wave learning in its existing memory.
 
-Source: `rust/loopflow/src/engine/builtins/LOOPFLOW.md`.
+Source: `rust/loopflow/src/builtins/LOOPFLOW.md`.
 
 ## Next
 

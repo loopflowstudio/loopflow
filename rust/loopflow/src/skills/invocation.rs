@@ -4,8 +4,8 @@ use std::sync::LazyLock;
 
 use serde::{Deserialize, Serialize};
 
-use crate::engine::flow::Skill;
-use crate::engine::skill_catalog::SkillDialect;
+use crate::flow::Skill;
+use crate::skills::catalog::SkillDialect;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SkillInvocation {
@@ -18,7 +18,7 @@ impl SkillInvocation {
         Ok(serde_json::from_slice(&std::fs::read(path)?)?)
     }
 
-    fn capture_directory(config: &crate::engine::agent::AgentConfig) -> anyhow::Result<PathBuf> {
+    fn capture_directory(config: &crate::agent::AgentConfig) -> anyhow::Result<PathBuf> {
         let capture = config
             .env
             .get(crate::session_record::CAPTURE_KEY_ENV)
@@ -81,7 +81,7 @@ impl SkillInvocation {
 
     pub(crate) fn claude_input(
         &self,
-        config: &crate::engine::agent::AgentConfig,
+        config: &crate::agent::AgentConfig,
     ) -> anyhow::Result<(Vec<String>, String)> {
         if !self.native_for("claude") || !self.native_declarations("claude") {
             return Ok((Vec::new(), self.translated_input("claude")));
@@ -92,7 +92,7 @@ impl SkillInvocation {
 
     fn prepare_claude(
         &self,
-        config: &crate::engine::agent::AgentConfig,
+        config: &crate::agent::AgentConfig,
         context: Option<&str>,
     ) -> anyhow::Result<(Vec<String>, String)> {
         if context.is_none() && self.unchanged_source() {
@@ -159,7 +159,7 @@ impl SkillInvocation {
     pub(crate) fn terminal_input(
         &self,
         harness: &str,
-        config: &crate::engine::agent::AgentConfig,
+        config: &crate::agent::AgentConfig,
     ) -> anyhow::Result<(Vec<String>, String)> {
         let context = format!("{}\n\n{}", config.system_prompt, config.task_prompt);
         if self.native_for("claude") && harness == "claude" && self.native_declarations("claude") {
@@ -392,9 +392,9 @@ impl SkillInvocation {
 #[cfg(test)]
 mod tests {
     use super::SkillInvocation;
-    use crate::engine::flow::Skill;
-    use crate::engine::skill_catalog::SkillCatalog;
-    use crate::engine::skill_catalog::{SkillDialect, SkillOrigin};
+    use crate::flow::Skill;
+    use crate::skills::catalog::SkillCatalog;
+    use crate::skills::catalog::{SkillDialect, SkillOrigin};
 
     #[test]
     fn port_arguments_preserve_quoting_escapes_and_literal_inserted_tokens() {

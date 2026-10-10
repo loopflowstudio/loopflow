@@ -3,7 +3,7 @@
 //! Registration is automatic: drop a file into the right builtins/
 //! subdirectory and build.rs generates the HashMap entries.
 
-use crate::engine::definition_name::portable_name;
+use crate::definition::name::portable_name;
 
 /// Bundled LOOPFLOW.md - the one loopflow operating document every launched
 /// agent receives, including the Work and Session vocabulary.
@@ -31,7 +31,7 @@ pub fn builtin_skill_description(name: &str) -> String {
     let Some(content) = get_builtin_skill(name) else {
         return String::new();
     };
-    crate::engine::skills::skill_description(content).unwrap_or_default()
+    crate::skills::skill_description(content).unwrap_or_default()
 }
 
 /// One-line description for a built-in flow, drawn from the first non-blank,
@@ -118,7 +118,7 @@ include!(concat!(env!("OUT_DIR"), "/builtin_skill_categories.rs"));
 mod tests {
     use super::*;
 
-    const WAVES_DOC: &str = include_str!("../../../../docs/waves.md");
+    const WAVES_DOC: &str = include_str!("../../../docs/waves.md");
 
     #[test]
     fn wave_model_is_embedded_in_prompts_and_docs() {

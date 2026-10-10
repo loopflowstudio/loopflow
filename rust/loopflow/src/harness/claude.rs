@@ -10,8 +10,8 @@ use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
+use crate::agent::{build_claude_stream_session_args, AgentConfig};
 use crate::chat::types::{ConversationEvent, Lifecycle};
-use crate::engine::agent::{build_claude_stream_session_args, AgentConfig};
 use crate::harness::claude_mapping::ReaderState;
 use crate::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
 use crate::harness::{claude_mapping, Harness, HarnessError, RawProviderEvent, SendCurrentOutcome};
@@ -31,7 +31,7 @@ pub struct ClaudeHarness {
     events: mpsc::UnboundedSender<ConversationEvent>,
     raw_provider: Option<mpsc::UnboundedSender<RawProviderEvent>>,
     config: Option<AgentConfig>,
-    capture: Option<crate::engine::agent::AgentCapture>,
+    capture: Option<crate::agent::AgentCapture>,
     should_seed_task_prompt: bool,
     /// Vendor session id captured from the first turn's `system` event; a
     /// respawn (after interrupt/crash) resumes it via `--resume`.
@@ -123,7 +123,7 @@ impl ClaudeHarness {
             .lock()
             .expect("claude provider session id lock poisoned")
             .clone();
-        let context_file = crate::engine::agent::write_system_prompt_file(config, "session")?;
+        let context_file = crate::agent::write_system_prompt_file(config, "session")?;
         let args =
             build_claude_stream_session_args(config, resume_id.as_ref(), context_file.as_deref());
         let mut cmd = Command::new("claude");
@@ -378,7 +378,7 @@ impl ClaudeHarness {
 
 #[async_trait]
 impl Harness for ClaudeHarness {
-    fn set_capture(&mut self, capture: Option<crate::engine::agent::AgentCapture>) {
+    fn set_capture(&mut self, capture: Option<crate::agent::AgentCapture>) {
         self.capture = capture;
     }
     fn process_id(&self) -> Option<u32> {
@@ -851,7 +851,7 @@ mod tests {
             resume_token: None,
             provider_account_id: None,
             provider_account_authority_home: None,
-            write_scope: crate::engine::agent::AgentWriteScope::Configured,
+            write_scope: crate::agent::AgentWriteScope::Configured,
             execution_boundary: None,
             skip_permissions: false,
             structured_replies: Vec::new(),
@@ -999,7 +999,7 @@ done
             resume_token: None,
             provider_account_id: None,
             provider_account_authority_home: None,
-            write_scope: crate::engine::agent::AgentWriteScope::Configured,
+            write_scope: crate::agent::AgentWriteScope::Configured,
             execution_boundary: None,
             skip_permissions: false,
             structured_replies: Vec::new(),

@@ -9,10 +9,10 @@ use fs2::FileExt;
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 
-use crate::engine::agent::{run_agent, AgentCapabilities, AgentConfig, ProcessConfig};
-use crate::engine::config::load_config_or_default;
-use crate::engine::git::current_branch;
-use crate::engine::load_skill;
+use crate::agent::{run_agent, AgentCapabilities, AgentConfig, ProcessConfig};
+use crate::config::load_config_or_default;
+use crate::flow::load_skill;
+use crate::git::current_branch;
 use crate::pr_landing::{
     LandingPlacement, LandingSupervisor, NewPrLanding, PrLanding, PrLandingState,
     SUPERVISOR_STALE_AFTER,
@@ -117,12 +117,7 @@ pub(crate) trait LandingDriver: Send + Sync {
 #[derive(Debug, Clone)]
 struct GithubLandingDriver {
     repairs: bool,
-    release: Option<
-        Arc<(
-            super::release_lock::ReleaseLock,
-            crate::engine::git::WorktreeLease,
-        )>,
-    >,
+    release: Option<Arc<(super::release_lock::ReleaseLock, crate::git::WorktreeLease)>>,
 }
 
 impl LandingDriver for GithubLandingDriver {
@@ -214,10 +209,7 @@ fn classify_github_observation(
 fn admit_ci_fix(
     landing: &PrLanding,
     incident: &CiIncident,
-    release: Option<&(
-        super::release_lock::ReleaseLock,
-        crate::engine::git::WorktreeLease,
-    )>,
+    release: Option<&(super::release_lock::ReleaseLock, crate::git::WorktreeLease)>,
 ) -> OpsResult<()> {
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
@@ -316,7 +308,7 @@ fn admit_ci_fix(
                 .map_err(repair_error)?
                 .ok_or_else(|| repair_error("reserved repair Session disappeared"))?
         } else {
-            let (provider, model) = crate::engine::parse_agent(config.agent());
+            let (provider, model) = crate::config::parse_agent(config.agent());
             crate::session::LfSession {
                 id: format!("session_{}", uuid::Uuid::new_v4().simple()),
                 captured: None,
@@ -361,8 +353,8 @@ fn admit_ci_fix(
             return Err(repair_error("landing changed before repair reservation"));
         }
         drop(lock);
-        let context = crate::engine::process::execution_context().map_err(repair_error)?;
-        let bin = crate::engine::process::pin_control_binary(&context.lf_bin);
+        let context = crate::os_process::execution_context().map_err(repair_error)?;
+        let bin = crate::os_process::pin_control_binary(&context.lf_bin);
         let argv = vec![
             bin.to_string_lossy().to_string(),
             "task".into(),
@@ -385,7 +377,7 @@ fn admit_ci_fix(
             ("LF_USER_NAME", ""),
         ];
         if let Some((lock, lease)) = release {
-            crate::engine::process::start_lf_session_inheriting(
+            crate::os_process::start_lf_session_inheriting(
                 &name,
                 &landing.worktree,
                 &argv,
@@ -398,7 +390,7 @@ fn admit_ci_fix(
             .await
             .map_err(repair_error)?;
         } else {
-            crate::engine::process::start_lf_session_with_env(
+            crate::os_process::start_lf_session_with_env(
                 &name,
                 &landing.worktree,
                 &argv,
@@ -673,11 +665,11 @@ fn process_ci_fix(
             }
         }
     }
-    crate::engine::agent::pin_provider_account_id_blocking(&mut launch)?;
+    crate::agent::pin_provider_account_id_blocking(&mut launch)?;
     let capabilities = AgentCapabilities {
         chrome: config.chrome,
     };
-    let (harness, model) = crate::engine::parse_agent(launch.agent());
+    let (harness, model) = crate::config::parse_agent(launch.agent());
     let session = store
         .sqlite
         .session(session_id)
@@ -896,9 +888,7 @@ fn lock_landing(landing: &PrLanding) -> OpsResult<Option<Arc<File>>> {
         .truncate(false)
         .read(true)
         .write(true)
-        .open(
-            crate::engine::git::absolute_git_dir(&landing.worktree)?.join("lf-pr-landing.lock"),
-        )?;
+        .open(crate::git::absolute_git_dir(&landing.worktree)?.join("lf-pr-landing.lock"))?;
     match FileExt::try_lock_exclusive(&lock) {
         Ok(()) => Ok(Some(Arc::new(lock))),
         Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => Ok(None),
@@ -1283,7 +1273,7 @@ async fn cleanup_landed_pr(store: &SharedStore, landing: &PrLanding) -> OpsResul
         eprintln!("PR merged; retained its checkout for the Flow that landed it.");
         return Ok(());
     }
-    if crate::engine::worktrees::is_persistent_worktree(&landing.worktree)? {
+    if crate::git::worktrees::is_persistent_worktree(&landing.worktree)? {
         match crate::ops::sync::restart_landed_persistent(&landing.worktree) {
             Ok(true) => eprintln!("PR merged; restarted persistent branch from the default branch."),
             Ok(false) => eprintln!(
@@ -1309,7 +1299,7 @@ async fn cleanup_landed_pr(store: &SharedStore, landing: &PrLanding) -> OpsResul
         );
         return Ok(());
     }
-    let repo = crate::engine::worktrees::main_repo_root(&landing.worktree)?;
+    let repo = crate::git::worktrees::main_repo_root(&landing.worktree)?;
     if std::fs::canonicalize(&repo)? == std::fs::canonicalize(&landing.worktree)? {
         eprintln!("PR merged; retained the primary checkout and branch.");
         return Ok(());
@@ -1409,7 +1399,7 @@ pub(crate) fn reconcile_armed_pr(
     options: &LandOptions,
     pr: &PrInfo,
     lock: &super::release_lock::ReleaseLock,
-    lease: &crate::engine::git::WorktreeLease,
+    lease: &crate::git::WorktreeLease,
 ) -> OpsResult<PrLanding> {
     let landing = record_armed_pr(repo, options, pr)?;
     let release = Some(Arc::new((lock.try_clone()?, lease.try_clone()?)));

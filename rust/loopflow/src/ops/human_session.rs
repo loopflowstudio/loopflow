@@ -548,7 +548,7 @@ fn session_token(session: &LfSession) -> HumanSessionToken {
 
 /// Launch the prepared input of a conversation or of a saved Flow's review.
 async fn serve_locked(store: &SharedStore, session: &LfSession, launch_lock: File) -> Result<()> {
-    let lf = crate::engine::process::resolve_pinned_lf_binary()?;
+    let lf = crate::os_process::resolve_pinned_lf_binary()?;
     let mut command = tokio::process::Command::new(lf);
     let token = session_token(session);
     command
@@ -750,7 +750,7 @@ async fn connect_live_codex(
     let interrupted_store = store.sqlite.clone();
     let interrupted_session = session.id.clone();
     let interrupted_attachment = attachment.clone();
-    crate::engine::agent::register_interrupt_cleanup(move || {
+    crate::agent::register_interrupt_cleanup(move || {
         // A native client owns its attachment, never the surviving provider's exit.
         match interrupted_store.finish_session_attachment(
             &interrupted_session,
@@ -764,8 +764,8 @@ async fn connect_live_codex(
     });
     let connected = async {
         // Retain the AgentProcess while this lf invocation is attached.
-        crate::engine::process::hold_agent_process_lifeline(
-            &crate::engine::process::agent_process_lifeline_path(Path::new(&endpoint)),
+        crate::os_process::hold_agent_process_lifeline(
+            &crate::os_process::agent_process_lifeline_path(Path::new(&endpoint)),
         )
         .context("Codex AgentProcess is stopping after its attached lf exited")?;
         if replace_clients {
@@ -1008,7 +1008,7 @@ pub(crate) async fn rename(
     let session = find_session(store, session_id, false)
         .await?
         .ok_or_else(|| session_not_found(session_id))?;
-    let title = crate::engine::naming::validate_session_title(title)
+    let title = crate::naming::validate_session_title(title)
         .map_err(|error| anyhow!("cannot rename Session {session_id}: {error}"))?;
     let title_source = match source {
         SessionTitleSource::Human => crate::session::TitleSource::Human,
@@ -1200,7 +1200,7 @@ pub(crate) fn human_open_argv(
     remote_machine: Option<&crate::durable::MachineId>,
     id: &str,
 ) -> Result<Vec<String>> {
-    let context = crate::engine::process::execution_context()?;
+    let context = crate::os_process::execution_context()?;
     // A fresh terminal does not inherit the listing process's data selection.
     // Carry the executable and its data together, including when a different
     // installation becomes current between listing and opening.
@@ -1250,7 +1250,7 @@ async fn conversation_process_is_running(id: &str) -> Result<bool> {
 
 #[cfg(not(test))]
 async fn start_durable_session(name: &str, cwd: &Path, argv: &[String]) -> Result<()> {
-    crate::engine::process::start_home_session(name, cwd, argv).await
+    crate::os_process::start_home_session(name, cwd, argv).await
 }
 
 #[cfg(test)]
@@ -2093,8 +2093,8 @@ mod tests {
 
     #[test]
     fn membership_wire_ids_are_derived_from_their_captures() {
-        use crate::engine::flow::{ConcretePath, ConcreteSkill, ConcreteStep, ConcreteXor, Skill};
-        use crate::engine::flow_graph::FlowGraph;
+        use crate::flow::graph::FlowGraph;
+        use crate::flow::{ConcretePath, ConcreteSkill, ConcreteStep, ConcreteXor, Skill};
         fn skill(name: &str, human: bool) -> ConcreteStep {
             ConcreteStep::Skill(ConcreteSkill {
                 skill: Skill::named(name),

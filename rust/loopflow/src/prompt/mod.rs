@@ -3,6 +3,10 @@
 //! This module handles gathering all context components (docs, diff, clipboard, etc.)
 //! and assembling them into a formatted prompt.
 
+pub mod context_budget;
+pub mod process;
+pub mod structured_reply;
+
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Write;
@@ -10,8 +14,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
 
-use crate::engine::error::CoreError;
-use crate::engine::flow::{load_skill, Skill};
+use crate::error::CoreError;
+use crate::flow::{load_skill, Skill};
 use crate::repository::RepoId;
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -141,9 +145,9 @@ impl Surface {
     /// where a real dependency should route.
     pub fn instructions(self) -> &'static str {
         match self {
-            Self::Headless => crate::engine::builtins::SURFACE_HEADLESS,
-            Self::Chat => crate::engine::builtins::SURFACE_CHAT,
-            _ => crate::engine::builtins::SURFACE_HUMAN_PRESENT,
+            Self::Headless => crate::builtins::SURFACE_HEADLESS,
+            Self::Chat => crate::builtins::SURFACE_CHAT,
+            _ => crate::builtins::SURFACE_HUMAN_PRESENT,
         }
     }
 }
@@ -200,7 +204,7 @@ impl PromptComponents {
         !self.operate
             && self.skill.as_ref().is_some_and(|skill| {
                 skill.source.as_ref().is_some_and(|source| {
-                    source.dialect != crate::engine::skill_catalog::SkillDialect::Loopflow
+                    source.dialect != crate::skills::catalog::SkillDialect::Loopflow
                 })
             })
     }
@@ -390,7 +394,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
     debug!(elapsed_ms = start.elapsed().as_millis(), "gathered context");
     Ok(PromptComponents {
         surface: opts.surface,
-        user_name: crate::engine::config::participant_name()?,
+        user_name: crate::config::participant_name()?,
         docs,
         diff,
         diff_files,
@@ -1051,8 +1055,7 @@ fn gather_changed_file_paths(repo_root: &Path) -> Result<Vec<String>, CoreError>
         return Ok(Vec::new());
     }
 
-    let base_branch =
-        crate::engine::git::get_default_branch(repo_root).unwrap_or("main".to_string());
+    let base_branch = crate::git::get_default_branch(repo_root).unwrap_or("main".to_string());
     let diff_ref = format!("origin/{}...HEAD", base_branch);
     let committed_files = git_changed_file_names(repo_root, &diff_ref)?;
     if !committed_files.is_empty() {
@@ -1195,8 +1198,7 @@ fn gather_diff_tiered(repo_root: &Path) -> Result<(Option<String>, DiffTier, usi
         return Ok((None, DiffTier::None, 0));
     }
 
-    let base_branch =
-        crate::engine::git::get_default_branch(repo_root).unwrap_or("main".to_string());
+    let base_branch = crate::git::get_default_branch(repo_root).unwrap_or("main".to_string());
     let diff_ref = format!("origin/{}...HEAD", base_branch);
 
     // Count committed changes vs base branch. If none, fall back to
@@ -1297,7 +1299,7 @@ fn parse_shortstat_total_lines(output: &str) -> Option<usize> {
 }
 
 fn read_clipboard() -> Option<String> {
-    crate::engine::clipboard::read()
+    crate::platform::clipboard::read()
 }
 
 fn build_gitignore(repo_root: &Path) -> ignore::gitignore::Gitignore {
@@ -1431,7 +1433,7 @@ pub fn drop_duplicate_docs(
                      "provider-native discovery owns this instruction file or its symlink target")
                 } else if components.operate
                     && name == "LOOPFLOW.md"
-                    && doc.content.trim() == crate::engine::builtins::LOOPFLOW_DOC.trim()
+                    && doc.content.trim() == crate::builtins::LOOPFLOW_DOC.trim()
                 {
                     (
                         Kind::OperatingInstructions,
@@ -1537,7 +1539,7 @@ pub fn format_system_sections(components: &PromptComponents) -> Vec<String> {
 pub fn loopflow_section() -> String {
     format!(
         "<lf:loopflow>\n{}\n</lf:loopflow>",
-        crate::engine::builtins::LOOPFLOW_DOC
+        crate::builtins::LOOPFLOW_DOC
     )
 }
 
@@ -1672,7 +1674,7 @@ pub fn format_content_sections(components: &PromptComponents) -> Vec<String> {
 
 /// Name context is display data, not authorship for historical or external requests.
 pub fn render_user_context(name: Option<&str>) -> String {
-    let Some(name) = name.and_then(crate::engine::config::normalize_user_name) else {
+    let Some(name) = name.and_then(crate::config::normalize_user_name) else {
         return String::new();
     };
     let name = serde_json::to_string(&name)
@@ -1792,7 +1794,7 @@ fn format_files<'a>(docs: impl IntoIterator<Item = &'a Document>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::flow::Skill;
+    use crate::flow::Skill;
     use std::path::{Path, PathBuf};
 
     fn init_repo() -> tempfile::TempDir {
@@ -2001,7 +2003,7 @@ mod tests {
 
         let prompt = render_full_prompt(components);
         assert!(prompt.contains("<lf:loopflow>"));
-        assert!(prompt.contains(crate::engine::builtins::LOOPFLOW_DOC.trim()));
+        assert!(prompt.contains(crate::builtins::LOOPFLOW_DOC.trim()));
         assert!(prompt.contains("</lf:loopflow>"));
     }
 
@@ -2014,7 +2016,7 @@ mod tests {
 
         let prompt = render_full_prompt(components);
         assert!(!prompt.contains("<lf:loopflow>"));
-        assert!(!prompt.contains(crate::engine::builtins::LOOPFLOW_DOC.trim()));
+        assert!(!prompt.contains(crate::builtins::LOOPFLOW_DOC.trim()));
         assert!(!prompt.contains("lf chat"));
     }
 
@@ -2068,13 +2070,13 @@ mod tests {
     #[test]
     fn each_session_carries_its_operate_procedure_once() {
         for scope in ["repo", "wave", "task"] {
-            let operate = crate::engine::builtins::get_builtin_skill(&format!("{scope}/operate"))
+            let operate = crate::builtins::get_builtin_skill(&format!("{scope}/operate"))
                 .expect("operate skill");
             let procedure = operate
                 .splitn(3, "---\n")
                 .nth(2)
                 .expect("operate skill has a body");
-            let session = crate::engine::builtins::get_builtin_skill(&format!("{scope}/session"))
+            let session = crate::builtins::get_builtin_skill(&format!("{scope}/session"))
                 .expect("session skill");
             assert_eq!(session.matches(procedure).count(), 1, "{scope}");
             assert!(

@@ -4,7 +4,6 @@
 use std::collections::HashMap;
 
 use crate::durable::TaskId;
-use crate::engine::workflow::{WorkflowDefinition, END, START};
 use crate::id::LfProcessId;
 use crate::ops::workflow::{
     Workflow, WorkflowActor, WorkflowMove, WorkflowMoveKind, WorkflowPosition,
@@ -12,6 +11,7 @@ use crate::ops::workflow::{
 use crate::process::LfProcess;
 use crate::store::StoreResult;
 use crate::task_work::{TaskSession, TaskWork};
+use crate::workflow::{WorkflowDefinition, END, START};
 
 use super::SqliteStore;
 
@@ -335,7 +335,7 @@ pub(super) fn reach_end_in(
         }
         EndMove::Set => {
             if !set_node_in(tx, task, END, by, note)? {
-                let unplanned = crate::engine::workflow::unplanned();
+                let unplanned = crate::workflow::unplanned();
                 tx.execute(
                     "INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,?2,?3,?4)",
                     rusqlite::params![

@@ -49,7 +49,7 @@ pub struct Cli {
     #[arg(long, hide = true)]
     pub skill_input: Option<std::path::PathBuf>,
     #[arg(skip)]
-    pub resolved_invocation: Option<crate::engine::skill_invocation::SkillInvocation>,
+    pub resolved_invocation: Option<crate::skills::invocation::SkillInvocation>,
 
     /// Prefer this managed provider login before the normal route. Repeat to
     /// select provider-qualified preferences such as `claude=jack@`.

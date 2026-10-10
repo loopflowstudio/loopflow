@@ -2,10 +2,10 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use crate::engine::flow::{ConcreteCommand, ConcreteSkill, ConcreteStep, ConcreteXor};
-use crate::engine::transitions::{
+use crate::flow::transitions::{
     finish_step, FlowProgress as TransitionProgress, FlowTransition, FlowVerdict,
 };
+use crate::flow::{ConcreteCommand, ConcreteSkill, ConcreteStep, ConcreteXor};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StepProgress {
@@ -75,17 +75,17 @@ pub trait SkillExecutor: Send + Sync {
 }
 
 #[derive(Debug, Clone)]
-pub struct FlowEngine<E> {
+pub struct FlowRunner<E> {
     executor: E,
 }
 
-impl<E> FlowEngine<E> {
+impl<E> FlowRunner<E> {
     pub fn new(executor: E) -> Self {
         Self { executor }
     }
 }
 
-impl<E: SkillExecutor> FlowEngine<E> {
+impl<E: SkillExecutor> FlowRunner<E> {
     pub async fn run(&self, items: &[ConcreteStep], start_index: usize) -> Result<FlowOutcome> {
         let mut cursor = ExecutionCursor {
             index: start_index,
@@ -330,14 +330,14 @@ pub fn current_skill(items: &[ConcreteStep], cursor: &ExecutionCursor) -> Option
 
 #[cfg(test)]
 mod tests {
-    use crate::engine::execution::{
-        current_skill, ExecutionContext, ExecutionCursor, FlowEngine, FlowOutcome, NestedCursor,
+    use crate::flow::runner::{
+        current_skill, ExecutionContext, ExecutionCursor, FlowOutcome, FlowRunner, NestedCursor,
         SkillExecutor, SkillOutcome,
     };
-    use crate::engine::flow::{
+    use crate::flow::transitions::{FlowDecision, FlowVerdict};
+    use crate::flow::{
         Command, ConcreteCommand, ConcretePath, ConcreteSkill, ConcreteStep, ConcreteXor, Skill,
     };
-    use crate::engine::transitions::{FlowDecision, FlowVerdict};
     use anyhow::{anyhow, Result};
     use async_trait::async_trait;
     use std::collections::{HashMap, VecDeque};
@@ -514,8 +514,8 @@ mod tests {
             paths: HashMap::from([(
                 "selected".to_owned(),
                 ConcretePath {
-                    steps: crate::engine::compile_flow(
-                        &crate::engine::load_flow(flow, repo).unwrap(),
+                    steps: crate::flow::compile_flow(
+                        &crate::flow::load_flow(flow, repo).unwrap(),
                         repo,
                     )
                     .unwrap(),
@@ -527,7 +527,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn engine_runs_independent_loops_and_carries_direction_through_the_body() {
+    async fn runner_runs_independent_loops_and_carries_direction_through_the_body() {
         let repo = fixture_repo().unwrap();
         let items = vec![
             step("init", None),
@@ -556,7 +556,7 @@ mod tests {
             );
         let mut cursor = ExecutionCursor::default();
         assert_eq!(
-            FlowEngine::new(executor.clone())
+            FlowRunner::new(executor.clone())
                 .run_with_cursor(&items, &mut cursor)
                 .await
                 .unwrap(),
@@ -589,7 +589,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn engine_keeps_iterating_until_advance() {
+    async fn runner_keeps_iterating_until_advance() {
         let repo = fixture_repo().unwrap();
         let items = vec![
             step("work", None),
@@ -604,7 +604,7 @@ mod tests {
             RecordingExecutor::new(repo.path().to_owned()).with_outcomes("decide", outcomes);
         let mut cursor = ExecutionCursor::default();
         assert_eq!(
-            FlowEngine::new(executor.clone())
+            FlowRunner::new(executor.clone())
                 .run_with_cursor(&items, &mut cursor)
                 .await
                 .unwrap(),
@@ -659,7 +659,7 @@ mod tests {
             );
         let mut cursor = ExecutionCursor::default();
         assert_eq!(
-            FlowEngine::new(executor.clone())
+            FlowRunner::new(executor.clone())
                 .run_with_cursor(&items, &mut cursor)
                 .await
                 .unwrap(),
@@ -698,7 +698,7 @@ mod tests {
                 .with_outcomes("decide", vec![outcome]);
             let mut cursor = ExecutionCursor::default();
             assert!(matches!(
-                FlowEngine::new(executor.clone())
+                FlowRunner::new(executor.clone())
                     .run_with_cursor(&items, &mut cursor)
                     .await
                     .unwrap(),
@@ -723,7 +723,7 @@ mod tests {
         let executor = RecordingExecutor::new(repo.path().to_owned())
             .with_outcomes("decide", vec![decision(FlowDecision::Iterate, "repair")])
             .stop_after(2);
-        assert!(FlowEngine::new(executor.clone())
+        assert!(FlowRunner::new(executor.clone())
             .run(&items, 0)
             .await
             .unwrap_err()
@@ -735,7 +735,7 @@ mod tests {
         let resumed = RecordingExecutor::new(repo.path().to_owned())
             .with_outcomes("decide", vec![decision(FlowDecision::Advance, "proven")]);
         assert_eq!(
-            FlowEngine::new(resumed.clone())
+            FlowRunner::new(resumed.clone())
                 .run_with_cursor(&items, &mut cursor)
                 .await
                 .unwrap(),
@@ -745,7 +745,7 @@ mod tests {
         assert_eq!(cursor.progress.repeats["1"], 1);
         assert!(cursor.progress.verdict.is_none());
         assert_eq!(
-            FlowEngine::new(resumed.clone())
+            FlowRunner::new(resumed.clone())
                 .run_with_cursor(&items, &mut cursor)
                 .await
                 .unwrap(),
@@ -780,7 +780,7 @@ mod tests {
                 vec![decision(FlowDecision::Iterate, "repair nested")],
             )
             .stop_after(7);
-        assert!(FlowEngine::new(executor.clone())
+        assert!(FlowRunner::new(executor.clone())
             .run(&items, 0)
             .await
             .unwrap_err()
@@ -826,7 +826,7 @@ mod tests {
         let resumed = RecordingExecutor::new(repo.path().to_owned())
             .with_outcomes("decide", vec![decision(FlowDecision::Advance, "proven")]);
         assert_eq!(
-            FlowEngine::new(resumed.clone())
+            FlowRunner::new(resumed.clone())
                 .run_with_cursor(&items, &mut cursor)
                 .await
                 .unwrap(),
@@ -873,7 +873,7 @@ mod tests {
                 ],
             );
         assert_eq!(
-            FlowEngine::new(executor.clone())
+            FlowRunner::new(executor.clone())
                 .run(&items, 0)
                 .await
                 .unwrap(),
@@ -924,7 +924,7 @@ mod tests {
         let executor = RecordingExecutor::new(repo.path().to_owned())
             .with_verdicts(&["silence"])
             .stop_after(1);
-        assert!(FlowEngine::new(executor.clone())
+        assert!(FlowRunner::new(executor.clone())
             .run(&items, 0)
             .await
             .is_err());
@@ -934,7 +934,7 @@ mod tests {
         assert!(cursor.child.is_none());
         let resumed = RecordingExecutor::new(repo.path().to_owned());
         assert_eq!(
-            FlowEngine::new(resumed.clone())
+            FlowRunner::new(resumed.clone())
                 .run_with_cursor(&items, &mut cursor)
                 .await
                 .unwrap(),
@@ -961,7 +961,7 @@ mod tests {
             );
         let mut cursor = ExecutionCursor::default();
         assert_eq!(
-            FlowEngine::new(executor.clone())
+            FlowRunner::new(executor.clone())
                 .run_with_cursor(&items, &mut cursor)
                 .await
                 .unwrap(),
@@ -977,7 +977,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn engine_runs_selected_xor_path() {
+    async fn runner_runs_selected_xor_path() {
         let repo = fixture_repo().expect("tempdir");
         std::fs::create_dir_all(repo.path().join(".lf/flows")).expect("flows dir");
         std::fs::write(
@@ -987,14 +987,14 @@ mod tests {
         .expect("write flow");
 
         let executor = RecordingExecutor::new(repo.path().to_path_buf()).with_verdicts(&["ship"]);
-        let engine = FlowEngine::new(executor.clone());
+        let runner = FlowRunner::new(executor.clone());
         let items = vec![ConcreteStep::Xor(ConcreteXor {
             router: Skill::named("xor-route"),
             paths: HashMap::from([(
                 "ship".to_string(),
                 ConcretePath {
-                    steps: crate::engine::compile_flow(
-                        &crate::engine::load_flow("branch", repo.path()).unwrap(),
+                    steps: crate::flow::compile_flow(
+                        &crate::flow::load_flow("branch", repo.path()).unwrap(),
                         repo.path(),
                     )
                     .unwrap(),
@@ -1004,7 +1004,7 @@ mod tests {
             sources: vec!["test".to_string()],
         })];
 
-        let outcome = engine.run(&items, 0).await.expect("engine run");
+        let outcome = runner.run(&items, 0).await.expect("runner run");
         assert_eq!(outcome, FlowOutcome::Completed);
         assert_eq!(
             executor.calls(),
@@ -1017,22 +1017,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn engine_stops_when_executor_waits() {
+    async fn runner_stops_when_executor_waits() {
         let repo = fixture_repo().expect("tempdir");
         let executor = RecordingExecutor::new(repo.path().to_path_buf()).with_wait("design");
-        let engine = FlowEngine::new(executor.clone());
+        let runner = FlowRunner::new(executor.clone());
         let items = vec![
             ConcreteStep::Skill(skill("design")),
             ConcreteStep::Skill(skill("implement")),
         ];
 
-        let outcome = engine.run(&items, 0).await.expect("engine run");
+        let outcome = runner.run(&items, 0).await.expect("runner run");
         assert_eq!(outcome, FlowOutcome::Waiting);
         assert_eq!(executor.calls(), vec!["design".to_string()]);
     }
 
     #[tokio::test]
-    async fn engine_resumes_nested_xor_after_waiting_skill() {
+    async fn runner_resumes_nested_xor_after_waiting_skill() {
         let repo = fixture_repo().expect("tempdir");
         std::fs::create_dir_all(repo.path().join(".lf/flows")).expect("flows dir");
         std::fs::write(
@@ -1046,8 +1046,8 @@ mod tests {
             paths: HashMap::from([(
                 "ship".to_string(),
                 ConcretePath {
-                    steps: crate::engine::compile_flow(
-                        &crate::engine::load_flow("branch", repo.path()).unwrap(),
+                    steps: crate::flow::compile_flow(
+                        &crate::flow::load_flow("branch", repo.path()).unwrap(),
                         repo.path(),
                     )
                     .unwrap(),
@@ -1061,10 +1061,10 @@ mod tests {
         let executor = RecordingExecutor::new(repo.path().to_path_buf())
             .with_verdicts(&["ship"])
             .with_wait("design");
-        let outcome = FlowEngine::new(executor.clone())
+        let outcome = FlowRunner::new(executor.clone())
             .run_with_cursor(&items, &mut cursor)
             .await
-            .expect("engine run");
+            .expect("runner run");
         assert_eq!(outcome, FlowOutcome::Waiting);
         assert_eq!(
             executor.calls(),
@@ -1078,10 +1078,10 @@ mod tests {
         assert_eq!(resumed.skill.name, "implement");
 
         let executor = RecordingExecutor::new(repo.path().to_path_buf()).with_verdicts(&["ship"]);
-        let outcome = FlowEngine::new(executor.clone())
+        let outcome = FlowRunner::new(executor.clone())
             .run_with_cursor(&items, &mut cursor)
             .await
-            .expect("resume engine");
+            .expect("resume runner");
         assert_eq!(outcome, FlowOutcome::Completed);
         assert_eq!(executor.calls(), vec!["implement".to_string()]);
     }
@@ -1116,7 +1116,7 @@ mod tests {
         };
         let executor = RecordingExecutor::new(PathBuf::new());
         assert_eq!(
-            FlowEngine::new(executor.clone())
+            FlowRunner::new(executor.clone())
                 .run_with_cursor(&items, &mut cursor)
                 .await
                 .unwrap(),
@@ -1165,7 +1165,7 @@ mod tests {
                 .contains("captured"));
             let executor = RecordingExecutor::new(PathBuf::new());
             assert!(matches!(
-                FlowEngine::new(executor.clone())
+                FlowRunner::new(executor.clone())
                     .run_with_cursor(&items, &mut cursor)
                     .await
                     .unwrap(),
@@ -1188,10 +1188,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn engine_runs_ops_items() {
+    async fn runner_runs_ops_items() {
         let repo = fixture_repo().expect("tempdir");
         let executor = RecordingExecutor::new(repo.path().to_path_buf());
-        let engine = FlowEngine::new(executor.clone());
+        let runner = FlowRunner::new(executor.clone());
         let items = vec![ConcreteStep::Command(ConcreteCommand {
             item: Command {
                 command: "sync".to_string(),
@@ -1200,7 +1200,7 @@ mod tests {
             sources: vec!["test".to_string()],
         })];
 
-        let outcome = engine.run(&items, 0).await.expect("engine run");
+        let outcome = runner.run(&items, 0).await.expect("runner run");
         assert_eq!(outcome, FlowOutcome::Completed);
         assert_eq!(executor.calls(), vec!["op:sync --fast".to_string()]);
     }

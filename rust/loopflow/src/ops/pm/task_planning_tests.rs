@@ -1800,7 +1800,7 @@ exit 0
                 .unwrap();
             let workflow = fixture.store.sqlite.workflow(&task.id).unwrap();
             let other_workflow = fixture.store.sqlite.workflow(&other.id).unwrap();
-            let process = crate::engine::agent::ProcessConfig {
+            let process = crate::agent::ProcessConfig {
                 auto,
                 task_input: Some(crate::ops::task_input::TaskInput::new(
                     fixture.store.clone(),
@@ -1814,7 +1814,7 @@ exit 0
                 )),
                 ..Default::default()
             };
-            let launch = crate::engine::agent::AgentConfig {
+            let launch = crate::agent::AgentConfig {
                 agent: Some(agent.into()),
                 cwd: Some(repo.to_path_buf()),
                 env: std::collections::BTreeMap::from([
@@ -1830,10 +1830,10 @@ exit 0
                 let mut running = tokio::task::spawn_blocking(move || {
                     crate::journal::with_test_ledger(database, || {
                         PM_TEST_CONTEXT.sync_scope(context, || {
-                            crate::engine::agent::run_agent(
+                            crate::agent::run_agent(
                                 &launch,
                                 &process,
-                                &crate::engine::agent::AgentCapabilities::default(),
+                                &crate::agent::AgentCapabilities::default(),
                             )
                         })
                     })
@@ -2476,8 +2476,8 @@ fi
                 project_id: project.id,
                 worktree: Some(repo.clone()),
                 workspace_slug: "completion".into(),
-                branch: crate::engine::git::current_branch(&repo).unwrap().unwrap(),
-                base_commit: crate::engine::git::rev_parse(&repo, "HEAD").unwrap(),
+                branch: crate::git::current_branch(&repo).unwrap().unwrap(),
+                base_commit: crate::git::rev_parse(&repo, "HEAD").unwrap(),
                 parent_pr_id: None,
                 abandon_intent: None,
                 created_at: timestamp,
@@ -2490,8 +2490,8 @@ fi
                 task_id: task.id.clone(),
                 sequence: 1,
                 slug: "completion".into(),
-                branch: crate::engine::git::current_branch(&repo).unwrap().unwrap(),
-                base_commit: crate::engine::git::rev_parse(&repo, "HEAD").unwrap(),
+                branch: crate::git::current_branch(&repo).unwrap().unwrap(),
+                base_commit: crate::git::rev_parse(&repo, "HEAD").unwrap(),
                 parent_pr_id: None,
                 publication: None,
                 merge_commit: None,
@@ -2631,9 +2631,7 @@ fi
             1
         );
         assert_eq!(
-            crate::engine::worktrees::list_worktrees(&repo)
-                .unwrap()
-                .len(),
+            crate::git::worktrees::list_worktrees(&repo).unwrap().len(),
             1
         );
     });

@@ -88,7 +88,7 @@ pub(crate) fn launch_isolated() -> bool {
         let repo = std::env::current_dir()
             .ok()
             .and_then(|cwd| crate::repo::discover_repo_root(&cwd).ok().flatten());
-        crate::engine::config::load_config_or_default(repo.as_deref()).isolate
+        crate::config::load_config_or_default(repo.as_deref()).isolate
     })
 }
 

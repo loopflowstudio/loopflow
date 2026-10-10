@@ -23,9 +23,9 @@ use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
+use crate::agent::stream::{ResultSubtype, StreamEvent};
 use crate::chat::types::{ConversationEvent, ConversationItem, ItemDelta, Lifecycle, TurnUsage};
-use crate::engine::naming::generated_session_title;
-use crate::engine::stream::{ResultSubtype, StreamEvent};
+use crate::naming::generated_session_title;
 use crate::store::{StoreError, StoreResult};
 
 /// An opaque artifact directory key; it grants no conversation or Flow authority.
@@ -89,23 +89,23 @@ pub enum SessionFlowMembership {
 pub struct AgentProcessRequest {
     pub system_prompt: String,
     pub task_prompt: String,
-    pub skill_invocation: Option<crate::engine::skill_invocation::SkillInvocation>,
+    pub skill_invocation: Option<crate::skills::invocation::SkillInvocation>,
     pub agent: String,
     pub account_id: Option<crate::store::ProviderAccountId>,
     pub max_turns: Option<u32>,
-    pub write_scope: crate::engine::AgentWriteScope,
-    pub execution_boundary: Option<crate::engine::AgentExecutionBoundary>,
+    pub write_scope: crate::agent::AgentWriteScope,
+    pub execution_boundary: Option<crate::agent::AgentExecutionBoundary>,
     pub skip_permissions: bool,
     pub chrome: bool,
 }
 
 impl AgentProcessRequest {
     pub(crate) fn from_prepared(
-        config: &crate::engine::AgentConfig,
-        capabilities: &crate::engine::AgentCapabilities,
+        config: &crate::agent::AgentConfig,
+        capabilities: &crate::agent::AgentCapabilities,
     ) -> Self {
         Self {
-            system_prompt: crate::engine::agent::system_prompt_with_structured_replies(config),
+            system_prompt: crate::agent::system_prompt_with_structured_replies(config),
             task_prompt: config.task_prompt.clone(),
             skill_invocation: config.skill_invocation.clone(),
             agent: config.agent().to_string(),
@@ -119,7 +119,7 @@ impl AgentProcessRequest {
     }
 
     pub(crate) fn replay_unavailable_reason(&self) -> Option<&'static str> {
-        let (harness, _) = crate::engine::parse_agent(&self.agent);
+        let (harness, _) = crate::config::parse_agent(&self.agent);
         matches!(harness.as_str(), "claude" | "codex")
             .then_some("managed Claude/Codex replay requires a recorded account ID")
             .filter(|_| self.account_id.is_none())
@@ -1974,7 +1974,7 @@ pub(crate) fn register_session_attachment_interrupt(
     attachment: crate::process::SessionAttachment,
 ) {
     let store = store.clone();
-    crate::engine::agent::register_interrupt_cleanup(move || {
+    crate::agent::register_interrupt_cleanup(move || {
         match finish_session_attachment(&store, &session, &attachment, "interrupted") {
             Ok(()) | Err(StoreError::InvalidAuthority(_)) => {}
             Err(error) => tracing::warn!(%error, %session, "record interrupted Session connection"),
@@ -2329,7 +2329,7 @@ impl CaptureHandle {
 
     fn register_interrupt(&self) {
         let capture = Arc::downgrade(&self.0);
-        crate::engine::agent::register_interrupt_cleanup(move || {
+        crate::agent::register_interrupt_cleanup(move || {
             if let Some(capture) = capture.upgrade() {
                 let mut capture = capture.lock().expect("Session capture mutex poisoned");
                 if capture.settled_outcome.is_none() {
@@ -3314,9 +3314,10 @@ mod tests {
         write_provider_client, AgentProcessRequest, CaptureHandle, SessionCaptureManifest,
         SessionCaptureSpec, SubjectAttribution, TerminalReceipt,
     };
+    use crate::agent::stream::{ResultSubtype, StreamEvent};
+    use crate::agent::AgentCapabilities;
+    use crate::agent::AgentConfig;
     use crate::chat::types::{ConversationEvent, ConversationItem, TurnUsage};
-    use crate::engine::stream::{ResultSubtype, StreamEvent};
-    use crate::engine::{AgentCapabilities, AgentConfig};
 
     #[test]
     fn terminal_attachment_probe() {

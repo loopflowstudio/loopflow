@@ -4,7 +4,6 @@ use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use reqwest::Method;
 use serde_json::{json, Value};
 use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
@@ -386,45 +385,40 @@ async fn observe_native_messages(
     turn_in_progress: &AtomicBool,
 ) -> Result<Vec<Value>> {
     let messages = opencode_history::read_messages(client, base_url, session).await?;
-    let events = history
-        .lock()
-        .expect("OpenCode history lock poisoned")
-        .observe(session, &messages)?;
-    // Emit native-correlated output before its completion,
-    // even when a snapshot gets ahead of queued SSE deltas.
-    for event in events
-        .iter()
-        .filter(|event| matches!(event, ConversationEvent::TurnStarted { .. }))
-    {
-        state.observe_lifecycle(event);
-        turn_in_progress.store(true, Ordering::SeqCst);
-        let _ = event_tx.send(event.clone());
-    }
-    let current_messages: Vec<_> = messages
-        .iter()
-        .filter(|message| {
-            message["info"]["parentID"].as_str().is_some_and(|request| {
-                history
-                    .lock()
-                    .expect("OpenCode history lock poisoned")
-                    .admitted(request)
+    let (events, current_messages) = {
+        let mut history = history.lock().expect("OpenCode history lock poisoned");
+        let events = history.observe(session, &messages)?;
+        let current_messages: Vec<_> = messages
+            .iter()
+            .filter(|message| {
+                message["info"]["parentID"]
+                    .as_str()
+                    .is_some_and(|request| history.admitted(request))
             })
-        })
-        .cloned()
-        .collect();
+            .cloned()
+            .collect();
+        (events, current_messages)
+    };
+    // Emit native-correlated output between start and completion, even when
+    // a snapshot gets ahead of queued SSE deltas. Empty snapshots do not idle
+    // an in-flight submission.
+    let (starts, remaining): (Vec<_>, Vec<_>) = events
+        .into_iter()
+        .partition(|event| matches!(event, ConversationEvent::TurnStarted { .. }));
+    for event in starts {
+        state.observe_lifecycle(&event);
+        turn_in_progress.store(true, Ordering::SeqCst);
+        let _ = event_tx.send(event);
+    }
     for event in state.observe_messages(&current_messages) {
         let _ = event_tx.send(event);
     }
-    for event in events {
-        if !matches!(event, ConversationEvent::TurnStarted { .. }) {
-            state.observe_lifecycle(&event);
-        }
+    for event in remaining {
+        state.observe_lifecycle(&event);
         if matches!(event, ConversationEvent::TurnCompleted { .. }) {
             turn_in_progress.store(false, Ordering::SeqCst);
         }
-        if !matches!(event, ConversationEvent::TurnStarted { .. }) {
-            let _ = event_tx.send(event);
-        }
+        let _ = event_tx.send(event);
     }
     Ok(messages)
 }
@@ -627,9 +621,14 @@ async fn open_agent_session(
         return Ok(session_id.clone());
     }
 
-    let session_url = format!("{base_url}/session");
-    let response =
-        send_request_with_retry(client, Method::POST, &session_url, Some(json!({}))).await?;
+    // Creation is not idempotent: an error can follow a successful native save.
+    // Leave that outcome uncertain rather than creating a second conversation.
+    let response = client
+        .post(format!("{base_url}/session"))
+        .json(&json!({}))
+        .send()
+        .await?
+        .error_for_status()?;
     let body: Value = response
         .json()
         .await
@@ -762,41 +761,6 @@ async fn wait_for_server(
     }
 }
 
-async fn send_request_with_retry(
-    client: &reqwest::Client,
-    method: Method,
-    url: &str,
-    payload: Option<Value>,
-) -> Result<reqwest::Response> {
-    let mut attempt = 0;
-
-    loop {
-        let mut request = client.request(method.clone(), url);
-        if let Some(body) = payload.clone() {
-            request = request.json(&body);
-        }
-
-        match request.send().await {
-            Ok(response) if response.status().is_server_error() && attempt == 0 => {
-                attempt += 1;
-                tokio::time::sleep(Duration::from_millis(200)).await;
-            }
-            Ok(response) => {
-                return response
-                    .error_for_status()
-                    .map_err(|err| anyhow!("OpenCode request failed ({method} {url}): {err}"));
-            }
-            Err(err) if attempt == 0 && (err.is_timeout() || err.is_connect()) => {
-                attempt += 1;
-                tokio::time::sleep(Duration::from_millis(200)).await;
-            }
-            Err(err) => {
-                return Err(anyhow!("OpenCode request failed ({method} {url}): {err}"));
-            }
-        }
-    }
-}
-
 fn parse_session_id(value: &Value) -> Option<AgentSessionId> {
     value
         .get("id")
@@ -905,6 +869,48 @@ fn parse_data_frame(frame: &str) -> Option<String> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[tokio::test]
+    async fn failed_creation_does_not_create_another_conversation() {
+        use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+
+        for status in ["503 Unavailable", "200 OK"] {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let endpoint = format!("http://{}", listener.local_addr().unwrap());
+            let creations = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let server = {
+                let creations = creations.clone();
+                tokio::spawn(async move {
+                    loop {
+                        let (socket, _) = listener.accept().await.unwrap();
+                        let mut socket = BufReader::new(socket);
+                        let mut line = String::new();
+                        socket.read_line(&mut line).await.unwrap();
+                        assert!(line.starts_with("POST /session "));
+                        loop {
+                            line.clear();
+                            socket.read_line(&mut line).await.unwrap();
+                            if line == "\r\n" {
+                                break;
+                            }
+                        }
+                        let mut body = [0; 2];
+                        socket.read_exact(&mut body).await.unwrap();
+                        assert_eq!(&body, b"{}");
+                        creations.fetch_add(1, Ordering::SeqCst);
+                        // The native save happened, but its response cannot supply
+                        // identity (server error or malformed successful response).
+                        socket.get_mut().write_all(format!("HTTP/1.1 {status}\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}").as_bytes()).await.unwrap();
+                    }
+                })
+            };
+            assert!(open_agent_session(&reqwest::Client::new(), &endpoint, None)
+                .await
+                .is_err());
+            assert_eq!(creations.load(Ordering::SeqCst), 1);
+            server.abort();
+        }
+    }
 
     #[tokio::test]
     #[allow(clippy::await_holding_lock)] // Isolate the disposable store selection.

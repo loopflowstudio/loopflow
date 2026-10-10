@@ -881,9 +881,15 @@ mod tests {
     use serde_json::json;
 
     #[tokio::test]
-    async fn startup_retains_uncertain_creation_and_permission_identity_after_takeover() {
+    async fn startup_retains_creation_and_permissions_after_cancellation_and_takeover() {
         use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-        for failure in ["creation", "permissions-applied", "permissions-unapplied"] {
+        for failure in [
+            "creation",
+            "permissions-applied",
+            "permissions-unapplied",
+            "cancelled-creation",
+            "cancelled-permissions",
+        ] {
             let home = tempfile::tempdir().unwrap();
             let database = home.path().join("loopflow.db");
             let store = crate::store::sqlite::SqliteStore::open_ephemeral(&database).unwrap();
@@ -908,7 +914,11 @@ mod tests {
                 .unwrap();
             let creations = Arc::new(std::sync::atomic::AtomicUsize::new(0));
             let patches = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let accepted = Arc::new(tokio::sync::Notify::new());
+            let release = Arc::new(tokio::sync::Notify::new());
             let server = {
+                let accepted = accepted.clone();
+                let release = release.clone();
                 let creations = creations.clone();
                 let patches = patches.clone();
                 tokio::spawn(async move {
@@ -934,15 +944,26 @@ mod tests {
                         socket.read_exact(&mut body).await.unwrap();
                         let response = if request.starts_with("POST /session ") {
                             creations.fetch_add(1, Ordering::SeqCst);
+                            if failure == "cancelled-creation" {
+                                accepted.notify_one();
+                                release.notified().await;
+                            }
                             if failure == "creation" { continue; }
                             json!({"id":"native"})
                         } else if request.starts_with("PATCH /session/native ") {
                             patches.fetch_add(1, Ordering::SeqCst);
                             assert_eq!(serde_json::from_slice::<Value>(&body).unwrap(),
                                 json!({"permission":[{"permission":"*","pattern":"*","action":"ask"}]}));
-                            configured = failure == "permissions-applied";
-                            // The response is lost whether the mutation applied or not.
-                            continue;
+                            configured = failure != "permissions-unapplied";
+                            if failure == "cancelled-permissions" {
+                                accepted.notify_one();
+                                release.notified().await;
+                            }
+                            if failure.starts_with("permissions-") {
+                                // The response is lost whether the mutation applied or not.
+                                continue;
+                            }
+                            json!({"id":"native"})
                         } else {
                             assert!(request.starts_with("GET /session/native "));
                             json!({"id":"native","permission":if configured {
@@ -953,16 +974,61 @@ mod tests {
                     }
                 })
             };
-            let owner = (store.clone(), "opencode".into(), first.clone());
-            assert!(prepare_agent_session(
-                owner.clone(),
+            let startup = tokio::spawn(prepare_agent_session(
+                (store.clone(), "opencode".into(), first.clone()),
                 endpoint.clone(),
                 None,
-                AgentWriteScope::Configured
-            )
-            .await
-            .is_err());
-            drop(owner);
+                AgentWriteScope::Configured,
+            ));
+            let transferred = if failure.starts_with("cancelled-") {
+                tokio::time::timeout(Duration::from_secs(5), accepted.notified())
+                    .await
+                    .expect("server accepted startup mutation");
+                startup.abort();
+                assert!(startup.await.unwrap_err().is_cancelled());
+                let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+                let mut transfer = {
+                    // A separately opened store exercises the OS fence, not a
+                    // shared SQLite connection's mutex.
+                    let store =
+                        crate::store::sqlite::SqliteStore::open_ephemeral(&database).unwrap();
+                    let first = first.clone();
+                    let attacher = attacher.clone();
+                    tokio::task::spawn_blocking(move || {
+                        started_tx.send(()).unwrap();
+                        let current = store
+                            .claim_session_attachment("opencode", Some(&first), &attacher, false)
+                            .unwrap();
+                        // The response must commit before the new owner enters.
+                        assert_eq!(
+                            store.session_thread("opencode").unwrap(),
+                            Some("native".into())
+                        );
+                        current
+                    })
+                };
+                started_rx.await.unwrap();
+                assert!(
+                    tokio::time::timeout(Duration::from_millis(100), &mut transfer)
+                        .await
+                        .is_err(),
+                    "cancelling the caller released an in-flight mutation's fence"
+                );
+                assert_eq!(
+                    store.session_attachment("opencode").unwrap(),
+                    Some(first.clone())
+                );
+                release.notify_one();
+                Some(
+                    tokio::time::timeout(Duration::from_secs(5), transfer)
+                        .await
+                        .unwrap()
+                        .unwrap(),
+                )
+            } else {
+                assert!(startup.await.unwrap().is_err());
+                None
+            };
             drop(store);
             let store = crate::store::sqlite::SqliteStore::open_ephemeral(&database).unwrap();
             assert_eq!(
@@ -977,9 +1043,11 @@ mod tests {
                     Some("native".into())
                 }
             );
-            let current = store
-                .claim_session_attachment("opencode", Some(&first), &attacher, false)
-                .unwrap();
+            let current = transferred.unwrap_or_else(|| {
+                store
+                    .claim_session_attachment("opencode", Some(&first), &attacher, false)
+                    .unwrap()
+            });
             assert_eq!(current.agent_process_id, first.agent_process_id);
             let result = prepare_agent_session(
                 (store.clone(), "opencode".into(), current),
@@ -988,7 +1056,10 @@ mod tests {
                 AgentWriteScope::Worktree,
             )
             .await;
-            assert_eq!(result.is_ok(), failure == "permissions-applied");
+            assert_eq!(
+                result.is_ok(),
+                failure == "permissions-applied" || failure.starts_with("cancelled-")
+            );
             assert!(prepare_agent_session(
                 (store, "opencode".into(), first),
                 endpoint,

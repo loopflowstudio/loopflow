@@ -44,10 +44,13 @@ removes its checkout without another agent. An unfinished neighbor, post-merge
 commits, ignored personal files and referenced native history remain intact.
 All source/history preservation conditions in the exact design remain binding.
 
-## 2. Bound diagnostics and interrupted temporary output — LOO-390 follow-through
+## 2. Bound diagnostics and interrupted temporary output — LOO-448
 
-LOO-390 already owns storage prevention; reuse it rather than file a competing
-storage umbrella. Customers should not acquire unlimited operational logs or abandoned temporary
+[LOO-448](https://linear.app/loopflow/issue/LOO-448/keep-disposable-logs-and-temporary-output-from-filling-the-disk)
+owns this independently shippable follow-up. Jack Heart's earlier LOO-390 direction
+requires linked follow-up Tasks rather than new PRs under the investigation Task.
+LOO-390 remains the evidence owner; LOO-448 is filed but not launched while the core
+uses the serial implementation lane. Customers should not acquire unlimited operational logs or abandoned temporary
 payloads merely by running lf. Audit current writers and their actual readers,
 then give disposable output one retention policy exercised by the same maintenance
 entry point. Legacy directory names alone are not ownership or disposal evidence.

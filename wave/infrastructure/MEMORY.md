@@ -280,6 +280,29 @@ unread legacy `traces`, `backups`, `lfd.db*`, `logs`; LOO-304's 40 GiB of
 Earlier cleanup history: `66da3fdf7:wave/infrastructure/MEMORY.md` under
 “Retained capture storage and autonomous cleanup.” Current direction is under Capture cutover.
 
+## Automatic checkout collection (2026-10-09)
+
+Jack Heart authorized the worktree-cleanup keystone after design review. He also
+classified Etude experiment output as disposable; expiry, budgets and explicit
+retention remain proposals. Rotation/compression are in design scope, not consent
+to expire usable conversations. No one-off machine deletion was requested.
+
+Cleanup authority requires ownership, exact-head settlement, idle execution and
+classified content, not age, remote disappearance, ignored status or planning
+completion. Main #1499 separates completion from delivery: PR-less completed
+Tasks and unresolved follow-through retain their checkout even beside a settled
+landing. The shared collector preserves this at every entry point. Unknown
+process inspection retains work; local refs use compare-and-delete. Cache tags
+classify artifacts, not referenced Session history.
+
+Reuse repository reconciliation rather than another daemon or agent. Release's
+installed-schedule evidence teaches two boundaries: executable promotion must not
+strand jobs on immutable old binaries, and generated service tests do not prove
+installed operation. Per-data-directory exclusion does not fence another store's
+execution on the same checkout. Source cleanup/retry tests establish no installed
+automatic collection; activation, whole-pass bounds and cross-store/history safety
+remain incomplete. Plan: `scratch/clean-up.md`. Artifact eviction and history rotation are follow-ups.
+
 ## Project configuration and review direction (2026-10-05)
 
 LOO-366's October 5 decisions are under Optional chapters and Task workflows;
@@ -395,38 +418,20 @@ reacquire after dropping the parent's shared handle. Parent death and elapsed
 wait grant neither mutation nor deletion authority. Main-reset/stash helpers can
 replace a held lock inode; explicit source selection avoids that failure class.
 
-Same-Home coverage, overlap, retry timing and interruption proofs remain at
-`c418953634bd101f51878d2be2b40fb3facafabd:wave/infrastructure/MEMORY.md`
-and its referenced commits `a60ac0281`, `02d6b3c00`, `95643bd50`, `d60d254ef`.
-They retain original ownership, physical failure, frozen coverage, candidate,
-caller bytes and child-held locks without republishing or double settlement.
-Synthetic proofs do not establish configured automatic settlements.
+Earlier same-Home/lease proofs, container isolation, October 6 telemetry recovery
+and original scheduled receipts are preserved at
+`e1be316001ab8841617c0afc7974cfc915756576:wave/infrastructure/MEMORY.md`, this heading.
+They establish neither configured automatic settlement nor permission to replay
+publication. Jack Heart authorized telemetry-repair publication; LOO-382's operator
+owns later recovery. The scorecard's 35 rows and twelve tests supply no scheduled credit.
 
-PR #1457 merged installer isolation: candidate preflight and public installer
-smoke use disposable Linux containers, checking selected CLI bytes instead of
-the entry gate. Native macOS smoke stays separate. Prior simulated checks prove
-neither container/public acceptance nor automatic settlement.
-
-October 6 scheduled receipt cron_a4b8b11b2a534bf99d183e677f2a6871 failed after
-recovery cron_5d930c31c7ae4a118f6b93774496991c passed continuity but the scorecard
-emitted retired product/task-loop-trust. Accepted chapter commit 42451654e removed
-that contract; remove its hardcoded producer output, preserving strict metric
-validation and lifecycle rows. Installed CLI with the repaired checkout reports
-35 rows; twelve focused tests pass. Original failed receipts and repair ownership
-remain unchanged. Jack Heart authorized publication; the operator owns subsequent
-release recovery after LOO-382. This manual proof supplies no automatic settlement.
-
-Release's September 28 incident proves entry points need operation-level recovery:
-an agent reported failure successfully, producing a misleading green cron receipt.
-Jack's later steer records v0.12.24 publication/install and skill-to-Flow activation
-at unchanged 10:00. That supersedes the child's dated pending-activation evidence,
-without proving this accounting branch is installed or either qualifying outcome.
-Release-specific detail remains in [release memory](release/MEMORY.md).
-October 5 child evidence records repaired installed jobs using the machine gate
-at unchanged 09:00/10:00 schedules. Ownership remains Infrastructure; the child
-is not registered. History exposed three unresolved opportunities with unknown
-timezone provenance, zero executions and no qualifying pair. Schedule repair
-cannot backfill that evidence or count as an unattended settlement.
+Release's entry-point lesson applies across Infrastructure: a successful agent
+report of failure must not become a green operation receipt. Jack's v0.12.24
+publication/install and skill-to-Flow activation supersede the child's dated
+pending claim, without proving either qualifying accounting outcome. October 5
+schedule repair retained 09:00/10:00 and Infrastructure ownership; the child was
+not registered. Three unresolved opportunities retained unknown timezone provenance,
+zero executions and no qualifying pair. Detail remains in [Release memory](release/MEMORY.md).
 
 All 36 telemetry failures, including the original 35, remain dated counterevidence
 from September 24. The missing `agent_turns` diagnosis is historical: integrated

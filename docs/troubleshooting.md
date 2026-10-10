@@ -156,13 +156,17 @@ than 1,000 samples.
 Prune requires Loopflow ownership and a recorded settlement of the current head.
 It preserves primary and persistent checkouts, unfinished Tasks, live or unknown
 execution, uncommitted files and unclassified ignored data. Age, a closed PR and a
-missing remote branch are not deletion authority. Only wholly ignored directories
+missing remote branch are not deletion authority. Completed Tasks retain PR-less
+checkouts and checkouts with unresolved delivery or follow-through, even if a
+separate landing records a merge. Only wholly ignored directories
 with a valid `CACHEDIR.TAG` are disposable; a familiar name such as `target` or
 `.venv` is not enough. Unknown size estimates are `null`, not zero.
 
 Repository reconciliation (`lf task reconcile`) retries deferred cleanup locally,
-even if delivery observation fails. Cleanup never deletes remote branches, Task
-outcomes or Session history. Use `lf wt delete NAME --force` only when deliberately
+even if delivery observation fails. Automatic retries currently require an installed
+repository tick; first-work activation is not yet implemented. Cleanup leaves
+remote branches and Task outcomes intact and retains recognized local Session
+evidence. Full referenced-payload protection remains unfinished. Use `lf wt delete NAME --force` only when deliberately
 discarding a checkout.
 
 ```bash

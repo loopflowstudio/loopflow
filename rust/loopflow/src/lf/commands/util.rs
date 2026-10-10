@@ -243,9 +243,15 @@ pub(crate) fn resume_session_with_env(
         artifact_key.to_string(),
     )]);
     environment.extend(extra_environment.clone());
-    let (_, saved) =
-        crate::session_record::resolve_manifest(&crate::store::lf_home_dir(), artifact_key)?;
-    if let Some(request) = saved.process {
+    // Native history remains resumable when the optional capture payload is gone.
+    // Retain saved context when available; malformed payloads still report errors.
+    let request =
+        match crate::session_record::resolve_manifest(&crate::store::lf_home_dir(), artifact_key) {
+            Ok((_, saved)) => saved.process,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(error.into()),
+        };
+    if let Some(request) = request {
         command.context = request.conversation_context.clone();
         if harness == "codex" {
             command.args.splice(

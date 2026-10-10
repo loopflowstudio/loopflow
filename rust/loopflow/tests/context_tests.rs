@@ -427,15 +427,15 @@ fn wave_filtering_excludes_waves_without_a_matching_selection() {
 }
 
 #[test]
-fn wave_filtering_includes_all_markdown_with_readme_first() {
+fn wave_filtering_includes_all_markdown_in_path_order() {
     let repo = TempDir::new().unwrap();
     let directory = repo.path().join("wave/features");
     fs::create_dir_all(&directory).unwrap();
     let files = [
-        "README.md",
         "01-core.md",
         "02-advanced.md",
         "03-experimental.md",
+        "README.md",
     ];
     for file in files {
         fs::write(directory.join(file), file).unwrap();
@@ -503,9 +503,9 @@ fn nested_wave_reads_checkout_ancestor_markdown_in_order() {
         paths,
         [
             "MEMORY.md",
-            "wave/infrastructure/README.md",
             "wave/infrastructure/GOAL.md",
             "wave/infrastructure/MEMORY.md",
+            "wave/infrastructure/README.md",
             "wave/infrastructure/release/GOAL.md",
             "wave/infrastructure/release/MEMORY.md",
             "wave/infrastructure/release/notes.md",

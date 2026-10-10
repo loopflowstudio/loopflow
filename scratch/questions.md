@@ -41,9 +41,11 @@ OpenCode's proposed implementation uses native conversation/system transforms,
 scoped to the first owning Session; its native startup/compaction matrix is still
 unproved. Codex trust hashes are scoped to generated session-flags declarations,
 not global approval. Native `hooks/list` confirmed the generated hashes. The
-network-isolated actual lf/native startup attempt failed with `Operation not
-permitted` before any model request; cause remains unresolved and gate owns it.
+earlier network-isolated startup failed with `Operation not permitted`; Jack Heart
+identified the sandbox in October 10 comment `96ee2917` and reported successful
+Codex headless and Claude headless/interactive branch launches outside it. Interactive
+Codex, compaction, resume and OpenCode remain explicitly nonblocking, unverified coverage.
 
 Jack Heart selected checkout Wave files on 2026-10-09: launch and callback context
-read the saved Wave path and its ancestors, listing real paths. Database document
-storage and other readers remain LOO-449's work. Native continuation stays with gate.
+read the saved Wave path and its ancestors, listing real paths. Main #1521 removed database document
+storage and moved configuration reads to checkout files; its reader is retained.

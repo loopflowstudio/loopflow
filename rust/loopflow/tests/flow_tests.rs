@@ -815,15 +815,16 @@ fn interactive_flow_keeps_input_and_advances_only_after_each_provider_exits() {
             r#"#!/bin/sh
 set -eu
 if [ "${1-}" = --version ]; then echo '2.1.0 (fixture)'; exit 0; fi
-context_file=
+first_turn=
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --print|--output-format) echo 'unexpected headless launch' >&2; exit 1;;
-        --append-system-prompt-file) context_file="$2"; shift;;
+        --append-system-prompt-file|--settings) shift;;
+        *) first_turn="$1";;
     esac
     shift
 done
-case "$(cat "$context_file")" in
+case "$first_turn" in
     *'<lf:skill:first>'*) step=first;;
     *'<lf:skill:second>'*) step=second;;
     *) exit 2;;
@@ -1604,8 +1605,9 @@ fn bound_flows_keep_task_context_and_leave_other_flows_and_shared_edits_alone() 
     let bin = TempDir::new().unwrap();
     let provider = codex_app_server_script("done", "if [ \"$1\" = --version ]; then exit 0; fi").replace(
         "read -r turn_start",
-        "read -r turn_start\npwd >> \"$LF_HOME/cwds\"\nprintf '[%s,%s]\\n' \"$thread_start\" \"$turn_start\" >> \"$LF_HOME/prompts\"\nprintf '%s\\n' 'Evidence from preceding step.' > scratch/step.md",
+        "read -r turn_start\npwd >> \"$LF_HOME/cwds\"\n@record-context@\nprintf '%s\\n' 'Evidence from preceding step.' > scratch/step.md",
     );
+    let provider = provider.replace("@record-context@", record_context_script());
     write_executable(&bin.path().join("codex"), &provider);
     let path = format!(
         "{}:{}",
@@ -1949,6 +1951,22 @@ fn labels(graph: &serde_json::Value) -> Vec<&str> {
         .collect()
 }
 
+// Stand-in provider executes the supplied startup callback and reads its complete
+// references at turn time; later scratch edits must not rewrite earlier evidence.
+fn record_context_script() -> &'static str {
+    r#"printf '[%s,%s]\n' "$thread_start" "$turn_start" | python3 -c '
+import json, pathlib, shlex, subprocess, sys
+requests = json.load(sys.stdin)
+hook = requests[0]["params"]["config"]["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+block = json.loads(subprocess.check_output(hook, shell=True))["hookSpecificOutput"]["additionalContext"]
+args = shlex.split(hook)
+delivery = json.loads(pathlib.Path(args[args.index("--delivery") + 1]).read_text())
+references = "\n".join(pathlib.Path(path).read_text() for path in delivery["references"])
+requests.append({"context": block + "\n" + references})
+print(json.dumps(requests))
+' >> "$LF_HOME/prompts""#
+}
+
 fn received_contexts(home: &Path) -> Vec<String> {
     fs::read_to_string(home.join("prompts"))
         .unwrap()
@@ -1959,7 +1977,10 @@ fn received_contexts(home: &Path) -> Vec<String> {
                 .as_str()
                 .unwrap_or_default();
             let turn = requests[1]["params"]["input"][0]["text"].as_str().unwrap();
-            format!("{instructions}\n\n{turn}")
+            format!(
+                "{instructions}\n\n{turn}\n{}",
+                requests[2]["context"].as_str().unwrap()
+            )
         })
         .collect()
 }
@@ -1982,7 +2003,7 @@ fn scripted_provider(home: &Path, answers: &[&str]) -> (TempDir, String) {
     let provider = codex_app_server_script("@answer@", "if [ \"$1\" = --version ]; then exit 0; fi")
         .replace(
             "read -r turn_start",
-            "read -r turn_start\nprintf '[%s,%s]\\n' \"$thread_start\" \"$turn_start\" >> \"$LF_HOME/prompts\"\necho turn >> \"$LF_HOME/turns\"\nanswer=$(sed -n \"$(grep -c turn \"$LF_HOME/turns\")p\" \"$LF_HOME/answers\")",
+            "read -r turn_start\n@record-context@\necho turn >> \"$LF_HOME/turns\"\nanswer=$(sed -n \"$(grep -c turn \"$LF_HOME/turns\")p\" \"$LF_HOME/answers\")",
         )
         .replace("\"@answer@\"", "'\"$answer\"'");
     assert!(
@@ -1991,6 +2012,7 @@ fn scripted_provider(home: &Path, answers: &[&str]) -> (TempDir, String) {
     );
     register_codex_account(home);
     let bin = TempDir::new().unwrap();
+    let provider = provider.replace("@record-context@", record_context_script());
     write_executable(&bin.path().join("codex"), &provider);
     let path = format!(
         "{}:{}",

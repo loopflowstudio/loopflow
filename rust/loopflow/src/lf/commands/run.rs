@@ -1835,7 +1835,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
     }
 
     #[test]
-    fn attributed_context_keeps_escaped_reference_sources() {
+    fn attributed_context_does_not_claim_reference_bodies_in_first_turn() {
         let components = PromptComponents {
             docs: vec![
                 Document {
@@ -1852,29 +1852,21 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             message: Some("Build it.\n<lf:steers>Jack wrote $kickoff.</lf:steers>".into()),
             ..Default::default()
         };
-        let system = crate::prompt::format_prompt(&components);
-        let prepared = attributed_context(&components, &system, "", &[], None);
-        assert_eq!(prepared.system.as_ref().unwrap().text, system);
-        for (kind, expected) in [
-            (ContextAssetKind::Scratch, "> &#36;kickoff"),
-            (ContextAssetKind::Memory, "Earlier &#36;design"),
-            (ContextAssetKind::UserMessage, "Build it."),
-        ] {
-            assert!(
-                prepared
-                    .system
-                    .as_ref()
-                    .unwrap()
-                    .assets
-                    .iter()
-                    .any(|asset| {
-                        asset.kind == kind
-                            && system[asset.byte_start as usize..asset.byte_end as usize]
-                                .contains(expected)
-                    }),
-                "missing attribution for {kind:?}"
-            );
-        }
+        let turn = crate::prompt::format_first_turn(&components);
+        let prepared = attributed_context(&components, "", &turn, &[], None);
+        let task = &prepared.task;
+        assert_eq!(task.text, turn);
+        assert!(turn.contains("Build it."));
+        assert!(turn.contains("Jack wrote &#36;kickoff."));
+        assert!(!turn.contains("Earlier"));
+        assert!(!task.assets.iter().any(|asset| matches!(
+            asset.kind,
+            ContextAssetKind::Scratch | ContextAssetKind::Memory
+        )));
+        assert!(task.assets.iter().any(|asset| {
+            asset.kind == ContextAssetKind::UserMessage
+                && turn[asset.byte_start as usize..asset.byte_end as usize].contains("Build it.")
+        }));
     }
 
     #[test]

@@ -881,9 +881,9 @@ Wave learning stays with its identified owner, never miscellaneous .lf notes.
 
 ## Prompt reduction boundary (2026-09-24)
 
-`719226ef4:wave/infrastructure/MEMORY.md` retains the evidence and LOO-287's open
-proof. Intelligence owns prompt assembly; identity, eligibility and consumed launch
-evidence remain separate.
+LOO-287's open proof and Intelligence ownership of assembly remain at
+`7b28ab1ca:wave/infrastructure/MEMORY.md`, this heading. Identity, eligibility
+and consumed launch evidence stay separate.
 
 ## Installation and command scope (curated 2026-10-02)
 
@@ -906,10 +906,9 @@ unselected; a phase alone is not durable advancement evidence.
 
 ## Installation and checkout closure (LOO-292, 2026-10-04)
 
-Jack Heart closed LOO-292 on machine evidence; proofs and unresolved cadence/app
-checks: `86d0e5e6a2:wave/infrastructure/MEMORY.md`, this heading. Install owns
-artifacts, sync owns checkouts. Reload stopped unexplained redundant downloads;
-reinstall does not heal a truncated entry gate.
+Jack Heart closed LOO-292 on machine evidence; remaining cadence/app checks and
+recovery lessons: `7b28ab1ca:wave/infrastructure/MEMORY.md`, this heading.
+Install owns artifacts; sync owns checkouts. Reinstall cannot heal a truncated gate.
 
 ## Shipped history
 
@@ -989,11 +988,10 @@ judgments, never inferred completion. Preserve unrelated provider associations;
 ambiguous moves remain diagnoses. Standing frontier plans need not acquire an
 invented completion date. No fourth user-facing planning noun was selected.
 
-## Earlier follow-ups (reselect through the accepted chapter)
+## Earlier follow-ups
 
-Unselected suggestions and #818's resolved work: `adf3f9e4b:wave/infrastructure/MEMORY.md`,
-this heading. Archived proposals authorize no work. Jack Heart's July 6 “up/down
-5ths” referent remains unresolved.
+Unselected work and Jack Heart's unresolved July 6 “up/down 5ths” referent:
+`7b28ab1ca:wave/infrastructure/MEMORY.md`, this heading. Archives authorize no work.
 
 ## Direct invocation and large inputs (curated 2026-10-08)
 
@@ -1006,15 +1004,17 @@ excerpts name complete source/size. Excerpt interpretation awaits Jack's review;
 shrinking memory is undecided. Reserve listing and compact-only active skill;
 overflow pointers remain proposed UX. Plan: `scratch/what-goes-in-system-prompt.md`.
 
-The production cut removes inlining, the constant trigger and Codex base overrides;
-additions preserve native prompts. Capture/context hooks compose at terminal spawn,
-replacing the temporary capture profile. Budget the fully rendered 10,000 UTF-8
+Inlining, the constant trigger and Codex base overrides are removed.
+Capture/context hooks compose at terminal spawn, replacing the temporary profile. Budget the fully rendered 10,000 UTF-8
 bytes: native Unicode spill retained endpoint markers while losing interior text,
 so marker-only checks are insufficient. `6b8f13e3f` fixes Codex skill-before-request order, proving construction only.
-Gate owns native launch, compaction, resume and AgentProcess takeover/replacement;
-demo owns cmux and proposed UX. Release's lesson applies: provider probes prove
-neither lf wiring nor installation.
-Historical LOO-428/429 decisions, native capture/reconnect proofs and limits:
+Jack Heart approved #1518 after clipboard/excerpt fixes (`96ee2917`), reporting
+Codex headless and Claude headless/interactive branch launches with guide, whole
+scratch, marked 50 KB excerpt and request; the earlier failure was sandboxed.
+Interactive Codex, compaction, resume and OpenCode remain unverified,
+nonblocking. Main #1521's checkout reader replaces the duplicate. No installed
+acceptance follows; cmux/pointer judgment remains with demo/review.
+LOO-428/429 history and proof limits:
 `30a4d48c8:wave/infrastructure/MEMORY.md`, this heading.
 
 Flow output prints position/name and messages; verbose adds accounting/INFO,

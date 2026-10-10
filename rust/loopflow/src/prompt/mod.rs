@@ -530,30 +530,34 @@ fn gather_wave_docs(repo_root: &Path, wave: Option<&str>) -> Result<Vec<Document
     let Some(wave) = wave else {
         return Ok(docs);
     };
-    let mut directory = PathBuf::from("wave");
-    for segment in Path::new(wave).components() {
-        directory.push(segment);
-        let absolute = repo_root.join(&directory);
-        if !absolute.is_dir() {
-            continue;
+    let mut prefix = String::new();
+    for segment in wave.split('/') {
+        if !prefix.is_empty() {
+            prefix.push('/');
         }
-        let mut paths = fs::read_dir(&absolute)?
+        prefix.push_str(segment);
+        let directory = repo_root.join("wave").join(&prefix);
+        let entries = match std::fs::read_dir(&directory) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error.into()),
+        };
+        let mut paths = entries
             .map(|entry| entry.map(|entry| entry.path()))
             .collect::<Result<Vec<_>, _>>()?;
-        paths.retain(|path| path.is_file() && path.extension().is_some_and(|ext| ext == "md"));
-        paths.sort_by_key(|path| {
-            (
-                path.file_name().is_none_or(|name| name != "README.md"),
-                path.clone(),
-            )
-        });
+        paths.sort();
         for path in paths {
+            if !path.is_file() || path.extension().is_none_or(|extension| extension != "md") {
+                continue;
+            }
+            let name = path
+                .file_name()
+                .expect("document has a name")
+                .to_string_lossy();
+            let content = std::fs::read_to_string(&path)?;
             docs.push(Document {
-                path: directory
-                    .join(path.file_name().expect("directory entry has a name"))
-                    .to_string_lossy()
-                    .into_owned(),
-                content: fs::read_to_string(&path)?,
+                path: format!("wave/{prefix}/{name}"),
+                content,
                 source: DocumentSource::Wave,
             });
         }
@@ -1683,14 +1687,14 @@ mod tests {
                 .collect::<Vec<_>>(),
             [
                 "Inherited decision",
-                "Additional context",
                 "Parse tokens",
-                "First decision"
+                "First decision",
+                "Additional context"
             ]
         );
         std::fs::write(child.join("MEMORY.md"), "Edited decision λ").unwrap();
         let next = gather_wave_docs(repo.path(), Some("tools/parser")).unwrap();
-        assert_eq!(next[3].content, "Edited decision λ");
+        assert_eq!(next[2].content, "Edited decision λ");
         std::fs::remove_file(child.join("MEMORY.md")).unwrap();
         let absent = gather_wave_docs(repo.path(), Some("tools/parser")).unwrap();
         assert_eq!(absent.len(), 3);

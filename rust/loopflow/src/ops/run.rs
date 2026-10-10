@@ -565,7 +565,13 @@ mod tests {
                 ..Default::default()
             })
             .unwrap();
-            let prompt = crate::prompt::format_prompt(&components);
+            // Source discovery preserves ancestry; diagnostics no longer inline bodies.
+            let prompt = components
+                .docs
+                .iter()
+                .map(|doc| doc.content.as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
             let ancestor = if address.starts_with("product/") {
                 "Product memory"
             } else {

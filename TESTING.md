@@ -173,6 +173,13 @@ uses a prior pass only when tracked and untracked file content, the worktree,
 and the selected command plan are identical. Full and optional hosted runs never
 reuse evidence.
 
+Do not run source-tree Cargo builds alongside the materialized Rust phase.
+The materializer reuses this checkout's `target/`; rebuilding `target/debug/lf`
+from source mid-suite replaces the candidate with a different migration frontier.
+Wait for gate to finish, then run focused repairs serially (or use a separate
+`CARGO_TARGET_DIR`). Version/schema mismatches after such overlap are invalid
+verification evidence, not permission to alter a fixture or installed database.
+
 Slow suites (`loopflow`, `e2e`) stay off in changed-mode even when
 their paths change—the run prints why and how to force them:
 

@@ -1,7 +1,7 @@
 # What goes in the system prompt
 
-Status: draft. Decisions marked accepted are Jack's, 2026-10-09, in the design
-Session. Everything else is proposal. Jack's subsequent LOO-444 steer authorizes
+Status: PR #1518 approved by Jack Heart on October 10 after clipboard/excerpt fixes
+(comment `96ee2917`). Other unselected defaults remain proposals. Jack's subsequent LOO-444 steer authorizes
 building proposed defaults and naming them at demo, not changing accepted channels.
 
 Channel contract resolved (Jack, 2026-10-09, "option B"): the added-instructions
@@ -9,21 +9,19 @@ slot is byte-identical within a launch profile, and surface instructions,
 participant name and reply guidance stay in it. A launch profile is the surface,
 the reply settings and the participant; two launches sharing all three send the
 same bytes. The launch cut now wires fixed additions and file/excerpt callbacks; the native
-provider/resume/compaction matrix remains for gate. Jack's later `e1fdb81b-75ff-4cca-b789-243ad84bad14` steer authorizes
+remaining provider/resume/compaction coverage is disclosed below. Jack's later `e1fdb81b-75ff-4cca-b789-243ad84bad14` steer authorizes
 that production cut. Option A below resolves first-turn transport; no fixed-slot
 or transport decision remains open.
-Reconciled on 2026-10-10 through `8951376e5`, with locally available main
-`be4a2b2af` (#1520), including #1519's AgentProcess ownership. No newer remote
-inspection is claimed. The October 10 clipboard/excerpt cut is implemented at
-`95e6703d9` and simplified at `b7300bf0c`; `30a4d48c8` reconnects its modules to
-main's flattened owners. Native acceptance remains below.
+Reconciled on October 10 with main `df5169ab9` (#1521), including #1519/#1520's
+AgentProcess ownership. Clipboard/excerpts and source/callback simplifications
+remain at `95e6703d9`, `b7300bf0c` and `8951376e5`; native evidence is below.
 
 The earlier callback-only review describes the pre-production checkpoint.
 `494210e37` connects the launchers and removes inlining/overrides;
 `d3c01464e` reduces callbacks to saved delivery and preserves OpenCode resume
 settings. Source inspection confirms those changes, not native acceptance.
-The remaining work is native integration proof and review of proposed UX,
-not another channel cutover.
+Remaining native coverage is disclosed below, not a delivery blocker under Jack
+Heart's October 10 steer. Proposed UX remains identified for review.
 
 First-turn transport resolved (Jack, 2026-10-09, "A is fine"): the first turn
 stays a command-line argument on terminal launches. No editor, paste or stdin
@@ -37,8 +35,8 @@ Wave source resolved (Jack Heart, 2026-10-09, comment
 Wave Markdown from this repo checkout, with ancestors by path segment as before
 #1503. The saved delivery keeps the Wave name, not its database ID; listings name
 real files. `gather_saved_wave_docs`, callback Wave-ID lookup and generated Wave
-snapshots are removed. The `wave_documents` table, `lf wave edit` and other
-readers are unchanged; LOO-449 owns their removal. This supersedes the stored-Wave
+snapshots are removed. Main #1521 (LOO-449), now integrated, removes `wave_documents` and `lf wave edit`;
+Wave configuration also reads the checkout. This supersedes the stored-Wave
 requirements and rename/name-reuse proof at `8b41e0327`.
 Jack Heart resolved clipboard placement on October 10: skill, message, then tagged
 clipboard text, counted toward the argument cap. Shrinking Wave memory remains open.
@@ -59,7 +57,7 @@ Delete: clipboard private-reference writer and whole-or-listed-only assertions.
 Preserve: reference escaping, native skill selection, first-turn order/cap,
 current checkout reads, complete manifest and native hook ownership.
 Review caught a native-skill message-wrapper change; it was removed so only the
-clipboard suffix changes on that path. Native integration remains with gate.
+clipboard suffix changes on that path. Remaining native coverage is disclosed below.
 
 ## Problem
 
@@ -147,8 +145,8 @@ and the compact-only saved active skill. Native delivery is connected; its full 
 
 ## Done when
 
-Focused block checks exist; complete-channel checks remain with gate (one Cargo
-filter per invocation):
+Focused block checks exist; these automated checks cover construction and callbacks,
+not the outstanding native-provider matrix (one Cargo filter per invocation):
 
 ```sh
 cargo test -p loopflow process_prompt
@@ -217,38 +215,31 @@ Existing provider config/plugins are merged, not overwritten. Node checks cover
 refresh, duplicate-addition avoidance, preserved native text and sibling isolation;
 this is not native OpenCode integration acceptance.
 
-### Remaining work
+### Remaining coverage and PR notes
 
-- The terminal launch fixture uses stand-in providers and invokes the emitted
-  callbacks separately. The headless Codex fixture observes thread/turn inputs,
-  not native hook execution. These establish wiring and refreshed callback output,
-  not delivery into a native model request. The existing provider-only probes
-  remain prerequisite evidence, not substitutes for the matrix below.
-- Gate: actual lf/native fake-API startup, manual/automatic compaction, terminal and
-  app-server resume/replacement on Claude, Codex and OpenCode; preserve native base,
-  guides, naming/capture hooks, permissions, account isolation and first-turn text.
-  Exercise explicit native declarations/assets and changed launch fixtures.
-- Gate: captured reference/readability and late source changes, oversized Unicode,
-  listings and skill; verify exact trusted hashes against supported native Codex.
-  Saved delivery rereads the captured checkout and Wave path; native continuation
-  remains unproved. Checkout edits, ancestors, real listing paths and stale stored
-  documents are covered by focused source/callback fixtures. Wave configuration
-  still reads saved GOAL frontmatter; changing that reader belongs to LOO-449,
-  not this context-source cut. Checkout content refresh does not prove configuration
-  refresh or native hook delivery.
-- Demo: cmux's 200 KB launch, native resume-list text, whole-pointer reads and the
-  proposed OpenCode native-guide interpretation. No transport probes or new size
-  refusals are selected.
+Jack Heart's October 10 comment `96ee2917` records real branch launches outside
+sandbox: Codex headless, Claude headless and Claude interactive received the repo
+guide, a whole small scratch file, a marked 50 KB-file excerpt and the request in
+`lf:message`. Jack attributes the earlier `Operation not permitted` to the sandbox.
+This is reported native launch evidence, not a gate rerun or installed acceptance.
 
-An isolated native Codex `hooks/list` accepted all three generated session-flags
-hashes (two context hooks and capture):
-`/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo444-trust-ynsnmwqi/`.
-The actual lf/native fake-API startup attempt under macOS network isolation failed
-before a model request with `Operation not permitted`; adding Unix-socket allowance
-did not resolve it. This is unresolved environment/entry-point evidence, not a
-provider pass or a proven product cause:
-`/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo444-lf-wire-gcs_tci8/`.
-Release's operation-entry lesson applies; callback-only tests cannot replace this.
+Interactive Codex, manual/automatic compaction, resume/replacement and OpenCode
+remain unverified. Jack explicitly made these disclosures nonblocking. Native
+AgentProcess takeover, pointer reads, cmux's 200 KB presentation and resume-list
+judgment are not established by callback or request-construction fixtures.
+Linux-only planning reconnect stays with CI on this macOS checkout.
+
+The excerpt rule remains the operator's interpretation of Jack's “normal snippet
++ block thing,” recorded for confirmation at review. Overflow listing/skill pointers
+and the OpenCode native-guide interpretation remain proposed defaults.
+
+Main `df5169ab9` supplies the single checkout-file Wave reader and configuration;
+this branch's duplicate reader is removed. Preserve main's path ordering and
+missing-directory/error behavior. The terminal callback fixture refreshes Wave and
+scratch bytes without the removed document cache.
+
+Earlier isolated hook-trust and sandbox evidence remains at
+`7b28ab1ca:scratch/what-goes-in-system-prompt.md`, Remaining work.
 
 Review moved capture-hook composition back to terminal spawn so lower callers
 cannot lose native identity capture, connected OpenCode's generic terminal runner,
@@ -257,7 +248,26 @@ follow checkout paths under Jack's later source decision. No installation, publi
 The pre-cut implementation plan and complete older checks remain at
 `6149952c8:scratch/what-goes-in-system-prompt.md`.
 
-Checks: `cargo test -p loopflow --lib gather_documents_` (9), `--test context_tests context_delivery_repository_memory` (1), `--test context_launch_tests terminal_context_refreshes` (1), `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` pass; tests clear inherited `LF_*` and close stdin. Prior native-skill ordering regression is retained; this reconciliation inspected `6b8f13e3f` and current `send_input`, without rerunning unchanged tests. `lf context --json` fits. Native delivery/resume/compaction remains with gate; proposed UX with demo/review.
+Gate review found stale old-channel expectations in Flow, startup, resume and
+context DTO fixtures. Fixtures now inspect first-turn text and execute emitted
+callbacks at provider turn time, retaining references before later scratch edits.
+The actual resume regression was an unconditional manifest read: missing optional
+capture payload blocked a still-valid native conversation. Resume now preserves
+native history when that file is absent; malformed saved data still reports errors.
+Existing missing-manifest launch/resume coverage exercises both paths.
+
+The initial materialized run overlapped a source-tree Cargo rebuild, replacing its
+shared `target/debug/lf` with a different migration frontier. Its affected failures
+are invalid verification evidence; serial materialized reruns own the result.
+`TESTING.md` now forbids overlapping builds on that shared target.
+
+Python's four prune cases read the installed registry despite `LF_HOME` and fail
+on its absent `planning_completed` column; no installed-store writes or repair
+were attempted. The nested macOS sandbox observation returns `Operation not permitted`.
+These five host-dependent cases stay deferred to isolated CI; the full Python run
+is not green. Architecture-map drift was fixed and its 21 tests pass.
+
+Checks (October 10): `scripts/test.py --reuse-passing` ran affected suites once (initial materialized Rust 2,284/2,392; 108 failed, then serial `materialize_rust_tests.py -- cargo nextest ... -E <failed cases>` passed 105/108 and the final repaired 3/3); focused integration 22/22, architecture pytest 21/21, benchmark/alignment pytest 38/38 and Node pass; website 76/76, headless Swift 410/410 plus boundary check pass; `cargo fmt --all -- --check`, `cargo clippy --all-targets --jobs 4 -- -D warnings`, `git diff --check` and `lf context --json` pass. Python initial 402/408: architecture repaired; four installed-store prune cases and one nested-sandbox case deferred to isolated CI, alongside Linux-only planning reconnect. Logs: `.lf/tmp/gate/run-97150/`, `/tmp/loo444-materialized-repairs.log`, `/tmp/loo444-resume-repairs.log`; no single all-green gate or installed/native-matrix acceptance claimed.
 
 ### Integrated upstream boundary
 
@@ -424,18 +434,3 @@ Historical probe/check results predate the Rust cut, not production verification
 Exact retained JSON paths, earlier scratch copies and compressed-probe receipts:
 `ebdfd89cd:scratch/what-goes-in-system-prompt.md`, Evidence. No provider probes
 were rerun during compression.
-
-### Main sync reconciliation (2026-10-10)
-
-Merged pinned main `df5169ab9` (LOO-449): checkout files now also own Wave
-configuration; the document cache/API is removed. Earlier notes assigning that
-removal to future work are superseded. Keep the fixed additions, first-turn
-skill/request/clipboard and refreshed capped block; do not restore inline
-formatters. Main's fresh-file test retains README-first ordering, and the terminal
-callback fixture now checks changed Wave memory as well as scratch. The callback
-fixture no longer seeds the deleted document cache; it reads without registration.
-
-Check: `cargo test -p loopflow --test context_launch_tests terminal_context_refreshes`
-passes (1), inherited LF/LOOPFLOW variables cleared and stdin closed; native
-delivery remains gate's responsibility. Review removed the stale cache setup and
-preserved main's independent storage/configuration changes.

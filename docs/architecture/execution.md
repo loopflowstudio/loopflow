@@ -54,15 +54,15 @@ not evidence that old captured intent changed.
 Process admission records one actual lf process and immutable causal ancestry.
 Nested wrappers reuse the process identity and cannot finish the outer command
 early. Direct child commands name their invoking Process. Agent-issued commands
-record the incoming agent bit plus stable Session/provider-generation provenance,
-then resolve the current matching attachment once at admission.
+record the incoming agent bit plus stable Session/AgentProcess provenance,
+then resolve the current attached LfProcess once at admission.
 
 AgentProcess rows use the same `processes` inventory, with kind `agent`, exact
 PID/birth, served Session, original parent and current attachment. Session rows
 retain the current AgentProcess reference and native thread. Detached and replaced
 rows survive until positive terminal evidence; attachment absence never removes
 them from inventory. Shell helpers do not become fake lf invocations. After handoff, new
-commands from the continuing provider name the new attachment; delayed commands from
+commands from the continuing provider name the newly attached LfProcess; delayed commands from
 a replaced provider retain their historical origin. A parent exiting never
 rewrites existing descendants. These causal links grant neither signaling nor
 Flow authority.
@@ -96,7 +96,7 @@ blockers.
 2. Reserve the conversation, history/capture reference and exact attachment together.
 3. Publish immutable launch input and record publication before spawning.
 4. Start or connect the native provider and retain exact AgentProcess/thread/client
-   evidence, distinct from the attached lf invocation.
+   evidence, distinct from the attached LfProcess.
 5. Append correlated provider outcomes and usage; settle command completion
    under its Process lifetime.
 
@@ -125,9 +125,9 @@ attachment settlement. A recorded client move is an intentional command exit,
 not provider failure; it does not establish a successful provider turn.
 
 Scheduled settlement reads unfinished AgentProcess rows, but live-orphan
-termination currently recognizes only noninteractive Codex app-server and
-OpenCode serve groups. Claude and native foreground coverage remain unfinished;
-recording them alone does not establish orphan cleanup. Unknown identities and
+termination covers noninteractive providers only: Codex app-server, OpenCode
+serve and headless Claude groups. Native foreground coverage remains unfinished;
+recording a foreground provider alone does not establish orphan cleanup. Unknown identities and
 duplicate PID/birth records remain non-signallable. Failed OS observation makes
 scheduled reconciliation fail with the affected LfProcess ID, without settling that row.
 The reaper's identity, command and descendant observations use the shared OS
@@ -171,7 +171,7 @@ closing or ending the surviving provider; orphan settlement remains independent.
 Composed stand-ins cover launch and pre-launch takeover, not configured Codex or
 a complete native-client relay exchange.
 
-A passive viewer subscribes without claiming the Session. A former attachment can
+A passive viewer subscribes without claiming the Session. A formerly attached LfProcess can
 keep receiving and retaining provider history after transfer but cannot start or
 steer a turn or change current attachment, connection, process evidence or stream
 attention. Retaining history grants no native-write or Flow authority.
@@ -182,11 +182,11 @@ correlation carry that snapshot. Broadcast-only starts retain unknown attributio
 late correlated replies can fill it, but cannot borrow a newer capture or bind.
 The snapshot supplies history only and never authorizes dispatch.
 
-The continuing AgentProcess retains its provider generation while each attachment
+The continuing AgentProcess retains its identity while each attachment
 receives a fresh opaque token, including reattachment of the same lf Process.
 Release revokes that token as well. The token is a compare-and-swap witness,
-not another process identity or lifecycle owner. The AgentProcess
-launch cutover remains unfinished; caller/status wires still use provider generation.
+not another process identity or lifecycle owner. Caller provenance, turn origin
+and Program Status name the AgentProcess itself; no generation counter remains.
 
 Attachment exit retains an exact history-event reference rather than deriving a
 receipt from counter arithmetic. Migration preserves old event keys and payloads,
@@ -259,7 +259,7 @@ tuples vary in size, and listing checks exact client receipts. The query therefo
 has no constant-byte or constant-time guarantee. Measurement status belongs in
 the [cutover status](../architecture-reference.md#cutover-status).
 
-Typed Task/Wave links survive landing and provider/attachment replacement. Readers
+Typed Task/Wave links survive landing and provider replacement and takeover. Readers
 never use live PR eligibility, path names or mutable manifests to recover identity.
 Default interactive visibility does not hide headless history from explicit queries
 or make it impossible to resume. Desktop and CLI consume the same fields.

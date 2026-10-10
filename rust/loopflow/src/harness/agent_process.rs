@@ -1,5 +1,6 @@
 //! Launch and settle AgentProcesses in the inventory used by gates and live views.
 //! Unknown identity, duplicate PID/birth and unknown attachment life grant no signal authority.
+use crate::id::LfProcessId;
 use crate::journal::{
     process_evidence, process_identity_evidence, process_started_at, OsProcess,
     ProcessIdentityEvidence,
@@ -11,11 +12,15 @@ use crate::store::{StoreError, StoreResult};
 use anyhow::Result;
 use std::collections::{HashMap, HashSet};
 
+/// The store, LfSession and frozen attachment one invocation launches and
+/// writes under.
+pub(crate) type AttachmentOwner = (SqliteStore, String, SessionAttachment);
+
 /// Open the invocation's attachment without refreshing its authority from the
 /// store. A launch without one is refused: every AgentProcess is recorded.
 pub(super) fn open_owner(
     attachment: Option<&(String, SessionAttachment)>,
-) -> Result<(SqliteStore, String, SessionAttachment)> {
+) -> Result<AttachmentOwner> {
     let (session, attachment) = attachment
         .ok_or_else(|| anyhow::anyhow!("AgentProcess requires an admitted invocation"))?;
     Ok((
@@ -28,7 +33,7 @@ pub(super) fn open_owner(
 /// The pre-exec recorder both launch paths share: the child's PID and birth
 /// reach its record under the owner's attachment before the provider runs.
 fn record_identity(
-    (store, session, attachment): &(SqliteStore, String, SessionAttachment),
+    (store, session, attachment): &AttachmentOwner,
 ) -> impl FnOnce(u32) -> std::io::Result<()> + Send + '_ {
     move |pid| {
         let started_at = process_started_at(pid)?
@@ -45,7 +50,7 @@ fn record_identity(
 pub(super) fn spawn(
     command: tokio::process::Command,
     lifeline: Option<&std::path::Path>,
-    owner: &(SqliteStore, String, SessionAttachment),
+    owner: &AttachmentOwner,
 ) -> Result<tokio::process::Child> {
     let (store, session, attachment) = owner;
     super::dispatch::off_reactor(|| {
@@ -74,7 +79,7 @@ pub(super) fn spawn(
 /// pre-exec recording as headless launches.
 pub(crate) fn spawn_native(
     command: std::process::Command,
-    owner: &(SqliteStore, String, SessionAttachment),
+    owner: &AttachmentOwner,
 ) -> Result<std::process::Child> {
     let (store, session, attachment) = owner;
     store
@@ -96,7 +101,7 @@ pub(crate) fn spawn_native(
 /// no provider attachment; ending it must not settle the surviving provider.
 pub(crate) fn stop_native(
     child: &mut std::process::Child,
-    owner: Option<&(SqliteStore, String, SessionAttachment)>,
+    owner: Option<&AttachmentOwner>,
 ) -> Result<()> {
     let mut stop = || {
         let mut wait = || -> std::io::Result<()> {
@@ -141,6 +146,8 @@ fn reap_in(store: &SqliteStore, dry_run: bool) -> StoreResult<AgentProcessReapRe
             *counts.entry(identity).or_insert(0usize) += 1;
         }
     }
+    let dead_lf =
+        |process: &LfProcessId| process_evidence(store, process) == ProcessIdentityEvidence::Dead;
     let mut report = AgentProcessReapReport::default();
     for agent in &agents {
         let Some((pid, start)) = agent.process.pid.zip(agent.process.os_started_at) else {
@@ -164,12 +171,7 @@ fn reap_in(store: &SqliteStore, dry_run: bool) -> StoreResult<AgentProcessReapRe
         let dead = evidence == ProcessIdentityEvidence::Dead;
         let orphaned = counts[&(pid, start)] == 1
             && !agent.interactive
-            && agent
-                .attached_lf_process_id
-                .as_ref()
-                .is_none_or(|attached| {
-                    process_evidence(store, attached) == ProcessIdentityEvidence::Dead
-                })
+            && agent.attached_lf_process_id.as_ref().is_none_or(dead_lf)
             && observed
                 .as_ref()
                 .is_some_and(|process| is_agent_process(process, start, agent.provider.as_deref()));
@@ -188,13 +190,7 @@ fn reap_in(store: &SqliteStore, dry_run: bool) -> StoreResult<AgentProcessReapRe
                 }
             } else {
                 // Attachment life is sampled again beneath the transfer lock.
-                if agent
-                    .attached_lf_process_id
-                    .as_ref()
-                    .is_some_and(|attached| {
-                        process_evidence(store, attached) != ProcessIdentityEvidence::Dead
-                    })
-                {
+                if !agent.attached_lf_process_id.as_ref().is_none_or(dead_lf) {
                     return Err(StoreError::InvalidAuthority(
                         "attached LfProcess death is unresolved".into(),
                     ));
@@ -221,9 +217,7 @@ fn reap_in(store: &SqliteStore, dry_run: bool) -> StoreResult<AgentProcessReapRe
             continue;
         };
         if attachment.agent_process_id != agent.process.id
-            || !attachment.lf_process_id.as_ref().is_some_and(|attached| {
-                process_evidence(store, attached) == ProcessIdentityEvidence::Dead
-            })
+            || !attachment.lf_process_id.as_ref().is_some_and(dead_lf)
         {
             continue;
         }
@@ -235,7 +229,7 @@ fn reap_in(store: &SqliteStore, dry_run: bool) -> StoreResult<AgentProcessReapRe
     Ok(report)
 }
 
-/// Exact live identity, the provider's server command, and its own process group.
+/// Exact live identity, the provider's headless command, and its own process group.
 fn is_agent_process(process: &OsProcess, started_at: i64, provider: Option<&str>) -> bool {
     if process.pid <= 1
         || process.pgid != process.pid
@@ -254,6 +248,8 @@ fn is_agent_process(process: &OsProcess, started_at: i64, provider: Option<&str>
     match provider {
         Some("codex") => program("codex") && has("app-server") && has("--listen"),
         Some("opencode") => program("opencode") && has("serve"),
+        // Headless Claude has no subcommand to match; identity and group carry it.
+        Some("claude") => program("claude"),
         _ => false,
     }
 }
@@ -607,17 +603,21 @@ mod tests {
     fn detached_agent_is_reaped_but_duplicate_historical_identity_is_not_signal_authority() {
         let _lock = crate::journal::test_env_lock();
         let _ambient = crate::test_ambient::EnvGuard::new();
+        for (provider, argv) in [
+            ("codex", &["codex", "app-server", "--listen", "fixture"][..]),
+            ("opencode", &["opencode", "serve"]),
+            ("claude", &["claude"]),
+        ] {
+            reap_detached(provider, argv);
+        }
+    }
+
+    fn reap_detached(provider: &str, argv: &[&str]) {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
         let mut child = Command::new("/bin/sh")
-            .args([
-                "-c",
-                "sleep 60 & wait; :",
-                "codex",
-                "app-server",
-                "--listen",
-                "fixture",
-            ])
+            .args(["-c", "sleep 60 & wait; :"])
+            .args(argv)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -632,8 +632,8 @@ mod tests {
             rusqlite::Connection::open(home.path().join("db"))
                 .unwrap()
                 .execute(
-                    "UPDATE agent_sessions SET provider='codex',interactive=0 WHERE id=?1",
-                    [name],
+                    "UPDATE agent_sessions SET provider=?2,interactive=0 WHERE id=?1",
+                    [name, provider],
                 )
                 .unwrap();
             let attached = store
@@ -662,9 +662,9 @@ mod tests {
         // Always clean up this fixture's own group before assertions.
         crate::os_process::terminate_process_group(pid);
         let _ = child.wait();
-        assert!(report.errors.is_empty(), "{:?}", report.errors);
-        assert_eq!(report.orphaned, [pid]);
-        assert_eq!(report.reaped, 1);
+        assert!(report.errors.is_empty(), "{provider}: {:?}", report.errors);
+        assert_eq!(report.orphaned, [pid], "{provider}");
+        assert_eq!(report.reaped, 1, "{provider}");
         assert!(store.agent_processes().unwrap().is_empty());
     }
 }

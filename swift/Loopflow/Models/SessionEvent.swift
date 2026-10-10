@@ -14,7 +14,7 @@ public struct SessionEvent: Codable, Sendable, Equatable, Identifiable {
     public let agentSession: AgentSessionId?
     public let providerTurn: String?
     public let kind: Kind
-    public let providerGeneration: Int64?
+    public let agentProcessId: String?
     public let lfProcessId: String?
     public let taskID: String?
     public let waveID: String?
@@ -32,7 +32,7 @@ public struct SessionEvent: Codable, Sendable, Equatable, Identifiable {
         case sessionID = "session_id"
         case agentSession = "provider_thread"
         case providerTurn = "provider_turn"
-        case providerGeneration = "provider_generation"
+        case agentProcessId = "agent_process_id"
         case lfProcessId = "lf_process_id"
         case taskID = "task_id"
         case waveID = "wave_id"

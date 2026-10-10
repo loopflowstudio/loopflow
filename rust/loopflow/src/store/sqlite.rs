@@ -2045,13 +2045,13 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "INSERT INTO processes(id,trace_id,parent_lf_process_id,command,repo,cwd,started_at,
-                via_agent,caller_session_id,caller_provider_generation,completed_at,outcome,exit_code,signal,error,pid)
+                via_agent,caller_session_id,caller_agent_process_id,completed_at,outcome,exit_code,signal,error,pid)
              VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)
              ON CONFLICT(id) DO UPDATE SET completed_at=excluded.completed_at,
                 outcome=excluded.outcome,exit_code=excluded.exit_code,signal=excluded.signal,error=excluded.error
              WHERE processes.completed_at IS NULL AND excluded.completed_at IS NOT NULL",
             params![process.id,process.trace_id,process.parent_lf_process_id,process.command,process.repo,process.cwd,
-                process.started_at,process.via_agent,process.caller_session_id,process.caller_provider_generation,
+                process.started_at,process.via_agent,process.caller_session_id,process.caller_agent_process_id,
                 process.completed_at,process.outcome,process.exit_code,process.signal,process.error,process.pid],
         )?;
         Ok(())

@@ -4205,9 +4205,9 @@ mod tests {
                 Some("native-thread".into())
             );
             // The finished attachment's AgentProcess is never adopted.
-            assert_eq!(
-                next_attachment.provider_generation,
-                attachment.provider_generation + 1
+            assert_ne!(
+                next_attachment.agent_process_id,
+                attachment.agent_process_id
             );
             assert_eq!(
                 Some(&next_attachment.provider_lf_process_id),
@@ -4407,10 +4407,7 @@ mod tests {
         );
         // Ending the AgentProcess may already have reaped this exact child.
         let _ = agent_process.wait();
-        assert_eq!(
-            replacement.provider_generation,
-            attachment.provider_generation + 1
-        );
+        assert_ne!(replacement.agent_process_id, attachment.agent_process_id);
         assert_eq!(replacement.provider_lf_process_id, next);
         assert!(store.session_connection("conversation").unwrap().is_none());
         assert!(store
@@ -4457,10 +4454,7 @@ mod tests {
         provider.wait().unwrap();
         let replacement =
             super::resume_session_agent_process(&store, "conversation", &next).unwrap();
-        assert_eq!(
-            replacement.provider_generation,
-            attachment.provider_generation + 1
-        );
+        assert_ne!(replacement.agent_process_id, attachment.agent_process_id);
     }
 
     #[test]

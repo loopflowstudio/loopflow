@@ -16,7 +16,8 @@ now live on tagged process rows; recorded-agent views and scheduled settlement
 share that inventory. Captured Claude/native replacement advances the capture's
 snapshot without refreshing stale operations. Owned native launches record before
 exec while preserving terminal groups; runtime verification remains open. Optional
-launches, foreground orphan cleanup and generation-based wires still need conversion.
+admission types and foreground orphan cleanup still need conversion.
+Headless launch refuses a missing attachment at runtime.
 Invocation-owned account failover now settles the old process and preserves its
 history before replacement. Top and Task gates share unfinished-row selection
 and identity judgment; unknown agents and receipt-less lf rows remain visible.
@@ -44,7 +45,7 @@ accounts/routes and resumable conversations. Configured acceptance is separate.
 Current CLI examples use supported spellings. `lf session connect` has `open` as
 an alias; `--replace` stops owned clients and connects through the same live
 Codex AgentProcess, preserving its active turn and other conversations. There is no
-separate Session AgentProcess-restart operation. A Flow whose process died leaves its
+separate AgentProcess-restart operation. A Flow whose process died leaves its
 Processes as history; nothing resumes it. `session list` supports
 `--interactive false`, `--history`, `--task` and `--search`; `--all` means all
 repositories. `--page --json` uses stable ID pages; Desktop retains earlier
@@ -224,7 +225,8 @@ There is no replacement Request, Execution, SkillInvocation or generic attempt
 object. History entries have stable references, not independent lifecycles.
 Jack Heart selected AgentProcess on October 9 for the actual provider OS process,
 not for an attempt. LOO-443 records it in the shared process table; unconditional
-launch recording and generation-wire replacement remain unfinished.
+launch recording is typed only at runtime. AgentProcess identity replaces the
+provider generation in caller provenance, turn origin and Program Status.
 
 | Owner | Authoritative fields and operations |
 | --- | --- |
@@ -241,7 +243,7 @@ reviews, interactive and headless work. Default views select interactive
 conversations. `lf session list --waiting` selects conversations Waiting on a
 person, using the same Rust projection as Desktop. `session_activity` holds both
 the attached LfProcess's latest stream reading and an optional terminal-reported snapshot.
-A current provider generation's reports take precedence: any blocked record, or
+The current AgentProcess's reports take precedence: any blocked record, or
 idle for an interactive Session, means Waiting. Other reports and explicit clear
 suppress inference. Without reports, an unanswered question, interactive hand-back
 or 120 seconds of silence without an unresolved tool call means Waiting.
@@ -249,8 +251,8 @@ No current reading is unknown; replacement providers need fresh observations.
 
 Desktop consumes the embedded Ghostty action for every retained surface. Shell
 panes keep local records; Session panes publish bounded snapshots through
-`lf session observe-status` with the current terminal receipt and provider
-generation. Stream identity and increasing sequence fence replacements in SQLite.
+`lf session observe-status` with the current terminal receipt and the
+reading's AgentProcess. Stream identity and increasing sequence fence replacements in SQLite.
 An unchanged provider keeps reports across attachment handoff. Report text is literal
 and display-sanitized; protocol IDs never select Sessions or grant process,
 Flow or completion authority. Detached relay observation remains unimplemented. Explicit filters expose headless and
@@ -289,7 +291,7 @@ a naming-only migration. Provider protocol names remain vendor-owned.
 An LfSession can have many historical attached Processes and at most one current
 attachment. Compare-and-set issues a fresh opaque token on every claim and release,
 including A → B → A. The token has no independent lifecycle. A continuing
-AgentProcess keeps its provider generation and origin through handoff and an unattached
+AgentProcess keeps its identity and origin through handoff and an unattached
 interval. Old clients may retain provider history but cannot start/steer turns or
 change current attachment, connection, process evidence or stream attention.
 History retention grants no native-write or Flow authority. Passive connection
@@ -309,27 +311,30 @@ Lock files retain their inode across process exit; deleting a live lock file
 would let two processes own different locks for the same Session.
 
 Connect transfers the attachment while retaining the live conversation. Client
-replacement claims the attachment before stopping the exact old clients; it leaves the AgentProcess and sibling
-conversations running. Connecting is the only way an AgentProcess changes attachment.
-Session resume is admitted when the previously attached LfProcess has finished or is provably
-dead, and refused while it may be alive. A resumed Session always starts a new
-AgentProcess and resumes the saved native thread on it; it never adopts the old one.
-A finished attached LfProcess closed its AgentProcess as it exited. A dead one may have left
-one, so its replacement first ends the recorded PID/start identity under the
-Session lock. A recorded process that is still running and cannot be ended, such
-as one outside its own process group or a Codex AgentProcess serving an unrelated
-conversation, refuses the resume and leaves the Session unchanged.
+replacement claims the attachment before stopping the exact old clients; it leaves
+the AgentProcess and sibling conversations running. Connecting is the only way an
+AgentProcess changes its attached LfProcess.
+Session resume is admitted when the previously attached LfProcess has finished or
+is provably dead, and refused while it may be alive. A resumed Session always
+reserves a new AgentProcess and resumes the saved native thread on it; it never
+adopts the old one. A finished LfProcess closed its AgentProcess as it exited. A
+dead one may have left it running, so its replacement first ends the recorded
+PID/start identity under the Session lock. A recorded process that is still running
+and cannot be ended, such as one outside its own process group or a Codex
+AgentProcess serving an unrelated conversation, refuses the resume and leaves the
+Session unchanged.
 PID/start identity and native endpoint are operational evidence; conversation
 identity, causality and elapsed time grant no signal authority.
 
-An exact attachment exit closes its Codex AgentProcess and writes a Session receipt under
-the same transaction as attachment handoff. An old attachment's exit cannot stop a
-transferred AgentProcess. Shutdown verifies the recorded PID/start and process group;
-an AgentProcess serving other loaded conversations is left running with a close error.
+An exact attached LfProcess exit closes its Codex AgentProcess and records the
+end under the same transaction as attachment transfer. A former attachment's exit
+cannot stop a transferred AgentProcess. Shutdown verifies the recorded PID/start
+and the whole process group; an AgentProcess serving other loaded conversations is
+left running with a close error.
 Closing clears the live endpoint and retains the native thread ID and history.
 Native terminal providers own their own process exit. An observed
 normal or interrupted exit retires an unbound, non-primary conversation only
-when that attached LfProcess owns its AgentProcess. Task/Wave conversations, primary
+when that LfProcess launched its AgentProcess. Task/Wave conversations, primary
 Sessions, Asks and Flow reviews remain available. A stopped turn or missing
 process never completes a conversation, and retirement never settles a Flow.
 Completed Sessions retain their history but contribute no current rows or counts.
@@ -349,8 +354,8 @@ One actual lf process gets one LfProcess, including nested direct and agent-issu
 commands. In-process wrappers reuse it and cannot settle it early; each Flow
 step is a child process with its own Process.
 The incoming `via_agent` bit describes the caller, not whether the command later
-launches an agent. Agent-issued children resolve stable Session/provider-generation
-provenance to the current matching attachment once, at admission. Delayed children
+launches an agent. Agent-issued children resolve stable Session/AgentProcess
+provenance to the current attached LfProcess once, at admission. Delayed children
 of a replaced provider retain their historical origin; existing parents never change.
 
 Process outcomes are succeeded, failed or interrupted when observed. Unobserved
@@ -549,7 +554,7 @@ effects. The unconditional-update race remains a protocol limit.
 | **Machine / Placement / Promotion** — stable machine identity, Work placement, and artifact selection | `MachineId` is identity; SSH route is mutable. Placement is planning state and never process ownership. Promotion owns immutable artifact selection, isolated schema proof, app replacement, and rollback only. Install selects the latest published release independently of caller Git state; the laptop schedule invokes that same command. Checkout updates belong to sync. | [`Machine`](../rust/loopflow/src/durable.rs), [`Placement`](../rust/loopflow/src/durable.rs), [`SwitchReceipt`](../rust/loopflow/src/installation.rs), [`published installation`](../rust/loopflow/src/lf/commands/install/published.rs) | `machines`, `work_placements`; Machine-local SQLite; installation selection and switch receipts; laptop refresh LaunchAgent | The promotion command owns its OS-locked switch transaction | `lf machine`, `lf self`, `lf --machine`, `lf install`, `lf schedule` | `process:ssh`, `process:launchctl`, `process:systemctl`, `process:/usr/bin/open`, `process:/usr/bin/osascript`, `process:brew`, `process:/bin/sh`, `process:tmux` |
 | **Session history projections** — captured events and exact provider evidence | LfSession owns provider outcomes and Process owns command outcomes; original payload and exact process receipts confer no Flow authority. | `SessionCaptureSpec`, `SessionCaptureManifest`, `SessionHistory`, `ProviderHistory`, `SessionUsage` | Projects LfSession-owned input/history; Machine-local `runs/<prefix>/<run-id>/` immutable payload and process receipts | shared conversation admission and history | `lf mon show`, `lf replay`, `lf usage`, `lf activity`; Work/status history | `process:lf`, provider harnesses |
 | **LfProcess** — one actual lf process | The journal transaction records command completion and fixes each child's causal parent at admission. Agent provenance grants no control authority. | [`LfProcessId`](../rust/loopflow/src/id.rs), [`AgentCaller`](../rust/loopflow/src/process.rs) | `processes` (`kind='lf'`) | Outermost foreground command; installation/bootstrap coverage remains a cutover obligation | `lf monitor`, `lf mon list`; ordinary parsed CLI commands | — |
-| **AgentProcess** — the provider's OS process | Its original parent and served Session survive attachment transfer. PID/birth and terminal evidence belong to the record; a fresh token fences each attachment. | `AgentProcess`, `SessionAttachment`, common `LfProcess` projection | `processes` (`kind='agent'`); Session retains its current record reference | Provider launch and observed settlement; unconditional launch conversion remains open | `lf top`, `lf monitor`, Task execution inventory | Provider OS process |
+| **AgentProcess** — the provider's OS process | Its original parent and served Session survive attachment transfer. PID/birth and terminal evidence belong to the record; a fresh token fences each attachment. | `AgentProcess`, `SessionAttachment`, common `LfProcess` projection | LfProcess's table, rows of `kind='agent'`; Session retains its current record reference | Provider launch and observed settlement; typed admission remains open | `lf top`, Task execution inventory; LfProcess's process readers | Provider OS process |
 | **Local process observation** — recorded processes joined to OS facts | Lf receipts and AgentProcess PID/birth establish observations, not new ownership. Detached records and unknown identities remain visible; failed OS sampling never proves absence. Duplicate or unknown identities grant no signal authority. | [`ActivitySnapshot`](../rust/loopflow/src/lf/commands/top.rs), [`ProcessPruneReport`](../rust/loopflow/src/lf/commands/top.rs) | Process rows and Machine-local lf receipts; no provider registry | Foreground observation and scheduled record settlement | `lf ps`, `lf top`, `lf mon prune`, `lf doctor` | `process:/bin/ps`, `process:ps`, `process:sysctl`, `process:lsof`, `process:kill`, `process:which` |
 | **Provider account / route** — credential authority and ordered provider selection on one Machine | Provider token/account rows and Access Profiles own routing; credentials stay in provider homes, encrypted storage or Doppler. Machine connection installs a separate resident login. | [`Provider`](../rust/loopflow/src/provider_auth/mod.rs), [`AccessProfile`](../rust/loopflow/src/profile.rs), [`ProviderRoute`](../rust/loopflow/src/profile.rs), [`ProviderAccount`](../rust/loopflow/src/store/mod.rs) | `access_profiles`, `auth_browser_bindings`, `provider_accounts`, `provider_account_limits`, `provider_account_switches`, `provider_routes`, `provider_session_accounts`, `provider_tokens` | The foreground auth command owns provider login process groups and passive browser handoff; durable processes use credentials installed on their Machine | `lf account` | `provider:claude`, `provider:codex`, `provider:doppler`, `provider:opencodezen`, `process:claude`, `process:codex`, `process:doppler`, `process:opencode`, `process:security`, `process:secret-tool` |
 | **Context budgets** — limits and usage for assembled launch input | Existing personal/repo config and Wave frontmatter resolve each limit; the shared prompt assembler measures and enforces it. | [`ContextBudgets`](../rust/loopflow/src/prompt/context_budget.rs), [`ContextBudgetReport`](../rust/loopflow/src/prompt/context_budget.rs) | Authored config and source files; complete excerpt sources under `.lf/tmp/context/`; no measurement store | Foreground preview and launch assembly | `lf context` | — |
@@ -683,7 +688,7 @@ Session/Process caller provenance supplies ancestry and mutation authority.
 3. Publish immutable input atomically. An unpublished reservation is recoverable;
    uncertain publication/spawn evidence never permits a blind duplicate launch.
 4. Start the AgentProcess, or connect to the one a live attachment holds. Record its
-   identity and endpoint, distinct from the client's process and the conversation's attachment.
+   identity and endpoint, distinct from the client's process and the attached LfProcess.
 5. Append correlated provider outcomes and usage; retain missingness. The
    Flow process reads a deciding or routing step's answer from the turn that step's
    Process captured.
@@ -946,18 +951,20 @@ upgrade transaction. These locks do not turn a conversation ID into authority.
 Causal ancestry and conversation identity are not process ownership. Local child
 handles permit the spawning process to control its child. Cross-process control
 requires exact PID/start identity and the appropriate native scope, claim and
-provider generation. Revalidate that evidence before every signal.
+AgentProcess record. Revalidate that evidence before every signal.
 
-An AgentProcess lives only while an LfProcess attached to it does. Each Codex and
-OpenCode AgentProcess runs in its own process group with a watchdog that holds the
-read end of a lifeline; every attached LfProcess holds a write end until it ends. Return, a
+A headless AgentProcess lives only while an LfProcess attached to it does. It
+runs in its own process group with a watchdog that holds the read end of a
+lifeline; each attached LfProcess holds a write end until it ends. Return, a
 signal, a panic and SIGKILL all close it, and the watchdog then terminates the
-group. An LfProcess taking an AgentProcess over holds the same lifeline first, so handoff
-leaves the AgentProcess alive. A saved endpoint alone is not liveness; a missing
-endpoint alone is not AgentProcess death. An attachment that replaces a dead one ends the
-AgentProcess it left by recorded PID and start time, then resumes the saved native
-thread on a new AgentProcess; the turn that was in flight is not recovered. Nothing
-authorizes terminating a shared AgentProcess to recover one thread.
+group. Only Codex names its lifeline, so only a Codex takeover can hold the same
+lifeline first and leave the AgentProcess alive; takeover coverage for other
+providers and foreground terminals remains open. A saved endpoint alone is not
+liveness; a missing endpoint alone is not death. An LfProcess that replaces a
+dead one ends the AgentProcess it left by recorded PID and start time, then
+resumes the saved native thread on a new AgentProcess; the turn that was in
+flight is not recovered. Nothing authorizes terminating a shared AgentProcess to
+recover one thread.
 
 One exception to local-handle control exists. The scheduled repository check and
 `lf mon prune` terminate an AgentProcess that outlived its attachment: the recorded PID and

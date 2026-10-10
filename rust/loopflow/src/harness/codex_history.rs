@@ -197,7 +197,7 @@ impl History {
                     self.observe(id);
                 }
                 // Snapshot recovery knows completion, not which client started the
-                // turn or which provider generation was active at that earlier time.
+                // turn or which AgentProcess was active at that earlier time.
                 completion(store, session, thread, turn)?;
             }
         }
@@ -475,7 +475,7 @@ mod tests {
             .unwrap();
         assert_eq!(unknown.kind, SessionEventKind::Started);
         assert_eq!(unknown.lf_process_id, None);
-        assert_eq!(unknown.provider_generation, None);
+        assert_eq!(unknown.agent_process_id, None);
         assert!(
             store
                 .record_session_turn_origin(

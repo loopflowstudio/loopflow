@@ -4275,7 +4275,7 @@ mod tests {
             parent_lf_process_id: None,
             via_agent: None,
             caller_session_id: None,
-            caller_provider_generation: None,
+            caller_agent_process_lfid: None,
             command: Some("historical diagnostic".into()),
             repo: None,
             cwd: Some(repo.path().to_string_lossy().into_owned()),
@@ -4648,7 +4648,7 @@ mod tests {
             parent_lf_process_id: None,
             via_agent: None,
             caller_session_id: None,
-            caller_provider_generation: None,
+            caller_agent_process_lfid: None,
             command: Some("implement".into()),
             repo: None,
             cwd: Some(

@@ -260,7 +260,7 @@ Unix PID and may collide across history. References are `<role>_lf_process_id`:
 Loopflow started: one `processes` row of kind `agent`, with its parent LfProcess,
 the attached LfProcess and a fresh attachment token. It survives attachment handoff.
 LfSession is one Loopflow-owned durable conversation, interactive or headless; identity,
-name, feedback and native history survive attachment replacement. Product text says
+name, feedback and native history survive takeover. Product text says
 Session for interactive and Run for headless work. AgentSession is the provider-owned
 conversation, represented by an opaque AgentSessionId used for resume, native
 turn keys and account attribution. An LfSession selects one AgentSession at a

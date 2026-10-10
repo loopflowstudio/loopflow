@@ -103,15 +103,15 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "INSERT INTO session_activity(session_id,attachment_token,observed_at,open_tools,pending_input,yielded,provider_generation)
-             SELECT ?1,?2,?3,?4,?5,?6,?7 FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1 AND p.attachment_token=?2 AND p.provider_generation=?7
+            "INSERT INTO session_activity(session_id,attachment_token,observed_at,open_tools,pending_input,yielded,agent_process_id)
+             SELECT ?1,?2,?3,?4,?5,?6,?7 FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1 AND p.attachment_token=?2 AND p.id=?7
              ON CONFLICT(session_id) DO UPDATE SET attachment_token=excluded.attachment_token,
                 observed_at=excluded.observed_at,open_tools=excluded.open_tools,
                 pending_input=excluded.pending_input,yielded=excluded.yielded,
-                program_status=CASE WHEN session_activity.provider_generation=excluded.provider_generation THEN session_activity.program_status END,
-                provider_generation=excluded.provider_generation",
+                program_status=CASE WHEN session_activity.agent_process_id IS excluded.agent_process_id THEN session_activity.program_status END,
+                agent_process_id=excluded.agent_process_id",
             params![session, attachment.token, activity.observed_at,
-                activity.open_tools as i64, activity.pending_input as i64, activity.yielded, attachment.provider_generation],
+                activity.open_tools as i64, activity.pending_input as i64, activity.yielded, attachment.agent_process_id],
         )?;
         Ok(())
     }
@@ -126,7 +126,7 @@ impl SqliteStore {
              JOIN agent_sessions s ON s.id=act.session_id
              JOIN processes p ON p.id=s.agent_process_id
              WHERE s.completed_at IS NULL AND act.attachment_token=p.attachment_token
-             AND act.provider_generation=p.provider_generation AND act.program_status IS NULL
+             AND act.agent_process_id=p.id AND act.program_status IS NULL
              AND act.pending_input=0 AND act.open_tools=0
              AND NOT (s.interactive=1 AND act.yielded=1) AND ?1-act.observed_at<?2",
             params![now, quiet],
@@ -164,18 +164,18 @@ impl SqliteStore {
         conn.query_row(
             "SELECT s.task_id,s.wave_id,s.current_capture FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id
              WHERE s.id=?1 AND p.attachment_token=?2 AND p.attached_lf_process_id=?3
-               AND p.provider_generation=?4",
+               AND p.id=?4",
             params![
                 session,
                 attachment.token,
                 process,
-                attachment.provider_generation
+                attachment.agent_process_id
             ],
             |row| {
                 Ok(crate::session::SessionTurnOrigin {
                     session_id: session.into(),
                     lf_process_id: process.clone(),
-                    provider_generation: attachment.provider_generation,
+                    agent_process_id: attachment.agent_process_id.clone(),
                     task_id: row.get(0)?,
                     wave_id: row.get(1)?,
                     captured_event: row.get(2)?,
@@ -208,14 +208,14 @@ impl SqliteStore {
         let values = params![
             seq,
             origin.lf_process_id,
-            origin.provider_generation,
+            origin.agent_process_id,
             origin.task_id,
             origin.wave_id,
             origin.captured_event
         ];
         let matches: Option<bool> = tx
             .query_row(
-                "SELECT lf_process_id IS ?2 AND provider_generation IS ?3
+                "SELECT lf_process_id IS ?2 AND agent_process_id IS ?3
                 AND task_id IS ?4 AND wave_id IS ?5 AND captured_event IS ?6
              FROM session_events WHERE seq=?1 AND lf_process_id IS NOT NULL",
                 values,
@@ -231,7 +231,7 @@ impl SqliteStore {
             }
             None => {
                 tx.execute(
-                    "UPDATE session_events SET lf_process_id=?2,provider_generation=?3,
+                    "UPDATE session_events SET lf_process_id=?2,agent_process_id=?3,
                         task_id=?4,wave_id=?5,captured_event=?6 WHERE seq=?1",
                     values,
                 )?;
@@ -290,7 +290,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(
             "SELECT e.seq,e.session_id,e.provider_thread,e.provider_turn,e.kind,
-                    origin.provider_generation,CASE WHEN e.kind='captured' THEN e.lf_process_id ELSE origin.lf_process_id END,
+                    origin.agent_process_id,CASE WHEN e.kind='captured' THEN e.lf_process_id ELSE origin.lf_process_id END,
                     CASE WHEN e.kind IN ('observed','captured') THEN e.task_id ELSE origin.task_id END,
                     CASE WHEN e.kind IN ('observed','captured') THEN e.wave_id ELSE origin.wave_id END,e.observed_at,e.payload
              FROM session_events e LEFT JOIN session_events origin
@@ -336,7 +336,7 @@ impl SqliteStore {
                     row.get::<_, Option<AgentSessionId>>(2)?,
                     row.get::<_, Option<String>>(3)?,
                     row.get::<_, String>(4)?,
-                    row.get::<_, Option<i64>>(5)?,
+                    row.get::<_, Option<String>>(5)?,
                     row.get::<_, Option<String>>(6)?,
                     row.get::<_, Option<String>>(7)?,
                     row.get::<_, Option<String>>(8)?,
@@ -352,7 +352,7 @@ impl SqliteStore {
                 agent_session,
                 provider_turn,
                 kind,
-                provider_generation,
+                agent_process_id,
                 lf_process_id,
                 task_id,
                 wave_id,
@@ -377,7 +377,7 @@ impl SqliteStore {
                         )))
                     }
                 },
-                provider_generation,
+                agent_process_id,
                 lf_process_id,
                 task_id,
                 wave_id,
@@ -1359,7 +1359,7 @@ mod tests {
         store
             .claim_session_attachment(&session.id, Some(&attachment), &second, true)
             .unwrap();
-        // Gen 2 observes the surviving Gen 1 turn. The recorder never saw its usage.
+        // The replacement AgentProcess observes the first one's surviving turn. The recorder never saw its usage.
         store
             .record_session_event(
                 &session.id,
@@ -1382,7 +1382,7 @@ mod tests {
         assert_eq!(history.len(), 4);
         assert!(history.iter().all(
             |event| event.lf_process_id.as_deref() == Some(first.as_str())
-                && event.provider_generation == Some(1)
+                && event.agent_process_id.as_deref() == Some(attachment.agent_process_id.as_str())
         ));
         assert!(store
             .summary_for_input(&session.id, &replacement.artifact_key)
@@ -1604,7 +1604,7 @@ mod tests {
             "recovery cannot invent start or usage receipts"
         );
         assert_eq!(history[0].payload, completed);
-        assert_eq!(history[0].provider_generation, None);
+        assert_eq!(history[0].agent_process_id, None);
         assert_eq!(history[0].lf_process_id, None);
         assert!(store
             .session_history("conversation", seq, 100)
@@ -1650,7 +1650,7 @@ mod tests {
         let replacement = store
             .claim_session_attachment("conversation", Some(&original), &second, true)
             .unwrap();
-        assert_eq!(replacement.provider_generation, 2);
+        assert_ne!(replacement.agent_process_id, original.agent_process_id);
         assert!(store.session_connection("conversation").unwrap().is_none());
         assert!(store
             .agent_process_identity("conversation")
@@ -1690,9 +1690,12 @@ mod tests {
             )
             .unwrap();
         let events = store.session_history("conversation", seq, 100).unwrap();
-        assert_eq!(events[1].provider_generation, Some(1));
+        assert_eq!(
+            events[1].agent_process_id.as_deref(),
+            Some(original.agent_process_id.as_str())
+        );
         assert_eq!(events[1].lf_process_id.as_deref(), Some(first.as_str()));
-        assert_eq!(events[2].provider_generation, None);
+        assert_eq!(events[2].agent_process_id, None);
         assert_eq!(events[2].lf_process_id, None);
     }
 }

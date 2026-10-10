@@ -7,13 +7,12 @@ use anyhow::Result;
 use serde_json::{json, Value};
 
 use crate::chat::types::{ConversationEvent, Lifecycle};
-use crate::process::SessionAttachment;
 use crate::session::{SessionEventKind, SessionTurnOrigin};
 use crate::store::sqlite::SqliteStore;
 
 #[derive(Debug, Default)]
 pub(super) struct History {
-    pub(super) owner: Option<(SqliteStore, String, SessionAttachment)>,
+    pub(super) owner: Option<super::agent_process::AttachmentOwner>,
     requests: BTreeMap<String, Request>,
     attention: super::attention::Attention,
 }
@@ -26,12 +25,19 @@ struct Request {
 }
 
 impl History {
-    pub(super) fn new(owner: Option<(SqliteStore, String, SessionAttachment)>) -> Self {
+    pub(super) fn new(owner: Option<super::agent_process::AttachmentOwner>) -> Self {
         Self {
             owner,
             ..Self::default()
         }
     }
+    /// The attachment that fences native writes; absent until the server starts.
+    pub(super) fn owner(&self) -> Result<super::agent_process::AttachmentOwner> {
+        self.owner
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("OpenCode server not started"))
+    }
+
     /// One server event of conversation `thread`, read for attention only.
     pub(super) fn attend(&mut self, thread: &AgentSessionId, event: &Value) {
         if let Some((store, session, attachment)) = &self.owner {
@@ -253,12 +259,12 @@ pub(super) async fn read_messages(
 // Native submission is bounded and serialized with attachment handoff. An
 // uncertain HTTP result is retained as uncertain; never submit it twice here.
 pub(super) async fn post(
-    owner: Option<(SqliteStore, String, SessionAttachment)>,
+    (store, session, attachment): super::agent_process::AttachmentOwner,
     url: String,
     payload: Value,
 ) -> Result<()> {
     tokio::task::spawn_blocking(move || {
-        let write = || {
+        store.with_session_attachment(&session, &attachment, || {
             reqwest::blocking::Client::new()
                 .post(url)
                 .timeout(std::time::Duration::from_secs(10))
@@ -271,12 +277,7 @@ pub(super) async fn post(
                         "OpenCode native request: {error}"
                     ))
                 })
-        };
-        if let Some((store, session, attachment)) = owner {
-            store.with_session_attachment(&session, &attachment, write)
-        } else {
-            write()
-        }
+        })
     })
     .await??;
     Ok(())

@@ -3,6 +3,12 @@ import Foundation
 import Loopflow
 import Observation
 
+/// The provider named by one Session reading. A conversation Loopflow never
+/// launched has no AgentProcess; that absence is itself the reading.
+struct SessionProviderReading: Equatable, Sendable {
+    let agentProcessLFID: String?
+}
+
 /// Owned by a retained surface, never by a SwiftUI mount or its current focus.
 @MainActor @Observable
 final class ProgramStatusSurface {
@@ -14,20 +20,20 @@ final class ProgramStatusSurface {
     private(set) var sessionId: String?
     private var association = UUID()
     private var terminalId: String?
-    private var generation: Int64?
+    private var provider: SessionProviderReading?
     private var writer: ProgramStatusWriter?
     private var publication: Task<Void, Never>?
     private var active = true
 
-    func associate(sessionId: String?, terminalId: String?, generation: Int64?) {
-        guard self.sessionId != sessionId || self.terminalId != terminalId || self.generation != generation else { return }
-        let firstSessionReading = self.sessionId == sessionId && self.terminalId == terminalId && self.generation == nil
+    func associate(sessionId: String?, terminalId: String?, provider: SessionProviderReading?) {
+        guard self.sessionId != sessionId || self.terminalId != terminalId || self.provider != provider else { return }
+        let firstSessionReading = self.sessionId == sessionId && self.terminalId == terminalId && self.provider == nil
         writer?.stop()
         writer = nil
         association = UUID()
         self.sessionId = sessionId
         self.terminalId = terminalId
-        self.generation = generation
+        self.provider = provider
         if !firstSessionReading { sessionReducer = ProgramStatusReducer() }
         observationError = nil
         if firstSessionReading { publish() }
@@ -49,10 +55,10 @@ final class ProgramStatusSurface {
 
     private func publish() {
         if snapshot != reducer.snapshot { snapshot = reducer.snapshot }
-        guard sessionReducer.snapshot.seen, let sessionId, let terminalId, let generation else { return }
+        guard sessionReducer.snapshot.seen, let sessionId, let terminalId, let provider else { return }
         if writer == nil {
             let association = self.association
-            writer = ProgramStatusWriter(sessionId: sessionId, terminalId: terminalId, generation: generation) { [weak self] error in
+            writer = ProgramStatusWriter(sessionId: sessionId, terminalId: terminalId, provider: provider) { [weak self] error in
                 Task { @MainActor in
                     guard let self, self.active, self.association == association else { return }
                     self.observationError = error
@@ -82,7 +88,7 @@ private final class ProgramStatusWriter: @unchecked Sendable {
     private let queue = DispatchQueue(label: "studio.loopflow.program-status")
     private let sessionId: String
     private let terminalId: String
-    private let generation: Int64
+    private let provider: SessionProviderReading
     private let failure: @Sendable (String) -> Void
     private var process: Process?
     private var input: FileHandle?
@@ -94,10 +100,10 @@ private final class ProgramStatusWriter: @unchecked Sendable {
     private var drainDeadline: Date?
     private var last: ProgramStatusRecords?
 
-    init(sessionId: String, terminalId: String, generation: Int64, failure: @escaping @Sendable (String) -> Void) {
+    init(sessionId: String, terminalId: String, provider: SessionProviderReading, failure: @escaping @Sendable (String) -> Void) {
         self.sessionId = sessionId
         self.terminalId = terminalId
-        self.generation = generation
+        self.provider = provider
         self.failure = failure
     }
 
@@ -118,7 +124,8 @@ private final class ProgramStatusWriter: @unchecked Sendable {
     private func start() throws {
         let helper = try LocalWaveAgentLauncher.controlLfPath()
         let process = LocalWaveAgentLauncher.queryProcess(
-            [helper, "session", "observe-status", sessionId, "--terminal", terminalId, "--generation", String(generation)]
+            [helper, "session", "observe-status", sessionId, "--terminal", terminalId]
+                + (provider.agentProcessLFID.map { ["--agent-process", $0] } ?? [])
         )
         let pipe = Pipe()
         process.standardInput = pipe

@@ -33,6 +33,15 @@ def _database(env: dict[str, str]) -> str:
     return str(Path(env["LF_HOME"]) / "loopflow.db")
 
 
+def _agent_process(database: sqlite3.Connection, session: str, columns: str) -> tuple:
+    """Read the Session's current AgentProcess (p) beside the Session (s)."""
+    return database.execute(
+        f"SELECT {columns} FROM agent_sessions s "
+        "LEFT JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?",
+        (session,),
+    ).fetchone()
+
+
 class Responses(ThreadingHTTPServer):
     def __init__(self) -> None:
         super().__init__(("127.0.0.1", 0), Handler)
@@ -549,12 +558,9 @@ def _public_connection_contract(
 
     try:
         with sqlite3.connect(_database(env)) as database:
-            endpoint, thread, generation = database.execute(
-                "SELECT p.endpoint,s.provider_thread,p.provider_generation "
-                "FROM agent_sessions s LEFT JOIN processes p ON p.id=s.agent_process_id "
-                "WHERE s.id=?",
-                (session,),
-            ).fetchone()
+            endpoint, thread, agent_process = _agent_process(
+                database, session, "p.endpoint,s.provider_thread,p.id"
+            )
         provider = Client(Path(endpoint))
         inspectors.append(provider)
         provider.call("thread/resume", {"threadId": thread})
@@ -622,12 +628,11 @@ def _public_connection_contract(
         # Explicit client replacement must use the same live-provider path as
         # ordinary connect, with the current turn and shared sibling untouched.
         with sqlite3.connect(_database(env)) as database:
-            before_prepare = database.execute(
-                "SELECT p.attached_lf_process_id,p.attachment_token,p.endpoint,s.provider_thread,"
-                "p.provider_generation FROM agent_sessions s "
-                "LEFT JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?",
-                (session,),
-            ).fetchone()
+            before_prepare = _agent_process(
+                database,
+                session,
+                "p.attached_lf_process_id,p.attachment_token,p.endpoint,s.provider_thread,p.id",
+            )
         prepared = _command(
             [str(binary), "session", "connect", session, "--replace", "--json"],
             work,
@@ -638,12 +643,11 @@ def _public_connection_contract(
         assert "--replace" in json.loads(prepared.stdout)["open_argv"]
         assert all(previous.poll() is None for previous in processes)
         with sqlite3.connect(_database(env)) as database:
-            after_prepare = database.execute(
-                "SELECT p.attached_lf_process_id,p.attachment_token,p.endpoint,s.provider_thread,"
-                "p.provider_generation FROM agent_sessions s "
-                "LEFT JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?",
-                (session,),
-            ).fetchone()
+            after_prepare = _agent_process(
+                database,
+                session,
+                "p.attached_lf_process_id,p.attachment_token,p.endpoint,s.provider_thread,p.id",
+            )
         assert after_prepare == before_prepare
         replaced.extend(processes)
         _connect("replacement", replace=True)
@@ -659,35 +663,31 @@ def _public_connection_contract(
                 == "active"
             )
         with sqlite3.connect(_database(env)) as database:
-            retained_connection = database.execute(
-                "SELECT p.endpoint,s.provider_thread,p.provider_generation "
-                "FROM agent_sessions s LEFT JOIN processes p ON p.id=s.agent_process_id "
-                "WHERE s.id=?",
-                (session,),
-            ).fetchone()
-            attached, observed_generation, interactive = database.execute(
-                "SELECT p.attached_lf_process_id,p.provider_generation,s.interactive "
-                "FROM agent_sessions s LEFT JOIN processes p ON p.id=s.agent_process_id "
-                "WHERE s.id=?",
-                (session,),
-            ).fetchone()
+            retained_connection = _agent_process(
+                database, session, "p.endpoint,s.provider_thread,p.id"
+            )
+            attached, observed_agent_process, interactive = _agent_process(
+                database, session, "p.attached_lf_process_id,p.id,s.interactive"
+            )
             before = {row[0] for row in database.execute("SELECT id FROM processes")}
-        assert observed_generation == generation and interactive == 1
-        assert retained_connection == (endpoint, thread, generation)
+        assert observed_agent_process == agent_process and interactive == 1
+        assert retained_connection == (endpoint, thread, agent_process)
         assert attached != before_prepare[0]
         server.release.set()
         provider.wait_turn(active)
         with sqlite3.connect(_database(env)) as database:
             after = database.execute(
-                "SELECT id,parent_lf_process_id,caller_session_id,caller_provider_generation "
+                "SELECT id,parent_lf_process_id,caller_session_id,caller_agent_process_id "
                 "FROM processes WHERE via_agent=1"
             ).fetchall()
         children = [row for row in after if row[0] not in before]
         assert len(children) == 1, children
-        child_id, child_parent, child_session, child_generation = children[0]
-        assert (child_parent, child_session, child_generation) == (attached, session, generation), (
-            children
-        )
+        child_id, child_parent, child_session, child_agent_process = children[0]
+        assert (child_parent, child_session, child_agent_process) == (
+            attached,
+            session,
+            agent_process,
+        ), children
         call(2, 0, "thread/read", {"threadId": thread, "includeTurns": True})
         history_command = [str(binary), "session", "history", session, "--json", "--limit", "0"]
         recorded = _command(history_command, work, env, timeout=15)
@@ -713,18 +713,17 @@ def _public_connection_contract(
             _, error = processes[2].communicate(timeout=15)
             assert processes[2].returncode == 0, error.decode()
             with sqlite3.connect(_database(env)) as database:
-                closed = database.execute(
-                    "SELECT p.endpoint,s.provider_thread,p.attached_lf_process_id "
-                    "FROM agent_sessions s LEFT JOIN processes p ON p.id=s.agent_process_id "
-                    "WHERE s.id=?",
-                    (session,),
-                ).fetchone()
-            assert closed == (None, thread, None), closed
+                closed = _agent_process(
+                    database,
+                    session,
+                    "s.provider_thread,p.attached_lf_process_id,p.completed_at IS NOT NULL",
+                )
+            assert closed == (thread, None, 1), closed
             assert not Path(endpoint).exists() or not provider.reader.is_alive()
             results["owner_exit_closed_agent_process"] = True
         results["history"] = history
         results["public_connect"] = dict(
-            provider_generation=generation,
+            agent_process=agent_process,
             attached=attached,
             retained_client_rejected=True,
             active_turn_and_sibling_survived=True,

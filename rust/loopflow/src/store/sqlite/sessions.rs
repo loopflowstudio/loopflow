@@ -102,12 +102,12 @@ pub(super) fn session_in(conn: &Connection, id: &str) -> StoreResult<Option<LfSe
     .transpose()
 }
 
-/// Reported status wins within the provider generation; otherwise use the
+/// Reported status wins for the current AgentProcess; otherwise use the
 /// current attachment's input/hand-back/quiet reading. Filter before pagination.
 fn waiting_sql(session: &str, now: i64) -> String {
     format!(
         "EXISTS(SELECT 1 FROM session_activity act WHERE act.session_id={session}.id
-            AND {session}.completed_at IS NULL AND act.provider_generation=COALESCE((SELECT provider_generation FROM processes WHERE id={session}.agent_process_id),0)
+            AND {session}.completed_at IS NULL AND act.agent_process_id IS {session}.agent_process_id
             AND CASE WHEN act.program_status IS NOT NULL THEN
                 EXISTS(SELECT 1 FROM json_each(act.program_status,'$.records') r
                     WHERE json_extract(r.value,'$.state')='blocked'
@@ -215,7 +215,7 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         {waiting},
         COALESCE(({task_state}) IN ('done','abandoned'),0),
         EXISTS(SELECT 1 FROM tasks p WHERE p.primary_session_id=s.id),
-        (SELECT act.program_status FROM session_activity act WHERE act.session_id=s.id AND act.provider_generation=COALESCE(p.provider_generation,0)),COALESCE(p.provider_generation,0)
+        (SELECT act.program_status FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id),a.agent_process_id
         FROM page s JOIN agent_sessions a ON a.id=s.id
         LEFT JOIN processes p ON p.id=a.agent_process_id
         LEFT JOIN session_events captured ON captured.seq=s.current_capture
@@ -273,7 +273,7 @@ fn read_summary(
                 .get::<_, Option<String>>(32)?
                 .map(|json| serde_json::from_str(&json))
                 .transpose()?,
-            provider_generation: row.get(33)?,
+            agent_process_id: row.get(33)?,
             task_terminal: row.get(30)?,
             task_primary: row.get(31)?,
             captured: row.get(16)?,
@@ -1188,9 +1188,9 @@ fn require_current_actor_in(conn: &Connection, id: &str) -> StoreResult<()> {
     if let Some(caller) = crate::journal::agent_caller().filter(|caller| caller.session_id == id) {
         let current: bool = conn.query_row(
             "SELECT EXISTS(SELECT 1 FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1
-                AND p.provider_generation=?2 AND p.parent_lf_process_id=?3
+                AND p.id=?2 AND p.parent_lf_process_id=?3
                 AND p.attached_lf_process_id IS NOT NULL)",
-            params![id, caller.provider_generation, caller.origin_lf_process_id],
+            params![id, caller.agent_process_id, caller.origin_lf_process_id],
             |row| row.get(0),
         )?;
         if !current {

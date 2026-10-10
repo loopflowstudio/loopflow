@@ -1452,7 +1452,7 @@ fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
             parent_lf_process_id: None,
             via_agent: None,
             caller_session_id: None,
-            caller_provider_generation: None,
+            caller_agent_process_lfid: None,
             command: Some("task move start".into()),
             repo: None,
             cwd: None,

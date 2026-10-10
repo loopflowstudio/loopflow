@@ -1,6 +1,6 @@
 //! What a provider's own stream says about a conversation waiting on a person.
-//! Each attached LfProcess that owns a stream keeps one tracker and saves its
-//! reading; the Waiting rule itself is read from that row by the Session inventory.
+//! Each attached LfProcess that owns a stream keeps one tracker and saves its reading; the
+//! Waiting rule itself is read from that row by the Session inventory.
 
 use std::collections::BTreeSet;
 
@@ -478,8 +478,8 @@ mod tests {
                 .map(|(_, now, quiet)| (*now, *quiet))
                 .unwrap()
         };
-        // A permission the attached LfProcess answers itself is no question, and
-        // the tool it guards is still open.
+        // A permission the attached LfProcess answers itself is no question, and the tool
+        // it guards is still open.
         assert_eq!(at("permission.asked"), (false, false));
         assert_eq!(at("question.asked"), (true, true));
         assert_eq!(at("question.replied"), (false, false), "its tool is open");

@@ -30,7 +30,7 @@ drops it too, so sessions a person opens by hand inherit none of it.
 |---|---|---|---|
 | `LF_CAPTURE_KEY` | Session capture and native resume | Capture lookup, provider callbacks, Task comments | Selects subordinate captured history in the resolved Machine. SQLite must record its owning Session; a present manifest must agree. It grants neither Task nor Flow authority. |
 | `LF_TRACE_ID`, `LF_PROCESS_ID` | Journal, agent and session launch | Journal, git operations | Joins a child's events to its caller's trace. |
-| `LF_AGENT_CALLER` | Session capture and native resume | Journal, once, then resolved process context | Carries Session identity, provider generation and origin Process for nested command ancestry and checkpoint composition. |
+| `LF_AGENT_CALLER` | Session capture and native resume | Journal, once, then resolved process context | Carries Session identity, AgentProcess identity and origin Process for nested command ancestry and checkpoint composition. |
 | `LF_AS` | `--as` | Run and Task commands | Declares the Work a command contributes to; resolved against the registry. |
 | `LF_FLOW_ID` | Flow process, for each agent step | The step's agent and skills | Names the Flow a step serves: its Flow process's id. Steps of one Flow share notes under it; `lf` reads nothing from it. |
 | `LF_WAVE_ID` | Wave and Task launches | Wave resolution | Default Wave for a child command. |

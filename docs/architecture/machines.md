@@ -116,7 +116,7 @@ that identity without inventing an outcome. An unclaimed provider PID is
 never killed merely because it resembles a Loopflow child.
 
 Cross-process control requires exact PID/start identity and the applicable
-conversation/provider generation. Revalidate native scope or exclusive process
+conversation and AgentProcess record. Revalidate native scope or exclusive process
 group before signaling. An attached LfProcess may disappear while its AgentProcess survives;
 recorded endpoints alone do not prove liveness.
 

@@ -176,7 +176,8 @@ pub struct SessionRecord {
     /// working or nothing current says.
     pub attention: Option<SessionAttention>,
     pub program_status: Option<crate::program_status::Records>,
-    pub provider_generation: i64,
+    /// The provider's current AgentProcess; absent when Loopflow never launched one.
+    pub agent_process_lfid: Option<crate::id::ProcessLfid>,
     /// Its Task names it as the Task's primary conversation.
     pub task_primary: bool,
     pub task_ids: Vec<crate::durable::TaskId>,
@@ -434,7 +435,7 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
         primary_scope: session.primary_scope.clone(),
         attention: session_attention(session),
         program_status: session.program_status.clone(),
-        provider_generation: session.provider_generation,
+        agent_process_lfid: session.agent_process_lfid.clone(),
         task_primary: session.task_primary,
         task_ids: session.task_ids.clone(),
         id: session.id.clone(),
@@ -931,7 +932,7 @@ async fn surface(store: &SharedStore, session: &LfSession) -> Result<SessionReco
         primary_scope: metadata.primary_scope.clone(),
         attention: session_attention(&metadata),
         program_status: metadata.program_status.clone(),
-        provider_generation: metadata.provider_generation,
+        agent_process_lfid: metadata.agent_process_lfid.clone(),
         task_primary: metadata.task_primary,
         task_ids: store.sqlite.session_task_ids(&session.id)?,
         id: session.id.clone(),
@@ -1319,7 +1320,7 @@ pub(crate) async fn observe_program_status(
     store: &SharedStore,
     id: &str,
     terminal: &str,
-    generation: i64,
+    agent_process: Option<&crate::id::ProcessLfid>,
 ) -> Result<()> {
     let session = find_session(store, id, false)
         .await?
@@ -1332,11 +1333,11 @@ pub(crate) async fn observe_program_status(
         )?
         .context("Session disappeared")?;
     anyhow::ensure!(
-        current.provider_generation == generation,
+        current.agent_process_lfid.as_ref() == agent_process,
         "Session provider changed"
     );
-    // Re-read capture after the generation witness. A replacement before or
-    // during client inspection then fails the transactional generation check.
+    // Re-read capture after the AgentProcess witness. A replacement before or
+    // during client inspection then fails the transactional identity check.
     let session = store
         .sqlite
         .session(&session.id)?
@@ -1352,7 +1353,7 @@ pub(crate) async fn observe_program_status(
     anyhow::ensure!(
         store
             .sqlite
-            .begin_program_status(&session.id, generation, &stream)?,
+            .begin_program_status(&session.id, agent_process, &stream)?,
         "Session provider changed"
     );
     let mut last = None;
@@ -1390,7 +1391,7 @@ pub(crate) async fn observe_program_status(
                 anyhow::ensure!(
                     store.sqlite.record_program_status(
                         &session.id,
-                        generation,
+                        agent_process,
                         &stream,
                         sequence,
                         &records
@@ -1406,7 +1407,7 @@ pub(crate) async fn observe_program_status(
         anyhow::ensure!(
             store.sqlite.record_program_status(
                 &session.id,
-                generation,
+                agent_process,
                 &stream,
                 sequence + 1,
                 &records
@@ -1675,7 +1676,7 @@ mod tests {
         let wave = crate::id::WaveId::new();
         let mut summary = crate::session::SessionSummary {
             program_status: None,
-            provider_generation: 0,
+            agent_process_lfid: None,
             primary_scope: None,
             attachment_outcome: None,
             waiting: false,

@@ -221,19 +221,22 @@ unpublished code retained, without deletion or delivery authorization.
 
 ## AgentProcess (LOO-443, 2026-10-09)
 
-Jack Heart requested one inventory; #1512/#1516/#1499 integrated. Unknown stays visible; retry retains history. `c1c09fb6c` fences resume; `9255e9b03` shares native admission.
-`82b5d90d5` separates attachment/provenance and relay/upstream. Stand-ins
-prove launch and takeover rejection (A → B → A), not configured relay.
+Jack Heart requested one inventory; #1512/#1516/#1499 integrated. Unknown stays visible; retry retains history.
+`82b5d90d5` separates attachment/provenance and relay/upstream; stand-ins
+prove takeover rejection (A → B → A), not configured relay.
 Client exit never settles its provider, nor provider death an unknown attachment.
 
-Entry fixtures exposed swallowed errors and zombie-as-live probes.
 Reaper and Codex close share group judgment: leader death is insufficient;
 failed descendant inventory refuses before signaling.
 
-Headless launch refuses a missing attachment. Jack's steer `0aa2c34c` requested
-publication without merge. Generations, foreground cleanup, takeover death
-orders, public Task agreement, two-second removal, installed settlement stay
-open. FIFO is Codex-only; reaping noninteractive Codex/OpenCode.
+Headless launch refuses a missing attachment. AgentProcess identity replaced
+provider generation; released counters stay unread, pre-upgrade callers read stale.
+Jack's `71741bd4` accepted #1519 as it stands: LOO-447 owns Claude/OpenCode
+takeover and stop; two-second removal, the three orphans and live-provider runs
+are accepted unproven. FIFO is Codex-only; reaping covers noninteractive providers.
+A draft must `depends_on` main's unreleased drafts: name order broke their
+frontier fixtures in the materialized run only. PR CI defers every job while
+`scratch/` holds files: no hosted proof before landing.
 
 ## Execution vocabulary (LOO-441/442/446, 2026-10-09)
 

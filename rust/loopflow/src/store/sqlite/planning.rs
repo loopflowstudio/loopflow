@@ -1228,6 +1228,8 @@ mod tests {
             "pm_project_evidence",
             "project_readiness",
             "task_flow_observations",
+            "local_planning",
+            "optional_task_pr",
         ] {
             sqlite.apply_migration_for_test(name).unwrap();
         }

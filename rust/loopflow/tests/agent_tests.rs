@@ -326,7 +326,7 @@ while read -r line; do :; done
     );
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     let agents = db.prepare(
-        "SELECT id,agent_session_id,parent_lf_process_id,completed_at,spawn_state FROM processes WHERE kind='agent' ORDER BY provider_generation"
+        "SELECT id,agent_session_id,parent_lf_process_id,completed_at,spawn_state FROM processes WHERE kind='agent' ORDER BY rowid"
     ).unwrap().query_map([], |row| Ok((
         row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?,
         row.get::<_, Option<i64>>(3)?, row.get::<_, String>(4)?,

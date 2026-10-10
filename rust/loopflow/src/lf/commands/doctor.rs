@@ -730,7 +730,7 @@ mod tests {
             parent_lf_process_id: None,
             via_agent: Some(false),
             caller_session_id: None,
-            caller_provider_generation: None,
+            caller_agent_process_lfid: None,
             command: None,
             repo: Some("/src/loopflow".into()),
             cwd: None,

@@ -550,10 +550,10 @@ fn ledger_insert(
             .agent_caller
             .as_ref()
             .map(|caller| caller.session_id.clone()),
-        caller_provider_generation: context
+        caller_agent_process_lfid: context
             .agent_caller
             .as_ref()
-            .map(|caller| caller.provider_generation),
+            .and_then(|caller| caller.agent_process_lfid.clone()),
         command: context.command.clone(),
         repo: context.repo.clone(),
         cwd: Some(repo_root.display().to_string()),

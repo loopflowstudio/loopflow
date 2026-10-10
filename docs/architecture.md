@@ -218,15 +218,15 @@ Sessions; explicit filters expose headless and completed history. Large captured
 payloads remain files, but readers select and page rows before opening them.
 
 Connect uses the live AgentProcess when possible. Passive display acquires no claim.
-Transferring the conversation attachment revokes the old client's ability to start
+Transferring the attachment revokes the old client's ability to start
 or steer turns and mutate Session state, including queued writes. It does not
-replace the provider generation or interrupt an existing turn. Client replacement
-leaves the AgentProcess alive and never authorizes killing a shared AgentProcess
-for one thread. AgentProcess PID, client PID and conversation attachment are distinct.
+replace the AgentProcess or interrupt an existing turn. Client replacement
+leaves the AgentProcess alive and never authorizes killing a shared one
+for one thread. AgentProcess PID, client PID and attached LfProcess are distinct.
 
 Process ancestry records the actual lf caller. A direct child names its parent's
 Process; an agent-issued child also records `via_agent` and LfSession provenance.
-The provider's generation resolves to the current attachment at child admission.
+The provider's AgentProcess resolves to its attached LfProcess at child admission.
 A delayed command from a replaced provider retains historical provenance; old
 Process parents are never rewritten. Causal ancestry grants no control authority.
 

@@ -19,7 +19,7 @@ use super::SqliteStore;
 
 pub(super) const PROCESS_SELECT: &str =
     "SELECT e.id,e.trace_id,e.parent_lf_process_id,e.via_agent,e.caller_session_id,
-    e.caller_provider_generation,e.command,e.repo,e.cwd,
+    e.caller_agent_process_id,e.command,e.repo,e.cwd,
     e.started_at,e.completed_at,e.outcome,e.exit_code,e.signal,e.error,e.pid,e.kind,e.agent_session_id,e.os_started_at FROM processes e";
 
 pub(super) fn read_process(row: &rusqlite::Row<'_>) -> rusqlite::Result<LfProcess> {
@@ -36,7 +36,7 @@ pub(super) fn read_process(row: &rusqlite::Row<'_>) -> rusqlite::Result<LfProces
         parent_lf_process_id: row.get(2)?,
         via_agent: row.get(3)?,
         caller_session_id: row.get(4)?,
-        caller_provider_generation: row.get(5)?,
+        caller_agent_process_id: row.get(5)?,
         command: row.get(6)?,
         repo: row.get(7)?,
         cwd: row.get(8)?,
@@ -162,16 +162,15 @@ fn attachment_in(
 ) -> StoreResult<Option<SessionAttachment>> {
     let row = conn
         .query_row(
-            "SELECT p.attached_lf_process_id,p.attachment_token,p.provider_generation,p.parent_lf_process_id,p.id
+            "SELECT p.attached_lf_process_id,p.attachment_token,p.parent_lf_process_id,p.id
          FROM agent_sessions s LEFT JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1",
             [session],
             |row| {
                 Ok((
                     row.get::<_, Option<String>>(0)?,
                     row.get::<_, Option<AttachmentToken>>(1)?,
-                    row.get::<_, Option<i64>>(2)?,
-                    row.get::<_, Option<String>>(3)?,
-                    row.get::<_, Option<LfProcessId>>(4)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<LfProcessId>>(3)?,
                 ))
             },
         )
@@ -185,9 +184,8 @@ fn attachment_in(
     Ok(Some(SessionAttachment {
         lf_process_id: row.0.as_deref().map(parse).transpose()?,
         token,
-        agent_process_id: row.4.ok_or(StoreError::NotFound)?,
-        provider_generation: row.2.unwrap_or(0),
-        provider_lf_process_id: parse(row.3.as_deref().ok_or_else(|| {
+        agent_process_id: row.3.ok_or(StoreError::NotFound)?,
+        provider_lf_process_id: parse(row.2.as_deref().ok_or_else(|| {
             StoreError::InvalidData("AgentProcess has no parent LfProcess".into())
         })?)?,
     }))
@@ -215,7 +213,7 @@ fn agent_process_progress_in(
     )?)
 }
 
-/// Require the current attached lf invocation, not merely a retained agent row.
+/// Require the current attached LfProcess, not merely a retained agent row.
 fn require_attachment_in(
     conn: &rusqlite::Connection,
     session: &str,
@@ -247,9 +245,6 @@ pub(super) fn attach_in(
             .map_or_else(LfProcessId::new, |value| value.agent_process_id.clone()),
         lf_process_id: Some(process.clone()),
         token: AttachmentToken::new(),
-        provider_generation: current.as_ref().map_or(1, |value| {
-            value.provider_generation + i64::from(replace_provider)
-        }),
         provider_lf_process_id: current.as_ref().filter(|_| !replace_provider).map_or_else(
             || process.clone(),
             |value| value.provider_lf_process_id.clone(),
@@ -264,11 +259,11 @@ pub(super) fn attach_in(
         }
         tx.execute(
             "INSERT INTO processes(id,kind,trace_id,parent_lf_process_id,command,repo,cwd,
-                started_at,agent_session_id,agent_provider,agent_interactive,provider_generation,spawn_state)
+                started_at,agent_session_id,agent_provider,agent_interactive,spawn_state)
              SELECT ?2,'agent',COALESCE((SELECT trace_id FROM processes WHERE id=?3),?2),
-                ?3,s.provider,s.repo,s.cwd,?4,s.id,s.provider,s.interactive,?5,'reserved' FROM agent_sessions s WHERE s.id=?1",
+                ?3,s.provider,s.repo,s.cwd,?4,s.id,s.provider,s.interactive,'reserved' FROM agent_sessions s WHERE s.id=?1",
             params![session,attached.agent_process_id,process,
-                time::OffsetDateTime::now_utc().unix_timestamp(),attached.provider_generation],
+                time::OffsetDateTime::now_utc().unix_timestamp()],
         )?;
         tx.execute(
             "UPDATE agent_sessions SET agent_process_id=?2 WHERE id=?1",
@@ -957,7 +952,7 @@ impl SqliteStore {
         let parent = current
             .as_ref()
             .filter(|current| {
-                current.provider_generation == caller.provider_generation
+                Some(&current.agent_process_id) == caller.agent_process_id.as_ref()
                     && current.provider_lf_process_id == caller.origin_lf_process_id
             })
             .and_then(|current| current.lf_process_id.as_ref())
@@ -1102,8 +1097,8 @@ mod discovery_tests {
             )
             .unwrap();
             conn.execute("UPDATE processes SET parent_lf_process_id=?2,via_agent=1,caller_session_id='retained-caller',
-                caller_provider_generation=7,outcome='succeeded',
-                completed_at=6,exit_code=0 WHERE id=?1", params![agent,direct]).unwrap();
+                caller_agent_process_id=?3,outcome='succeeded',
+                completed_at=6,exit_code=0 WHERE id=?1", params![agent,direct,parent]).unwrap();
             conn.execute(
                 "UPDATE processes SET outcome='interrupted',completed_at=7,exit_code=130
                 WHERE id=?1",
@@ -1142,7 +1137,7 @@ mod discovery_tests {
             success.caller_session_id.as_deref(),
             Some("retained-caller")
         );
-        assert_eq!(success.caller_provider_generation, Some(7));
+        assert_eq!(success.caller_agent_process_id.as_ref(), Some(&parent));
         assert_eq!(success.via_agent, Some(true));
         assert_eq!(page.entries[0].signal, None);
         for (outcome, expected) in [
@@ -1692,7 +1687,7 @@ mod attachment_tests {
             .unwrap();
         assert_eq!(first.lf_process_id, third.lf_process_id);
         assert_eq!(first.provider_lf_process_id, third.provider_lf_process_id);
-        assert_eq!(first.provider_generation, third.provider_generation);
+        assert_eq!(first.agent_process_id, third.agent_process_id);
         assert_ne!(first.token, third.token);
         assert_eq!(
             store.session_connection("conversation").unwrap(),
@@ -1824,12 +1819,64 @@ mod attachment_tests {
             )
             .unwrap();
         assert_eq!(exit, before[0].0);
+        // Only the current generation has a record. Earlier generations stay
+        // unknown, and the released counters remain beside them as history.
+        let agent: String = conn
+            .query_row(
+                "SELECT agent_process_id FROM agent_sessions WHERE id='live'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let identities = |sql: &str| {
+            conn.prepare(sql)
+                .unwrap()
+                .query_map([], |row| {
+                    Ok((row.get::<_, Option<String>>(0)?, row.get::<_, i64>(1)?))
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap()
+        };
+        let expected = vec![(Some(agent.clone()), 3), (None, 2)];
+        assert_eq!(
+            identities(
+                "SELECT agent_process_id,provider_generation FROM session_events
+                 WHERE kind='started' ORDER BY seq"
+            ),
+            expected
+        );
+        assert_eq!(
+            identities(
+                "SELECT caller_agent_process_id,caller_provider_generation FROM processes
+                 WHERE caller_session_id='live' ORDER BY started_at DESC"
+            ),
+            expected
+        );
+        let reading: Option<String> = conn
+            .query_row(
+                "SELECT agent_process_id FROM session_activity WHERE session_id='live'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(reading, Some(agent));
         let violations: i64 = conn
             .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
                 row.get(0)
             })
             .unwrap();
         assert_eq!(violations, 0);
+        for table in ["agent_sessions", "session_activity"] {
+            let columns = conn
+                .prepare(&format!("PRAGMA table_info({table})"))
+                .unwrap()
+                .query_map([], |row| row.get::<_, String>(1))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            assert!(!columns.iter().any(|column| column == "provider_generation"));
+        }
     }
     #[test]
     fn detached_and_replaced_agents_remain_in_the_process_inventory() {

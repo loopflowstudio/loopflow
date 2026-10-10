@@ -375,17 +375,17 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
             serde_json::from_slice(&std::fs::read(home.path().join("resumed.caller")).unwrap())
                 .unwrap();
         assert_eq!(caller.session_id, id);
-        let recorded: (i64, String) = rusqlite::Connection::open(home.path().join("loopflow.db"))
+        let recorded: (Option<loopflow::id::LfProcessId>, String) = rusqlite::Connection::open(home.path().join("loopflow.db"))
             .unwrap()
             .query_row(
-                "SELECT p.provider_generation,p.parent_lf_process_id FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1",
+                "SELECT p.id,p.parent_lf_process_id FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1",
                 [id],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
         assert_eq!(
             (
-                caller.provider_generation,
+                caller.agent_process_id,
                 caller.origin_lf_process_id.to_string()
             ),
             recorded
@@ -772,8 +772,8 @@ fn waiting_lists_only_conversations_waiting_on_a_person() {
             .claim_session_attachment(id, None, &parent, true)
             .unwrap();
         db.execute(
-            "INSERT INTO session_activity(session_id,attachment_token,provider_generation,observed_at,open_tools,pending_input,yielded)
-             SELECT s.id,p.attachment_token,p.provider_generation,unixepoch(),1,?2,0 FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1",
+            "INSERT INTO session_activity(session_id,attachment_token,agent_process_id,observed_at,open_tools,pending_input,yielded)
+             SELECT s.id,p.attachment_token,p.id,unixepoch(),1,?2,0 FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1",
             rusqlite::params![id, pending],
         )
         .unwrap();
@@ -1584,8 +1584,8 @@ fn program_status_cli_observes_waiting_without_completing_work() {
         [&lf_process_id],
     )
     .unwrap();
-    // A native conversation needs no attachment claim for passive display.
-    let generation = "0".to_string();
+    // A native conversation needs no lf attachment for passive display: the
+    // reading reports no AgentProcess, so the observer names none.
     let mut observer = Child(
         command(
             home.path(),
@@ -1595,8 +1595,6 @@ fn program_status_cli_observes_waiting_without_completing_work() {
                 &id,
                 "--terminal",
                 "fixture-pane",
-                "--generation",
-                &generation,
             ],
         )
         .stdin(Stdio::piped())
@@ -1697,8 +1695,6 @@ fn program_status_cli_observes_waiting_without_completing_work() {
             &id,
             "--terminal",
             "fixture-pane",
-            "--generation",
-            &generation,
         ],
     );
     assert!(!stale.status.success());

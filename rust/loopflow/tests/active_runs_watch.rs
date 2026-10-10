@@ -121,16 +121,16 @@ fn watch_updates_and_releases_only_its_reader_on_eof_or_closed_stdout() {
     )
     .unwrap();
     // Membership comes from the recorded AgentProcess, not the client receipt.
-    let agent = loopflow::id::ProcessLfid::new();
+    let agent = loopflow::id::LfProcessId::new();
     db.execute(
-        "INSERT INTO processes(lfid,trace_id,kind,agent_session_id,started_at,pid,os_started_at,
+        "INSERT INTO processes(id,trace_id,kind,agent_session_id,started_at,pid,os_started_at,
             agent_provider,agent_interactive,provider_generation,spawn_state)
          VALUES(?1,?1,'agent',?2,?3,?4,?3,'cat',1,1,'spawn_requested')",
         rusqlite::params![agent, id, client_started, client.0.id()],
     )
     .unwrap();
     db.execute(
-        "UPDATE agent_sessions SET agent_process_lfid=?2 WHERE id=?1",
+        "UPDATE agent_sessions SET agent_process_id=?2 WHERE id=?1",
         rusqlite::params![id, agent],
     )
     .unwrap();
@@ -153,7 +153,7 @@ fn watch_updates_and_releases_only_its_reader_on_eof_or_closed_stdout() {
     let snapshot = next_ready(&frames, 1);
     assert_eq!(snapshot.sessions[0].id.as_str(), id);
     db.execute(
-        "UPDATE processes SET completed_at=?2,spawn_state='exited' WHERE lfid=?1",
+        "UPDATE processes SET completed_at=?2,spawn_state='exited' WHERE id=?1",
         rusqlite::params![agent, client_started],
     )
     .unwrap();

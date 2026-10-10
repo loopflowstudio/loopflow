@@ -404,15 +404,11 @@ reacquire after dropping the parent's shared handle. Parent death and elapsed
 wait grant neither mutation nor deletion authority. Main-reset/stash helpers can
 replace a held lock inode; explicit source selection avoids that failure class.
 
-Same-Home interruption/overlap proofs and exact commits remain at
-`c418953634bd101f51878d2be2b40fb3facafabd:wave/infrastructure/MEMORY.md`,
-this heading. They preserve ownership, frozen coverage, failure and child-held
-locks, but prove no configured automatic settlement.
-
-PR #1457 merged installer isolation: candidate preflight and public installer
-smoke use disposable Linux containers, checking selected CLI bytes instead of
-the entry gate. Native macOS smoke stays separate. Prior simulated checks prove
-neither container/public acceptance nor automatic settlement.
+Historical same-Home overlap/interruption proofs and #1457's installer-isolation
+boundary remain at `30a4d48c8:wave/infrastructure/MEMORY.md`, this heading and its
+linked receipts. They preserve due ownership, candidate, uncertain publication,
+caller edits and child-held leases; simulated passes establish neither public
+container/macOS acceptance nor configured automatic settlement.
 
 October 6 scheduled receipt cron_a4b8b11b2a534bf99d183e677f2a6871 failed after
 recovery cron_5d930c31c7ae4a118f6b93774496991c passed continuity but the scorecard
@@ -889,9 +885,9 @@ Wave learning stays with its identified owner, never miscellaneous .lf notes.
 
 ## Prompt reduction boundary (2026-09-24)
 
-`719226ef4:wave/infrastructure/MEMORY.md` retains the evidence and LOO-287's open
-proof. Intelligence owns prompt assembly; identity, eligibility and consumed launch
-evidence remain separate.
+LOO-287's open proof and Intelligence ownership of assembly remain at
+`7b28ab1ca:wave/infrastructure/MEMORY.md`, this heading. Identity, eligibility
+and consumed launch evidence stay separate.
 
 ## Installation and command scope (curated 2026-10-02)
 
@@ -914,10 +910,9 @@ unselected; a phase alone is not durable advancement evidence.
 
 ## Installation and checkout closure (LOO-292, 2026-10-04)
 
-Jack Heart closed LOO-292 on machine evidence; proofs and unresolved cadence/app
-checks: `86d0e5e6a2:wave/infrastructure/MEMORY.md`, this heading. Install owns
-artifacts, sync owns checkouts. Reload stopped unexplained redundant downloads;
-reinstall does not heal a truncated entry gate.
+Jack Heart closed LOO-292 on machine evidence; remaining cadence/app checks and
+recovery lessons: `7b28ab1ca:wave/infrastructure/MEMORY.md`, this heading.
+Install owns artifacts; sync owns checkouts. Reinstall cannot heal a truncated gate.
 
 ## Shipped history
 
@@ -997,29 +992,34 @@ judgments, never inferred completion. Preserve unrelated provider associations;
 ambiguous moves remain diagnoses. Standing frontier plans need not acquire an
 invented completion date. No fourth user-facing planning noun was selected.
 
-## Earlier follow-ups (reselect through the accepted chapter)
+## Earlier follow-ups
 
-Unselected suggestions and #818's resolved work: `adf3f9e4b:wave/infrastructure/MEMORY.md`,
-this heading. Archived proposals authorize no work. Jack Heart's July 6 “up/down
-5ths” referent remains unresolved.
+Unselected work and Jack Heart's unresolved July 6 “up/down 5ths” referent:
+`7b28ab1ca:wave/infrastructure/MEMORY.md`, this heading. Archives authorize no work.
 
 ## Direct invocation and large inputs (curated 2026-10-08)
 
-Jack Heart's LOO-429 decision supersedes 428's argv/fixed-system constraints:
-all assembled context in one system/instructions file, short user trigger, no
-split, fallback or lf-side refusal wording. PR #1498 owns transport/oversized
-acceptance. Claude readback proves neither plan mode, cmux nor the combined
-candidate; shared transport proves no native resume. Jack authorized 429 landing
-despite gaps, then 428 queue/landing October 8.
+Jack Heart's October 9–10 LOO-444 decisions supersede LOO-429's all-system
+assembly: fixed additions per surface/reply-settings/participant profile; first
+turn skill, request, tagged clipboard. Terminal argv stays, with one size refusal
+naming bytes/cap; no alternative transport. Conversation context rereads checkout
+Wave/ancestor files and scratch, not SQLite. Small files stay whole; marked start
+excerpts name complete source/size. Excerpt interpretation awaits Jack's review;
+shrinking memory is undecided. Reserve listing and compact-only active skill;
+overflow pointers remain proposed UX. Plan: `scratch/what-goes-in-system-prompt.md`.
 
-Jack approved setup-free Codex coexistence: temporary native capture profile,
-bounded wrapper-trust parser probe, unchanged saved config/trust. Normal exit
-removes the profile; interruption may leave it unselected. Codex 0.160.1 composes
-profile/CLI hooks; two CLI tables replace each other; config bypass is ignored.
-Native PTYs prove capture, launch hooks and reconnect. Fresh reconnect hooks
-are absent even without lf; earlier assertions reread launch receipts. Actual
-cmux/installation remain unproved; preserve live Sessions. Launch receipts prove
-neither fresh reconnect hooks nor host tracking.
+Inlining, the constant trigger and Codex base overrides are removed.
+Capture/context hooks compose at terminal spawn, replacing the temporary profile. Budget the fully rendered 10,000 UTF-8
+bytes: native Unicode spill retained endpoint markers while losing interior text,
+so marker-only checks are insufficient. `6b8f13e3f` fixes Codex skill-before-request order, proving construction only.
+Jack Heart approved #1518 after clipboard/excerpt fixes (`96ee2917`), reporting
+Codex headless and Claude headless/interactive branch launches with guide, whole
+scratch, marked 50 KB excerpt and request; the earlier failure was sandboxed.
+Interactive Codex, compaction, resume and OpenCode remain unverified,
+nonblocking. Main #1521's checkout reader replaces the duplicate. No installed
+acceptance follows; cmux/pointer judgment remains with demo/review.
+LOO-428/429 history and proof limits:
+`30a4d48c8:wave/infrastructure/MEMORY.md`, this heading.
 
 Flow output prints position/name and messages; verbose adds accounting/INFO,
 never prompts. Started commits with Flow registration. Jack removed `--tui`

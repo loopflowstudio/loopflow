@@ -560,7 +560,7 @@ fn context_report_keeps_unknown_sources_distinct_from_zero() {
     );
     let steers = &report.steps[0].sources[4];
     assert_eq!(steers.source, ContextSource::Steers);
-    assert_eq!((steers.count, steers.over_budget), (Some(384), true));
+    assert_eq!((steers.count, steers.over_budget), (Some(384), false));
     assert!(report.steps[1]
         .sources
         .iter()

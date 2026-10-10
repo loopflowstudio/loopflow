@@ -80,11 +80,10 @@ fn session_request(context: &crate::trace::PreparedTurnContext) -> Option<&str> 
     }
     // Library callers have unassembled, separate system/task prompts.
     let task = &context.task;
-    (task.text != crate::prompt::INITIAL_TURN_PROMPT
-        && task
-            .assets
-            .iter()
-            .all(|asset| asset.kind == ContextAssetKind::Assembly))
+    (task
+        .assets
+        .iter()
+        .all(|asset| asset.kind == ContextAssetKind::Assembly))
     .then_some(task.text.as_str())
 }
 
@@ -167,12 +166,10 @@ mod tests {
     use super::sanitize_for_branch;
 
     #[test]
-    fn generated_titles_use_work_and_never_the_system_trigger() {
+    fn generated_titles_use_work_when_the_turn_has_no_request() {
         let cwd = std::path::Path::new("/repo/terminal-titles");
-        let context = crate::trace::PreparedTurnContext::from_prompts(
-            "# Loopflow operating guide",
-            crate::prompt::INITIAL_TURN_PROMPT,
-        );
+        let context =
+            crate::trace::PreparedTurnContext::from_prompts("# Loopflow operating guide", "");
         assert_eq!(
             super::generated_session_title(
                 Some(&context),

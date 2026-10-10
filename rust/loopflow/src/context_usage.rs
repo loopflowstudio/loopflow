@@ -96,8 +96,6 @@ impl ContextSource {
         match self {
             Self::Memory => Some(BudgetKey::MemoryTokens),
             Self::Scratch => Some(BudgetKey::ScratchTokens),
-            // Steers ride inside the goal message and share its budget.
-            Self::Goal | Self::Steers => Some(BudgetKey::GoalTokens),
             _ => None,
         }
     }
@@ -138,8 +136,6 @@ pub struct StepContext {
     pub sources: Vec<SourceUsage>,
     /// Everything Loopflow assembled and submitted, in cl100k tokens.
     pub assembled_tokens: Option<u64>,
-    pub assembled_budget_tokens: Option<u64>,
-    pub over_assembled_budget: bool,
     /// Input the provider reported for its first and largest requests.
     pub first_request_tokens: Option<u64>,
     pub peak_request_tokens: Option<u64>,
@@ -230,9 +226,6 @@ fn flag(step: &mut StepContext, budgets: &ContextBudgets) {
             usage.over_budget = usage.tokens.is_some_and(|tokens| tokens > limit);
         }
     }
-    let limit = budgets.limit(BudgetKey::InputTokens) as u64;
-    step.assembled_budget_tokens = Some(limit);
-    step.over_assembled_budget = step.assembled_tokens.is_some_and(|tokens| tokens > limit);
 }
 
 // -- Capture reading -----------------------------------------------------------
@@ -481,8 +474,6 @@ impl Measured {
             observed_at: history.observed_at,
             sources,
             assembled_tokens,
-            assembled_budget_tokens: None,
-            over_assembled_budget: false,
             first_request_tokens: self.first_request,
             peak_request_tokens: self.peak_request,
             gaps: self.gaps,
@@ -523,10 +514,8 @@ pub fn render_step(step: &StepContext) -> String {
             detail.join("; ")
         ));
     }
-    let budget =
-        budget_note(step.assembled_budget_tokens, step.over_assembled_budget).unwrap_or_default();
     lines.push(format!(
-        "  {:<14} {:>10}  {budget}",
+        "  {:<14} {:>10}",
         "assembled",
         cell(step.assembled_tokens)
     ));
@@ -578,7 +567,7 @@ pub fn render_report(report: &ContextReport) -> String {
         }
         line.push_str(&format!(
             "  {:>WIDTH$}  {:>WIDTH$}  {}",
-            flagged(step.assembled_tokens, step.over_assembled_budget),
+            cell(step.assembled_tokens),
             cell(step.peak_request_tokens),
             crate::lf::commands::util::short_id(&step.input)
         ));
@@ -835,14 +824,13 @@ mod tests {
                 .unwrap();
         super::flag(&mut step, &budgets);
         let steers = &step.sources[4];
-        assert!(steers.over_budget);
-        assert_eq!(steers.budget_tokens, Some(50));
-        assert!(step.over_assembled_budget);
+        assert!(!steers.over_budget);
+        assert_eq!(steers.budget_tokens, None);
         assert!(!step.sources[1].over_budget);
         assert!(step
             .gaps
             .iter()
             .any(|gap| gap.contains("without recorded count")));
-        assert!(super::render_step(&step).contains("OVER budget 50"));
+        assert!(!super::render_step(&step).contains("OVER budget"));
     }
 }

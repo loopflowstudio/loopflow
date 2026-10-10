@@ -21,6 +21,11 @@ pub fn run(selector: &str) -> Result<()> {
 fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
     let (_, source) = crate::session_record::resolve_manifest(home, selector)
         .with_context(|| format!("cannot read capture {selector}"))?;
+    anyhow::ensure!(
+        source.surface == "headless",
+        "capture {} did not record a replayable headless request",
+        source.artifact_key
+    );
     let mut request = source.process.ok_or_else(|| {
         anyhow!(
             "capture {} did not record a replayable headless request",
@@ -45,6 +50,7 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
     }
     let mut config = AgentConfig {
         system_prompt: request.system_prompt.clone(),
+        conversation_context: request.conversation_context.clone(),
         task_prompt: request.task_prompt.clone(),
         skill_invocation: request.skill_invocation.clone(),
         agent: Some(request.agent.clone()),
@@ -158,6 +164,7 @@ mod tests {
         let registry = home.path().join("loopflow.db");
 
         let request = AgentProcessRequest {
+            conversation_context: None,
             system_prompt: "recorded system".to_string(),
             task_prompt: "recorded task".to_string(),
             skill_invocation: None,

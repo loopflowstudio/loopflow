@@ -159,6 +159,13 @@ impl OpenCodeHarness {
             if config.write_scope == AgentWriteScope::Worktree {
                 command.env("OPENCODE_CONFIG_CONTENT", opencode_worktree_config());
             }
+            if let Some(context) = &config.conversation_context {
+                super::context::configure_opencode(
+                    command.as_std_mut(),
+                    context,
+                    &crate::agent::system_prompt_with_structured_replies(config),
+                )?;
+            }
             super::configure_vendor_std_env(command.as_std_mut())?;
             let base_url = format!("http://127.0.0.1:{port}");
             store.record_agent_process_endpoint(session, attachment, &base_url)?;
@@ -485,7 +492,7 @@ impl Harness for OpenCodeHarness {
         }
         let mut turn_guard = TurnInProgressGuard::new(self.turn_in_progress.clone());
 
-        self.submit_prompt(build_turn_payload(&turn_content, config, first_turn))
+        self.submit_prompt(build_turn_payload(&turn_content, config))
             .await?;
 
         self.should_seed_prompt = false;
@@ -512,7 +519,7 @@ impl Harness for OpenCodeHarness {
         };
 
         match self
-            .submit_prompt(build_turn_payload(text, config, false))
+            .submit_prompt(build_turn_payload(text, config))
             .await
         {
             Ok(provider_turn_id) => SendCurrentOutcome::Sent { provider_turn_id },
@@ -771,14 +778,14 @@ fn build_turn_content(content: &str, config: &AgentConfig, first_turn: bool) -> 
     }
 }
 
-fn build_turn_payload(content: &str, config: &AgentConfig, first_turn: bool) -> Value {
+fn build_turn_payload(content: &str, config: &AgentConfig) -> Value {
     let mut payload = json!({
         "parts": [
             { "type": "text", "text": content }
         ]
     });
 
-    if first_turn && !config.system_prompt.trim().is_empty() {
+    if !config.system_prompt.trim().is_empty() {
         payload["system"] = Value::String(config.system_prompt.trim().to_string());
     }
 
@@ -1413,6 +1420,19 @@ mod tests {
     }
 
     #[test]
+    fn every_owned_turn_keeps_the_same_additive_instructions() {
+        let config = AgentConfig {
+            system_prompt: "Fixed additions.".into(),
+            ..Default::default()
+        };
+        let first = build_turn_payload("initial request", &config);
+        let next = build_turn_payload("follow-up after compaction", &config);
+        assert_eq!(first["system"], "Fixed additions.");
+        assert_eq!(next["system"], first["system"]);
+        assert_eq!(next["parts"][0]["text"], "follow-up after compaction");
+    }
+
+    #[test]
     fn build_turn_payload_includes_explicit_opencode_model() {
         let payload = build_turn_payload(
             "hello",
@@ -1420,7 +1440,6 @@ mod tests {
                 agent: Some("opencode:moonshotai/kimi-k2".to_string()),
                 ..Default::default()
             },
-            false,
         );
         assert_eq!(
             payload.get("model"),
@@ -1439,7 +1458,6 @@ mod tests {
                 agent: Some("claude:sonnet".to_string()),
                 ..Default::default()
             },
-            false,
         );
         assert!(payload.get("model").is_none());
     }
@@ -1452,7 +1470,6 @@ mod tests {
                 agent: Some("opencode".to_string()),
                 ..Default::default()
             },
-            false,
         );
         assert!(payload.get("model").is_none());
     }
@@ -1473,6 +1490,7 @@ mod tests {
             chrome: false,
             session_attachment: None,
             system_prompt: String::new(),
+            conversation_context: None,
             task_prompt: String::new(),
             skill_invocation: None,
             agent: Some("opencode".to_string()),

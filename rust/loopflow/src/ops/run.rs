@@ -395,21 +395,10 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let _home =
             crate::lf::commands::flow::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
-        let store =
-            crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join("loopflow.db"))
-                .unwrap();
         let tmp = loopflow_test_support::TestRepo::new();
         std::fs::create_dir_all(tmp.path().join("wave/release")).unwrap();
         let goal = "---\ncrons: []\n---\n## Objective\nShip a reliable release.\n\n## Bounds\nKeep rollback available.\n";
         std::fs::write(tmp.path().join("wave/release/GOAL.md"), goal).unwrap();
-        store
-            .ensure_wave(
-                &crate::repository::CanonicalRepo::discover(tmp.path())
-                    .unwrap()
-                    .to_string(),
-                "release",
-            )
-            .unwrap();
         let seed = super::render_wave_context(tmp.path(), "release", "");
         for message in [None, Some(seed)] {
             let prepared = crate::prompt::process::prepare_process_prompt(
@@ -428,15 +417,17 @@ mod tests {
                 },
             )
             .unwrap();
-            assert_eq!(
-                prepared.prompt.matches("Ship a reliable release.").count(),
-                1
-            );
-            assert_eq!(
-                prepared.prompt.matches("Keep rollback available.").count(),
-                1
-            );
-            assert!(prepared.config.system_prompt.contains(goal));
+            let block = prepared
+                .config
+                .conversation_context
+                .as_ref()
+                .unwrap()
+                .block(crate::context_block::ContextMoment::Start)
+                .unwrap()
+                .text;
+            assert_eq!(block.matches("Ship a reliable release.").count(), 1);
+            assert_eq!(block.matches("Keep rollback available.").count(), 1);
+            assert!(!prepared.config.system_prompt.contains(goal));
             let context = crate::lf::commands::run::attributed_context(
                 &prepared.components,
                 &prepared.config.system_prompt,
@@ -455,7 +446,7 @@ mod tests {
                         asset.source_path.as_deref() == Some("wave/release/GOAL.md")
                     })
                     .count(),
-                1
+                0
             );
             assert!(context.decisions.iter().any(|decision| {
                 decision.source_path.as_deref() == Some("wave/release/GOAL.md")
@@ -574,7 +565,13 @@ mod tests {
                 ..Default::default()
             })
             .unwrap();
-            let prompt = crate::prompt::format_prompt(&components);
+            // Source discovery preserves ancestry; diagnostics no longer inline bodies.
+            let prompt = components
+                .docs
+                .iter()
+                .map(|doc| doc.content.as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
             let ancestor = if address.starts_with("product/") {
                 "Product memory"
             } else {

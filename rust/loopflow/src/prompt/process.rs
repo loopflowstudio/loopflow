@@ -6,8 +6,8 @@ use crate::error::CoreError;
 use crate::flow::Skill;
 use crate::prompt::structured_reply::{structured_replies_for_context, ClientContext};
 use crate::prompt::{
-    drop_duplicate_docs, format_prompt, gather_context, Document, DocumentSource,
-    GatherContextOpts, PromptComponents, RelatedRepoContext, Surface, INITIAL_TURN_PROMPT,
+    drop_duplicate_docs, format_first_turn, gather_context, Document, DocumentSource,
+    GatherContextOpts, PromptComponents, RelatedRepoContext, Surface,
 };
 
 /// Optional per-source overrides for context gathering.
@@ -28,7 +28,7 @@ pub struct ProcessPromptInput {
     pub docs: Vec<String>,
     pub wave: Option<String>,
     pub message: Option<String>,
-    /// Exact invocation arguments; Work direction stays in `message`.
+    /// Exact invocation arguments; captured Work direction stays in `references`.
     pub skill_arguments: String,
     pub no_loopflow: bool,
     pub agent: Option<String>,
@@ -37,6 +37,8 @@ pub struct ProcessPromptInput {
     pub yolo_mode: bool,
     pub source_overrides: ContextSourceOverrides,
     pub summary: Option<String>,
+    /// Complete captured context, listed separately from the live request.
+    pub references: Vec<(String, String)>,
     pub client_context: ClientContext,
     /// Related repos resolved from the edge graph.
     pub related_repos: Vec<RelatedRepoContext>,
@@ -45,11 +47,9 @@ pub struct ProcessPromptInput {
 /// Canonical Process preparation output.
 #[derive(Debug, Clone)]
 pub struct PreparedProcessPrompt {
-    pub budget_report: crate::prompt::context_budget::ContextBudgetReport,
     pub config: AgentConfig,
     pub components: PromptComponents,
     pub deduplication_decisions: Vec<crate::trace::ContextDecision>,
-    pub prompt: String,
 }
 
 /// Build context + Process config from canonical Process preparation input.
@@ -57,21 +57,6 @@ pub fn prepare_process_prompt(
     config: &Config,
     input: ProcessPromptInput,
 ) -> Result<PreparedProcessPrompt, CoreError> {
-    let prepared = preview_process_prompt(config, input)?;
-    prepared.budget_report.check_input()?;
-    Ok(prepared)
-}
-
-/// Assemble a preview even when its total input would prevent launch.
-pub(crate) fn preview_process_prompt(
-    config: &Config,
-    input: ProcessPromptInput,
-) -> Result<PreparedProcessPrompt, CoreError> {
-    let budgets = crate::prompt::context_budget::ContextBudgets::resolve(
-        config,
-        &input.repo_root,
-        input.wave.as_deref(),
-    )?;
     let ProcessPromptInput {
         repo_root,
         skill,
@@ -88,6 +73,7 @@ pub(crate) fn preview_process_prompt(
         yolo_mode,
         source_overrides,
         summary,
+        references,
         client_context,
         related_repos,
     } = input;
@@ -131,28 +117,13 @@ pub(crate) fn preview_process_prompt(
         });
     }
 
-    let original_system = format_prompt(&components);
-    let mut budget_report = crate::prompt::context_budget::bound_context(&mut components, budgets)?;
-    // Plain installed skills need no instructions for maintaining absent Work
-    // context. Keep enforcing budgets and disclose any managed context or excerpts.
-    if !components.is_standalone_skill()
-        || !components.budget_decisions.is_empty()
-        || components.docs.iter().any(|doc| {
-            matches!(
-                doc.source,
-                DocumentSource::Scratch | DocumentSource::Wave | DocumentSource::RepoMemory
-            )
-        })
-    {
-        budget_report.measure_input(
-            &original_system,
-            INITIAL_TURN_PROMPT,
-            &format_prompt(&components),
-            INITIAL_TURN_PROMPT,
-        );
-        components.budget_notice = Some(format!("{}\nTotal usage above is before this budget notice and provider reply guidance; the launch ceiling includes both.", budget_report.render()));
-    }
-    let prompt = format_prompt(&components);
+    components
+        .summaries
+        .extend(references.into_iter().map(|(path, content)| Document {
+            path,
+            content,
+            source: DocumentSource::Summary,
+        }));
 
     let agent = resolve_agent(agent.as_deref(), components.skill.as_ref(), config);
     validate_agent_policy(&agent)?;
@@ -170,24 +141,27 @@ pub(crate) fn preview_process_prompt(
             skill: skill.clone(),
             arguments: skill_arguments.clone(),
         });
-    // Installed skills carry gathered context through their native invocation.
-    // Inline skills and ordinary prompts use the complete system context file.
-    let (system_prompt, task_prompt) = if skill_invocation.is_some() {
-        let mut parts = crate::prompt::format_content_sections(&components);
-        if let Some(message) = components
-            .message
-            .as_deref()
-            .filter(|message| *message != skill_arguments)
-        {
-            parts.push(crate::prompt::render_message(message));
-        }
-        (
-            crate::prompt::format_system_sections(&components).join("\n\n"),
-            parts.join("\n\n"),
-        )
+    let system_prompt = crate::prompt::format_system_sections(&components).join("\n\n");
+    let task_prompt = if skill_invocation.is_some() {
+        [
+            components
+                .message
+                .as_deref()
+                .filter(|message| *message != skill_arguments)
+                .map(crate::prompt::render_message),
+            components
+                .clipboard
+                .as_deref()
+                .map(crate::prompt::format_clipboard),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join("\n\n")
     } else {
-        (prompt.clone(), INITIAL_TURN_PROMPT.to_string())
+        format_first_turn(&components)
     };
+    let conversation_context = Some(crate::context_block::ContextDelivery::prepare(&components)?);
     let action_style = components
         .skill
         .as_ref()
@@ -196,6 +170,7 @@ pub(crate) fn preview_process_prompt(
         chrome: false,
         session_attachment: None,
         system_prompt,
+        conversation_context,
         task_prompt,
         skill_invocation,
         agent: Some(agent),
@@ -215,22 +190,10 @@ pub(crate) fn preview_process_prompt(
         )]
         .into(),
     };
-    let effective_system = crate::agent::system_prompt_with_structured_replies(&launch);
-    budget_report.measure_input(
-        &original_system,
-        INITIAL_TURN_PROMPT,
-        &effective_system,
-        &launch.task_input_for_budget(),
-    );
-    // The source snapshot is stable; the total includes this notice and provider guidance.
-    // The notice labels its pre-feedback total; the report measures submitted bytes.
-
     Ok(PreparedProcessPrompt {
-        budget_report,
         config: launch,
         components,
         deduplication_decisions,
-        prompt,
     })
 }
 
@@ -321,6 +284,17 @@ Test skill body.
         }
     }
 
+    fn conversation(prepared: &super::PreparedProcessPrompt) -> String {
+        prepared
+            .config
+            .conversation_context
+            .as_ref()
+            .unwrap()
+            .block(crate::context_block::ContextMoment::Start)
+            .unwrap()
+            .text
+    }
+
     #[test]
     #[cfg(unix)]
     fn context_delivery_keeps_native_and_symlink_sources_single() {
@@ -339,8 +313,16 @@ Test skill body.
             },
         )
         .unwrap();
-        assert!(!prepared.prompt.contains("Provider-owned instructions."));
-        assert_eq!(prepared.prompt.matches("A shared document.").count(), 1);
+        assert!(!prepared
+            .config
+            .system_prompt
+            .contains("Provider-owned instructions."));
+        assert_eq!(
+            conversation(&prepared)
+                .matches("A shared document.")
+                .count(),
+            1
+        );
         assert!(prepared.deduplication_decisions.iter().any(|decision| {
             decision.source_path.as_deref() == Some("alias.md")
                 && decision.decision == crate::trace::ContextDecisionKind::Deduplicated
@@ -383,16 +365,34 @@ Test skill body.
                 },
             )
             .unwrap();
-            assert_eq!(prepared.prompt.matches(operating.trim()).count(), 1);
             assert_eq!(
-                prepared.prompt.matches("Keep rollback available.").count(),
+                prepared
+                    .config
+                    .system_prompt
+                    .matches(operating.trim())
+                    .count(),
+                usize::from(!no_loopflow)
+            );
+            let context = prepared.config.conversation_context.as_ref().unwrap();
+            let references = context
+                .references
+                .iter()
+                .map(|path| fs::read_to_string(path).unwrap())
+                .collect::<Vec<_>>();
+            assert_eq!(
+                references
+                    .iter()
+                    .filter(|text| text.as_str() == "Keep rollback available.")
+                    .count(),
                 2
             );
-            assert!(prepared
+            assert!(references
+                .iter()
+                .any(|text| text == "Local operating guidance."));
+            assert!(!prepared
                 .config
                 .system_prompt
                 .contains("Local operating guidance."));
-            assert!(prepared.config.system_prompt.contains(operating.trim()));
             assert_eq!(
                 prepared.deduplication_decisions.iter().any(|decision| {
                     decision.kind == crate::trace::ContextAssetKind::OperatingInstructions
@@ -404,276 +404,66 @@ Test skill body.
     }
 
     #[test]
-    fn large_task_launch_stays_within_context_budget_and_preserves_sources() {
+    fn additions_are_identical_when_repository_request_and_skill_change() {
         let _home = crate::journal::TestLedgerGuard::new();
-        use crate::prompt::context_budget::BudgetKey;
-        let goal_tokens = BudgetKey::GoalTokens.default_limit();
-        let input_bytes = BudgetKey::InputBytes.default_limit();
-        let input_tokens = BudgetKey::InputTokens.default_limit();
-        let memory_tokens = BudgetKey::MemoryTokens.default_limit();
-        let scratch_tokens = BudgetKey::ScratchTokens.default_limit();
-        use crate::prompt::count_tokens;
-
-        let tmp = create_repo_fixture();
-        fs::create_dir_all(tmp.path().join("scratch")).unwrap();
-        let evidence =
-            "Retain the observed failure and verify the configured user path.\n".repeat(2_000);
-        fs::create_dir_all(tmp.path().join("wave/infrastructure/release")).unwrap();
-        for wave in ["infrastructure", "infrastructure/release"] {
-            fs::write(tmp.path().join(format!("wave/{wave}/MEMORY.md")), &evidence).unwrap();
-        }
-        for index in 0..14 {
-            fs::write(tmp.path().join(format!("scratch/{index:02}.md")), &evidence).unwrap();
-        }
-        let message = format!(
-            "Task definition\n{}\nLatest direction: preserve the public API",
-            (0..384)
-                .map(|id| format!(
-                    "Comment {id}: {}\n",
-                    "A recorded implementation result. ".repeat(100)
-                ))
-                .collect::<String>()
-        );
-        assert!(message.len() > 1_048_576);
-        let store = crate::store::sqlite::SqliteStore::new(
-            &crate::store::database_path_from_env().unwrap(),
-        )
-        .unwrap();
-        store
-            .ensure_wave(
-                &crate::repository::CanonicalRepo::discover(tmp.path())
-                    .unwrap()
-                    .to_string(),
-                "infrastructure/release",
+        let repo = create_repo_fixture();
+        fs::create_dir(repo.path().join("scratch")).unwrap();
+        let prepare = |agent: &str, skill: Option<&str>, request: &str| {
+            prepare_process_prompt(
+                &default_test_config(),
+                ProcessPromptInput {
+                    repo_root: repo.path().into(),
+                    agent: Some(agent.into()),
+                    skill: skill.map(str::to_owned),
+                    message: Some(request.into()),
+                    references: vec![("Task brief".into(), "Jack requested a stable API".into())],
+                    ..Default::default()
+                },
             )
-            .unwrap();
-        let prepared = prepare_process_prompt(
-            &default_test_config(),
-            ProcessPromptInput {
-                repo_root: tmp.path().to_path_buf(),
-                skill: Some("test".into()),
-                wave: Some("infrastructure/release".into()),
-                message: Some(message.clone()),
-                surface: Surface::Headless,
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        let config = &prepared.config;
-        assert_eq!(config.task_prompt, INITIAL_TURN_PROMPT);
-        let bytes = config.system_prompt.len() + config.task_prompt.len();
-        let tokens = count_tokens(&config.system_prompt) + count_tokens(&config.task_prompt);
-        assert!(bytes <= input_bytes, "{bytes}");
-        assert!(tokens <= input_tokens, "{tokens}");
-        assert!(count_tokens(prepared.components.message.as_ref().unwrap()) <= goal_tokens);
-        for path in [
-            "wave/infrastructure/MEMORY.md",
-            "wave/infrastructure/release/MEMORY.md",
-        ] {
-            let memory = prepared
-                .components
-                .docs
-                .iter()
-                .find(|doc| doc.path == path)
-                .unwrap();
-            assert!(count_tokens(&memory.content) <= memory_tokens);
-        }
-        assert!(
-            prepared
-                .components
-                .docs
-                .iter()
-                .filter(|doc| doc.source == DocumentSource::Scratch)
-                .map(|doc| count_tokens(&doc.content))
-                .sum::<usize>()
-                <= scratch_tokens
-        );
-        assert!(config.system_prompt.contains("Task definition"));
-        assert!(config
-            .system_prompt
-            .contains("Latest direction: preserve the public API"));
-        assert!(config.system_prompt.contains("scratch/13.md"));
-        let sources: Vec<_> = fs::read_dir(tmp.path().join(".lf/tmp/context"))
             .unwrap()
-            .collect();
-        assert_eq!(sources.len(), 3);
-        assert_eq!(prepared.components.budget_decisions.len(), 4);
+        };
+        let first = prepare("claude", None, "First request");
+        fs::write(repo.path().join("scratch/huge.md"), "BIG".repeat(70_000)).unwrap();
+        let second = prepare("codex", Some("test"), "Second request");
+        assert_eq!(first.config.system_prompt, second.config.system_prompt);
+        assert!(!second.config.system_prompt.contains("BIG"));
+        assert!(!second.config.task_prompt.contains("Jack requested"));
+        let delivery = second.config.conversation_context.as_ref().unwrap();
+        assert_eq!(
+            fs::read_to_string(&delivery.references[0]).unwrap(),
+            "Jack requested a stable API"
+        );
         assert!(
-            config
-                .system_prompt
-                .find("<lf:file path=\"wave/infrastructure/MEMORY.md\">")
+            delivery
+                .block(crate::context_block::ContextMoment::Start)
                 .unwrap()
-                < config
-                    .system_prompt
-                    .find("<lf:file path=\"wave/infrastructure/release/MEMORY.md\">")
-                    .unwrap()
+                .text
+                .len()
+                <= 10_000
         );
-        let path = sources
-            .iter()
-            .map(|entry| entry.as_ref().unwrap().path())
-            .find(|path| fs::read_to_string(path).unwrap() == message)
-            .unwrap();
-        assert_eq!(fs::read_to_string(&path).unwrap(), message);
-        assert!(config.system_prompt.contains(path.to_str().unwrap()));
-        assert_eq!(
-            fs::read_to_string(tmp.path().join("scratch/00.md")).unwrap(),
-            evidence
-        );
-        eprintln!("384-comment launch: {tokens} tokens, {bytes} bytes");
     }
 
     #[test]
-    fn repository_ancestor_and_selected_wave_memory_share_one_budget() {
-        let _home = crate::journal::TestLedgerGuard::new();
+    fn first_turn_contains_skill_then_exact_request_without_size_reduction() {
         let tmp = create_repo_fixture();
-        let inherited = "Parent decisions and observations.\n".repeat(8_000);
-        let own = "Release decisions and observations.\n".repeat(2_000);
-        fs::write(tmp.path().join("MEMORY.md"), &inherited).unwrap();
-        for (wave, memory) in [
-            ("infrastructure", &inherited),
-            ("infrastructure/delivery", &inherited),
-            ("infrastructure/delivery/release", &own),
-        ] {
-            let directory = tmp.path().join("wave").join(wave);
-            fs::create_dir_all(&directory).unwrap();
-            fs::write(directory.join("MEMORY.md"), memory).unwrap();
-        }
-        let memory_tokens = 6_000;
-        let memory_bytes = 48 * 1024;
-        let config = Config {
-            context_budgets: [
-                (
-                    crate::prompt::context_budget::BudgetKey::MemoryTokens,
-                    memory_tokens,
-                ),
-                (
-                    crate::prompt::context_budget::BudgetKey::MemoryBytes,
-                    memory_bytes,
-                ),
-            ]
-            .into(),
-            ..default_test_config()
-        };
+        let message = "😀 request\r\n".repeat(20_000);
         let prepared = prepare_process_prompt(
-            &config,
+            &default_test_config(),
             ProcessPromptInput {
-                repo_root: tmp.path().to_path_buf(),
-                wave: Some("infrastructure/delivery/release".into()),
+                repo_root: tmp.path().to_owned(),
+                skill: Some("test".into()),
+                message: Some(message.clone()),
                 ..Default::default()
             },
         )
         .unwrap();
-        let memories = &prepared.components.docs;
+        assert_eq!(prepared.config.task_prompt, format!("<lf:skill:test>\nTest skill body.\n\n</lf:skill:test>\n\n<lf:message>\n{message}\n</lf:message>"));
+        assert!(!prepared.config.system_prompt.contains("Test skill body."));
+        assert!(!prepared.config.system_prompt.contains(&message));
         assert_eq!(
-            memories
-                .iter()
-                .map(|doc| doc.path.as_str())
-                .collect::<Vec<_>>(),
-            [
-                "MEMORY.md",
-                "wave/infrastructure/MEMORY.md",
-                "wave/infrastructure/delivery/MEMORY.md",
-                "wave/infrastructure/delivery/release/MEMORY.md",
-            ]
+            prepared.components.message.as_deref(),
+            Some(message.as_str())
         );
-        assert!(memories
-            .iter()
-            .all(|doc| doc.content.contains("excerpt only")));
-        let submitted_tokens: usize = memories
-            .iter()
-            .map(|doc| crate::prompt::count_tokens(&doc.content))
-            .sum();
-        assert!(submitted_tokens <= memory_tokens);
-        assert!(memories.iter().map(|doc| doc.content.len()).sum::<usize>() <= memory_bytes);
-        let usage = &prepared.budget_report.usage[..memories.len()];
-        assert!(usage.iter().map(|entry| entry.token_limit).sum::<usize>() <= memory_tokens);
-        assert!(usage.iter().map(|entry| entry.byte_limit).sum::<usize>() <= memory_bytes);
-        for (doc, entry) in memories.iter().zip(usage) {
-            assert_eq!(entry.source, doc.path);
-            assert_eq!(
-                entry.submitted_tokens,
-                crate::prompt::count_tokens(&doc.content)
-            );
-            assert_eq!(entry.submitted_bytes, doc.content.len());
-            assert!(entry.original_tokens > entry.submitted_tokens);
-        }
-    }
-
-    #[test]
-    fn repository_memory_is_bounded_without_a_selected_wave() {
-        let tmp = create_repo_fixture();
-        let memory = "Repository decisions and observations.\n".repeat(8_000);
-        fs::write(tmp.path().join("MEMORY.md"), &memory).unwrap();
-        let prepared = prepare_process_prompt(
-            &default_test_config(),
-            ProcessPromptInput {
-                repo_root: tmp.path().to_path_buf(),
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        let doc = &prepared.components.docs[0];
-        assert!(
-            crate::prompt::count_tokens(&doc.content)
-                <= crate::prompt::context_budget::BudgetKey::MemoryTokens.default_limit()
-        );
-        assert!(doc.content.contains("excerpt only"));
-        assert_eq!(
-            prepared.components.budget_decisions[0].scope,
-            crate::trace::ContextScope::Repo
-        );
-        assert!(fs::read_dir(tmp.path().join(".lf/tmp/context"))
-            .unwrap()
-            .any(|entry| fs::read_to_string(entry.unwrap().path()).unwrap() == memory));
-    }
-
-    #[test]
-    fn oversized_explicit_instructions_report_local_input_budget() {
-        let tmp = create_repo_fixture();
-        let error = prepare_process_prompt(
-            &default_test_config(),
-            ProcessPromptInput {
-                repo_root: tmp.path().to_path_buf(),
-                resolved_skill: Some(Skill {
-                    source: None,
-                    content: Some("Follow this instruction. ".repeat(100_000)),
-                    ..Skill::named("large")
-                }),
-                ..Default::default()
-            },
-        )
-        .unwrap_err();
-        assert!(error.to_string().contains("exceeds the input budget"));
-    }
-
-    #[test]
-    fn structured_reply_guidance_counts_toward_the_launch_budget() {
-        let tmp = create_repo_fixture();
-        let config = default_test_config();
-        let input = |content: String, has_ui| ProcessPromptInput {
-            repo_root: tmp.path().to_path_buf(),
-            resolved_skill: Some(Skill {
-                source: None,
-                content: Some(content),
-                ..Skill::named("budget")
-            }),
-            client_context: ClientContext {
-                has_ui,
-                compact: false,
-            },
-            ..Default::default()
-        };
-        let baseline = prepare_process_prompt(&config, input(String::new(), false)).unwrap();
-        let overhead = crate::prompt::count_tokens(&baseline.config.system_prompt)
-            + crate::prompt::count_tokens(&baseline.config.task_prompt);
-        let content = " x".repeat(
-            crate::prompt::context_budget::BudgetKey::InputTokens.default_limit() - overhead - 32,
-        );
-        prepare_process_prompt(&config, input(content.clone(), false)).unwrap();
-        let Err(error) = prepare_process_prompt(&config, input(content, true)) else {
-            panic!("structured reply guidance exceeded the launch budget without rejection");
-        };
-        assert!(error.to_string().contains("exceeds the input budget"));
     }
 
     #[test]
@@ -691,18 +481,6 @@ Test skill body.
             "Jack previously invoked $kickoff.",
         )
         .unwrap();
-        let store = crate::store::sqlite::SqliteStore::new(
-            &crate::store::database_path_from_env().unwrap(),
-        )
-        .unwrap();
-        store
-            .ensure_wave(
-                &crate::repository::CanonicalRepo::discover(tmp.path())
-                    .unwrap()
-                    .to_string(),
-                "product",
-            )
-            .unwrap();
         let prepared = prepare_process_prompt(
             &default_test_config(),
             ProcessPromptInput {
@@ -718,12 +496,19 @@ Test skill body.
             },
         )
         .unwrap();
-        let submitted = &prepared.config.system_prompt;
-        assert!(submitted.contains("<lf:skill:implement>"));
-        assert!(submitted.contains("Turn the design doc into working code."));
+        let submitted = conversation(&prepared);
+        assert!(prepared.config.task_prompt.contains("<lf:skill:implement>"));
+        assert!(prepared
+            .config
+            .task_prompt
+            .contains("Turn the design doc into working code."));
+        assert!(!prepared
+            .config
+            .system_prompt
+            .contains("<lf:skill:implement>"));
         assert!(submitted.contains(plan));
         assert!(submitted.contains("scratch/nested/intent.md"));
-        assert_eq!(submitted.matches("&#36;kickoff").count(), 3);
+        assert_eq!(submitted.matches("&#36;kickoff").count(), 2);
         assert!(!submitted.contains("$kickoff"));
         assert!(!submitted.contains("<lf:skill:kickoff>"));
         assert!(prepared
@@ -761,7 +546,6 @@ Test skill body.
                 )
                 .unwrap();
                 assert_eq!(prepared.components.user_name.as_deref(), Some("Jack"));
-                assert!(prepared.prompt.contains("display name is \"Jack\""));
                 assert!(prepared
                     .config
                     .system_prompt
@@ -833,7 +617,7 @@ Test skill body.
             },
         )
         .expect("prepare prompt");
-        assert!(prepared.prompt.contains("<lf:loopflow>"));
+        assert!(prepared.config.system_prompt.contains("<lf:loopflow>"));
         assert!(prepared
             .config
             .system_prompt
@@ -856,7 +640,7 @@ Test skill body.
             },
         )
         .expect("prepare prompt");
-        assert!(!prepared.prompt.contains("<lf:loopflow>"));
+        assert!(!prepared.config.system_prompt.contains("<lf:loopflow>"));
         assert!(!prepared
             .config
             .system_prompt
@@ -1055,7 +839,7 @@ Test skill body.
     }
 
     #[test]
-    fn standalone_skill_omits_work_guidance_but_keeps_context_and_budget_enforcement() {
+    fn native_skill_uses_the_same_context_channel() {
         let tmp = create_repo_fixture();
         fs::write(tmp.path().join("context.md"), "docs content").unwrap();
         let source = Skill {
@@ -1076,31 +860,19 @@ Test skill body.
             ..Default::default()
         };
         let prepared = prepare_process_prompt(&default_test_config(), input.clone()).unwrap();
-        assert!(prepared.config.system_prompt.is_empty());
-        assert!(prepared.config.task_prompt.contains("docs content"));
+        assert!(!prepared.config.system_prompt.contains("<lf:loopflow>"));
+        assert!(!prepared.config.task_prompt.contains("docs content"));
+        assert!(conversation(&prepared).contains("context.md"));
         assert!(!prepared.config.task_prompt.contains("<lf:context-budget>"));
-
-        for key in [
-            crate::prompt::context_budget::BudgetKey::InputTokens,
-            crate::prompt::context_budget::BudgetKey::InputBytes,
-        ] {
-            let limited = Config {
-                context_budgets: [(key, 1)].into(),
-                ..default_test_config()
-            };
-            assert!(prepare_process_prompt(&limited, input.clone())
-                .unwrap_err()
-                .to_string()
-                .contains("exceeds the input budget"));
-        }
 
         std::fs::create_dir_all(tmp.path().join("scratch")).unwrap();
         std::fs::write(tmp.path().join("scratch/plan.md"), "Preserve this decision").unwrap();
         let prepared = prepare_process_prompt(&default_test_config(), input).unwrap();
-        assert!(prepared.config.task_prompt.contains("<lf:context-budget>"));
-        assert!(prepared
+        assert!(!prepared.config.task_prompt.contains("<lf:context-budget>"));
+        assert!(conversation(&prepared).contains("Preserve this decision"));
+        assert!(!prepared
             .config
-            .task_prompt
+            .system_prompt
             .contains("Preserve this decision"));
     }
 
@@ -1147,7 +919,16 @@ Test skill body.
                 .config
                 .system_prompt
                 .contains("Preserve the Task checkout"));
-            assert!(prepared.config.task_input_for_budget().contains("Audit"));
+            assert!(prepared
+                .config
+                .skill_invocation
+                .as_ref()
+                .unwrap()
+                .skill
+                .content
+                .as_deref()
+                .unwrap()
+                .contains("Audit"));
         }
     }
 
@@ -1227,73 +1008,5 @@ Test skill body.
         .expect("bare OpenCode should defer to the user's default");
 
         assert_eq!(prepared.config.agent.as_deref(), Some("opencode"));
-    }
-}
-
-#[cfg(test)]
-mod budget_tests {
-    use std::fs;
-
-    use crate::config::Config;
-    use crate::prompt::context_budget::BudgetKey;
-    use crate::prompt::count_tokens;
-    use crate::prompt::process::{
-        prepare_process_prompt, preview_process_prompt, ProcessPromptInput,
-    };
-
-    #[test]
-    fn every_context_writer_receives_limits_usage_and_cleanup_guidance() {
-        let repo = tempfile::tempdir().unwrap();
-        fs::create_dir_all(repo.path().join("scratch")).unwrap();
-        fs::write(
-            repo.path().join("scratch/plan.md"),
-            "Pending live decision. ".repeat(500),
-        )
-        .unwrap();
-        let config = Config {
-            context_budgets: [(BudgetKey::ScratchTokens, 400)].into(),
-            ..Default::default()
-        };
-        for skill in ["realign", "compress", "kickoff", "implement"] {
-            let prepared = prepare_process_prompt(
-                &config,
-                ProcessPromptInput {
-                    repo_root: repo.path().to_owned(),
-                    skill: Some(skill.into()),
-                    ..Default::default()
-                },
-            )
-            .unwrap();
-            let prompt = &prepared.config.system_prompt;
-            assert!(prompt.contains("<lf:context-budget>"), "{skill}");
-            assert!(prompt.contains("scratch_tokens: 400 (provided config)"));
-            assert!(prompt.contains("Read the relevant omitted sections"));
-            assert!(prompt.contains("Re-run the query after writing"));
-            let total = prepared.budget_report.usage.last().unwrap();
-            assert_eq!(
-                total.submitted_tokens,
-                count_tokens(&prepared.config.task_prompt) + count_tokens(prompt)
-            );
-        }
-    }
-
-    #[test]
-    fn preview_reports_a_total_that_launch_would_reject() {
-        let repo = tempfile::tempdir().unwrap();
-        let config = Config {
-            context_budgets: [(BudgetKey::InputTokens, 100)].into(),
-            ..Default::default()
-        };
-        let input = ProcessPromptInput {
-            repo_root: repo.path().to_owned(),
-            skill: Some("realign".into()),
-            ..Default::default()
-        };
-        let preview = preview_process_prompt(&config, input.clone()).unwrap();
-        assert!(preview.budget_report.usage.last().unwrap().submitted_tokens > 100);
-        assert!(prepare_process_prompt(&config, input)
-            .unwrap_err()
-            .to_string()
-            .contains("exceeds the input budget"));
     }
 }

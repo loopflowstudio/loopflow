@@ -754,7 +754,7 @@ fn public_local_planning_survives_restart_with_generated_identity() {
         .iter()
         .find(|entry| entry["source"] == "wave/inbox/MEMORY.md")
         .unwrap();
-    assert_eq!(memory_usage["submitted_bytes"], 25);
+    assert_eq!(memory_usage["bytes"], 25);
     let edited_wave = lf(
         repo.path(),
         home.path(),
@@ -2743,7 +2743,7 @@ fn wave_files_are_checkout_local_and_edits_reach_status_without_ensure() {
         .iter()
         .find(|entry| entry["source"] == "wave/local/MEMORY.md")
         .unwrap();
-    assert_eq!(usage["original_bytes"], "A freshly edited decision.".len());
+    assert_eq!(usage["bytes"], "A freshly edited decision.".len());
     let removed = command(
         &checkout,
         home.path(),

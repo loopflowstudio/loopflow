@@ -371,16 +371,16 @@ fn codex_rpc_error_response_maps_to_error_event() {
 // Status/SSE alone supplies neither a native completion nor measured usage.
 #[test]
 fn opencode_native_history_preserves_output_tools_and_usage_missingness() {
-    use crate::id::ProcessLfid;
+    use crate::id::LfProcessId;
     use crate::store::sqlite::SqliteStore;
 
     let home = tempfile::tempdir().unwrap();
     let path = home.path().join("store.db");
     let store = SqliteStore::open_ephemeral(&path).unwrap();
     let sql = rusqlite::Connection::open(&path).unwrap();
-    let process = ProcessLfid::new();
+    let process = LfProcessId::new();
     sql.execute(
-        "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+        "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
         [process.as_str()],
     )
     .unwrap();

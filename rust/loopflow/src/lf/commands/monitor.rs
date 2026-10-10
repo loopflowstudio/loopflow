@@ -266,13 +266,13 @@ pub fn run(command: &MonitorCommand) -> anyhow::Result<()> {
             };
             let filter = LfProcessFilter {
                 repo,
-                parent_process_lfid: match parent {
+                parent_lf_process_id: match parent {
                     Some(parent) => Some(
                         store
                             .resolve_process(parent)
                             .await?
                             .context("Parent Process was not found")?
-                            .lfid,
+                            .id,
                     ),
                     None => None,
                 },
@@ -313,7 +313,7 @@ fn print_process(process: &LfProcess) {
         .unwrap_or_else(|_| command.to_string());
     println!(
         "{}  {}  {}  {}",
-        process.lfid,
+        process.id,
         process.started_at,
         process.outcome.as_deref().unwrap_or("unknown"),
         display
@@ -494,7 +494,7 @@ pub fn overview(json: bool, all: bool) -> anyhow::Result<()> {
                     ("stopped", format!("Driver exited at {at}"))
                 }
                 crate::session::FlowProcessSummaryState::Current => {
-                    match crate::id::ProcessLfid::parse(&summary.id)
+                    match crate::id::LfProcessId::parse(&summary.id)
                         .map(|driver| crate::journal::process_evidence(&store.sqlite, &driver))
                     {
                         Ok(crate::journal::ProcessIdentityEvidence::Live) => {

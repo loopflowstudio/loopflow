@@ -10,7 +10,7 @@ use crate::id::{AgentSessionId, WaveId};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SessionTurnOrigin {
     pub session_id: String,
-    pub process_lfid: crate::id::ProcessLfid,
+    pub lf_process_id: crate::id::LfProcessId,
     pub provider_generation: i64,
     pub captured_event: Option<i64>,
     pub task_id: Option<String>,
@@ -28,7 +28,7 @@ pub struct SessionEvent {
     pub provider_turn: Option<String>,
     pub kind: SessionEventKind,
     pub provider_generation: Option<i64>,
-    pub process_lfid: Option<String>,
+    pub lf_process_id: Option<String>,
     pub task_id: Option<String>,
     pub wave_id: Option<String>,
     pub observed_at: i64,
@@ -90,7 +90,7 @@ pub struct LfSession {
     pub task_id: Option<TaskId>,
     pub wave_id: Option<WaveId>,
     /// The Flow whose step captured the current input; derived, never stored.
-    pub flow_process_lfid: Option<String>,
+    pub flow_lf_process_id: Option<String>,
     pub work_source: Option<WorkSource>,
     /// Time of a prospective bind; absent for admission or unknown historical timing.
     pub bound_at: Option<i64>,
@@ -227,7 +227,7 @@ pub(crate) struct SessionSummary {
     pub interactive: bool,
     pub task_id: Option<TaskId>,
     pub wave_id: Option<WaveId>,
-    pub flow_process_lfid: Option<String>,
+    pub flow_lf_process_id: Option<String>,
     pub cwd: std::path::PathBuf,
     pub skill: Option<String>,
     pub provider: Option<String>,

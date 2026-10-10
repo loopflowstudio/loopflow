@@ -132,7 +132,7 @@ pub fn inspect(selector: &str, json: bool) -> Result<()> {
         for step in &detail.steps {
             println!(
                 "  {}  {}  {}",
-                step.process_lfid,
+                step.lf_process_id,
                 step.position(),
                 step.outcome.as_deref().unwrap_or("no recorded exit"),
             );

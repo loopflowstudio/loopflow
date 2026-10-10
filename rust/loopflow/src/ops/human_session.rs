@@ -231,7 +231,7 @@ fn session_attention(session: &crate::session::SessionSummary) -> Option<Session
 pub enum SessionFlowMembership {
     Step {
         flow: String,
-        flow_process_lfid: String,
+        flow_lf_process_id: String,
         step: String,
         /// Exact graph occurrence, unavailable for older capture manifests.
         node: Option<u32>,
@@ -374,14 +374,14 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
             },
         }
     });
-    let flow_membership = match (&session.flow_process_lfid, &session.flow) {
+    let flow_membership = match (&session.flow_lf_process_id, &session.flow) {
         (None, _) if session.independent => SessionFlowMembership::Independent,
         (None, _) => SessionFlowMembership::Unknown {
             reason: "Flow membership was not recorded".into(),
         },
         (Some(id), Some(flow)) => SessionFlowMembership::Step {
             flow: flow.name.clone(),
-            flow_process_lfid: id.clone(),
+            flow_lf_process_id: id.clone(),
             step: session.skill.clone().unwrap_or_default(),
             node: session.node,
             iterations: session.iterations.clone(),
@@ -731,7 +731,7 @@ async fn connect_live_codex(
     if thread != provider.agent_session {
         bail!("Recorded conversation differs from the live provider thread");
     }
-    let process = crate::journal::current_process_lfid()
+    let process = crate::journal::current_lf_process_id()
         .ok_or_else(|| anyhow!("Connecting requires the current lf Process"))?;
     let attachment =
         match store
@@ -910,14 +910,14 @@ async fn surface(store: &SharedStore, session: &LfSession) -> Result<SessionReco
         .ok_or_else(|| session_not_found(&session.id))?;
     let state = session_state(&metadata, !clients.is_empty());
     let actions = session_actions(state);
-    let flow_membership = match (&session.flow_process_lfid, &metadata.flow) {
+    let flow_membership = match (&session.flow_lf_process_id, &metadata.flow) {
         (None, _) if metadata.independent => SessionFlowMembership::Independent,
         (None, _) => SessionFlowMembership::Unknown {
             reason: "Flow membership was not recorded".into(),
         },
         (Some(id), Some(flow)) => SessionFlowMembership::Step {
             flow: flow.name.clone(),
-            flow_process_lfid: id.clone(),
+            flow_lf_process_id: id.clone(),
             step: session.skill.clone().unwrap_or_default(),
             node: session.node,
             iterations: session.iterations.clone(),
@@ -1522,7 +1522,7 @@ mod tests {
                     let original = store.sqlite.claim_session_attachment(
                         &session.id,
                         None,
-                        &crate::id::ProcessLfid::new(),
+                        &crate::id::LfProcessId::new(),
                         true,
                     )?;
                     let mut command = std::process::Command::new("/bin/sleep");
@@ -1568,14 +1568,14 @@ mod tests {
                                     let second = sqlite.claim_session_attachment(
                                         &session_id,
                                         Some(&first),
-                                        &crate::id::ProcessLfid::new(),
+                                        &crate::id::LfProcessId::new(),
                                         false,
                                     )?;
                                     if transfer == "reattach" {
                                         let third = sqlite.claim_session_attachment(
                                             &session_id,
                                             Some(&second),
-                                            first.process_lfid.as_ref().unwrap(),
+                                            first.lf_process_id.as_ref().unwrap(),
                                             false,
                                         )?;
                                         assert_eq!(
@@ -1612,7 +1612,7 @@ mod tests {
                     let result = super::connect_live_codex(&store, &session, &native, false).await;
                     let history = server.await;
                     let alive = provider.try_wait()?.is_none();
-                    let row = store.sqlite.process(&original.agent_process_lfid)?.unwrap();
+                    let row = store.sqlite.process(&original.agent_process_id)?.unwrap();
                     let attachment = store.sqlite.session_attachment(&session.id)?.unwrap();
                     let retained = store.sqlite.session_connection(&session.id)?;
                     // Only the test's throwaway child is stopped, after observing client effects.
@@ -1631,12 +1631,12 @@ mod tests {
                         assert!(args.contains("--remote\nunix:///tmp/lf-connect-"), "{args}");
                         assert!(args.contains("client.sock") && args.contains("saved-thread"));
                         assert!(!args.contains(endpoint.to_str().unwrap()));
-                        assert!(attachment.process_lfid.is_none());
+                        assert!(attachment.lf_process_id.is_none());
                         std::fs::remove_file(args_path)?;
                     } else {
                         assert!(result.is_err(), "stale {transfer} connection launched");
                         assert!(!args_path.exists());
-                        assert!(attachment.process_lfid.is_some());
+                        assert!(attachment.lf_process_id.is_some());
                     }
                 }
                 Ok(())
@@ -1692,7 +1692,7 @@ mod tests {
             interactive: true,
             task_id: Some(task.clone()),
             wave_id: Some(wave.clone()),
-            flow_process_lfid: Some("flow".into()),
+            flow_lf_process_id: Some("flow".into()),
             cwd: "/unavailable".into(),
             skill: Some("review".into()),
             provider: None,
@@ -1748,7 +1748,7 @@ mod tests {
             super::SessionState::Unknown,
             "Flow completion is not Session/process completion"
         );
-        summary.flow_process_lfid = None;
+        summary.flow_lf_process_id = None;
         assert!(matches!(
             super::summary_surface(&summary).flow_membership,
             super::SessionFlowMembership::Unknown { .. }
@@ -1987,7 +1987,7 @@ mod tests {
             iterations: None,
             task_id,
             wave_id: Some(wave.id().clone()),
-            flow_process_lfid: None,
+            flow_lf_process_id: None,
             work_source: None,
             bound_at: None,
             interactive: true,
@@ -2160,14 +2160,14 @@ mod tests {
         .unwrap();
         for session in sessions {
             if let super::SessionFlowMembership::Step {
-                flow_process_lfid,
+                flow_lf_process_id,
                 step,
                 node: Some(node),
                 ..
             } = session.flow_membership
             {
                 assert_eq!(
-                    graphs[&flow_process_lfid].node_at(node).unwrap().label,
+                    graphs[&flow_lf_process_id].node_at(node).unwrap().label,
                     step
                 );
             }

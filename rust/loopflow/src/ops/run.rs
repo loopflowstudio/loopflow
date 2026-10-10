@@ -824,7 +824,7 @@ mod tests {
                 }),
                 task_id,
                 wave_id: None,
-                flow_process_lfid: None,
+                flow_lf_process_id: None,
                 bound_at: None,
                 interactive: false,
                 repo: None,

@@ -305,7 +305,7 @@ after an upgrade.
 
 Monitor keeps live processes, recorded outcomes and missing observations distinct.
 A process has a durable `lfid` and an optional Unix `pid`. Inspect by LFID; PIDs
-can be reused. `parent_process_lfid` names the recorded parent, and historical
+can be reused. `parent_lf_process_id` names the recorded parent, and historical
 rows without PID evidence keep `pid: null`.
 Its overview explains each item's state and next action. A mechanical Process has
 no provider conclusion. JSON reads emit one document; the active watch emits

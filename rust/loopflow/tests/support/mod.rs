@@ -617,8 +617,8 @@ fn write_executable(dir: &Path, name: &str, content: &str) {
 pub fn record_flow(home: &Path, cwd: &Path, flow: &str, label: &str, outcome: &str) -> String {
     use loopflow::engine::flow::{ConcreteSkill, ConcreteStep, Skill};
     let db = rusqlite::Connection::open(home.join("loopflow.db")).expect("open test registry");
-    let driver = loopflow::id::ProcessLfid::new();
-    let step = loopflow::id::ProcessLfid::new();
+    let driver = loopflow::id::LfProcessId::new();
+    let step = loopflow::id::LfProcessId::new();
     for (id, parent, argv) in [
         (driver.clone(), None, vec!["lf", "run", flow]),
         (
@@ -628,7 +628,7 @@ pub fn record_flow(home: &Path, cwd: &Path, flow: &str, label: &str, outcome: &s
         ),
     ] {
         db.execute(
-            "INSERT INTO processes(lfid,trace_id,parent_process_lfid,command,repo,cwd,started_at,completed_at,outcome)
+            "INSERT INTO processes(id,trace_id,parent_lf_process_id,command,repo,cwd,started_at,completed_at,outcome)
              VALUES(?1,?2,?3,?4,?5,?5,1,2,?6)",
             rusqlite::params![
                 id.as_str(),
@@ -652,7 +652,7 @@ pub fn record_flow(home: &Path, cwd: &Path, flow: &str, label: &str, outcome: &s
         })],
     );
     db.execute(
-        "INSERT INTO flow_processes(process_lfid,flow,graph) VALUES(?1,?2,?3)",
+        "INSERT INTO flow_processes(lf_process_id,flow,graph) VALUES(?1,?2,?3)",
         rusqlite::params![
             driver.as_str(),
             flow,
@@ -661,7 +661,7 @@ pub fn record_flow(home: &Path, cwd: &Path, flow: &str, label: &str, outcome: &s
     )
     .expect("record FlowProcess");
     db.execute(
-        "INSERT INTO flow_process_steps(flow_process_lfid,process_lfid,node,iterations) VALUES(?1,?2,0,'[[]]')",
+        "INSERT INTO flow_process_steps(flow_lf_process_id,lf_process_id,node,iterations) VALUES(?1,?2,0,'[[]]')",
         rusqlite::params![driver.as_str(), step.as_str()],
     )
     .expect("record Flow step");
@@ -675,7 +675,7 @@ pub fn recorded_flows(home: &Path) -> Vec<(Option<String>, Vec<serde_json::Value
     let db = rusqlite::Connection::open(home.join("loopflow.db")).expect("open test registry");
     let mut drivers = db
         .prepare(
-            "SELECT d.lfid,d.outcome,f.flow,f.graph FROM flow_processes f JOIN processes d ON d.lfid=f.process_lfid
+            "SELECT d.id,d.outcome,f.flow,f.graph FROM flow_processes f JOIN processes d ON d.id=f.lf_process_id
              ORDER BY d.rowid",
         )
         .expect("select Flow drivers");
@@ -701,7 +701,7 @@ pub fn recorded_flows(home: &Path) -> Vec<(Option<String>, Vec<serde_json::Value
             let mut steps = db
                 .prepare(
                     "SELECT e.command,s.node,s.iterations FROM flow_process_steps s
-                     JOIN processes e ON e.lfid=s.process_lfid WHERE s.flow_process_lfid=?1 ORDER BY s.seq",
+                     JOIN processes e ON e.id=s.lf_process_id WHERE s.flow_lf_process_id=?1 ORDER BY s.seq",
                 )
                 .expect("select Flow steps");
             let steps = steps

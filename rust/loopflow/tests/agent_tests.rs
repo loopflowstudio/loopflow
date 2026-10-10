@@ -84,7 +84,7 @@ fn library_launch_records_each_provider_under_its_invocation() {
         assert!(agent.os_started_at.is_some());
         assert!(agent.completed_at.is_some());
         let parent = store
-            .process(agent.parent_process_lfid.as_ref().unwrap())
+            .process(agent.parent_lf_process_id.as_ref().unwrap())
             .unwrap()
             .unwrap();
         assert_eq!(parent.kind, loopflow::process::ProcessKind::Lf);
@@ -134,7 +134,7 @@ fn library_launch_reuses_the_enclosing_invocation() {
             .collect::<Vec<_>>();
         assert_eq!(agents.len(), 2);
         for agent in agents {
-            assert_eq!(agent.parent_process_lfid.as_ref(), Some(&parents[0].lfid));
+            assert_eq!(agent.parent_lf_process_id.as_ref(), Some(&parents[0].id));
             assert!(agent.completed_at.is_some());
         }
         Ok(())
@@ -326,7 +326,7 @@ while read -r line; do :; done
     );
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     let agents = db.prepare(
-        "SELECT lfid,agent_session_id,parent_process_lfid,completed_at,spawn_state FROM processes WHERE kind='agent' ORDER BY provider_generation"
+        "SELECT id,agent_session_id,parent_lf_process_id,completed_at,spawn_state FROM processes WHERE kind='agent' ORDER BY provider_generation"
     ).unwrap().query_map([], |row| Ok((
         row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?,
         row.get::<_, Option<i64>>(3)?, row.get::<_, String>(4)?,

@@ -17,7 +17,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn.execute(
             "INSERT INTO session_activity(session_id,attachment_token,observed_at,open_tools,pending_input,yielded,provider_generation,status_stream,status_sequence)
-             SELECT s.id,NULL,0,0,0,0,?2,?3,0 FROM agent_sessions s LEFT JOIN processes p ON p.lfid=s.agent_process_lfid
+             SELECT s.id,NULL,0,0,0,0,?2,?3,0 FROM agent_sessions s LEFT JOIN processes p ON p.id=s.agent_process_id
              WHERE s.id=?1 AND COALESCE(p.provider_generation,0)=?2 AND s.completed_at IS NULL
              ON CONFLICT(session_id) DO UPDATE SET
                 attachment_token=CASE WHEN session_activity.provider_generation=?2 THEN session_activity.attachment_token ELSE NULL END,
@@ -45,7 +45,7 @@ impl SqliteStore {
         Ok(conn.execute(
             "UPDATE session_activity SET program_status=?5,status_sequence=?4
              WHERE session_id=?1 AND provider_generation=?2 AND status_stream=?3 AND status_sequence<?4
-             AND EXISTS(SELECT 1 FROM agent_sessions s LEFT JOIN processes p ON p.lfid=s.agent_process_lfid WHERE s.id=?1 AND COALESCE(p.provider_generation,0)=?2 AND s.completed_at IS NULL)",
+             AND EXISTS(SELECT 1 FROM agent_sessions s LEFT JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1 AND COALESCE(p.provider_generation,0)=?2 AND s.completed_at IS NULL)",
             params![session, provider_generation, stream, sequence, json],
         )? == 1)
     }
@@ -53,7 +53,7 @@ impl SqliteStore {
 
 #[cfg(test)]
 mod tests {
-    use crate::id::ProcessLfid;
+    use crate::id::LfProcessId;
     use crate::program_status::{Kind, Records, Report, State};
     use crate::session::{SessionActivity, SessionFilter};
     use crate::store::sqlite::SqliteStore;
@@ -63,18 +63,18 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("session", "run_00000000000000000000000000000001");
-        let process_lfid = ProcessLfid::new();
+        let lf_process_id = LfProcessId::new();
         store
             .conn
             .lock()
             .unwrap()
             .execute(
-                "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
-                [&process_lfid],
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+                [&lf_process_id],
             )
             .unwrap();
         let first = store
-            .claim_session_attachment("session", None, &process_lfid, true)
+            .claim_session_attachment("session", None, &lf_process_id, true)
             .unwrap();
         store
             .record_session_activity(
@@ -138,7 +138,7 @@ mod tests {
             )
             .unwrap());
         let second = store
-            .claim_session_attachment("session", Some(&first), &process_lfid, false)
+            .claim_session_attachment("session", Some(&first), &lf_process_id, false)
             .unwrap();
         assert_eq!(
             store.session_summaries(&filter, 500).unwrap()[0]
@@ -179,7 +179,7 @@ mod tests {
             .unwrap());
         assert!(store.session_summaries(&filter, 500).unwrap().is_empty());
         let third = store
-            .claim_session_attachment("session", Some(&second), &process_lfid, true)
+            .claim_session_attachment("session", Some(&second), &lf_process_id, true)
             .unwrap();
         assert!(!store
             .record_program_status(

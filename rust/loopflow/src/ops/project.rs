@@ -57,7 +57,7 @@ pub async fn ensure(repo: &Path, name: &str) -> OpsResult<PmProject> {
         .map_err(project_error)?;
     store
         .sqlite
-        .record_project_activation(wave.id(), crate::journal::current_process_lfid().as_ref())
+        .record_project_activation(wave.id(), crate::journal::current_lf_process_id().as_ref())
         .map_err(project_error)?;
     let acquisition = super::pm::lock_wave_planning(&wave).await?;
     import_binding(&store, &wave, &acquisition)?;

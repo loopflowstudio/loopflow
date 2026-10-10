@@ -669,9 +669,9 @@ mod tests {
         std::env::set_var("LF_HOME", home.path());
         let store = crate::store::sqlite::SqliteStore::open_ephemeral(&database).unwrap();
         let conn = rusqlite::Connection::open(&database).unwrap();
-        let process = crate::id::ProcessLfid::new();
+        let process = crate::id::LfProcessId::new();
         conn.execute(
-            "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'trace',1)",
+            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'trace',1)",
             [&process],
         )
         .unwrap();
@@ -781,22 +781,19 @@ mod tests {
                 // The native conversation survives the OS process's interruption.
                 harness.set_agent_session(Some("native-conversation".into()));
                 harness.interrupt().await.unwrap();
-                let ended = store.process(&first.agent_process_lfid).unwrap().unwrap();
+                let ended = store.process(&first.agent_process_id).unwrap().unwrap();
                 assert_eq!(ended.pid, Some(first_pid));
                 assert!(ended.completed_at.is_some());
 
                 harness.send_input("resumed request").await.unwrap();
                 let (_, second) = capture.session_attachment().unwrap();
-                assert_ne!(first.agent_process_lfid, second.agent_process_lfid);
+                assert_ne!(first.agent_process_id, second.agent_process_id);
                 assert_ne!(first.token, second.token);
-                let running = store.process(&second.agent_process_lfid).unwrap().unwrap();
+                let running = store.process(&second.agent_process_id).unwrap().unwrap();
                 assert_eq!(running.pid, harness.process_id());
-                assert_eq!(running.parent_process_lfid, first.process_lfid);
+                assert_eq!(running.parent_lf_process_id, first.lf_process_id);
                 assert!(running.completed_at.is_none());
-                assert_eq!(
-                    store.process(&first.agent_process_lfid).unwrap(),
-                    Some(ended)
-                );
+                assert_eq!(store.process(&first.agent_process_id).unwrap(), Some(ended));
                 assert!(capture.prepare_agent_process(&session, &first).is_err());
                 assert!(store
                     .record_session_connection(&session, &first, "stale", &"stale".into())
@@ -830,8 +827,8 @@ mod tests {
                 harness.stop().await.unwrap();
                 capture.finish("completed").unwrap();
                 let settled = store.session_attachment(&session).unwrap().unwrap();
-                assert_eq!(settled.agent_process_lfid, second.agent_process_lfid);
-                assert_eq!(settled.process_lfid, None);
+                assert_eq!(settled.agent_process_id, second.agent_process_id);
+                assert_eq!(settled.lf_process_id, None);
             });
             Ok(())
         })
@@ -940,11 +937,11 @@ done
         // provider-owned AgentSession.
         let database = home.path().join("loopflow.db");
         let store = crate::store::sqlite::SqliteStore::open_ephemeral(&database).unwrap();
-        let process = crate::id::ProcessLfid::new();
+        let process = crate::id::LfProcessId::new();
         rusqlite::Connection::open(&database)
             .unwrap()
             .execute(
-                "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'trace',1)",
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'trace',1)",
                 [&process],
             )
             .unwrap();

@@ -328,7 +328,7 @@ pub struct FlowProcessDetail {
 /// One launched step and how its process ended.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FlowStepProcess {
-    pub process_lfid: crate::id::ProcessLfid,
+    pub lf_process_id: crate::id::LfProcessId,
     pub label: String,
     pub key: u32,
     pub iterations: Vec<Vec<u32>>,

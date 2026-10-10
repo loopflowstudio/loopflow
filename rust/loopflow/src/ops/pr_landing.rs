@@ -307,7 +307,7 @@ fn admit_ci_fix(
         if retry && reservation.retries >= config.automation.retries {
             return Err(repair_error("repair startup exhausted automatic retries"));
         }
-        let launcher = crate::journal::current_process_lfid()
+        let launcher = crate::journal::current_lf_process_id()
             .ok_or_else(|| repair_error("repair admission requires a recorded Process"))?;
         let session = if let Some(id) = &reservation.session {
             store
@@ -331,7 +331,7 @@ fn admit_ci_fix(
                 iterations: None,
                 task_id: landing.task_id.clone(),
                 wave_id: None,
-                flow_process_lfid: None,
+                flow_lf_process_id: None,
                 work_source: landing
                     .task_id
                     .as_ref()
@@ -431,9 +431,9 @@ fn admit_ci_fix(
 
 /// A reservation still held by the caller was never handed to a repair worker;
 /// a long-lived watcher must be able to retry its own unacknowledged launch.
-fn repair_live(store: &SharedStore, process: Option<&crate::id::ProcessLfid>) -> bool {
+fn repair_live(store: &SharedStore, process: Option<&crate::id::LfProcessId>) -> bool {
     process.is_some_and(|process| {
-        Some(process) != crate::journal::current_process_lfid().as_ref()
+        Some(process) != crate::journal::current_lf_process_id().as_ref()
             && crate::journal::process_evidence(&store.sqlite, process)
                 != crate::journal::ProcessIdentityEvidence::Dead
     })
@@ -494,13 +494,13 @@ pub fn run_repair(identity: &str, launcher: &str) -> OpsResult<()> {
             .find(|row| row.incident.identity == identity)
             .ok_or_else(|| repair_error("repair incident disappeared"))?
             .incident;
-        let process = crate::journal::current_process_lfid()
+        let process = crate::journal::current_lf_process_id()
             .ok_or_else(|| repair_error("repair worker has no Process"))?;
         if !store
             .sqlite
             .handoff_repair(
                 identity,
-                &crate::id::ProcessLfid::parse(launcher).map_err(repair_error)?,
+                &crate::id::LfProcessId::parse(launcher).map_err(repair_error)?,
                 &process,
             )
             .map_err(repair_error)?
@@ -566,7 +566,7 @@ pub fn run_repair(identity: &str, launcher: &str) -> OpsResult<()> {
         .sqlite
         .finish_repair(
             identity,
-            &crate::journal::current_process_lfid().expect("repair has a process"),
+            &crate::journal::current_lf_process_id().expect("repair has a process"),
             failure.as_deref(),
             conclusion,
             captured,

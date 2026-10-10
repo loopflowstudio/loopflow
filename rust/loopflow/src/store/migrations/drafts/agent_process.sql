@@ -7,11 +7,11 @@ ALTER TABLE processes ADD COLUMN endpoint TEXT;
 ALTER TABLE processes ADD COLUMN agent_provider TEXT;
 ALTER TABLE processes ADD COLUMN agent_interactive INTEGER CHECK(agent_interactive IN (0,1));
 ALTER TABLE processes ADD COLUMN provider_generation INTEGER;
-ALTER TABLE processes ADD COLUMN attached_process_lfid TEXT;
+ALTER TABLE processes ADD COLUMN attached_lf_process_id TEXT;
 ALTER TABLE processes ADD COLUMN attachment_token TEXT;
 ALTER TABLE processes ADD COLUMN attachment_exit_seq INTEGER REFERENCES session_events(seq);
 ALTER TABLE processes ADD COLUMN spawn_state TEXT CHECK(spawn_state IN ('reserved','spawn_requested','spawn_failed','exited'));
-ALTER TABLE agent_sessions ADD COLUMN agent_process_lfid TEXT REFERENCES processes(lfid);
+ALTER TABLE agent_sessions ADD COLUMN agent_process_id TEXT REFERENCES processes(lfid);
 CREATE TEMP TABLE agent_process_backfill AS SELECT id AS session_id,
     (lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' ||
     substr(lower(hex(randomblob(2))),2) || '-8' ||
@@ -24,7 +24,7 @@ FROM agent_sessions WHERE provider_generation>0 OR provider_pid IS NOT NULL
     OR driver_generation>0 OR driver_process_lfid IS NOT NULL;
 INSERT INTO processes(lfid,kind,trace_id,parent_process_lfid,command,repo,cwd,started_at,
     pid,os_started_at,agent_session_id,endpoint,agent_provider,agent_interactive,provider_generation,
-    attached_process_lfid,attachment_token,attachment_exit_seq,spawn_state,completed_at)
+    attached_lf_process_id,attachment_token,attachment_exit_seq,spawn_state,completed_at)
 SELECT b.lfid,'agent',COALESCE(p.trace_id,b.lfid),s.provider_process_lfid,
     s.provider,s.repo,s.cwd,COALESCE(s.provider_started_at,s.created_at),
     s.provider_pid,s.provider_started_at,s.id,s.provider_endpoint,s.provider,s.interactive,s.provider_generation,
@@ -42,7 +42,7 @@ SELECT b.lfid,'agent',COALESCE(p.trace_id,b.lfid),s.provider_process_lfid,
         'provider:'||s.provider_generation||':exited') ORDER BY e.seq DESC LIMIT 1)
 FROM agent_sessions s JOIN agent_process_backfill b ON b.session_id=s.id
 LEFT JOIN processes p ON p.lfid=s.provider_process_lfid;
-UPDATE agent_sessions SET agent_process_lfid=(SELECT lfid FROM agent_process_backfill b WHERE b.session_id=agent_sessions.id);
+UPDATE agent_sessions SET agent_process_id=(SELECT lfid FROM agent_process_backfill b WHERE b.session_id=agent_sessions.id);
 ALTER TABLE session_activity ADD COLUMN attachment_token TEXT;
 UPDATE session_activity SET attachment_token=(
     SELECT b.attachment_token FROM agent_process_backfill b JOIN agent_sessions s ON s.id=b.session_id
@@ -52,7 +52,7 @@ DROP TABLE agent_process_backfill;
 -- Preserve conflicting PID/birth observations separately; never deduplicate them
 -- into signal authority or invent terminal evidence for uncertain history.
 CREATE INDEX agent_process_session ON processes(agent_session_id) WHERE kind='agent';
-CREATE INDEX agent_process_attachment ON processes(attached_process_lfid) WHERE kind='agent';
+CREATE INDEX agent_process_attachment ON processes(attached_lf_process_id) WHERE kind='agent';
 DROP INDEX session_driver_process;
 DROP INDEX session_provider_pid;
 DROP INDEX session_unknown_engine_origin;

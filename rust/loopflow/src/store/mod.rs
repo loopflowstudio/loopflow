@@ -1672,9 +1672,9 @@ mod tests {
             assert_eq!(record.item, snapshot.snapshot.items[0]);
             assert_eq!(record.project, Some(snapshot.snapshot.projects[1].clone()));
             assert_eq!(record.observed_at, 17);
-            let driver = crate::id::ProcessLfid::new();
+            let driver = crate::id::LfProcessId::new();
             rusqlite::Connection::open(directory.path().join("registry.db")).unwrap().execute(
-                "INSERT INTO processes(lfid,trace_id,started_at,completed_at,outcome) VALUES(?1,?2,1,2,'succeeded')",
+                "INSERT INTO processes(id,trace_id,started_at,completed_at,outcome) VALUES(?1,?2,1,2,'succeeded')",
                 rusqlite::params![driver,crate::id::TraceId::new()],
             ).unwrap();
             let definition = crate::engine::workflow::WorkflowDefinition {

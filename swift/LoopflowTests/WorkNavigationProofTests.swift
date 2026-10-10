@@ -539,7 +539,7 @@ struct WorkNavigationProofTests {
         }
         // A historical invocation must not jump into an identically keyed node
         // of the current Flow. The real chip leaves this Session selected.
-        try await named.membership(.step(flow: "feature", flowProcessLfid: "prior-invocation",
+        try await named.membership(.step(flow: "feature", flowLfProcessId: "prior-invocation",
                                         step: "loop-or-next", node: 5, iterations: [[1, 1]],
                                         occurrence: .past), for: "first")
         await model.refresh()

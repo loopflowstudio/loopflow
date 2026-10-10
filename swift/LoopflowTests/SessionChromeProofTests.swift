@@ -53,7 +53,7 @@ struct SessionChromeProofTests {
         value["actions"] = sessionActionFixture(state: "active")
         value["terminal_ids"] = [panes[0]]
         value["open_argv"] = ["must-not-launch"]
-        value["flow_membership"] = ["kind": "step", "flow": "feature", "flow_process_lfid": invocation,
+        value["flow_membership"] = ["kind": "step", "flow": "feature", "flow_lf_process_id": invocation,
                                     "step": "realign", "occurrence": "current", "node": 5, "iterations": [[2, 1]]]
         let sessions = String(decoding: try JSONSerialization.data(withJSONObject: [value]), as: UTF8.self)
         let query = RegistryQuery { args, _ in

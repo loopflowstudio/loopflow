@@ -52,24 +52,24 @@ pub(crate) fn execution_blockers(
     processes: &[LfProcess],
 ) -> OpsResult<Vec<String>> {
     let mut lineage = HashSet::new();
-    let mut next = crate::journal::current_process_lfid();
+    let mut next = crate::journal::current_lf_process_id();
     while let Some(id) = next.filter(|id| lineage.insert(id.clone())) {
         next = store
             .process(&id)
             .map_err(error)?
-            .and_then(|process| process.parent_process_lfid);
+            .and_then(|process| process.parent_lf_process_id);
     }
     Ok(processes
         .iter()
         .filter(|process| {
             process.completed_at.is_none()
-                && !lineage.contains(&process.lfid)
-                && process_evidence(store, &process.lfid) != ProcessIdentityEvidence::Dead
+                && !lineage.contains(&process.id)
+                && process_evidence(store, &process.id) != ProcessIdentityEvidence::Dead
         })
         .map(|process| {
             format!(
                 "Process {} has live or unresolved execution; inspect `lf monitor show {}`",
-                process.lfid, process.lfid
+                process.id, process.id
             )
         })
         .collect())

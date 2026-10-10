@@ -239,7 +239,7 @@ fn completion(
 #[cfg(test)]
 mod tests {
     use super::History;
-    use crate::id::ProcessLfid;
+    use crate::id::LfProcessId;
     use crate::process::SessionAttachment;
     use crate::session::SessionEventKind;
     use crate::store::sqlite::SqliteStore;
@@ -254,11 +254,11 @@ mod tests {
             let sql = rusqlite::Connection::open(&path).unwrap();
             let original =
                 store.test_session("conversation", &crate::session_record::new_artifact_key());
-            let a = ProcessLfid::new();
-            let b = ProcessLfid::new();
+            let a = LfProcessId::new();
+            let b = LfProcessId::new();
             for process in [&a, &b] {
                 sql.execute(
-                    "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+                    "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
                     [process],
                 )
                 .unwrap();
@@ -339,7 +339,7 @@ mod tests {
             assert_eq!(retained.len(), 3);
             assert!(retained
                 .iter()
-                .all(|event| event.process_lfid.as_deref() == Some(a.as_str())));
+                .all(|event| event.lf_process_id.as_deref() == Some(a.as_str())));
             assert_eq!(
                 store
                     .input_history(&original.artifact_key)
@@ -368,13 +368,13 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("history.db");
         let store = SqliteStore::open_ephemeral(&path).unwrap();
-        let first = ProcessLfid::new();
-        let second = ProcessLfid::new();
+        let first = LfProcessId::new();
+        let second = LfProcessId::new();
         let conn = rusqlite::Connection::open(&path).unwrap();
         store.test_session("conversation", "run_00000000000000000000000000000001");
         for process in [&first, &second] {
             conn.execute(
-                "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
                 [process.as_str()],
             )
             .unwrap();
@@ -386,7 +386,7 @@ mod tests {
             .session_turn_origin("conversation", &original)
             .unwrap();
         let replacement = SessionAttachment {
-            process_lfid: Some(second.clone()),
+            lf_process_id: Some(second.clone()),
             token: crate::id::AttachmentToken::new(),
             ..original.clone()
         };
@@ -419,7 +419,7 @@ mod tests {
             }
             let before = store.session_history("conversation", 0, 0).unwrap();
             assert_eq!(
-                before.last().unwrap().process_lfid.as_deref(),
+                before.last().unwrap().lf_process_id.as_deref(),
                 Some(first.as_str())
             );
             // A reconnect discovers the existing turn; another input receives
@@ -470,7 +470,7 @@ mod tests {
             .find(|event| event.provider_turn.as_deref() == Some("unknown"))
             .unwrap();
         assert_eq!(unknown.kind, SessionEventKind::Started);
-        assert_eq!(unknown.process_lfid, None);
+        assert_eq!(unknown.lf_process_id, None);
         assert_eq!(unknown.provider_generation, None);
         assert!(
             store
@@ -478,7 +478,7 @@ mod tests {
                     &"thread".into(),
                     "reply-first",
                     &crate::session::SessionTurnOrigin {
-                        process_lfid: second,
+                        lf_process_id: second,
                         ..original_origin
                     }
                 )

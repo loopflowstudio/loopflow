@@ -162,7 +162,7 @@ When editing `*.rs` files:
 - Conversion methods: `as_` (cheap/borrowed), `to_` (allocates), `into_` (consumes self)
 - No `get_` prefix on getters: `fn name(&self)` not `fn get_name(&self)`
 - Return `Option<T>` for "not found", `Result<T, E>` for "something went wrong"
-- Newtypes for domain concepts: `struct ProcessLfid(String)` not `type ProcessLfid = String`
+- Newtypes for domain concepts: `struct LfProcessId(String)` not `type LfProcessId = String`
 - Every `unsafe` block requires a `// SAFETY:` comment explaining invariants
 - When a name conflicts with a keyword: use `r#type` or `type_`, not `typ`
 - Use `#[non_exhaustive]` on public enums that may grow
@@ -253,7 +253,7 @@ Current navigation stays Wave → Task and Linear retains past Projects.
 
 LfProcess is one actual lf process, including direct and agent-issued nested commands.
 Its `lfid` is durable Loopflow identity; `pid` is the optional Unix PID and may
-collide across history. References use `process_lfid` and `parent_process_lfid`.
+collide across history. References use `lf_process_id` and `parent_lf_process_id`.
 LfSession is one Loopflow-owned durable conversation, interactive or headless; identity,
 name, feedback and native history survive driver replacement. Product text says
 Session for interactive and Run for headless work. AgentSession is the provider-owned

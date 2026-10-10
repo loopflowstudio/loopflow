@@ -200,11 +200,11 @@ mod tests {
         let store = crate::store::sqlite::SqliteStore::open_ephemeral(&path).unwrap();
         let session =
             store.test_session("conversation", &crate::session_record::new_artifact_key());
-        let process = crate::id::ProcessLfid::new();
+        let process = crate::id::LfProcessId::new();
         rusqlite::Connection::open(&path)
             .unwrap()
             .execute(
-                "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
                 [process.as_str()],
             )
             .unwrap();

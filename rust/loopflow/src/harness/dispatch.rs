@@ -90,7 +90,7 @@ pub(super) fn off_reactor<T>(work: impl FnOnce() -> T) -> T {
 #[cfg(test)]
 mod tests {
     use super::{off_reactor, within};
-    use crate::id::ProcessLfid;
+    use crate::id::LfProcessId;
     use crate::process::SessionAttachment;
     use crate::store::sqlite::SqliteStore;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -103,11 +103,11 @@ mod tests {
         let path = home.path().join("dispatch.db");
         let store = SqliteStore::open_ephemeral(&path).unwrap();
         store.test_session("conversation", "run_00000000000000000000000000000001");
-        let process = ProcessLfid::new();
+        let process = LfProcessId::new();
         rusqlite::Connection::open(&path)
             .unwrap()
             .execute(
-                "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
                 [process.as_str()],
             )
             .unwrap();

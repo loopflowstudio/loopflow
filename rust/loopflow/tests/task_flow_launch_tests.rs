@@ -317,7 +317,7 @@ from pathlib import Path
 import time
 
 home = Path(os.environ['LF_HOME'])
-(home / 'ready.tmp').write_text(os.environ['LF_PROCESS_LFID'])
+(home / 'ready.tmp').write_text(os.environ['LF_PROCESS_ID'])
 (home / 'ready.tmp').replace(home / 'ready')
 while not (home / 'release').exists():
     time.sleep(.02)
@@ -349,10 +349,13 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
         assert!(started().is_none());
         assert!(support::recorded_flows(task.home.path()).is_empty());
 
-        let parent = loopflow::id::ProcessLfid::new();
+        let parent = loopflow::id::LfProcessId::new();
         let trace = loopflow::id::TraceId::new();
-        db.execute("INSERT INTO processes(lfid,trace_id,cwd,command,started_at) VALUES(?1,?2,?3,'caller',1)",
-            rusqlite::params![parent, trace, caller.to_str().unwrap()]).unwrap();
+        db.execute(
+            "INSERT INTO processes(id,trace_id,cwd,command,started_at) VALUES(?1,?2,?3,'caller',1)",
+            rusqlite::params![parent, trace, caller.to_str().unwrap()],
+        )
+        .unwrap();
         let (cwd, args): (&Path, &[&str]) = match launch {
             "task" => (&caller, &["-b", "task", "run", "INF-123", "proof"]),
             "direct" => (&caller, &["-b", "--task", "INF-123", "run", "proof"]),
@@ -364,7 +367,7 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
         let log = fs::File::create(&log_path).unwrap();
         let mut held = HeldFlow {
             child: command(cwd, task.home.path(), args)
-                .env("LF_PROCESS_LFID", parent.as_str())
+                .env("LF_PROCESS_ID", parent.as_str())
                 .env("LF_TRACE_ID", trace.as_str())
                 .stdout(log.try_clone().unwrap())
                 .stderr(log)
@@ -391,7 +394,7 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
         let driver = flows[0]["id"].as_str().unwrap();
         let recorded: (String, String) = db
             .query_row(
-                "SELECT cwd,parent_process_lfid FROM processes WHERE lfid=?1",
+                "SELECT cwd,parent_lf_process_id FROM processes WHERE id=?1",
                 [driver],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
@@ -402,7 +405,7 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
         );
         let ancestor = if launch == "task" {
             db.query_row(
-                "SELECT parent_process_lfid FROM processes WHERE lfid=?1",
+                "SELECT parent_lf_process_id FROM processes WHERE id=?1",
                 [&recorded.1],
                 |row| row.get::<_, String>(0),
             )
@@ -412,7 +415,7 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
         };
         assert_eq!(ancestor, parent.as_str());
         let original: String = db
-            .query_row("SELECT cwd FROM processes WHERE lfid=?1", [parent], |row| {
+            .query_row("SELECT cwd FROM processes WHERE id=?1", [parent], |row| {
                 row.get(0)
             })
             .unwrap();
@@ -750,7 +753,7 @@ fn a_workflow_with_no_landing_edge_reaches_its_end_without_a_pr() {
         ]
     );
     let history = workflow["history"].as_array().unwrap();
-    assert_eq!(history[1]["process_lfid"], history[2]["process_lfid"]);
+    assert_eq!(history[1]["lf_process_id"], history[2]["lf_process_id"]);
     assert_eq!(history[1]["actor"], "person");
     assert_eq!(history[2]["actor"], "edge");
     task.repo
@@ -942,8 +945,8 @@ fn attempts(home: &Path, task_run: &str) -> Vec<String> {
     let db = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
     let mut rows = db
         .prepare(
-            "SELECT d.outcome FROM flow_processes f JOIN processes d ON d.lfid=f.process_lfid
-             WHERE d.parent_process_lfid=?1 ORDER BY d.rowid",
+            "SELECT d.outcome FROM flow_processes f JOIN processes d ON d.id=f.lf_process_id
+             WHERE d.parent_lf_process_id=?1 ORDER BY d.rowid",
         )
         .unwrap();
     let outcomes = rows
@@ -960,7 +963,7 @@ fn one_task_run_starts_its_flow_again_until_an_attempt_succeeds_or_attempts_run_
     task.ok(&["-b", "task", "run", "INF-123", "gated"]);
     let carrier = |workflow: &serde_json::Value| {
         let chose = workflow["history"].as_array().unwrap().last().unwrap();
-        chose["process_lfid"].as_str().unwrap().to_string()
+        chose["lf_process_id"].as_str().unwrap().to_string()
     };
     // Every attempt fails: the Task run gives up and the edge holds the Task.
     let output = task.run(&["-b", "task", "run", "INF-123", "gate"]);
@@ -970,7 +973,7 @@ fn one_task_run_starts_its_flow_again_until_an_attempt_succeeds_or_attempts_run_
     assert_eq!(stopped["position"]["edge"], 2);
     assert_eq!(stopped["position"]["running"], false);
     assert_eq!(
-        stopped["position"]["process_lfid"],
+        stopped["position"]["lf_process_id"],
         carrier(&stopped).as_str()
     );
     assert_eq!(
@@ -1015,7 +1018,7 @@ fn one_task_run_starts_its_flow_again_until_an_attempt_succeeds_or_attempts_run_
         ["took_up", "chose", "arrived", "chose", "chose", "arrived"]
     );
     let arrived = workflow["history"].as_array().unwrap().last().unwrap();
-    let task_run = arrived["process_lfid"].as_str().unwrap();
+    let task_run = arrived["lf_process_id"].as_str().unwrap();
     assert_eq!(
         attempts(task.home.path(), task_run),
         ["failed", "failed", "succeeded"]
@@ -1270,7 +1273,7 @@ fn completion_preserves_retained_session_input_and_unknown_process_history() {
     let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
     let exec = uuid::Uuid::new_v4().to_string();
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    db.execute("INSERT INTO processes(lfid,trace_id,cwd,started_at,command) VALUES(?1,?1,?2,?3,'historical inspection')",
+    db.execute("INSERT INTO processes(id,trace_id,cwd,started_at,command) VALUES(?1,?1,?2,?3,'historical inspection')",
         rusqlite::params![exec, task.repo.path().canonicalize().unwrap().to_str().unwrap(), now]).unwrap();
     db.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,interactive,task_id,wave_id,cwd)
         VALUES('retained-input','retained input','generated',?1,0,0,?2,?3,?4)",
@@ -1297,7 +1300,7 @@ fn completion_preserves_retained_session_input_and_unknown_process_history() {
     assert_eq!(sessions, after);
     let unfinished: bool = db
         .query_row(
-            "SELECT completed_at IS NULL AND outcome IS NULL FROM processes WHERE lfid=?1",
+            "SELECT completed_at IS NULL AND outcome IS NULL FROM processes WHERE id=?1",
             [&exec],
             |row| row.get(0),
         )
@@ -1376,7 +1379,7 @@ fn provider_completed_delivery_can_file_and_finish_without_reopening() {
     let workflow = task.workflow();
     let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
     let processes: Vec<(String, Option<i64>, Option<String>)> = db
-        .prepare("SELECT lfid,completed_at,outcome FROM processes")
+        .prepare("SELECT id,completed_at,outcome FROM processes")
         .unwrap()
         .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
         .unwrap()
@@ -1501,7 +1504,7 @@ done
     for (id, completed, outcome) in processes {
         assert_eq!(
             db.query_row(
-                "SELECT completed_at,outcome FROM processes WHERE lfid=?1",
+                "SELECT completed_at,outcome FROM processes WHERE id=?1",
                 [id],
                 |row| Ok((
                     row.get::<_, Option<i64>>(0)?,

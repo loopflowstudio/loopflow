@@ -159,7 +159,7 @@ pub(crate) fn checkout_execution_boundary(
 pub(crate) const EXECUTION_IDENTITY_ENV: [&str; 6] = [
     crate::process::AGENT_CALLER_ENV,
     crate::journal::LF_TRACE_ID_ENV,
-    crate::journal::LF_PROCESS_LFID_ENV,
+    crate::journal::LF_PROCESS_ID_ENV,
     crate::session_record::CAPTURE_KEY_ENV,
     "LF_RUN_ID",
     "LF_RUN_DIR",

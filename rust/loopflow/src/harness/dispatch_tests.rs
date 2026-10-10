@@ -12,7 +12,7 @@ use tokio::sync::oneshot;
 use tokio_tungstenite::{tungstenite::protocol::Role, tungstenite::Message, WebSocketStream};
 
 use super::codex_history::History;
-use crate::id::ProcessLfid;
+use crate::id::LfProcessId;
 use crate::session::SessionEventKind;
 use crate::store::sqlite::SqliteStore;
 use crate::store::StoreError;
@@ -61,9 +61,9 @@ async fn stalled_dispatch() {
     let store = SqliteStore::open_ephemeral(&path).unwrap();
     let sql = rusqlite::Connection::open(&path).unwrap();
     sql.busy_timeout(Duration::from_millis(100)).unwrap();
-    let process = ProcessLfid::new();
+    let process = LfProcessId::new();
     sql.execute(
-        "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+        "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
         [process.as_str()],
     )
     .unwrap();
@@ -112,7 +112,7 @@ async fn stalled_dispatch() {
     // A distinct connection proves the Machine's WAL writer is also free, not
     // merely this SqliteStore's mutex.
     sql.execute(
-        "UPDATE processes SET command='unrelated write' WHERE lfid=?1",
+        "UPDATE processes SET command='unrelated write' WHERE id=?1",
         [process.as_str()],
     )
     .unwrap();
@@ -124,9 +124,9 @@ async fn stalled_dispatch() {
         .any(|event| event.kind == SessionEventKind::Started
             && event.provider_turn.as_deref() == Some("turn")));
 
-    let replacement = ProcessLfid::new();
+    let replacement = LfProcessId::new();
     sql.execute(
-        "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+        "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
         [replacement.as_str()],
     )
     .unwrap();

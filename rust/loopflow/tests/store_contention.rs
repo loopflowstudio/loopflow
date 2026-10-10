@@ -24,10 +24,10 @@ fn process() -> LfProcess {
         kind: loopflow::process::ProcessKind::Lf,
         agent_session_id: None,
         os_started_at: None,
-        lfid: loopflow::id::ProcessLfid::new(),
+        id: loopflow::id::LfProcessId::new(),
         pid: None,
         trace_id: loopflow::id::TraceId::new(),
-        parent_process_lfid: None,
+        parent_lf_process_id: None,
         via_agent: Some(false),
         caller_session_id: None,
         caller_provider_generation: None,
@@ -94,7 +94,7 @@ fn every_receipt_at_fleet_fanout_is_recorded_exactly_once() {
         "the ledger must hold exactly the receipts the fleet requested"
     );
     assert_eq!(
-        count(&path, "SELECT COUNT(DISTINCT lfid) FROM processes"),
+        count(&path, "SELECT COUNT(DISTINCT id) FROM processes"),
         expected,
         "no receipt may be recorded twice"
     );

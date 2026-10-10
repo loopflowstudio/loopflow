@@ -371,7 +371,7 @@ pub struct SessionHistory {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ProviderHistory {
     pub reference: ProviderHistoryReference,
-    pub process_lfid: Option<crate::id::ProcessLfid>,
+    pub lf_process_id: Option<crate::id::LfProcessId>,
     pub task_id: Option<crate::durable::TaskId>,
     pub wave_id: Option<crate::id::WaveId>,
     pub started_at: Option<i64>,
@@ -1051,9 +1051,9 @@ fn project_provider_history(
                 start_seq: start.map(|event| event.seq),
                 completion_seq: completed.map(|event| event.seq),
             },
-            process_lfid: start
-                .and_then(|event| event.process_lfid.as_deref())
-                .map(crate::id::ProcessLfid::parse)
+            lf_process_id: start
+                .and_then(|event| event.lf_process_id.as_deref())
+                .map(crate::id::LfProcessId::parse)
                 .transpose()
                 .map_err(std::io::Error::other)?,
             task_id: start
@@ -1120,7 +1120,7 @@ fn project_provider_history(
                 })?,
                 attempt_key: attempt.into(),
             },
-            process_lfid: None,
+            lf_process_id: None,
             task_id: origin
                 .and_then(|event| event.task_id.as_deref())
                 .map(crate::durable::TaskId::parse)
@@ -2088,7 +2088,7 @@ impl CaptureHandle {
         let store = crate::store::sqlite::SqliteStore::new(
             &crate::store::database_path_from_env().map_err(record_error)?,
         )?;
-        let process_lfid = crate::journal::current_process_lfid().ok_or_else(|| {
+        let lf_process_id = crate::journal::current_lf_process_id().ok_or_else(|| {
             StoreError::InvalidAuthority("Session input requires an admitted Process".into())
         })?;
         let mut next = store.session(session)?.ok_or(StoreError::NotFound)?;
@@ -2101,7 +2101,7 @@ impl CaptureHandle {
         next.artifact_key = new_artifact_key();
         next.input_published = false;
         let (next, attachment) =
-            store.claim_session_input(next, expected.as_ref(), &process_lfid, || {
+            store.claim_session_input(next, expected.as_ref(), &lf_process_id, || {
                 runtime::close_session_agent_process(&store, session)
             })?;
         // Continue the Session's attribution; the manifest still describes the
@@ -2305,7 +2305,7 @@ impl CaptureHandle {
     /// Claim an admitted conversation and retain the exact provider provenance
     /// used by its tools. A later attachment transfer never rewrites this process.
     pub(crate) fn claim_session_attachment(&self) -> StoreResult<()> {
-        let process_lfid = crate::journal::current_process_lfid().ok_or_else(|| {
+        let lf_process_id = crate::journal::current_lf_process_id().ok_or_else(|| {
             StoreError::InvalidAuthority("AgentProcess requires an admitted invocation".into())
         })?;
         let mut capture = self.0.lock().expect("Session capture mutex poisoned");
@@ -2320,7 +2320,7 @@ impl CaptureHandle {
                     "AgentProcess requires an admitted conversation".into(),
                 )
             })?;
-        let attachment = resume_session_agent_process(&store, &session.id, &process_lfid)?;
+        let attachment = resume_session_agent_process(&store, &session.id, &lf_process_id)?;
         capture.attachment = Some((session.id, attachment));
         drop(capture);
         self.register_interrupt();
@@ -2651,7 +2651,7 @@ impl SessionCapture {
                 task_id: work.as_ref().and_then(|work| work.task_id.clone()),
                 wave_id: work.as_ref().and_then(|work| work.wave_id.clone()),
                 work_source: work.as_ref().map(|work| work.source),
-                flow_process_lfid: None,
+                flow_lf_process_id: None,
                 bound_at: None,
                 interactive: manifest.surface != "headless",
                 repo: None,
@@ -2662,7 +2662,7 @@ impl SessionCapture {
                 completed_at: None,
                 created_at: manifest.created_at.unix_timestamp(),
             },
-            crate::journal::current_process_lfid().as_ref(),
+            crate::journal::current_lf_process_id().as_ref(),
         )?;
         Ok(Some(session))
     }
@@ -2948,10 +2948,10 @@ impl SessionCapture {
 pub(crate) fn resume_session_agent_process(
     store: &crate::store::sqlite::SqliteStore,
     session: &str,
-    process_lfid: &crate::id::ProcessLfid,
+    lf_process_id: &crate::id::LfProcessId,
 ) -> StoreResult<crate::process::SessionAttachment> {
     let expected = store.session_attachment(session)?;
-    store.resume_session_attachment(session, expected.as_ref(), process_lfid, || {
+    store.resume_session_attachment(session, expected.as_ref(), lf_process_id, || {
         runtime::close_session_agent_process(store, session)
     })
 }
@@ -3435,13 +3435,13 @@ mod tests {
             assert_eq!(child.wait()?.code(), Some(42));
             // Observed wait, not successful spawn or a finished capture, ends it.
             capture.record_native_agent_exit(&first)?;
-            let ended = store.process(&first.agent_process_lfid)?.unwrap();
+            let ended = store.process(&first.agent_process_id)?.unwrap();
             assert_eq!(ended.pid, Some(child.id()));
             assert!(ended.completed_at.is_some());
 
             let (mut child, snapshot) = capture.spawn_native_agent(command())?;
             let second = snapshot;
-            assert_ne!(first.agent_process_lfid, second.agent_process_lfid);
+            assert_ne!(first.agent_process_id, second.agent_process_id);
             assert_eq!(
                 capture.session_attachment(),
                 Some((session.clone(), second.clone()))
@@ -3449,20 +3449,20 @@ mod tests {
             assert_eq!(child.wait()?.code(), Some(42));
             assert!(capture.record_native_agent_exit(&first).is_err());
             assert!(store
-                .process(&second.agent_process_lfid)?
+                .process(&second.agent_process_id)?
                 .unwrap()
                 .completed_at
                 .is_none());
             // The child exited but without its wait receipt another launch is refused.
             assert!(capture.spawn_native_agent(command()).is_err());
             capture.record_native_agent_exit(&second)?;
-            assert_eq!(store.process(&first.agent_process_lfid)?, Some(ended));
+            assert_eq!(store.process(&first.agent_process_id)?, Some(ended));
             capture.finish("completed")?;
             assert!(capture.spawn_native_agent(command()).is_err());
             assert!(store
                 .session_attachment(&session)?
                 .unwrap()
-                .process_lfid
+                .lf_process_id
                 .is_none());
             Ok(())
         })
@@ -4209,8 +4209,8 @@ mod tests {
                 driver.provider_generation + 1
             );
             assert_eq!(
-                Some(&next_driver.provider_process_lfid),
-                next_driver.process_lfid.as_ref()
+                Some(&next_driver.provider_lf_process_id),
+                next_driver.lf_process_id.as_ref()
             );
             assert!(store.session_connection(&session.id)?.is_none());
             assert!(store.session_provider_process(&session.id)?.is_none());
@@ -4280,7 +4280,7 @@ mod tests {
             assert!(store
                 .session_attachment(&session.id)?
                 .unwrap()
-                .process_lfid
+                .lf_process_id
                 .is_none());
             assert!(!store
                 .session_history(&session.id, 0, 0)?
@@ -4311,18 +4311,18 @@ mod tests {
         crate::store::sqlite::SqliteStore,
         crate::process::SessionAttachment,
         std::process::Child,
-        crate::id::ProcessLfid,
+        crate::id::LfProcessId,
     ) {
         let path = ledger.home().join("loopflow.db");
         let store = crate::store::sqlite::SqliteStore::open_ephemeral(&path).unwrap();
         store.test_session("conversation", &super::new_artifact_key());
-        let first = crate::id::ProcessLfid::new();
-        let second = crate::id::ProcessLfid::new();
+        let first = crate::id::LfProcessId::new();
+        let second = crate::id::LfProcessId::new();
         let sql = rusqlite::Connection::open(&path).unwrap();
         let trace = crate::id::TraceId::new();
         for process in [&first, &second] {
             sql.execute(
-                "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,?2,1)",
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?2,1)",
                 rusqlite::params![process, trace],
             )
             .unwrap();
@@ -4343,7 +4343,7 @@ mod tests {
             serde_json::to_vec(&crate::journal::ProcessReceipt {
                 schema_version: 1,
                 trace_id: trace.to_string(),
-                process_lfid: first.to_string(),
+                lf_process_id: first.to_string(),
                 pid: process.id(),
                 started_at: crate::journal::process_started_at(process.id())
                     .unwrap()
@@ -4410,7 +4410,7 @@ mod tests {
             replacement.provider_generation,
             driver.provider_generation + 1
         );
-        assert_eq!(replacement.provider_process_lfid, next);
+        assert_eq!(replacement.provider_lf_process_id, next);
         assert!(store.session_connection("conversation").unwrap().is_none());
         assert!(store
             .session_provider_process("conversation")

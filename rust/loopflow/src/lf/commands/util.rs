@@ -542,7 +542,7 @@ fn record_interactive_opened(environment: &BTreeMap<String, String>) -> Result<(
     let Some(input) = environment.get(crate::session_record::CAPTURE_KEY_ENV) else {
         return Ok(());
     };
-    let Some(process) = crate::journal::current_process_lfid() else {
+    let Some(process) = crate::journal::current_lf_process_id() else {
         return Ok(());
     };
     let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
@@ -576,9 +576,9 @@ fn native_provider_attachment(
         .get(crate::process::AGENT_CALLER_ENV)
         .ok_or_else(|| anyhow!("Native launch has no admitted conversation"))?;
     let caller: crate::process::AgentCaller = serde_json::from_str(caller)?;
-    let process = crate::journal::current_process_lfid()
+    let process = crate::journal::current_lf_process_id()
         .ok_or_else(|| anyhow!("Native launch has no admitted invocation"))?;
-    if attachment.process_lfid.as_ref() != Some(&process)
+    if attachment.lf_process_id.as_ref() != Some(&process)
         || attachment.caller(session.clone()) != caller
     {
         bail!("Session attachment differs from native launch provenance");
@@ -596,7 +596,7 @@ fn native_provider_attachment(
                     "Remote client endpoint differs from its AgentProcess".into(),
                 ));
             }
-        } else if attachment.provider_process_lfid != process {
+        } else if attachment.provider_lf_process_id != process {
             return Err(crate::store::StoreError::InvalidAuthority(
                 "Native provider launch does not own the admitted AgentProcess".into(),
             ));
@@ -653,7 +653,7 @@ fn session_command_status_with_env(
             let session = store
                 .session_for_artifact(input)?
                 .ok_or_else(|| anyhow!("Session input {input} is not recorded"))?;
-            let process = crate::journal::current_process_lfid()
+            let process = crate::journal::current_lf_process_id()
                 .ok_or_else(|| anyhow!("Native launch has no admitted invocation"))?;
             let attachment =
                 crate::session_record::resume_session_agent_process(&store, &session.id, &process)?;
@@ -1874,10 +1874,10 @@ mod tests {
                 index + 1
             );
             let attachment = store.session_attachment(&saved.id).unwrap().unwrap();
-            assert!(attachment.process_lfid.is_none());
+            assert!(attachment.lf_process_id.is_none());
             assert!(rows
                 .iter()
-                .any(|row| row.lfid == attachment.provider_process_lfid
+                .any(|row| row.id == attachment.provider_lf_process_id
                     && row.pid == Some(std::process::id())
                     && row.completed_at.is_some()));
             let received = std::fs::read_to_string(temp.path().join("received")).unwrap();
@@ -2026,7 +2026,7 @@ mod tests {
         assert_eq!(failed, 1);
         for agent in agents {
             let parent = store
-                .process(agent.parent_process_lfid.as_ref().unwrap())
+                .process(agent.parent_lf_process_id.as_ref().unwrap())
                 .unwrap()
                 .unwrap();
             assert_eq!(parent.pid, Some(std::process::id()));
@@ -2046,7 +2046,7 @@ mod tests {
             let original = store.claim_session_attachment(
                 &session.id,
                 None,
-                &crate::id::ProcessLfid::new(),
+                &crate::id::LfProcessId::new(),
                 true,
             )?;
             let mut command = Command::new("/bin/sleep");
@@ -2065,14 +2065,14 @@ mod tests {
             let attached = store.claim_session_attachment(
                 &session.id,
                 Some(&original),
-                &crate::journal::current_process_lfid().unwrap(),
+                &crate::journal::current_lf_process_id().unwrap(),
                 false,
             )?;
             let environment = BTreeMap::from([(
                 crate::process::AGENT_CALLER_ENV.into(),
                 serde_json::to_string(&attached.caller(session.id.clone()))?,
             )]);
-            let before = store.process(&attached.agent_process_lfid)?.unwrap();
+            let before = store.process(&attached.agent_process_id)?.unwrap();
             let mut command = SessionCommand {
                 program: "/usr/bin/true".into(),
                 args: vec![],
@@ -2085,7 +2085,7 @@ mod tests {
             };
             let result = session_command_status_with_env(&command, &environment, None, None, None);
             let alive = provider.try_wait()?.is_none();
-            let unchanged = store.process(&attached.agent_process_lfid)? == Some(before);
+            let unchanged = store.process(&attached.agent_process_id)? == Some(before);
             command.remote = None;
             let local = session_command_status_with_env(&command, &environment, None, None, None);
             command.remote = Some(NativeConnection {
@@ -2143,7 +2143,7 @@ mod tests {
                 let (session, attachment) = capture.session_attachment().unwrap();
                 let store = SqliteStore::new(&home.join("loopflow.db"))?;
                 if opening_error {
-                    let process = crate::journal::current_process_lfid().unwrap();
+                    let process = crate::journal::current_lf_process_id().unwrap();
                     store.retain_session_observation(
                         &store.session(&session)?.unwrap(),
                         &crate::session::SessionObservation {
@@ -2188,7 +2188,7 @@ mod tests {
                         "{error:#}"
                     );
                 }
-                let ended = store.process(&attachment.agent_process_lfid)?.unwrap();
+                let ended = store.process(&attachment.agent_process_id)?.unwrap();
                 assert!(ended.completed_at.is_some());
                 assert_eq!(
                     crate::journal::process_identity_evidence(

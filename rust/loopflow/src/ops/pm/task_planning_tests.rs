@@ -602,7 +602,7 @@ fn task_deletion_active_sync_reconnect_retains_execution_and_history() {
             rusqlite::params![task.id.as_str(), repo.to_str().unwrap()],
         )
         .unwrap();
-        conn.execute("INSERT INTO processes(lfid,trace_id,command,cwd,started_at) VALUES('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222','lf run code',?1,2)",[repo.to_str().unwrap()]).unwrap();
+        conn.execute("INSERT INTO processes(id,trace_id,command,cwd,started_at) VALUES('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222','lf run code',?1,2)",[repo.to_str().unwrap()]).unwrap();
         conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,cwd,task_id,wave_id,provider_thread,input_published) VALUES('session-retained','Conversation','human',2,?1,?2,?3,'native-retained',1)",rusqlite::params![repo.to_str().unwrap(),task.id.as_str(),task.wave_id.as_str()]).unwrap();
         fixture
             .store
@@ -610,15 +610,15 @@ fn task_deletion_active_sync_reconnect_retains_execution_and_history() {
             .claim_session_attachment(
                 "session-retained",
                 None,
-                &crate::id::ProcessLfid::parse("11111111-1111-4111-8111-111111111111").unwrap(),
+                &crate::id::LfProcessId::parse("11111111-1111-4111-8111-111111111111").unwrap(),
                 true,
             )
             .unwrap();
         conn.execute("INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,created_at,updated_at) VALUES('pr-retained',?1,1,'task','retain/branch','retained-base',1,7)",[task.id.as_str()]).unwrap();
         let graph = json!({"name":"code", "nodes":[{"name":"review","skill":"review","description":null}],
             "edges":[{"from":"start","to":"review","flow":"implement"},{"from":"review","to":"end","flow":null}]});
-        conn.execute("INSERT INTO task_workflows(task_id,graph,node,edge,process_lfid,updated_at) VALUES(?1,?2,'start',0,'11111111-1111-4111-8111-111111111111',3)",rusqlite::params![task.id.as_str(),graph.to_string()]).unwrap();
-        conn.execute("INSERT INTO task_workflow_moves(task_id,workflow,kind,from_node,to_node,edge,process_lfid,note,at) VALUES(?1,'code','chose','start','review',0,'11111111-1111-4111-8111-111111111111','Original choice',3)",[task.id.as_str()]).unwrap();
+        conn.execute("INSERT INTO task_workflows(task_id,graph,node,edge,lf_process_id,updated_at) VALUES(?1,?2,'start',0,'11111111-1111-4111-8111-111111111111',3)",rusqlite::params![task.id.as_str(),graph.to_string()]).unwrap();
+        conn.execute("INSERT INTO task_workflow_moves(task_id,workflow,kind,from_node,to_node,edge,lf_process_id,note,at) VALUES(?1,'code','chose','start','review',0,'11111111-1111-4111-8111-111111111111','Original choice',3)",[task.id.as_str()]).unwrap();
         let rows = || {
             [
                 "processes",
@@ -1446,10 +1446,10 @@ fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
             kind: crate::process::ProcessKind::Lf,
             agent_session_id: None,
             os_started_at: None,
-            lfid: crate::id::ProcessLfid::new(),
+            id: crate::id::LfProcessId::new(),
             pid: None,
             trace_id: crate::id::TraceId::new(),
-            parent_process_lfid: None,
+            parent_lf_process_id: None,
             via_agent: None,
             caller_session_id: None,
             caller_provider_generation: None,
@@ -1467,7 +1467,7 @@ fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
         fixture
             .store
             .sqlite
-            .set_workflow_node(&task.id, "start", &process.lfid, Some("New scope"))
+            .set_workflow_node(&task.id, "start", &process.id, Some("New scope"))
             .unwrap();
         assert_eq!(
             fixture

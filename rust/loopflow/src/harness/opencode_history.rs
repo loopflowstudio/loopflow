@@ -286,7 +286,7 @@ pub(super) async fn post(
 mod tests {
     use super::History;
 
-    use crate::id::ProcessLfid;
+    use crate::id::LfProcessId;
     use crate::session::SessionEventKind;
     use crate::store::sqlite::SqliteStore;
     use serde_json::json;
@@ -297,10 +297,10 @@ mod tests {
         let path = home.path().join("store.db");
         let store = SqliteStore::open_ephemeral(&path).unwrap();
         let input = crate::session_record::new_artifact_key();
-        let process = ProcessLfid::new();
+        let process = LfProcessId::new();
         let sql = rusqlite::Connection::open(&path).unwrap();
         sql.execute(
-            "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
             [process.as_str()],
         )
         .unwrap();
@@ -323,9 +323,9 @@ mod tests {
         store
             .replace_session_input(session.captured, replacement.clone())
             .unwrap();
-        let second = ProcessLfid::new();
+        let second = LfProcessId::new();
         sql.execute(
-            "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
             [second.as_str()],
         )
         .unwrap();
@@ -409,6 +409,6 @@ mod tests {
                 row.kind,
                 SessionEventKind::Captured | SessionEventKind::Observed
             ))
-            .all(|row| row.process_lfid.as_deref() == Some(process.as_str())));
+            .all(|row| row.lf_process_id.as_deref() == Some(process.as_str())));
     }
 }

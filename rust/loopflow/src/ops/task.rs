@@ -575,7 +575,7 @@ async fn traverse_workflow(
             }));
         }
     };
-    let process = crate::journal::current_process_lfid()
+    let process = crate::journal::current_lf_process_id()
         .ok_or_else(|| task_error("a workflow move requires a registered Process"))?;
     if let Some(definition) = &take_up {
         store
@@ -612,7 +612,7 @@ async fn traverse_workflow(
 /// its target. A Task moved elsewhere in the meantime stays where it was put.
 /// Arrival is retained when the completion trigger fails.
 pub fn workflow_arrive(task: &Task) -> OpsResult<()> {
-    let Some(process) = crate::journal::current_process_lfid() else {
+    let Some(process) = crate::journal::current_lf_process_id() else {
         return Ok(());
     };
     block_on_task(async {
@@ -684,7 +684,7 @@ pub fn workflow_set(issue: &str, node: &str, note: Option<&str>) -> OpsResult<St
                 nodes.join(", ")
             )));
         }
-        let process = crate::journal::current_process_lfid()
+        let process = crate::journal::current_lf_process_id()
             .ok_or_else(|| task_error("a workflow move requires a registered Process"))?;
         if !store
             .sqlite
@@ -4273,10 +4273,10 @@ mod tests {
             kind: crate::process::ProcessKind::Lf,
             agent_session_id: None,
             os_started_at: None,
-            lfid: crate::id::ProcessLfid::new(),
+            id: crate::id::LfProcessId::new(),
             pid: None,
             trace_id: crate::id::TraceId::new(),
-            parent_process_lfid: None,
+            parent_lf_process_id: None,
             via_agent: None,
             caller_session_id: None,
             caller_provider_generation: None,
@@ -4325,7 +4325,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(blockers.len(), 1, "{blockers:?}");
-        assert!(blockers[0].contains(process.lfid.as_str()));
+        assert!(blockers[0].contains(process.id.as_str()));
         let gate = runtime
             .block_on(super::task_completion_gate(&fixture.store, &fixture.task))
             .unwrap();
@@ -4338,11 +4338,11 @@ mod tests {
         let receipt = crate::journal::ProcessReceipt {
             schema_version: 1,
             trace_id: process.trace_id.to_string(),
-            process_lfid: process.lfid.to_string(),
+            lf_process_id: process.id.to_string(),
             pid,
             started_at: crate::journal::process_started_at(pid).unwrap().unwrap(),
         };
-        let receipt_path = root.join(format!("{}.json", process.lfid));
+        let receipt_path = root.join(format!("{}.json", process.id));
         let receipt_bytes = serde_json::to_vec(&receipt).unwrap();
         std::fs::write(&receipt_path, &receipt_bytes).unwrap();
         assert!(runtime
@@ -4375,7 +4375,7 @@ mod tests {
             WorkStatus::Done
         );
         assert_eq!(
-            fixture.store.sqlite.process(&process.lfid).unwrap(),
+            fixture.store.sqlite.process(&process.id).unwrap(),
             Some(process)
         );
         assert_eq!(fixture.store.sqlite.session(&session.id).unwrap(), before);
@@ -4646,10 +4646,10 @@ mod tests {
             kind: crate::process::ProcessKind::Lf,
             agent_session_id: None,
             os_started_at: None,
-            lfid: crate::id::ProcessLfid::new(),
+            id: crate::id::LfProcessId::new(),
             pid: None,
             trace_id: crate::id::TraceId::new(),
-            parent_process_lfid: None,
+            parent_lf_process_id: None,
             via_agent: None,
             caller_session_id: None,
             caller_provider_generation: None,
@@ -4697,10 +4697,10 @@ mod tests {
         crate::journal::set_test_machine_booted_at(None);
         // The stalled Session's unanswered turn is history, not execution.
         assert_eq!(unresolved.len(), 1, "{unresolved:?}");
-        assert!(unresolved[0].contains(process.lfid.as_str()));
+        assert!(unresolved[0].contains(process.id.as_str()));
         assert!(after_boot.is_empty(), "{after_boot:?}");
         assert_eq!(
-            fixture.store.sqlite.process(&process.lfid).unwrap(),
+            fixture.store.sqlite.process(&process.id).unwrap(),
             Some(process)
         );
         assert_eq!(

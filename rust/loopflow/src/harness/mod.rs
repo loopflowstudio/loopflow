@@ -367,11 +367,11 @@ pub(crate) fn admit_for_test(config: &mut AgentConfig) -> crate::journal::TestLe
     let ledger = crate::journal::TestLedgerGuard::new();
     let database = ledger.home().join("loopflow.db");
     let store = crate::store::sqlite::SqliteStore::open_ephemeral(&database).unwrap();
-    let process = crate::id::ProcessLfid::new();
+    let process = crate::id::LfProcessId::new();
     rusqlite::Connection::open(&database)
         .unwrap()
         .execute(
-            "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
             [process.as_str()],
         )
         .unwrap();

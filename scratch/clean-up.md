@@ -279,52 +279,67 @@ Codex rollout bytes through cleanup, then calls `provider_conversation::admit` w
 an unrecorded ID, forcing actual transcript discovery and cwd reading. No provider is
 launched; this is not a provider-resume proof.
 
+### Setup I/O isolation
+
+Setup I/O isolation separates registration/hint reads from missing-hint initialization,
+attempted-hint writes, receipt reads, receipt publication and receipt pruning.
+Each request uses a two-second child deadline before checkout admission, with no
+checkout locks, Git lease or source-removal operation. The existing subprocess
+owner kills its process group and bounds reaping; an OS-stuck child may remain
+awaiting reaping, but owns no checkout admission and cannot continue into deletion.
+The internal executable entry bypasses ordinary command/store startup and explicitly
+excludes inherited descriptors (including outer Flow/release/Git exclusions). This is
+product I/O isolation, not another agent or cleanup owner.
+
+The parent alone advances scheduling and admits removal after acknowledgments.
+Atomic scheduling writes may commit before interruption; per-worker hint temporaries
+and unique receipt IDs prevent inode reuse. A failed receipt write disables further
+updates to that receipt. The next pass resumes from published progress. Scheduling facts
+never grant deletion authority. Normal failed hint writes remove their temporary;
+killed writes can leave small administrative temporary files. Their reclamation
+in retained registrations remains with artifact follow-up, not source deletion.
+
+Real-FIFO fixtures cover stalled hint reads, hint publication interruption,
+receipt observation interruption and lost receipt-publication acknowledgments.
+They check preservation, available admission after timeout, retry and healthy
+neighbor collection. A blocked worker also proves that an inherited outer lock
+is released when its parent closes it, without waiting for the worker. A three-second
+Git removal fixture checks that setup and admission deadlines never cancel admitted
+destructive removal. Receipt fixtures
+now use canonical main-repository keys; earlier alias-key fixtures did not
+establish resumption by the real maintenance pass. The repaired 41-failure
+fixture passes with that shared key.
+
 ### Remaining in this PR
 
-Reconciled 2026-10-09 against `65018af2e` and `c62a28b02`: failed-hint
-fairness, cheap previews and composed backfill coverage now exist. They do not
-resolve the final-observation counterexample below. The locally available
-`origin/main` has no commits absent from this branch; no remote refresh is claimed.
+Reconciled 2026-10-09 through `467951af7`, including `5d197652a`: setup I/O
+isolation now joins failed-hint fairness, cheap previews and composed backfill
+coverage. Exact-head settlement and fail-closed locked evidence checks are unchanged.
+Neither setup isolation nor early protection matches resolves the final-observation
+counterexample below. The locally available `origin/main` has no commits absent from this branch; no remote refresh is claimed.
 
-1. **Finish bounded observation and failure isolation.** Independent setup I/O
-   isolation now separates registration/hint reads from missing-hint initialization,
-   attempted-hint writes, receipt reads, receipt publication and receipt pruning.
-   Each request runs in a two-second subprocess before checkout admission, with no
-   checkout locks, Git lease or source-removal operation. The existing subprocess
-   owner kills its process group and bounds reaping; an OS-stuck child may remain
-   awaiting reaping, but owns no checkout admission and cannot continue into deletion.
-   The internal executable entry bypasses ordinary command/store startup and explicitly
-   excludes inherited descriptors (including outer Flow/release/Git exclusions). This is
-   product I/O isolation, not another agent or cleanup owner.
+1. **Finish bounded observation and failure isolation.** The requested separation
+   of setup reads, scheduling writes and checkout admission exists in `5d197652a`
+   and `467951af7`; the completed slice and its FIFO proofs are above. It does not
+   finish the bounded-pass requirement.
 
-   The parent alone advances scheduling and admits removal after acknowledgments.
-   Atomic scheduling writes may commit before interruption; per-worker hint temporaries
-   and unique receipt IDs prevent inode reuse, and a failed receipt write disables further updates
-   to that receipt. The next pass resumes from published progress. Scheduling facts
-   never grant deletion authority. Normal failed hint writes remove their temporary;
-   killed writes can leave small administrative temporary files. Their reclamation
-   in retained registrations remains with artifact follow-up, not source deletion.
+   Global lock-file creation, initial registration normalization, registry filesystem
+   opens/normalization, checkout/Git lease discovery and aggregate locked observation
+   still run inline. Worker descriptor enumeration and process launch also precede
+   the child deadline; timeout permits up to one additional second of synchronous
+   reaping before handing off an OS-stuck child. A two-second request deadline is
+   therefore not a two-second end-to-end request guarantee.
 
-   Real-FIFO fixtures cover stalled hint reads, hint publication interruption,
-   receipt observation interruption and lost receipt-publication acknowledgments.
-   They check preservation, available admission after timeout, retry and healthy
-   neighbor collection. A blocked worker also proves that an inherited outer lock
-   is released when its parent closes it, without waiting for the worker. A three-second Git removal fixture checks that setup and
-   admission deadlines never cancel admitted destructive removal. Receipt fixtures
-   now use canonical main-repository keys; earlier alias-key fixtures did not
-   establish resumption by the real maintenance pass. The repaired 41-failure
-   fixture passes with that shared key.
-
-   **Remaining:** global lock-file creation, initial registration normalization,
-   registry filesystem opens/normalization, checkout/Git lease discovery and aggregate
-   locked observation still run inline. Setup now bounds individual hint/receipt
-   requests, not their cardinality or total duration; directory enumeration failure
-   can defer the repository. Kernel-uninterruptible filesystem calls are not simulated
-   by the FIFO tests. The 41-failure fairness proof still does not establish a whole-pass
-   time bound. No canceled worker receives locks or a continuation to apply cleanup.
-   Further lock preparation must preserve that separation; destructive removal itself
-   must never be wrapped in the cancellable worker. Item 2 remains the review boundary
-   for any dependent final-history mechanism.
+   `checkout_attempts` visits every registration before candidate admission starts.
+   The 32-observation cap limits admitted candidates, not these setup reads or missing
+   hint writes. Bound aggregate setup with durable progress and preserve retry
+   fairness; also isolate remaining preparatory I/O without giving canceled workers
+   checkout locks or a continuation into deletion. Directory enumeration failure
+   can still defer the repository. The 41-failure fixture covers immediate write
+   failures, not many stalled paths or a whole-pass time bound; FIFO fixtures do not
+   simulate kernel-uninterruptible calls. Destructive removal must remain outside
+   cancellation. Dependent final-history changes still require item 2's mechanism
+   review; no replacement is selected by this reconciliation.
 2. **Revise final evidence observation before dependent implementation.** The
    opt-in `cleanup_evidence_cost_probe` measures already-complete raw projection,
    fresh path resolution and native traversal separately—no backfill is timed.
@@ -432,4 +447,4 @@ allocated bytes by category; observed free-space delta after collection; oldest
 eligible retention age. APFS sharing, hardlinks and concurrent writers mean
 directory sums are estimates, not guaranteed reclaimed bytes.
 
-Check: `cargo test -p loopflow --lib cleanup_setup_` — 7 passed; focused failed-hint fairness, oldest-deferral, slow-candidate, slow-registration and receipt tests — 5 passed; real CLI I/O protocol smoke, `cargo build -p loopflow --bin lf`, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check` — passed; full acceptance/provider resume: gate; installed scheduler/upgrade: demo.
+Check: realign `git diff --check` — passed (prose only); prior `cargo test -p loopflow --lib cleanup_setup_` — 7 passed; focused failed-hint fairness, oldest-deferral, slow-candidate, slow-registration and receipt tests — 5 passed; real CLI I/O protocol smoke, `cargo build -p loopflow --bin lf`, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check` — passed; full acceptance/provider resume: gate; installed scheduler/upgrade: demo.

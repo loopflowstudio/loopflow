@@ -35,8 +35,11 @@
 - Implementation choice, 2026-10-09: admission starts after setup. Git observation
   subprocesses and independent registry SQL readers have two-second deadlines;
   initial normalization, registry filesystem I/O, lease discovery and aggregate locked
-  observation remain unbounded. Hint/receipt filesystem requests now use isolated
-  two-second subprocesses; their aggregate setup cost still scales with registrations. An admitted destructive removal is never canceled by these budgets.
+  observation remain unbounded. Hint/receipt requests use isolated children
+  with two-second deadlines plus bounded reaping; descriptor enumeration and spawn
+  precede that clock. Setup still visits all registrations before the 32-candidate
+  cap applies. No aggregate setup bound is proved. An admitted destructive removal
+  is never canceled by these budgets.
 - Implementation choice, 2026-10-09: retain the 32-observation/eight-removal caps,
   using last-attempt timestamps and a fixed hourly cohort. A receipt-owned fairness
   sweep now interleaves with oldest-first scheduling because failed hint writes cannot

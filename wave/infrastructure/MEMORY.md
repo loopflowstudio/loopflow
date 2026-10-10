@@ -281,29 +281,26 @@ Earlier cleanup history: `66da3fdf7:wave/infrastructure/MEMORY.md` under
 ## Automatic checkout collection (2026-10-09)
 
 Jack Heart authorized automatic collection and disposable Etude output; budgets
-remain draft. Rotation design grants no conversation-expiry or one-off deletion.
+remain draft. Rotation grants no conversation-expiry or one-off deletion.
+Require ownership, exact-head settlement, idle execution and classified content.
+Age, remote absence, ignored status and completion cannot substitute. Retain PR-less
+Tasks/unresolved follow-through; compare-and-delete refs; history overrides cache tags.
+Repair schedules before pruning binaries; preserve disable.
+Release's lesson: generated schedules and manual recovery prove no unattended firing.
 
-Require ownership, exact-head settlement, idle execution and classified content;
-age, remote absence, ignored status and completion cannot substitute.
-PR-less Tasks/unresolved follow-through retain checkouts. Compare-and-delete refs;
-cache tags never override history.
+`467951af7` separates cancellable setup reads from atomic scheduling
+writes, excluding inherited locks. Lost write acknowledgments end that receipt's
+writer; later passes resume published progress. Hints never authorize deletion.
+FIFO proofs cover retention, retries, neighbors and lock release. Never cancel removal. Per-request deadlines do not bound enumeration/spawn, setup cardinality,
+inline lock discovery or aggregate locked observation. Kernel-stuck I/O is unproved.
 
-Repair schedules before pruning binaries; failure retains them and disable survives.
-Release's lesson: generated schedules prove no loaded firing.
-
-`65018af2e` adds a receipt sweep beside timestamp priority: 41 persistent hint
-failures no longer starve healthy neighbors under tested arrivals/interruption.
-Neither lane authorizes deletion or bounds stalled I/O. Setup writes hints/receipts;
-it is not read-only. Never cancel destructive removal.
-
-Previews defer history; removal requires complete coverage and fresh destinations.
-Early protection matches help, but the raw read times out at 65,536 synthetic rows. Repeating that
-unchanged input cannot progress; paged backfill does not repair final observation.
-Cached negatives cannot survive symlink retargeting. Workload-sized isolated
-observation versus a history-owner fresh view remains unselected. Native deadlines
-are cooperative, not syscall bounds. Provider launch/resume, second release CLI
-writer and installed schedule/upgrade acceptance remain unproved.
-Prior proofs: `968db3886:wave/infrastructure/MEMORY.md`, this heading.
+Previews defer history; removal needs complete coverage and fresh destinations.
+The final raw read hit its deadline at 65,536 projected synthetic rows;
+unchanged retries cannot progress. Cached negatives fail on symlink retargeting.
+Workload-sized isolated observation versus a history-owner fresh view remains
+unselected; neither a larger constant timeout nor early positive matches resolves it.
+Gate owns provider resume/second release writer; demo owns installed schedule/upgrade.
+Prior proofs: `3a571cb3a:wave/infrastructure/MEMORY.md`, this heading.
 Plan: `scratch/clean-up.md`.
 
 ## Project configuration and review direction (2026-10-05)

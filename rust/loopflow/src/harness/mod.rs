@@ -385,12 +385,21 @@ pub(crate) fn admit_for_test(config: &mut AgentConfig) -> crate::journal::TestLe
 
 #[cfg(test)]
 mod tests {
+    use std::os::unix::fs::PermissionsExt;
+
     use super::*;
 
     #[tokio::test]
     async fn unattached_launch_is_refused_before_any_provider_starts() {
         // Account selection reads this private, empty store; no route exists.
         let ledger = crate::journal::TestLedgerGuard::new();
+        let _env = crate::test_ambient::EnvGuard::clear(&["PATH", "LF_BIN"]);
+        // Claude probes its version before the first input launches an agent.
+        let claude = ledger.home().join("claude");
+        std::fs::write(&claude, "#!/bin/sh\n[ \"$1\" = --version ]\n").unwrap();
+        std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::env::set_var("PATH", ledger.home());
+        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
         let absent = ledger.home().join("absent");
         for name in ["codex", "claude", "opencode"] {
             let (tx, _rx) = mpsc::unbounded_channel();

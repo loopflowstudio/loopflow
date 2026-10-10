@@ -1169,6 +1169,9 @@ Loopflow can hide the CI failure.
 Include direct provider-harness startup tests in this check: even an expected
 spawn failure first resolves the conversation's `lf`. Pin a fixture executable
 under the environment lock and restore the pin afterward.
+Attachment-rejection fixtures must also supply provider version probes and restrict
+PATH to their stand-ins: Claude checks `--version` before launching on first input.
+A locally installed provider must not make an otherwise incomplete fixture pass.
 
 Changes to terminal provider probes or spawning must run both `session_cli_tests`
 and `agent_startup_tests`. An executable that exits with an error still started

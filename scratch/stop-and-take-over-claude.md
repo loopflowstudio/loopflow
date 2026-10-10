@@ -2,7 +2,8 @@
 
 Jack Heart requested provider-independent takeover and stop on 2026-10-09.
 The outcome is accepted; the remaining Claude transport proposal is a draft.
-Reconciled 2026-10-10 against `b62086390`; implementation boundary: `ac0f659aa`. Dependencies #1519/#1520 are integrated
+Reconciled 2026-10-10, including atomic result correlation below; previous
+implementation boundary: `ac0f659aa`. Dependencies #1519/#1520 are integrated
 at `be4a2b2af`, satisfying Jack's steer `28e0c5cc`; #1521 is integrated through
 `df5169ab9`. LOO-443's remaining item 3 was read at
 `4f6ed76b2^:scratch/introduce-agentprocess-record-the-provider.md`.
@@ -28,6 +29,17 @@ shippable or Task completion. This plan grants no installation or delivery autho
    attachments at the transport owner before writes. Lost acknowledgements and
    transport death retain uncertain inputs without replay. This is unimplemented,
    not an accepted relay design.
+
+   Result recovery cannot reconstruct a reader-local pending queue and replay
+   results against it: two reconstructed readers can assign one result to two
+   turns. The surviving history path now selects an admission and commits output,
+   usage and completion atomically, deduplicating the native result UUID within
+   its AgentProcess. Conflicting repeated payloads refuse without consuming the
+   next turn. A transport still needs ordered, durable consumption of previously
+   uncorrelated output; result deduplication alone is not a replay cursor.
+   Client completion projection must share that decision: the current launcher
+   mapper still has its own counters and is not made replay-safe by this history
+   repair. Replace that coupling with the transport, not a second result parser.
 
    The draft must preserve `dispatch.rs`'s bounded write fence: the transport
    owner validates and holds it through the provider write, not the caller while
@@ -83,7 +95,8 @@ Preserve stream/history parsers, native identity, permissions, saved origins and
 stale-write fences while replacing these paths in one cut. Do not polish the
 predecessor transport.
 
-Already deleted: anonymous lifelines, optional headless launch, endpoint-derived
+Already deleted: Claude’s reader-local pending-result queue and non-atomic
+result receipts (SQLite now owns result correlation); anonymous lifelines, optional headless launch, endpoint-derived
 FIFO paths, `HELD_LIFELINES`, provider-specific signaling, creation retries,
 permission PATCH, launcher-local request maps, SSE-only permission replies and
 OpenCode's ignored `ApprovalPolicy` constructor argument. Claude History no longer
@@ -123,8 +136,8 @@ and foreground defaults were repaired without schema or installed-data changes.
 ### Claude observation
 
 `4834c18f4` saves UUID/origin under the dispatch fence before pipe writes, without
-inventing native identity. Native echoes admit requests; reopened readers recover
-unfinished turns in observation order for the same AgentProcess. Fixtures cover
+inventing native identity. Native echoes admit requests; SQLite selects unfinished turns in observation
+order for the same AgentProcess. Fixtures cover
 loss before echo/result, changed captured input, duplicate echo, foreign-process
 rejection and native-thread binding; not unread pipes.
 
@@ -200,6 +213,12 @@ Detailed reviews and previous compression evidence remain at
 `ac0f659aa:scratch/stop-and-take-over-claude.md` and its referenced history.
 Release's entry-point lesson applies: harness fixtures cannot prove public handoff.
 
+October 10 recovery review found repeated results could consume a later admission,
+and a failure after output/usage could leave partial receipts. Focused history
+fixtures now cover overlapping/reopened readers, changed repeats, missing identity
+and rollback at completion. These are observation proofs only; launcher-owned
+pipes, their failure tails and the public takeover path remain unchanged.
+
 ## Checks
 
-`git diff --check`: pass; prose-only reconciliation, prior `ac0f659aa` checks remain applicable; public death orders unfinished, Linux acceptance CI-owned.
+`cargo test -p loopflow --lib harness::claude_history::tests` (5), `cargo build -p loopflow`, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check`: pass; public death orders unfinished, Linux acceptance CI-owned.

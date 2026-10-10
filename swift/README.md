@@ -599,14 +599,15 @@ drafts remain retained; no remote planning tree or execution record is imported.
 change retained pane visibility. Focus, split, move, resize and zoom use that same
 exact-target path through the registry and multiplexer; see the
 [CLI examples](../docs/lf.md#desktop-navigation). `--repo`/`--task` select Work;
-`--pane` selects a pane ID from inspection. Omit it only for one eligible pane;
-ambiguity lists choices and does nothing. Surface/window/content tokens are internal.
+`--pane` selects a pane ID from inspection or a creation receipt. Without it,
+the verified caller terminal wins within selected Work, otherwise one eligible
+pane is required; ambiguity lists choices and does nothing. Surface/window/content tokens are internal.
 Move retains the pane itself,
 including its content occurrence and surface key; it never closes/reopens a client.
 Split adds an empty pane. Arrangement preserves selection except explicit focus;
 zoom does not redirect input to an unselected pane. Window/content replacement
-rejects stale targets, including the second target of a move or resize. Replies
-are model readings, not native-rendering proof. Shell, Files and Flow-log add
+rejects stale targets, including the second target of a move or resize. Mutation replies
+identify the affected pane directly; they are not native-rendering proof. Shell, Files and Flow-log add
 companions beside the exact target without changing focus or zoom. Files and
 Flow-log reuse existing panes for the named Task; its recorded checkout must
 match. Remote shells run on the recorded execution Machine; changed or missing checkouts

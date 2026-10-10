@@ -131,7 +131,7 @@ fn inspection_is_identical_across_spellings_and_has_no_launch_side_effects() {
     let overview = success(run(repo.path(), home.path(), &["--help"]));
     let overview = String::from_utf8(overview).unwrap();
     assert!(overview.starts_with("Usage: lf "));
-    assert!(overview.lines().count() <= 25, "{overview}");
+    assert!(overview.contains("--repo") && overview.contains("--machine"));
     assert!(
         !home.path().join(".lf").exists(),
         "inspection wrote runtime state"
@@ -863,7 +863,6 @@ fn retired_installation_and_capture_paths_do_not_resolve() {
         vec!["machine", "desktop"],
         vec!["machine", "screenshot"],
         vec!["self", "screenshot"],
-        vec!["desktop"],
         vec!["screenshot"],
         vec!["__screenshot-supervisor"],
     ] {
@@ -1144,4 +1143,61 @@ fn portable_help_describes_exact_kind_selection() {
     assert!(help(&["help", "team-check"]).contains("team-check — flow"));
     assert!(help(&["help", "skill", "team-check"])
         .contains("Untyped lookup selects the same-named flow"));
+}
+
+#[test]
+fn structured_help_describes_pane_creation_and_read_results_without_desktop() {
+    use loopflow::lf::navigation::describe_command;
+    let repo = fixture();
+    let home = tempfile::tempdir().unwrap();
+    let output = success(run(
+        repo.path(),
+        home.path(),
+        &["help", "desktop", "split", "--json"],
+    ));
+    let split: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(
+        split,
+        describe_command(&["desktop".into(), "split".into()], false).unwrap()
+    );
+    assert!(!home.path().join(".lf").exists());
+    let definition = &split["definition"];
+    let args = definition["arguments"].as_array().unwrap();
+    let axis = args.iter().find(|arg| arg["name"] == "axis").unwrap();
+    assert_eq!(axis["required"], true);
+    assert_eq!(
+        axis["values"],
+        serde_json::json!(["horizontal", "vertical"])
+    );
+    assert!(args
+        .iter()
+        .any(|arg| arg["name"] == "pane" && arg["required"] == false));
+    assert!(!args.iter().any(|arg| arg["name"] == "target"));
+    assert_eq!(
+        definition["result_schema"]["properties"]["pane"]["type"],
+        "string"
+    );
+    assert_eq!(
+        definition["result_schema"]["properties"]["machine_id"]["type"],
+        "string"
+    );
+    let read = describe_command(&["desktop".into(), "read".into()], false).unwrap();
+    let region = read["definition"]["arguments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|arg| arg["name"] == "region")
+        .unwrap();
+    assert_eq!(
+        region["values"],
+        serde_json::json!(["screen", "scrollback", "selection"])
+    );
+    assert!(read["definition"]["result_schema"]["$defs"]["DesktopTextResult"].is_object());
+    assert!(describe_command(&["desktop".into(), "splut".into()], false).is_err());
+    let all = describe_command(&["desktop".into()], true).unwrap();
+    assert!(all["definition"]["commands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|command| command["result_schema"].is_object()));
 }

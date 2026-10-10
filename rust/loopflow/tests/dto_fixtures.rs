@@ -1214,3 +1214,16 @@ fn task_files_frames_preserve_checkout_identity_and_heartbeat() {
         assert!(serde_json::from_value::<TaskFilesFrame>(missing).is_err());
     }
 }
+
+#[test]
+fn desktop_pane_receipt_returns_the_affected_identity() {
+    use loopflow::lf::commands::desktop::DesktopPaneReceipt;
+    let json = include_str!("../../../tests/fixtures/dto/desktop_pane_receipt.json");
+    let receipt: DesktopPaneReceipt = serde_json::from_str(json).unwrap();
+    assert_eq!(receipt.pane, "created-pane");
+    assert_eq!(receipt.machine_id, "machine-a");
+    assert_eq!(
+        serde_json::to_value(&receipt).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+}

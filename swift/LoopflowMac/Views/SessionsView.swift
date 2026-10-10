@@ -45,7 +45,8 @@ final class SessionsWorkspace {
     let isLocal: Bool
     var executionLocation: TaskLocationObservation?
 
-    func newShell(beside pane: String? = nil, focus: Bool = true) throws {
+    @discardableResult
+    func newShell(beside pane: String? = nil, focus: Bool = true) throws -> PaneState? {
         let command: [String]
         if isLocal { command = [] }
         else {
@@ -58,7 +59,7 @@ final class SessionsWorkspace {
                 "--repository", location.repositoryID, "task", "shell", task,
                 "--checkout", identity.worktree]
         }
-        multiplexer.newShell(command: command, beside: pane, focus: focus)
+        return multiplexer.newShell(command: command, beside: pane, focus: focus)
     }
     let multiplexer = MultiplexerStore()
     let hover = PaneHover()
@@ -186,7 +187,8 @@ final class SessionsWorkspaceRegistry {
             result: result)
     }
 
-    func controlPane(_ request: DesktopPaneCommand, model: WorkModel) throws {
+    @discardableResult
+    func controlPane(_ request: DesktopPaneCommand, model: WorkModel) throws -> String {
         let target = request.target
         let (workspace, pane) = try retainedPane(for: target)
         let store = workspace.multiplexer
@@ -200,6 +202,7 @@ final class SessionsWorkspaceRegistry {
             }
             _ = try retainedPane(for: other)
         }
+        var result: PaneState? = pane
         switch request.action {
         case .text(let surface, let text):
             guard let terminal = workspace.terminal(for: pane) else {
@@ -212,7 +215,7 @@ final class SessionsWorkspaceRegistry {
             }
             try surfaces.sendKey(key, terminal: terminal, surface: surface)
         case .shell:
-            try workspace.newShell(beside: target.pane, focus: false)
+            result = try workspace.newShell(beside: target.pane, focus: false)
         case .files(let task), .flowLog(let task):
             let identity = WorkspaceIdentity(machineId: target.machineId, worktree: target.worktree)
             guard let projection = model.task(id: task),
@@ -225,11 +228,11 @@ final class SessionsWorkspaceRegistry {
             } else {
                 .flowLog(taskId: projection.task.id)
             }
-            store.show(content, beside: target.pane, focus: false)
+            result = store.show(content, beside: target.pane, focus: false)
         case .hide: workspace.setCollapsed(paneId: target.pane, collapsed: true)
         case .restore: workspace.setCollapsed(paneId: target.pane, collapsed: false)
         case .focus: store.setFocusedPane(target.pane)
-        case .split(let axis): _ = store.split(target.pane, axis: axis, focusNewPane: false)
+        case .split(let axis): result = store.split(target.pane, axis: axis, focusNewPane: false)
         case .move(let destination, let axis):
             try peer(destination)
             store.move(target.pane, beside: destination.pane, axis: axis)
@@ -241,6 +244,8 @@ final class SessionsWorkspaceRegistry {
             store.updateRatio(between: target.pane, and: toward.pane, ratio: ratio)
         case .zoom(let enabled): store.setZoom(target.pane, enabled: enabled)
         }
+        guard let result else { throw RegistryQueryError("The addressed pane disappeared; inspect Desktop before retrying.") }
+        return result.id
     }
 
     private func retainedPane(for target: DesktopPaneTarget) throws -> (SessionsWorkspace, PaneState) {

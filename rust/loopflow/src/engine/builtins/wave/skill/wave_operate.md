@@ -77,7 +77,7 @@ and due follow-ups have been checked for selection or authorized execution.
   all associated Flows and unfinished Processes first; leave a live ship Flow
   to finish. With no live driver, a durable none/filed disposition needs
   `lf task complete <issue>` and a status reread. Otherwise run
-  `lf --task <issue> run finish-delivery` to file accepted follow-ups or record
+  `lf --task <issue> flow finish-delivery` to file accepted follow-ups or record
   none, then complete. This applies to manual GitHub merges too. Do not replay
   gate, re-arm, resume a stopped Flow or wait for the filed children to finish.
   Missing scope judgment or uncertain provider writes remain visible blockers.

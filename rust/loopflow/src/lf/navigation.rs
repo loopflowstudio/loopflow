@@ -283,7 +283,16 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
         let cwd = std::env::current_dir()?;
         let repo = crate::repo::discover_repo_root(&cwd)?.unwrap_or(cwd);
         match command {
-            Commands::Help { path, all } => print!("{}", render_help(path, &repo, *all)?),
+            Commands::Help { path, all, json } => {
+                if *json || cli.json {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&describe_command(path, *all)?)?
+                    );
+                } else {
+                    print!("{}", render_help(path, &repo, *all)?);
+                }
+            }
             Commands::List { path, json } => crate::lf::commands::list::show(path, &repo, *json)?,
             Commands::Flow {
                 cmd: FlowCommand::List { json, inventory },
@@ -332,6 +341,53 @@ pub fn resolve_path<'a>(tree: &'a Command, path: &[String]) -> Result<(&'a Comma
         canonical.extend(expansion);
     }
     Ok((current, canonical))
+}
+
+/// Installed syntax only. Runtime support and legal actions remain observations
+/// from Desktop/Work; this read opens neither a store nor a native application.
+pub fn describe_command(path: &[String], recursive: bool) -> Result<serde_json::Value> {
+    fn describe(command: &Command, canonical: &[String], recursive: bool) -> serde_json::Value {
+        let arguments = command.get_arguments().filter(|arg| !arg.is_hide_set()).map(|arg| {
+            let arity = arg.get_num_args().unwrap_or_else(|| clap::builder::ValueRange::new(usize::from(arg.get_action().takes_values())));
+            serde_json::json!({
+                "name": arg.get_id().as_str(),
+                "long": arg.get_long(),
+                "short": arg.get_short().map(|ch| ch.to_string()),
+                "position": arg.get_index(),
+                "required": arg.is_required_set(),
+                "global": arg.is_global_set(),
+                "description": arg.get_help().map(ToString::to_string),
+                "min_values": arity.min_values(),
+                "max_values": (arity.max_values() != usize::MAX).then_some(arity.max_values()),
+                "defaults": arg.get_default_values().iter().map(|value| value.to_string_lossy()).collect::<Vec<_>>(),
+                "values": arg.get_value_parser().possible_values().map(|values| values.filter(|v| !v.is_hide_set()).map(|v| v.get_name().to_string()).collect::<Vec<_>>()),
+                "conflicts": command.get_arg_conflicts_with(arg).iter().map(|a| a.get_id().as_str()).collect::<Vec<_>>(),
+            })
+        }).collect::<Vec<_>>();
+        let children = command.get_subcommands().filter(|child| !child.is_hide_set()).map(|child| {
+            let mut path = canonical.to_vec();
+            path.push(child.get_name().into());
+            if recursive { describe(child, &path, true) } else {
+                serde_json::json!({"command": format!("lf {}", path.join(" ")), "description": child.get_about().map(ToString::to_string)})
+            }
+        }).collect::<Vec<_>>();
+        serde_json::json!({
+            "command": std::iter::once("lf").chain(canonical.iter().map(String::as_str)).collect::<Vec<_>>().join(" "),
+            "description": command.get_about().map(ToString::to_string),
+            "usage": command.clone().render_usage().to_string(),
+            "arguments": arguments,
+            "commands": children,
+            "result_schema": crate::lf::commands::desktop::result_schema(canonical),
+        })
+    }
+    let tree = command_tree();
+    let (command, canonical) = resolve_path(&tree, path)?;
+    Ok(serde_json::json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "scope": "installed_cli",
+        "definition": describe(command, &canonical, recursive),
+        "root_arguments": describe(&tree, &[], false)["arguments"],
+    }))
 }
 
 pub fn render_help(path: &[String], repo: &Path, all: bool) -> Result<String> {

@@ -152,25 +152,22 @@ authors a save. Two-Home/file-Git and Store fixtures cover conflicts, narrower/f
 inheritance, clearing/no-echo and unchanged seeded execution, not running Flows.
 Earlier evidence/failed attempts: `829c9b993:wave/product/MEMORY.md`, this heading.
 
-`9cc0707b0`/`92d95edfe`: recorded-location reads observe owners, never exchange
-execution. Nonces fence stale replies without peer-clock comparison; deadlines
-bound each peer, not the whole sequential scan. Added peers are not a global
-inventory. One positive owner survives another peer's unavailability; conflicting
-positives refuse. No negative observation authorizes first start.
-Two-CLI/import fixtures cover delegation edits and shared pathless-Started
-provenance, not launches.
-`faebb042e`–`5d55957c6`: remote Task links retain the scene and nonce-validated
-Session/Files owners. Local cache identity differs from the peer command subject.
-Session-only/Changes links share Files preparation; recording copies transport
-classification as well as closures, or remote paths regain local affordances.
-SSH preserves stdin/native Home. Mixed exchange, admission and running-Flow/configured-SSH/native proof remain.
+Remote evidence: `d16fc62d8:wave/product/MEMORY.md`, this heading. Nonces fence replies, deadlines are per-peer,
+not a global inventory. Positive owners survive unavailable peers; conflicting
+positives refuse, negatives never admit start. Remote Session/Files/shells retain
+scene, owner, stdin and drafts; transport classification prevents local affordances.
+No replay, local fallback or filesystem CAS. Two-CLI/seeded fixtures establish
+neither running Flows nor configured SSH/native acceptance; mixed exchange and admission remain.
 
-`7aa8a5eb5`: owner-pinned SSH shells/file invalidations retain drafts; no local
-fallback, replay or filesystem CAS. Jack Heart ordered companions, selectors, then
-admission (October 9).
-`2c5610ca4`/`1f0f64150` replace public JSON targets/tokens with `--repo`/`--task`
-and optional `--pane`. Unique panes are implicit; ambiguity/absence dispatches
-nothing. Arrangement stays owner-pinned; native acceptance remains unproved.
+Jack Heart (October 10) accepted Rex conventions in LOO-427: ordinary
+`--repo`/`--task`/`--pane`, then verified caller-terminal inference within Work,
+then one eligible pane; ambiguity never follows focus. Caller inference requires the original PTY. Mutations return affected
+pane IDs, including created/reused companions, not readiness. `help --json` derives
+syntax and Desktop result schemas from Clap/Rust DTOs; installed support and current
+Work eligibility stay separate. Native proof remains. LOO-397 is unstarted.
+Jack authorized Product follow-ups LOO-452 (shortcut customization, beyond LOO-403)
+and LOO-453 (readiness/events); research:
+[the comparison](../../docs/reviews/terminal-command-comparison.md#rex-composition-and-discoverability-2026-10-10).
 
 **Confirmation cannot elect execution.** `4c43550c2`: divergent revisions and
 independent refs both confirm, not Task allocation. `42990dea3` shares membership

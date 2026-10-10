@@ -379,21 +379,10 @@ receipts and private selection; only accepted joint frontiers parent saves.
 Earlier composition and failures: `a44ddcb5f`, this section, and
 [findings](findings.md#shared-planning-composition).
 
-Foreground reconnect, lost-publication receipts and completion counterexamples:
-`b2add0cf8:scratch/compare-cmux-s-command-line.md`, **Ancestry and foreground
-composition** / **Post-LOO-418 completion boundary**. Fresh stream confirmation,
-accepted-only frontiers and private holds remain required. Accepted Git mutations
-supersede completion intent atomically with delivery; Linear retains its status-change
-owner. Git confirmation never acknowledges provider delivery. Seeded execution,
-disk drafts and one fake provider prove neither a running Flow nor native acceptance.
-
-`787f440ea`/`50bf78f1e` exchange nullable Machine ID/time/provenance through
-Placement, retaining conflicts, narrower/future inheritance, clearing, no-echo
-and seeded started-checkout retention. Reaffirmation preserves explicit intent;
-selecting a legacy assignment authors a save. Public Wave/file-Git and Store-level
-Task/Project evidence, failed attempts and limits remain in
-[findings](findings.md#delegation-exchange--october-9). No running Flow, exclusive
-admission or public Task/Project-clearing proof follows.
+Earlier reconnect/completion and delegation-exchange receipts are retained at
+`d16fc62d8:scratch/compare-cmux-s-command-line.md`, **Mixed command**, and
+[findings](findings.md#delegation-exchange--october-9). They cover causal conflicts,
+clearing, no-echo and seeded retention, not running Flows or exclusive admission.
 
 **Required mixed-operation proofs:** execution-local `task run` and its Workflow
 must coexist with repeat Git exchange, disconnect/reconnect, comments/follow-ups,
@@ -441,8 +430,9 @@ one. Plain-repo and remote-unavailable cases remain useful. JSON/Swift agree.
 
 **Controls and Jack Heart’s October 9 selector change implemented locally.**
 Public `--target` and `--surface` are deleted; existing `--repo`/`--task` plus optional
-`--pane` select retained Work. One eligible pane in the selected Task is implicit; multiple matches
-return choices without effects. Move/resize use plain peer-pane selectors.
+`--pane` select retained Work. Jack Heart accepted the Rex conventions on October 10:
+explicit pane wins, then the caller's PTY-validated terminal within selected Work,
+then one eligible pane; multiple matches return choices without effects.
 `DesktopPaneTarget` and surface tokens stay internal. Resolve through existing
 Work/pane owners; validate the captured window/content/surface before acting,
 never retarget by later focus. Unique/ambiguous/explicit selectors and retained lifetime
@@ -500,6 +490,16 @@ contents. The owned two-shell native fixture covers insertion, submission, focus
 exit and replacement, but remains unexecuted without a display. Full mechanism and
 evidence: `9cc0707b0:scratch/compare-cmux-s-command-line.md`, this heading.
 
+**October 10 adaptation:** mutations return a `DesktopPaneReceipt` naming the affected
+pane and repository/window/Machine/checkout. Split returns the new leaf; Files and
+Flow-log return the reused or created leaf. This replaces mutation-wide inspections;
+`desktop list` remains the snapshot reader. Receipts establish no surface readiness.
+`lf help PATH --json` derives argument metadata from Clap; Desktop JSON result
+schemas derive from Rust DTOs using Schemars. It reads no running app or store;
+installed syntax, running-app support and Work legal actions remain distinct.
+LOO-397 is unstarted; broader discovery remains there. Jack authorized separate
+LOO-452 shortcut customization and LOO-453 readiness/events explorations.
+
 ### 5. Complete-path verification and demo
 
 **Depends on 1–4.** One PR. Gate owns affected Rust suites and
@@ -519,4 +519,4 @@ identity/delegation, open them, add shell/Files panes, retain an unfinished draf
 change focus, target a harmless command, read output, hide/restore, and verify the
 original input target and draft survive. Demo owns native usability; preserve comparison evidence and use no real accounts or live user terminals.
 
-Check: `git diff --check` — PASS (prose-only realign); prior build/Clippy/focused passes retained at `43bf9bad2`, this section; broader verification: gate/CI; configured/native proof: demo.
+Check: `cargo test` (desktop/PTY, cli_discovery, Desktop DTOs, documented_commands), `cargo fmt`, Clippy `--all-targets -D warnings`, and `scripts/test_desktop.sh --filter 'DesktopPaneControlTests|DTOFixtureTests|WorkDestinationTests' -Xswiftc -gnone` — PASS; native: demo, broader checks: gate/CI.

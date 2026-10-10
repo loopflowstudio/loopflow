@@ -410,8 +410,8 @@ Reuse these owners without duplicating their outcomes:
 ## Rex: composition and discoverability (2026-10-10)
 
 Jack Heart requested this comparison and asked for worthwhile explorations outside
-LOO-427 to become Tasks. These are research recommendations, not accepted changes
-to the implementation. Public documentation was inspected; Rex was not installed
+LOO-427 to become Tasks. Jack subsequently accepted adapting the conventions here. The comparison below
+records the research baseline; the implementation delta follows it. Public documentation was inspected; Rex was not installed
 or exercised. No competitor implementation, help payload or configuration was
 incorporated. The Loopflow comparison uses source at `46d3f8da1`.
 
@@ -447,6 +447,13 @@ is ready or that the intended result was rendered.
 Review finding: the branch's simpler selectors solve command verbosity, but the
 creation response still makes an agent rediscover the object it just requested.
 Source review only; no runtime or conformance test was performed for this research.
+
+Implementation delta: mutations now return the affected pane directly, caller defaults
+reuse the existing PTY-validated identity within selected Work, and `lf help PATH --json`
+describes Clap arguments plus Desktop result schemas derived from Rust DTOs.
+The broad help Task LOO-397 remains unstarted; this bounded discovery cut is local
+to LOO-427. Caller inference requires the original PTY, so redirected agent tools
+still use explicit pane IDs. No native readiness or configured-provider proof follows.
 
 Filed, unstarted in the Loopflow repository's Product Wave:
 [LOO-452 — Customize Desktop shortcuts and explain effective bindings](https://linear.app/loopflow/issue/LOO-452)

@@ -339,8 +339,11 @@ struct DesktopPaneControlTests {
         document.editor.string = "unfinished draft"
         document.editor.setSelectedRange(NSRange(location: 2, length: 4))
         for action in [DesktopPaneAction.files(task: task.id), .flowLog(task: task.id)] {
-            _ = try router.controlPane(.init(target: source, action: action))
-            _ = try router.controlPane(.init(target: source, action: action))
+            let created = try router.controlPane(.init(target: source, action: action))
+            let reused = try router.controlPane(.init(target: source, action: action))
+            #expect(created.pane == reused.pane)
+            #expect(created.pane != source.pane)
+            #expect(store.layout.pane(for: created.pane) != nil)
         }
         #expect(store.layout.allPanes.count == 4)
         let files = try #require(store.layout.allPanes.first { $0.content == .files(taskId: task.id) })
@@ -348,7 +351,8 @@ struct DesktopPaneControlTests {
         _ = try router.controlPane(.init(target: source, action: .files(task: task.id)))
         #expect(!store.collapsedPaneIds.contains(files.id))
         #expect(store.layout.pane(for: files.id) == files)
-        _ = try router.controlPane(.init(target: source, action: .shell))
+        let shellReceipt = try router.controlPane(.init(target: source, action: .shell))
+        #expect(store.layout.pane(for: shellReceipt.pane)?.content == .shell)
         #expect(store.layout.allPanes.count == 5)
         #expect(store.layout.pane(for: session.id) == session)
         #expect(store.focusedPane == selected)
@@ -390,11 +394,13 @@ struct DesktopPaneControlTests {
 
         for _ in 0..<2 { // Repeating after a lost reply is idempotent.
             let report = try router.controlPane(DesktopPaneCommand(target: request, action: .hide))
-            #expect(report.windows[0].workspaces[0].hiddenPanes == [shell.id])
+            #expect(report.pane == shell.id)
+            #expect(router.inspect().windows[0].workspaces[0].hiddenPanes == [shell.id])
             #expect(store.focusedPane == session)
         }
         let report = try router.controlPane(DesktopPaneCommand(target: request, action: .restore))
-        #expect(report.windows[0].workspaces[0].hiddenPanes.isEmpty)
+        #expect(report.pane == shell.id)
+        #expect(router.inspect().windows[0].workspaces[0].hiddenPanes.isEmpty)
         #expect(store.layout == layout)
         #expect(store.focusedPane == session)
         #expect(store.shellCommands[shell.id] == ["fixture-shell"])
@@ -423,7 +429,12 @@ struct DesktopPaneControlTests {
         let shellTarget = target(shell, window: window), sessionTarget = target(session, window: window)
         // Later focus must not redirect any of these requests.
         store.setFocusedPane(filesPane.id)
-        _ = try router.controlPane(.init(target: shellTarget, action: .split(axis: .horizontal)))
+        let split = try router.controlPane(.init(target: shellTarget, action: .split(axis: .horizontal)))
+        #expect(split.pane != shellTarget.pane)
+        #expect(store.layout.pane(for: split.pane)?.content == .empty)
+        #expect(split.repository == repository)
+        #expect(split.machineId == identity.machineId)
+        #expect(split.worktree == identity.worktree)
         #expect(store.layout.allPanes.count == 4)
         #expect(store.focusedPane == filesPane)
         let empty = try #require(store.layout.allPanes.first { $0.content == .empty })

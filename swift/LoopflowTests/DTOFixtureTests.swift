@@ -212,6 +212,14 @@ struct DTOFixtureTests {
         }
     }
 
+    @Test func desktopPaneReceiptIdentifiesTheAffectedPane() throws {
+        let data = try loadFixtureData("desktop_pane_receipt.json")
+        let receipt = try JSONDecoder().decode(DesktopPaneReceipt.self, from: data)
+        #expect(receipt.pane == "created-pane")
+        #expect(receipt.machineId == "machine-a")
+        #expect(try JSONDecoder().decode(DesktopPaneReceipt.self, from: JSONEncoder().encode(receipt)) == receipt)
+    }
+
     @Test func desktopInspectionRetainsUnavailableWorkAndExactPanes() throws {
         let data = try loadFixtureData("desktop_inspection.json")
         let report = try JSONDecoder().decode(DesktopInspection.self, from: data)

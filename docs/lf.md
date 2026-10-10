@@ -721,9 +721,12 @@ lf --repo loopflow --task LOO-427 desktop hide --pane "$pane"
 lf --task LOO-427 desktop restore --pane "$pane"
 ```
 
-Omit `--pane` only when the selected Work has one eligible pane. Ambiguity lists
-choices and changes nothing; `--pane` names an exact pane ID, never the current
-focus. Text/key/read require an existing terminal surface. Restore without a pane
+Without `--pane`, a command issued on a verified Desktop terminal's original
+PTY selects that terminal within the chosen Work. Explicit `--pane` wins.
+Otherwise one eligible pane is selected; ambiguity lists choices and changes
+nothing. Redirected stdin, agent tool subprocesses without that PTY, and markers
+inherited across SSH do not establish caller identity: use `--pane` when needed.
+Selection never follows current focus. Text/key/read require an existing terminal surface. Restore without a pane
 selects a unique hidden pane. A Task scope uses its recorded Machine/checkout;
 a repository without Task scope considers its retained workspaces. Unavailable Work
 or no matching pane produces an error without opening a window or preparing Work.
@@ -741,12 +744,28 @@ lf --task LOO-427 desktop zoom --pane "$pane"
 lf --task LOO-427 desktop zoom --pane "$pane" --off
 ```
 
+```sh
+pane=$(lf --task LOO-427 desktop shell --pane "$anchor" --json | jq -r .pane)
+lf --task LOO-427 desktop zoom --pane "$pane"
+lf help desktop shell --json          # installed arguments and JSON result schema
+lf help desktop --all --json          # all Desktop command contracts
+```
+
+Structured help derives syntax from Clap and Desktop output schemas from their
+wire types. It describes the installed CLI without opening the app. A null
+`result_schema` means that command has no schema advertised yet. Running-app
+support remains in `desktop list`; current Work eligibility stays in its legal
+actions. A successful shell receipt may precede its surface: inspect readiness
+before input, and do not repeat creation after a lost reply.
+
 Move and resize use two distinct panes in the same Machine/checkout. Vertical
 places a pane to the right; horizontal below. Resize gives the selected side its
 share (0.1–0.9). Split, move, resize, zoom, hide and restore retain drafts and
 selection. Focus selects the addressed pane without changing Work or foregrounding
-a window. Closing a view does not end a Session. Replies describe model state,
-not usable rendering. Inspect after a lost reply; split is not safe to replay.
+a window. Closing a view does not end a Session. Mutations print the affected
+pane ID; `--json` adds its repository, window, Machine, checkout and observation
+time. Split returns the new pane; companions return the created or reused pane.
+A receipt confirms the operation, not terminal readiness or usable rendering. Inspect after a lost reply; split is not safe to replay.
 
 ```sh
 lf --task LOO-427 desktop shell --pane "$pane"

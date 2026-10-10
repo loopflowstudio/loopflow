@@ -1,11 +1,12 @@
 # Findings supporting LOO-427
 
-Dated evidence; [plan](compare-cmux-s-command-line.md) owns scope and acceptance,
-[questions](questions.md) unresolved judgments. October 8 removes the earlier
-storage coupling locally.
+The [plan](compare-cmux-s-command-line.md) owns remaining work. Earlier storage
+findings: `f48d84511:scratch/findings.md`; assignment provenance remains unknown.
 
-Earlier storage findings: `f48d84511:scratch/findings.md`, **Earlier identity and
-storage findings**. Historical assignment provenance remains unknown.
+October 10 review: preserve PTY validation when inferring a caller; return creation
+IDs without claiming readiness. Fixed a missing Swift bridge return, stale help
+assertions and two retired `run finish-delivery` examples. Failures and passing
+reruns: `/tmp/loo427-rex-*.log`. No native acceptance follows.
 
 ## Decisions these findings do not establish
 

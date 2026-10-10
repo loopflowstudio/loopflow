@@ -205,6 +205,27 @@ public struct DesktopPaneTarget: Codable, Sendable, Equatable {
     }
 }
 
+/// The affected pane, including a newly allocated or reused companion. This
+/// acknowledges the view operation, not terminal or provider readiness.
+public struct DesktopPaneReceipt: Codable, Sendable, Equatable {
+    public let repository: String
+    public let window: String
+    public let machineId: String
+    public let worktree: String
+    public let pane: String
+    public let observedAt: Int64
+
+    public init(target: DesktopPaneTarget, pane: String, observedAt: Int64) {
+        repository = target.repository; window = target.window
+        machineId = target.machineId; worktree = target.worktree
+        self.pane = pane; self.observedAt = observedAt
+    }
+    enum CodingKeys: String, CodingKey {
+        case repository, window, worktree, pane
+        case machineId = "machine_id", observedAt = "observed_at"
+    }
+}
+
 public struct DesktopPaneCommand: Codable, Sendable, Equatable {
     public let target: DesktopPaneTarget
     public let action: DesktopPaneAction

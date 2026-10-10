@@ -456,6 +456,9 @@ pub enum Commands {
         path: Vec<String>,
         #[arg(long)]
         all: bool,
+        /// Describe installed command arguments and available result schemas
+        #[arg(long)]
+        json: bool,
     },
     /// Read durable Work history, recorded commands and provider usage
     #[command(args_conflicts_with_subcommands = true)]
@@ -524,7 +527,7 @@ pub enum DesktopCommand {
     },
     /// Hide an exact retained pane without closing its Session or process
     Hide {
-        /// Pane ID from desktop list; omit only when one pane is eligible
+        /// Pane ID; defaults to this terminal when verified, otherwise one eligible pane
         #[arg(long)]
         pane: Option<String>,
         #[arg(long)]

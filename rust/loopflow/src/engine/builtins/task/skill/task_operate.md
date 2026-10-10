@@ -100,7 +100,7 @@ or liveness evidence; never a reason to start a second driver). “Ready” or
    First inspect every associated live Flow and unfinished Process; a live ship
    Flow owns its finish. With no live driver, if the disposition is already durable,
    run `lf task complete <issue>` and reread status. Otherwise run
-   `lf --task <issue> run finish-delivery`, which performs only follow-through.
+   `lf --task <issue> flow finish-delivery`, which performs only follow-through.
    Do not replay gate, re-arm the PR, resume an old Flow or require its template.
    Inspect receipts after failure before retrying; unavailable scope judgment
    stays a concrete blocker in this conversation. The source does not wait for

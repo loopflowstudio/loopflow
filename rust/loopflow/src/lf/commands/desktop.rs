@@ -7,14 +7,14 @@ use crate::ops::human_session::SessionAction;
 use crate::ops::task_actions::TaskActionModel;
 use crate::ops::task_run::TaskRunControl;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DesktopInspection {
     pub observed_at: i64,
     pub windows: Vec<DesktopWindowInspection>,
     pub openings: Vec<DesktopOpening>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DesktopWindowInspection {
     pub repository: String,
     pub window: String,
@@ -31,7 +31,7 @@ pub struct DesktopWindowInspection {
     pub opening: Option<DesktopOpening>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DesktopTaskInspection {
     pub id: String,
     pub reading: String,
@@ -42,7 +42,7 @@ pub struct DesktopTaskInspection {
     pub run_control: Option<TaskRunControl>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DesktopSessionInspection {
     pub id: String,
     pub machine_id: Option<String>,
@@ -52,7 +52,7 @@ pub struct DesktopSessionInspection {
     pub actions: Option<Vec<SessionAction>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DesktopWorkspaceInspection {
     pub machine_id: String,
     pub worktree: String,
@@ -62,7 +62,7 @@ pub struct DesktopWorkspaceInspection {
     pub hidden_panes: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DesktopLayoutInspection {
     pub pane: Option<String>,
     pub incarnation: Option<String>,
@@ -74,7 +74,7 @@ pub struct DesktopLayoutInspection {
     pub children: Vec<DesktopLayoutInspection>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DesktopWorktreeInspection {
     pub machine_id: String,
     pub repository_path: String,
@@ -82,7 +82,7 @@ pub struct DesktopWorktreeInspection {
     pub layout: DesktopWorktreeNode,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DesktopWorktreeNode {
     pub slot: Option<String>,
     pub machine_id: Option<String>,
@@ -91,7 +91,7 @@ pub struct DesktopWorktreeNode {
     pub children: Vec<DesktopWorktreeNode>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DesktopPaneTarget {
     pub repository: String,
     pub window: String,
@@ -101,13 +101,24 @@ pub struct DesktopPaneTarget {
     pub incarnation: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// Identifies the affected pane without implying a rendered or ready terminal.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct DesktopPaneReceipt {
+    pub repository: String,
+    pub window: String,
+    pub machine_id: String,
+    pub worktree: String,
+    pub pane: String,
+    pub observed_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DesktopPaneCommand {
     pub target: DesktopPaneTarget,
     pub action: DesktopPaneAction,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum DesktopPaneAction {
@@ -145,7 +156,9 @@ pub enum DesktopPaneAction {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, clap::ValueEnum)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Serialize, Deserialize, clap::ValueEnum, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum DesktopKey {
@@ -162,7 +175,9 @@ pub enum DesktopKey {
     End,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, clap::ValueEnum)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Serialize, Deserialize, clap::ValueEnum, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum DesktopSplitAxis {
@@ -170,7 +185,7 @@ pub enum DesktopSplitAxis {
     Vertical,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DesktopTextRequest {
     pub target: DesktopPaneTarget,
     pub surface: String,
@@ -178,7 +193,9 @@ pub struct DesktopTextRequest {
     pub max_bytes: usize,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, clap::ValueEnum)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Serialize, Deserialize, clap::ValueEnum, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum DesktopTextRegion {
@@ -187,7 +204,7 @@ pub enum DesktopTextRegion {
     Selection,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DesktopTextReading {
     pub request: DesktopTextRequest,
     pub observed_at: i64,
@@ -195,7 +212,7 @@ pub struct DesktopTextReading {
     pub result: DesktopTextResult,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "status", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum DesktopTextResult {
@@ -203,7 +220,7 @@ pub enum DesktopTextResult {
     Unavailable { reason: DesktopTextUnavailable },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum DesktopTextUnavailable {
@@ -234,6 +251,30 @@ on run argv
 end run
 "#;
 
+/// Output schemas are generated from the same DTOs that decode Desktop replies.
+/// Serialization context keeps nullable fields present, matching emitted JSON.
+pub(crate) fn result_schema(path: &[String]) -> Option<schemars::Schema> {
+    fn schema<T: schemars::JsonSchema>() -> schemars::Schema {
+        schemars::generate::SchemaSettings::draft2020_12()
+            .for_serialize()
+            .into_generator()
+            .into_root_schema_for::<T>()
+    }
+    match path
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .as_slice()
+    {
+        ["desktop", "list"] => Some(schema::<DesktopInspection>()),
+        ["desktop", "open"] => Some(schema::<DesktopOpening>()),
+        ["desktop", "read"] => Some(schema::<DesktopTextReading>()),
+        ["desktop", "text" | "key" | "hide" | "restore" | "focus" | "shell" | "files" | "flow-log"
+        | "split" | "move" | "resize" | "zoom"] => Some(schema::<DesktopPaneReceipt>()),
+        _ => None,
+    }
+}
+
 pub fn require_supported() -> Result<()> {
     if !cfg!(target_os = "macos") {
         bail!("Loopflow Desktop launching and control require macOS; use `lf task status <task>` or `lf --task <task>` in this terminal instead");
@@ -243,14 +284,14 @@ pub fn require_supported() -> Result<()> {
 }
 
 /// LaunchServices acceptance is opening, never proof of a usable native target.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DesktopOpening {
     pub url: String,
     pub status: DesktopOpeningStatus,
     pub reason: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DesktopOpeningStatus {
     Opening,
@@ -519,7 +560,7 @@ pub fn run(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<
             diff,
             json,
         } => return open_work(cli, session.as_deref(), *diff, *json || cli.json),
-        DesktopCommand::List { json } => return invoke(None, *json || cli.json),
+        DesktopCommand::List { json } => return inspect(*json || cli.json),
         _ => {}
     }
     // Work selects the repository/checkout. One live reading supplies every
@@ -527,7 +568,8 @@ pub fn run(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<
     let resolution = opening_context(cli, None)?;
     let inspection: DesktopInspection = serde_json::from_slice(&contact(None, false)?)
         .context("Desktop returned an invalid reading")?;
-    let selected = inspection.resolve_pane(&resolution, command)?;
+    let caller = crate::session_record::current_terminal_id();
+    let selected = inspection.resolve_pane(&resolution, command, caller.as_deref())?;
     let target = selected.target()?;
     let (action, json) = match command {
         DesktopCommand::Open { .. } | DesktopCommand::List { .. } => unreachable!("handled above"),
@@ -619,13 +661,21 @@ pub fn run(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<
         }
         DesktopCommand::Zoom { off, json, .. } => (DesktopPaneAction::Zoom { enabled: !off }, json),
     };
-    invoke(
+    let output = contact(
         Some(&serde_json::to_string(&DesktopPaneCommand {
             target,
             action,
         })?),
-        *json || cli.json,
-    )
+        false,
+    )?;
+    let receipt: DesktopPaneReceipt = serde_json::from_slice(&output)
+        .context("Desktop returned an invalid receipt; inspect before retrying")?;
+    if *json || cli.json {
+        println!("{}", serde_json::to_string_pretty(&receipt)?);
+    } else {
+        println!("{}", receipt.pane);
+    }
+    Ok(())
 }
 
 fn bound<'a>(fact: &'a crate::ops::context::ContextFact, name: &str) -> Result<&'a str> {
@@ -646,6 +696,7 @@ impl DesktopInspection {
         &self,
         work: &crate::ops::context::ContextExplanation,
         command: &crate::lf::DesktopCommand,
+        caller: Option<&str>,
     ) -> Result<ResolvedPane<'_>> {
         use crate::lf::DesktopCommand;
         use crate::ops::context::ContextFact;
@@ -724,6 +775,28 @@ impl DesktopInspection {
                     continue;
                 }
                 candidates.push((workspace, leaf));
+            }
+        }
+        // Caller identity comes from the existing PTY-validated attachment,
+        // never from focus or a marker inherited across SSH/background handoff.
+        // Explicit Work still bounds the candidate set; an explicit pane wins.
+        if pane.is_none() {
+            if let Some(caller) = caller {
+                let own = candidates.iter().filter(|(workspace, leaf)| {
+                    matches!(&work.machine, ContextFact::Bound { value, .. } if value == &workspace.machine_id)
+                        && match leaf.content.as_deref() {
+                            Some("shell") => leaf.pane.as_deref() == Some(caller),
+                            Some("session") => leaf.surface.as_deref() == Some(caller),
+                            _ => false,
+                        }
+                }).collect::<Vec<_>>();
+                if let [(workspace, leaf)] = own.as_slice() {
+                    return Ok(ResolvedPane {
+                        window,
+                        workspace,
+                        leaf,
+                    });
+                }
             }
         }
         match candidates.as_slice() {
@@ -872,8 +945,8 @@ fn contact(request: Option<&str>, text_read: bool) -> Result<Vec<u8>> {
     Ok(output.stdout)
 }
 
-fn invoke(request: Option<&str>, json: bool) -> Result<()> {
-    let output = contact(request, false)?;
+fn inspect(json: bool) -> Result<()> {
+    let output = contact(None, false)?;
     let reading: DesktopInspection = serde_json::from_slice(&output)
         .context("Desktop returned an invalid reading; inspect again before retrying")?;
     if json {
@@ -1105,7 +1178,7 @@ mod tests {
             text: "draft".into(),
             json: true,
         };
-        let selected = inspection.resolve_pane(&work, &text).unwrap();
+        let selected = inspection.resolve_pane(&work, &text, None).unwrap();
         let target = selected.target().unwrap();
         let surface = selected.surface().unwrap();
         assert_eq!(target.pane, "session-pane");
@@ -1118,7 +1191,7 @@ mod tests {
         workspace.layout.children.push(other);
         workspace.focused_pane = "second-terminal".into();
         let error = inspection
-            .resolve_pane(&work, &text)
+            .resolve_pane(&work, &text, None)
             .unwrap_err()
             .to_string();
         assert!(
@@ -1132,7 +1205,7 @@ mod tests {
             text: "draft".into(),
             json: false,
         };
-        let explicit_selection = inspection.resolve_pane(&work, &explicit).unwrap();
+        let explicit_selection = inspection.resolve_pane(&work, &explicit, None).unwrap();
         assert_eq!(explicit_selection.target().unwrap(), target);
         assert_eq!(explicit_selection.surface().unwrap(), surface);
         // The already resolved transport request retains the old lifetime, not
@@ -1141,10 +1214,63 @@ mod tests {
             Some("replacement".into());
         inspection.windows[0].workspaces[0].layout.children[0].surface =
             Some("replacement-surface".into());
-        let replacement = inspection.resolve_pane(&work, &explicit).unwrap();
+        let replacement = inspection.resolve_pane(&work, &explicit, None).unwrap();
         assert_ne!(replacement.target().unwrap(), target);
         assert_ne!(replacement.surface().unwrap(), surface);
         assert_eq!(target.incarnation, "occurrence-session-pane");
+    }
+
+    #[test]
+    fn caller_pane_stays_with_its_machine_and_explicit_selectors_win() {
+        use crate::lf::DesktopCommand;
+        let (mut inspection, mut work) = pane_fixture();
+        work.machine = work.execution_machine.clone();
+        let workspace = &mut inspection.windows[0].workspaces[0];
+        let mut shell = workspace.layout.children[0].clone();
+        shell.pane = Some("caller-shell".into());
+        shell.content = Some("shell".into());
+        shell.surface = Some("shell-surface".into());
+        workspace.layout.children.push(shell);
+        workspace.focused_pane = "caller-shell".into();
+        let text = DesktopCommand::Text {
+            pane: None,
+            text: "draft".into(),
+            json: true,
+        };
+        let selected = inspection
+            .resolve_pane(&work, &text, Some("native-surface-incarnation"))
+            .unwrap();
+        assert_eq!(selected.target().unwrap().pane, "session-pane");
+        let selected = inspection
+            .resolve_pane(&work, &text, Some("caller-shell"))
+            .unwrap();
+        assert_eq!(selected.target().unwrap().pane, "caller-shell");
+        let explicit = DesktopCommand::Text {
+            pane: Some("session-pane".into()),
+            text: "draft".into(),
+            json: true,
+        };
+        assert_eq!(
+            inspection
+                .resolve_pane(&work, &explicit, Some("caller-shell"))
+                .unwrap()
+                .target()
+                .unwrap()
+                .pane,
+            "session-pane"
+        );
+        // A marker from another Machine or a replaced Session cannot resolve
+        // ambiguous panes, even when one of them has focus.
+        assert!(inspection
+            .resolve_pane(&work, &text, Some("old-surface"))
+            .is_err());
+        work.machine = crate::ops::context::ContextFact::Bound {
+            value: "other-machine".into(),
+            source: "observer".into(),
+        };
+        assert!(inspection
+            .resolve_pane(&work, &text, Some("caller-shell"))
+            .is_err());
     }
 
     #[test]
@@ -1156,7 +1282,7 @@ mod tests {
             json: false,
         };
         assert!(inspection
-            .resolve_pane(&work, &focus)
+            .resolve_pane(&work, &focus, None)
             .unwrap_err()
             .to_string()
             .contains("Multiple eligible"));
@@ -1165,7 +1291,7 @@ mod tests {
             json: false,
         };
         assert!(inspection
-            .resolve_pane(&work, &missing)
+            .resolve_pane(&work, &missing, None)
             .unwrap_err()
             .to_string()
             .contains("No eligible pane"));
@@ -1174,14 +1300,14 @@ mod tests {
             text: "no input".into(),
             json: false,
         };
-        assert!(inspection.resolve_pane(&work, &files).is_err());
+        assert!(inspection.resolve_pane(&work, &files, None).is_err());
         let restore = DesktopCommand::Restore {
             pane: None,
             json: false,
         };
         assert_eq!(
             inspection
-                .resolve_pane(&work, &restore)
+                .resolve_pane(&work, &restore, None)
                 .unwrap()
                 .target()
                 .unwrap()
@@ -1192,12 +1318,12 @@ mod tests {
             value: "/other-task".into(),
             source: "recorded".into(),
         };
-        assert!(inspection.resolve_pane(&work, &restore).is_err());
+        assert!(inspection.resolve_pane(&work, &restore, None).is_err());
         work.checkout = ContextFact::Unavailable {
             reason: "owner offline".into(),
         };
         assert!(inspection
-            .resolve_pane(&work, &restore)
+            .resolve_pane(&work, &restore, None)
             .unwrap_err()
             .to_string()
             .contains("owner offline"));
@@ -1217,7 +1343,7 @@ mod tests {
             axis: super::DesktopSplitAxis::Vertical,
             json: false,
         };
-        let selected = inspection.resolve_pane(&work, &command).unwrap();
+        let selected = inspection.resolve_pane(&work, &command, None).unwrap();
         let target = selected.target().unwrap();
         assert_eq!(target.pane, "session-pane");
         let destination = selected.peer("files-pane").unwrap().target().unwrap();

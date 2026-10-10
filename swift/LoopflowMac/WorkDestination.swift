@@ -80,7 +80,7 @@ struct WorkLinkReceiver: NSViewRepresentable {
     let repository: String
     let openingRequests: Set<UUID>
     let inspect: (String, UUID) -> DesktopWindowInspection
-    let controlPane: (DesktopPaneCommand) throws -> Void
+    let controlPane: (DesktopPaneCommand) throws -> String
     let readText: (DesktopTextRequest) throws -> DesktopTextReading
     let receive: (URL) async -> Void
 
@@ -103,12 +103,12 @@ struct WorkLinkReceiver: NSViewRepresentable {
         let repository: String
         let openingRequests: Set<UUID>
         var inspect: (String, UUID) -> DesktopWindowInspection
-        var controlPane: (DesktopPaneCommand) throws -> Void
+        var controlPane: (DesktopPaneCommand) throws -> String
         var readText: (DesktopTextRequest) throws -> DesktopTextReading
         var receive: (URL) async -> Void
 
         init(router: WorkLinkRouter, repository: String, openingRequests: Set<UUID>, inspect: @escaping (String, UUID) -> DesktopWindowInspection,
-             controlPane: @escaping (DesktopPaneCommand) throws -> Void,
+             controlPane: @escaping (DesktopPaneCommand) throws -> String,
              readText: @escaping (DesktopTextRequest) throws -> DesktopTextReading,
              receive: @escaping (URL) async -> Void) {
             self.router = router
@@ -128,7 +128,7 @@ struct WorkLinkReceiver: NSViewRepresentable {
                     window?.makeKeyAndOrderFront(nil)
                 }, inspect: inspect, controlPane: { [weak self] request in
                     guard let self else { throw RegistryQueryError("The repository window is unavailable.") }
-                    try self.controlPane(request)
+                    return try self.controlPane(request)
                 }, readText: { [weak self] request in
                     guard let self else { throw RegistryQueryError("The repository window is unavailable.") }
                     return try self.readText(request)

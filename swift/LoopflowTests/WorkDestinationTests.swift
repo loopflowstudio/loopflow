@@ -976,7 +976,7 @@ struct WorkDestinationTests {
         let window = UUID()
         var received: [TaskLink] = []
         router.register(window, repository: workspace.id, focus: {}, inspect: windowInspection,
-            controlPane: { _ in }, readText: { _ in throw RegistryQueryError("No terminal") }) { url in
+            controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { url in
             do { received.append(try TaskLink(url: url)) } catch { Issue.record(error) }
         }
         for machine in ["local-owner", "peer-owner"] {
@@ -1001,7 +1001,7 @@ struct WorkDestinationTests {
         #expect(router.inspect().openings.first?.status == .opening)
         let id = UUID()
         router.register(id, repository: workspace.id, openingRequests: router.workspaceRequests(workspace.id), focus: {}, inspect: windowInspection,
-                        controlPane: { _ in }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+                        controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
         #expect(router.inspect().openings.first?.status == .usable)
         _ = try await router.openRepository(path: repositoryFixturePath(), link: nil, query: query) { _ in
             Issue.record("An open repository must reuse its window")
@@ -1031,10 +1031,10 @@ struct WorkDestinationTests {
         }
         #expect(router.inspect().openings.first?.status == .opening)
         router.register(UUID(), repository: "old-plan", focus: {}, inspect: windowInspection,
-                        controlPane: { _ in }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+                        controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
         #expect(router.inspect().openings.first?.status == .opening)
         router.register(UUID(), repository: current.id, openingRequests: router.workspaceRequests(current.id), focus: {}, inspect: windowInspection,
-                        controlPane: { _ in }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+                        controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
         #expect(router.inspect().openings.first?.status == .usable)
     }
 
@@ -1064,12 +1064,12 @@ struct WorkDestinationTests {
         #expect(router.inspect().openings.first?.status == .opening)
         let stale = UUID()
         router.register(stale, repository: workspace.id, openingRequests: oldRequests, focus: {}, inspect: windowInspection,
-                        controlPane: { _ in }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+                        controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
         #expect(router.inspect().openings.first?.status == .opening)
         router.remove(stale, repository: workspace.id)
         _ = try await router.resolveWorkspace(workspace, query: query)
         router.register(UUID(), repository: workspace.id, openingRequests: router.workspaceRequests(workspace.id), focus: {}, inspect: windowInspection,
-                        controlPane: { _ in }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+                        controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
         #expect(router.inspect().openings.first?.status == .usable)
     }
 
@@ -1084,7 +1084,7 @@ struct WorkDestinationTests {
         let current = router.workspaceRequests(workspace.id)
         let id = UUID()
         router.register(id, repository: workspace.id, openingRequests: validated, focus: {}, inspect: windowInspection,
-                        controlPane: { _ in }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+                        controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
         #expect(router.inspect().openings.first?.status == .opening)
         router.confirmRegisteredWorkspace(workspace.id, requests: validated)
         #expect(router.inspect().openings.first?.status == .opening)
@@ -1105,7 +1105,7 @@ struct WorkDestinationTests {
         #expect(router.inspect().openings.first?.status == .failed)
         let receipt = router.inspect().openings
         router.register(UUID(), repository: workspace.id, openingRequests: router.workspaceRequests(workspace.id), focus: {}, inspect: windowInspection,
-                        controlPane: { _ in }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+                        controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
         #expect(router.inspect().openings == receipt)
     }
 
@@ -1227,7 +1227,7 @@ struct WorkDestinationTests {
         #expect(try await router.resolveWorkspace(restoredAlias, query: after) == scene)
         let window = UUID()
         router.register(window, repository: scene.id, openingRequests: router.workspaceRequests(scene.id), focus: {},
-            inspect: windowInspection, controlPane: { _ in },
+            inspect: windowInspection, controlPane: { $0.target.pane },
             readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
         #expect(router.inspect().windows.map(\.repository) == ["plan"])
         #expect(router.inspect().openings.first?.status == .usable)
@@ -1247,7 +1247,7 @@ struct WorkDestinationTests {
         let window = UUID()
         if registered {
             router.register(window, repository: scene.id, focus: {}, inspect: windowInspection,
-                controlPane: { _ in }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+                controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
         }
         let validation = Task {
             try await router.resolveWorkspace(RepositoryWorkspace(id: "plan", path: path), query: RegistryQuery { _, _ in
@@ -1263,7 +1263,7 @@ struct WorkDestinationTests {
         #expect(try await validation.value == scene)
         if !registered {
             router.register(window, repository: scene.id, focus: {}, inspect: windowInspection,
-                controlPane: { _ in }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+                controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
         }
         #expect(router.inspect().windows.map(\.repository) == ["old-plan"])
         #expect(router.inspect().windows.first?.window == (reboundWindow ?? window.uuidString))
@@ -1286,7 +1286,7 @@ struct WorkDestinationTests {
         let register: (RepositoryWorkspace) -> Void = { scene in
             router.register(window, repository: scene.id, openingRequests: router.workspaceRequests(scene.id),
                 focus: {}, inspect: windowInspection,
-                controlPane: { _ in }, readText: { _ in throw RegistryQueryError("No terminal") }) { received.append($0) }
+                controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { received.append($0) }
         }
         if alreadyOpen {
             _ = try await router.openRepository(path: path, link: nil,

@@ -168,18 +168,21 @@ public final class MultiplexerStore {
         closedState = nil
     }
 
-    public func newShell(command: [String] = [], beside paneId: String? = nil, focus: Bool = true) {
+    @discardableResult
+    public func newShell(command: [String] = [], beside paneId: String? = nil, focus: Bool = true) -> PaneState? {
         _insert(.shell, beside: paneId ?? focusedPaneId, focus: focus, shellCommand: command)
     }
 
     /// Reveal a Task's Flow process log or files beside existing terminals,
     /// never replacing them. Explicit targets do not follow later focus.
-    public func show(_ content: PaneContent, beside paneId: String? = nil, focus: Bool = true) {
+    @discardableResult
+    public func show(_ content: PaneContent, beside paneId: String? = nil, focus: Bool = true) -> PaneState? {
         if let pane = layout.allPanes.first(where: { $0.content == content }) {
             if focus { setFocusedPane(pane.id) }
             else { setCollapsed(paneId: pane.id, collapsed: false) }
+            return pane
         } else {
-            _insert(content, beside: paneId ?? focusedPaneId, focus: focus)
+            return _insert(content, beside: paneId ?? focusedPaneId, focus: focus)
         }
     }
 

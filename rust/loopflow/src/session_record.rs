@@ -1564,7 +1564,7 @@ pub(crate) fn provider_client_matches(
 
 /// A terminal marker is valid only on the PTY where the shell installed it.
 /// Inherited environment after app, SSH, or background handoff is not attachment.
-fn current_terminal_id() -> Option<String> {
+pub(crate) fn current_terminal_id() -> Option<String> {
     let id = std::env::var("LF_TERMINAL_ID")
         .ok()
         .filter(|id| !id.is_empty())?;

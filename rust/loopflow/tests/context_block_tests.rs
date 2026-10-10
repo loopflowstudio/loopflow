@@ -110,7 +110,8 @@ fn hook_refreshes_sqlite_ancestors_and_scratch_without_replaying_the_request() {
         .unwrap()
         .trim_end_matches('.');
     let path: String = serde_json::from_str(path).unwrap();
-    let manifest: Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+    let manifest: Value =
+        serde_json::from_slice(&fs::read(repo.path().join(path)).unwrap()).unwrap();
     let snapshots: Vec<_> = manifest["files"]
         .as_array()
         .unwrap()

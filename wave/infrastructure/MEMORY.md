@@ -231,13 +231,13 @@ independent. Leader death alone or failed descendant inventory grants no signal 
 `82b5d90d5` proves A → B → A rejection with stand-ins, not configured relay.
 CI: `be4a2b2af:wave/infrastructure/MEMORY.md`, this heading.
 
-LOO-447: fenced stop/abort; drop never signals. Codex acquires custody before
-claiming. Standby cannot write; group death releases custody; watchdog stays outside.
-OpenCode saves reachability before creation, native identity before permission
-setup, and original attempts/rules before HTTP. Uncertainty never permits replay.
-One blocking owner must retain HTTP and receipt fences through async cancellation;
-its dedicated proof remains open. `62b6c27df` proves reader-free reply recovery,
-not public takeover. Claude transport and public death-order proofs remain open.
+LOO-447: fenced stop/abort; drop never signals. Codex takes custody before claim;
+standbys cannot write. Group death releases custody; watchdog stays outside.
+OpenCode saves reachability before creation, identity before setup and attempts
+before HTTP; unknown creation identity remains unresolved. `c75082d01` fences HTTP
+and receipts in one worker; cancellation proof is open. `62b6c27df` proves
+reader-free reply recovery. Release's lesson applies: harness recovery proves no
+public takeover. Claude transport and public death-order proofs remain open.
 Plan: `scratch/stop-and-take-over-claude.md`.
 
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)

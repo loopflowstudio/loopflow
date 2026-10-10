@@ -13,7 +13,7 @@ a conservative implementation choice, not acceptance of the bounded-time proposa
 No schema migration. Rust/Swift SessionState now has unknown, active and closed;
 `tests/fixtures/dto/session_states.json` owns the shared variants.
 
-## Delete — do not maintain
+## Reconciled implementation (2026-10-10)
 
 Removed socket connect-and-drop probing, attachment-exit-event input completion,
 attachment-outcome Session state, and the derived Interrupted state. Client files
@@ -38,11 +38,15 @@ cannot override a recorded agent's state; terminal navigation still retains rece
 
 ## Remaining
 
-Gate owns affected suites and composed CLI/watch acceptance. Demo owns the real
-headless approval → SIGKILL → ended/non-Waiting → fresh resume scenario in disposable
-work. Tests cover killed approval/quiet/blocked agents with and without an exit save,
+Gate owns `session_cli_tests`, `work_watch`, affected history/connection suites
+and headless Desktop checks. Composed acceptance must observe OS death without a
+store write through `lf wave sessions`, `lf task status`, `lf monitor` and Work-watch.
+Demo owns the real headless approval → SIGKILL → closed/non-Waiting → fresh resume
+scenario in disposable work, including rejection of the dead agent’s saved socket. Tests cover killed approval/quiet/blocked agents with and without an exit save,
 an ended record with an answering socket, missing input exit events, handoff fencing,
 unknown replacement attention and shared state variants. These do not prove installed
-acceptance. Unknown timeout remains unselected; no delivery or installation requested.
+acceptance. Jack Heart has not selected a timeout: retaining unknown indefinitely
+is the conservative implementation, not an approved product decision. No delivery
+or installation requested.
 
-Checks: `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and network-isolated `cargo test -p loopflow --lib` filters `program_status` (5) / `uncertain_records_stay_visible_and_share_the_gate_judgment` (1) pass; prior unchanged Swift fixture pass retained, gate/CI own composed acceptance.
+Checks: realign `git diff --check` passes (prose only); retained `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and network-isolated `cargo test -p loopflow --lib` filters `program_status` (5) / `uncertain_records_stay_visible_and_share_the_gate_judgment` (1) pass; prior unchanged Swift fixture pass retained, gate/CI own composed acceptance.

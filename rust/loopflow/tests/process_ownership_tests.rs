@@ -101,16 +101,24 @@ async fn scheduled_agent_settlement_reports_failed_observation_and_recovers_with
     let bin = home.path().join("bin");
     std::fs::create_dir(&bin).unwrap();
     let ps = bin.join("ps");
-    std::fs::write(
-        &ps,
-        "#!/bin/sh\nprintf 'fixture sampling unavailable' >&2\nexit 2\n",
-    )
-    .unwrap();
-    std::fs::set_permissions(&ps, std::fs::Permissions::from_mode(0o755)).unwrap();
-    for args in [
-        ["task", "reconcile", "--json"],
-        ["monitor", "prune", "--json"],
+    for (args, single_pid_reads) in [
+        (["task", "reconcile", "--json"], false),
+        (["monitor", "prune", "--json"], false),
+        // Exact leader observation succeeds, but descendant inventory fails.
+        // The reaper must refuse before signaling, not assume no descendants.
+        (["task", "reconcile", "--json"], true),
     ] {
+        let forward = if single_pid_reads {
+            "if [ \"$1\" = -p ]; then exec /bin/ps \"$@\"; fi\n"
+        } else {
+            ""
+        };
+        std::fs::write(
+            &ps,
+            format!("#!/bin/sh\n{forward}printf 'fixture sampling unavailable' >&2\nexit 2\n"),
+        )
+        .unwrap();
+        std::fs::set_permissions(&ps, std::fs::Permissions::from_mode(0o755)).unwrap();
         let output = command(home.path(), repo.path(), &args)
             .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
             .output()

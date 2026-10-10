@@ -228,9 +228,10 @@ prove launch and takeover rejection, including A → B → A; configured relay i
 unproved. Client exit never settles its provider; provider death never settles
 an unknown attachment.
 
-Release's entry-point lesson exposed scheduled settlement's silent observation
-failure and zombie-as-live group probe. Preserve OS errors with LFIDs; group death
-requires no live member, not PID disappearance. Installed acceptance is unproved.
+Release's entry-point lesson exposed swallowed errors and zombie-as-live probes.
+Reaper and Codex close share group-wide judgment: leader death is insufficient;
+failed descendant inventory refuses before signaling. Errors retain LFIDs;
+installed acceptance is unproved.
 
 Optional headless admission, generations, foreground cleanup, takeover death
 orders, public Task agreement, two-second removal and installed settlement remain

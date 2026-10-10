@@ -10,7 +10,6 @@ use crate::store::sqlite::SqliteStore;
 use crate::store::{StoreError, StoreResult};
 use anyhow::Result;
 use std::collections::{HashMap, HashSet};
-use std::process::Command;
 
 /// Open the configured attachment without refreshing its authority from the store.
 pub(super) fn open_owner(
@@ -158,9 +157,8 @@ fn reap_in(store: &SqliteStore, dry_run: bool) -> StoreResult<AgentProcessReapRe
         let Some((pid, start)) = agent.process.pid.zip(agent.process.os_started_at) else {
             continue;
         };
-        let evidence = match OsProcess::read(pid) {
-            Ok(Some(process)) => process.evidence(start),
-            Ok(None) => ProcessIdentityEvidence::Dead,
+        let observed = match OsProcess::read(pid) {
+            Ok(process) => process,
             Err(error) => {
                 report.errors.push(format!(
                     "AgentProcess {}: cannot observe PID {pid}: {error}",
@@ -169,6 +167,11 @@ fn reap_in(store: &SqliteStore, dry_run: bool) -> StoreResult<AgentProcessReapRe
                 continue;
             }
         };
+        let evidence = observed
+            .as_ref()
+            .map_or(ProcessIdentityEvidence::Dead, |process| {
+                process.evidence(start)
+            });
         let dead = evidence == ProcessIdentityEvidence::Dead;
         let orphaned = evidence == ProcessIdentityEvidence::Live
             && counts[&(pid, start)] == 1
@@ -176,7 +179,9 @@ fn reap_in(store: &SqliteStore, dry_run: bool) -> StoreResult<AgentProcessReapRe
             && agent.attached_process_lfid.as_ref().is_none_or(|attached| {
                 process_evidence(store, attached) == ProcessIdentityEvidence::Dead
             })
-            && is_agent_process(pid, start, agent.provider.as_deref());
+            && observed
+                .as_ref()
+                .is_some_and(|process| is_agent_process(process, start, agent.provider.as_deref()));
         if orphaned {
             report.orphaned.push(pid);
         }
@@ -203,7 +208,8 @@ fn reap_in(store: &SqliteStore, dry_run: bool) -> StoreResult<AgentProcessReapRe
                         "attached LfProcess death is unresolved".into(),
                     ));
                 }
-                terminate_agent_process(pid, start, agent.provider.as_deref())?;
+                terminate_agent_process(pid, start, agent.provider.as_deref())
+                    .map_err(|error| StoreError::InvalidAuthority(error.to_string()))?;
             }
             Ok(())
         });
@@ -238,47 +244,39 @@ fn reap_in(store: &SqliteStore, dry_run: bool) -> StoreResult<AgentProcessReapRe
     Ok(report)
 }
 
-/// Whether `pid` is still the recorded AgentProcess: same start time, the
-/// provider's server command line, and leader of its own process group.
-fn is_agent_process(pid: u32, started_at: i64, provider: Option<&str>) -> bool {
-    let Ok(raw) = i32::try_from(pid) else {
-        return false;
-    };
-    // SAFETY: getpgid only reads process metadata.
-    if raw <= 1 || unsafe { libc::getpgid(raw) } != raw {
+/// Exact live identity, the provider's server command, and its own process group.
+fn is_agent_process(process: &OsProcess, started_at: i64, provider: Option<&str>) -> bool {
+    if process.pid <= 1
+        || process.pgid != process.pid
+        || process.evidence(started_at) != ProcessIdentityEvidence::Live
+    {
         return false;
     }
-    if !matches!(process_started_at(pid), Ok(Some(actual)) if (actual - started_at).abs() <= 3) {
-        return false;
-    }
-    let Ok(output) = Command::new("ps")
-        .args(["-o", "command=", "-p", &pid.to_string()])
-        .output()
-    else {
-        return false;
-    };
-    let command = String::from_utf8_lossy(&output.stdout);
-    let has = |word: &str| command.split_whitespace().any(|part| part == word);
+    let has = |word: &str| process.command.split_whitespace().any(|part| part == word);
     let program = |name: &str| {
-        command
-            .split_whitespace()
-            .any(|part| part == name || part.ends_with(&format!("/{name}")))
+        process.command.split_whitespace().any(|part| {
+            std::path::Path::new(part)
+                .file_name()
+                .is_some_and(|file| file == name)
+        })
     };
-    output.status.success()
-        && match provider {
-            Some("codex") => program("codex") && has("app-server") && has("--listen"),
-            Some("opencode") => program("opencode") && has("serve"),
-            _ => false,
-        }
+    match provider {
+        Some("codex") => program("codex") && has("app-server") && has("--listen"),
+        Some("opencode") => program("opencode") && has("serve"),
+        _ => false,
+    }
 }
 
 /// Stop the AgentProcess's group, then any group one of its descendants leads.
 /// Identity is proven again here, immediately before the first signal.
-fn terminate_agent_process(pid: u32, started_at: i64, provider: Option<&str>) -> StoreResult<()> {
-    let refused =
-        |reason: &str| StoreError::InvalidAuthority(format!("AgentProcess {pid} {reason}"));
-    let descendants = descendant_group_leaders(pid);
-    if !is_agent_process(pid, started_at, provider) {
+fn terminate_agent_process(pid: u32, started_at: i64, provider: Option<&str>) -> Result<()> {
+    let refused = |reason: &str| anyhow::anyhow!("AgentProcess {pid} {reason}");
+    let processes = OsProcess::sample(time::OffsetDateTime::now_utc().unix_timestamp())?;
+    let descendants = descendant_group_leaders(pid, &processes);
+    if !OsProcess::read(pid)?
+        .as_ref()
+        .is_some_and(|process| is_agent_process(process, started_at, provider))
+    {
         return Err(refused("is no longer the recorded process"));
     }
     if !terminate_process_group(pid) {
@@ -287,8 +285,9 @@ fn terminate_agent_process(pid: u32, started_at: i64, provider: Option<&str>) ->
     for (leader, leader_started_at) in descendants {
         // Most exit with the AgentProcess. One that survives is still the process
         // sampled above only if its start time is unchanged.
-        if matches!(process_started_at(leader), Ok(Some(actual)) if (actual - leader_started_at).abs() <= 3)
-            && !terminate_process_group(leader)
+        if OsProcess::read(leader)?.is_some_and(|process| {
+            process.pgid == leader && process.matches_start(leader, leader_started_at)
+        }) && !terminate_process_group(leader)
         {
             tracing::warn!(
                 pid,
@@ -303,41 +302,22 @@ fn terminate_agent_process(pid: u32, started_at: i64, provider: Option<&str>) ->
 /// Descendants of `pid` that lead their own process group, with start times.
 /// A provider helper such as Codex's code-mode host runs outside the AgentProcess's
 /// group, so the group signal alone would leave it behind.
-fn descendant_group_leaders(pid: u32) -> Vec<(u32, i64)> {
-    let Ok(output) = Command::new("ps")
-        .args(["-axo", "pid=,ppid=,pgid="])
-        .output()
-    else {
-        return Vec::new();
-    };
-    let rows = String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter_map(|line| {
-            let mut fields = line.split_whitespace().map(str::parse::<u32>);
-            Some((
-                fields.next()?.ok()?,
-                fields.next()?.ok()?,
-                fields.next()?.ok()?,
-            ))
-        })
-        .collect::<Vec<_>>();
-    let mut children = HashMap::<u32, Vec<(u32, u32)>>::new();
-    for (child, parent, group) in rows {
-        children.entry(parent).or_default().push((child, group));
+fn descendant_group_leaders(pid: u32, processes: &[OsProcess]) -> Vec<(u32, i64)> {
+    let mut children = HashMap::<u32, Vec<&OsProcess>>::new();
+    for process in processes {
+        children.entry(process.ppid).or_default().push(process);
     }
     let mut leaders = Vec::new();
     let mut seen = HashSet::from([pid]);
     let mut pending = vec![pid];
     while let Some(parent) = pending.pop() {
-        for (child, group) in children.get(&parent).into_iter().flatten() {
-            if !seen.insert(*child) {
+        for child in children.get(&parent).into_iter().flatten() {
+            if !seen.insert(child.pid) {
                 continue;
             }
-            pending.push(*child);
-            if group == child {
-                if let Ok(Some(started_at)) = process_started_at(*child) {
-                    leaders.push((*child, started_at));
-                }
+            pending.push(child.pid);
+            if child.pgid == child.pid {
+                leaders.push((child.pid, child.started_at));
             }
         }
     }

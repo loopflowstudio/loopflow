@@ -9,9 +9,11 @@ use super::ProcessIdentityEvidence;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct OsProcess {
     pub(crate) pid: u32,
+    pub(crate) ppid: u32,
     pub(crate) pgid: u32,
     pub(crate) started_at: i64,
     pub(crate) kernel_state: String,
+    pub(crate) command: String,
 }
 
 impl OsProcess {
@@ -55,7 +57,7 @@ impl OsProcess {
 fn query(selection: &[&str], now: i64) -> io::Result<Vec<OsProcess>> {
     let output = Command::new("ps")
         .args(selection)
-        .args(["-o", "pid=,pgid=,state=,etime="])
+        .args(["-ww", "-o", "pid=,ppid=,pgid=,state=,etime=,command="])
         .output()?;
     if !output.status.success() {
         if output.status.code() == Some(1) && output.stdout.is_empty() && output.stderr.is_empty() {
@@ -77,19 +79,30 @@ fn query(selection: &[&str], now: i64) -> io::Result<Vec<OsProcess>> {
 }
 
 fn parse(line: &str, now: i64) -> Option<OsProcess> {
-    let mut fields = line.split_whitespace();
-    let pid = fields.next()?.parse().ok()?;
-    let pgid = fields.next()?.parse().ok()?;
-    let kernel_state = fields.next()?.to_owned();
-    let elapsed = i64::try_from(elapsed_seconds(fields.next()?)?).ok()?;
-    if fields.next().is_some() {
+    // The command is the final column and may itself contain whitespace.
+    // ps pads columns, so consume each fixed field from the remaining suffix.
+    let mut remaining = line.trim();
+    let mut next = || {
+        let end = remaining.find(char::is_whitespace)?;
+        let field = &remaining[..end];
+        remaining = remaining[end..].trim_start();
+        Some(field)
+    };
+    let pid = next()?.parse().ok()?;
+    let ppid = next()?.parse().ok()?;
+    let pgid = next()?.parse().ok()?;
+    let kernel_state = next()?.to_owned();
+    let elapsed = i64::try_from(elapsed_seconds(next()?)?).ok()?;
+    if remaining.is_empty() {
         return None;
     }
     Some(OsProcess {
         pid,
+        ppid,
         pgid,
         started_at: now.checked_sub(elapsed)?,
         kernel_state,
+        command: remaining.to_owned(),
     })
 }
 
@@ -123,14 +136,17 @@ mod tests {
 
     #[test]
     fn activity_and_control_share_identity_and_zombie_evidence() {
-        for (line, start, evidence) in [
-            ("10 10 S 01:00", 99_940, ProcessIdentityEvidence::Live),
-            ("10 10 R 02:00:00", 92_800, ProcessIdentityEvidence::Live),
-            ("10 10 Z 1-00:00:00", 13_600, ProcessIdentityEvidence::Dead),
-            ("10 10 S 2-01:02:03", -76_523, ProcessIdentityEvidence::Live),
-            ("10 10 S 01:00", 99_930, ProcessIdentityEvidence::Dead),
+        for (state, age, start, evidence) in [
+            ("S", "01:00", 99_940, ProcessIdentityEvidence::Live),
+            ("R", "02:00:00", 92_800, ProcessIdentityEvidence::Live),
+            ("Z", "1-00:00:00", 13_600, ProcessIdentityEvidence::Dead),
+            ("S", "2-01:02:03", -76_523, ProcessIdentityEvidence::Live),
+            ("S", "01:00", 99_930, ProcessIdentityEvidence::Dead),
         ] {
-            let process = parse(line, 100_000).unwrap();
+            let line = format!("  10   1  10 {state} {age} /path with spaces/codex app-server");
+            let process = parse(&line, 100_000).unwrap();
+            assert_eq!(process.ppid, 1);
+            assert_eq!(process.command, "/path with spaces/codex app-server");
             assert_eq!(process.evidence(start), evidence);
             assert_eq!(
                 process.matches_start(10, start),
@@ -139,12 +155,13 @@ mod tests {
             assert!(!process.matches_start(11, start));
         }
         for line in [
-            "10 10 S ?",
-            "10 10 S 00:bad:01",
-            "10 10 S 18446744073709551615-00:00",
-            "bad 10 S 00:00",
-            "10 bad S 00:00",
-            "10 10 S 00:00 extra",
+            "10 1 10 S ? fixture",
+            "10 1 10 S 00:bad:01 fixture",
+            "10 1 10 S 18446744073709551615-00:00 fixture",
+            "bad 1 10 S 00:00 fixture",
+            "10 1 bad S 00:00 fixture",
+            "10 1 10 S 00:00",
+            "10 bad 10 S 00:00 fixture",
         ] {
             assert!(parse(line, 100_000).is_none(), "{line}");
         }

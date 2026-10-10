@@ -723,6 +723,8 @@ mod tests {
             (
                 Some(vec![OsProcess {
                     pid: 4242,
+                    ppid: 1,
+                    command: "fixture".into(),
                     pgid: 4242,
                     started_at: now + 10,
                     kernel_state: "R".into(),
@@ -732,6 +734,8 @@ mod tests {
             (
                 Some(vec![OsProcess {
                     pid: 4242,
+                    ppid: 1,
+                    command: "fixture".into(),
                     pgid: 4242,
                     started_at: now,
                     kernel_state: "Z".into(),
@@ -741,6 +745,8 @@ mod tests {
             (
                 Some(vec![OsProcess {
                     pid: 4242,
+                    ppid: 1,
+                    command: "fixture".into(),
                     pgid: 4242,
                     started_at: now,
                     kernel_state: "R".into(),
@@ -803,6 +809,8 @@ mod tests {
         let os = |start| {
             vec![OsProcess {
                 pid: 4242,
+                ppid: 1,
+                command: "fixture".into(),
                 pgid: 4242,
                 started_at: start,
                 kernel_state: "S".into(),

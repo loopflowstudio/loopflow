@@ -105,9 +105,13 @@ attribution survive.
 - Process-group signal-0 existence checks are removed. The shared OS inventory
   records group membership and distinguishes live descendants from unreaped zombies;
   failed observation never proves group death.
-- Top’s private OS sampler/elapsed parser and receipt-only birth comparison are
-  removed. `journal::OsProcess` owns single-PID and inventory observation, including
-  zombie rejection. Malformed samples fail observation rather than inventing absence.
+- Top’s private OS sampler/elapsed parser, receipt-only birth comparison and the
+  reaper's command/tree samplers are removed. `journal::OsProcess` supplies identity,
+  parent/group, command and zombie evidence. Malformed samples fail observation;
+  failed descendant inventory refuses before signaling rather than inventing absence.
+- Codex close's separate signal/wait loop is removed. It retains native-thread and
+  exact leader checks, then uses the shared group termination path; leader death
+  alone cannot settle a group with surviving helpers.
 - Capture's `driver` slot and `claim_conversation_driver` name are replaced by
   attachment naming; there is no second owner. The reaper's unused
   `settled_drivers` counter and serialization derives are removed. Its callers
@@ -234,7 +238,14 @@ remains failure and live descendants still prevent settlement. The CLI fixture
 passes failed observation, recovery, detached settlement and activity removal using
 a throwaway server-shaped shell. It proves neither configured providers nor an
 installed scheduled firing. Review retained group-wide observation rather than
-checking only the leader, which would lose surviving descendants.
+checking only the leader, which would lose surviving descendants. Compression found
+that same leader-only mistake in Codex close and removed its private wait loop.
+The throwaway close fixture has a TERM-resistant helper whose leader exits first;
+shared termination must observe the entire group dead. The scheduled fixture also
+allows exact PID reads while failing descendant inventory, retaining the live
+provider and record without signaling. Reaper command/tree observations now come
+from the shared OS reader rather than separate permissive `ps` parsers. These
+checks do not establish configured-provider or foreground cleanup.
 
 ## Remaining implementation
 
@@ -328,4 +339,4 @@ LfSession's selected AgentSession. Branch-only fixtures use the typed identity.
 Earlier native-util/planning-reconnect, 16-test isolated lifecycle and typed-identity
 sync checks are retained at `e87e9d643`, this plan.
 
-Check: `cargo test -p loopflow --test process_ownership_tests --lib --no-run` passes; network-isolated test binaries pass `scheduled_agent_settlement_reports_failed_observation_and_recovers_without_losing_history`, `journal::os_process::tests`, `terminating_a_group_reaches_a_grandchild_that_outlived_its_leader` and `detached_agent_is_reaped_but_duplicate_historical_identity_is_not_signal_authority` (6 tests); fmt, all-target Clippy and diff checks pass; full Rust/Swift/DTO/materialized/Linux verification remains gate/CI-owned.
+Check: `cargo test -p loopflow --lib --test process_ownership_tests --no-run`, network-isolated OS/reaper/Codex-close/resume/top and scheduled-entry tests (21), `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and diff checks pass; full Rust/Swift/DTO/materialized/Linux verification remains gate/CI-owned. Earlier focused results: `16415389c`, this plan.

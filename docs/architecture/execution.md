@@ -124,7 +124,8 @@ headless groups under that attachment fence, refusing ambiguous OS ownership;
 Codex additionally refuses a server hosting unrelated conversations. Claude stop/
 interrupt and OpenCode stop use common group close, recording death under the fence.
 OpenCode abort uses bounded fenced HTTP without retries; drop never signals its
-child. Failed startup retains the child for fenced cleanup and reports refusal.
+child. Failed startup detaches without erasing the admitted provider or uncertain
+native effects; pre-exec spawn failure retains its positive non-start evidence.
 Runtime settlement alone does not establish takeover safety. Public live connection
 currently dispatches only to Codex; Claude and OpenCode still take native resume.
 OpenCode saves request IDs and frozen origins in Session history before HTTP
@@ -137,7 +138,12 @@ lifeline FIFO instead of a launcher-owned pipe. Pending permissions are acquired
 at reader startup and on native wake edges. Replies select saved request origins
 and retain attempts in Session observations before fenced HTTP. Lost responses
 read back pending permissions; unresolved attempts never replay after reconnect.
-Public connection and recovery before native identity is saved remain unfinished.
+The server endpoint is saved before launch/readiness, independently of native
+Session selection. Creation and permission setup retain AgentProcess-keyed
+attempts in Session observations before bounded fenced HTTP. Returned identity
+is saved before permission setup. Reconnect never repeats uncertain creation;
+permission readback uses the original saved rules, not replacement configuration.
+Public connection and process-death recovery before native identity remain unfinished.
 
 Owned native launches use the same pre-exec recording channel under the attachment
 lock, but no headless group/watchdog setup. Failed recording prevents provider code

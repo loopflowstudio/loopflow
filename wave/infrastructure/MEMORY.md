@@ -221,23 +221,24 @@ unpublished code retained, without deletion or delivery authorization.
 
 ## AgentProcess (LOO-443/447, 2026-10-10)
 
-Jack Heart accepted #1519 (`71741bd4`); unknown stays visible; retries retain history.
+Jack Heart accepted #1519 (`71741bd4`); retain uncertainty and retry history.
 LOO-447 owns Claude/OpenCode takeover/stop; two-second removal, three orphans
 and configured-provider runs are accepted unproven.
 
-Headless launch requires attachment. AgentProcess identity replaces generation;
-released counters stay unread, pre-upgrade callers stale. Client exit proves no
-provider death; provider death proves no unknown attachment's exit. Group death
-requires more than leader death; failed descendant inventory refuses signaling.
+Headless launch requires attachment. AgentProcess replaces generation;
+released counters stay unread, old callers stale. Client and provider death remain
+independent. Leader death alone or failed descendant inventory grants no signal authority.
 `82b5d90d5` proves A → B → A rejection with stand-ins, not configured relay.
-Draft/CI: `be4a2b2af:wave/infrastructure/MEMORY.md`, this heading.
+CI: `be4a2b2af:wave/infrastructure/MEMORY.md`, this heading.
 
 LOO-447: fenced stop/abort; drop never signals. Codex acquires custody before
 claiming. Standby cannot write; group death releases custody; watchdog stays outside.
 OpenCode saves reply attempts before fenced HTTP; readback never replays uncertainty.
-`62b6c27df` recovers replies without a reader. Endpoint reuse remains harness-only;
-pre-save identity loss unresolved. Claude pipes remain launcher-owned; public takeover and
-both death orders unfinished. Plan: `scratch/stop-and-take-over-claude.md`.
+`62b6c27df` recovers replies without a reader. Startup saves reachability before
+creation and native identity before permission setup. AgentProcess-keyed attempts
+retain original rules; uncertain writes never replay. HTTP fixtures prove no public
+takeover. Claude pipes and both death orders remain unfinished.
+Plan: `scratch/stop-and-take-over-claude.md`.
 
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)
 

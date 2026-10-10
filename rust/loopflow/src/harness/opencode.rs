@@ -79,9 +79,9 @@ impl OpenCodeHarness {
             owner.clone(),
         ))));
         let (store, session, attachment) = &owner;
-        let connection = store.session_connection(session)?;
-        let (base_url, agent_session) = if let Some((endpoint, thread)) = connection {
-            if self.agent_session.as_ref() != Some(&thread) {
+        let endpoint = store.agent_process_endpoint(session)?;
+        let base_url = if let Some(endpoint) = endpoint {
+            if store.session_thread(session)?.as_ref() != self.agent_session.as_ref() {
                 return Err(anyhow!(
                     "Saved OpenCode conversation differs; reconnect with its recorded provider"
                 ));
@@ -97,7 +97,7 @@ impl OpenCodeHarness {
             store.with_session_attachment(session, attachment, || Ok(()))?;
             custody.retain(pid, birth);
             self.should_seed_prompt = false;
-            (endpoint, thread)
+            endpoint
         } else {
             let port = allocate_port()?;
             // The provider owns this file descriptor, not a pipe reader in its
@@ -131,28 +131,20 @@ impl OpenCodeHarness {
                 command.env("OPENCODE_CONFIG_CONTENT", opencode_worktree_config());
             }
             super::configure_vendor_std_env(command.as_std_mut())?;
+            let base_url = format!("http://127.0.0.1:{port}");
+            store.record_agent_process_endpoint(session, attachment, &base_url)?;
             self.child = Some(super::agent_process::spawn(command, &owner)?);
             let child = self.child.as_mut().expect("admitted OpenCode child");
-            let base_url = format!("http://127.0.0.1:{port}");
             wait_for_server(&self.client, &base_url, child).await?;
-            let agent_session =
-                open_agent_session(&self.client, &base_url, self.agent_session.as_ref()).await?;
-            // The dedicated server answers each native permission once, after the
-            // originating user message has been selected under the Session owner.
-            let mut permissions = vec![json!({"permission":"*","pattern":"*","action":"ask"})];
-            if config.write_scope == AgentWriteScope::Worktree {
-                permissions
-                    .push(json!({"permission":"external_directory","pattern":"*","action":"deny"}));
-            }
-            self.client
-                .patch(format!("{base_url}/session/{agent_session}"))
-                .json(&json!({"permission":permissions}))
-                .send()
-                .await?
-                .error_for_status()?;
-            store.record_session_connection(session, attachment, &base_url, &agent_session)?;
-            (base_url, agent_session)
+            base_url
         };
+        let agent_session = prepare_agent_session(
+            owner.clone(),
+            base_url.clone(),
+            self.agent_session.clone(),
+            config.write_scope,
+        )
+        .await?;
 
         let event_tx = self.events.clone();
         let raw_provider = self.raw_provider.clone();
@@ -440,15 +432,9 @@ impl Harness for OpenCodeHarness {
 
         let start_result = self.start_inner(config).await;
         if let Err(err) = start_result {
-            // A failed reader must not stop the provider it was connecting to.
-            // Only a new launch owns failed-startup provider cleanup.
-            if self.child.is_some() {
-                if let Err(cleanup) = self.stop().await {
-                    return Err(err.context(format!("OpenCode startup cleanup refused: {cleanup}")));
-                }
-            } else {
-                self.disconnect();
-            }
+            // No child exists before reachability is saved. Once admitted,
+            // startup can have uncertain native effects: detach, never erase them.
+            self.disconnect();
             return Err(err);
         }
         Ok(())
@@ -599,36 +585,55 @@ impl Harness for OpenCodeHarness {
     }
 }
 
-/// A saved conversation must remain the same conversation after a retry.
-async fn open_agent_session(
-    client: &reqwest::Client,
-    base_url: &str,
-    stored: Option<&AgentSessionId>,
+/// One startup writer survives caller cancellation and holds frozen authority
+/// through HTTP and persistence. Readback can settle configuration, never repeat
+/// an uncertain native creation or permission write.
+async fn prepare_agent_session(
+    owner: super::agent_process::AttachmentOwner,
+    base_url: String,
+    stored: Option<AgentSessionId>,
+    write_scope: AgentWriteScope,
 ) -> Result<AgentSessionId> {
-    if let Some(session_id) = stored {
-        client
-            .get(format!("{base_url}/session/{session_id}"))
-            .send()
-            .await?
-            .error_for_status()?;
-        return Ok(session_id.clone());
-    }
-
-    // Creation is not idempotent: an error can follow a successful native save.
-    // Leave that outcome uncertain rather than creating a second conversation.
-    let response = client
-        .post(format!("{base_url}/session"))
-        .json(&json!({}))
-        .send()
-        .await?
-        .error_for_status()?;
-    let body: Value = response
-        .json()
-        .await
-        .map_err(|err| anyhow!("failed to parse opencode session response: {err}"))?;
-
-    parse_session_id(&body)
-        .ok_or_else(|| anyhow!("opencode session response did not include session id: {body}"))
+    Ok(tokio::task::spawn_blocking(move || {
+        let (store, session, attachment) = owner;
+        store.with_session_attachment(&session, &attachment, || {
+            let error = |err: anyhow::Error| crate::store::StoreError::InvalidData(err.to_string());
+            let prepare = || -> Result<AgentSessionId> {
+                let client = reqwest::blocking::Client::builder()
+                    .timeout(Duration::from_secs(10)).build()?;
+                let thread = if let Some(thread) = store.session_thread(&session)?.or(stored) {
+                    thread
+                } else {
+                    if !store.record_agent_process_startup_attempt(&session, &attachment, "opencode-create", &json!({}))?.0 {
+                        return Err(anyhow!("OpenCode native Session creation is uncertain; not creating another conversation"));
+                    }
+                    let body: Value = client.post(format!("{base_url}/session"))
+                        .json(&json!({})).send()?.error_for_status()?.json()?;
+                    parse_session_id(&body).ok_or_else(|| anyhow!("OpenCode creation returned no native Session identity"))?
+                };
+                // Retain identity before permission I/O: losing that response must
+                // not lose the conversation which the server already created.
+                store.record_session_connection(&session, &attachment, &base_url, &thread)?;
+                let mut permissions = vec![json!({"permission":"*","pattern":"*","action":"ask"})];
+                if write_scope == AgentWriteScope::Worktree {
+                    permissions.push(json!({"permission":"external_directory","pattern":"*","action":"deny"}));
+                }
+                let url = format!("{base_url}/session/{thread}");
+                let observed: Value = client.get(&url).send()?.error_for_status()?.json()?;
+                let (first_attempt, permissions) = store.record_agent_process_startup_attempt(
+                    &session, &attachment, "opencode-permissions", &json!(permissions))?;
+                if observed["permission"] != json!(permissions) {
+                    if !first_attempt {
+                        return Err(anyhow!("OpenCode permission configuration is uncertain; not replaying"));
+                    }
+                    client.patch(&url).json(&json!({"permission":permissions}))
+                        .send()?.error_for_status()?;
+                }
+                Ok(thread)
+            };
+            prepare().map_err(error)
+        })
+    }).await??)
 }
 
 fn send_disconnect_error(
@@ -864,43 +869,127 @@ mod tests {
     use serde_json::json;
 
     #[tokio::test]
-    async fn failed_creation_does_not_create_another_conversation() {
+    async fn startup_retains_uncertain_creation_and_permission_identity_after_takeover() {
         use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-
-        for status in ["503 Unavailable", "200 OK"] {
+        for failure in ["creation", "permissions-applied", "permissions-unapplied"] {
+            let home = tempfile::tempdir().unwrap();
+            let database = home.path().join("loopflow.db");
+            let store = crate::store::sqlite::SqliteStore::open_ephemeral(&database).unwrap();
+            let sql = rusqlite::Connection::open(&database).unwrap();
+            let launcher = crate::id::LfProcessId::new();
+            let attacher = crate::id::LfProcessId::new();
+            for id in [&launcher, &attacher] {
+                sql.execute(
+                    "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?1,1)",
+                    [id],
+                )
+                .unwrap();
+            }
+            store.test_session("opencode", &crate::session_record::new_artifact_key());
+            let first = store
+                .claim_session_attachment("opencode", None, &launcher, true)
+                .unwrap();
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let endpoint = format!("http://{}", listener.local_addr().unwrap());
+            store
+                .record_agent_process_endpoint("opencode", &first, &endpoint)
+                .unwrap();
             let creations = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let patches = Arc::new(std::sync::atomic::AtomicUsize::new(0));
             let server = {
                 let creations = creations.clone();
+                let patches = patches.clone();
                 tokio::spawn(async move {
+                    let mut configured = false;
                     loop {
                         let (socket, _) = listener.accept().await.unwrap();
                         let mut socket = BufReader::new(socket);
-                        let mut line = String::new();
-                        socket.read_line(&mut line).await.unwrap();
-                        assert!(line.starts_with("POST /session "));
+                        let mut request = String::new();
+                        socket.read_line(&mut request).await.unwrap();
+                        let mut length = 0;
                         loop {
-                            line.clear();
+                            let mut line = String::new();
                             socket.read_line(&mut line).await.unwrap();
                             if line == "\r\n" {
                                 break;
                             }
+                            if let Some(value) = line.to_lowercase().strip_prefix("content-length:")
+                            {
+                                length = value.trim().parse::<usize>().unwrap();
+                            }
                         }
-                        let mut body = [0; 2];
+                        let mut body = vec![0; length];
                         socket.read_exact(&mut body).await.unwrap();
-                        assert_eq!(&body, b"{}");
-                        creations.fetch_add(1, Ordering::SeqCst);
-                        // The native save happened, but its response cannot supply
-                        // identity (server error or malformed successful response).
-                        socket.get_mut().write_all(format!("HTTP/1.1 {status}\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}").as_bytes()).await.unwrap();
+                        let response = if request.starts_with("POST /session ") {
+                            creations.fetch_add(1, Ordering::SeqCst);
+                            if failure == "creation" { continue; }
+                            json!({"id":"native"})
+                        } else if request.starts_with("PATCH /session/native ") {
+                            patches.fetch_add(1, Ordering::SeqCst);
+                            assert_eq!(serde_json::from_slice::<Value>(&body).unwrap(),
+                                json!({"permission":[{"permission":"*","pattern":"*","action":"ask"}]}));
+                            configured = failure == "permissions-applied";
+                            // The response is lost whether the mutation applied or not.
+                            continue;
+                        } else {
+                            assert!(request.starts_with("GET /session/native "));
+                            json!({"id":"native","permission":if configured {
+                                json!([{"permission":"*","pattern":"*","action":"ask"}])
+                            } else { json!([]) }})
+                        }.to_string();
+                        socket.get_mut().write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}", response.len()).as_bytes()).await.unwrap();
                     }
                 })
             };
-            assert!(open_agent_session(&reqwest::Client::new(), &endpoint, None)
-                .await
-                .is_err());
+            let owner = (store.clone(), "opencode".into(), first.clone());
+            assert!(prepare_agent_session(
+                owner.clone(),
+                endpoint.clone(),
+                None,
+                AgentWriteScope::Configured
+            )
+            .await
+            .is_err());
+            drop(owner);
+            drop(store);
+            let store = crate::store::sqlite::SqliteStore::open_ephemeral(&database).unwrap();
+            assert_eq!(
+                store.agent_process_endpoint("opencode").unwrap(),
+                Some(endpoint.clone())
+            );
+            assert_eq!(
+                store.session_thread("opencode").unwrap(),
+                if failure == "creation" {
+                    None
+                } else {
+                    Some("native".into())
+                }
+            );
+            let current = store
+                .claim_session_attachment("opencode", Some(&first), &attacher, false)
+                .unwrap();
+            assert_eq!(current.agent_process_id, first.agent_process_id);
+            let result = prepare_agent_session(
+                (store.clone(), "opencode".into(), current),
+                endpoint.clone(),
+                None,
+                AgentWriteScope::Worktree,
+            )
+            .await;
+            assert_eq!(result.is_ok(), failure == "permissions-applied");
+            assert!(prepare_agent_session(
+                (store, "opencode".into(), first),
+                endpoint,
+                None,
+                AgentWriteScope::Configured
+            )
+            .await
+            .is_err());
             assert_eq!(creations.load(Ordering::SeqCst), 1);
+            assert_eq!(
+                patches.load(Ordering::SeqCst),
+                usize::from(failure != "creation")
+            );
             server.abort();
         }
     }
@@ -996,6 +1085,11 @@ mod tests {
                         let mut line = String::new();
                         socket.read_line(&mut line).await.unwrap();
                         requests.lock().unwrap().push(line.clone());
+                        if line.starts_with("GET /session/native ") {
+                            let body = json!({"id":"native","permission":[{"permission":"*","pattern":"*","action":"ask"}]}).to_string();
+                            socket.get_mut().write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+                            return;
+                        }
                         if line.starts_with("GET /event ") {
                             subscribed.store(true, Ordering::SeqCst);
                             socket.get_mut().write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n").await.unwrap();
@@ -1254,49 +1348,6 @@ mod tests {
     // -- Fake-SSE disconnect matrix --
 
     use crate::chat::types::{ConversationItem, Lifecycle};
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::net::TcpListener;
-
-    #[tokio::test]
-    async fn open_agent_session_creates_only_without_saved_identity() {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let base_url = format!("http://127.0.0.1:{port}");
-
-        tokio::spawn(async move {
-            loop {
-                let Ok((mut socket, _)) = listener.accept().await else {
-                    return;
-                };
-                let mut buf = vec![0u8; 4096];
-                let n = socket.read(&mut buf).await.unwrap_or(0);
-                let request = String::from_utf8_lossy(&buf[..n]).to_string();
-                let response = if request.starts_with("GET /session/live") {
-                    "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}"
-                } else if request.starts_with("POST /session ") {
-                    "HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\n{\"id\":\"new\"}"
-                } else {
-                    "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n"
-                };
-                let _ = socket.write_all(response.as_bytes()).await;
-            }
-        });
-
-        let client = reqwest::Client::new();
-        assert_eq!(
-            open_agent_session(&client, &base_url, Some(&"live".into()))
-                .await
-                .unwrap(),
-            "live".into()
-        );
-        assert!(open_agent_session(&client, &base_url, Some(&"gone".into()))
-            .await
-            .is_err());
-        assert_eq!(
-            open_agent_session(&client, &base_url, None).await.unwrap(),
-            "new".into()
-        );
-    }
 
     // -- Live checks against the real `opencode serve` --
     //

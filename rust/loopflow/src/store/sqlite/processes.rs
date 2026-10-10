@@ -438,6 +438,63 @@ impl SqliteStore {
         ).optional()?)
     }
 
+    /// Reachability survives native Session creation that has not returned an ID.
+    pub(crate) fn agent_process_endpoint(&self, session: &str) -> StoreResult<Option<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT p.endpoint FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1",
+            [session], |row| row.get(0),
+        ).optional()?.flatten())
+    }
+
+    pub(crate) fn record_agent_process_endpoint(
+        &self,
+        session: &str,
+        expected: &SessionAttachment,
+        endpoint: &str,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        require_attachment_in(&tx, session, expected)?;
+        tx.execute(
+            "UPDATE processes SET endpoint=?2 WHERE id=?1",
+            params![expected.agent_process_id, endpoint],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Startup effects have no native turn yet. Retain the attempt against the
+    /// AgentProcess, so a replacement attachment cannot repeat an uncertain write.
+    /// The caller holds the attachment fence through the subsequent bounded I/O.
+    pub(crate) fn record_agent_process_startup_attempt(
+        &self,
+        session: &str,
+        expected: &SessionAttachment,
+        operation: &str,
+        intent: &serde_json::Value,
+    ) -> StoreResult<(bool, serde_json::Value)> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        require_attachment_in(&tx, session, expected)?;
+        let key = format!("agent:{}:startup:{operation}", expected.agent_process_id);
+        let saved: Option<String> = tx.query_row(
+            "SELECT json_extract(payload,'$.intent') FROM session_events WHERE session_id=?1 AND receipt_key=?2",
+            params![session, key], |row| row.get(0),
+        ).optional()?;
+        if let Some(saved) = saved {
+            return Ok((false, serde_json::from_str(&saved)?));
+        }
+        tx.execute(
+            "INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,observed_at,payload,captured_event)
+             SELECT id,'observed',?2,?3,?4,?5,current_capture FROM agent_sessions WHERE id=?1",
+            params![session, key, expected.lf_process_id,
+                time::OffsetDateTime::now_utc().unix_timestamp(),
+                serde_json::json!({"type":"agent_startup_attempt","agent_process_id":expected.agent_process_id,"operation":operation,"intent":intent}).to_string()])?;
+        tx.commit()?;
+        Ok((true, intent.clone()))
+    }
+
     pub(crate) fn session_thread(&self, session: &str) -> StoreResult<Option<AgentSessionId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn

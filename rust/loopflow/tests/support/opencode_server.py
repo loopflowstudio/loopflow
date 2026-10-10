@@ -171,13 +171,15 @@ class Server(BaseHTTPRequestHandler):
                     self._json({}, 404)
                 else:
                     self._json(
-                        sessions[session] if self.path.endswith("/message") else {"id": session}
+                        sessions[session] if self.path.endswith("/message") else {"id": session, "permission":SESSION_PERMISSIONS.get(session, [])}
                     )
         else:
             self._json({})
 
     def do_PATCH(self):
-        self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+        with LOCK:
+            SESSION_PERMISSIONS[self.path.split("/")[2]] = body["permission"]
         self._json({})
 
     def do_POST(self):
@@ -220,6 +222,7 @@ if "serve" not in sys.argv:
     if __WAIT__:  # noqa: F821 — substituted by the Rust fixture before execution
         sys.stdin.readline()
     raise SystemExit(0)
+SESSION_PERMISSIONS = {}
 sessions = json.loads(SESSIONS.read_text()) if SESSIONS.exists() else {}
 ThreadingHTTPServer(
     ("127.0.0.1", int(sys.argv[sys.argv.index("--port") + 1])), Server

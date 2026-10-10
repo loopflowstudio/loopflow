@@ -152,6 +152,9 @@ pub(crate) fn close_session_agent_process(store: &SqliteStore, session: &str) ->
     else {
         return Ok(false);
     };
+    if agent.interactive {
+        return Ok(false);
+    }
     let Some((pid, started)) = agent.process.pid.zip(agent.process.os_started_at) else {
         return Ok(false);
     };
@@ -167,9 +170,6 @@ pub(crate) fn close_session_agent_process(store: &SqliteStore, session: &str) ->
             ))
         }
         ProcessIdentityEvidence::Live => {}
-    }
-    if agent.interactive {
-        return Ok(false);
     }
     if agents.iter().any(|other| {
         other.process.id != agent.process.id

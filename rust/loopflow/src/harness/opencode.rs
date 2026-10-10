@@ -518,10 +518,7 @@ impl Harness for OpenCodeHarness {
             return SendCurrentOutcome::NotSteerable;
         };
 
-        match self
-            .submit_prompt(build_turn_payload(text, config))
-            .await
-        {
+        match self.submit_prompt(build_turn_payload(text, config)).await {
             Ok(provider_turn_id) => SendCurrentOutcome::Sent { provider_turn_id },
             Err(error) => SendCurrentOutcome::Failed {
                 error: format!("failed to send opencode steer: {error}"),

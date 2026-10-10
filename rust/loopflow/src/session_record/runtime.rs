@@ -367,7 +367,22 @@ mod tests {
                 store.session_attachment("resume").unwrap(),
                 Some(second.clone())
             );
-            super::finish_session_attachment(&store, "resume", &second, "interrupted").unwrap();
+            let returned = store
+                .claim_session_attachment("resume", Some(&second), &launch, false)
+                .unwrap();
+            assert_eq!(returned.agent_process_id, first.agent_process_id);
+            assert_ne!(returned.token, first.token);
+            for stale in [&first, &second] {
+                assert!(
+                    super::finish_session_attachment(&store, "resume", stale, "interrupted")
+                        .is_err()
+                );
+            }
+            assert_eq!(
+                crate::journal::process_identity_evidence(pid, birth),
+                crate::journal::ProcessIdentityEvidence::Live
+            );
+            super::finish_session_attachment(&store, "resume", &returned, "interrupted").unwrap();
             assert_eq!(
                 crate::journal::process_identity_evidence(pid, birth),
                 crate::journal::ProcessIdentityEvidence::Dead
@@ -382,7 +397,7 @@ mod tests {
     }
 
     #[test]
-    fn live_foreground_agent_is_not_subject_to_headless_close() {
+    fn foreground_agent_is_not_subject_to_headless_close_before_or_after_exit() {
         let _ambient = crate::test_ambient::EnvGuard::new();
         for provider in ["claude", "opencode", "codex"] {
             let (home, store, detached) = resume_fixture();
@@ -401,7 +416,7 @@ mod tests {
             store
                 .record_agent_process_launch("resume", &attachment, &command)
                 .unwrap();
-            let child = Child(command.spawn().unwrap());
+            let mut child = Child(command.spawn().unwrap());
             let pid = child.0.id();
             let birth = crate::journal::process_started_at(pid).unwrap().unwrap();
             store
@@ -416,6 +431,19 @@ mod tests {
                 crate::journal::process_identity_evidence(pid, birth),
                 crate::journal::ProcessIdentityEvidence::Live
             );
+            assert_eq!(
+                store.session_attachment("resume").unwrap(),
+                Some(attachment.clone())
+            );
+            child.0.kill().unwrap();
+            child.0.wait().unwrap();
+            let before = store.process(&attachment.agent_process_id).unwrap();
+            assert!(!store
+                .with_session_attachment("resume", &attachment, || {
+                    super::close_session_agent_process(&store, "resume")
+                })
+                .unwrap());
+            assert_eq!(store.process(&attachment.agent_process_id).unwrap(), before);
             assert_eq!(
                 store.session_attachment("resume").unwrap(),
                 Some(attachment)

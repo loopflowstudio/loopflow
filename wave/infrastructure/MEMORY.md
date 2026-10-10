@@ -250,6 +250,8 @@ output and return their original sequence/disposition on replay. Client counters
 still ignore them. Independent ordered transport, receipt-based projection and
 public death orders remain unfinished. No fence reacquisition or permanent custody;
 EOF/history/write errors grant no settlement or teardown.
+Foreground exclusion precedes death inspection: an exited terminal provider
+still cannot be settled by headless close.
 Plan: `scratch/stop-and-take-over-claude.md`.
 
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)
@@ -583,21 +585,15 @@ Jack Heart selected one editable draft per Task and immutable released SQL.
 Mechanics: [MIGRATIONS.md](../../rust/loopflow/src/store/MIGRATIONS.md).
 Unshipped branch evidence: `986be7988:wave/infrastructure/MEMORY.md`.
 
-## One main Home (LOO-342, curated 2026-10-07)
+## One main Home (LOO-342, curated 2026-10-10)
 
-Jack Heart approved the one-Home cutover: ordinary commands, Task workers and
-Flow steps use installed `lf` and `~/.lf`; explicit `LF_HOME` experiments need a
-fresh directory after schema changes. PR #1381 merged as `6c73356074c4`; installed
-v0.12.31 acceptance passed and LOO-342 is done. Current mechanics:
-[CLI docs](../../docs/lf.md#use-one-machine) and
-[Machines](../../docs/architecture/machines.md#one-main-machine).
-
-Jack authorized legacy retirement on October 4. All 37 identified processes
-exited after SIGTERM; retained databases and exact signal/path receipts remain
-under `~/.lf-retired/20261004T161815Z/`, earlier snapshots under
-`~/.lf-retired/20261002T191224Z/worktrees/`. Main identity stayed unchanged.
-Release recovery, acceptance and retirement details:
-`173d649cf:wave/infrastructure/MEMORY.md` under “One main Home.”
+Jack Heart approved installed `lf` and `~/.lf` for ordinary commands, Task
+workers and Flow steps. Explicit `LF_HOME` experiments need a fresh directory
+after schema changes. PR #1381 shipped; installed v0.12.31 acceptance closed
+LOO-342. Jack authorized legacy retirement; 37 identified processes exited,
+retained databases/receipts survived and main identity stayed unchanged.
+Exact retirement paths, release evidence and current-document links:
+`b1a50a7dc:wave/infrastructure/MEMORY.md`, this heading.
 
 ## Worktree listing and fenced dispatch (LOO-375, reconciled 2026-10-07)
 

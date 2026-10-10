@@ -157,22 +157,17 @@ impl SqliteStore {
             [machine_id.as_str()],
             |_| Ok(()),
         )?;
-        if let Some(current) = find_placement_in(&tx, work)? {
-            if current.machine_id == *machine_id
-                && current.provenance == PlacementProvenance::Explicit
-            {
-                tx.commit()?;
-                return Ok(current);
-            }
-        }
         let column = format!("{}_id", work.kind());
+        // Reaffirming explicit intent preserves its timestamp and journal entry;
+        // selecting a legacy assignment explicitly is still a new authored save.
         tx.execute(
             &format!(
                 "INSERT INTO work_placements ({column}, machine_id, enabled, placed_at, provenance)
                  VALUES (?1, ?2, 1, ?3, 'explicit')
                  ON CONFLICT({column}) DO UPDATE SET
                     machine_id=excluded.machine_id, placed_at=excluded.placed_at,
-                    provenance=excluded.provenance"
+                    provenance=excluded.provenance
+                 WHERE machine_id IS NOT excluded.machine_id OR provenance IS NOT excluded.provenance"
             ),
             params![work.id(), machine_id.as_str(), now_unix()],
         )?;

@@ -1567,9 +1567,15 @@ fn insert_and_project(
         projected
             .iter()
             .copied()
-            .filter(|field| !(object.kind == PlanningKind::Project && content_field(field)))
+            .filter(|field| {
+                *field != "delegation"
+                    && !(object.kind == PlanningKind::Project && content_field(field))
+            })
             .map(|field| (field, &winners[field].1.value)),
     )?;
+    if let Some((_, delegation)) = winners.get("delegation") {
+        project_delegation(conn, object, &delegation.value)?;
+    }
     if object.kind == PlanningKind::Project {
         let content = serde_json::from_value(serde_json::json!({
             "workflow":winners["workflow"].1.value,
@@ -2374,54 +2380,61 @@ fn validate_wave(
     })
 }
 
+// Assignment intent uses Placement, not scalar Work columns or Machine connections.
+// The caller's projection savepoint and import suppression also cover this write.
+fn project_delegation(
+    conn: &Connection,
+    object: &PlanningObject,
+    value: &Value,
+) -> StoreResult<()> {
+    let column = format!("{}_id", object.kind.as_str());
+    if value.is_null() {
+        conn.execute(
+            &format!("DELETE FROM work_placements WHERE {column}=?1"),
+            [&object.id],
+        )?;
+    } else {
+        conn.execute(
+            &format!(
+                "INSERT INTO work_placements({column},machine_id,placed_at,provenance)
+                 VALUES(?1,?2,?3,?4) ON CONFLICT({column}) DO UPDATE SET
+                    machine_id=excluded.machine_id,placed_at=excluded.placed_at,provenance=excluded.provenance
+                 WHERE machine_id IS NOT excluded.machine_id OR placed_at IS NOT excluded.placed_at
+                    OR provenance IS NOT excluded.provenance"
+            ),
+            params![object.id, value["machine_id"].as_str(), value["placed_at"].as_i64(), value["provenance"].as_str()],
+        )?;
+    }
+    Ok(())
+}
+
 fn project_fields<'a>(
     conn: &Connection,
     object: &PlanningObject,
     fields: impl IntoIterator<Item = (&'a str, &'a Value)>,
 ) -> StoreResult<()> {
-    let fields = fields
-        .into_iter()
-        .map(|(field, value)| {
-            let value = match field {
-                "project_id" | "current_project_id" => {
-                    local_reference(conn, PlanningKind::Project, value)?
-                }
-                "task_id" => local_reference(conn, PlanningKind::Task, value)?,
-                _ => value.clone(),
-            };
-            Ok((field, value))
-        })
-        .collect::<StoreResult<Vec<_>>>()?;
     let mut columns = BTreeMap::new();
-    for (field, value) in &fields {
-        if *field == "delegation" {
-            // Assignment intent uses the Placement owner, never Task checkout or
-            // Machine connection rows. Import suppression prevents journal echo.
-            let column = format!("{}_id", object.kind.as_str());
-            if value.is_null() {
-                conn.execute(
-                    &format!("DELETE FROM work_placements WHERE {column}=?1"),
-                    [&object.id],
-                )?;
-            } else {
-                conn.execute(&format!("INSERT INTO work_placements({column},machine_id,placed_at,provenance)
-                    VALUES(?1,?2,?3,?4) ON CONFLICT({column}) DO UPDATE SET
-                    machine_id=excluded.machine_id,placed_at=excluded.placed_at,provenance=excluded.provenance
-                    WHERE machine_id IS NOT excluded.machine_id OR placed_at IS NOT excluded.placed_at
-                        OR provenance IS NOT excluded.provenance"),
-                    params![object.id,value["machine_id"].as_str(),value["placed_at"].as_i64(),value["provenance"].as_str()])?;
+    for (field, value) in fields {
+        match field {
+            "disposition" => {
+                // The merged snapshot has already validated names and grouped values.
+                columns.extend(
+                    value
+                        .as_object()
+                        .expect("validated planning field group")
+                        .iter()
+                        .map(|(key, value)| (key.as_str(), value.clone())),
+                );
             }
-        } else if *field == "disposition" {
-            // The merged snapshot has already validated names and grouped values.
-            columns.extend(
-                value
-                    .as_object()
-                    .expect("validated planning field group")
-                    .iter()
-                    .map(|(key, value)| (key.as_str(), value)),
-            );
-        } else {
-            columns.insert(*field, value);
+            "project_id" | "current_project_id" => {
+                columns.insert(field, local_reference(conn, PlanningKind::Project, value)?);
+            }
+            "task_id" => {
+                columns.insert(field, local_reference(conn, PlanningKind::Task, value)?);
+            }
+            _ => {
+                columns.insert(field, value.clone());
+            }
         }
     }
     let assignments = columns
@@ -2606,6 +2619,20 @@ mod tests {
             TaskExecutionSource::RecordedCheckout
         );
         left.place_work(&work, &a).unwrap();
+        // Reaffirming an old explicit assignment must not refresh its save clock
+        // or compete with a peer's later edit.
+        left.conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE work_placements SET placed_at=1 WHERE task_id=?1",
+                [id.as_str()],
+            )
+            .unwrap();
+        let selected = left.placement(&work).unwrap();
+        let saved = export(&left, "/source");
+        assert_eq!(left.place_work(&work, &a).unwrap(), selected);
+        assert_eq!(export(&left, "/source"), saved);
         import(&right, "/target", "explicit", &export(&left, "/source"));
         assert_eq!(
             right.placement(&work).unwrap().provenance,

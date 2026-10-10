@@ -1281,20 +1281,21 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
                     &authority.repo,
                     &authority.local_machine,
                 );
-                if *disable {
-                    crate::ops::remove_cron(&launch_agents_dir, "", &key, &SystemLaunchctl)?;
-                } else {
-                    let spec = CronSpec {
-                        wave: String::new(),
-                        flow: key,
-                        target_kind: CronTargetKind::Repository,
-                        schedule: crate::ops::parse_schedule("every-minute")?,
-                        working_directory: authority.repo,
-                        lf_path: crate::ops::resolve_lf_path()?,
-                        host: authority.host,
-                    };
-                    crate::ops::add_cron(&launch_agents_dir, &spec, &SystemLaunchctl)?;
-                }
+                let spec = CronSpec {
+                    wave: String::new(),
+                    flow: key,
+                    target_kind: CronTargetKind::Repository,
+                    schedule: crate::ops::parse_schedule("every-minute")?,
+                    working_directory: authority.repo,
+                    lf_path: crate::ops::resolve_lf_path()?,
+                    host: authority.host,
+                };
+                crate::ops::cron::sync_repository_tick(
+                    &launch_agents_dir,
+                    &spec,
+                    *disable,
+                    &SystemLaunchctl,
+                )?;
                 return Ok(());
             }
             let wave = wave.as_deref().expect("clap requires Wave or repository");

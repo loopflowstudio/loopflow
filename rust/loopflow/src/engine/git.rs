@@ -1120,6 +1120,9 @@ pub(crate) fn worktree_add_inheriting(
         absolute_git_dir(path)?.join("lf-created"),
         rev_parse(path, "HEAD")?,
     )?;
+    if let Err(error) = crate::ops::cron::maintain_repository_tick(repo) {
+        eprintln!("repository maintenance unavailable: {error}");
+    }
     Ok(())
 }
 

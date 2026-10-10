@@ -138,7 +138,8 @@ pub fn status(repo: &Path) -> OpsResult<AutomationStatus> {
         let job = jobs.iter().find(|job| {
             job.target_kind == super::cron::CronTargetKind::Repository && job.flow == key
         });
-        let enabled = job.is_some_and(|job| job.loaded);
+        let disabled = super::cron::repository_tick_disabled(&crate::store::lf_home_dir(), &key)?;
+        let enabled = !disabled && job.is_some_and(|job| job.loaded);
         let receipts = super::cron::list_cron_receipts(
             &super::cron::receipt_root(&crate::store::lf_home_dir()),
             "",
@@ -152,8 +153,10 @@ pub fn status(repo: &Path) -> OpsResult<AutomationStatus> {
             .iter()
             .find(|receipt| receipt.outcome == super::cron::CronOutcome::Failed);
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
-        let coverage = if !enabled {
+        let coverage = if disabled {
             "disabled"
+        } else if !enabled {
+            "ordinary-command fallback"
         } else if receipts
             .first()
             .is_some_and(|receipt| receipt.outcome == super::cron::CronOutcome::Failed)

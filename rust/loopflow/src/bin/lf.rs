@@ -10,7 +10,7 @@ use tracing_subscriber::EnvFilter;
 use loopflow::engine::target::DefinitionKind;
 use loopflow::journal::{self, with_runtime, LfEventFields, LfEventType, LfNode};
 use loopflow::lf::{
-    Cli, Commands, FlowCommand, InstallCommand, SkillCommand, TaskCommand, WaveCommand,
+    Cli, Commands, FlowCommand, InstallCommand, SkillCommand, TaskCommand, WaveCommand, WtCommand,
 };
 
 use loopflow::ops::project::update_plan;
@@ -1608,6 +1608,36 @@ fn dispatch(
 ) -> anyhow::Result<()> {
     // Remote commands prove they reached the saved machine before dispatch.
     loopflow::lf::commands::machine::validate_expected_machine_process()?;
+
+    // Work-producing entry points ensure retry coverage; previews and reads do
+    // not install services or start collection. Failure never blocks the work.
+    if matches!(
+        &cli.command,
+        None | Some(
+            Commands::Inline { .. }
+                | Commands::External(_)
+                | Commands::Flow {
+                    cmd: FlowCommand::External(_)
+                }
+                | Commands::Run { .. }
+                | Commands::Skill { .. }
+                | Commands::Commit { .. }
+                | Commands::Task {
+                    cmd: TaskCommand::Run { .. }
+                }
+                | Commands::Wt {
+                    cmd: WtCommand::Create { plan: false, .. }
+                }
+        )
+    ) {
+        if let Ok(directory) = std::env::current_dir() {
+            if loopflow::engine::worktrees::main_repo_root(&directory).is_ok() {
+                if let Err(error) = loopflow::ops::cron::maintain_repository_tick(&directory) {
+                    eprintln!("repository maintenance unavailable: {error}");
+                }
+            }
+        }
+    }
 
     // `lf task run` places the Task and fills its defaults; from here it is
     // `lf --task ISSUE run FLOW`.

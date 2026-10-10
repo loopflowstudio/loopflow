@@ -407,7 +407,11 @@ lf task automation --json           # schedule coverage and CI repair holds
 lf cron sync --repo --disable       # remove the schedule
 ```
 
-Checks continue with Desktop closed while the placed Machine's user is logged in.
+Installed releases enable the minute check on first work; explicit disable stays
+in effect until enabled again. Checks continue with Desktop closed while the placed
+Machine's user is logged in. Without launchd, work-producing commands trigger a
+throttled background check instead. Checks also retry safe checkout cleanup and
+report retained paths in `lf task reconcile --json`.
 They record CI failures and settle verified merges. Flow recovery belongs to its
 caller: inspect execution and effect history before launching fresh work.
 

@@ -1429,6 +1429,7 @@ pub(crate) fn repair_running(store: &SharedStore, landing: &PrLanding) -> OpsRes
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DeliveryCheck {
     pub checked_at: i64,
+    pub cleanup: Option<crate::ops::wt::cleanup::CleanupReport>,
     pub errors: Vec<String>,
 }
 
@@ -1498,6 +1499,7 @@ pub fn reconcile_repository(repo: &Path) -> OpsResult<DeliveryCheck> {
         let store = landing_store().await?;
         let mut report = DeliveryCheck {
             checked_at: OffsetDateTime::now_utc().unix_timestamp(),
+            cleanup: None,
             errors: Vec::new(),
         };
         match crate::ops::wt::cleanup::run_cleanup_pass(
@@ -1508,14 +1510,19 @@ pub fn reconcile_repository(repo: &Path) -> OpsResult<DeliveryCheck> {
         .await
         {
             Ok(cleanup) => {
-                for path in cleanup.removed {
+                for decision in &cleanup.deferred {
+                    if let crate::ops::wt::cleanup::CleanupAction::Retain(reason) = &decision.action
+                    {
+                        eprintln!("retained {}: {reason}", decision.path.display());
+                    }
+                }
+                for path in &cleanup.removed {
                     eprintln!("Removed {}", path.display());
                 }
-                report
-                    .errors
-                    .extend(cleanup.failed.into_iter().map(|failure| {
-                        format!("cleanup {}: {}", failure.path.display(), failure.error)
-                    }));
+                report.errors.extend(cleanup.failed.iter().map(|failure| {
+                    format!("cleanup {}: {}", failure.path.display(), failure.error)
+                }));
+                report.cleanup = Some(cleanup);
             }
             Err(error) => report.errors.push(format!("checkout cleanup: {error}")),
         }

@@ -981,7 +981,15 @@ pub(crate) fn process_evidence(
     store: &SqliteStore,
     process: &ProcessLfid,
 ) -> ProcessIdentityEvidence {
-    let Ok(receipts) = read_process_receipts_at(&crate::store::lf_home_dir()) else {
+    process_evidence_at(store, process, &crate::store::lf_home_dir())
+}
+
+pub(crate) fn process_evidence_at(
+    store: &SqliteStore,
+    process: &ProcessLfid,
+    home: &Path,
+) -> ProcessIdentityEvidence {
+    let Ok(receipts) = read_process_receipts_at(home) else {
         return ProcessIdentityEvidence::Unknown;
     };
     if let Some(receipt) = receipts

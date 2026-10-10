@@ -47,7 +47,7 @@ mod task_comments;
 mod task_content;
 mod task_follow_through;
 pub(crate) mod task_state_delivery;
-mod task_work;
+pub(crate) mod task_work;
 pub(crate) mod wave_documents;
 
 pub use project_selection::{ProjectActivation, ProjectReadiness, ProjectReadinessState};
@@ -127,22 +127,6 @@ fn deleted_task_issues_in(
     let mut statement = conn.prepare("SELECT issue_id FROM task_deletions WHERE wave_id=?1")?;
     let rows = statement.query_map([wave_id.as_str()], |row| row.get::<_, String>(0))?;
     rows.map(|row| row.map_err(StoreError::from)).collect()
-}
-
-pub(crate) fn read_nonterminal_task_worktrees(path: &Path) -> StoreResult<Vec<PathBuf>> {
-    let conn = Connection::open_with_flags(
-        path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )?;
-    crate::performance::observe_sqlite(&conn);
-    conn.execute_batch("PRAGMA query_only = ON; PRAGMA busy_timeout = 5000;")?;
-    let mut statement = conn.prepare(&format!(
-        "SELECT t.worktree FROM tasks t WHERE {}",
-        durable::task_open_sql("t")
-    ))?;
-    let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
-    rows.map(|row| row.map(PathBuf::from).map_err(StoreError::from))
-        .collect()
 }
 
 fn migrate_plaintext_provider_tokens(conn: &mut Connection) -> StoreResult<()> {

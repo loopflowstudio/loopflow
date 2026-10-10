@@ -15,7 +15,7 @@ use crate::engine::git::{
 use crate::engine::worktrees::{is_persistent_worktree, list_porcelain, main_repo_root};
 use crate::journal::{process_evidence, ProcessIdentityEvidence};
 use crate::ops::{OpsError, OpsResult};
-use crate::store::SharedStore;
+use crate::store::{sqlite::SqliteStore, SharedStore};
 use crate::work::task::PrPhase;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -96,11 +96,144 @@ fn retain(decision: &mut CleanupDecision, reason: impl Into<String>) {
     decision.action = CleanupAction::Retain(reason.into());
 }
 
+fn release_registry() -> OpsResult<Option<SqliteStore>> {
+    // Tests never consult the installed account's registry.
+    if cfg!(test) || !crate::store::custom_home_selected() {
+        return Ok(None);
+    }
+    let path = crate::store::production_database_path();
+    if !path.try_exists()? {
+        return Ok(None);
+    }
+    SqliteStore::open_read_only(&path).map(Some).map_err(error)
+}
+
+fn evidence_roots(store: &SqliteStore) -> OpsResult<Vec<PathBuf>> {
+    let mut roots = vec![crate::store::lf_home_dir()];
+    if !cfg!(test) {
+        roots.push(
+            crate::store::production_database_path()
+                .parent()
+                .expect("database has a parent")
+                .to_path_buf(),
+        );
+    }
+    for provider in [
+        crate::provider_auth::Provider::Codex,
+        crate::provider_auth::Provider::Claude,
+    ] {
+        roots.push(crate::provider_account::activation::native_home(
+            provider, None,
+        ));
+    }
+    roots.extend(
+        store
+            .list_provider_accounts(None)
+            .map_err(error)?
+            .into_iter()
+            .filter_map(|account| account.home),
+    );
+    Ok(roots.into_iter().map(|path| normalized(&path)).collect())
+}
+
+fn release_blocker(store: &SqliteStore, path: &Path) -> OpsResult<Option<String>> {
+    if evidence_roots(store)?
+        .iter()
+        .any(|root| root.starts_with(path))
+    {
+        return Ok(Some("local Session evidence in release registry".into()));
+    }
+    let home = store.home_dir().map_err(error)?;
+    let open = store.open_processes().map_err(error)?;
+    for task in store.task_checkouts().map_err(error)? {
+        if normalized(&task.worktree) != path {
+            continue;
+        }
+        let status = store
+            .work_status(&WorkRef::Task(task.task_id.clone()))
+            .map_err(error)?;
+        if !matches!(status, WorkStatus::Done | WorkStatus::Abandoned) {
+            return Ok(Some("unfinished Task in release registry".into()));
+        }
+        // Release settlement is not inferred from the experimental store.
+        if status == WorkStatus::Done {
+            let pr = store.active_task_pr(&task.task_id).map_err(error)?;
+            let follow = store.task_follow_through(&task.task_id).map_err(error)?;
+            if pr.is_none()
+                || !crate::ops::task::CompletionGate::from_delivery(pr.as_ref(), &follow)
+                    .blockers
+                    .is_empty()
+            {
+                return Ok(Some("unresolved delivery in release registry".into()));
+            }
+        }
+        if open.for_task(&task.task_id).iter().any(|p| {
+            crate::journal::process_evidence_at(store, &p.lfid, &home)
+                != ProcessIdentityEvidence::Dead
+        }) {
+            return Ok(Some(
+                "Task has live or unknown execution in release registry".into(),
+            ));
+        }
+    }
+    if open.all.iter().any(|p| {
+        p.cwd
+            .as_deref()
+            .is_some_and(|cwd| normalized(Path::new(cwd)).starts_with(path))
+            && crate::journal::process_evidence_at(store, &p.lfid, &home)
+                != ProcessIdentityEvidence::Dead
+    }) {
+        return Ok(Some("live or unknown execution in release registry".into()));
+    }
+    Ok(None)
+}
+
+#[derive(Debug)]
+struct Observations {
+    tasks: Vec<crate::store::sqlite::TaskCheckout>,
+    open: crate::store::sqlite::task_work::OpenProcesses,
+    registered: HashSet<PathBuf>,
+    default_branch: String,
+    evidence_roots: Vec<PathBuf>,
+}
+
+impl Observations {
+    fn read(store: &SharedStore, repo: &Path) -> OpsResult<Self> {
+        Ok(Self {
+            tasks: store.sqlite.task_checkouts().map_err(error)?,
+            open: store.sqlite.open_processes().map_err(error)?,
+            registered: list_porcelain(repo)?
+                .into_iter()
+                .map(|(path, _)| normalized(&path))
+                .collect(),
+            default_branch: get_default_branch(repo)?,
+            evidence_roots: evidence_roots(&store.sqlite)?,
+        })
+    }
+}
+
 async fn observe(
     store: &SharedStore,
     repo: &Path,
     decision: &mut CleanupDecision,
     external: &OpsResult<HashSet<PathBuf>>,
+) -> OpsResult<()> {
+    observe_with_snapshot(
+        store,
+        repo,
+        decision,
+        external,
+        &Observations::read(store, repo)?,
+    )
+    .await
+}
+
+async fn observe_with_snapshot(
+    store: &SharedStore,
+    repo: &Path,
+    decision: &mut CleanupDecision,
+    external: &OpsResult<HashSet<PathBuf>>,
+    snapshot: &Observations,
 ) -> OpsResult<()> {
     // Each observation stands alone, including a recheck after planning.
     decision.evidence.clear();
@@ -114,17 +247,14 @@ async fn observe(
         retain(decision, "missing checkout; registration retained");
         return Ok(());
     }
-    if normalized(&main_repo_root(path)?) != normalized(repo)
-        || !list_porcelain(repo)?
-            .iter()
-            .any(|(registered, _)| normalized(registered) == *path)
+    if normalized(&main_repo_root(path)?) != normalized(repo) || !snapshot.registered.contains(path)
     {
         retain(decision, "checkout registration changed");
         return Ok(());
     }
     decision.branch = current_branch(path)?;
     decision.observed_head = Some(rev_parse(path, "HEAD")?);
-    if decision.branch.as_deref() == Some(get_default_branch(repo)?.as_str()) {
+    if decision.branch.as_deref() == Some(snapshot.default_branch.as_str()) {
         retain(decision, "default branch");
         return Ok(());
     }
@@ -138,45 +268,45 @@ async fn observe(
     let mut settled = false;
     // Use the same unfinished-Process snapshot for Task membership and cwd
     // protection; neither needs the Task's full Session or Flow history.
-    let open = store.sqlite.open_processes().map_err(error)?;
-    for task in store.list_tasks(None).await.map_err(error)? {
-        let Some(worktree) = &task.worktree else {
-            continue;
-        };
-        if normalized(worktree) != normalized(path) {
+    let open = &snapshot.open;
+    for task in &snapshot.tasks {
+        if normalized(&task.worktree) != normalized(path) {
             continue;
         }
         owned = true;
         let status = store
-            .work_status(&WorkRef::Task(task.id.clone()))
+            .work_status(&WorkRef::Task(task.task_id.clone()))
             .await
             .map_err(error)?;
         if !matches!(status, WorkStatus::Done | WorkStatus::Abandoned) {
             retain(
                 decision,
-                format!("unfinished Task {}", task.plan.identifier),
+                format!("unfinished Task {}", task.issue_identifier),
             );
             return Ok(());
         }
         if status == WorkStatus::Done {
-            let Some(pr) = store.active_task_pr(&task.id).await.map_err(error)? else {
+            let Some(pr) = store.active_task_pr(&task.task_id).await.map_err(error)? else {
                 retain(decision, "completed Task has a PR-less checkout");
                 return Ok(());
             };
-            let follow_through = store.sqlite.task_follow_through(&task.id).map_err(error)?;
+            let follow_through = store
+                .sqlite
+                .task_follow_through(&task.task_id)
+                .map_err(error)?;
             let gate = crate::ops::task::CompletionGate::from_delivery(Some(&pr), &follow_through);
             if !gate.blockers.is_empty() {
                 retain(decision, format!("unresolved delivery: {}", gate.reason()));
                 return Ok(());
             }
         }
-        if open.for_task(&task.id).iter().any(|process| {
+        if open.for_task(&task.task_id).iter().any(|process| {
             process_evidence(&store.sqlite, &process.lfid) != ProcessIdentityEvidence::Dead
         }) {
             retain(decision, "Task has live or unknown execution");
             return Ok(());
         }
-        for pr in store.task_prs(&task.id).await.map_err(error)? {
+        for pr in store.task_prs(&task.task_id).await.map_err(error)? {
             if decision.branch.as_deref() == Some(pr.branch.as_str())
                 && pr.phase() == PrPhase::Merged
                 && pr.head_sha() == decision.observed_head.as_deref()
@@ -184,23 +314,15 @@ async fn observe(
                 settled = true;
                 decision
                     .evidence
-                    .push(format!("Task {}: exact merged head", task.plan.identifier));
+                    .push(format!("Task {}: exact merged head", task.issue_identifier));
             }
         }
     }
-    // Experimental databases cannot collect release-owned unfinished work.
-    // Unit tests use ephemeral registries, never the installed account database.
-    #[cfg(not(test))]
-    let production = crate::store::production_database_path();
-    #[cfg(not(test))]
-    if production.exists()
-        && crate::store::read_nonterminal_task_worktrees(&production)
-            .map_err(error)?
-            .iter()
-            .any(|root| normalized(root) == normalized(path))
-    {
-        retain(decision, "unfinished Task in release registry");
-        return Ok(());
+    if let Some(release) = release_registry()? {
+        if let Some(reason) = release_blocker(&release, path)? {
+            retain(decision, reason);
+            return Ok(());
+        }
     }
     for landing in store.sqlite.merged_landings_at(path).map_err(error)? {
         owned = true;
@@ -243,6 +365,14 @@ async fn observe(
             return Ok(());
         }
         Ok(_) => {}
+    }
+    if snapshot
+        .evidence_roots
+        .iter()
+        .any(|root| root.starts_with(path))
+    {
+        retain(decision, "local Session evidence");
+        return Ok(());
     }
     if super::git(path, &["ls-files", "-v"])?.lines().any(|line| {
         line.as_bytes()
@@ -334,8 +464,8 @@ fn remove_artifact(root: &Path) -> OpsResult<()> {
             std::fs::remove_file(entry.path())?;
         }
     }
-    std::fs::remove_file(root.join("CACHEDIR.TAG"))?;
-    std::fs::remove_dir(root)?;
+    // Leave the tag for Git's final non-forced removal. A crash at any point
+    // leaves a valid declaration, rather than an unclassifiable empty root.
     Ok(())
 }
 
@@ -348,9 +478,19 @@ async fn plan_selected(
     repo: &Path,
     selected: Option<&Path>,
 ) -> OpsResult<Vec<CleanupDecision>> {
+    plan_selected_until(store, repo, selected, None).await
+}
+
+async fn plan_selected_until(
+    store: &SharedStore,
+    repo: &Path,
+    selected: Option<&Path>,
+    deadline: Option<Instant>,
+) -> OpsResult<Vec<CleanupDecision>> {
     let repo = main_repo_root(repo)?;
     let selected = selected.map(normalized);
     let external = running_paths();
+    let snapshot = Observations::read(store, &repo);
     let mut plan = Vec::new();
     for (path, branch) in list_porcelain(&repo)? {
         let path = normalized(&path);
@@ -365,8 +505,20 @@ async fn plan_selected(
             evidence: Vec::new(),
             estimated_bytes: None,
         };
-        if let Err(error) = observe(store, &repo, &mut decision, &external).await {
-            retain(&mut decision, format!("observation unavailable: {error}"));
+        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            retain(&mut decision, "planning budget exhausted");
+        } else {
+            match &snapshot {
+                Ok(snapshot) => {
+                    if let Err(error) =
+                        observe_with_snapshot(store, &repo, &mut decision, &external, snapshot)
+                            .await
+                    {
+                        retain(&mut decision, format!("observation unavailable: {error}"));
+                    }
+                }
+                Err(error) => retain(&mut decision, format!("observation unavailable: {error}")),
+            }
         }
         plan.push(decision);
     }
@@ -399,6 +551,12 @@ pub async fn apply_cleanup(
         }
         let result = async {
             let _admission = store.sqlite.lock_checkout(&decision.path).map_err(error)?;
+            let release = release_registry()?;
+            let _release_admission = release
+                .as_ref()
+                .map(|release| release.lock_checkout(&decision.path))
+                .transpose()
+                .map_err(error)?;
             let lease = acquire_worktree_lease(&repo, &decision.path, "checkout cleanup")?;
             let expected_head = decision.observed_head.clone();
             let expected_branch = decision.branch.clone();
@@ -447,7 +605,14 @@ pub async fn run_cleanup_pass(
     repo: &Path,
     budget: CleanupBudget,
 ) -> OpsResult<CleanupReport> {
-    let home = crate::store::lf_home_dir();
+    let home = if cfg!(test) {
+        crate::store::lf_home_dir()
+    } else {
+        crate::store::production_database_path()
+            .parent()
+            .expect("database has a parent")
+            .to_path_buf()
+    };
     std::fs::create_dir_all(&home)?;
     let lock = OpenOptions::new()
         .create(true)
@@ -461,14 +626,32 @@ pub async fn run_cleanup_pass(
             return Ok(CleanupReport {
                 planned: Vec::new(),
                 removed: Vec::new(),
-                deferred: Vec::new(),
+                deferred: vec![CleanupDecision {
+                    path: repo.to_path_buf(),
+                    branch: None,
+                    observed_head: None,
+                    action: CleanupAction::Retain("another cleanup pass is running".into()),
+                    evidence: Vec::new(),
+                    estimated_bytes: None,
+                }],
                 failed: Vec::new(),
             });
         }
         Err(error) => return Err(error.into()),
     }
-    let plan = plan_cleanup(store, repo).await?;
-    apply_cleanup(store, repo, plan, budget).await
+    let started = Instant::now();
+    let plan =
+        plan_selected_until(store, repo, None, Some(started + budget.admission_time)).await?;
+    apply_cleanup(
+        store,
+        repo,
+        plan,
+        CleanupBudget {
+            admission_time: budget.admission_time.saturating_sub(started.elapsed()),
+            ..budget
+        },
+    )
+    .await
 }
 
 pub(crate) async fn cleanup_path(store: &SharedStore, repo: &Path, path: &Path) -> OpsResult<()> {
@@ -725,7 +908,9 @@ mod tests {
         let plan = plan_cleanup(&store, repo.path()).await.unwrap();
         // A crash after removing one artifact but before Git removal leaves
         // ordinary registered ownership; the next pass needs no cleanup queue.
-        std::fs::remove_file(path.join("target/artifact")).unwrap();
+        super::remove_artifact(&path.join("target")).unwrap();
+        assert!(!path.join("target/artifact").exists());
+        assert!(path.join("target/CACHEDIR.TAG").exists());
         let report = apply_cleanup(&store, repo.path(), plan, CleanupBudget::default())
             .await
             .unwrap();
@@ -911,6 +1096,73 @@ mod tests {
         assert!(report.removed.is_empty());
         retained(&report.deferred[0], "changed after planning");
         assert!(path.exists());
+    }
+
+    #[tokio::test]
+    async fn cleanup_retains_a_provider_home_inside_a_declared_cache() {
+        let _guard = crate::journal::TestLedgerGuard::new();
+        let (repo, directory, store, path) = fixture().await;
+        let home = path.join("target/provider");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(
+            path.join("target/CACHEDIR.TAG"),
+            "Signature: 8a477f597d28d172789f06886806bc55",
+        )
+        .unwrap();
+        std::fs::write(home.join("history.jsonl"), "retained conversation").unwrap();
+        let connection = rusqlite::Connection::open(directory.path().join("store.db")).unwrap();
+        connection.execute("INSERT INTO provider_accounts(provider,account_id,home,credential_state,routing_state,created_at,updated_at) VALUES('codex','account',?1,'missing','disabled',1,1)", [home.to_str().unwrap()]).unwrap();
+        retained(&decision(&store, &repo, &path).await, "Session evidence");
+        assert_eq!(
+            std::fs::read_to_string(home.join("history.jsonl")).unwrap(),
+            "retained conversation"
+        );
+    }
+
+    #[tokio::test]
+    async fn cleanup_planning_budget_retains_unobserved_checkouts() {
+        let _guard = crate::journal::TestLedgerGuard::new();
+        let _external = ExternalInspection::idle();
+        let (repo, _directory, store, path) = fixture().await;
+        let plan =
+            super::plan_selected_until(&store, repo.path(), None, Some(std::time::Instant::now()))
+                .await
+                .unwrap();
+        retained(
+            plan.iter().find(|item| item.path == path).unwrap(),
+            "planning budget exhausted",
+        );
+        assert!(path.exists());
+    }
+
+    #[tokio::test]
+    async fn cleanup_release_registry_protects_unknown_process_and_admission() {
+        let _guard = crate::journal::TestLedgerGuard::new();
+        let (repo, directory, _store, path) = fixture().await;
+        let release =
+            crate::store::sqlite::SqliteStore::open_ephemeral(&directory.path().join("release.db"))
+                .unwrap();
+        let connection = rusqlite::Connection::open(directory.path().join("release.db")).unwrap();
+        connection.execute("INSERT INTO processes(lfid,trace_id,cwd,started_at) VALUES('00000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000002',?1,unixepoch())", [path.to_str().unwrap()]).unwrap();
+        assert!(super::release_blocker(&release, &path)
+            .unwrap()
+            .unwrap()
+            .contains("unknown execution"));
+        connection
+            .execute(
+                "UPDATE processes SET completed_at=2,outcome='succeeded',exit_code=0",
+                [],
+            )
+            .unwrap();
+        assert!(super::release_blocker(&release, &path).unwrap().is_none());
+        let reader =
+            crate::store::sqlite::SqliteStore::open_read_only(&directory.path().join("release.db"))
+                .unwrap();
+        let admission = release.lock_checkout(&path).unwrap();
+        assert!(reader.lock_checkout(&path).is_err());
+        drop(admission);
+        assert!(reader.lock_checkout(&path).is_ok());
+        assert!(repo.path().exists());
     }
 
     #[tokio::test]

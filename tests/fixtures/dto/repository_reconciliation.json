@@ -1,0 +1,10 @@
+{
+  "checked_at": 1791500000,
+  "cleanup": {
+    "planned": [{"path":"/repo.finished","branch":"finished","observed_head":"abc123","action":{"retain":"running external process"},"evidence":["landing: exact merged head"],"estimated_bytes":null}],
+    "removed": [],
+    "deferred": [{"path":"/repo.finished","branch":"finished","observed_head":"abc123","action":{"retain":"running external process"},"evidence":["landing: exact merged head"],"estimated_bytes":null}],
+    "failed": []
+  },
+  "errors": []
+}

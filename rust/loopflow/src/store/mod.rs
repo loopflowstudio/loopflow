@@ -126,10 +126,6 @@ pub(crate) fn production_database_path() -> PathBuf {
     machine_home_dir().join(".lf/loopflow.db")
 }
 
-pub(crate) fn read_nonterminal_task_worktrees(path: &Path) -> StoreResult<Vec<PathBuf>> {
-    sqlite::read_nonterminal_task_worktrees(path)
-}
-
 fn default_lf_home_dir() -> PathBuf {
     machine_home_dir().join(".lf")
 }
@@ -1288,9 +1284,8 @@ pub type SharedStore = Arc<Store>;
 #[cfg(test)]
 mod tests {
     use super::{
-        guard_development_database, may_apply_migrations, read_nonterminal_task_worktrees,
-        CredentialState, PmSnapshotRow, ProviderAccount, ProviderAccountId, RoutingState,
-        StorageConfig,
+        guard_development_database, may_apply_migrations, CredentialState, PmSnapshotRow,
+        ProviderAccount, ProviderAccountId, RoutingState, StorageConfig,
     };
     use crate::build_info::{BuildProvenance, MigrationAuthority};
     use crate::child::ChildRef;
@@ -1308,42 +1303,6 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::Arc;
     use time::OffsetDateTime;
-
-    #[test]
-    fn reads_nonterminal_task_ownership_without_opening_the_store_for_writes() {
-        let temp = tempfile::tempdir().expect("create temp directory");
-        let path = temp.path().join("registry.db");
-        let connection = rusqlite::Connection::open(&path).expect("open fixture database");
-        connection
-            .execute_batch(
-                "CREATE TABLE tasks (
-                    id TEXT PRIMARY KEY,
-                    worktree TEXT NOT NULL,
-                    abandoned_at INTEGER,
-                    planning_completed INTEGER
-                 );
-                 CREATE TABLE task_workflows (task_id TEXT PRIMARY KEY, node TEXT NOT NULL, edge INTEGER);
-                 INSERT INTO tasks VALUES ('running', '/repo.running', NULL, NULL);
-                 INSERT INTO tasks VALUES ('waiting', '/repo.waiting', NULL, NULL);
-                 INSERT INTO tasks VALUES ('completed', '/repo.completed', NULL, 1);
-                 INSERT INTO tasks VALUES ('abandoned', '/repo.abandoned', 1, NULL);
-                 INSERT INTO task_workflows VALUES ('running', 'review', 2);
-                 INSERT INTO task_workflows VALUES ('completed', 'review', 2);
-                 INSERT INTO task_workflows VALUES ('waiting', 'end', NULL);",
-            )
-            .expect("seed task ownership");
-        drop(connection);
-
-        let mut paths = read_nonterminal_task_worktrees(&path).expect("read task ownership");
-        paths.sort();
-        assert_eq!(
-            paths,
-            vec![
-                PathBuf::from("/repo.running"),
-                PathBuf::from("/repo.waiting")
-            ]
-        );
-    }
 
     #[test]
     fn development_production_gate_has_no_override() {

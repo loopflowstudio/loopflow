@@ -287,6 +287,178 @@ pub fn add_cron(
     inspect_cron(&path, launchctl)
 }
 
+fn repository_disable_path(home: &Path, key: &str) -> PathBuf {
+    home.join("cron").join(format!("{key}.disabled"))
+}
+
+pub(crate) fn repository_tick_disabled(home: &Path, key: &str) -> OpsResult<bool> {
+    Ok(repository_disable_path(home, key).try_exists()?)
+}
+
+fn lock_repository_tick(spec: &CronSpec) -> OpsResult<fs::File> {
+    let root = spec.host.lf_home.join("cron");
+    fs::create_dir_all(&root)?;
+    let file = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(root.join(format!("{}.maintenance", spec.flow)))?;
+    fs2::FileExt::try_lock_exclusive(&file)?;
+    Ok(file)
+}
+
+/// Explicit selection persists even if launchd is unavailable during removal.
+pub fn sync_repository_tick(
+    agents: &Path,
+    spec: &CronSpec,
+    disable: bool,
+    launchctl: &dyn Launchctl,
+) -> OpsResult<()> {
+    let _lock = lock_repository_tick(spec)?;
+    let choice = repository_disable_path(&spec.host.lf_home, &spec.flow);
+    if disable {
+        fs::create_dir_all(choice.parent().expect("cron preference has a parent"))?;
+        write_private_file(&choice, b"disabled\n")?;
+        remove_cron(agents, "", &spec.flow, launchctl)?;
+    } else {
+        match fs::remove_file(&choice) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        ensure_repository_tick_locked(agents, spec, launchctl)?;
+    }
+    Ok(())
+}
+
+fn ensure_repository_tick(
+    agents: &Path,
+    spec: &CronSpec,
+    launchctl: &dyn Launchctl,
+) -> OpsResult<()> {
+    let _lock = lock_repository_tick(spec)?;
+    ensure_repository_tick_locked(agents, spec, launchctl)
+}
+
+fn ensure_repository_tick_locked(
+    agents: &Path,
+    spec: &CronSpec,
+    launchctl: &dyn Launchctl,
+) -> OpsResult<()> {
+    if repository_tick_disabled(&spec.host.lf_home, &spec.flow)? {
+        return Ok(());
+    }
+    let path = plist_path(agents, "", &spec.flow);
+    if path.try_exists()?
+        && read_cron_spec(&path)? == *spec
+        && launchctl.is_loaded(&label("", &spec.flow))?
+    {
+        return Ok(());
+    }
+    add_cron(agents, spec, launchctl)?;
+    Ok(())
+}
+
+/// First work and later ordinary writes repair scheduling without an agent.
+/// Experimental binaries must never install themselves in the login session.
+pub fn maintain_repository_tick(repo: &Path) -> OpsResult<()> {
+    if cfg!(test)
+        || crate::store::custom_home_selected()
+        || !crate::build_info::provenance().is_release()
+    {
+        return Ok(());
+    }
+    let repo = crate::engine::worktrees::main_repo_root(repo)?;
+    let store = crate::store::sqlite::SqliteStore::open_read_only(
+        &crate::store::production_database_path(),
+    )
+    .map_err(|error| OpsError::Message(error.to_string()))?;
+    let machine = store
+        .local_machine()
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    let spec = CronSpec {
+        flow: repository_cron_key(&repo, &machine.id),
+        wave: String::new(),
+        target_kind: CronTargetKind::Repository,
+        schedule: parse_schedule("every-minute")?,
+        working_directory: repo,
+        lf_path: resolve_lf_path()?,
+        host: CronHost {
+            machine_id: machine.id,
+            lf_home: crate::store::lf_home_dir(),
+            path_env: std::env::var("PATH")
+                .map_err(|error| OpsError::Message(error.to_string()))?,
+        },
+    };
+    if repository_tick_disabled(&spec.host.lf_home, &spec.flow)? {
+        return Ok(());
+    }
+    let agents = default_launch_agents_dir()?;
+    let schedule = if cfg!(target_os = "macos") {
+        ensure_repository_tick(&agents, &spec, &SystemLaunchctl)
+    } else {
+        Err(OpsError::Message(
+            "automatic repository ticks require launchd".into(),
+        ))
+    };
+    if let Err(error) = schedule {
+        if start_repository_fallback(&agents, &spec)? {
+            eprintln!(
+                "repository schedule unavailable: {error}; started ordinary-command maintenance"
+            );
+        }
+    }
+    Ok(())
+}
+
+fn start_repository_fallback(agents: &Path, spec: &CronSpec) -> OpsResult<bool> {
+    let throttle = match lock_repository_tick(spec) {
+        Ok(lock) => lock,
+        Err(OpsError::Io(error)) if error.kind() == std::io::ErrorKind::WouldBlock => {
+            return Ok(false)
+        }
+        Err(error) => return Err(error),
+    };
+    if repository_tick_disabled(&spec.host.lf_home, &spec.flow)?
+        || (throttle.metadata()?.len() > 0
+            && throttle
+                .metadata()?
+                .modified()?
+                .elapsed()
+                .unwrap_or_default()
+                < Duration::from_secs(60))
+    {
+        return Ok(false);
+    }
+    fs::create_dir_all(agents)?;
+    write_private_file(
+        &plist_path(agents, "", &spec.flow),
+        render_plist(spec, Utc::now().timestamp()).as_bytes(),
+    )?;
+    let mut command = Command::new(&spec.lf_path);
+    command
+        .args(["wave", "cron", "run", "--wave", "", "--flow", &spec.flow])
+        .current_dir(&spec.working_directory)
+        .env_clear()
+        .env("LF_HOME", &spec.host.lf_home)
+        .env("PATH", &spec.host.path_env)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    if let Some(home) = dirs::home_dir() {
+        command.env("HOME", home);
+    }
+    let mut child = command.spawn()?;
+    (&throttle).write_all(b"attempt\n")?;
+    // Reap if the initiating command stays alive; the finite child remains
+    // independent when an ordinary command exits first.
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(true)
+}
+
 pub fn remove_cron(
     launch_agents_dir: &Path,
     wave: &str,
@@ -532,6 +704,15 @@ pub(crate) fn run_cron_recorded(
     validate_installed_spec(&spec, wave, flow)?;
     let root = receipt_root(&spec.host.lf_home);
     let mut receipt = new_receipt(&spec, current_machine, source);
+    if spec.target_kind == CronTargetKind::Repository
+        && repository_tick_disabled(&spec.host.lf_home, &spec.flow)?
+    {
+        receipt.finished_at = Some(Utc::now().timestamp());
+        receipt.outcome = CronOutcome::Succeeded;
+        receipt.exit_code = Some(0);
+        write_receipt(&root, &receipt)?;
+        return Ok(receipt);
+    }
     if source == CronSource::Scheduled && accounting::consume_trigger(&spec, &receipt)? {
         receipt.source = CronSource::Triggered;
     }
@@ -1864,6 +2045,48 @@ mod tests {
         let error = list_crons(temp.path(), &FakeLaunchctl::default()).unwrap_err();
         assert!(error.to_string().contains("missing required LoopflowWave"));
         assert!(error.to_string().contains("lf wave cron sync"));
+    }
+
+    #[test]
+    fn repository_tick_preserves_disable_and_repairs_executable() {
+        let temp = tempfile::tempdir().unwrap();
+        let agents = temp.path().join("agents");
+        let launchctl = FakeLaunchctl::default();
+        let mut cron = spec(temp.path(), Path::new("/usr/bin/true"));
+        cron.wave.clear();
+        cron.flow = super::repository_cron_key(&cron.working_directory, &cron.host.machine_id);
+        cron.target_kind = CronTargetKind::Repository;
+        cron.schedule = parse_schedule("every-minute").unwrap();
+        fs::create_dir_all(&cron.working_directory).unwrap();
+        super::ensure_repository_tick(&agents, &cron, &launchctl).unwrap();
+        assert!(list_crons(&agents, &launchctl).unwrap()[0].loaded);
+        cron.lf_path = PathBuf::from("/usr/bin/false");
+        super::ensure_repository_tick(&agents, &cron, &launchctl).unwrap();
+        assert_eq!(
+            list_crons(&agents, &launchctl).unwrap()[0].lf_path,
+            cron.lf_path
+        );
+        super::sync_repository_tick(&agents, &cron, true, &launchctl).unwrap();
+        super::ensure_repository_tick(&agents, &cron, &launchctl).unwrap();
+        assert!(list_crons(&agents, &launchctl).unwrap().is_empty());
+        super::sync_repository_tick(&agents, &cron, false, &launchctl).unwrap();
+        assert!(list_crons(&agents, &launchctl).unwrap()[0].loaded);
+    }
+
+    #[test]
+    fn repository_fallback_is_throttled_and_respects_disable() {
+        let temp = tempfile::tempdir().unwrap();
+        let agents = temp.path().join("agents");
+        let mut cron = spec(temp.path(), Path::new("/usr/bin/true"));
+        cron.wave.clear();
+        cron.flow = super::repository_cron_key(&cron.working_directory, &cron.host.machine_id);
+        cron.target_kind = CronTargetKind::Repository;
+        cron.schedule = parse_schedule("every-minute").unwrap();
+        fs::create_dir_all(&cron.working_directory).unwrap();
+        assert!(super::start_repository_fallback(&agents, &cron).unwrap());
+        assert!(!super::start_repository_fallback(&agents, &cron).unwrap());
+        super::sync_repository_tick(&agents, &cron, true, &FakeLaunchctl::default()).unwrap();
+        assert!(!super::start_repository_fallback(&agents, &cron).unwrap());
     }
 
     #[test]

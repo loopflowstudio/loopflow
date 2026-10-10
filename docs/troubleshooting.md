@@ -163,10 +163,12 @@ with a valid `CACHEDIR.TAG` are disposable; a familiar name such as `target` or
 `.venv` is not enough. Unknown size estimates are `null`, not zero.
 
 Repository reconciliation (`lf task reconcile`) retries deferred cleanup locally,
-even if delivery observation fails. Automatic retries currently require an installed
-repository tick; first-work activation is not yet implemented. Cleanup leaves
+even if delivery observation fails. Installed releases enable the repository tick on
+first work and repair its executable on later work. Explicit disable survives those
+repairs. Without launchd, work-producing commands start at most one fallback check
+per minute. Cleanup leaves
 remote branches and Task outcomes intact and retains recognized local Session
-evidence. Full referenced-payload protection remains unfinished. Use `lf wt delete NAME --force` only when deliberately
+evidence, including registered provider homes inside declared caches. Full referenced-payload protection remains unfinished. Use `lf wt delete NAME --force` only when deliberately
 discarding a checkout.
 
 ```bash

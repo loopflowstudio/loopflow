@@ -231,14 +231,14 @@ leader death or unknown descendants grants no signaling.
 `82b5d90d5` proves A → B → A rejection with stand-ins, not configured relay.
 CI: `be4a2b2af:wave/infrastructure/MEMORY.md`, this heading.
 
-LOO-447: fenced stop/abort; drop never signals. Codex acquires custody before claim;
-standbys cannot write. Group death releases custody; watchdog stays outside.
+LOO-447: fenced stop/abort, signal-free drop, custody before Codex claim.
+Standbys cannot write; group death releases custody; watchdog stays outside.
 OpenCode saves endpoint/attempts before effects. v1.2.0 creation carries rules
 and a correlation title; PATCH fixtures were wrong (`894bc61e5`).
 Missing/ambiguous identity readback stays uncertain.
 `07529ac3d`: creation-worker death/readback without replay, not public takeover.
 Claude pipes/correlation remain launcher-owned despite custody. Public dispatch
-is Codex-only; harness recovery proves no public handoff (Release's entry lesson).
+is Codex-only; harness recovery proves no public handoff.
 Plan: `scratch/stop-and-take-over-claude.md`.
 
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)

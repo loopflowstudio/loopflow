@@ -11,19 +11,18 @@ use crate::store::{StoreError, StoreResult};
 use anyhow::Result;
 use std::collections::{HashMap, HashSet};
 
-/// Open the configured attachment without refreshing its authority from the store.
+/// Open the invocation's attachment without refreshing its authority from the
+/// store. A launch without one is refused: every AgentProcess is recorded.
 pub(super) fn open_owner(
     attachment: Option<&(String, SessionAttachment)>,
-) -> Result<Option<(SqliteStore, String, SessionAttachment)>> {
-    attachment
-        .map(|(session, attachment)| {
-            Ok((
-                SqliteStore::new(&crate::store::database_path_from_env()?)?,
-                session.clone(),
-                attachment.clone(),
-            ))
-        })
-        .transpose()
+) -> Result<(SqliteStore, String, SessionAttachment)> {
+    let (session, attachment) = attachment
+        .ok_or_else(|| anyhow::anyhow!("AgentProcess requires an admitted invocation"))?;
+    Ok((
+        SqliteStore::new(&crate::store::database_path_from_env()?)?,
+        session.clone(),
+        attachment.clone(),
+    ))
 }
 
 /// One headless launch sequence for every harness. Keep the attachment fence
@@ -32,44 +31,32 @@ pub(super) fn open_owner(
 pub(super) fn spawn(
     command: tokio::process::Command,
     lifeline: Option<&std::path::Path>,
-    owner: Option<&(SqliteStore, String, SessionAttachment)>,
+    owner: &(SqliteStore, String, SessionAttachment),
 ) -> Result<tokio::process::Child> {
+    let (store, session, attachment) = owner;
     super::dispatch::off_reactor(|| {
         let program = command
             .as_std()
             .get_program()
             .to_string_lossy()
             .into_owned();
-        let launch = || {
-            if let Some((store, session, attachment)) = owner {
-                store.record_session_provider_launch(session, attachment, command.as_std())?;
-            }
+        store.with_session_attachment(session, attachment, || {
+            store.record_session_provider_launch(session, attachment, command.as_std())?;
             let spawned = crate::engine::process::spawn_agent_process(command, lifeline, |pid| {
-                if let Some((store, session, attachment)) = owner {
-                    let started_at = process_started_at(pid)?.ok_or_else(|| {
-                        std::io::Error::other("AgentProcess birth unavailable before exec")
-                    })?;
-                    store
-                        .record_session_provider_process(session, attachment, pid, started_at)
-                        .map_err(std::io::Error::other)?;
-                }
-                Ok(())
+                let started_at = process_started_at(pid)?.ok_or_else(|| {
+                    std::io::Error::other("AgentProcess birth unavailable before exec")
+                })?;
+                store
+                    .record_session_provider_process(session, attachment, pid, started_at)
+                    .map_err(std::io::Error::other)
             });
             if spawned.is_err() {
-                if let Some((store, session, attachment)) = owner {
-                    store.record_native_provider_exit(session, attachment, false)?;
-                }
+                store.record_native_provider_exit(session, attachment, false)?;
             }
             spawned.map_err(|error| {
                 StoreError::InvalidData(format!("failed to spawn {program}: {error}"))
             })
-        };
-        match owner {
-            Some((store, session, attachment)) => {
-                store.with_session_attachment(session, attachment, launch)
-            }
-            None => launch(),
-        }
+        })
     })
     .map_err(Into::into)
 }
@@ -506,10 +493,10 @@ mod tests {
         let first = store
             .claim_session_attachment(&session.id, None, &parent, true)
             .unwrap();
-        let owner = |attachment| Some((store.clone(), session.id.clone(), attachment));
+        let owner = |attachment| (store.clone(), session.id.clone(), attachment);
         let mut command = tokio::process::Command::new("/bin/sh");
         command.env_clear().args(["-c", "exit 42"]);
-        let mut child = super::spawn(command, None, owner(first.clone()).as_ref()).unwrap();
+        let mut child = super::spawn(command, None, &owner(first.clone())).unwrap();
         let recorded = store.process(&first.agent_process_lfid).unwrap().unwrap();
         assert_eq!(recorded.pid, child.id());
         assert!(recorded.os_started_at.is_some());
@@ -529,7 +516,7 @@ mod tests {
             .env_clear()
             .args(["-c", "printf effect > \"$1\"", "fixture"])
             .arg(&marker);
-        assert!(super::spawn(stale, None, owner(first.clone()).as_ref()).is_err());
+        assert!(super::spawn(stale, None, &owner(first.clone())).is_err());
         assert!(!marker.exists());
         assert_eq!(
             store.session_attachment(&session.id).unwrap(),
@@ -543,7 +530,7 @@ mod tests {
             .is_none());
 
         let missing = tokio::process::Command::new(home.path().join("absent-provider"));
-        assert!(super::spawn(missing, None, owner(next.clone()).as_ref()).is_err());
+        assert!(super::spawn(missing, None, &owner(next.clone())).is_err());
         let failed = store.process(&next.agent_process_lfid).unwrap().unwrap();
         assert!(failed.completed_at.is_some());
         assert!(

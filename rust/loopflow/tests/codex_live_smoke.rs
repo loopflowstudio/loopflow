@@ -13,6 +13,10 @@ use loopflow::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
 use loopflow::engine::agent::AgentConfig;
 use loopflow::harness::codex::CodexHarness;
 use loopflow::harness::{ApprovalPolicy, Harness};
+use loopflow::id::ProcessLfid;
+use loopflow::session::{LfSession, TitleSource};
+use loopflow::store::sqlite::SqliteStore;
+use loopflow::store::{open_ephemeral_store, StorageConfig};
 use tokio::sync::mpsc;
 
 #[tokio::test]
@@ -22,9 +26,51 @@ async fn codex_live_one_turn_smoke() {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mut harness = CodexHarness::new(tx, ApprovalPolicy::AutoApprove);
 
+    // Every launch is recorded: admit one Session in a private store.
+    std::env::set_var("LF_HOME", dir.path());
+    let database = dir.path().join("loopflow.db");
+    let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
+        .await
+        .expect("store");
+    let store = SqliteStore::new(&database).expect("store");
+    store
+        .create_session(
+            LfSession {
+                captured: None,
+                task_id: None,
+                wave_id: None,
+                flow_process_lfid: None,
+                work_source: None,
+                bound_at: None,
+                id: "smoke".into(),
+                artifact_key: uuid::Uuid::new_v4().simple().to_string(),
+                caller_artifact_key: None,
+                input_published: false,
+                cwd: dir.path().into(),
+                skill: None,
+                provider: Some("codex".into()),
+                model: None,
+                node: None,
+                iterations: None,
+                interactive: false,
+                repo: None,
+                title: "Codex live smoke".into(),
+                title_source: TitleSource::Generated,
+                request: None,
+                ready_summary: None,
+                completed_at: None,
+                created_at: 1,
+            },
+            None,
+        )
+        .expect("session");
+    let attachment = store
+        .claim_session_attachment("smoke", None, &ProcessLfid::new(), true)
+        .expect("attachment");
     let config = AgentConfig {
         agent: Some("codex".to_string()),
         cwd: Some(dir.path().to_path_buf()),
+        session_attachment: Some(("smoke".into(), attachment)),
         ..AgentConfig::default()
     };
     harness.start(&config).await.expect("codex start");

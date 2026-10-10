@@ -113,8 +113,10 @@ Claude and OpenCode currently use anonymous lifelines without that handoff path.
 Writers remain held until OS exit, even after attachment transfer;
 only the last holder's exit closes the lifeline and stops the group, including
 after SIGKILL. The lifeline does not itself enforce current attachment authority.
-Owned native launches use the same pre-exec recording channel under the attachment
-lock, but no headless group/watchdog setup. Failed recording prevents provider code
+Headless launch requires the invocation's attachment: Claude, Codex and OpenCode
+refuse to start a provider without one, and their writes and signals have no
+unfenced path. Owned native launches use the same pre-exec recording channel under
+the attachment lock, but no headless group/watchdog setup. Failed recording prevents provider code
 from running. Captured native waits retain the spawned attachment snapshot: a late
 wait cannot mark a replacement exited. Native terminal process groups are unchanged;
 foreground orphan cleanup remains unfinished.

@@ -95,11 +95,8 @@ impl ClaudeHarness {
     }
 
     fn turn_origin(&self) -> Result<Option<crate::session::SessionTurnOrigin>> {
-        self.owner()?
-            .map(|(store, session, attachment)| {
-                Ok(store.session_turn_origin(&session, &attachment)?)
-            })
-            .transpose()
+        let (store, session, attachment) = self.owner()?;
+        Ok(Some(store.session_turn_origin(&session, &attachment)?))
     }
 
     /// Spawn the persistent stream-json process and its reader, if not already
@@ -146,7 +143,7 @@ impl ClaudeHarness {
         self.shutdown_requested.store(false, Ordering::SeqCst);
 
         let owner = self.owner()?;
-        let mut child = super::agent_process::spawn(cmd, None, owner.as_ref())?;
+        let mut child = super::agent_process::spawn(cmd, None, &owner)?;
         drop(activation);
         let stdin = child
             .stdin
@@ -164,7 +161,7 @@ impl ClaudeHarness {
         self.spawn_reader(
             stdout,
             super::claude_history::History {
-                owner,
+                owner: Some(owner),
                 requests: self.requests.clone(),
                 pending: VecDeque::new(),
                 attention: Default::default(),
@@ -305,26 +302,20 @@ impl ClaudeHarness {
     /// Tear the persistent process down and reap its tasks. The next
     /// `send_input` respawns and resumes the captured session.
     async fn kill_process(&mut self) -> Result<()> {
-        let owner = self.owner()?;
-        if let Some(child) = self.child.as_mut() {
+        if self.child.is_some() {
+            // Only an admitted launch produced this child.
+            let (store, session, attachment) = self.owner()?;
+            let child = self.child.as_mut().expect("child presence checked above");
             super::dispatch::off_reactor(|| {
-                let mut signal = || {
+                store.with_session_attachment(&session, &attachment, || {
                     child
                         .start_kill()
                         .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))
-                };
-                match &owner {
-                    Some((store, session, attachment)) => {
-                        store.with_session_attachment(session, attachment, signal)
-                    }
-                    None => signal(),
-                }
+                })
             })?;
             child.wait().await?;
             self.child = None;
-            if let Some((store, session, attachment)) = &owner {
-                store.record_native_provider_exit(session, attachment, true)?;
-            }
+            store.record_native_provider_exit(&session, &attachment, true)?;
         }
         self.stdin = None;
         if let Some(task) = self.reader_task.take() {
@@ -348,13 +339,11 @@ impl ClaudeHarness {
 
     fn owner(
         &self,
-    ) -> Result<
-        Option<(
-            crate::store::sqlite::SqliteStore,
-            String,
-            crate::process::SessionAttachment,
-        )>,
-    > {
+    ) -> Result<(
+        crate::store::sqlite::SqliteStore,
+        String,
+        crate::process::SessionAttachment,
+    )> {
         super::agent_process::open_owner(
             self.config
                 .as_ref()
@@ -363,19 +352,21 @@ impl ClaudeHarness {
     }
 
     async fn send_line(&mut self, line: String) -> Result<()> {
-        let owner = self.owner()?;
         let mut stdin = self
             .stdin
             .take()
             .ok_or_else(|| anyhow!("claude stdin not available"))?;
+        let (store, session, attachment) = match self.owner() {
+            Ok(owner) => owner,
+            Err(error) => {
+                self.stdin = Some(stdin);
+                return Err(error);
+            }
+        };
         let (stdin, result) = tokio::task::spawn_blocking(move || {
-            let mut write = || super::dispatch::write_fenced(&mut stdin, line.as_bytes());
-            let result = match &owner {
-                Some((store, session, attachment)) => {
-                    store.with_session_attachment(session, attachment, write)
-                }
-                None => write(),
-            };
+            let result = store.with_session_attachment(&session, &attachment, || {
+                super::dispatch::write_fenced(&mut stdin, line.as_bytes())
+            });
             (stdin, result)
         })
         .await?;
@@ -656,7 +647,7 @@ mod activity_tests {
         .await
         .expect("a live Claude child must have observable CPU without a process group");
         assert_eq!(harness.process_group_id(), None);
-        harness.stop().await.unwrap();
+        // The injected child was never admitted; kill_on_drop ends it.
     }
 }
 
@@ -921,7 +912,8 @@ mod tests {
             std::env::set_var(key, home.path());
         }
         std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
-        std::env::set_var("PATH", home.path());
+        // Admission samples the child's birth through ps before exec.
+        std::env::set_var("PATH", format!("{}:/usr/bin:/bin", home.path().display()));
         let script = home.path().join("claude");
         std::fs::write(&script, r#"#!/bin/sh
 resume=""
@@ -944,11 +936,31 @@ while read -r line; do
 done
 "#).unwrap();
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let mut config = live_config();
-        config.cwd = Some(home.path().to_path_buf());
+        // Each harness is its own admitted conversation; both resume one
+        // provider-owned AgentSession.
+        let database = home.path().join("loopflow.db");
+        let store = crate::store::sqlite::SqliteStore::open_ephemeral(&database).unwrap();
+        let process = crate::id::ProcessLfid::new();
+        rusqlite::Connection::open(&database)
+            .unwrap()
+            .execute(
+                "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'trace',1)",
+                [&process],
+            )
+            .unwrap();
+        let admitted = |id: &str| {
+            store.test_session(id, &crate::session_record::new_artifact_key());
+            let attachment = store
+                .claim_session_attachment(id, None, &process, true)
+                .unwrap();
+            let mut config = live_config();
+            config.cwd = Some(home.path().to_path_buf());
+            config.session_attachment = Some((id.into(), attachment));
+            config
+        };
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mut first = ClaudeHarness::new(tx);
-        first.config = Some(config.clone());
+        first.config = Some(admitted("first"));
         first.send_input("remember").await.unwrap();
         let (status, answer, _) = tokio::time::timeout(Duration::from_secs(5), drive_turn(&mut rx))
             .await
@@ -960,7 +972,7 @@ done
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mut resumed = ClaudeHarness::new(tx);
         resumed.set_agent_session(Some(agent_session.clone()));
-        resumed.config = Some(config);
+        resumed.config = Some(admitted("second"));
         resumed.send_input("recall").await.unwrap();
         let (status, answer, _) = tokio::time::timeout(Duration::from_secs(5), drive_turn(&mut rx))
             .await
@@ -1027,7 +1039,9 @@ done
     async fn live_persistent_process_handles_sequential_turns() {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mut harness = ClaudeHarness::new(tx);
-        harness.start(&live_config()).await.expect("start");
+        let mut config = live_config();
+        let _ledger = super::super::admit_for_test(&mut config);
+        harness.start(&config).await.expect("start");
 
         harness
             .send_input("Reply with exactly: ALPHA")
@@ -1060,7 +1074,9 @@ done
     async fn live_send_current_coalesces_into_one_boundary() {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mut harness = ClaudeHarness::new(tx);
-        harness.start(&live_config()).await.expect("start");
+        let mut config = live_config();
+        let _ledger = super::super::admit_for_test(&mut config);
+        harness.start(&config).await.expect("start");
 
         harness
             .send_input("Write a slow, detailed 200-word explanation of how a bicycle works.")

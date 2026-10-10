@@ -33,6 +33,15 @@ This extends the existing exact-owner rule, not generic harness-stop authority.
 The native PTY fixture covers inherited descriptors/group, not configured terminal
 interaction. Focused runtime results are recorded in the plan.
 
+2026-10-09 implementation choice: headless admission is refused at launch rather
+than typed into `Harness::start`. Every production start already carried a claimed
+attachment; the optional config field remains because configs are prepared before
+admission. Moving the attachment into the start signature stays open.
+
+2026-10-09 assumption: Jack Heart's steer to publish supersedes the plan's earlier
+"no partial publication" note. The PR is published for review with the remaining
+lifecycle cuts listed in the plan; it is not presented as complete or landable.
+
 2026-10-09 implementation choice: native commands carry the owner's exact
 attachment in memory, never serialized into stable tool provenance. The client
 relay and provider endpoint are separate paths. Connection exit/interruption

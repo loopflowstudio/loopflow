@@ -97,7 +97,9 @@ attribution survive.
   `native_provider_driver`'s missing-provenance-as-client inference are removed.
   Native admission no longer reconstructs authority from `AgentCaller`; the
   command carries the capture or connection owner’s frozen attachment separately.
-  Raw headless optional admission remains a deletion target.
+- Optional headless admission: `open_owner` returning `None`, `spawn`'s ownerless
+  branch, Codex's unfenced writer and Claude's unfenced stdin/kill branches are
+  removed. History structs keep an optional owner only for parser fixtures.
 - Top’s receipt-selected inventory, `ProcessSnapshot`, and the exclusive
   `read_process_snapshot` transaction wrapper are removed. One unfinished-row
   query now serves Task membership and activity; receipts establish identity,
@@ -146,8 +148,24 @@ Shared headless and owned native admission record argv and OS identity before
 exec, under the attachment lock. Native admission preserves foreground groups,
 TTY and stdio. Synchronous admission cannot lose an admitted child to cancellation
 before returning it. Admission consumes each reservation once; a duplicate cannot
-mark a running row spawn-failed. Raw headless harness paths still permit missing
-attachments; captured native admission now requires one.
+mark a running row spawn-failed. Headless and captured native admission both
+require an attachment.
+
+**Unconditional headless admission (2026-10-09, after sync with main `906576f39`,
+#1499):** `run_agent` already claimed an attachment for every explicit or implicit
+capture, so the only unattached starts were fixtures. `open_owner` now refuses a
+missing attachment and `spawn` takes its owner by reference; no parent is invented
+at spawn. Claude's stdin write and kill, and Codex's socket writer, lose their
+unfenced branches. `AgentConfig.session_attachment` stays optional because the
+config is prepared before admission; a start without it fails with "AgentProcess
+requires an admitted invocation" before any provider code runs. Pre-exec recording
+samples the child's birth through `ps`, so a launch PATH without `ps` fails
+admission; fixtures that narrowed PATH now include the system directories.
+The three ignored live-provider smokes admit a private Session; they were not run.
+Fixture repair: `continuation_resumes_the_saved_thread_on_a_fresh_engine` recorded
+the live test process as the previous provider and expected silent replacement,
+contradicting the observed-exit rule; it now records a throwaway child and observes
+its exit.
 
 Captured Claude and native retries reserve a fresh AgentProcess only after exact
 exit/spawn failure, advancing capture settlement and the next launch together.
@@ -249,12 +267,10 @@ checks do not establish configured-provider or foreground cleanup.
 
 ## Remaining implementation
 
-1. **Raw headless starts.** `run_agent` and native helpers enter the invocation
-   runtime, but raw `Harness::start`, optional config, `open_owner` and headless
-   `spawn` still permit unrecorded children. Make admission unconditional at the
-   invocation entry, not by inventing a parent inside a spawn callback. Retain
-   the lock through recording, failed-spawn evidence and uncertain-spawn refusal.
-   Native foreground treatment must preserve TTY/process-group behavior.
+1. **Admission types.** Headless admission is unconditional at runtime. The
+   config field and history owners remain `Option`; passing the attachment to
+   `Harness::start` would move the refusal into the type. `stop_native` keeps its
+   ownerless branch for remote clients, which own no provider.
 2. Remove numeric provider generation from runtime caller/status fences in favor
    of AgentProcess identity. Request correlation already freezes Process, Work and
    capture before send in Claude, Codex and OpenCode history; `SessionTurnOrigin`
@@ -339,6 +355,4 @@ LfSession's selected AgentSession. Branch-only fixtures use the typed identity.
 Earlier native-util/planning-reconnect, 16-test isolated lifecycle and typed-identity
 sync checks are retained at `e87e9d643`, this plan.
 
-Check: `cargo test -p loopflow --lib --test process_ownership_tests --no-run`, network-isolated OS/reaper/Codex-close/resume/top and scheduled-entry tests (21), `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and diff checks pass; full Rust/Swift/DTO/materialized/Linux verification remains gate/CI-owned. Earlier focused results: `16415389c`, this plan.
-
-Check: sync with main `906576f39` retained both Swift fixture additions; `scripts/test_desktop.sh --filter 'DTOFixtureTests/(activityFixture|composedTaskLifecycle|taskDeliveryFixture)'` passes (3) after adding AgentProcess-cutover fields to main's new lifecycle fixture; broader verification remains gate/CI-owned.
+Check: `cargo test -p loopflow --lib` with inherited `LF_*` cleared: CHECK_RESULT; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `--test process_ownership_tests --test agent_tests` pass. Full Rust integration/Swift/DTO/materialized/Linux verification remains gate/CI-owned. Earlier focused results: `16415389c`, this plan.

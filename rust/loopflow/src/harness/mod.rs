@@ -360,9 +360,62 @@ pub fn default_create_harness(
     )
 }
 
+/// Admit a fixture launch: a private ledger with one Session attached to one
+/// recorded lf invocation. Keep the guard for the life of the harness.
+#[cfg(test)]
+pub(crate) fn admit_for_test(config: &mut AgentConfig) -> crate::journal::TestLedgerGuard {
+    let ledger = crate::journal::TestLedgerGuard::new();
+    let database = ledger.home().join("loopflow.db");
+    let store = crate::store::sqlite::SqliteStore::open_ephemeral(&database).unwrap();
+    let process = crate::id::ProcessLfid::new();
+    rusqlite::Connection::open(&database)
+        .unwrap()
+        .execute(
+            "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+            [process.as_str()],
+        )
+        .unwrap();
+    store.test_session("fixture", &crate::session_record::new_artifact_key());
+    let attachment = store
+        .claim_session_attachment("fixture", None, &process, true)
+        .unwrap();
+    config.session_attachment = Some(("fixture".into(), attachment));
+    ledger
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn unattached_launch_is_refused_before_any_provider_starts() {
+        // Account selection reads this private, empty store; no route exists.
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let absent = ledger.home().join("absent");
+        for name in ["codex", "claude", "opencode"] {
+            let (tx, _rx) = mpsc::unbounded_channel();
+            let mut harness =
+                default_create_harness(name, ApprovalPolicy::AutoApprove, tx).unwrap();
+            let config = AgentConfig {
+                agent: Some(name.into()),
+                // Even a mistakenly reached spawn cannot launch a real provider.
+                cwd: Some(absent.clone()),
+                ..Default::default()
+            };
+            let error = match harness.start(&config).await {
+                // Claude launches on its first input.
+                Ok(()) => harness.send_input("unrecorded").await.unwrap_err(),
+                Err(error) => error,
+            };
+            assert!(
+                error
+                    .to_string()
+                    .contains("AgentProcess requires an admitted invocation"),
+                "{name}: {error}"
+            );
+            assert_eq!(harness.process_id(), None, "{name}");
+        }
+    }
 
     #[test]
     fn canonical_harness_is_case_insensitive_and_trimmed() {

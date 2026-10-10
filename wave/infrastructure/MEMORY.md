@@ -221,21 +221,19 @@ unpublished code retained, without deletion or delivery authorization.
 
 ## AgentProcess (LOO-443, 2026-10-09)
 
-Jack Heart requested one inventory; #1512/#1516 integrated. Unknown stays visible;
-retry retains history. `c1c09fb6c` fences resume; `9255e9b03` shares native admission.
-`82b5d90d5` separates frozen attachment/provenance and relay/upstream. Stand-ins
-prove launch and takeover rejection, including A → B → A; configured relay is
-unproved. Client exit never settles its provider; provider death never settles
-an unknown attachment.
+Jack Heart requested one inventory; #1512/#1516/#1499 integrated. Unknown stays visible; retry retains history. `c1c09fb6c` fences resume; `9255e9b03` shares native admission.
+`82b5d90d5` separates attachment/provenance and relay/upstream. Stand-ins
+prove launch and takeover rejection (A → B → A), not configured relay.
+Client exit never settles its provider, nor provider death an unknown attachment.
 
-Release's entry-point lesson exposed swallowed errors and zombie-as-live probes.
-Reaper and Codex close share group-wide judgment: leader death is insufficient;
-failed descendant inventory refuses before signaling. Errors retain LFIDs;
-installed acceptance is unproved.
+Entry fixtures exposed swallowed errors and zombie-as-live probes.
+Reaper and Codex close share group judgment: leader death is insufficient;
+failed descendant inventory refuses before signaling.
 
-Optional headless admission, generations, foreground cleanup, takeover death
-orders, public Task agreement, two-second removal and installed settlement remain
-open. FIFO is Codex-only; reaping is noninteractive Codex/OpenCode.
+Headless launch refuses a missing attachment. Jack's steer `0aa2c34c` requested
+publication without merge. Generations, foreground cleanup, takeover death
+orders, public Task agreement, two-second removal, installed settlement stay
+open. FIFO is Codex-only; reaping noninteractive Codex/OpenCode.
 
 ## Execution ownership names (LOO-441, 2026-10-09)
 

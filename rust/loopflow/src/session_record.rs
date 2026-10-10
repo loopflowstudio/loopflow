@@ -4165,12 +4165,19 @@ mod tests {
                 "/retained.sock",
                 &"native-thread".into(),
             )?;
+            // The previous provider is a throwaway child whose exit is observed
+            // before continuation; a live one would refuse replacement.
+            let mut provider = std::process::Command::new("/bin/sleep")
+                .arg("60")
+                .spawn()?;
             store.record_session_provider_process(
                 &session.id,
                 &driver,
-                std::process::id(),
-                crate::journal::process_started_at(std::process::id())?.unwrap(),
+                provider.id(),
+                crate::journal::process_started_at(provider.id())?.unwrap(),
             )?;
+            provider.kill()?;
+            provider.wait()?;
             store.release_session_attachment(&session.id, &driver)?;
             Ok(())
         })

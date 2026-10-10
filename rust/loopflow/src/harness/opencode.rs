@@ -69,7 +69,9 @@ impl OpenCodeHarness {
 
     async fn start_inner(&mut self, config: &AgentConfig) -> Result<()> {
         let owner = super::agent_process::open_owner(config.session_attachment.as_ref())?;
-        self.history = Arc::new(Mutex::new(opencode_history::History::new(owner.clone())));
+        self.history = Arc::new(Mutex::new(opencode_history::History::new(Some(
+            owner.clone(),
+        ))));
         let port = allocate_port()?;
         let mut command = Command::new("opencode");
         command
@@ -92,7 +94,7 @@ impl OpenCodeHarness {
             command.env("OPENCODE_CONFIG_CONTENT", opencode_worktree_config());
         }
         super::configure_vendor_std_env(command.as_std_mut())?;
-        let mut child = super::agent_process::spawn(command, None, owner.as_ref())?;
+        let mut child = super::agent_process::spawn(command, None, &owner)?;
         let stderr = child
             .stderr
             .take()
@@ -1103,7 +1105,9 @@ mod tests {
     async fn live_basic_turn_completes() {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mut harness = OpenCodeHarness::new(tx, ApprovalPolicy::AutoApprove);
-        harness.start(&live_config()).await.expect("start");
+        let mut config = live_config();
+        let _ledger = super::super::admit_for_test(&mut config);
+        harness.start(&config).await.expect("start");
 
         harness
             .send_input("Reply with exactly: ALPHA")
@@ -1121,7 +1125,9 @@ mod tests {
     async fn live_send_current_coalesces_into_one_boundary() {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mut harness = OpenCodeHarness::new(tx, ApprovalPolicy::AutoApprove);
-        harness.start(&live_config()).await.expect("start");
+        let mut config = live_config();
+        let _ledger = super::super::admit_for_test(&mut config);
+        harness.start(&config).await.expect("start");
 
         harness
             .send_input(

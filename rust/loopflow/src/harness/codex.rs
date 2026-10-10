@@ -21,7 +21,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use futures_util::{SinkExt, StreamExt};
+use futures_util::StreamExt;
 use serde_json::{json, Value};
 use tokio::net::UnixStream;
 use tokio::process::{Child, Command};
@@ -987,20 +987,10 @@ impl Harness for CodexHarness {
 
 impl CodexHarness {
     async fn start_inner(&mut self, launch: &AgentConfig) -> Result<()> {
-        self.session_attachment =
-            super::agent_process::open_owner(launch.session_attachment.as_ref())?;
-        let connection = self
-            .session_attachment
-            .as_ref()
-            .map(|(store, session, _)| store.session_connection(session))
-            .transpose()?
-            .flatten();
-        let saved_thread = self
-            .session_attachment
-            .as_ref()
-            .map(|(store, session, _)| store.session_thread(session))
-            .transpose()?
-            .flatten();
+        let owner = super::agent_process::open_owner(launch.session_attachment.as_ref())?;
+        self.session_attachment = Some(owner.clone());
+        let connection = owner.0.session_connection(&owner.1)?;
+        let saved_thread = owner.0.session_thread(&owner.1)?;
         if let Some(thread) = &saved_thread {
             if self.resume_agent_session.as_ref() != Some(thread) {
                 anyhow::bail!(
@@ -1079,7 +1069,7 @@ impl CodexHarness {
             Some(super::agent_process::spawn(
                 command,
                 Some(&lifeline),
-                self.session_attachment.as_ref(),
+                &owner,
             )?)
         } else {
             None
@@ -1133,7 +1123,7 @@ impl CodexHarness {
         let stderr = child.as_mut().and_then(|child| child.stderr.take());
 
         let (outbound_tx, mut outbound_rx) = mpsc::channel::<OutboundRpc>(128);
-        let authority = self.session_attachment.clone();
+        let authority = owner.clone();
         let writer_events = self.events.clone();
         let native_history = Arc::new(Mutex::new(super::codex_history::History::default()));
         let writer_history = native_history.clone();
@@ -1155,9 +1145,7 @@ impl CodexHarness {
                     .expect("codex history lock poisoned")
                     .request(
                         &payload,
-                        authority.as_ref().map(|(store, session, attachment)| {
-                            (store, session.as_str(), attachment)
-                        }),
+                        Some((&authority.0, authority.1.as_str(), &authority.2)),
                     );
                 if let Err(error) = recorded {
                     let _ = writer_events.send(ConversationEvent::Error {
@@ -1168,26 +1156,19 @@ impl CodexHarness {
                     break;
                 }
                 let message = Message::Text(payload.to_string().into());
-                let outcome = if let Some((store, session, expected)) = authority.clone() {
-                    let dispatched = tokio::task::spawn_blocking(move || {
-                        let outcome = store.with_session_attachment(&session, &expected, || {
-                            super::dispatch::send_fenced(&mut writer, message)
-                        });
-                        (writer, outcome)
-                    })
-                    .await;
-                    let Ok((returned, outcome)) = dispatched else {
-                        break;
-                    };
-                    writer = returned;
-                    outcome.map_err(|error| error.to_string())
-                } else {
-                    writer
-                        .send(message)
-                        .await
-                        .map_err(|error| error.to_string())
+                let (store, session, expected) = authority.clone();
+                let dispatched = tokio::task::spawn_blocking(move || {
+                    let outcome = store.with_session_attachment(&session, &expected, || {
+                        super::dispatch::send_fenced(&mut writer, message)
+                    });
+                    (writer, outcome)
+                })
+                .await;
+                let Ok((returned, outcome)) = dispatched else {
+                    break;
                 };
-                if let Err(message) = outcome {
+                writer = returned;
+                if let Err(message) = outcome.map_err(|error| error.to_string()) {
                     let _ = writer_events.send(ConversationEvent::Error {
                         code: "codex_dispatch_rejected".into(),
                         message,

@@ -163,8 +163,8 @@ The toolbar's **+** changes what the multiplexer shows: **New shell**,
 Task's checkout, newest first, whether an edge or a person started it; it is
 not the Workflow's history. One line each: Flow, state, when it started and
 how long it ran. A row opens to its id, graph and steps (the shape of
-`lf flow show ID --processes --json`). A process whose driver exited early reads
-**stopped**. One whose driver was killed has no exit record and keeps reading
+`lf flow show ID --processes --json`). A Flow whose process exited early reads
+**stopped**. One whose process was killed has no exit record and keeps reading
 as running. **Task details → Debug** lists the Task's raw Sessions and Processes.
 Sessions list **Waiting** first and working ones in a compact group.
 The Wave page's **Workflow** sets the Project's workflow from the catalogue
@@ -275,7 +275,7 @@ feedback remain inspectable.
 The shared Session projection supplies action labels, unavailable reasons and Work
 paths to both CLI and Mac; local terminal presence only determines which pane to show.
 
-Flow steps run as ordinary `lf -b skill <name>` commands under their driver.
+Flow steps run as ordinary `lf -b skill <name>` commands under their Flow process.
 The app lists, opens, and acts on the shared
 Rust `SessionRecord` projection; it owns no parallel queue.
 The Session ID targets conversation actions and history lookup. A prepared

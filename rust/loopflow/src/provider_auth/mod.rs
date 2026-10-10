@@ -24,8 +24,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use base64::Engine;
+use base64::prelude::*;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use reqwest::Url;
@@ -613,7 +612,8 @@ impl LinearOAuthBroker {
     }
 
     fn build_authorization_url(app: &LinearOAuthApp, code_verifier: &str, state: &str) -> String {
-        let code_challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(code_verifier.as_bytes()));
+        let code_challenge =
+            BASE64_URL_SAFE_NO_PAD.encode(Sha256::digest(code_verifier.as_bytes()));
         let mut url = Url::parse(LINEAR_OAUTH_AUTHORIZE_URL)
             .expect("linear oauth authorize URL should parse");
         {
@@ -1895,7 +1895,7 @@ async fn start_auth_command(
         }
     };
 
-    let process_group = crate::engine::process::ProcessGroupGuard::new(
+    let process_group = crate::os_process::ProcessGroupGuard::new(
         child
             .id()
             .expect("newly spawned auth command should have a process id"),
@@ -2858,7 +2858,7 @@ fn codex_login_from_auth(json: &serde_json::Value) -> Option<String> {
 
 pub(crate) fn jwt_claims(token: &str) -> Option<serde_json::Value> {
     let payload = token.split('.').nth(1)?.trim_end_matches('=');
-    let claims = URL_SAFE_NO_PAD.decode(payload).ok()?;
+    let claims = BASE64_URL_SAFE_NO_PAD.decode(payload).ok()?;
     serde_json::from_slice(&claims).ok()
 }
 
@@ -4799,7 +4799,7 @@ attributes:
         let tmp = tempdir().expect("tempdir");
         let codex_dir = tmp.path().join(".codex");
         fs::create_dir_all(&codex_dir).expect("create codex dir");
-        let claims = URL_SAFE_NO_PAD.encode(r#"{"email":"engineering@example.com"}"#);
+        let claims = BASE64_URL_SAFE_NO_PAD.encode(r#"{"email":"engineering@example.com"}"#);
         let id_token = format!("header.{claims}.signature");
         fs::write(
             codex_dir.join("auth.json"),
@@ -4822,7 +4822,7 @@ attributes:
         let tmp = tempdir().expect("tempdir");
         let codex_dir = tmp.path().join(".codex");
         fs::create_dir_all(&codex_dir).expect("create codex dir");
-        let claims = URL_SAFE_NO_PAD.encode(r#"{"exp":4102444800}"#);
+        let claims = BASE64_URL_SAFE_NO_PAD.encode(r#"{"exp":4102444800}"#);
         let access_token = format!("header.{claims}.signature");
         fs::write(
             codex_dir.join("auth.json"),

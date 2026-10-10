@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 use tracing::warn;
 
-use crate::engine::context_budget::BudgetKey;
+use crate::prompt::context_budget::BudgetKey;
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum WaveConfigError {

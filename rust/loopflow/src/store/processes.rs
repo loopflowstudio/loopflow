@@ -1,12 +1,12 @@
 use std::num::NonZeroU32;
 
-use crate::id::ProcessLfid;
+use crate::id::LfProcessId;
 use crate::process::{LfProcess, LfProcessCursor, LfProcessFilter, LfProcessPage};
 
 use super::{run_sqlite, Store, StoreResult};
 
 impl Store {
-    pub async fn process(&self, id: &ProcessLfid) -> StoreResult<Option<LfProcess>> {
+    pub async fn process(&self, id: &LfProcessId) -> StoreResult<Option<LfProcess>> {
         let id = id.clone();
         run_sqlite(&self.sqlite, move |store| store.process(&id)).await
     }

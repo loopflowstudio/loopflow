@@ -2,12 +2,12 @@
 //! These receipts confer no conversational or Flow mutation authority.
 
 use crate::id::AgentSessionId;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use serde_json::{json, Value};
 
-use crate::process::SessionDriver;
-use crate::session::SessionEventKind;
+use crate::process::SessionAttachment;
+use crate::session::{SessionEventKind, SessionTurnOrigin};
 use crate::store::sqlite::SqliteStore;
 use crate::store::StoreResult;
 
@@ -17,41 +17,81 @@ use crate::store::StoreResult;
 #[derive(Debug, Default)]
 pub(super) struct History {
     sequence: u64,
-    final_answers: HashMap<String, String>,
-    known: HashMap<String, u64>,
-    requests: HashMap<String, u64>,
-    started: HashSet<String>,
-    replies: HashMap<String, SessionDriver>,
-    attributed: HashSet<String>,
+    turns: HashMap<String, Turn>,
+    requests: HashMap<String, (u64, Option<SessionTurnOrigin>)>,
     attention: super::attention::Attention,
 }
 
+/// All connection-local evidence for one native turn. Seeing a turn before
+/// submitting a request prevents that request from claiming its origin.
+#[derive(Debug, Default)]
+struct Turn {
+    first_seen: u64,
+    started: bool,
+    origin: Option<SessionTurnOrigin>,
+    attributed: bool,
+    final_answer: Option<String>,
+}
+
+impl Turn {
+    fn correlate(
+        &mut self,
+        store: &SqliteStore,
+        thread: &AgentSessionId,
+        turn: &str,
+    ) -> StoreResult<()> {
+        if self.started && !self.attributed {
+            if let Some(origin) = &self.origin {
+                store.record_session_turn_origin(thread, turn, origin)?;
+                self.attributed = true;
+                self.origin = None;
+            }
+        }
+        Ok(())
+    }
+}
+
 impl History {
-    pub(super) fn request(&mut self, rpc: &Value) {
-        // Saved with the provider's next message.
+    pub(super) fn request(
+        &mut self,
+        rpc: &Value,
+        owner: Option<(&SqliteStore, &str, &SessionAttachment)>,
+    ) -> StoreResult<()> {
         self.attention.apply(super::attention::codex(rpc, true));
         if rpc["method"] == "turn/start" && !rpc["id"].is_null() {
+            let origin = owner
+                .map(|(store, session, attachment)| store.session_turn_origin(session, attachment))
+                .transpose()?;
             self.sequence += 1;
-            self.requests.insert(rpc["id"].to_string(), self.sequence);
+            self.requests
+                .insert(rpc["id"].to_string(), (self.sequence, origin));
         }
+        Ok(())
     }
 
-    fn observe(&mut self, turn: &str) {
-        self.known.entry(turn.to_owned()).or_insert(self.sequence);
+    fn observe(&mut self, turn: &str) -> &mut Turn {
+        self.turns.entry(turn.to_owned()).or_insert_with(|| Turn {
+            first_seen: self.sequence,
+            ..Turn::default()
+        })
     }
 
     pub(super) fn record(
         &mut self,
         store: &SqliteStore,
         session: &str,
-        driver: Option<&SessionDriver>,
+        attachment: Option<&SessionAttachment>,
         expected_thread: Option<&AgentSessionId>,
         rpc: &Value,
     ) -> StoreResult<()> {
         self.sequence += 1;
-        if let Some(driver) = driver {
-            self.attention
-                .record(store, session, driver, super::attention::codex(rpc, false));
+        if let Some(attachment) = attachment {
+            self.attention.record(
+                store,
+                session,
+                attachment,
+                super::attention::codex(rpc, false),
+            );
         }
         let request = if rpc.get("method").is_none() {
             self.requests.remove(&rpc["id"].to_string())
@@ -94,10 +134,10 @@ impl History {
         }
         let turn = super::codex_mapping::extract_turn_id(params);
         if let Some(turn) = turn {
-            self.observe(&turn);
+            let observed = self.observe(&turn);
             match method {
                 "turn/started" => {
-                    self.started.insert(turn.clone());
+                    observed.started = true;
                     store.record_session_event(
                         session,
                         thread,
@@ -120,12 +160,12 @@ impl History {
                 }
                 "item/completed" => {
                     if let Some(text) = final_text(&params["item"]) {
-                        self.final_answers.insert(turn, text.to_owned());
+                        observed.final_answer = Some(text.to_owned());
                     }
                 }
                 "turn/completed" => {
                     completion(store, session, thread, &params["turn"])?;
-                    if let Some(text) = self.final_answers.remove(&turn) {
+                    if let Some(text) = observed.final_answer.take() {
                         store.record_session_event(
                             session,
                             thread,
@@ -137,37 +177,16 @@ impl History {
                 }
                 _ => {}
             }
+            observed.correlate(store, thread, &turn)?;
         }
-        if let (Some(turn), Some(driver), Some(request)) =
-            (result["turn"]["id"].as_str(), driver, request)
+        if let (Some(turn), Some((request, Some(origin)))) =
+            (result["turn"]["id"].as_str(), request)
         {
-            let existing = self.known.get(turn).is_some_and(|seen| *seen < request);
-            self.observe(turn);
-            if !existing && !self.attributed.contains(turn) {
-                self.replies
-                    .entry(turn.to_owned())
-                    .or_insert_with(|| driver.clone());
+            let observed = self.observe(turn);
+            if observed.first_seen >= request && !observed.attributed {
+                observed.origin.get_or_insert(origin);
             }
-        }
-        let correlated: Vec<_> = self
-            .started
-            .iter()
-            .filter(|turn| self.replies.contains_key(*turn) && !self.attributed.contains(*turn))
-            .cloned()
-            .collect();
-        for turn in correlated {
-            let driver = &self.replies[&turn];
-            if let Some(process) = &driver.process_lfid {
-                store.record_session_turn_origin(
-                    session,
-                    thread,
-                    &turn,
-                    driver.provider_generation,
-                    process,
-                )?;
-            }
-            self.attributed.insert(turn.clone());
-            self.replies.remove(&turn);
+            observed.correlate(store, thread, turn)?;
         }
         if let Some(turns) = result["thread"]["turns"]
             .as_array()
@@ -178,7 +197,7 @@ impl History {
                     self.observe(id);
                 }
                 // Snapshot recovery knows completion, not which client started the
-                // turn or which provider generation was active at that earlier time.
+                // turn or which AgentProcess was active at that earlier time.
                 completion(store, session, thread, turn)?;
             }
         }
@@ -224,42 +243,165 @@ fn completion(
 #[cfg(test)]
 mod tests {
     use super::History;
-    use crate::id::ProcessLfid;
-    use crate::process::SessionDriver;
+    use crate::id::LfProcessId;
+    use crate::process::SessionAttachment;
     use crate::session::SessionEventKind;
     use crate::store::sqlite::SqliteStore;
     use serde_json::json;
+
+    #[test]
+    fn delayed_start_keeps_request_capture_across_a_b_a_takeover() {
+        for reply_first in [false, true] {
+            let home = tempfile::tempdir().unwrap();
+            let path = home.path().join("history.db");
+            let store = SqliteStore::open_ephemeral(&path).unwrap();
+            let sql = rusqlite::Connection::open(&path).unwrap();
+            let original =
+                store.test_session("conversation", &crate::session_record::new_artifact_key());
+            let a = LfProcessId::new();
+            let b = LfProcessId::new();
+            for process in [&a, &b] {
+                sql.execute(
+                    "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+                    [process],
+                )
+                .unwrap();
+            }
+            let first = store
+                .claim_session_attachment(&original.id, None, &a, false)
+                .unwrap();
+            let mut history = History::default();
+            history
+                .request(
+                    &json!({"id":1,"method":"turn/start"}),
+                    Some((&store, &original.id, &first)),
+                )
+                .unwrap();
+            let middle = store
+                .claim_session_attachment(&original.id, Some(&first), &b, false)
+                .unwrap();
+            let mut next = original.clone();
+            next.artifact_key = crate::session_record::new_artifact_key();
+            let next = store
+                .replace_session_input(original.captured, next)
+                .unwrap();
+            let current = store
+                .claim_session_attachment(&original.id, Some(&middle), &a, false)
+                .unwrap();
+            assert_ne!(first.token, current.token);
+            assert!(store.session_turn_origin(&original.id, &first).is_err());
+            // Both requests predate the start notification. A second reply for
+            // the same turn must not replace the first correlated origin.
+            history
+                .request(
+                    &json!({"id":2,"method":"turn/start"}),
+                    Some((&store, &original.id, &current)),
+                )
+                .unwrap();
+            let reply = json!({"id":1,"result":{"turn":{"id":"late"}}});
+            let start = json!({"method":"turn/started","params":{"threadId":"thread","turn":{"id":"late"}}});
+            let messages = if reply_first {
+                [&reply, &start]
+            } else {
+                [&start, &reply]
+            };
+            for message in messages {
+                history
+                    .record(
+                        &store,
+                        &original.id,
+                        Some(&first),
+                        Some(&"thread".into()),
+                        message,
+                    )
+                    .unwrap();
+                assert_eq!(sql.query_row("SELECT count(*) FROM session_events WHERE kind='started' AND captured_event=?1", [next.captured], |row| row.get::<_,i64>(0)).unwrap(),0);
+            }
+            let before = store.session_history(&original.id, 0, 0).unwrap();
+            for message in [&json!({"id":2,"result":{"turn":{"id":"late"}}}), &start] {
+                history
+                    .record(
+                        &store,
+                        &original.id,
+                        Some(&current),
+                        Some(&"thread".into()),
+                        message,
+                    )
+                    .unwrap();
+            }
+            assert_eq!(store.session_history(&original.id, 0, 0).unwrap(), before);
+            history.record(&store,&original.id,Some(&first),Some(&"thread".into()),
+                &json!({"method":"thread/tokenUsage/updated","params":{"threadId":"thread","turnId":"late","tokenUsage":{"total":{"inputTokens":12},"last":{"inputTokens":12}}}})).unwrap();
+            history.record(&store,&original.id,Some(&first),Some(&"thread".into()),
+                &json!({"method":"turn/completed","params":{"threadId":"thread","turn":{"id":"late","status":"completed"}}})).unwrap();
+            let retained = store
+                .session_history(&original.id, 0, 0)
+                .unwrap()
+                .into_iter()
+                .filter(|event| event.provider_turn.as_deref() == Some("late"))
+                .collect::<Vec<_>>();
+            assert_eq!(retained.len(), 3);
+            assert!(retained
+                .iter()
+                .all(|event| event.lf_process_id.as_deref() == Some(a.as_str())));
+            assert_eq!(
+                store
+                    .input_history(&original.artifact_key)
+                    .unwrap()
+                    .usage
+                    .total_input_tokens,
+                Some(12)
+            );
+            assert_eq!(
+                store
+                    .input_history(&next.artifact_key)
+                    .unwrap()
+                    .usage
+                    .total_input_tokens,
+                None
+            );
+            assert_eq!(
+                store.session_attachment(&original.id).unwrap(),
+                Some(current)
+            );
+        }
+    }
 
     #[test]
     fn busy_turn_input_preserves_known_and_unknown_origins() {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("history.db");
         let store = SqliteStore::open_ephemeral(&path).unwrap();
-        let first = ProcessLfid::new();
-        let second = ProcessLfid::new();
+        let first = LfProcessId::new();
+        let second = LfProcessId::new();
         let conn = rusqlite::Connection::open(&path).unwrap();
         store.test_session("conversation", "run_00000000000000000000000000000001");
         for process in [&first, &second] {
             conn.execute(
-                "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
                 [process.as_str()],
             )
             .unwrap();
         }
-        let original = SessionDriver {
-            process_lfid: Some(first.clone()),
-            generation: 1,
-            provider_generation: 1,
-            provider_process_lfid: first.clone(),
-        };
-        let replacement = SessionDriver {
-            process_lfid: Some(second.clone()),
-            generation: 2,
+        let original = store
+            .claim_session_attachment("conversation", None, &first, false)
+            .unwrap();
+        let original_origin = store
+            .session_turn_origin("conversation", &original)
+            .unwrap();
+        let replacement = SessionAttachment {
+            lf_process_id: Some(second.clone()),
+            token: crate::id::AttachmentToken::new(),
             ..original.clone()
         };
         for (turn, reply_first) in [("notification-first", false), ("reply-first", true)] {
             let mut history = History::default();
-            history.request(&json!({"id":1,"method":"turn/start"}));
+            history
+                .request(
+                    &json!({"id":1,"method":"turn/start"}),
+                    Some((&store, "conversation", &original)),
+                )
+                .unwrap();
             let reply = json!({"id":1,"result":{"turn":{"id":turn}}});
             let started =
                 json!({"method":"turn/started","params":{"threadId":"thread","turn":{"id":turn}}});
@@ -281,7 +423,7 @@ mod tests {
             }
             let before = store.session_history("conversation", 0, 0).unwrap();
             assert_eq!(
-                before.last().unwrap().process_lfid.as_deref(),
+                before.last().unwrap().lf_process_id.as_deref(),
                 Some(first.as_str())
             );
             // A reconnect discovers the existing turn; another input receives
@@ -289,7 +431,12 @@ mod tests {
             let mut current = History::default();
             current.record(&store,"conversation",Some(&replacement),Some(&"thread".into()),
                 &json!({"result":{"thread":{"id":"thread","turns":[{"id":turn,"status":"inProgress"}]}}})).unwrap();
-            current.request(&json!({"id":2,"method":"turn/start"}));
+            current
+                .request(
+                    &json!({"id":2,"method":"turn/start"}),
+                    Some((&store, "conversation", &original)),
+                )
+                .unwrap();
             current
                 .record(
                     &store,
@@ -306,7 +453,12 @@ mod tests {
         // that this client started the turn.
         current.record(&store,"conversation",Some(&replacement),Some(&"thread".into()),
             &json!({"method":"turn/started","params":{"threadId":"thread","turn":{"id":"unknown"}}})).unwrap();
-        current.request(&json!({"id":3,"method":"turn/start"}));
+        current
+            .request(
+                &json!({"id":3,"method":"turn/start"}),
+                Some((&store, "conversation", &original)),
+            )
+            .unwrap();
         current
             .record(
                 &store,
@@ -322,16 +474,17 @@ mod tests {
             .find(|event| event.provider_turn.as_deref() == Some("unknown"))
             .unwrap();
         assert_eq!(unknown.kind, SessionEventKind::Started);
-        assert_eq!(unknown.process_lfid, None);
-        assert_eq!(unknown.provider_generation, None);
+        assert_eq!(unknown.lf_process_id, None);
+        assert_eq!(unknown.agent_process_id, None);
         assert!(
             store
                 .record_session_turn_origin(
-                    "conversation",
                     &"thread".into(),
                     "reply-first",
-                    1,
-                    &second
+                    &crate::session::SessionTurnOrigin {
+                        lf_process_id: second,
+                        ..original_origin
+                    }
                 )
                 .is_err(),
             "contradictory actual origin evidence still fails"

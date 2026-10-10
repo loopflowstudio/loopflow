@@ -1,22 +1,19 @@
-use crate::engine::agent::{run_agent, AgentCapabilities, ProcessConfig};
-use crate::engine::config::{load_config_or_default, Config};
-use crate::engine::git::{current_branch, get_default_branch};
-use crate::engine::identity::WorktreeName;
-use crate::engine::naming::git_user;
-use crate::engine::target::{resolve_definition, Target};
-use crate::engine::worktrees::{
+use crate::agent::{run_agent, AgentCapabilities, ProcessConfig};
+use crate::config::{load_config_or_default, Config};
+use crate::definition::{resolve_definition, Target};
+use crate::flow::load_skill;
+use crate::git::worktree_name::WorktreeName;
+use crate::git::worktrees::{
     create_from_placement_plan, diff_shortstats, list_worktrees, list_worktrees_timed,
     main_repo_root, plan_placement, prune_worktrees, sibling_worktree_name,
     sibling_worktree_name_with_main, PlacementStrategy, PullRequestState, WorktreePrunePolicy,
     WorktreeSegment,
 };
-use crate::engine::{
-    load_skill, prepare_process_prompt, sync_skills, ContextSourceOverrides, ProcessPromptInput,
-    SkillSyncOptions, Surface,
-};
+use crate::git::{current_branch, get_default_branch};
 use crate::lf::commands::util::find_repo_root;
 use crate::lf::output::{column_width, Colors};
 use crate::lf::{CronCommand, PrCommand, ReleaseCommand, RepoCommand, WtCommand};
+use crate::naming::git_user;
 use crate::ops::OpsError;
 use crate::ops::{
     abandon_branch, abort_sync_after_authorization, abort_sync_for_resolution, arm,
@@ -28,6 +25,12 @@ use crate::ops::{
     CronSource, CronSpec, CronTargetKind, LandOptions, PrOptions, Progress, SyncOptions,
     SystemLaunchctl,
 };
+use crate::prompt::process::prepare_process_prompt;
+use crate::prompt::process::ContextSourceOverrides;
+use crate::prompt::process::ProcessPromptInput;
+use crate::prompt::Surface;
+use crate::skills::sync_skills;
+use crate::skills::SkillSyncOptions;
 use crate::store::RegistryUnavailable;
 use anyhow::{anyhow, Result};
 use std::collections::HashSet;
@@ -131,7 +134,7 @@ pub fn run_release(cmd: &ReleaseCommand) -> Result<()> {
     let progress = CliProgress;
     match cmd {
         ReleaseCommand::History { wave, days, json } => {
-            let repo = crate::engine::worktrees::main_repo_root(&find_repo_root()?)?;
+            let repo = crate::git::worktrees::main_repo_root(&find_repo_root()?)?;
             let now = chrono::Utc::now().timestamp();
             let history = crate::ops::cron::history::release_history(
                 &crate::store::lf_home_dir(),
@@ -635,7 +638,7 @@ pub(crate) fn land_repo(
     })?;
     if let Some(pr) = pr {
         if options.wait_and_fix {
-            crate::engine::agent::register_interrupt_cleanup(|| {
+            crate::agent::register_interrupt_cleanup(|| {
                 eprintln!("Landing wait interrupted; merge intent retained.");
             });
             crate::ops::pr_landing::wait_for_merge(repo_root, options, &pr).map_err(|error| {
@@ -1910,7 +1913,7 @@ pub fn run_wt(cmd: &WtCommand) -> Result<()> {
         } => {
             if *persistent && !*plan {
                 let repo = find_repo_root()?;
-                let workspace = crate::engine::worktrees::ensure_agent_worktree(
+                let workspace = crate::git::worktrees::ensure_agent_worktree(
                     &repo,
                     WorktreeSegment::parse(name)?,
                 )?;
@@ -1978,7 +1981,7 @@ fn wt_create(name: &str, dry_run: bool) -> Result<()> {
     Ok(())
 }
 
-fn print_placement_plan(plan: &crate::engine::worktrees::PlacementPlan) {
+fn print_placement_plan(plan: &crate::git::worktrees::PlacementPlan) {
     println!("branch: {}", plan.branch);
     println!("base: {}", plan.base_ref);
     println!("worktree: {}", plan.worktree_path.display());
@@ -2603,14 +2606,14 @@ fn process_skill_agent(
     )?;
 
     let agent = prepared.config.agent();
-    let (provider, model) = crate::engine::parse_agent(agent);
+    let (provider, model) = crate::config::parse_agent(agent);
     let cwd = prepared
         .config
         .cwd
         .clone()
         .unwrap_or_else(|| repo_root.to_path_buf());
     let context = crate::trace::PreparedTurnContext::from_prompts(
-        &crate::engine::agent::system_prompt_with_structured_replies(&prepared.config),
+        &crate::agent::system_prompt_with_structured_replies(&prepared.config),
         &prepared.config.task_prompt,
     );
     let capture = crate::session_record::CaptureHandle::begin_with_context(

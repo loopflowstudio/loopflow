@@ -1,16 +1,31 @@
+pub mod agent;
 pub mod build_info;
+pub mod builtins;
 pub mod chat;
 pub mod child;
+pub mod command;
+pub mod config;
 pub mod context_usage;
+pub mod definition;
 pub mod durable;
-pub mod engine;
+pub mod error;
+pub mod flow;
+pub mod git;
 pub mod harness;
 pub mod id;
 pub mod installation;
 pub mod journal;
 pub mod lf;
+pub(crate) mod machine_route;
+pub mod naming;
+pub(crate) mod os_process;
+pub mod platform;
 pub mod process;
+pub mod prompt;
+pub mod skills;
 pub mod task_work;
+pub(crate) mod terminal_title;
+pub mod workflow;
 // Build-time parsing lives here so its golden tests compile against the exact parser.
 #[allow(dead_code)]
 pub(crate) mod migration_drafts;

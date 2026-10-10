@@ -406,7 +406,7 @@ Project's `workflow:` (`feature`, `code`, `research`, or a file in
 nodes: each `lf task run` takes one edge leaving the current node and runs
 that edge's Flow, and at a node the Task waits on you in its conversation.
 See [workflows](authoring.md#workflows).
-Each launch starts a fresh Flow: one driver process holding the expanded graph
+Each launch starts a fresh Flow: one Flow process holding the expanded graph
 and the step processes it starts. Every Flow remains history and none is privileged. A finished Flow
 leaves Task Work open until an explicit completion or delivery operation
 settles it.
@@ -450,7 +450,7 @@ turns or process exits. Repeat completion to retry pending planning writeback.
 
 `ship` waits for merge, then performs follow-through. A manual merge or stopped
 finishing Flow stays visibly pending until the next Task/Wave operation recovers
-it with `finish-delivery`, after inspecting live drivers. No fresh gate or landing
+it with `finish-delivery`, after inspecting live Flow processes. No fresh gate or landing
 is required. The source completes after filing, without waiting for the children.
 
 A due follow-up returns on its owning Wave's next operation, even if unstarted.

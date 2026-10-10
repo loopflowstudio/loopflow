@@ -121,7 +121,7 @@ lf flow list                             # autonomous Flow definitions
 lf flow customize pursue                 # print its local source path
 ```
 
-A Flow whose driver died leaves its Processes as history. No command resumes it. To change direction or recover:
+A Flow whose process died leaves its Processes as history. No command resumes it. To change direction or recover:
 
 ```bash
 lf task interrupt EXP-12             # end the active provider turn
@@ -307,8 +307,8 @@ An open conversation keeps the instructions it launched with; `replace` it
 after an upgrade.
 
 Monitor keeps live processes, recorded outcomes and missing observations distinct.
-A process has a durable `lfid` and an optional Unix `pid`. Inspect by LFID; PIDs
-can be reused. `parent_process_lfid` names the recorded parent, and historical
+A process has a durable `id` and an optional Unix `pid`. Inspect by `id`; PIDs
+can be reused. `parent_lf_process_id` names the recorded parent, and historical
 rows without PID evidence keep `pid: null`.
 Its overview explains each item's state and next action. A mechanical Process has
 no provider conclusion. JSON reads emit one document; the active watch emits
@@ -503,7 +503,7 @@ lf session list --task LOO-358 --interactive all --history
 `--waiting` narrows that selection to conversations waiting on you. In Desktop,
 a program's OSC 7501 report takes precedence: any blocked record means Waiting,
 as does idle for an interactive Session. Working, done, error and explicit clear
-suppress the quiet-time inference for that provider generation. A blocked child
+suppress the quiet-time inference for that AgentProcess. A blocked child
 still counts when its parent reports working.
 
 Without reports, the existing provider stream supplies questions, hand-back and
@@ -542,7 +542,7 @@ workspace; enter its printed path before editing.
 Primary conversations reuse their respective worktrees, including after replacement.
 They display a workspace without gaining Task membership. Moved checkouts are
 rediscovered; missing checkouts recover committed branch state. Live conversations
-keep their placement until an idle driver boundary.
+keep their placement until their attached LfProcess is idle.
 
 Persistent workspaces retain scratch locally through commit, sync, publication and
 landing. Selected-path commits preserve unrelated staged edits. Publication pushes

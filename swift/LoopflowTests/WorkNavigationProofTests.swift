@@ -142,7 +142,7 @@ struct WorkNavigationProofTests {
             return ["id": id, "run_id": id, "interactive": true, "work": work, "title": title, "detail": "claude",
              "provider": "claude", "cwd": cwd, "state": "active", "ready_summary": NSNull(), "work_path": NSNull(),
              "actions": sessionActionFixture(state: "active"), "title_source": "generated",
-             "task_primary": false, "flow_membership": ["kind": "independent"], "task_ids": taskIds, "provider_generation": 1, "terminal_ids": [], "open_argv": ["must-not-launch"]]
+             "task_primary": false, "flow_membership": ["kind": "independent"], "task_ids": taskIds, "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids": [], "open_argv": ["must-not-launch"]]
         }
         let attached = [
             record("release-outcomes", title: "Release outcomes", work: ["kind": "task", "id": "work-0-0"], cwd: "/src/loopflow.calmer"),
@@ -539,7 +539,7 @@ struct WorkNavigationProofTests {
         }
         // A historical invocation must not jump into an identically keyed node
         // of the current Flow. The real chip leaves this Session selected.
-        try await named.membership(.step(flow: "feature", flowProcessLfid: "prior-invocation",
+        try await named.membership(.step(flow: "feature", flowLfProcessId: "prior-invocation",
                                         step: "loop-or-next", node: 5, iterations: [[1, 1]],
                                         occurrence: .past), for: "first")
         await model.refresh()
@@ -578,7 +578,7 @@ struct WorkNavigationProofTests {
             records.append([
                 "id": "row-\(index)", "run_id": "row-\(index)", "interactive": true, "work": NSNull(),
                 "title": "Conversation \(index)", "detail": "Local shell", "cwd": path,
-                "state": "active", "ready_summary": NSNull(), "work_path": NSNull(), "actions": sessionActionFixture(state: "active"), "title_source": "generated", "task_primary": false, "flow_membership": ["kind": "independent"], "task_ids": [], "provider_generation": 1, "terminal_ids": [shell],
+                "state": "active", "ready_summary": NSNull(), "work_path": NSNull(), "actions": sessionActionFixture(state: "active"), "title_source": "generated", "task_primary": false, "flow_membership": ["kind": "independent"], "task_ids": [], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids": [shell],
                 "open_argv": ["must-not-launch"],
             ])
         }
@@ -747,12 +747,12 @@ struct WorkNavigationProofTests {
         [{"id":"navigation-split", "run_id": "navigation-split", "interactive": true,
           "work":{"kind":"task","id":"ts_review00000000000000000000000000"},
           "title":"Navigation proof","detail":"Local cat PTY","cwd":"/tmp",
-          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(state: "active")),"title_source":"generated","task_primary":false, "flow_membership":{"kind":"independent"},"task_ids": ["ts_review00000000000000000000000000"], "provider_generation": 1, "terminal_ids":[],"open_argv":["/bin/cat"]}]
+          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(state: "active")),"title_source":"generated","task_primary":false, "flow_membership":{"kind":"independent"},"task_ids": ["ts_review00000000000000000000000000"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids":[],"open_argv":["/bin/cat"]}]
         """
         let otherRecords = """
         [{"id":"context-session", "run_id": "context-session", "interactive": true,"work":null,
           "title":"Other repository conversation","detail":"Existing external client","cwd":"/src/context",
-          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(state: "active")),"title_source":"generated","task_primary":false, "flow_membership":{"kind":"independent"},"task_ids": [], "provider_generation": 1, "terminal_ids":[],"open_argv":["lf","session","connect","context-session"]}]
+          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(state: "active")),"title_source":"generated","task_primary":false, "flow_membership":{"kind":"independent"},"task_ids": [], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids":[],"open_argv":["lf","session","connect","context-session"]}]
         """
         let query = RegistryQuery { args, cwd in
             switch args.first {

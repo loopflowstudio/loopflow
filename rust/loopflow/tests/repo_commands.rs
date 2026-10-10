@@ -4,7 +4,7 @@ use std::fs;
 use std::path::Path;
 use std::process::{Command, Output};
 
-use loopflow::engine::flow::Command as FlowCommand;
+use loopflow::flow::Command as FlowCommand;
 use loopflow_test_support::TestRepo;
 use serde_json::Value;
 use support::EnvGuard;

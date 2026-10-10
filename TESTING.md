@@ -503,19 +503,6 @@ CI installs stable on each run. An older local compiler can miss new Clippy
 lints and standard-library deprecations. Put rustup's proxies first on `PATH`
 so Cargo subcommands cannot select an older Homebrew Clippy or rustfmt.
 
-Task cancellation uses a real child CLI with a disposable scorecard effect.
-Build the sibling CLI before running this library-only proof:
-
-```bash
-cargo build -p loopflow --bin lf
-cargo test -p loopflow --lib task_stop_waits_for_selected_step_after_driver_death
-```
-
-The proof covers retained and released driver claims, child exit, interrupted
-Process history, and an unresolved mechanical outcome. Linux also holds interrupt
-cleanup after the effect exits to exercise settlement ordering. It uses no
-configured provider or installed Machine.
-
 For shared repository discovery or CLI dispatch changes, include the PM and
 Wave consumers in the focused check:
 
@@ -540,7 +527,7 @@ directory without Git metadata; Work operations still enforce repository ownersh
 cargo nextest run -p loopflow --test status_tests --test wave_repository_ownership --no-fail-fast
 ```
 
-Task decision feedback has a focused store-and-driver check:
+Task decision feedback has a focused store-and-Flow-runner check:
 
 ```bash
 cargo test -p loopflow --lib task_decision_live_unblock_returns_feedback_without_navigation -- --test-threads=1
@@ -597,7 +584,7 @@ Loopflow installed, a shared launch gets no account home or credential
 variable, and an isolated launch stays in its account's home. On macOS it
 writes and removes one Keychain item scoped to its temporary config directory.
 The fixture copies the candidate, uses private Machines and stops only its identified
-engine children. Native execution uses synthetic Responses, not configured
+provider process children. Native execution uses synthetic Responses, not configured
 accounts or installed data. Ordinary retry, usage, binding and review behavior
 belong in `session_lifecycle_tests`; Chapter convergence belongs in
 `ops::chapter::tests`, including interrupted rotation and second-Machine sync.
@@ -679,7 +666,7 @@ not cover the prompts that generate their input. Update obsolete assertions to
 match the intended contract instead of restoring retired commands in the prose.
 
 ```bash
-cargo test -p loopflow --lib engine::builtins::tests
+cargo test -p loopflow --lib builtins::tests
 ```
 
 When changing the builtin catalog or Flow composition, also exercise discovery.
@@ -692,7 +679,7 @@ cargo test -p loopflow --test cli_discovery list_preserves_kinds_overrides_sourc
 
 Catalog retirement also affects historical migration tests. Keep their persisted
 names and data-preservation assertions at the migration boundary; current catalog
-resolution belongs in engine tests. Include the legacy Flow repair check:
+resolution belongs in skill catalog tests. Include the legacy Flow repair check:
 
 ```bash
 cargo test -p loopflow --lib legacy_task_flow_repair
@@ -703,7 +690,7 @@ personal agent directories and pruning. `sync-skills --repo` exports repository
 skills and Flow recipes into the checkout; default sync exports globally.
 
 ```bash
-cargo test -p loopflow --lib engine::skills::tests
+cargo test -p loopflow --lib skills::tests
 ```
 
 After editing embedded skills, directions, surfaces, or prompt assembly, run
@@ -829,7 +816,7 @@ fix, verify the installation harness uses the same toolchain policy; a host lint
 pass does not verify the container build. Use `--image` to reproduce an older
 toolchain explicitly.
 
-CLI owner-tree changes must include `cargo test -p loopflow --lib engine::flow_graph::tests`
+CLI owner-tree changes must include `cargo test -p loopflow --lib flow::graph::tests`
 to verify builtin operation labels, plus the affected proofs above. The regular
 Rust suite skips those installation proofs; a skipped case is not verification.
 Task status reads a Flow from recorded command outcomes and OS liveness. Run
@@ -1064,7 +1051,7 @@ Machine or prove configured-provider resumption.
 
 When changing how a Flow step is described or read back, include the step
 argument and Process inventory tests and the public Session lifecycle proofs. A
-Flow is its driver Process and step Processes; assert on those Processes and on the Session
+Flow is its Flow process and step Processes; assert on those Processes and on the Session
 turn a step Process captured.
 
 ```bash
@@ -1101,7 +1088,7 @@ fixture, restore it afterward, and serialize environment changes with
 in conversation tests; keep Session spawning mocked. Listing waiting Sessions
 also resolves the executable for their open command, even with spawning mocked.
 Enter `journal::with_runtime` after selecting the fixture Machine so its Process and
-the Session driver references share the same database. Simulated finite-provider
+the Session attachment references share the same database. Simulated finite-provider
 harnesses must record their owned child exit; an absent endpoint is not exit
 evidence.
 
@@ -1147,6 +1134,9 @@ to PATH, so an inherited CLI directory containing `claude` can outrank a fixture
 fake provider and launch the real one. A temporary `LF_HOME` alone does not prevent
 this. Keep the failed evidence if this occurs, stop the test group, and verify the
 fixture under the corrected executable context before completing the suite.
+`test_network.py` clears `LF_*` before exec; provider fixtures must pin `LF_BIN`
+inside that boundary. Integration `EnvGuard` uses `CARGO_BIN_EXE_lf`, not the
+installed CLI directory, so its provider stand-ins remain first on PATH.
 
 Default-runtime selection reads the OS account's installation records. Use the
 installation harness for default-runtime proofs; never replace the machine's
@@ -1166,6 +1156,9 @@ Loopflow can hide the CI failure.
 Include direct provider-harness startup tests in this check: even an expected
 spawn failure first resolves the conversation's `lf`. Pin a fixture executable
 under the environment lock and restore the pin afterward.
+Attachment-rejection fixtures must also supply provider version probes and restrict
+PATH to their stand-ins: Claude checks `--version` before launching on first input.
+A locally installed provider must not make an otherwise incomplete fixture pass.
 
 Changes to terminal provider probes or spawning must run both `session_cli_tests`
 and `agent_startup_tests`. An executable that exits with an error still started
@@ -1195,8 +1188,8 @@ must retain Wave placement before projecting accepted Projects.
 ### Shared identity fixtures
 
 When changing Session activity or Waiting, run `session_cli_tests` and
-`work_watch` together. Direct SQL fixtures must carry both driver and provider
-generations, matching the production activity writer. Rebuild both SwiftPM and
+`work_watch` together. Direct SQL fixtures must carry both the attachment
+token and the AgentProcess id, matching the production activity writer. Rebuild both SwiftPM and
 the Xcode test targets after shared model renames; Foundation types such as
 `Foundation.Process` need explicit qualification where names overlap.
 

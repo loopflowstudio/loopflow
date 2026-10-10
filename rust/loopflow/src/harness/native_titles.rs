@@ -30,10 +30,10 @@ pub(crate) fn name_native_session(provider: &str, input: &Value) -> anyhow::Resu
         return Ok(None);
     };
     // lf's assembled context has its own attributed name and title transport.
-    if prompt == crate::engine::prompt::INITIAL_TURN_PROMPT {
+    if prompt == crate::prompt::INITIAL_TURN_PROMPT {
         return Ok(None);
     }
-    let Some(title) = crate::engine::naming::request_title(prompt) else {
+    let Some(title) = crate::naming::request_title(prompt) else {
         return Ok(None);
     };
     if let Some(thread) = input["session_id"].as_str() {
@@ -190,7 +190,7 @@ mod tests {
         assert!(name_native_session("claude", &input).unwrap().is_none());
         input.as_object_mut().unwrap().remove("session_title");
         for prompt in [
-            json!(crate::engine::prompt::INITIAL_TURN_PROMPT),
+            json!(crate::prompt::INITIAL_TURN_PROMPT),
             json!("..."),
             Value::Null,
         ] {

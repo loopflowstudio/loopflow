@@ -1385,14 +1385,14 @@ mod tests {
             INSERT INTO task_events(task_id,kind_json,created_at) VALUES('research','{"kind":"completed","summary":"accepted findings"}',4);"#).unwrap();
         conn.execute_batch(r#"
             UPDATE tasks SET pm_writeback_json='{"state":"pending","operation":"complete_task","error":"offline"}' WHERE id='single';
-            INSERT INTO processes(lfid,trace_id,command,cwd,started_at)
-                VALUES('held','trace','lf run proof','/single',2);
-            INSERT INTO task_workflows(task_id,graph,node,edge,process_lfid,updated_at)
-                VALUES('single','{"name":"proof","nodes":[],"edges":[]}','start',0,'held',2);
             INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id)
                 VALUES('conversation','Retained conversation','human',2,0,'/single','single','w');
             UPDATE task_prs SET parent_pr_id='old-pr' WHERE id='current-pr';
         "#).unwrap();
+        conn.execute_batch(include_str!(
+            "../../tests/fixtures/migrations/optional_task_pr_held_process.sql"
+        ))
+        .unwrap();
         if _draft_is_canonical("local_planning") {
             // Exercise the combined release, not an intermediate draft schema.
             apply_sqlite(&conn).unwrap();
@@ -1400,6 +1400,8 @@ mod tests {
             super::_migration_transaction(&conn, |conn| {
                 conn.execute_batch(&current_draft_sql("local_planning"))?;
                 conn.execute_batch(&current_draft_sql("optional_task_pr"))?;
+                conn.execute_batch(&current_draft_sql("agent_process"))?;
+                conn.execute_batch(&current_draft_sql("lf_process_ids"))?;
                 validate_foreign_keys(conn)
             })
             .unwrap();
@@ -1436,7 +1438,7 @@ mod tests {
             .unwrap();
         assert_eq!(pending, ("completed".into(), 1, 0));
         let execution: (String, i64, String, Option<i64>) = conn.query_row(
-            "SELECT w.node,w.edge,w.process_lfid,p.completed_at FROM task_workflows w JOIN processes p ON p.lfid=w.process_lfid WHERE w.task_id='single'",
+            "SELECT w.node,w.edge,w.lf_process_id,p.completed_at FROM task_workflows w JOIN processes p ON p.id=w.lf_process_id WHERE w.task_id='single'",
             [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?)),
         ).unwrap();
         assert_eq!(execution, ("start".into(), 0, "held".into(), None));
@@ -1512,26 +1514,10 @@ mod tests {
     fn process_names_preserves_released_history_and_constraints() {
         let conn = open();
         apply_before_current_draft(&conn, "process_names");
-        conn.execute_batch(r#"
-            PRAGMA foreign_keys = ON;
-            INSERT INTO execs(id,trace_id,command,cwd,started_at)
-                VALUES('parent','trace','lf run code','/repo/task',1);
-            INSERT INTO execs(id,trace_id,parent_exec_id,command,started_at,completed_at,outcome,exit_code,error)
-                VALUES('child','trace','parent','lf skill implement',2,3,'failed',42,'retained error');
-            INSERT INTO waves(id,name,repo,created_at,project_activation_exec_id) VALUES('w','proof','/repo',1,'parent');
-            INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES('p','w','external-p',1);
-            INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,created_at,worktree)
-                VALUES('t','p','external-t','PROOF-1',1,'/repo/task');
-            INSERT INTO agent_sessions(id,title,title_source,created_at,cwd,task_id,wave_id,driver_exec_id,provider_exec_id,provider_thread,input_published)
-                VALUES('s','Keep conversation','human',1,'/repo/task','t','w','child','child','native-thread',1);
-            INSERT INTO session_events(session_id,exec_id,kind,receipt_key,observed_at,payload)
-                VALUES('s','child','captured','capture',2,'{"exec":"opaque history"}');
-            INSERT INTO flow_execs(exec_id,flow,graph) VALUES('parent','code','{}');
-            INSERT INTO flow_exec_steps(flow_exec_id,exec_id,node,iterations) VALUES('parent','child',7,'[[2,1]]');
-            INSERT INTO task_workflows(task_id,graph,node,edge,exec_id,updated_at) VALUES('t','{}','start',0,'parent',2);
-            INSERT INTO task_workflow_moves(task_id,workflow,kind,from_node,to_node,edge,exec_id,note,at)
-                VALUES('t','code','chose','start','start',0,'parent','Retained decision',2);
-        "#).unwrap();
+        conn.execute_batch(include_str!(
+            "../../tests/fixtures/migrations/process_names_released.sql"
+        ))
+        .unwrap();
         let rows = |table: &str| -> Vec<Vec<rusqlite::types::Value>> {
             let mut query = conn.prepare(&format!("SELECT * FROM {table}")).unwrap();
             let columns = query.column_count();
@@ -1578,16 +1564,19 @@ mod tests {
         assert!(conn
             .execute("UPDATE flow_process_steps SET node=8", [])
             .is_err());
-        assert!(conn.execute("INSERT INTO flow_process_steps(flow_process_lfid,process_lfid,node,iterations) VALUES('parent','parent',0,'[]')", []).is_err());
+        assert!(conn
+            .execute_batch(include_str!(
+                "../../tests/fixtures/migrations/process_names_unstarted_step.sql"
+            ))
+            .is_err());
         conn.execute("UPDATE tasks SET started_at=started_at WHERE id='t'", [])
             .unwrap();
         assert!(conn
             .execute("UPDATE tasks SET started_at=started_at+1 WHERE id='t'", [])
             .is_err());
-        conn.execute(
-            "UPDATE processes SET completed_at=4,outcome='succeeded',exit_code=0 WHERE lfid='parent'",
-            [],
-        )
+        conn.execute_batch(include_str!(
+            "../../tests/fixtures/migrations/process_names_finish_parent.sql"
+        ))
         .unwrap();
         let after: i64 = conn
             .query_row(
@@ -2378,8 +2367,8 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            serde_json::from_str::<crate::engine::workflow::WorkflowDefinition>(&placed.0).unwrap(),
-            crate::engine::workflow::unplanned()
+            serde_json::from_str::<crate::workflow::WorkflowDefinition>(&placed.0).unwrap(),
+            crate::workflow::unplanned()
         );
         assert_eq!((placed.1, placed.2, placed.3, placed.4), (25, None, 25, 1));
         assert_eq!(
@@ -2442,7 +2431,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(workflow, ("custom".into(), "custom".into(), None));
-        // No saved Flow becomes a Flow exec: the driver-written record starts empty.
+        // No saved Flow becomes a Flow exec: the Flow process record starts empty.
         let flows: i64 = conn
             .query_row(
                 "SELECT (SELECT count(*) FROM flow_execs)+(SELECT count(*) FROM flow_exec_steps)",
@@ -2705,8 +2694,7 @@ mod tests {
     async fn retired_home_landings_remain_readable_and_fence_old_supervisors() {
         use std::sync::Arc;
 
-        use crate::ops::pr_landing::{reconcile_pr_landing, LandingDriver, LandingObservation};
-        use crate::ops::OpsResult;
+        use crate::ops::pr_landing::{reconcile_pr_landing, LandingObservation, ObservePr};
         use crate::pr_landing::{LandingPlacement, LandingSupervisor, PrLandingId, PrLandingState};
         use crate::store::sqlite::SqliteStore;
         use time::OffsetDateTime;
@@ -2866,22 +2854,13 @@ mod tests {
         drop(conn);
         drop(store);
 
-        struct Merged;
-        impl LandingDriver for Merged {
-            fn observe(&self, _: &crate::pr_landing::PrLanding) -> OpsResult<LandingObservation> {
-                Ok(LandingObservation::Merged {
-                    head_sha: "head".into(),
-                    merge_commit: "merge".into(),
-                })
-            }
-            fn repair(
-                &self,
-                _: &crate::pr_landing::PrLanding,
-                _: &crate::work::task::CiIncident,
-            ) -> OpsResult<()> {
-                panic!("merged delivery must not start a repair")
-            }
-        }
+        // A merged delivery is observed without ever being offered a repair.
+        let merged_observation: ObservePr = Arc::new(|_| {
+            Ok(LandingObservation::Merged {
+                head_sha: "head".into(),
+                merge_commit: "merge".into(),
+            })
+        });
         let store = Arc::new(
             crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(path))
                 .await
@@ -2889,14 +2868,15 @@ mod tests {
         );
         let id = PrLandingId::from_raw("home_taskless");
         let landing = store.get_pr_landing(&id).await.unwrap().unwrap();
-        let merged = reconcile_pr_landing(store.clone(), landing, Arc::new(Merged))
+        let merged = reconcile_pr_landing(store.clone(), landing, merged_observation.clone(), None)
             .await
             .unwrap();
         assert_eq!(merged.state, PrLandingState::Merged);
         assert_eq!(merged.merge_commit.as_deref(), Some("merge"));
-        let repeated = reconcile_pr_landing(store.clone(), merged.clone(), Arc::new(Merged))
-            .await
-            .unwrap();
+        let repeated =
+            reconcile_pr_landing(store.clone(), merged.clone(), merged_observation, None)
+                .await
+                .unwrap();
         assert_eq!(repeated, merged);
         assert_eq!(
             store.pending_pr_landings("owner/repo").await.unwrap().len(),

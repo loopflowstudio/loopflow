@@ -238,7 +238,7 @@ pub(crate) async fn admit(store: &SharedStore, id: &str) -> Result<Option<LfSess
             iterations: None,
             task_id: None,
             wave_id: None,
-            flow_process_lfid: None,
+            flow_lf_process_id: None,
             work_source: None,
             bound_at: None,
             interactive: true,

@@ -60,7 +60,7 @@ pub(crate) fn render_task_context(
 
 fn render_wave_context(repo: &Path, wave: &str, metric_context: &str) -> String {
     // Authored goals and memory enter once through the prompt document gatherer.
-    let flows = match crate::engine::available_flow_names(repo) {
+    let flows = match crate::flow::available_flow_names(repo) {
         Ok(names) => names
             .iter()
             .map(|flow| format!("- {flow}"))
@@ -156,13 +156,10 @@ pub async fn resolve_work_selection(
         if let Ok(Some(workflow)) = store.sqlite.workflow(&task.id) {
             context.push_str(&format!("\n\n{}", workflow.guidance(&task.plan.identifier)));
         }
-        let cwd = if crate::engine::git::current_branch(repo)
-            .ok()
-            .flatten()
-            .as_deref()
+        let cwd = if crate::git::current_branch(repo).ok().flatten().as_deref()
             == Some(task.branch.as_str())
         {
-            crate::engine::git::worktree_root(repo).unwrap_or_else(|_| repo.to_path_buf())
+            crate::git::worktree_root(repo).unwrap_or_else(|_| repo.to_path_buf())
         } else {
             task.worktree()?.clone()
         };
@@ -195,7 +192,7 @@ pub async fn resolve_work_selection(
         let cwd = if crate::repository::CanonicalRepo::discover(Path::new(wave.repo()))
             .is_ok_and(|canonical| canonical.contains(repo))
         {
-            crate::engine::git::worktree_root(repo).unwrap_or_else(|_| repo.to_path_buf())
+            crate::git::worktree_root(repo).unwrap_or_else(|_| repo.to_path_buf())
         } else {
             PathBuf::from(wave.repo())
         };
@@ -256,7 +253,7 @@ pub async fn resolve_checkout_binding(
     )
     .await?;
     binding.source = crate::session::WorkSource::Checkout;
-    binding.cwd = crate::engine::git::worktree_root(repo).unwrap_or_else(|_| repo.to_path_buf());
+    binding.cwd = crate::git::worktree_root(repo).unwrap_or_else(|_| repo.to_path_buf());
     Ok(Some(binding))
 }
 
@@ -415,14 +412,14 @@ mod tests {
             .unwrap();
         let seed = super::render_wave_context(tmp.path(), "release", "");
         for message in [None, Some(seed)] {
-            let prepared = crate::engine::process_prompt::prepare_process_prompt(
-                &crate::engine::config::Config {
+            let prepared = crate::prompt::process::prepare_process_prompt(
+                &crate::config::Config {
                     diff_files: false,
                     diff: false,
                     paste: false,
                     ..Default::default()
                 },
-                crate::engine::process_prompt::ProcessPromptInput {
+                crate::prompt::process::ProcessPromptInput {
                     repo_root: tmp.path().to_path_buf(),
                     wave: Some("release".into()),
                     docs: vec!["wave/release/GOAL.md".into()],
@@ -551,7 +548,7 @@ mod tests {
                 store.get_task(&task.id).await.unwrap().unwrap().wave_id,
                 *release.id()
             );
-            let components = crate::engine::gather_context(&crate::engine::GatherContextOpts {
+            let components = crate::prompt::gather_context(&crate::prompt::GatherContextOpts {
                 repo_root: binding.cwd,
                 wave: Some(binding.wave_name),
                 include_diff: false,
@@ -559,7 +556,7 @@ mod tests {
                 ..Default::default()
             })
             .unwrap();
-            let prompt = crate::engine::format_prompt(&components);
+            let prompt = crate::prompt::format_prompt(&components);
             let ancestor = if address.starts_with("product/") {
                 "Product memory"
             } else {
@@ -745,14 +742,21 @@ mod tests {
             let history = crate::session_record::read_provider_session(&capture.artifact_dir())
                 .unwrap()
                 .unwrap();
-            let resumed = crate::lf::commands::util::resume_session(
-                "codex",
-                None,
-                repo.path(),
-                &capture.artifact_key(),
-                &history,
+            // The resuming invocation and its capture share this fixture's store.
+            let resumed = crate::journal::with_test_ledger(
+                crate::store::database_path_from_env().unwrap(),
+                || {
+                    crate::lf::commands::util::resume_session(
+                        "codex",
+                        None,
+                        repo.path(),
+                        &capture.artifact_key(),
+                        &history,
+                    )
+                },
             );
-            assert!(resumed.unwrap_err().to_string().contains("was deleted"));
+            let error = resumed.unwrap_err().to_string();
+            assert!(error.contains("was deleted"), "{error}");
             assert!(
                 crate::session_record::read_provider_clients(&capture.artifact_dir())
                     .unwrap()
@@ -817,7 +821,7 @@ mod tests {
                 }),
                 task_id,
                 wave_id: None,
-                flow_process_lfid: None,
+                flow_lf_process_id: None,
                 bound_at: None,
                 interactive: false,
                 repo: None,

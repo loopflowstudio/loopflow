@@ -7,7 +7,7 @@ use clap::Parser;
 use tracing::debug;
 use tracing_subscriber::EnvFilter;
 
-use loopflow::engine::target::DefinitionKind;
+use loopflow::definition::DefinitionKind;
 use loopflow::journal::{self, with_runtime, LfEventFields, LfEventType, LfNode};
 use loopflow::lf::{
     Cli, Commands, FlowCommand, InstallCommand, SkillCommand, TaskCommand, WaveCommand,
@@ -355,7 +355,7 @@ fn in_directory_runtime<T>(
 
 fn run_default_agent(cli: &Cli, command: &[String]) -> anyhow::Result<()> {
     let repo_root = loopflow::lf::commands::util::find_repo_root()?;
-    let moved = loopflow::engine::worktrees::move_default_agent_to_worktree(&repo_root)?;
+    let moved = loopflow::git::worktrees::move_default_agent_to_worktree(&repo_root)?;
     match moved {
         Some(worktree) => {
             eprintln!("moved to `{}`", worktree.path.display());
@@ -415,8 +415,8 @@ fn with_skill_runtime<T>(
 fn resolve_cli_target(
     cli: &mut Cli,
     args: &[String],
-) -> anyhow::Result<Option<(loopflow::engine::target::Target, Option<String>)>> {
-    use loopflow::engine::target::Target;
+) -> anyhow::Result<Option<(loopflow::definition::Target, Option<String>)>> {
+    use loopflow::definition::Target;
 
     let (name, kind, message) = match &cli.command {
         Some(Commands::Flow {
@@ -442,7 +442,7 @@ fn resolve_cli_target(
             let index =
                 first_target_index(&args[1..]).expect("parsed builtin has a command token") + 1;
             return Ok(Some((
-                Target::Command(loopflow::engine::Command {
+                Target::Command(loopflow::flow::Command {
                     command: args[index].clone(),
                     args: args[index + 1..].to_vec(),
                 }),
@@ -453,7 +453,7 @@ fn resolve_cli_target(
     };
     let repo = loopflow::repo::working_directory()?;
     if let Some(path) = &cli.skill_input {
-        let invocation = loopflow::engine::skill_invocation::SkillInvocation::read(path)?;
+        let invocation = loopflow::skills::invocation::SkillInvocation::read(path)?;
         anyhow::ensure!(
             invocation.skill.name == name,
             "captured skill does not match {name}"
@@ -462,18 +462,18 @@ fn resolve_cli_target(
         cli.resolved_invocation = Some(invocation);
         return Ok(Some((target, message)));
     }
-    let target = loopflow::engine::target::resolve_definition(&repo, &name, kind)?;
+    let target = loopflow::definition::resolve_definition(&repo, &name, kind)?;
     Ok(Some((target, message)))
 }
 
 fn execute_target(
-    target: loopflow::engine::target::Target,
+    target: loopflow::definition::Target,
     message: Option<&str>,
     cli: &Cli,
     args: &[String],
     binding: Option<&loopflow::ops::WorkBinding>,
 ) -> anyhow::Result<()> {
-    use loopflow::engine::target::Target;
+    use loopflow::definition::Target;
 
     match target {
         Target::Command(command) => execute_command(&command, cli, args, binding),
@@ -482,7 +482,7 @@ fn execute_target(
             let name = skill.name.as_str();
             let mut selected = cli.process_options();
             selected.resolved_invocation.get_or_insert_with(|| {
-                loopflow::engine::skill_invocation::SkillInvocation {
+                loopflow::skills::invocation::SkillInvocation {
                     skill: skill.clone(),
                     arguments: message.unwrap_or_default().to_string(),
                 }
@@ -705,7 +705,7 @@ fn print_task_snapshot(
         for process in &snapshot.work.processes {
             println!(
                 "  Process: {}  {}  {}",
-                process.lfid,
+                process.id,
                 process.command.as_deref().unwrap_or("unknown command"),
                 process.outcome.as_deref().unwrap_or("unknown")
             );
@@ -906,13 +906,15 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             Ok(())
         }
         TaskCommand::Reconcile { json } => {
-            // The schedule runs this check every minute; an engine whose driver
+            // The schedule runs this check every minute; an AgentProcess whose attached lf
             // was killed is reaped here before delivery is observed.
-            let engines = loopflow::harness::engine_orphans::reap_orphaned_engines(false);
+            let agents = loopflow::harness::agent_process::reap_agent_processes(false);
             let mut result = loopflow::ops::pr_landing::reconcile_repository(repo)?;
-            match engines {
-                Ok(engines) => result.errors.extend(engines.errors),
-                Err(error) => result.errors.push(format!("engine reap: {error}")),
+            match agents {
+                Ok(agents) => result.errors.extend(agents.errors),
+                Err(error) => result
+                    .errors
+                    .push(format!("AgentProcess settlement: {error}")),
             }
             if *json {
                 println!("{}", serde_json::to_string(&result)?);
@@ -1039,7 +1041,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             } else {
                 println!("{} · {}", issue.id, issue.name);
             }
-            if loopflow::engine::config::load_config_or_default(Some(repo))
+            if loopflow::config::load_config_or_default(Some(repo))
                 .pm
                 .and_then(|pm| pm.linear_team)
                 .is_some()
@@ -1240,7 +1242,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
         TaskCommand::Delete { issue } => {
             let identifier = loopflow::ops::task::task_delete(repo, issue)?;
             println!("{identifier}: removed locally; execution history retained");
-            if loopflow::engine::config::load_config_or_default(Some(repo))
+            if loopflow::config::load_config_or_default(Some(repo))
                 .pm
                 .and_then(|pm| pm.linear_team)
                 .is_some()
@@ -1408,7 +1410,7 @@ fn run() -> anyhow::Result<()> {
         // The target owns command flags, including --verbose; RUST_LOG controls transport logs.
         init_tracing(false);
         loopflow::installation::dispatch_default_cli()?;
-        ctrlc::set_handler(|| loopflow::engine::agent::exit_on_interrupt())
+        ctrlc::set_handler(|| loopflow::agent::exit_on_interrupt())
             .expect("failed to set Ctrl+C handler");
         journal::admit_process(&std::env::current_dir()?, &raw_args);
         loopflow::lf::commands::machine::validate_expected_machine_process()?;
@@ -1460,7 +1462,7 @@ fn run() -> anyhow::Result<()> {
     if !bypasses_installation_startup_gate {
         loopflow::installation::dispatch_default_cli()?;
     }
-    ctrlc::set_handler(|| loopflow::engine::agent::exit_on_interrupt())
+    ctrlc::set_handler(|| loopflow::agent::exit_on_interrupt())
         .expect("failed to set Ctrl+C handler");
 
     if bypasses_installation_startup_gate {
@@ -1706,7 +1708,7 @@ fn dispatch(
 }
 
 fn execute_command(
-    command: &loopflow::engine::Command,
+    command: &loopflow::flow::Command,
     cli: &Cli,
     args: &[String],
     binding: Option<&loopflow::ops::WorkBinding>,
@@ -1776,7 +1778,7 @@ fn execute_command(
             } => {
                 // It runs from the main checkout so its long-lived Process never
                 // counts as live work in a Task's worktree.
-                let root = loopflow::engine::worktrees::main_repo_root(
+                let root = loopflow::git::worktrees::main_repo_root(
                     &loopflow::lf::commands::util::find_repo_root()?,
                 )?;
                 let _cwd = CwdGuard::enter(&root)?;
@@ -2029,11 +2031,11 @@ fn finish_command(result: anyhow::Result<()>) -> anyhow::Result<()> {
             return Err(loopflow::process::CommandExit(code).into());
         }
         if matches!(
-            error.downcast_ref::<loopflow::engine::LoadError>(),
+            error.downcast_ref::<loopflow::error::LoadError>(),
             Some(
-                loopflow::engine::LoadError::TargetNotFound(_)
-                    | loopflow::engine::LoadError::SkillNotFound(_)
-                    | loopflow::engine::LoadError::FlowNotFound(_)
+                loopflow::error::LoadError::TargetNotFound(_)
+                    | loopflow::error::LoadError::SkillNotFound(_)
+                    | loopflow::error::LoadError::FlowNotFound(_)
             )
         ) {
             let error =
@@ -2078,7 +2080,7 @@ mod tests {
 
     #[test]
     fn command_targets_keep_arguments_and_definition_execution_stays_explicit() {
-        use loopflow::engine::target::Target;
+        use loopflow::definition::Target;
 
         let _lock = PROCESS_STATE_LOCK.lock().unwrap();
         let repo = tempfile::tempdir().unwrap();

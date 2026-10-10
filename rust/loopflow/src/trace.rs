@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::engine::prompt::{account_prompt_tokens, count_tokens};
+use crate::prompt::{account_prompt_tokens, count_tokens};
 use crate::store::{StoreError, StoreResult};
 
 pub const TOKENIZER: &str = "cl100k_base";

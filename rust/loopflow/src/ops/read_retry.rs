@@ -5,8 +5,8 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::engine::process::ProcessGroupGuard;
 use crate::ops::{OpsError, OpsResult};
+use crate::os_process::ProcessGroupGuard;
 
 pub(super) fn retry_read<T>(
     operation: &str,

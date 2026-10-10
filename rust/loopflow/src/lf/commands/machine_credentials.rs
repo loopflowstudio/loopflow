@@ -209,7 +209,7 @@ fn remote_command(machine: &Machine, args: &[&str], input: Option<&[u8]>) -> Res
             .join(" "),
     );
     let mut child = Command::new("ssh")
-        .args(crate::engine::machine_route::bounded_ssh_args(
+        .args(crate::machine_route::bounded_ssh_args(
             &machine.route,
             false,
         )?)
@@ -590,9 +590,9 @@ pub(super) async fn prepare_launch(
     );
     if requested.is_empty() && launching {
         let repo = super::util::find_repo_root().ok();
-        let config = crate::engine::config::load_config_or_default(repo.as_deref());
+        let config = crate::config::load_config_or_default(repo.as_deref());
         let agent = cli.agent.as_deref().unwrap_or_else(|| config.agent());
-        let (harness, _) = crate::engine::config::parse_agent(agent);
+        let (harness, _) = crate::config::parse_agent(agent);
         let provider = harness.parse::<Provider>()?;
         let repo_id = crate::provider_account::current_repo_id()?;
         if let Some(accounts) = crate::provider_account::inspect_provider_route(
@@ -636,8 +636,7 @@ mod tests {
     use std::path::Path;
     use std::sync::Arc;
 
-    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-    use base64::Engine;
+    use base64::prelude::*;
     use clap::Parser;
     use serde_json::json;
 
@@ -695,7 +694,8 @@ mod tests {
         fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
     }
     fn codex_credential(email: &str, token: &str) -> String {
-        let claims = URL_SAFE_NO_PAD.encode(json!({"email": email, "sub": "user-123"}).to_string());
+        let claims =
+            BASE64_URL_SAFE_NO_PAD.encode(json!({"email": email, "sub": "user-123"}).to_string());
         json!({"tokens": {"access_token": token, "refresh_token": "fresh-refresh", "id_token": format!("header.{claims}.sig")}}).to_string()
     }
     fn codex(root: &Path) {

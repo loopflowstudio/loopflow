@@ -449,7 +449,7 @@ fn clean_checkout(checkout: &std::path::Path) -> String {
             .unwrap()
             .success());
     }
-    crate::engine::git::rev_parse(checkout, "HEAD").unwrap()
+    crate::git::rev_parse(checkout, "HEAD").unwrap()
 }
 
 async fn local_backlog_tasks(context: &PmTestContext, repo: &std::path::Path) {

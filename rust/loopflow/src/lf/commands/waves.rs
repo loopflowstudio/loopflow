@@ -780,7 +780,7 @@ impl SharedTaskReads {
 /// so the details find them waiting; any other process would only ask twice.
 fn ask_checkouts_ahead(checkouts: &[crate::store::sqlite::TaskCheckout]) {
     const AT_ONCE: usize = 8;
-    if !crate::engine::git::retains_reads() {
+    if !crate::git::retains_reads() {
         return;
     }
     let existing = checkouts
@@ -796,10 +796,10 @@ fn ask_checkouts_ahead(checkouts: &[crate::store::sqlite::TaskCheckout]) {
                     existing.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
                 {
                     // The answers are kept by Git's reader; failures are the details' to report.
-                    let _ = crate::engine::git::is_clean(worktree);
-                    let _ = crate::engine::git::rev_parse(worktree, "HEAD");
-                    let _ = crate::engine::git::worktree_root(worktree);
-                    let _ = crate::engine::worktrees::git_common_dir(worktree);
+                    let _ = crate::git::is_clean(worktree);
+                    let _ = crate::git::rev_parse(worktree, "HEAD");
+                    let _ = crate::git::worktree_root(worktree);
+                    let _ = crate::git::worktrees::git_common_dir(worktree);
                 }
             });
         }
@@ -969,7 +969,7 @@ fn wave_checkout(wave: &Wave) -> Result<PathBuf> {
         }
     }
     Ok(
-        crate::engine::worktrees::main_repo_root(Path::new(wave.repo()))
+        crate::git::worktrees::main_repo_root(Path::new(wave.repo()))
             .unwrap_or_else(|_| PathBuf::from(wave.repo())),
     )
 }
@@ -1023,8 +1023,8 @@ fn snapshot_task_runtime(
     completion_pending: Option<String>,
     started: bool,
 ) -> TaskRuntimeSnapshot {
-    let config = crate::engine::config::load_config_or_default(task.worktree.as_deref());
-    let (provider, _) = crate::engine::config::parse_agent(config.agent());
+    let config = crate::config::load_config_or_default(task.worktree.as_deref());
+    let (provider, _) = crate::config::parse_agent(config.agent());
     TaskRuntimeSnapshot {
         work_id: task.id.to_string(),
         reason: if status.is_terminal() {
@@ -1528,7 +1528,7 @@ fn inspect_task_local_progress(
             reason: Some(format!("Task worktree is missing: {}", worktree.display())),
         };
     }
-    let dirty = match crate::engine::git::is_clean(worktree) {
+    let dirty = match crate::git::is_clean(worktree) {
         Ok(clean) => !clean,
         Err(error) => {
             return LocalProgressEvidence {
@@ -1542,7 +1542,7 @@ fn inspect_task_local_progress(
         }
     };
     let authored_commits = match active_pr_base {
-        Some(base) => match crate::engine::git::rev_parse(worktree, "HEAD") {
+        Some(base) => match crate::git::rev_parse(worktree, "HEAD") {
             Ok(head) => Some(head != base),
             Err(error) => {
                 return LocalProgressEvidence {
@@ -1673,7 +1673,7 @@ fn task_reference(
         let local = machine_id.as_ref() == Some(local_machine);
         // A removed checkout has no root to resolve.
         let worktree = if local && task_worktree.is_dir() {
-            crate::engine::git::worktree_root(task_worktree)
+            crate::git::worktree_root(task_worktree)
                 .ok()
                 .and_then(|root| root.canonicalize().ok())
                 .unwrap_or_else(|| task_worktree.clone())
@@ -1700,11 +1700,11 @@ fn task_pr_empty(task: &Task, pr: &TaskPr) -> Option<bool> {
     if !worktree.exists() {
         return None;
     }
-    let clean = crate::engine::git::is_clean(worktree).ok()?;
+    let clean = crate::git::is_clean(worktree).ok()?;
     if !clean {
         return Some(false);
     }
-    let head = crate::engine::git::rev_parse(worktree, "HEAD").ok()?;
+    let head = crate::git::rev_parse(worktree, "HEAD").ok()?;
     Some(head == pr.base_commit)
 }
 

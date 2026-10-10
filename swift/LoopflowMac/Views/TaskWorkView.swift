@@ -328,8 +328,8 @@ struct FlowProcessView: View {
                             .frame(minWidth: 52, alignment: .trailing)
                     }
                 }
-                .help(step.processLfid)
-                .accessibilityIdentifier("flow-process-step-\(step.processLfid)")
+                .help(step.lfProcessId)
+                .accessibilityIdentifier("flow-process-step-\(step.lfProcessId)")
             }
         } else {
             Text("Reading Flow…")

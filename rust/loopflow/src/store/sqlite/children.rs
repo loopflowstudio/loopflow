@@ -2150,18 +2150,6 @@ mod local_planning_tests {
 
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         apply_before_current_draft(&conn, "local_planning");
-        let renamed: bool = conn
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='processes')",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        let (processes, lfid, reference) = if renamed {
-            ("processes", "lfid", "process_lfid")
-        } else {
-            ("execs", "id", "exec_id")
-        };
         let wave = WaveId::new();
         let orphan_wave = WaveId::new();
         let project = ProjectId::new();
@@ -2179,15 +2167,12 @@ mod local_planning_tests {
         conn.execute("INSERT INTO pm_projects(repo,provider,id,observed_at,body) VALUES('/repo','linear','current',7,?1)",[&project_body]).unwrap();
         conn.execute("INSERT INTO pm_items(repo,provider,id,identifier,project_id,observed_at,body) VALUES('/repo','linear','LOO-318','LOO-318','current',7,?1)",[&item_body]).unwrap();
         conn.execute("INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,created_at,updated_at) VALUES('pr-retained',?1,1,'task','retain/branch','retained-base',1,7)",[task.as_str()]).unwrap();
-        conn.execute_batch(&format!("INSERT INTO {processes}({lfid},trace_id,command,cwd,started_at) VALUES('process-retained','trace','lf run code','/repo/task',2);")).unwrap();
-        conn.execute(&format!("INSERT INTO agent_sessions(id,title,title_source,created_at,cwd,task_id,wave_id,driver_{reference},provider_thread,input_published) VALUES('session-retained','Conversation','human',2,'/repo/task',?1,?2,'process-retained','native-retained',1)"),params![task.as_str(),wave]).unwrap();
-        conn.execute(&format!("INSERT INTO task_workflows(task_id,graph,node,edge,{reference},updated_at) VALUES(?1,'{{}}','review',0,'process-retained',3)"),[task.as_str()]).unwrap();
-        conn.execute(&format!("INSERT INTO task_workflow_moves(task_id,workflow,kind,from_node,to_node,edge,{reference},note,at) VALUES(?1,'code','chose','start','review',0,'process-retained','Original choice',3)"),[task.as_str()]).unwrap();
-        // The released frontier can precede another Task's required vocabulary migration.
-        if !renamed {
-            conn.execute_batch(&current_draft_sql("process_names"))
-                .unwrap();
-        }
+        conn.execute_batch(
+            &include_str!("../../../tests/fixtures/migrations/local_planning_retained_process.sql")
+                .replace("{task}", task.as_str())
+                .replace("{wave}", wave.as_str()),
+        )
+        .unwrap();
         let imported_project = ProjectId::new();
         conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at,project_slug,project_name,project_prompt_context,pm_snapshot_synced_at,updated_at) VALUES(?1,?2,'current',1,'current','Current','',7,7)",params![imported_project.as_str(),wave]).unwrap();
         conn.execute("INSERT INTO pm_wave_sync(wave_id,provider,initiative,synced_at) VALUES(?1,'linear',?2,7)",params![wave,payload["projects"][0]["initiative_ids"][0].as_str().unwrap()]).unwrap();

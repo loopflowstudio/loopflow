@@ -4,14 +4,14 @@
 use std::collections::HashMap;
 
 use crate::durable::TaskId;
-use crate::engine::workflow::{WorkflowDefinition, END, START};
-use crate::id::ProcessLfid;
+use crate::id::LfProcessId;
 use crate::ops::workflow::{
     Workflow, WorkflowActor, WorkflowMove, WorkflowMoveKind, WorkflowPosition,
 };
 use crate::process::LfProcess;
 use crate::store::StoreResult;
 use crate::task_work::{TaskSession, TaskWork};
+use crate::workflow::{WorkflowDefinition, END, START};
 
 use super::SqliteStore;
 
@@ -48,13 +48,14 @@ pub(super) fn session_tasks(session: &str) -> String {
     )
 }
 
-pub(super) fn process_lfids(selector: &str) -> String {
-    // History and drivers share one query-local membership; the partial
+pub(super) fn lf_process_ids(selector: &str) -> String {
+    // History and attachments share one query-local membership; the partial
     // index skips retained events that name no Process.
     format!("WITH members AS MATERIALIZED ({})
-        SELECT ae.lfid FROM processes ae JOIN ({}) tw ON ({})
-        UNION SELECT se.process_lfid FROM session_events se INDEXED BY session_process_membership WHERE se.session_id IN (SELECT id FROM members) AND se.process_lfid IS NOT NULL
-        UNION SELECT a.driver_process_lfid FROM agent_sessions a WHERE a.id IN (SELECT id FROM members) AND a.driver_process_lfid IS NOT NULL",
+        SELECT ae.id FROM processes ae JOIN ({}) tw ON ({})
+        UNION SELECT se.lf_process_id FROM session_events se INDEXED BY session_process_membership WHERE se.session_id IN (SELECT id FROM members) AND se.lf_process_id IS NOT NULL
+        UNION SELECT p.attached_lf_process_id FROM processes p WHERE p.agent_session_id IN (SELECT id FROM members) AND p.attached_lf_process_id IS NOT NULL
+        UNION SELECT p.id FROM processes p WHERE p.agent_session_id IN (SELECT id FROM members)",
         session_ids(selector), tasks(selector), checkout("ae.cwd"))
 }
 
@@ -62,7 +63,7 @@ pub(super) fn process_lfids(selector: &str) -> String {
 /// Explicit Session bindings use the same association as Task inventory.
 pub(super) fn task_of_process(
     conn: &rusqlite::Connection,
-    process: &ProcessLfid,
+    process: &LfProcessId,
 ) -> StoreResult<Option<String>> {
     use rusqlite::OptionalExtension;
     Ok(conn
@@ -70,9 +71,10 @@ pub(super) fn task_of_process(
             &format!(
                 "WITH members AS MATERIALIZED (
                     SELECT session_id AS id FROM session_events INDEXED BY session_process_membership
-                        WHERE process_lfid=?1
-                    UNION SELECT id FROM agent_sessions WHERE driver_process_lfid=?1)
-                 SELECT tw.id FROM tasks tw JOIN processes e ON e.lfid=?1
+                        WHERE lf_process_id=?1
+                    UNION SELECT agent_session_id FROM processes
+                        WHERE attached_lf_process_id=?1 AND agent_session_id IS NOT NULL)
+                 SELECT tw.id FROM tasks tw JOIN processes e ON e.id=?1
                  WHERE ({}) OR EXISTS(SELECT 1 FROM agent_sessions a
                     WHERE a.id IN (SELECT id FROM members) AND ({}))
                  ORDER BY length(tw.worktree) DESC, tw.id LIMIT 1",
@@ -90,7 +92,7 @@ pub(super) fn flows_of_task(
 ) -> StoreResult<Vec<crate::ops::flow_process::FlowProcess>> {
     super::flow_inventory::flows_in(
         conn,
-        &format!("e.lfid IN ({})", process_lfids("?1")),
+        &format!("e.id IN ({})", lf_process_ids("?1")),
         &[&task.as_str()],
     )
 }
@@ -103,7 +105,7 @@ fn workflow_row(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Optio
     use rusqlite::OptionalExtension;
     let Some((graph, node, edge, process)) = conn
         .query_row(
-            "SELECT graph,node,edge,process_lfid FROM task_workflows WHERE task_id=?1",
+            "SELECT graph,node,edge,lf_process_id FROM task_workflows WHERE task_id=?1",
             [task.as_str()],
             |row| {
                 Ok((
@@ -122,7 +124,7 @@ fn workflow_row(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Optio
         Some((edge, process)) => Some((
             edge,
             conn.query_row(
-                &format!("{} WHERE e.lfid=?1", super::processes::PROCESS_SELECT),
+                &format!("{} WHERE e.id=?1", super::processes::PROCESS_SELECT),
                 [process],
                 super::processes::read_process,
             )?,
@@ -134,8 +136,8 @@ fn workflow_row(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Optio
 
 fn workflow_moves(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Vec<WorkflowMove>> {
     conn.prepare(
-        "SELECT m.workflow,m.kind,m.from_node,m.to_node,m.edge,m.process_lfid,e.caller_session_id,m.note,m.at
-         FROM task_workflow_moves m LEFT JOIN processes e ON e.lfid=m.process_lfid
+        "SELECT m.workflow,m.kind,m.from_node,m.to_node,m.edge,m.lf_process_id,e.caller_session_id,m.note,m.at
+         FROM task_workflow_moves m LEFT JOIN processes e ON e.id=m.lf_process_id
          WHERE m.task_id=?1 ORDER BY m.seq",
     )?
     .query_and_then([task.as_str()], |row| {
@@ -153,7 +155,7 @@ fn workflow_moves(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Vec
             from: row.get(2)?,
             to: row.get(3)?,
             edge: row.get(4)?,
-            process_lfid: row.get(5)?,
+            lf_process_id: row.get(5)?,
             actor: match (kind, &session_id) {
                 (WorkflowMoveKind::Arrived, _) => WorkflowActor::Edge,
                 (_, Some(_)) => WorkflowActor::Conversation,
@@ -175,11 +177,11 @@ fn append_workflow_move(
     kind: WorkflowMoveKind,
     (from, to): (&str, &str),
     edge: Option<u32>,
-    by: Option<&ProcessLfid>,
+    by: Option<&LfProcessId>,
     note: Option<&str>,
 ) -> StoreResult<()> {
     conn.execute(
-        "INSERT INTO task_workflow_moves(task_id,workflow,kind,from_node,to_node,edge,process_lfid,note,at)
+        "INSERT INTO task_workflow_moves(task_id,workflow,kind,from_node,to_node,edge,lf_process_id,note,at)
          VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
         rusqlite::params![
             task.as_str(),
@@ -213,18 +215,18 @@ fn choose_edge_in(
     task: &TaskId,
     workflow: &Workflow,
     edge: u32,
-    by: Option<&ProcessLfid>,
+    by: Option<&LfProcessId>,
     note: Option<&str>,
 ) -> StoreResult<bool> {
     let chosen = &workflow.definition.edges[edge as usize];
     let stopped = match &workflow.position {
         WorkflowPosition::Node { .. } => None,
-        WorkflowPosition::Edge { process_lfid, .. } => Some(process_lfid.as_str()),
+        WorkflowPosition::Edge { lf_process_id, .. } => Some(lf_process_id.as_str()),
     };
     let carried = chosen.flow.is_some();
     let left = tx.execute(
-        "UPDATE task_workflows SET node=?2,edge=?3,process_lfid=?4,updated_at=?5
-         WHERE task_id=?1 AND node=?6 AND process_lfid IS ?7",
+        "UPDATE task_workflows SET node=?2,edge=?3,lf_process_id=?4,updated_at=?5
+         WHERE task_id=?1 AND node=?6 AND lf_process_id IS ?7",
         rusqlite::params![
             task.as_str(),
             if carried { &chosen.from } else { &chosen.to },
@@ -251,16 +253,16 @@ fn choose_edge_in(
     Ok(true)
 }
 
-fn arrive_in(tx: &rusqlite::Transaction<'_>, task: &TaskId, by: &ProcessLfid) -> StoreResult<()> {
+fn arrive_in(tx: &rusqlite::Transaction<'_>, task: &TaskId, by: &LfProcessId) -> StoreResult<()> {
     let Some((definition, _, Some((edge, carrier)))) = workflow_row(tx, task)? else {
         return Ok(());
     };
-    if &carrier.lfid != by {
+    if &carrier.id != by {
         return Ok(());
     }
     let arrived = &definition.edges[edge as usize];
     tx.execute(
-        "UPDATE task_workflows SET node=?2,edge=NULL,process_lfid=NULL,updated_at=?3 WHERE task_id=?1",
+        "UPDATE task_workflows SET node=?2,edge=NULL,lf_process_id=NULL,updated_at=?3 WHERE task_id=?1",
         rusqlite::params![task.as_str(), arrived.to, crate::store::rows::now_unix()],
     )?;
     append_workflow_move(
@@ -279,14 +281,14 @@ fn set_node_in(
     tx: &rusqlite::Transaction<'_>,
     task: &TaskId,
     node: &str,
-    by: Option<&ProcessLfid>,
+    by: Option<&LfProcessId>,
     note: Option<&str>,
 ) -> StoreResult<bool> {
     let Some((definition, from, edge)) = workflow_row(tx, task)? else {
         return Ok(false);
     };
     tx.execute(
-        "UPDATE task_workflows SET node=?2,edge=NULL,process_lfid=NULL,updated_at=?3 WHERE task_id=?1",
+        "UPDATE task_workflows SET node=?2,edge=NULL,lf_process_id=NULL,updated_at=?3 WHERE task_id=?1",
         rusqlite::params![task.as_str(), node, crate::store::rows::now_unix()],
     )?;
     append_workflow_move(
@@ -316,7 +318,7 @@ pub(super) fn reach_end_in(
     tx: &rusqlite::Transaction<'_>,
     task: &TaskId,
     how: &EndMove,
-    by: Option<&ProcessLfid>,
+    by: Option<&LfProcessId>,
     note: Option<&str>,
 ) -> StoreResult<bool> {
     if stands_at_end(tx, task)? {
@@ -333,7 +335,7 @@ pub(super) fn reach_end_in(
         }
         EndMove::Set => {
             if !set_node_in(tx, task, END, by, note)? {
-                let unplanned = crate::engine::workflow::unplanned();
+                let unplanned = crate::workflow::unplanned();
                 tx.execute(
                     "INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,?2,?3,?4)",
                     rusqlite::params![
@@ -364,19 +366,20 @@ pub(super) fn reach_end_in(
 }
 
 /// Every unfinished Process paired with each Task it belongs to: the same
-/// membership as `process_lfids`, reached from the few unfinished Processes instead of
+/// membership as `lf_process_ids`, reached from the few unfinished Processes instead of
 /// from every Session a Task has, and for all Tasks in one statement. The
 /// index and join order are pinned: left to itself the planner scans every
 /// Process and every event that names one.
 fn open_process_tasks() -> String {
     let session = session_membership("a");
     format!(
-        "WITH open AS MATERIALIZED (SELECT lfid,cwd FROM processes INDEXED BY processes_unfinished
+        "WITH open AS MATERIALIZED (SELECT id,cwd,agent_session_id,attached_lf_process_id FROM processes INDEXED BY processes_unfinished
             WHERE completed_at IS NULL),
-        sessions AS (SELECT DISTINCT se.process_lfid AS process,se.session_id AS session
-            FROM open CROSS JOIN session_events se ON se.process_lfid=open.lfid
-            UNION SELECT a.driver_process_lfid,a.id FROM open CROSS JOIN agent_sessions a ON a.driver_process_lfid=open.lfid)
-        SELECT open.lfid,tw.id FROM open JOIN tasks tw ON {}
+        sessions AS (SELECT DISTINCT se.lf_process_id AS process,se.session_id AS session
+            FROM open CROSS JOIN session_events se ON se.lf_process_id=open.id
+            UNION SELECT p.attached_lf_process_id,p.agent_session_id FROM open CROSS JOIN processes p ON p.attached_lf_process_id=open.id
+            UNION SELECT id,agent_session_id FROM open WHERE agent_session_id IS NOT NULL)
+        SELECT open.id,tw.id FROM open JOIN tasks tw ON {}
         UNION SELECT s.process,tw.id FROM sessions s JOIN agent_sessions a ON a.id=s.session
             JOIN tasks tw ON ({session})",
         checkout("open.cwd")
@@ -409,7 +412,7 @@ fn members(
                 id: row.get(0)?,
                 title: row.get(1)?,
                 interactive: row.get(2)?,
-                flow_process_lfid: row.get(3)?,
+                flow_lf_process_id: row.get(3)?,
                 completed_at: row.get(4)?,
             })
         })?
@@ -430,7 +433,7 @@ impl SqliteStore {
     ) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let by = crate::journal::current_process_lfid();
+        let by = crate::journal::current_lf_process_id();
         let moved = reach_end_in(&tx, task, how, by.as_ref(), note)?;
         tx.commit()?;
         Ok(moved)
@@ -457,9 +460,9 @@ impl SqliteStore {
         let (sessions, flows) = members(&tx, task)?;
         let processes = tx
             .prepare(&format!(
-                "{} WHERE e.lfid IN ({}) ORDER BY e.started_at DESC,e.lfid",
+                "{} WHERE e.id IN ({}) ORDER BY e.started_at DESC,e.id",
                 super::processes::PROCESS_SELECT,
-                process_lfids("?1")
+                lf_process_ids("?1")
             ))?
             .query_map([task.as_str()], super::processes::read_process)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -479,15 +482,8 @@ impl SqliteStore {
     pub(crate) fn open_processes(&self) -> StoreResult<OpenProcesses> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
-        let processes = tx
-            .prepare(&format!(
-                "{} INDEXED BY processes_unfinished WHERE e.completed_at IS NULL
-                ORDER BY e.started_at DESC,e.lfid",
-                super::processes::PROCESS_SELECT
-            ))?
-            .query_map([], super::processes::read_process)?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        let mut tasks: HashMap<ProcessLfid, Vec<String>> = HashMap::new();
+        let processes = super::processes::unfinished_processes(&tx)?;
+        let mut tasks: HashMap<LfProcessId, Vec<String>> = HashMap::new();
         let mut query = tx.prepare(&open_process_tasks())?;
         let mut rows = query.query([])?;
         while let Some(row) = rows.next()? {
@@ -499,7 +495,7 @@ impl SqliteStore {
         let mut by_task: HashMap<String, Vec<LfProcess>> = HashMap::new();
         // Each Task's Processes keep the newest-first order they were read in.
         for process in processes {
-            for task in tasks.remove(&process.lfid).unwrap_or_default() {
+            for task in tasks.remove(&process.id).unwrap_or_default() {
                 by_task.entry(task).or_default().push(process.clone());
             }
         }
@@ -532,7 +528,7 @@ impl SqliteStore {
     /// Whether a command with no recorded exit may still be running.
     /// Unknown is not stopped.
     pub(crate) fn process_may_run(&self, process: &crate::process::LfProcess) -> bool {
-        crate::journal::process_evidence(self, &process.lfid)
+        crate::journal::process_evidence(self, &process.id)
             != crate::journal::ProcessIdentityEvidence::Dead
     }
 
@@ -557,7 +553,7 @@ impl SqliteStore {
             None => WorkflowPosition::Node { node },
             Some((edge, process)) => WorkflowPosition::Edge {
                 edge,
-                process_lfid: process.lfid.to_string(),
+                lf_process_id: process.id.to_string(),
                 running: process.completed_at.is_none() && self.process_may_run(&process),
             },
         };
@@ -570,7 +566,7 @@ impl SqliteStore {
         &self,
         task: &TaskId,
         definition: &WorkflowDefinition,
-        by: &ProcessLfid,
+        by: &LfProcessId,
         note: Option<&str>,
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
@@ -606,7 +602,7 @@ impl SqliteStore {
         task: &TaskId,
         workflow: &Workflow,
         edge: u32,
-        by: &ProcessLfid,
+        by: &LfProcessId,
         note: Option<&str>,
     ) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
@@ -618,7 +614,7 @@ impl SqliteStore {
 
     /// The edge `by` carried the Task along succeeded: put the Task at its
     /// target. A Task no longer on that edge stays where it was put.
-    pub(crate) fn arrive_workflow_edge(&self, task: &TaskId, by: &ProcessLfid) -> StoreResult<()> {
+    pub(crate) fn arrive_workflow_edge(&self, task: &TaskId, by: &LfProcessId) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
         arrive_in(&tx, task, by)?;
@@ -631,7 +627,7 @@ impl SqliteStore {
         &self,
         task: &TaskId,
         node: &str,
-        by: &ProcessLfid,
+        by: &LfProcessId,
         note: Option<&str>,
     ) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
@@ -645,11 +641,11 @@ impl SqliteStore {
     pub(crate) fn workflow_edge_target(
         &self,
         task: &TaskId,
-        by: &ProcessLfid,
+        by: &LfProcessId,
     ) -> StoreResult<Option<String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(match workflow_row(&conn, task)? {
-            Some((definition, _, Some((edge, carrier)))) if &carrier.lfid == by => {
+            Some((definition, _, Some((edge, carrier)))) if &carrier.id == by => {
                 Some(definition.edges[edge as usize].to.clone())
             }
             _ => None,
@@ -673,7 +669,7 @@ mod tests {
     use rusqlite::params;
 
     use crate::durable::{FlowProcessFilter, ProjectId, TaskId};
-    use crate::id::{ProcessLfid, TraceId, WaveId};
+    use crate::id::{LfProcessId, TraceId, WaveId};
     use crate::process::{LfProcessFilter, LfProcessWorkFilter};
     use crate::session::SessionFilter;
     use crate::store::sqlite::SqliteStore;
@@ -748,8 +744,8 @@ mod tests {
         let task = TaskId::new();
         let wave = WaveId::new();
         let project = ProjectId::new();
-        let turn = ProcessLfid::new();
-        let finished = ProcessLfid::new();
+        let turn = LfProcessId::new();
+        let finished = LfProcessId::new();
         let conn = store.conn.lock().unwrap();
         conn.execute(
             "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'proof','/repo',1)",
@@ -764,28 +760,28 @@ mod tests {
             VALUES('bound','bound','human',1,0,?1,?2,'/elsewhere')", params![task.as_str(), wave]).unwrap();
         for (id, completed) in [(&turn, None), (&finished, Some(2))] {
             conn.execute(
-                "INSERT INTO processes(lfid,trace_id,cwd,started_at,completed_at,outcome) VALUES(?1,?2,'/elsewhere',1,?3,?4)",
+                "INSERT INTO processes(id,trace_id,cwd,started_at,completed_at,outcome) VALUES(?1,?2,'/elsewhere',1,?3,?4)",
                 params![id, TraceId::new(), completed, completed.map(|_: i64| "succeeded")],
             )
             .unwrap();
-            conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,process_lfid,observed_at,payload)
+            conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,observed_at,payload)
                 VALUES('bound','started',?1,?1,1,'{}')", [id]).unwrap();
         }
-        let read = |unfinished: bool, expected: &[&ProcessLfid]| {
+        let read = |unfinished: bool, expected: &[&LfProcessId]| {
             let mut query = conn
                 .prepare(&format!(
-                    "{} WHERE {} e.lfid IN ({}) ORDER BY e.started_at DESC,e.lfid",
+                    "{} WHERE {} e.id IN ({}) ORDER BY e.started_at DESC,e.id",
                     super::super::processes::PROCESS_SELECT,
                     if unfinished {
                         "e.completed_at IS NULL AND"
                     } else {
                         ""
                     },
-                    super::process_lfids("?1")
+                    super::lf_process_ids("?1")
                 ))
                 .unwrap();
             let mut ids = query
-                .query_map([task.as_str()], |row| row.get::<_, ProcessLfid>(0))
+                .query_map([task.as_str()], |row| row.get::<_, LfProcessId>(0))
                 .unwrap()
                 .collect::<rusqlite::Result<Vec<_>>>()
                 .unwrap();
@@ -956,9 +952,9 @@ mod tests {
         let task = TaskId::new();
         let wave = WaveId::new();
         let project = ProjectId::new();
-        let mechanical = ProcessLfid::new();
-        let bound_process = ProcessLfid::new();
-        let sibling = ProcessLfid::new();
+        let mechanical = LfProcessId::new();
+        let bound_process = LfProcessId::new();
+        let sibling = LfProcessId::new();
         {
             let conn = store.conn.lock().unwrap();
             conn.execute(
@@ -990,13 +986,13 @@ mod tests {
                 (&bound_process, "/elsewhere"),
                 (&sibling, "/missing/task%_-other"),
             ] {
-                conn.execute("INSERT INTO processes(lfid,trace_id,cwd,started_at,completed_at,outcome) VALUES(?1,?2,?3,1,2,'succeeded')", params![id, TraceId::new(), cwd]).unwrap();
+                conn.execute("INSERT INTO processes(id,trace_id,cwd,started_at,completed_at,outcome) VALUES(?1,?2,?3,1,2,'succeeded')", params![id, TraceId::new(), cwd]).unwrap();
             }
             // Binding includes earlier Processes in the inventory without assigning
             // their earlier performed work or usage to this Task.
-            conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,process_lfid,observed_at,payload) VALUES('history','started','before-bind',?1,1,'{}')", [&bound_process]).unwrap();
+            conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,observed_at,payload) VALUES('history','started','before-bind',?1,1,'{}')", [&bound_process]).unwrap();
             conn.execute(
-                "UPDATE processes SET parent_process_lfid=?1 WHERE lfid=?2",
+                "UPDATE processes SET parent_lf_process_id=?1 WHERE id=?2",
                 params![mechanical, sibling],
             )
             .unwrap();
@@ -1035,15 +1031,15 @@ mod tests {
             .processes
             .iter()
             .all(|process| process.completed_at.is_none()));
-        let unfinished = ProcessLfid::new();
+        let unfinished = LfProcessId::new();
         {
             let conn = store.conn.lock().unwrap();
             conn.execute(
-                "INSERT INTO processes(lfid,trace_id,cwd,started_at) VALUES(?1,?2,'/elsewhere',1)",
+                "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?2,'/elsewhere',1)",
                 params![unfinished, TraceId::new()],
             )
             .unwrap();
-            conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,process_lfid,observed_at,payload) VALUES('history','started','open',?1,1,'{}')", [&unfinished]).unwrap();
+            conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,observed_at,payload) VALUES('history','started','open',?1,1,'{}')", [&unfinished]).unwrap();
         }
         let open = store
             .task_open_work(&task, &store.open_processes().unwrap())
@@ -1053,22 +1049,22 @@ mod tests {
         assert!(open
             .processes
             .iter()
-            .any(|process| process.lfid == unfinished));
+            .any(|process| process.id == unfinished));
         // With every Process unfinished, each membership path agrees: checkout,
-        // Session event and driver.
+        // Session event and attachment.
         store
             .conn
             .lock()
             .unwrap()
             .execute_batch(
-                "CREATE TEMP TABLE finished AS SELECT lfid,completed_at FROM processes;
+                "CREATE TEMP TABLE finished AS SELECT id,completed_at FROM processes;
              UPDATE processes SET completed_at=NULL;",
             )
             .unwrap();
         let ids = |work: TaskWork| {
             work.processes
                 .into_iter()
-                .map(|process| process.lfid)
+                .map(|process| process.id)
                 .collect::<Vec<_>>()
         };
         let all = ids(store.task_work(&task).unwrap());
@@ -1080,7 +1076,7 @@ mod tests {
             all
         );
         store.conn.lock().unwrap().execute_batch(
-            "UPDATE processes SET completed_at=(SELECT completed_at FROM finished WHERE finished.lfid=processes.lfid);
+            "UPDATE processes SET completed_at=(SELECT completed_at FROM finished WHERE finished.id=processes.id);
              DROP TABLE finished;",
         )
         .unwrap();
@@ -1088,17 +1084,17 @@ mod tests {
             let conn = store.conn.lock().unwrap();
             conn.execute("DELETE FROM session_events WHERE receipt_key='open'", [])
                 .unwrap();
-            conn.execute("DELETE FROM processes WHERE lfid=?1", [&unfinished])
+            conn.execute("DELETE FROM processes WHERE id=?1", [&unfinished])
                 .unwrap();
         }
         assert!(work
             .processes
             .iter()
-            .any(|process| process.lfid == mechanical));
+            .any(|process| process.id == mechanical));
         assert!(work
             .processes
             .iter()
-            .any(|process| process.lfid == bound_process));
+            .any(|process| process.id == bound_process));
         assert_eq!(
             store.session_task_ids("manual").unwrap(),
             std::slice::from_ref(&task)
@@ -1146,9 +1142,9 @@ mod tests {
             performed
                 .entries
                 .iter()
-                .map(|process| &process.lfid)
+                .map(|process| &process.id)
                 .collect::<Vec<_>>(),
-            [&flow.steps[0].process.lfid]
+            [&flow.steps[0].process.id]
         );
 
         let child = TaskId::new();
@@ -1195,7 +1191,7 @@ mod tests {
         let bound_flow = store.test_flow("bound", "/elsewhere", &[], None);
         {
             let conn = store.conn.lock().unwrap();
-            conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,process_lfid,observed_at,payload) VALUES('history','started','bound-flow',?1,3,'{}')", [&bound_flow]).unwrap();
+            conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,observed_at,payload) VALUES('history','started','bound-flow',?1,3,'{}')", [&bound_flow]).unwrap();
         }
         let work = store.task_work(&task).unwrap();
         assert_eq!(work.flow_processes.len(), 1);

@@ -11,7 +11,9 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 use crate::durable::{WorkRef, WorkStatus};
-use crate::engine::git::{worktree_remove_owned, PreparedWorktreeLease, WorktreeRemoval};
+use crate::engine::git::{
+    worktree_remove_owned, PreparedWorktreeLease, WorktreeLease, WorktreeRemoval,
+};
 use crate::journal::{process_evidence_at, ProcessIdentityEvidence};
 use crate::ops::{OpsError, OpsResult};
 use crate::store::{sqlite::SqliteStore, SharedStore};
@@ -400,7 +402,7 @@ fn observe_source(
             // Locked observation validates this registration, not a sibling-wide
             // inventory. A preview's registration cannot authorize removal.
             let common = git_directory(repo, "--git-common-dir")?;
-            let backlink: PathBuf = io::read(io::Read::Checkout(admin.clone()))?;
+            let backlink = io::checkout_path(&admin)?;
             if admin.parent() != Some(common.join("worktrees").as_path()) || backlink != *path {
                 retain(decision, "checkout registration changed");
                 return Ok(());
@@ -768,6 +770,46 @@ pub fn apply_cleanup(
     Ok(report)
 }
 
+/// Prepare and open every file before acquiring anything. Workers return only
+/// unlocked descriptors; all admission stays in this parent.
+fn admit_checkout(
+    store: &SharedStore,
+    repo: &Path,
+    path: &Path,
+) -> OpsResult<(Vec<std::fs::File>, WorktreeLease)> {
+    let database = store.sqlite.path().map_err(error)?;
+    let mut paths: Vec<(PathBuf, bool)> = io::read(io::Read::Admission {
+        database,
+        path: path.to_path_buf(),
+    })?;
+    let release: Option<PathBuf> = io::read(io::Read::ReleaseRegistry)?;
+    if let Some(database) = release {
+        paths.extend(io::read::<Vec<(PathBuf, bool)>>(io::Read::Admission {
+            database,
+            path: path.to_path_buf(),
+        })?);
+    }
+    let prepared: PreparedWorktreeLease = io::read(io::Read::Lease {
+        repo: repo.to_path_buf(),
+        path: path.to_path_buf(),
+    })?;
+    // Finish every opener before taking the first lock. Each open_lock call
+    // waits for worker exit; a canceled opener cannot later acquire admission.
+    let files = paths
+        .into_iter()
+        .map(|(path, exclusive)| io::open_lock(path).map(|file| (file, exclusive)))
+        .collect::<OpsResult<Vec<_>>>()?;
+    let lease_file = io::open_lock(prepared.lock_path.clone())?;
+    let mut locks = Vec::new();
+    for (file, exclusive) in files {
+        locks.push(
+            SqliteStore::acquire_checkout_lock(file, exclusive, Duration::ZERO).map_err(error)?,
+        );
+    }
+    let lease = prepared.acquire(lease_file)?;
+    Ok((locks, lease))
+}
+
 /// Admission budgets belong to the caller. Once admitted, finish this attempt
 /// and its locked recheck before observing another checkout.
 fn apply_checkout(
@@ -780,41 +822,7 @@ fn apply_checkout(
         report.deferred.push(decision);
         return;
     }
-    let admission = (|| {
-        let database = store.sqlite.path().map_err(error)?;
-        let mut paths: Vec<(PathBuf, bool)> = io::read(io::Read::Admission {
-            database,
-            path: decision.path.clone(),
-        })?;
-        let release: Option<PathBuf> = io::read(io::Read::ReleaseRegistry)?;
-        if let Some(database) = release {
-            paths.extend(io::read::<Vec<(PathBuf, bool)>>(io::Read::Admission {
-                database,
-                path: decision.path.clone(),
-            })?);
-        }
-        let prepared: PreparedWorktreeLease = io::read(io::Read::Lease {
-            repo: repo.to_path_buf(),
-            path: decision.path.clone(),
-        })?;
-        // Open every file before taking any lock. Workers exit before transfer
-        // acknowledgment; a canceled opener cannot later acquire admission.
-        let files = paths
-            .into_iter()
-            .map(|(path, exclusive)| io::open_lock(path).map(|file| (file, exclusive)))
-            .collect::<OpsResult<Vec<_>>>()?;
-        let lease_file = io::open_lock(prepared.lock_path.clone())?;
-        let mut locks = Vec::new();
-        for (file, exclusive) in files {
-            locks.push(
-                SqliteStore::acquire_checkout_lock(file, exclusive, Duration::ZERO)
-                    .map_err(error)?,
-            );
-        }
-        let lease = prepared.acquire(lease_file)?;
-        Ok::<_, OpsError>((locks, lease))
-    })();
-    let (_admission, lease) = match admission {
+    let (_admission, lease) = match admit_checkout(store, repo, &decision.path) {
         Ok(locks) => locks,
         Err(error) => {
             retain(
@@ -928,6 +936,8 @@ fn write_attempt(marker: &Path, at: i64) -> OpsResult<()> {
     })
 }
 
+const REGISTRATION_WINDOW: usize = 32;
+
 /// A registration joined to its retry hint, never removal authority.
 #[derive(Debug)]
 struct CheckoutAttempt {
@@ -967,7 +977,11 @@ fn checkout_attempts(
             .registration_after
             .as_ref()
             .map_or(0, |after| admins.partition_point(|admin| admin <= after));
-        let window = admins[start..].iter().take(32).cloned().collect();
+        let window = admins[start..]
+            .iter()
+            .take(REGISTRATION_WINDOW)
+            .cloned()
+            .collect();
         (window, Some(admins.len() - start))
     };
     // Setup has its own admission window, so slow reads cannot consume every
@@ -976,8 +990,8 @@ fn checkout_attempts(
     let deadline = Instant::now() + budget.admission_time.min(Duration::from_secs(5));
     let mut attempts = Vec::new();
     progress.registrations_observed = 0;
-    for admin in &window {
-        if progress.registrations_observed >= 32 || Instant::now() >= deadline {
+    for admin in window.iter().take(REGISTRATION_WINDOW) {
+        if Instant::now() >= deadline {
             break;
         }
         if !resuming {
@@ -1097,10 +1111,7 @@ fn collect_pass(
             branch,
             ..
         } = attempt;
-        if Instant::now() >= deadline
-            || report.removed.len() >= budget.removals
-            || progress.observed >= 32
-        {
+        if Instant::now() >= deadline || report.removed.len() >= budget.removals {
             break;
         }
         progress.observed += 1;

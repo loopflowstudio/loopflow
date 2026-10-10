@@ -171,8 +171,14 @@ This pass also removes the repository-wide `Read::Settled` /
 `settled_checkout_paths` normalizing inventory and parent-side cleanup lock-file
 opens. Candidate-local positive lookups replace discovery; shared admission and
 lease discovery now separate file preparation from acquisition.
-No known deletion targets remain. Explicit abandonment and persistent-branch
-restart retain their separate authority; missing-registration repair never
+Removed the nested `Read::Checkout` dispatch and its worker-side JSON round trip;
+source observation calls the registration reader directly inside the same isolated
+worker. Preview listing now shares the existing Git-read path. `admit_checkout`
+names the prepare/open/acquire boundary without changing deadlines or lock ownership.
+The setup window owns the 32-candidate cap; application no longer repeats it.
+Administrative enumeration now propagates entry errors rather than treating a
+partial name set as complete. No known deletion targets remain. Explicit
+abandonment and persistent-branch restart retain their separate authority; missing-registration repair never
 justifies broad metadata pruning. Admitted destructive removal is never canceled.
 
 ## Forbidden outcomes
@@ -500,4 +506,4 @@ allocated bytes by category; observed free-space delta after collection; oldest
 eligible retention age. APFS sharing, hardlinks and concurrent writers mean
 directory sums are estimates, not guaranteed reclaimed bytes.
 
-Check: `cargo test -p loopflow --lib` with filters `cleanup_setup_`, `cleanup_apply_`, `cleanup_collection_passes_advance_past_slow_candidates_and_reconcile_hourly`, `cleanup_history_pages_eventually_collect_and_resolve_retargeted_paths`, `canonicalize_missing_tail_preserves_resolution_errors`, and `waiting_for_worktree_lease_never_displaces_its_owner` — 23 passed; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` — passed; full acceptance/provider resume: gate; installed scheduler/upgrade: demo.
+Check: `cargo test -p loopflow --lib` with filters `cleanup_setup_` and `cleanup_apply_` — 19 passed; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` — passed; full acceptance/provider resume: gate; installed scheduler/upgrade: demo.

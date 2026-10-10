@@ -43,7 +43,6 @@ pub(crate) enum Read {
     },
     Registrations(PathBuf),
     Checkouts(PathBuf),
-    Checkout(PathBuf),
     Settled {
         database: PathBuf,
         path: PathBuf,
@@ -89,9 +88,6 @@ pub(crate) struct Attempt {
 }
 
 pub(crate) fn read<T: DeserializeOwned>(request: Read) -> OpsResult<T> {
-    if WORKER.load(std::sync::atomic::Ordering::Relaxed) {
-        return serde_json::from_value(execute(Request::Read(request))?).map_err(super::error);
-    }
     request_worker(Request::Read(request))
 }
 
@@ -223,7 +219,7 @@ fn respond(result: OpsResult<serde_json::Value>) {
     );
 }
 
-fn checkout_path(admin: &Path) -> OpsResult<PathBuf> {
+pub(super) fn checkout_path(admin: &Path) -> OpsResult<PathBuf> {
     let gitdir = std::fs::read_to_string(admin.join("gitdir"))?;
     let path = Path::new(gitdir.trim_end_matches('\n'))
         .parent()
@@ -292,21 +288,10 @@ fn execute(request: Request) -> OpsResult<serde_json::Value> {
             )?;
             serde_json::to_value(decision).map_err(super::error)
         }
-        Request::Read(Read::Checkout(admin)) => {
-            serde_json::to_value(checkout_path(&admin)?).map_err(super::error)
-        }
         Request::Read(Read::Checkouts(repo)) => {
             // Keep Git and path resolution in the same cancellable process
             // group. A nested bounded_output would create an escaping group.
-            let output = Command::new("git")
-                .current_dir(repo)
-                .args(["worktree", "list", "--porcelain", "-z"])
-                .env("GIT_OPTIONAL_LOCKS", "0")
-                .output()?;
-            if !output.status.success() {
-                return Err(super::error("cleanup registration listing failed"));
-            }
-            let output = String::from_utf8(output.stdout).map_err(super::error)?;
+            let output = super::read_git(&repo, &["worktree", "list", "--porcelain", "-z"])?;
             let registered = crate::engine::worktrees::parse_porcelain(&output)
                 .into_iter()
                 .map(|(path, branch)| {
@@ -330,12 +315,9 @@ fn execute(request: Request) -> OpsResult<serde_json::Value> {
                     for entry in entries {
                         // Do not stat entries here: a stalled registration is
                         // observed separately, not in the repository-wide read.
-                        match entry {
-                            Ok(entry) => admins.push(entry.path()),
-                            Err(error) => {
-                                tracing::warn!(%error, "cleanup registration entry unavailable")
-                            }
-                        }
+                        // An unknown name cannot be consumed by the cursor.
+                        // Retry discovery rather than certify a partial sweep.
+                        admins.push(entry?.path());
                     }
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}

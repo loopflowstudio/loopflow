@@ -3,7 +3,7 @@
 use crate::id::AgentSessionId;
 use std::collections::{btree_map::Entry, BTreeMap};
 
-use anyhow::Result;
+use anyhow::{anyhow, Context, Result};
 use serde_json::{json, Value};
 
 use crate::chat::types::{ConversationEvent, Lifecycle};
@@ -133,13 +133,16 @@ impl History {
 }
 
 #[derive(Debug, Default)]
-struct Receipt {
-    messages: Vec<Value>,
+struct Receipt<'a> {
+    messages: Vec<&'a Value>,
     completion: Value,
     output: Option<Value>,
 }
 
-fn native_receipts(thread: &AgentSessionId, messages: &[Value]) -> BTreeMap<String, Receipt> {
+fn native_receipts<'a>(
+    thread: &AgentSessionId,
+    messages: &'a [Value],
+) -> BTreeMap<String, Receipt<'a>> {
     let mut receipts = BTreeMap::<String, Receipt>::new();
     for message in messages {
         let info = &message["info"];
@@ -153,7 +156,7 @@ fn native_receipts(thread: &AgentSessionId, messages: &[Value]) -> BTreeMap<Stri
             .entry(parent.into())
             .or_default()
             .messages
-            .push(message.clone());
+            .push(message);
     }
     for receipt in receipts.values_mut() {
         receipt.messages.sort_by(|a, b| {
@@ -220,7 +223,7 @@ fn record_receipts(
     session: &str,
     thread: &AgentSessionId,
     request: &str,
-    receipt: &Receipt,
+    receipt: &Receipt<'_>,
 ) -> Result<()> {
     for message in &receipt.messages {
         let info = &message["info"];
@@ -312,73 +315,76 @@ pub(super) async fn reply_pending_permissions(
         let thread = thread.clone();
         let id = id.to_string();
         let request = request.to_string();
-        tokio::task::spawn_blocking(move || {
-            let (store, session, attachment) = owner;
-            store.with_session_attachment(&session, &attachment, || {
-                let error = |message: String| crate::store::StoreError::InvalidData(message);
-                let first_attempt =
-                    store.record_session_permission_reply(&session, &thread, &id, &request)?;
-                let client = reqwest::blocking::Client::new();
-                if first_attempt {
-                    let response = client
-                        .post(format!("{endpoint}/permission/{id}/reply"))
-                        .timeout(std::time::Duration::from_secs(10))
-                        .json(&json!({"reply":"once"}))
-                        .send()
-                        .and_then(reqwest::blocking::Response::error_for_status);
-                    if response.is_ok() {
-                        return Ok(());
-                    }
-                }
-                // A lost response can follow acceptance. Readback may settle
-                // absence, but a still-pending permission never permits replay.
-                let pending = client
-                    .get(format!("{endpoint}/permission"))
-                    .timeout(std::time::Duration::from_secs(10))
+        with_attached_http(owner, move |(store, session, _), client| {
+            let first_attempt =
+                store.record_session_permission_reply(session, &thread, &id, &request)?;
+            if first_attempt {
+                let response = client
+                    .post(format!("{endpoint}/permission/{id}/reply"))
+                    .json(&json!({"reply":"once"}))
                     .send()
-                    .and_then(reqwest::blocking::Response::error_for_status)
-                    .and_then(|response| response.json::<Vec<Value>>())
-                    .map_err(|err| error(format!("OpenCode permission reply readback: {err}")))?;
-                if pending.iter().any(|permission| {
-                    permission["sessionID"] == thread.as_str() && permission["id"] == id
-                }) {
-                    return Err(error(format!(
-                        "OpenCode permission {id} reply is uncertain; not replaying"
-                    )));
+                    .and_then(reqwest::blocking::Response::error_for_status);
+                if response.is_ok() {
+                    return Ok(());
                 }
-                Ok(())
-            })
+            }
+            // A lost response can follow acceptance. Readback may settle
+            // absence, but a still-pending permission never permits replay.
+            let pending: Vec<Value> = client
+                .get(format!("{endpoint}/permission"))
+                .send()
+                .and_then(reqwest::blocking::Response::error_for_status)
+                .and_then(|response| response.json())
+                .context("OpenCode permission reply readback")?;
+            if pending.iter().any(|permission| {
+                permission["sessionID"] == thread.as_str() && permission["id"] == id
+            }) {
+                return Err(anyhow!(
+                    "OpenCode permission {id} reply is uncertain; not replaying"
+                ));
+            }
+            Ok(())
         })
-        .await??;
+        .await?;
     }
     Ok(())
 }
 
-// Native submission is bounded and serialized with attachment handoff. An
-// uncertain HTTP result is retained as uncertain; never submit it twice here.
+/// Run bounded HTTP and its durable receipts under frozen attachment authority.
+/// The worker keeps the fence through caller cancellation; it never retries I/O.
+pub(super) async fn with_attached_http<T: Send + 'static>(
+    owner: super::agent_process::AttachmentOwner,
+    write: impl FnOnce(&super::agent_process::AttachmentOwner, &reqwest::blocking::Client) -> Result<T>
+        + Send
+        + 'static,
+) -> Result<T> {
+    tokio::task::spawn_blocking(move || {
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .build()?;
+        let (store, session, attachment) = &owner;
+        // Keep operation errors intact; the store only owns attachment validation.
+        store.with_session_attachment(session, attachment, || Ok(write(&owner, &client)))?
+    })
+    .await?
+}
+
+// An uncertain HTTP result never permits a second submission here.
 pub(super) async fn post(
-    (store, session, attachment): super::agent_process::AttachmentOwner,
+    owner: super::agent_process::AttachmentOwner,
     url: String,
     payload: Value,
 ) -> Result<()> {
-    tokio::task::spawn_blocking(move || {
-        store.with_session_attachment(&session, &attachment, || {
-            reqwest::blocking::Client::new()
-                .post(url)
-                .timeout(std::time::Duration::from_secs(10))
-                .json(&payload)
-                .send()
-                .and_then(reqwest::blocking::Response::error_for_status)
-                .map(|_| ())
-                .map_err(|error| {
-                    crate::store::StoreError::InvalidData(format!(
-                        "OpenCode native request: {error}"
-                    ))
-                })
-        })
+    with_attached_http(owner, move |_, client| {
+        client
+            .post(url)
+            .json(&payload)
+            .send()
+            .and_then(reqwest::blocking::Response::error_for_status)
+            .context("OpenCode native request")?;
+        Ok(())
     })
-    .await??;
-    Ok(())
+    .await
 }
 
 #[cfg(test)]

@@ -233,11 +233,11 @@ CI: `be4a2b2af:wave/infrastructure/MEMORY.md`, this heading.
 
 LOO-447: fenced stop/abort; drop never signals. Codex acquires custody before
 claiming. Standby cannot write; group death releases custody; watchdog stays outside.
-OpenCode saves reply attempts before fenced HTTP; readback never replays uncertainty.
-`62b6c27df` recovers replies without a reader. Startup saves reachability before
-creation and native identity before permission setup. AgentProcess-keyed attempts
-retain original rules; uncertain writes never replay. HTTP fixtures prove no public
-takeover. Claude pipes and both death orders remain unfinished.
+OpenCode saves reachability before creation, native identity before permission
+setup, and original attempts/rules before HTTP. Uncertainty never permits replay.
+One blocking owner must retain HTTP and receipt fences through async cancellation;
+its dedicated proof remains open. `62b6c27df` proves reader-free reply recovery,
+not public takeover. Claude transport and public death-order proofs remain open.
 Plan: `scratch/stop-and-take-over-claude.md`.
 
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)

@@ -594,46 +594,58 @@ async fn prepare_agent_session(
     stored: Option<AgentSessionId>,
     write_scope: AgentWriteScope,
 ) -> Result<AgentSessionId> {
-    Ok(tokio::task::spawn_blocking(move || {
-        let (store, session, attachment) = owner;
-        store.with_session_attachment(&session, &attachment, || {
-            let error = |err: anyhow::Error| crate::store::StoreError::InvalidData(err.to_string());
-            let prepare = || -> Result<AgentSessionId> {
-                let client = reqwest::blocking::Client::builder()
-                    .timeout(Duration::from_secs(10)).build()?;
-                let thread = if let Some(thread) = store.session_thread(&session)?.or(stored) {
-                    thread
-                } else {
-                    if !store.record_agent_process_startup_attempt(&session, &attachment, "opencode-create", &json!({}))?.0 {
-                        return Err(anyhow!("OpenCode native Session creation is uncertain; not creating another conversation"));
-                    }
-                    let body: Value = client.post(format!("{base_url}/session"))
-                        .json(&json!({})).send()?.error_for_status()?.json()?;
-                    parse_session_id(&body).ok_or_else(|| anyhow!("OpenCode creation returned no native Session identity"))?
-                };
-                // Retain identity before permission I/O: losing that response must
-                // not lose the conversation which the server already created.
-                store.record_session_connection(&session, &attachment, &base_url, &thread)?;
-                let mut permissions = vec![json!({"permission":"*","pattern":"*","action":"ask"})];
-                if write_scope == AgentWriteScope::Worktree {
-                    permissions.push(json!({"permission":"external_directory","pattern":"*","action":"deny"}));
-                }
-                let url = format!("{base_url}/session/{thread}");
-                let observed: Value = client.get(&url).send()?.error_for_status()?.json()?;
-                let (first_attempt, permissions) = store.record_agent_process_startup_attempt(
-                    &session, &attachment, "opencode-permissions", &json!(permissions))?;
-                if observed["permission"] != json!(permissions) {
-                    if !first_attempt {
-                        return Err(anyhow!("OpenCode permission configuration is uncertain; not replaying"));
-                    }
-                    client.patch(&url).json(&json!({"permission":permissions}))
-                        .send()?.error_for_status()?;
-                }
-                Ok(thread)
-            };
-            prepare().map_err(error)
-        })
-    }).await??)
+    opencode_history::with_attached_http(owner, move |(store, session, attachment), client| {
+        let thread = if let Some(thread) = store.session_thread(session)?.or(stored) {
+            thread
+        } else {
+            let (first_attempt, _) = store.record_agent_process_startup_attempt(
+                session,
+                attachment,
+                "opencode-create",
+                &json!({}),
+            )?;
+            if !first_attempt {
+                return Err(anyhow!("OpenCode native Session creation is uncertain; not creating another conversation"));
+            }
+            let body: Value = client
+                .post(format!("{base_url}/session"))
+                .json(&json!({}))
+                .send()?
+                .error_for_status()?
+                .json()?;
+            parse_session_id(&body)
+                .ok_or_else(|| anyhow!("OpenCode creation returned no native Session identity"))?
+        };
+        // Retain identity before permission I/O: losing that response must
+        // not lose the conversation which the server already created.
+        store.record_session_connection(session, attachment, &base_url, &thread)?;
+        let mut permissions = vec![json!({"permission":"*","pattern":"*","action":"ask"})];
+        if write_scope == AgentWriteScope::Worktree {
+            permissions.push(json!({
+                "permission":"external_directory", "pattern":"*", "action":"deny"
+            }));
+        }
+        let url = format!("{base_url}/session/{thread}");
+        let observed: Value = client.get(&url).send()?.error_for_status()?.json()?;
+        let (first_attempt, permissions) = store.record_agent_process_startup_attempt(
+            session,
+            attachment,
+            "opencode-permissions",
+            &json!(permissions),
+        )?;
+        if observed["permission"] != permissions {
+            if !first_attempt {
+                return Err(anyhow!("OpenCode permission configuration is uncertain; not replaying"));
+            }
+            client
+                .patch(&url)
+                .json(&json!({"permission":permissions}))
+                .send()?
+                .error_for_status()?;
+        }
+        Ok(thread)
+    })
+    .await
 }
 
 fn send_disconnect_error(

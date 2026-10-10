@@ -1,6 +1,7 @@
 # LOO-450 — Claude Flow answers
 
-Jack Heart requested one Claude turn-recording path and native JSON schema delivery.
+Jack Heart requested one Claude turn-recording path and native JSON schema delivery
+on October 9, 2026. Reconciled October 10 against `4c79cccf7`.
 The engine/driver vocabulary strike is integrated at base be4a2b2af (#1520).
 The former headless print path bypassed ClaudeHarness; it is removed.
 
@@ -10,14 +11,6 @@ Headless Claude now uses the existing harness, preserving native skill
 selection, context, resume and attachment ownership. The Flow output schema travels
 through the ordinary CLI launch, capture/replay and correction turns to Claude. The existing
 native answer reader remains; no new capture format or migration.
-
-## Delete — do not maintain
-
-- `_run_agent_once`'s Claude-only stdin tempfile and print launch branch.
-- Exclusive expectations that headless Claude receives a text stdin file.
-- `ClaudeArgs::stream`: stream-only flags belong to the stream-input builder.
-These cuts are complete; no remaining deletion target.
-Preserve terminal launches and native/translated skill arguments and declarations.
 
 ## Review findings
 
@@ -36,8 +29,19 @@ third answer reader is needed.
 
 ## Remaining acceptance
 
-Gate owns wider affected launch/skill fixtures and capture/replay acceptance.
-The configured Claude Task pursue demo and installed acceptance remain unproved.
-Publication and landing are outside this implementation step.
+- Gate: affected launch/skill suites, including `context_launch_tests`, and
+  capture/replay with a non-null schema. Replay forwards the saved schema in code;
+  its existing fixture uses `None`, so it does not prove schema preservation.
+- Demo: the configured `lf -a claude task run <task> pursue` reaches `pr-publish`
+  without a hand-run step. The fake-provider test runs a taskless authored Flow
+  ending in `publish-proof`, not the Task workflow or a real publication.
+- Installed acceptance remains unproved; no installed store or live Session was
+  changed by these source fixtures. Publication and landing belong to the caller.
+
+The focused Flow fixture covers a valid first answer and an invalid first answer
+corrected on native resume, with `started`, `output` and `completed` counts for
+both. Terminal behavior and native/translated skill declarations remain required;
+removing the print branch does not waive them. No new product decision is needed.
+Release's entry-point lesson applies: Flow success is not Task-to-publication proof.
 
 Checks: network-isolated `cargo test -p loopflow` with `--test flow_tests claude_deciding_step_records_native_answer_and_advances`, `--test default_conversation_tests`, and `--lib claude_stream_context_keeps_large_instructions_and_reply_guidance_off_argv` passed; `cargo fmt` and `cargo clippy --all-targets -- -D warnings` passed; attachment-rejection proof remains applicable; gate owns wider launch/skill and replay checks.

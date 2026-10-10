@@ -234,12 +234,13 @@ provider generation; released counters stay unread, pre-upgrade callers read sta
 Jack's `71741bd4` accepted #1519 as it stands: LOO-447 owns Claude/OpenCode
 takeover and stop; two-second removal, the three orphans and live-provider runs
 are accepted unproven. FIFO is Codex-only; reaping covers noninteractive providers.
-A draft must `depends_on` main's unreleased drafts: name order broke their
-frontier fixtures in the materialized run only. PR CI defers every job while
-`scratch/` holds files: no hosted proof before landing.
+Drafts must `depends_on` unreleased parents; name order broke materialized fixtures.
+Scratch-bearing PRs defer the test matrix, not every job; TESTING.md owns the gate.
 
-LOO-450 unifies headless Claude with native turn recording and schema delivery.
-Configured Flow acceptance remains unproved.
+LOO-450: Jack selected one Claude harness and native schemas. Corrections require
+attachment-fenced native identity selection, not capture alone. Fake-provider Flow
+advancement proves neither configured Task publication nor installation (Release’s
+entry-point lesson).
 
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)
 

@@ -140,56 +140,29 @@ mutations, including Git metadata pruning.
 
 ## Delete — do not maintain
 
-Removed: old prune policies/classifiers and targeted APIs with their exclusive
-fixtures; `prepare_landed_delete`; duplicate lifecycle deletion; CLI-only protection;
-fail-open process inspection; preview metadata pruning; the orphan
-`engine/worktree.rs`; `Listing::pull_requests_known` and its optional PR map;
-`task_open_work`; the release-only `read_nonterminal_task_worktrees` reader and
-fixture; and separate `release_blocker` policy. Shared registry observations use
-`OpenProcesses`; async lifecycle callers dispatch one complete blocking attempt.
+Removed authorities: old prune policies/classifiers and targeted APIs;
+`prepare_landed_delete`; duplicate lifecycle deletion and CLI-only protection;
+fail-open process inspection and preview metadata pruning; orphan
+`engine/worktree.rs`; `Listing::pull_requests_known`; `task_open_work`;
+`read_nonterminal_task_worktrees`; separate `release_blocker`; and
+`worktree_remove_clean_owned`, with their exclusive fixtures. One lease-owned
+Git removal serves cleanup (`Clean`) and explicit discard/release (`Force`).
 
-`worktree_remove_clean_owned` is also gone. One lease-owned Git removal function
-serves cleanup (`Clean`) and explicit discard/release teardown (`Force`), using the
-lease's path rather than a second path argument. Process receipts reuse the existing
-PID/start-time classifier. Cleanup derives settlement from its exact-head evidence
-instead of maintaining a parallel boolean. The background batch planner/deadline
-branch, its exclusive budget fixture and the one-item batch wrapper are removed.
-Manual prune and maintenance share one checkout attempt; only their callers own
-admission budgets. An admitted destructive removal is never canceled.
-They also share observation-error handling and one bounded persistent-branch read
-for present or interrupted checkouts. Git filename output is no longer trimmed:
-an ignored ` target` directory must not borrow the declaration of `target`.
-A regression preserves that unclassified content through plan and apply. Cleanup
-receipts retain their output root, not an unused schedule specification. Foreground previews remain non-mutating.
-The restarting `session_events::session_evidence_paths` payload scan, path-only
-retry/full-scan cursors and per-pass registry snapshots are now also removed.
-Raw history projection and last-attempt scheduling replace them end to end.
-The per-checkout `Observations` wrapper and single-use evidence cache are also gone.
-Registration paths are normalized once per snapshot, borrowed during planning and
-refreshed under removal admission; retry sorting no longer performs filesystem
-reads or clones paths. Cheap checkout protections precede registry reads, and
-known dirty/unclassified content retains without a history traversal. Planning now
-stops at `ValidateCheckout`; only locked application traverses history. The duplicate
-pre-admission history traversal is deleted, including from maintenance. The resolved
-`evidence_roots` inventory and `RegistryObservations::evidence_blocker` wrapper are
-also removed: history checks stop at a positive protection match, but still require
-complete fresh evidence before allowing removal. Duplicate native homes are visited
-once; transcript discovery and cleanup share their layout definition. Cleanup fixtures
-reuse one exact-head settlement setup instead of replaying landing supervision.
-Inline registration-hint reads and missing-hint writes, and direct cleanup receipt
-filesystem calls, are replaced by separate read and scheduling subprocess requests.
-Primary-checkout retry scheduling and its special worker request path are removed;
-manual previews still explain primary retention. Each registration read now feeds
-its explicit hint initialization directly, without a second staging inventory.
-Worker replies deserialize directly to the requested type. Tests share canonical
-receipt setup and Git-delay wrappers while retaining their behavioral assertions.
-The unbounded all-registration hint loop is replaced by receipt-resumed setup
-windows; unconditional oldest-first admission after a failed hint write is also
-removed. Registration scheduling still uses Git registrations and constant-size
-receipt progress, not another checkout inventory. No known deletion targets remain.
-Explicit abandonment and persistent-branch
-restart retain their separate authority; missing-registration repair does not
-justify restoring broad metadata pruning.
+Removed observation/scheduling paths: restarting
+`session_events::session_evidence_paths`; per-pass registry snapshots;
+`Observations` and its evidence cache; duplicate pre-admission history traversal;
+`evidence_roots` and `RegistryObservations::evidence_blocker`; background batch
+planning; inline hint/receipt I/O; primary-checkout retry scheduling; and the
+unbounded hint loop. Earlier cuts and preservation proofs remain at
+`64667a32b:scratch/clean-up.md`, this heading.
+
+Bounded setup now joins registration branches and retry hints into
+`CheckoutAttempt` records. Filtering, sorting and admission use that one bounded
+candidate list, not repeated path joins or an impossible missing-hint error.
+Receipt cursors, failed-write fairness and fresh locked observation are unchanged.
+No known deletion targets remain. Explicit abandonment and persistent-branch
+restart retain their separate authority; missing-registration repair never
+justifies broad metadata pruning. Admitted destructive removal is never canceled.
 
 ## Forbidden outcomes
 
@@ -480,4 +453,4 @@ allocated bytes by category; observed free-space delta after collection; oldest
 eligible retention age. APFS sharing, hardlinks and concurrent writers mean
 directory sums are estimates, not guaranteed reclaimed bytes.
 
-Check: `cargo test -p loopflow --lib cleanup_setup_stalled_` — 4 passed; focused oldest-deferral, failed-hint-window and slow-candidate/hourly tests — 3 passed; `cargo test -p loopflow --test dto_fixtures cleanup_receipt_preserves_partial_scan_progress` — passed; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` — passed; full acceptance/provider resume: gate; installed scheduler/upgrade: demo.
+Check: `cargo test -p loopflow --lib cleanup_setup_` — 9 passed; focused oldest-deferral, failed-hint-window and slow-candidate/hourly tests — 3 passed; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` — passed; unchanged receipt DTO proof retained from `64667a32b`; full acceptance/provider resume: gate; installed scheduler/upgrade: demo.

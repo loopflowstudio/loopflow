@@ -906,17 +906,26 @@ fn write_attempt(marker: &Path, at: i64) -> OpsResult<()> {
     })
 }
 
+/// A registration joined to its retry hint, never removal authority.
+#[derive(Debug)]
+struct CheckoutAttempt {
+    path: PathBuf,
+    branch: Option<String>,
+    marker: PathBuf,
+    at: i64,
+}
+
 /// Read a bounded window of registration hints, resuming before any per-entry
 /// I/O. The receipt cursor survives unreadable hints and interrupted workers.
 /// Scheduling hints order this window only; none are checkout authority.
 fn checkout_attempts(
     repo: &Path,
-    registered: &HashSet<PathBuf>,
+    registered: &HashMap<PathBuf, Option<String>>,
     budget: CleanupBudget,
     progress: &mut CleanupProgress,
     save: &mut impl FnMut(&CleanupProgress) -> OpsResult<()>,
     report: &mut CleanupReport,
-) -> OpsResult<HashMap<PathBuf, (PathBuf, i64)>> {
+) -> OpsResult<Vec<CheckoutAttempt>> {
     let common = git_directory(repo, "--git-common-dir")?;
     let mut admins: Vec<PathBuf> = io::read(io::Read::Registrations(common))?;
     admins.sort();
@@ -943,8 +952,7 @@ fn checkout_attempts(
         save(progress)?;
         progress.full_scan_pending = pending;
         let attempt = match io::read::<io::Attempt>(io::Read::Attempt(admin.clone())) {
-            Ok(attempt) if registered.contains(&attempt.path) => attempt,
-            Ok(_) => continue,
+            Ok(attempt) => attempt,
             Err(error) => {
                 progress.full_scan_pending = true;
                 report.failed.push(CleanupFailure {
@@ -953,6 +961,9 @@ fn checkout_attempts(
                 });
                 continue;
             }
+        };
+        let Some(branch) = registered.get(&attempt.path) else {
+            continue;
         };
         let at = match attempt.at {
             Some(at) => at,
@@ -965,12 +976,20 @@ fn checkout_attempts(
                 }
             }
         };
-        attempts.insert(attempt.path, (attempt.marker, at));
+        attempts.insert(
+            attempt.path.clone(),
+            CheckoutAttempt {
+                path: attempt.path,
+                branch: branch.clone(),
+                marker: attempt.marker,
+                at,
+            },
+        );
     }
     if start + progress.registrations_observed == admins.len() {
         progress.registration_after = None;
     }
-    Ok(attempts)
+    Ok(attempts.into_values().collect())
 }
 
 /// Observe and apply one admitted candidate before starting another. Expensive
@@ -991,12 +1010,11 @@ fn collect_pass(
         });
     }
     let now = chrono::Utc::now().timestamp();
-    let mut registered = list_porcelain(repo)?;
+    let mut registered: HashMap<_, _> = list_porcelain(repo)?.into_iter().collect();
     // Primary checkouts are never candidates. Keep their preview explanation,
     // but do not spend retry slots or create scheduling hints for them.
-    let primary = normalized(repo);
-    registered.retain(|(path, _)| *path != primary);
-    let paths: HashSet<_> = registered.iter().map(|(path, _)| path.clone()).collect();
+    registered.remove(&normalized(repo));
+    let paths: HashSet<_> = registered.keys().cloned().collect();
     let mut report = CleanupReport {
         planned: Vec::new(),
         removed: Vec::new(),
@@ -1007,13 +1025,14 @@ fn collect_pass(
     progress.removed = 0;
     progress.deferred = 0;
     progress.failed = 0;
-    let attempts = checkout_attempts(repo, &paths, budget, progress, &mut save, &mut report)?;
+    let mut attempts =
+        checkout_attempts(repo, &registered, budget, progress, &mut save, &mut report)?;
     let setup_finished = progress.registration_after.is_none();
-    let full = progress.full_scan_started.is_some()
-        || progress
+    if progress.full_scan_started.is_none()
+        && progress
             .full_scan_at
-            .is_none_or(|last| now.saturating_sub(last) >= 3600);
-    if full && progress.full_scan_started.is_none() {
+            .is_none_or(|last| now.saturating_sub(last) >= 3600)
+    {
         // Freeze the discovery cohort. Later arrivals cannot extend this scan
         // forever; settled arrivals still enter the ordinary retry queue.
         progress.full_scan_started = Some(chrono::Utc::now().timestamp_micros());
@@ -1028,37 +1047,30 @@ fn collect_pass(
         .into_iter()
         .map(|path| normalized(&path))
         .collect();
-    let in_scan = |path: &Path| {
-        progress
-            .full_scan_started
-            .is_some_and(|cutoff| attempts.get(path).is_some_and(|(_, at)| *at <= cutoff))
-    };
-    let mut pending_scan = registered.iter().filter(|(path, _)| in_scan(path)).count();
-    registered.retain(|(path, _)| {
-        attempts.contains_key(path) && (in_scan(path) || settled.contains(path))
-    });
+    let cutoff = progress.full_scan_started;
+    let in_scan = |attempt: &CheckoutAttempt| cutoff.is_some_and(|cutoff| attempt.at <= cutoff);
+    let mut pending_scan = attempts.iter().filter(|attempt| in_scan(attempt)).count();
+    attempts.retain(|attempt| in_scan(attempt) || settled.contains(&attempt.path));
     // Within this setup window, persisted last-attempt times put old deferrals
     // ahead of arrivals. The registration cursor covers the other windows;
     // neither that cursor nor these hints can authorize removal.
-    registered.sort_by(|(left, _), (right, _)| {
-        let priority = |path| attempts.get(path).map_or(i64::MAX, |(_, at)| *at);
-        priority(left)
-            .cmp(&priority(right))
-            .then_with(|| left.cmp(right))
+    attempts.sort_by(|left, right| {
+        left.at
+            .cmp(&right.at)
+            .then_with(|| left.path.cmp(&right.path))
     });
     // Hints are best-effort. Interleave oldest-first retries with a receipt-owned
     // sweep, so even a full window of persistently unwritable hints cannot pin
     // all subsequent passes to the same candidates. This cursor is scheduling
     // only; every candidate still receives fresh observation under admission.
-    let mut sweep: Vec<_> = registered.iter().collect();
-    sweep.sort_by(|left, right| left.0.cmp(&right.0));
-    let pivot = progress
-        .fairness_after
-        .as_ref()
-        .map_or(0, |after| sweep.partition_point(|(path, _)| path <= after));
+    let mut sweep: Vec<_> = attempts.iter().collect();
+    sweep.sort_by(|left, right| left.path.cmp(&right.path));
+    let pivot = progress.fairness_after.as_ref().map_or(0, |after| {
+        sweep.partition_point(|attempt| attempt.path <= *after)
+    });
     sweep.rotate_left(pivot);
     let fairness_first = progress.fairness_next;
-    let scheduled = registered.iter().zip(sweep).flat_map(|(oldest, next)| {
+    let scheduled = attempts.iter().zip(sweep).flat_map(|(oldest, next)| {
         if fairness_first {
             [next, oldest]
         } else {
@@ -1071,7 +1083,13 @@ fn collect_pass(
     // Empty cheap ticks need no execution or Session history observations.
     let external = std::cell::OnceCell::new();
     let mut seen = HashSet::new();
-    for (path, branch) in scheduled {
+    for attempt in scheduled {
+        let CheckoutAttempt {
+            path,
+            branch,
+            marker,
+            ..
+        } = attempt;
         if Instant::now() >= deadline
             || report.removed.len() >= budget.removals
             || progress.observed >= 32
@@ -1090,19 +1108,10 @@ fn collect_pass(
         progress.full_scan_pending |= pending_scan > 0;
         save(progress)?;
         progress.full_scan_pending = pending;
-        let scheduled = (|| {
-            let (marker, at) = attempts
-                .get(path)
-                .ok_or_else(|| error("checkout registration has no scheduling hint"))?;
-            if progress
-                .full_scan_started
-                .is_some_and(|cutoff| *at <= cutoff)
-            {
-                pending_scan -= 1;
-            }
-            write_attempt(marker, chrono::Utc::now().timestamp_micros())
-        })();
-        if let Err(error) = scheduled {
+        if in_scan(attempt) {
+            pending_scan -= 1;
+        }
+        if let Err(error) = write_attempt(marker, chrono::Utc::now().timestamp_micros()) {
             let decision = CleanupDecision {
                 path: path.clone(),
                 branch: branch.clone(),
@@ -1137,7 +1146,7 @@ fn collect_pass(
     }
     progress.full_scan_pending |= pending_scan > 0;
     if setup_finished {
-        if full && !progress.full_scan_pending {
+        if cutoff.is_some() && !progress.full_scan_pending {
             progress.full_scan_at = Some(now);
             progress.full_scan_started = None;
         }

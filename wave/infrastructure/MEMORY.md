@@ -234,11 +234,10 @@ requires more than leader death; failed descendant inventory refuses signaling.
 Draft ordering and scratch-blocked CI evidence remain at
 `be4a2b2af:wave/infrastructure/MEMORY.md`, this heading.
 
-LOO-447: lifelines prove no takeover. Claude owns pipes/correlation; stop now
-shares fenced group close. OpenCode respawns; stop/abort/drop are unfenced.
-Neither proves impossibility. Bounded custody must preserve both death orders;
-standby grants no write authority. Runtime close proves no public handoff
-(Release’s entry-point lesson). Transport plan:
+LOO-447: Claude stop shares fenced group close; pipes/correlation remain launcher-owned.
+OpenCode respawns; stop/abort/drop are unfenced. Public live connection is Codex-only
+and claims before FIFO custody. Repair custody before claim. Both death orders remain required; standby cannot write. Release's
+entry-point lesson applies: runtime close proves no public handoff. Plan:
 `scratch/stop-and-take-over-claude.md`.
 
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)

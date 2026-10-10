@@ -87,8 +87,8 @@ installed acceptance remain unproved.
 Invocation-owned retry settles the exact old AgentProcess before reserving its
 replacement, retaining native/account history. Account failover selects a fresh
 thread; same-account retry retains it. Generic stop still preserves takeover.
-Generation-based caller/status wires and optional launches remain publication
-blockers.
+Headless launch requires an attachment; caller tokens name AgentProcess identity,
+not the retired provider generation.
 
 ## Publish before spawn
 
@@ -102,9 +102,8 @@ blockers.
 
 Headless Claude, Codex and OpenCode prepare their lifeline before spawning. The child
 establishes its process group, waits for watchdog readiness, then asks a parent
-thread to run its recording callback before exec. For an attached Session, this
-persists OS identity in the AgentProcess row; without an attachment it writes
-nothing. The shared harness launch holds the attachment fence through recording
+thread to run its recording callback before exec. This persists OS identity in the AgentProcess row; headless launch
+without an attachment is refused. The shared harness launch holds the attachment fence through recording
 and saves failed spawns on the record. Admission is synchronous so async cancellation
 cannot discard an admitted child before the harness receives it. Failed recording refuses exec;
 a failed exec retains any recorded identity without claiming provider execution.
@@ -119,7 +118,10 @@ headless groups under that attachment fence, refusing ambiguous OS ownership;
 Codex additionally refuses a server hosting unrelated conversations. OpenCode's
 harness stop/abort/drop paths still need the same fence. Claude harness stop and
 interrupt use the common group close, recording death before releasing the fence.
-Runtime settlement alone does not establish takeover safety.
+Runtime settlement alone does not establish takeover safety. Public live connection
+currently dispatches only to Codex; Claude and OpenCode still take native resume.
+Codex's public connection claims before acquiring its FIFO writer; closing that
+handoff race is part of the common custody replacement.
 
 Owned native launches use the same pre-exec recording channel under the attachment
 lock, but no headless group/watchdog setup. Failed recording prevents provider code

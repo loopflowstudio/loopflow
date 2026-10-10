@@ -15,7 +15,7 @@ providers remain outside headless group control. Tests signal only their own
 throwaway children; the lifeline shell stays dash-compatible (`kill -s TERM -- -pgid`).
 Jack accepted the SIGKILL timing demonstration, three historical orphans and
 configured-provider runs as out of scope. No installed-store writes or delivery
-are authorized by this implementation step. Stop-only work is not independently
+are authorized by this reconciliation. Stop-only work is not independently
 shippable or Task completion.
 
 ## Implemented boundary
@@ -49,10 +49,16 @@ in Claude fixtures were repaired; production schema and installed data are uncha
 3. **Replace OpenCode's unconditional server spawn on reconnect.** Reuse its saved
    server URL and native Session. Public attachment and harness takeover must use
    the same connection/claim path, with fenced writes and no raw endpoint bypass.
+   `ops/human_session.rs::open` currently dispatches live connection only for
+   Codex; other providers fall through to native resume. Generalizing harness
+   startup alone cannot satisfy the public demo. Preserve client-only settlement
+   when replacing `connect_live_codex`, rather than closing the surviving provider.
 4. **Delete anonymous lifelines and `HELD_LIFELINES`.** One per-AgentProcess named
    lifeline replaces both providers' anonymous paths and optional `open_lifeline`.
    Acquire custody before committing transfer; failed claims release only their
-   own holder. A scoped holder observes group death and releases then or on its own
+   own holder. Current `connect_live_codex` claims first and holds the FIFO later;
+   it is not a safe ordering template. Cover launcher exit between these two
+   operations for Codex as well as the new providers. A scoped holder observes group death and releases then or on its own
    exit, instead of accumulating dead providers in a process-global vector.
    Keep pre-exec recording and closed-stdio descriptor safety.
    The launcher may remain a non-writing standby after takeover: immediate release
@@ -77,7 +83,9 @@ and saves native Session identity under the fence. It is not in this branch or
 local main. Reuse that history path when integrated; preserve schema, skill-input
 and correction turns. Its Flow fixture proves no launcher-independent transport.
 
-Release's entry-point lesson applies: runtime close tests cannot establish public
+Source reconciliation (2026-10-10): local main remains `be4a2b2af`; the
+LOO-450 dependency observation above is unchanged. Release is the only immediate
+child Wave here; its complete goal and memory were read. Its entry-point lesson applies: runtime close tests cannot establish public
 handoff. Architecture docs name the remaining unfenced OpenCode paths. Compression
 keeps the low-level close private, removes the inspector's tuple argument and
 checks Claude's saved identity at launch rather than carrying optional evidence
@@ -85,4 +93,4 @@ through shutdown. Earlier review details: `5ea5cf5d6:scratch/stop-and-take-over-
 
 ## Checks
 
-`cargo test -p loopflow --lib --no-run` plus network-isolated test-binary filters `harness::claude::tests::`, `harness::agent_process::close_tests`, `session_record::runtime::tests` (serial): 15 passed, 2 configured-provider tests intentionally ignored; `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check`: pass; public takeover and Linux acceptance remain with implementation/CI.
+`cargo test -p loopflow --lib --no-run` plus network-isolated test-binary filters `harness::claude::tests::`, `harness::agent_process::close_tests`, `session_record::runtime::tests` (serial): 15 passed, 2 configured-provider tests intentionally ignored; `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check`: pass (prior implementation); realign source inspection and `git diff --check`: pass, no executable changes; public takeover and Linux acceptance remain with implementation/CI.

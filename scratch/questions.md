@@ -28,10 +28,10 @@ old word. Each is a record or a classifier of history, not vocabulary in use.
 clears `endpoint` and `attached_lf_process_id` when its owner exits, and that
 its `parent_lf_process_id` is the headless lf that launched it.
 
-2026-10-09 doc facts not rechecked: `docs/architecture/data.md` still describes
-the Session's attachment as a nullable Process reference with a generation
-fence, and TESTING.md says fixtures carry "attachment and provider generations".
-Only the vocabulary changed; LOO-443 owns the attachment-token wording.
+2026-10-09 doc repair outside the rename: `docs/architecture/data.md` and
+TESTING.md described the attachment's generation fence, which LOO-443's draft
+replaces with `attachment_token`. Both now name the token; a sync onto a
+LOO-443 that rewrites the same sentences will conflict there.
 
 2026-10-09 fixture repair outside the rename: `land_tests` read `via_agent`
 from the first child of the repair Process; with AgentProcess rows in the same

@@ -245,8 +245,8 @@ words name nothing. The lf attached to a Session is the attached LfProcess; the
 lf running a Flow is the Flow process; FlowRunner executes it. One draft renames
 released columns and exit receipt keys (`attachment:`); without old-name readers
 an earlier build's live Codex lifeline and journal receipts are not adopted.
-Released-shape SQL stays under `migrations/` paths. `processes` holds both
-kinds: filter `kind`. Installation unproved. Plan: `scratch/loo-446.md`. Prior proofs,
+`processes` holds both kinds: filter `kind`. Re-exports kept uncalled functions
+public, hence unreported. Installation unproved. Plan: `scratch/loo-446.md`. Prior proofs,
 LOO-442's unresolved gate failures and LOO-400 history:
 `585cf52cd:wave/infrastructure/MEMORY.md`, LOO-441 and LOO-442 headings.
 

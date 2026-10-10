@@ -60,8 +60,9 @@ belong to that Process; their results remain distinct in LfSession history.
 A provider may succeed before its command fails later.
 
 LfSession identity, name and feedback survive attachment replacement. Its current
-attachment is a nullable Process reference with a generation fence. The AgentProcess
-has separate identity and generation: an attached LfProcess can die while the AgentProcess continues.
+attachment is the AgentProcess's nullable LfProcess reference, fenced by a fresh
+attachment token. The AgentProcess has separate identity and its own provider
+generation: an attached LfProcess can die while the AgentProcess continues.
 History retains the original Process and provider generation when a later attachment
 recovers a missed native completion. Missing command outcome, usage or process
 evidence stays unknown.

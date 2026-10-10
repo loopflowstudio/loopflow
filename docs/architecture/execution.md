@@ -109,7 +109,7 @@ cannot discard an admitted child before the harness receives it. Failed recordin
 a failed exec retains any recorded identity without claiming provider execution.
 No post-spawn bind is needed. Every provider uses a private named FIFO keyed by
 AgentProcess ID beside its store, independent of its communication endpoint.
-Codex's public connection acquires custody before claiming the attachment;
+Public Codex and OpenCode connections acquire custody before claiming the attachment;
 a failed claim drops only its prospective writer. Successful holders remain
 non-writing standbys through attachment transfer and harness teardown until lf
 exit or confirmed provider-group death. The last writer's exit closes the lifeline and
@@ -126,8 +126,14 @@ interrupt and OpenCode stop use common group close, recording death under the fe
 OpenCode abort uses bounded fenced HTTP without retries; drop never signals its
 child. Failed startup detaches without erasing the admitted provider or uncertain
 native effects; pre-exec spawn failure retains its positive non-start evidence.
-Runtime settlement alone does not establish takeover safety. Public live connection
-currently dispatches only to Codex; Claude and OpenCode still take native resume.
+Runtime settlement alone does not establish takeover safety. Public OpenCode
+connection reuses the saved server, including recovery before native identity was
+saved. Its native TUI uses an authenticated local HTTP relay: prompts and abort
+hold the frozen attachment fence through dispatch, not through streamed answers.
+Repeated prompt identities refuse replay. Reads retain native streaming; other
+mutations refuse explicitly. The existing headless reader retains history and
+permission recovery. Client exit settles only its attachment, not the provider.
+Claude still lacks launcher-independent pipes and public live connection.
 OpenCode saves request IDs and frozen origins in Session history before HTTP
 submission. Native receipts recover pending correlation after launcher loss;
 submission evidence alone proves neither admission nor completion. Harness reconnect
@@ -146,7 +152,7 @@ losing the response, exact-title native readback can recover the identity withou
 creating another conversation. Missing or ambiguous matches remain uncertain;
 externally renamed titles cannot recover identity this way. Reconnect preserves
 native permissions rather than applying replacement configuration. Public
-connection and provider death-order proofs remain unfinished.
+process-death orders and full native-client behavior remain unproved.
 
 Owned native launches use the same pre-exec recording channel under the attachment
 lock, but no headless group/watchdog setup. Failed recording prevents provider code

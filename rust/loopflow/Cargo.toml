@@ -66,6 +66,7 @@ futures-util = "0.3"
 gethostname = "1.1"
 ipnet = "2"
 libc = "0.2"
+axum = "0.8"
 reqwest = { version = "0.13", features = ["blocking", "json", "stream"] }
 rusqlite = { version = "0.40", features = ["backup", "bundled", "trace"] }
 fs2 = "0.4"
@@ -81,7 +82,6 @@ tempfile = "3.27"
 sha2 = { version = "0.10", features = ["asm"] }
 
 [dev-dependencies]
-axum = "0.8"
 loopflow-test-support = { path = "../loopflow-test-support" }
 tokio = { version = "1", features = ["test-util"] }
 

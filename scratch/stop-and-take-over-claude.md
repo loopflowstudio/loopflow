@@ -80,9 +80,16 @@ in Claude fixtures were repaired; production schema and installed data are uncha
    file beside the FIFO; no launcher-local pipe/logger remains. Reader failure and
    harness drop detach without stopping a reused provider; pre-exec failures retain non-start evidence. Reconnect preserves native permissions
    without another setup mutation.
-   Public `ops/human_session.rs::open` still dispatches live connection only for
-   Codex. Replace that dispatch and preserve client-only settlement: harness reuse
-   alone cannot satisfy the demo. Retain the implemented permission recovery above.
+   Public `ops/human_session.rs::open` now dispatches Codex and OpenCode through
+   the same custody-before-claim and client-only settlement path. OpenCode reuses
+   the existing harness reader and native `attach` through an authenticated local
+   HTTP relay. Pending native identity reaches saved-creation readback before
+   ordinary resume. Prompts and abort are fenced; answer streaming is outside
+   the fence. Repeated prompt IDs refuse replay. Native reads preserve queries
+   while pinning the saved working directory. Other native mutations currently
+   refuse explicitly; native command/shell and manual permission UX are not proved.
+   The public stand-in fixture covers identity recovery and client-only exit,
+   not process-death orders. Retain the implemented permission recovery above.
    Startup saves the endpoint before spawn and creation intent before HTTP.
    The October 10 protocol correction below removes separate permission setup:
    creation saves/sends the original rules together with a per-AgentProcess title.
@@ -97,8 +104,8 @@ in Claude fixtures were repaired; production schema and installed data are uncha
    death orders. Preserve frozen authority for prompts, replies, abort and stop.
 3. **Carry common custody through new public transports.** The anonymous
    lifelines, optional launch path, endpoint-derived FIFO and `HELD_LIFELINES`
-   are deleted. Claude/OpenCode connection must acquire the existing common
-   custody before claim, like public Codex connection. Keep pre-exec recording,
+   are deleted. Codex/OpenCode public connection acquires common custody before
+   claim; Claude must use the same path when its transport exists. Keep pre-exec recording,
    closed-stdio safety, failed-claim release and both death orders. Codex harness
    reconnect consumes already-admitted authority; it is not the public claim path.
 4. **Prove the public path.** Both death orders, AgentProcess identity and pending
@@ -117,7 +124,9 @@ The shared close and Codex unrelated-thread inspection survive.
 ## Delete — do not maintain
 
 Remaining: launcher-owned Claude pipe transport and its exclusive fixtures;
-Codex-only public connection dispatch. Preserve the existing stream/history
+Claude's native-resume fallback for a live headless provider. Codex-only public
+connection dispatch is removed; native remote endpoints now carry strings
+rather than misrepresenting OpenCode HTTP addresses as filesystem paths. Preserve the existing stream/history
 parsers, exact request origins, native history, permissions and stale-write fences.
 Removed: OpenCode SSE-only permission replies, mapping-side reply requests and
 their now-single-field `MappedEvent` wrapper;
@@ -181,7 +190,7 @@ Missing, renamed or ambiguous native evidence never authorizes replay.
 
 The replaced cancellation/permission evidence and full previous plan are retained
 at `894bc61e5:scratch/stop-and-take-over-claude.md`; those simulated PATCH successes
-establish no provider support. The surviving fixture covers cancellation with a
+establish no provider support. The surviving creation fixture covers cancellation with a
 live blocking writer and SIGKILL of a separate throwaway creation worker before
 its response, plus lost/unapplied/ambiguous/renamed creation evidence. It reopens
 SQLite, transfers ownership, preserves AgentProcess identity and rejects the stale
@@ -189,6 +198,25 @@ owner without creating another conversation. It does not exercise public `open`,
 provider lifeline death orders or launcher-independent Claude transport.
 Release's entry-point lesson still applies. Public transport work remains open.
 
+## Public OpenCode transport (2026-10-10)
+
+The pinned v1.2.0 TUI uses `session.prompt` (`POST /session/:id/message`),
+not just `prompt_async`. Its server streams headers before awaiting generation.
+The relay therefore bounds dispatch under the attachment fence and drains the
+answer afterward; holding the fence through the answer would prevent takeover
+and stop. This reuses the existing real-time dispatch driver. Requests retain
+native message IDs and immutable origins before HTTP; a lost response cannot
+cause relay replay. Loopback authentication is passed in the native client's
+private environment, never its argv or debug output.
+
+Source: [native attach](https://github.com/anomalyco/opencode/blob/v1.2.0/packages/opencode/src/cli/cmd/tui/attach.ts),
+[native prompt](https://github.com/anomalyco/opencode/blob/v1.2.0/packages/opencode/src/cli/cmd/tui/component/prompt/index.tsx),
+[Session routes](https://github.com/anomalyco/opencode/blob/v1.2.0/packages/opencode/src/server/routes/session.ts).
+The fixture withholds an answer across A → B → A, verifies stale-write rejection
+and retained attribution, then drains the original answer. No native/configured
+provider run or both-death-orders acceptance is claimed. Claude transport remains
+unimplemented; this is an internal slice of the same indivisible PR.
+
 ## Checks
 
-Prior source checks (unchanged code): network-isolated `cargo test --offline -p loopflow --lib harness::opencode -- --test-threads=1`: 14 passed, 2 configured-provider tests ignored; `--test session_lifecycle_tests headless_history_is_discoverable_without_entering_the_interactive_list -- --exact`: 1 passed; fmt, all-target Clippy and `git diff --check` passed. Realignment: `git diff --check` passed; no code retest. Public takeover remains implementation work; Linux acceptance belongs to CI.
+Checks: `cargo check -p loopflow --lib --offline`, `cargo fmt`, `cargo clippy --offline --all-targets -- -D warnings`, and `git diff --check` pass; network-isolated library fixtures for public OpenCode pending-identity open, streamed-prompt/A → B → A fencing, and existing Codex connection pass (3 tests). Linux acceptance remains CI-owned.

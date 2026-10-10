@@ -37,7 +37,7 @@ impl Wake for Unpark {
 
 /// Drive `future` on this thread until it finishes or `limit` of real time
 /// passes. `None` means the limit passed; the future's effect is then unknown.
-fn within<F: Future>(limit: Duration, future: F) -> Option<F::Output> {
+pub(super) fn within<F: Future>(limit: Duration, future: F) -> Option<F::Output> {
     let waker = Waker::from(Arc::new(Unpark(thread::current())));
     let mut context = Context::from_waker(&waker);
     let mut future = pin!(future);

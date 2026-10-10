@@ -17,3 +17,11 @@ conversations retain their rules. This replaces the draft's separate setup phase
 The correction and process-death creation readback are implemented at
 `07529ac3d`; public transport is now the remaining implementation, not blocked
 on this protocol correction.
+
+2026-10-10: OpenCode native attachment uses an ephemeral authenticated loopback
+HTTP relay and the existing headless history/permission reader. Prompt and abort
+are the initial write surface; other native mutations explicitly refuse, rather
+than bypassing the fence. Full native command/shell and manual permission UX
+remain unproved, not accepted exclusions. The pinned native prompt route streams
+headers before generation, so only dispatch holds the fence; the answer drains
+outside it. Claude's separate transport proposal remains unchanged.

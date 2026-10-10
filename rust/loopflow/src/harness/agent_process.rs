@@ -126,12 +126,83 @@ pub(crate) fn stop_native(
     .map_err(Into::into)
 }
 
+/// Stop a harness's provider without settling its invocation. Group death and
+/// the exit receipt remain under the same frozen attachment fence.
+pub(super) fn stop((store, session, attachment): &AttachmentOwner) -> Result<()> {
+    super::dispatch::off_reactor(|| {
+        store.with_session_attachment(session, attachment, || {
+            if !close_session_agent_process(store, session)? {
+                return Err(StoreError::InvalidAuthority(
+                    "headless AgentProcess identity is unavailable".into(),
+                ));
+            }
+            store.record_agent_process_exit(session, attachment, true)
+        })
+    })
+    .map_err(Into::into)
+}
+
+/// Called with the exact attachment locked, never with SQLite held across I/O.
+/// Foreground providers settle through their launcher, never headless group control.
+pub(crate) fn close_session_agent_process(store: &SqliteStore, session: &str) -> StoreResult<bool> {
+    let Some(attachment) = store.session_attachment(session)? else {
+        return Ok(false);
+    };
+    let agents = store.agent_processes()?;
+    let Some(agent) = agents
+        .iter()
+        .find(|agent| agent.process.id == attachment.agent_process_id)
+    else {
+        return Ok(false);
+    };
+    let Some((pid, started)) = agent.process.pid.zip(agent.process.os_started_at) else {
+        return Ok(false);
+    };
+    match process_identity_evidence(pid, started) {
+        ProcessIdentityEvidence::Dead => {
+            return confirmed_group_death(pid)
+                .map(|()| true)
+                .map_err(|error| StoreError::InvalidAuthority(error.to_string()));
+        }
+        ProcessIdentityEvidence::Unknown => {
+            return Err(StoreError::InvalidAuthority(
+                "AgentProcess OS identity is unavailable".into(),
+            ))
+        }
+        ProcessIdentityEvidence::Live => {}
+    }
+    if agent.interactive {
+        return Ok(false);
+    }
+    if agents.iter().any(|other| {
+        other.process.id != agent.process.id
+            && other.process.pid == Some(pid)
+            && other.process.os_started_at == Some(started)
+    }) {
+        return Err(StoreError::InvalidAuthority(
+            "AgentProcess OS identity has multiple owners".into(),
+        ));
+    }
+    // A Codex server may host unrelated conversations. This is a refusal check,
+    // not another provider-specific signaling path.
+    if agent.provider.as_deref() == Some("codex") {
+        let (endpoint, thread) = store.session_connection(session)?.ok_or_else(|| {
+            StoreError::InvalidAuthority("Codex AgentProcess connection is unavailable".into())
+        })?;
+        crate::harness::codex_connection::validate_agent_process_close((&endpoint, &thread))
+            .map_err(|error| StoreError::InvalidAuthority(error.to_string()))?;
+    }
+    close_agent_process(pid, started)
+        .map_err(|error| StoreError::InvalidAuthority(error.to_string()))?;
+    Ok(true)
+}
+
 /// Stop an exactly recorded headless process group. The caller holds its Session
 /// attachment fence and has refused ambiguous ownership before reaching here.
 pub(crate) fn close_agent_process(pid: u32, started: i64) -> Result<()> {
     match process_identity_evidence(pid, started) {
         ProcessIdentityEvidence::Live => {}
-        ProcessIdentityEvidence::Dead => return Ok(()),
+        ProcessIdentityEvidence::Dead => return confirmed_group_death(pid),
         ProcessIdentityEvidence::Unknown => {
             return Err(anyhow!("AgentProcess OS identity is unavailable"));
         }
@@ -146,7 +217,7 @@ pub(crate) fn close_agent_process(pid: u32, started: i64) -> Result<()> {
         unsafe {
             libc::waitpid(group, std::ptr::null_mut(), libc::WNOHANG);
         }
-        return Ok(());
+        return confirmed_group_death(pid);
     }
     if owner != group {
         return Err(anyhow!(
@@ -160,6 +231,16 @@ pub(crate) fn close_agent_process(pid: u32, started: i64) -> Result<()> {
     } else {
         Err(anyhow!("AgentProcess group {pid} death is unresolved"))
     }
+}
+
+// Leader death alone neither proves group death nor authorizes signaling helpers.
+fn confirmed_group_death(pid: u32) -> Result<()> {
+    if OsProcess::group_is_alive(pid)? {
+        return Err(anyhow!(
+            "AgentProcess group {pid} survives its recorded leader"
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Default)]
@@ -718,6 +799,29 @@ mod close_tests {
             crate::os_process::terminate_process_group(self.0.id());
             let _ = self.0.wait();
         }
+    }
+
+    #[test]
+    fn exited_leader_does_not_settle_a_surviving_group() {
+        let mut group = Group(
+            Command::new("/bin/sh")
+                .env_clear()
+                .args(["-c", "/bin/sleep 60 & read -r done"])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .process_group(0)
+                .spawn()
+                .unwrap(),
+        );
+        let leader = crate::journal::OsProcess::read(group.0.id())
+            .unwrap()
+            .unwrap();
+        // Closing stdin lets the leader exit after it has spawned its helper.
+        drop(group.0.stdin.take());
+        group.0.wait().unwrap();
+        assert!(super::close_agent_process(leader.pid, leader.started_at).is_err());
+        assert!(crate::journal::OsProcess::group_is_alive(leader.pid).unwrap());
     }
 
     #[test]

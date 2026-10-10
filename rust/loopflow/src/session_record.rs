@@ -2102,7 +2102,7 @@ impl CaptureHandle {
         next.input_published = false;
         let (next, attachment) =
             store.claim_session_input(next, expected.as_ref(), &lf_process_id, || {
-                runtime::close_session_agent_process(&store, session)
+                crate::harness::agent_process::close_session_agent_process(&store, session)
             })?;
         // Continue the Session's attribution; the manifest still describes the
         // actual process cwd supplied by the caller.
@@ -2499,7 +2499,7 @@ impl CaptureHandle {
             );
         }
         let next = store.replace_session_agent_process(session, expected, resume_thread, || {
-            runtime::close_session_agent_process(&store, session)
+            crate::harness::agent_process::close_session_agent_process(&store, session)
         })?;
         capture.attachment = Some((session.clone(), next));
         if let Err(error) = capture.fail_and_begin_attempt(provider, model, account_id) {
@@ -2952,7 +2952,7 @@ pub(crate) fn resume_session_agent_process(
 ) -> StoreResult<crate::process::SessionAttachment> {
     let expected = store.session_attachment(session)?;
     store.resume_session_attachment(session, expected.as_ref(), lf_process_id, || {
-        runtime::close_session_agent_process(store, session)
+        crate::harness::agent_process::close_session_agent_process(store, session)
     })
 }
 

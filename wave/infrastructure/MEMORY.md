@@ -234,8 +234,8 @@ requires more than leader death; failed descendant inventory refuses signaling.
 Draft ordering and scratch-blocked CI evidence remain at
 `be4a2b2af:wave/infrastructure/MEMORY.md`, this heading.
 
-LOO-447: lifelines prove no takeover. Claude owns pipes/correlation; fenced stop
-waits only for its leader. OpenCode respawns; stop/abort/drop are unfenced.
+LOO-447: lifelines prove no takeover. Claude owns pipes/correlation; stop now
+shares fenced group close. OpenCode respawns; stop/abort/drop are unfenced.
 Neither proves impossibility. Holder release must preserve both death orders
 without unbounded retention. Release’s entry-point lesson applies: runtime close
 proves no public handoff. Transport plan and related work:

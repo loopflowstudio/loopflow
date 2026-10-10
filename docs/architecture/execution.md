@@ -117,8 +117,8 @@ Headless launch requires the invocation's attachment: Claude, Codex and OpenCode
 refuse to start a provider without one. Runtime settlement closes their recorded
 headless groups under that attachment fence, refusing ambiguous OS ownership;
 Codex additionally refuses a server hosting unrelated conversations. OpenCode's
-harness stop/abort/drop paths still need the same fence. Claude’s fenced harness
-stop still kills and waits for only its direct child, not the common group close.
+harness stop/abort/drop paths still need the same fence. Claude harness stop and
+interrupt use the common group close, recording death before releasing the fence.
 Runtime settlement alone does not establish takeover safety. Owned native launches use the same pre-exec recording channel under
 the attachment lock, but no headless group/watchdog setup. Failed recording prevents provider code
 from running. Captured native waits retain the spawned attachment snapshot: a late

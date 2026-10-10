@@ -303,19 +303,10 @@ impl ClaudeHarness {
     /// `send_input` respawns and resumes the captured session.
     async fn kill_process(&mut self) -> Result<()> {
         if self.child.is_some() {
-            // Only an admitted launch produced this child.
-            let (store, session, attachment) = self.owner()?;
-            let child = self.child.as_mut().expect("child presence checked above");
-            super::dispatch::off_reactor(|| {
-                store.with_session_attachment(&session, &attachment, || {
-                    child
-                        .start_kill()
-                        .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))
-                })
-            })?;
-            child.wait().await?;
+            super::agent_process::stop(&self.owner()?)?;
+            // Common close proves group death and reaps our leader. Dropping
+            // the Tokio handle also permits its reaper to collect a late zombie.
             self.child = None;
-            store.record_agent_process_exit(&session, &attachment, true)?;
         }
         self.stdin = None;
         if let Some(task) = self.reader_task.take() {
@@ -653,7 +644,7 @@ mod tests {
 
     #[tokio::test]
     #[allow(clippy::await_holding_lock)] // Isolate provider and database selection.
-    async fn sequential_managed_sessions_retain_their_exact_claude_agent_processes() {
+    async fn claude_stop_fences_takeover_and_ends_the_recorded_groups() {
         let _lock = crate::journal::test_env_lock();
         let _ambient = crate::test_ambient::EnvGuard::new();
         let original_path = std::env::var_os("PATH").unwrap_or_default();
@@ -665,7 +656,7 @@ mod tests {
         let conn = rusqlite::Connection::open(&database).unwrap();
         let process = crate::id::LfProcessId::new();
         conn.execute(
-            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'trace',1)",
+            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?1,1)",
             [&process],
         )
         .unwrap();
@@ -681,6 +672,13 @@ mod tests {
         let mut recorded = Vec::new();
         for id in ["first", "second"] {
             store.test_session(id, &crate::session_record::new_artifact_key());
+            rusqlite::Connection::open(&database)
+                .unwrap()
+                .execute(
+                    "UPDATE agent_sessions SET interactive=0, provider='claude' WHERE id=?1",
+                    [id],
+                )
+                .unwrap();
             let attachment = store
                 .claim_session_attachment(id, None, &process, true)
                 .unwrap();
@@ -697,6 +695,17 @@ mod tests {
             // Retain the first process while the same Process starts the next step.
             harnesses.push(harness);
         }
+        let original = harnesses[0].owner().unwrap().2;
+        let replacement = store
+            .claim_session_attachment("first", Some(&original), &process, false)
+            .unwrap();
+        assert!(harnesses[0].stop().await.is_err());
+        assert_eq!(
+            crate::journal::process_identity_evidence(recorded[0].0, recorded[0].1.unwrap().1,),
+            crate::journal::ProcessIdentityEvidence::Live
+        );
+        harnesses[0].config.as_mut().unwrap().session_attachment =
+            Some(("first".into(), replacement));
         for harness in &mut harnesses {
             harness.stop().await.unwrap();
         }
@@ -706,6 +715,7 @@ mod tests {
                 evidence.expect("managed Claude publishes exact AgentProcess identity");
             assert_eq!(pid, saved);
             assert!(start > 0);
+            assert!(!crate::journal::OsProcess::group_is_alive(pid).unwrap());
         }
     }
 
@@ -936,12 +946,19 @@ done
         rusqlite::Connection::open(&database)
             .unwrap()
             .execute(
-                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'trace',1)",
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?1,1)",
                 [&process],
             )
             .unwrap();
         let admitted = |id: &str| {
             store.test_session(id, &crate::session_record::new_artifact_key());
+            rusqlite::Connection::open(&database)
+                .unwrap()
+                .execute(
+                    "UPDATE agent_sessions SET interactive=0, provider='claude' WHERE id=?1",
+                    [id],
+                )
+                .unwrap();
             let attachment = store
                 .claim_session_attachment(id, None, &process, true)
                 .unwrap();

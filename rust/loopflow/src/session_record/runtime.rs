@@ -1,10 +1,10 @@
 //! Only the current attachment may close an AgentProcess. A replaced lf
 //! invocation may settle its own capture, not stop the new owner's provider.
 
-use crate::journal::{process_identity_evidence, ProcessIdentityEvidence};
+use crate::harness::agent_process::close_session_agent_process;
 use crate::process::SessionAttachment;
 use crate::store::sqlite::SqliteStore;
-use crate::store::{StoreError, StoreResult};
+use crate::store::StoreResult;
 
 pub(crate) fn finish_session_attachment(
     store: &SqliteStore,
@@ -15,57 +15,6 @@ pub(crate) fn finish_session_attachment(
     store.finish_session_attachment(session, attachment, outcome, || {
         close_session_agent_process(store, session)
     })
-}
-
-/// Called with the exact attachment locked, never with SQLite held across I/O.
-/// Foreground providers settle through their launcher, never headless group control.
-pub(super) fn close_session_agent_process(store: &SqliteStore, session: &str) -> StoreResult<bool> {
-    let Some(attachment) = store.session_attachment(session)? else {
-        return Ok(false);
-    };
-    let agents = store.agent_processes()?;
-    let Some(agent) = agents
-        .iter()
-        .find(|agent| agent.process.id == attachment.agent_process_id)
-    else {
-        return Ok(false);
-    };
-    let Some((pid, started)) = agent.process.pid.zip(agent.process.os_started_at) else {
-        return Ok(false);
-    };
-    match process_identity_evidence(pid, started) {
-        ProcessIdentityEvidence::Dead => return Ok(true),
-        ProcessIdentityEvidence::Unknown => {
-            return Err(StoreError::InvalidAuthority(
-                "AgentProcess OS identity is unavailable".into(),
-            ))
-        }
-        ProcessIdentityEvidence::Live => {}
-    }
-    if agent.interactive {
-        return Ok(false);
-    }
-    if agents.iter().any(|other| {
-        other.process.id != agent.process.id
-            && other.process.pid == Some(pid)
-            && other.process.os_started_at == Some(started)
-    }) {
-        return Err(StoreError::InvalidAuthority(
-            "AgentProcess OS identity has multiple owners".into(),
-        ));
-    }
-    // A Codex server may host unrelated conversations. This is a refusal check,
-    // not another provider-specific signaling path.
-    if agent.provider.as_deref() == Some("codex") {
-        let (endpoint, thread) = store.session_connection(session)?.ok_or_else(|| {
-            StoreError::InvalidAuthority("Codex AgentProcess connection is unavailable".into())
-        })?;
-        crate::harness::codex_connection::validate_agent_process_close((&endpoint, &thread))
-            .map_err(|error| StoreError::InvalidAuthority(error.to_string()))?;
-    }
-    crate::harness::agent_process::close_agent_process(pid, started)
-        .map_err(|error| StoreError::InvalidAuthority(error.to_string()))?;
-    Ok(true)
 }
 
 #[cfg(test)]

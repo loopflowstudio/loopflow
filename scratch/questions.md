@@ -6,7 +6,7 @@ OpenCode needs reconnect plus fenced stop/abort/drop. A named lifeline alone is
 insufficient. Neither finding proves takeover impossible or authorizes a refusal.
 The common-close slice is not independently shippable.
 
-The named-lifeline draft also needs an attacher-first release protocol: immediate
-superseded-holder release can kill the provider when the new attacher dies;
-unbounded retention preserves the existing leak. Transport and lifetime design
-remain implementation work, not a request to waive takeover.
+The plan now proposes launcher-independent stream ownership and scoped standby
+custody until group death or holder exit. Immediate superseded-holder release
+would break attacher-first survival; standby custody grants no write authority.
+The proposal remains unimplemented, not a request to waive takeover.

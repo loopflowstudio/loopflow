@@ -1,5 +1,5 @@
 //! What a provider's own stream says about a conversation waiting on a person.
-//! Each driver that owns a stream keeps one tracker and saves its reading; the
+//! Each attached invocation that owns a stream keeps one tracker and saves its reading; the
 //! Waiting rule itself is read from that row by the Session inventory.
 
 use std::collections::BTreeSet;
@@ -96,18 +96,18 @@ impl Attention {
         &mut self,
         store: &SqliteStore,
         session: &str,
-        driver: &SessionAttachment,
+        attachment: &SessionAttachment,
         signals: Vec<Signal>,
     ) {
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
-        self.record_at(store, session, driver, signals, now);
+        self.record_at(store, session, attachment, signals, now);
     }
 
     fn record_at(
         &mut self,
         store: &SqliteStore,
         session: &str,
-        driver: &SessionAttachment,
+        attachment: &SessionAttachment,
         signals: Vec<Signal>,
         now: i64,
     ) {
@@ -115,7 +115,7 @@ impl Attention {
             return;
         }
         if let Some(reading) = self.reading(now) {
-            if let Err(error) = store.record_session_activity(session, driver, &reading) {
+            if let Err(error) = store.record_session_activity(session, attachment, &reading) {
                 tracing::warn!(%error, session, "failed to save Session activity");
             }
         }
@@ -220,7 +220,7 @@ pub(super) fn codex(rpc: &Value, from_client: bool) -> Vec<Signal> {
 
 /// One OpenCode server event for conversation `thread`; the server reports
 /// every conversation on one stream. A permission request is answered by its
-/// driver and is not a question for a person.
+/// attached invocation and is not a question for a person.
 pub(super) fn opencode(event: &Value, thread: &str) -> Vec<Signal> {
     let properties = &event["properties"];
     let id = |value: &Value| value.as_str().map(str::to_owned);
@@ -274,12 +274,12 @@ mod tests {
     use crate::process::SessionAttachment;
     use crate::store::sqlite::SqliteStore;
 
-    /// A conversation whose driver saves what a recorded stream says, one
+    /// A conversation whose attachment saves what a recorded stream says, one
     /// message a second from `START`.
     struct Driven {
         _home: tempfile::TempDir,
         store: SqliteStore,
-        driver: SessionAttachment,
+        attachment: SessionAttachment,
         attention: Attention,
         now: i64,
     }
@@ -316,13 +316,13 @@ mod tests {
             .unwrap();
             conn.execute("UPDATE agent_sessions SET interactive=?1", [interactive])
                 .unwrap();
-            let driver = store
+            let attachment = store
                 .claim_session_attachment("conversation", None, &process, false)
                 .unwrap();
             Self {
                 _home: home,
                 store,
-                driver,
+                attachment,
                 attention: Attention::default(),
                 now: START,
             }
@@ -330,8 +330,13 @@ mod tests {
 
         fn hear(&mut self, signals: Vec<Signal>) {
             self.now += 1;
-            self.attention
-                .record_at(&self.store, "conversation", &self.driver, signals, self.now);
+            self.attention.record_at(
+                &self.store,
+                "conversation",
+                &self.attachment,
+                signals,
+                self.now,
+            );
         }
 
         /// Whether the inventory calls it Waiting `quiet` seconds after the
@@ -473,7 +478,7 @@ mod tests {
                 .map(|(_, now, quiet)| (*now, *quiet))
                 .unwrap()
         };
-        // A permission the driver answers itself is no question, and the tool
+        // A permission the attached invocation answers itself is no question, and the tool
         // it guards is still open.
         assert_eq!(at("permission.asked"), (false, false));
         assert_eq!(at("question.asked"), (true, true));
@@ -486,13 +491,13 @@ mod tests {
     }
 
     #[test]
-    fn a_reading_from_a_driver_that_let_go_says_nothing() {
+    fn a_reading_from_an_attachment_that_let_go_says_nothing() {
         let mut session = Driven::new(true);
         session.hear(claude(&json!({"type":"result","subtype":"success"})));
         assert!(session.waiting_after(0));
         session
             .store
-            .release_session_attachment("conversation", &session.driver)
+            .release_session_attachment("conversation", &session.attachment)
             .unwrap();
         assert!(!session.waiting_after(QUIET));
     }

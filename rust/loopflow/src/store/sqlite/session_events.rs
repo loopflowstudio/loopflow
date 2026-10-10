@@ -94,11 +94,11 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Replace the Session's reading with its current driver's.
+    /// Replace the Session's reading with its current attachment's.
     pub(crate) fn record_session_activity(
         &self,
         session: &str,
-        driver: &crate::process::SessionAttachment,
+        attachment: &crate::process::SessionAttachment,
         activity: &crate::session::SessionActivity,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -110,8 +110,8 @@ impl SqliteStore {
                 pending_input=excluded.pending_input,yielded=excluded.yielded,
                 program_status=CASE WHEN session_activity.agent_process_lfid IS excluded.agent_process_lfid THEN session_activity.program_status END,
                 agent_process_lfid=excluded.agent_process_lfid",
-            params![session, driver.token, activity.observed_at,
-                activity.open_tools as i64, activity.pending_input as i64, activity.yielded, driver.agent_process_lfid],
+            params![session, attachment.token, activity.observed_at,
+                activity.open_tools as i64, activity.pending_input as i64, activity.yielded, attachment.agent_process_lfid],
         )?;
         Ok(())
     }
@@ -134,7 +134,7 @@ impl SqliteStore {
         )?)
     }
 
-    /// Retain a provider observation even when its conversational driver has
+    /// Retain a provider observation even when its attachment has
     /// changed. Observation grants neither native write nor Flow authority.
     pub(crate) fn record_session_event(
         &self,
@@ -1198,7 +1198,7 @@ mod tests {
             assert_eq!(saved.completed_at.is_some(), retired);
             assert_eq!(saved.captured, session.captured);
             let summary = store.session_summary(id, 0).unwrap().unwrap();
-            assert_eq!(summary.driver_outcome.as_deref(), Some("interrupted"));
+            assert_eq!(summary.attachment_outcome.as_deref(), Some("interrupted"));
             let history = store.session_history(id, 0, 100).unwrap();
             assert!(history
                 .iter()

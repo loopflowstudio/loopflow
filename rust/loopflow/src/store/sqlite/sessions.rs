@@ -267,7 +267,7 @@ fn read_summary(
         Ok(crate::session::SessionSummary {
             task_ids: serde_json::from_str(&row.get::<_, String>(26)?)?,
             primary_scope: row.get(27)?,
-            driver_outcome: row.get(28)?,
+            attachment_outcome: row.get(28)?,
             waiting: row.get(29)?,
             program_status: row
                 .get::<_, Option<String>>(32)?

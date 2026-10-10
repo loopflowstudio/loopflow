@@ -120,8 +120,8 @@ pub struct SessionBind {
 /// on a person. A long silent provider step can read as Waiting.
 pub(crate) const WAITING_QUIET_SECONDS: i64 = 120;
 
-/// What a Session's driver last read from its provider's own stream. One row
-/// per Session, replaced by whichever driver currently owns that stream.
+/// What a Session's attached invocation last read from its provider's own stream. One row
+/// per Session, replaced by whichever attachment currently owns that stream.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionActivity {
     pub observed_at: i64,
@@ -208,7 +208,7 @@ impl Default for SessionFilter {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SessionSummary {
     pub primary_scope: Option<String>,
-    pub driver_outcome: Option<String>,
+    pub attachment_outcome: Option<String>,
     /// Waiting on a person, as of the read's clock.
     pub waiting: bool,
     pub program_status: Option<crate::program_status::Records>,

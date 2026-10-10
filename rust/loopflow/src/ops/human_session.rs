@@ -213,7 +213,7 @@ fn session_state(session: &crate::session::SessionSummary, has_clients: bool) ->
         SessionState::Closed
     } else if has_clients {
         SessionState::Active
-    } else if session.driver_outcome.as_deref() == Some("interrupted") {
+    } else if session.attachment_outcome.as_deref() == Some("interrupted") {
         SessionState::Interrupted
     } else {
         SessionState::Unknown
@@ -1678,7 +1678,7 @@ mod tests {
             program_status: None,
             agent_process_lfid: None,
             primary_scope: None,
-            driver_outcome: None,
+            attachment_outcome: None,
             waiting: false,
             task_terminal: false,
             task_primary: false,
@@ -1765,7 +1765,7 @@ mod tests {
         assert_eq!(row.ready_summary, summary.ready_summary);
         assert_eq!(row.attention, None);
         summary.ready_summary = None;
-        summary.driver_outcome = Some("interrupted".into());
+        summary.attachment_outcome = Some("interrupted".into());
         assert_eq!(
             super::summary_surface(&summary).state,
             super::SessionState::Interrupted

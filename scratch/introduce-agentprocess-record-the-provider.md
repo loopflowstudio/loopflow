@@ -347,7 +347,13 @@ checks do not establish configured-provider or foreground cleanup.
    table names AgentProcess rows as the attachment's owner. The lifeline
    paragraph states that only Codex takeover holds a named lifeline. Retained on
    purpose: the Flow driver (a different thing), the `engine.sock` socket
-   filename, fixture locals named `engine`.
+   filename, fixture locals named `engine`. Source followed on realignment
+   (2026-10-09): the Session inventory's exit outcome is `attachment_outcome`,
+   and attention, terminal-title, Codex history and activity writers name their
+   `SessionAttachment` an attachment. The `driver:` receipt range in the history
+   reader stays: it reads released events. Fixture locals named `driver` that
+   hold an attachment (session_record, dispatch, processes, Codex/OpenCode/Claude
+   history tests) remain; renaming them changes no behavior.
 6. Gate owns affected Rust/Swift/DTO and materialized-migration verification plus
    Linux lifeline checks. Hosted CI on a pull request defers every build, lint,
    test, migration, Swift and architecture job while `scratch/` holds files
@@ -452,5 +458,7 @@ Realign check (2026-10-09): `uv run python scripts/check_architecture.py` report
 Check (orphan rule and public agreement, 2026-10-09): `cargo test -p loopflow --lib harness::agent_process` 7 passed; `--test process_ownership_tests task_checkout_blockers` 1 passed; fmt and clippy `--all-targets -D warnings` pass. Wider suites stay with gate.
 
 Check (generation cut, 2026-10-09): `cargo test -p loopflow --no-fail-fast --lib` plus the ten affected integration targets, `LF_*` cleared and stdin closed: library 1766 passed, the same 4 failed (three pass alone; one is main's planning-migration fixture), integration targets pass; `swift build --build-tests` and `DTOFixtureTests` pass; `cargo fmt --all --check` and `cargo clippy -p loopflow --all-targets -- -D warnings` pass. Remaining integration targets, draft materialization, Linux lifeline and live-provider smokes stay gate/CI-owned. Earlier results: `4d720d314`, this plan.
+
+Realign check (attachment naming, 2026-10-09): PR #1519 head and main `906576f39` unchanged, hosted jobs still skipped by `scratch-clear`; `check_architecture.py` zero drift; the Task's `rg` is clean outside applied migrations and the draft. `cargo test -p loopflow --lib -- harness::attention engine::terminal_title` 12 passed after the rename; `cargo fmt --all`. Clippy and wider suites stay with gate.
 
 Compress check (required history owners, 2026-10-09): `cargo clippy -p loopflow --all-targets -- -D warnings` passes; `cargo test -p loopflow --lib harness::` 120 passed, 4 ignored. Wider suites stay with gate.

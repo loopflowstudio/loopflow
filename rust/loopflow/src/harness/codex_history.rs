@@ -80,14 +80,18 @@ impl History {
         &mut self,
         store: &SqliteStore,
         session: &str,
-        driver: Option<&SessionAttachment>,
+        attachment: Option<&SessionAttachment>,
         expected_thread: Option<&AgentSessionId>,
         rpc: &Value,
     ) -> StoreResult<()> {
         self.sequence += 1;
-        if let Some(driver) = driver {
-            self.attention
-                .record(store, session, driver, super::attention::codex(rpc, false));
+        if let Some(attachment) = attachment {
+            self.attention.record(
+                store,
+                session,
+                attachment,
+                super::attention::codex(rpc, false),
+            );
         }
         let request = if rpc.get("method").is_none() {
             self.requests.remove(&rpc["id"].to_string())

@@ -283,7 +283,8 @@ destination is stored. An interrupted page rolls back with its cursor; incomplet
 coverage or malformed references never authorize removal. The index can be rebuilt
 from Session events. Previews neither read the complete projection nor advance it.
 
-Only complete coverage is read, in one SQLite snapshot. Raw destinations are resolved
+Only complete coverage is read; the streamed reader in item 2 rereads past its
+last revision until a snapshot adds nothing. Raw destinations are resolved
 again in the locked removal observation, so earlier symlink/ancestor changes cannot
 hide behind a page cursor. The released-frontier migration fixture exercises multiple
 pages, heavier arrivals, an aborted page, an earlier-reference update, appended
@@ -339,7 +340,7 @@ fixture passes with that shared key.
 
 ### Remaining in this PR
 
-Reconciled 2026-10-09 against `6cd3c7594` and `7e1a51086`. The requested
+Reconciled 2026-10-09 against `6cd3c7594`, `7e1a51086` and `16374ab80`. The requested
 aggregate-settlement discovery repair and preparatory isolation exist. Durable
 continuation and fixed sweep endpoints remain intact. Exact-head settlement,
 completed-Task delivery and fail-closed history remain mandatory. Final observation is implemented in item 2; the source-alias locality gap
@@ -402,7 +403,8 @@ tests does not make the full PR ready to ship.
    not that broader source-veto set. Discarding an unresolved alias would weaken
    preservation; locality needs an ownership/path contract that proves disjointness,
    not an incomplete scan labeled complete. No such replacement is selected here.
-   This source-derived progress gap remains for mechanism review alongside item 2.
+   This source-derived progress gap remains for mechanism review; item 2 does not
+   address it.
    The unresolved choice is how the source owner can prove candidate disjointness
    despite an unreadable alias, or supply a complete fresh view without restarting
    every unrelated lookup. Any replacement needs composed healthy-collection proofs
@@ -410,8 +412,7 @@ tests does not make the full PR ready to ship.
    aliases that can reach the candidate and preserving fresh retargeting vetoes.
    The current fixtures do not establish these cases; skipping unknown paths or
    increasing a fixed timeout is not a selected solution.
-   Aggregate final history, its connection opens/path resolution, and native
-   traversal remain item 2. Git's admitted removal may inspect siblings;
+   Final history and native traversal now stream in item 2. Git's admitted removal may inspect siblings;
    setup isolation does not prove deletion through a permanently stalled sibling.
 2. **Implemented: fresh streamed evidence with a no-progress deadline.** On
    October 9, Jack Heart requested finishing automatic cleanup for all users; the

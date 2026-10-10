@@ -286,29 +286,29 @@ ownership, exact-head settlement, idle execution and classified content; retain
 PR-less Tasks/unresolved follow-through. Age, remote absence and ignored status
 never settle source. History overrides cache tags; compare-and-delete refs.
 Repair schedules before pruning binaries; preserve disable. Release's lesson:
-generated schedules/manual recovery prove no unattended firing.
+generated schedules and manual recovery prove no unattended firing.
 
 Consume the receipt's ≤32 registrations before publication; drain before
 rediscovery. The 65-registration fixture proves finite coverage, not arbitrary
-arrivals or retry frequency.
+arrivals or retry rate.
 
-At `7e1a51086`, settlement discovery uses candidate-local
+Settlement discovery uses candidate-local
 positive queries; aliases remain in hourly scans. Workers isolate source reads and
-lock-file preparation, transfer unlocked descriptors and exit before parent-owned
-admission. Never cancel admitted removal. FIFO fixtures prove healthy collection
-beside stalled source reads, unrelated landing aliases and interrupted openers.
-This proves no whole-pass bound or removal through a stalled Git sibling.
+lock-file preparation, transfer unlocked descriptors and exit before admission. Never cancel admitted removal. FIFO fixtures prove collection beside
+stalled source reads, landing aliases and interrupted openers.
+No whole-pass bound or removal through a stalled Git sibling is proved.
 
 Failure-local reporting is not failure-local progress: source vetoes still resolve
 all Task paths and open-Process aliases; one unknown can retain every candidate.
 External cwd inspection likewise fails closed as a set. Isolation alone cannot
-prove disjointness. No replacement ownership/path contract is selected.
+prove disjointness. No replacement contract is selected.
 
 Previews defer history; removal needs complete coverage and fresh destinations.
-The final read timed out at 65,536 projected synthetic rows; unchanged retries
-cannot progress. Cached negatives fail on retargeting. Workload-sized isolated
-observation versus a history-owner fresh view remains unselected; larger constant
-timeouts do not resolve it. Gate owns provider resume/second release writer;
+A whole-set final read timed out at 65,536 rows. Review chose the
+mechanism for Jack Heart's finish request. At `16374ab80` a worker streams
+evidence under a no-progress deadline renewed only by counted work;
+revisions expose edits behind the stream. Never cache negatives or raise the constant.
+Gate owns provider resume/second release writer;
 demo owns installed schedule/upgrade. Earlier proofs: `340db4227:wave/infrastructure/MEMORY.md`.
 Plan: `scratch/clean-up.md`.
 

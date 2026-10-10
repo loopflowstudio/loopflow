@@ -74,7 +74,8 @@
   This is scheduling only; fresh source/history checks retain disposal authority.
   Interrupted hint writes can leave small administrative temporaries; reclamation
   in retained roots remains an artifact follow-up. Preparation isolation does not
-  solve final evidence progress or promise bounded destructive Git I/O.
+  promise bounded destructive Git I/O; final evidence progress is the streamed
+  observation above.
 - Review finding, 2026-10-09: isolating source observation bounds its I/O but
   still resolves the registry's complete Task checkout set and relevant Process
   cwd aliases. External cwd inspection also fails closed for its complete set

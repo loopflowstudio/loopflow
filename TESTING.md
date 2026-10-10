@@ -503,19 +503,6 @@ CI installs stable on each run. An older local compiler can miss new Clippy
 lints and standard-library deprecations. Put rustup's proxies first on `PATH`
 so Cargo subcommands cannot select an older Homebrew Clippy or rustfmt.
 
-Task cancellation uses a real child CLI with a disposable scorecard effect.
-Build the sibling CLI before running this library-only proof:
-
-```bash
-cargo build -p loopflow --bin lf
-cargo test -p loopflow --lib task_stop_waits_for_selected_step_after_driver_death
-```
-
-The proof covers retained and released driver claims, child exit, interrupted
-Process history, and an unresolved mechanical outcome. Linux also holds interrupt
-cleanup after the effect exits to exercise settlement ordering. It uses no
-configured provider or installed Machine.
-
 For shared repository discovery or CLI dispatch changes, include the PM and
 Wave consumers in the focused check:
 

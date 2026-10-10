@@ -2694,8 +2694,7 @@ mod tests {
     async fn retired_home_landings_remain_readable_and_fence_old_supervisors() {
         use std::sync::Arc;
 
-        use crate::ops::pr_landing::{reconcile_pr_landing, LandingDriver, LandingObservation};
-        use crate::ops::OpsResult;
+        use crate::ops::pr_landing::{reconcile_pr_landing, LandingObservation, ObservePr};
         use crate::pr_landing::{LandingPlacement, LandingSupervisor, PrLandingId, PrLandingState};
         use crate::store::sqlite::SqliteStore;
         use time::OffsetDateTime;
@@ -2855,22 +2854,13 @@ mod tests {
         drop(conn);
         drop(store);
 
-        struct Merged;
-        impl LandingDriver for Merged {
-            fn observe(&self, _: &crate::pr_landing::PrLanding) -> OpsResult<LandingObservation> {
-                Ok(LandingObservation::Merged {
-                    head_sha: "head".into(),
-                    merge_commit: "merge".into(),
-                })
-            }
-            fn repair(
-                &self,
-                _: &crate::pr_landing::PrLanding,
-                _: &crate::work::task::CiIncident,
-            ) -> OpsResult<()> {
-                panic!("merged delivery must not start a repair")
-            }
-        }
+        // A merged delivery is observed without ever being offered a repair.
+        let merged_observation: ObservePr = Arc::new(|_| {
+            Ok(LandingObservation::Merged {
+                head_sha: "head".into(),
+                merge_commit: "merge".into(),
+            })
+        });
         let store = Arc::new(
             crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(path))
                 .await
@@ -2878,13 +2868,13 @@ mod tests {
         );
         let id = PrLandingId::from_raw("home_taskless");
         let landing = store.get_pr_landing(&id).await.unwrap().unwrap();
-        let merged = reconcile_pr_landing(store.clone(), landing, Arc::new(Merged))
+        let merged = reconcile_pr_landing(store.clone(), landing, merged_observation.clone(), None)
             .await
             .unwrap();
         assert_eq!(merged.state, PrLandingState::Merged);
         assert_eq!(merged.merge_commit.as_deref(), Some("merge"));
         let repeated =
-            reconcile_pr_landing(store.clone(), merged.clone(), Arc::new(Merged))
+            reconcile_pr_landing(store.clone(), merged.clone(), merged_observation, None)
                 .await
                 .unwrap();
         assert_eq!(repeated, merged);

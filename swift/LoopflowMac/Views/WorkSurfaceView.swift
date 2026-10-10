@@ -445,7 +445,7 @@ struct WorkSurfaceView: View {
         switch state {
         case .unknown: .neutral
         case .active: .running
-        case .closed, .interrupted: .stopped
+        case .closed: .stopped
         }
     }
 

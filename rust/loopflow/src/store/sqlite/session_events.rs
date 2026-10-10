@@ -767,12 +767,24 @@ mod tests {
         let mut template = store.test_session("seed", "run_000000000000000000000000000000ff");
         template.captured = None;
         template.caller_artifact_key = Some(template.artifact_key.clone());
+        let attached = crate::id::LfProcessId::new();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+                [&attached],
+            )
+            .unwrap();
         for at in 1..=60 {
             let mut session = template.clone();
             session.id = format!("conversation-{at}");
             session.artifact_key = format!("run_{at:032x}");
             session.created_at = at;
-            let session = store.create_session(session, None).unwrap();
+            let session = store
+                .create_session(session, (at == 1).then_some(&attached))
+                .unwrap();
             record_captured_start(&store, &session.id, &at.to_string());
             if at != 1 {
                 store
@@ -841,26 +853,14 @@ mod tests {
             .is_err());
         // A turn left open by an attachment that has exited is over: it stops
         // holding a place in the recent list.
-        let attached = crate::id::LfProcessId::new();
         store
             .conn
             .lock()
             .unwrap()
             .execute(
-                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
-                [attached.as_str()],
+                "UPDATE processes SET completed_at=100 WHERE id IN (SELECT lf_process_id FROM session_events WHERE session_id='conversation-1' AND kind='started')",
+                [],
             )
-            .unwrap();
-        let claim = store
-            .claim_session_attachment(
-                "conversation-1",
-                store.session_attachment("conversation-1").unwrap().as_ref(),
-                &attached,
-                true,
-            )
-            .unwrap();
-        store
-            .finish_session_attachment("conversation-1", &claim, "interrupted", || Ok(false))
             .unwrap();
         assert_eq!(
             store
@@ -885,51 +885,74 @@ mod tests {
     }
 
     #[test]
-    fn retained_and_current_attachment_exits_end_captured_and_native_history() {
-        for receipt in ["attachment:7:exit", "attachment:claim:exit"] {
-            for captured in [true, false] {
-                let home = tempfile::tempdir().unwrap();
-                let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
-                store.test_session("conversation", "run_00000000000000000000000000000001");
-                {
-                    let conn = store.conn.lock().unwrap();
-                    conn.execute("UPDATE agent_sessions SET input_published=?1", [captured])
-                        .unwrap();
-                    conn.execute(
-                        "INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,observed_at,payload,captured_event)
-                         SELECT id,'thread','turn','started','',10,'{}',CASE WHEN ?1 THEN current_capture END
-                         FROM agent_sessions",
-                        [captured],
-                    ).unwrap();
-                }
-                let completed_since = || {
-                    store
-                        .conversation_history(None, None, None, None, 20, true)
-                        .unwrap()
-                };
-                assert!(completed_since().is_empty());
-                // Similar receipts and payloads are not attachment exits.
-                store.conn.lock().unwrap().execute(
-                    "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
-                     VALUES('conversation','observed','provider:7:exit',30,'{}'),
-                           ('conversation','observed','attachment:claim:exit-pending',30,'{}')",
-                    [],
-                ).unwrap();
-                assert!(completed_since().is_empty());
-                store.conn.lock().unwrap().execute(
-                    "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
-                     VALUES('conversation','observed',?1,30,'{}')",
-                    [receipt],
-                ).unwrap();
-                let history = completed_since();
-                assert_eq!(history.len(), 1, "{receipt}, captured={captured}");
-                assert_eq!(history[0].captured.is_some(), captured);
-                assert_eq!(history[0].providers.len(), 1);
-                assert!(
-                    history[0].providers[0].outcome.is_none(),
-                    "attachment exit is not provider completion"
-                );
+    fn process_completion_ends_inputs_without_exit_events() {
+        for captured in [true, false] {
+            let home = tempfile::tempdir().unwrap();
+            let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+            let mut session =
+                store.test_session("seed", &crate::session_record::new_artifact_key());
+            session.id = "conversation".into();
+            session.captured = None;
+            session.artifact_key = crate::session_record::new_artifact_key();
+            let process = crate::id::LfProcessId::new();
+            let creator = crate::id::LfProcessId::new();
+            {
+                let conn = store.conn.lock().unwrap();
+                conn.execute(
+                    "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+                    [&process],
+                )
+                .unwrap();
             }
+            store.conn.lock().unwrap().execute(
+                "INSERT INTO processes(id,trace_id,started_at,completed_at) VALUES(?1,'fixture',1,25)", [&creator],
+            ).unwrap();
+            // Preparation may exit before another lf attaches and starts the turn.
+            store.create_session(session, Some(&creator)).unwrap();
+            {
+                let conn = store.conn.lock().unwrap();
+                conn.execute("UPDATE agent_sessions SET input_published=?1", [captured])
+                    .unwrap();
+                conn.execute(
+                    "INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,observed_at,payload,captured_event,lf_process_id)
+                     SELECT id,'thread','turn','started','',10,'{}',CASE WHEN ?1 THEN current_capture END,?2 FROM agent_sessions WHERE id='conversation'",
+                    rusqlite::params![captured,process],
+                ).unwrap();
+            }
+            let completed_since = || {
+                store
+                    .conversation_history(None, None, None, None, 20, true)
+                    .unwrap()
+            };
+            assert!(completed_since().is_empty());
+            // An unrelated attachment's exit cannot finish this input.
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
+                 VALUES('conversation','observed','attachment:other:exit',30,'{}')",
+                    [],
+                )
+                .unwrap();
+            assert!(completed_since().is_empty());
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "UPDATE processes SET completed_at=30 WHERE id=?1",
+                    [&process],
+                )
+                .unwrap();
+            let history = completed_since();
+            assert_eq!(history.len(), 1, "captured={captured}");
+            assert_eq!(history[0].captured.is_some(), captured);
+            assert!(
+                history[0].providers[0].outcome.is_none(),
+                "process death is not provider success"
+            );
         }
     }
 
@@ -1197,8 +1220,6 @@ mod tests {
             let saved = store.session(id).unwrap().unwrap();
             assert_eq!(saved.completed_at.is_some(), retired);
             assert_eq!(saved.captured, session.captured);
-            let summary = store.session_summary(id, 0).unwrap().unwrap();
-            assert_eq!(summary.attachment_outcome.as_deref(), Some("interrupted"));
             let history = store.session_history(id, 0, 100).unwrap();
             assert!(history
                 .iter()

@@ -431,11 +431,40 @@ impl SqliteStore {
         &self,
         session: &str,
     ) -> StoreResult<Option<(String, AgentSessionId)>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.query_row(
-            "SELECT p.endpoint,s.provider_thread FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1 AND p.endpoint IS NOT NULL AND s.provider_thread IS NOT NULL",
-            [session], |row| Ok((row.get(0)?, row.get(1)?)),
-        ).optional()?)
+        let saved = {
+            let conn = self.conn.lock().expect("store mutex poisoned");
+            conn.query_row(
+                "SELECT p.endpoint,s.provider_thread,p.completed_at,p.pid,p.os_started_at
+                 FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id
+                 WHERE s.id=?1 AND p.endpoint IS NOT NULL AND s.provider_thread IS NOT NULL",
+                [session],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, AgentSessionId>(1)?,
+                        row.get::<_, Option<i64>>(2)?,
+                        row.get::<_, Option<u32>>(3)?,
+                        row.get::<_, Option<i64>>(4)?,
+                    ))
+                },
+            )
+            .optional()?
+        };
+        let Some((endpoint, thread, completed, pid, start)) = saved else {
+            return Ok(None);
+        };
+        match crate::journal::agent_process_evidence(
+            completed,
+            pid,
+            start,
+            crate::journal::process_identity_evidence,
+        ) {
+            crate::journal::ProcessIdentityEvidence::Live => Ok(Some((endpoint, thread))),
+            crate::journal::ProcessIdentityEvidence::Dead => Ok(None),
+            crate::journal::ProcessIdentityEvidence::Unknown => Err(StoreError::InvalidAuthority(
+                "AgentProcess OS identity is unavailable; cannot reconnect or replace it".into(),
+            )),
+        }
     }
 
     pub(crate) fn session_thread(&self, session: &str) -> StoreResult<Option<AgentSessionId>> {
@@ -998,6 +1027,44 @@ mod discovery_tests {
             )
             .unwrap();
         id
+    }
+
+    #[test]
+    fn ended_agent_socket_cannot_be_adopted() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        store.test_session("session", &crate::session_record::new_artifact_key());
+        let attachment = store
+            .claim_session_attachment("session", None, &LfProcessId::new(), true)
+            .unwrap();
+        let path = home.path().join("answering.sock");
+        let _listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        store
+            .record_session_connection(
+                "session",
+                &attachment,
+                path.to_str().unwrap(),
+                &"native".into(),
+            )
+            .unwrap();
+        // Missing identity is unknown, never permission for a second launch.
+        assert!(store.session_connection("session").is_err());
+        store
+            .record_agent_process_identity(
+                "session",
+                &attachment,
+                std::process::id(),
+                crate::journal::process_started_at(std::process::id())
+                    .unwrap()
+                    .unwrap(),
+            )
+            .unwrap();
+        assert!(store.session_connection("session").unwrap().is_some());
+        store
+            .record_agent_process_exit("session", &attachment, true)
+            .unwrap();
+        assert!(std::os::unix::net::UnixStream::connect(&path).is_ok());
+        assert!(store.session_connection("session").unwrap().is_none());
     }
 
     #[test]
@@ -1675,6 +1742,16 @@ mod attachment_tests {
         }
         let first = store
             .claim_session_attachment("conversation", None, &a, true)
+            .unwrap();
+        store
+            .record_agent_process_identity(
+                "conversation",
+                &first,
+                std::process::id(),
+                crate::journal::process_started_at(std::process::id())
+                    .unwrap()
+                    .unwrap(),
+            )
             .unwrap();
         store
             .record_session_connection("conversation", &first, "endpoint", &"native-history".into())

@@ -106,13 +106,16 @@ pub(super) fn session_in(conn: &Connection, id: &str) -> StoreResult<Option<LfSe
 /// current attachment's input/hand-back/quiet reading. Filter before pagination.
 fn waiting_sql(session: &str, now: i64) -> String {
     format!(
-        "EXISTS(SELECT 1 FROM session_activity act WHERE act.session_id={session}.id
+        "EXISTS(SELECT 1 FROM session_activity act
+            JOIN processes p ON p.id={session}.agent_process_id
+            WHERE act.session_id={session}.id
             AND {session}.completed_at IS NULL AND act.agent_process_id IS {session}.agent_process_id
+            AND p.completed_at IS NULL
             AND CASE WHEN act.program_status IS NOT NULL THEN
                 EXISTS(SELECT 1 FROM json_each(act.program_status,'$.records') r
                     WHERE json_extract(r.value,'$.state')='blocked'
                     OR ({session}.interactive=1 AND json_extract(r.value,'$.state')='idle'))
-            ELSE act.attachment_token=(SELECT attachment_token FROM processes WHERE id={session}.agent_process_id)
+            ELSE act.attachment_token=p.attachment_token
                 AND (act.pending_input>0 OR (act.open_tools=0 AND (({session}.interactive=1 AND act.yielded=1)
                     OR {now}-act.observed_at>={quiet}))) END)",
         quiet = crate::session::WAITING_QUIET_SECONDS
@@ -123,6 +126,7 @@ fn inventory_query(
     filter: &crate::session::SessionFilter,
     select: &str,
     now: i64,
+    live_agents: &str,
 ) -> StoreResult<(String, Vec<rusqlite::types::Value>)> {
     use rusqlite::types::Value;
     let mut sql = format!("{select} WHERE 1");
@@ -141,7 +145,11 @@ fn inventory_query(
         sql.push_str(" AND s.completed_at IS NULL");
     }
     if filter.waiting {
-        sql.push_str(&format!(" AND {}", waiting_sql("s", now)));
+        sql.push_str(&format!(
+            " AND {} AND s.agent_process_id IN (SELECT value FROM json_each({}))",
+            waiting_sql("s", now),
+            bind(Value::Text(live_agents.into()))
+        ));
     }
     if let Some(repo) = &filter.repo {
         sql.push_str(&format!(
@@ -210,12 +218,10 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
          AND kind='observed' AND substr(receipt_key,-14)=':manifest.json')='independent'),
         (SELECT json_group_array(id) FROM ({})),
         a.primary_scope,
-        (SELECT CASE WHEN json_valid(e.payload) THEN json_extract(e.payload,'$.outcome') END FROM session_events e
-            WHERE e.session_id=s.id AND e.seq=(SELECT attachment_exit_seq FROM processes WHERE id=a.agent_process_id) AND e.kind='observed'),
         {waiting},
         COALESCE(({task_state}) IN ('done','abandoned'),0),
         EXISTS(SELECT 1 FROM tasks p WHERE p.primary_session_id=s.id),
-        (SELECT act.program_status FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id),a.agent_process_id
+        (SELECT act.program_status FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id),a.agent_process_id,p.completed_at,p.pid,p.os_started_at
         FROM page s JOIN agent_sessions a ON a.id=s.id
         LEFT JOIN processes p ON p.id=a.agent_process_id
         LEFT JOIN session_events captured ON captured.seq=s.current_capture
@@ -264,18 +270,31 @@ fn read_summary(
             }
             None => None,
         };
+        let agent_process_id: Option<crate::id::LfProcessId> = row.get(32)?;
+        let agent_process_evidence = if agent_process_id.is_some() {
+            Some(crate::journal::agent_process_evidence(
+                row.get(33)?,
+                row.get(34)?,
+                row.get(35)?,
+                crate::journal::process_identity_evidence,
+            ))
+        } else {
+            None
+        };
+        let live = agent_process_evidence == Some(crate::journal::ProcessIdentityEvidence::Live);
         Ok(crate::session::SessionSummary {
             task_ids: serde_json::from_str(&row.get::<_, String>(26)?)?,
             primary_scope: row.get(27)?,
-            attachment_outcome: row.get(28)?,
-            waiting: row.get(29)?,
+            agent_process_evidence,
+            waiting: live && row.get(28)?,
             program_status: row
-                .get::<_, Option<String>>(32)?
+                .get::<_, Option<String>>(31)?
                 .map(|json| serde_json::from_str(&json))
-                .transpose()?,
-            agent_process_id: row.get(33)?,
-            task_terminal: row.get(30)?,
-            task_primary: row.get(31)?,
+                .transpose()?
+                .filter(|_| live),
+            agent_process_id,
+            task_terminal: row.get(29)?,
+            task_primary: row.get(30)?,
             captured: row.get(16)?,
             id: row.get(0)?,
             artifact_key: crate::session_record::parse_artifact_key(&row.get::<_, String>(1)?)
@@ -396,14 +415,46 @@ impl SqliteStore {
             .ok_or_else(|| invalid(format!("Session {session} disappeared while being chosen")))
     }
 
+    // Waiting filters run before pagination; absence/unknown cannot occupy a page.
+    fn live_agent_ids(&self, needed: bool) -> StoreResult<String> {
+        let mut live = Vec::new();
+        if needed {
+            let identities = {
+                let conn = self.conn.lock().expect("store mutex poisoned");
+                let mut query = conn.prepare("SELECT id,pid,os_started_at FROM processes WHERE kind='agent' AND completed_at IS NULL")?;
+                let rows = query.query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<u32>>(1)?,
+                        row.get::<_, Option<i64>>(2)?,
+                    ))
+                })?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()?
+            };
+            for (id, pid, start) in identities {
+                if crate::journal::agent_process_evidence(
+                    None,
+                    pid,
+                    start,
+                    crate::journal::process_identity_evidence,
+                ) == crate::journal::ProcessIdentityEvidence::Live
+                {
+                    live.push(id);
+                }
+            }
+        }
+        Ok(serde_json::to_string(&live)?)
+    }
+
     /// Each row's Waiting is judged at `now`.
     pub(crate) fn session_summaries(
         &self,
         filter: &crate::session::SessionFilter,
         now: i64,
     ) -> StoreResult<Vec<crate::session::SessionSummary>> {
+        let live_agents = self.live_agent_ids(filter.waiting)?;
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let (page, values) = inventory_query(filter, SUMMARY_SELECT, now)?;
+        let (page, values) = inventory_query(filter, SUMMARY_SELECT, now, &live_agents)?;
         let mut query = conn.prepare(&summary_query(&page, filter.after.is_some(), now))?;
         let rows = query.query_map(rusqlite::params_from_iter(values), read_summary)?;
         rows.map(|row| row?).collect()
@@ -527,20 +578,17 @@ impl SqliteStore {
         window: (i64, bool, Option<usize>),
         input: Option<&str>,
     ) -> StoreResult<(Vec<crate::session_record::SessionHistory>, bool)> {
-        // An input has ended once its terminal record, its turns' completions or
-        // its attachment's exit says so: a turn left open at exit is over.
+        // A captured input cannot outlive its lf process. Terminal and provider
+        // turn evidence describe outcomes; attachment exit events do not own life.
         let inputs = {
             let conn = self.conn.lock().expect("store mutex poisoned");
-            let mut query = conn.prepare("WITH attachment_exits AS NOT MATERIALIZED (
-                SELECT session_id,seq,observed_at FROM session_events
-                WHERE kind='observed' AND substr(receipt_key,-5)=':exit'
-                    AND receipt_key>='attachment:' AND receipt_key<'attachment;'
-            ), inputs AS (
+            let mut query = conn.prepare("WITH inputs AS (
                 SELECT i.seq AS captured,i.receipt_key AS input_id,i.session_id,json_extract(i.payload,'$.caller_key') AS caller_input_id,
                     COALESCE(m.observed_at,i.observed_at) AS started,
                     CASE WHEN m.seq IS NOT NULL THEN m.task_id ELSE i.task_id END AS task_id,
                     CASE WHEN m.seq IS NOT NULL THEN m.wave_id ELSE i.wave_id END AS wave_id,
-                    CASE WHEN terminal.seq IS NOT NULL AND NOT (
+                    CASE WHEN attached.completed_at IS NOT NULL THEN attached.completed_at
+                    WHEN terminal.seq IS NOT NULL AND NOT (
                         json_valid(terminal.payload) AND CASE WHEN json_valid(terminal.payload) THEN
                         COALESCE(json_type(terminal.payload,'$.evidence.outcome')='text',0)
                         AND unixepoch(json_extract(terminal.payload,'$.evidence.ended_at')) IS NOT NULL ELSE 0 END
@@ -550,14 +598,18 @@ impl SqliteStore {
                             SELECT 1 FROM session_events done WHERE done.session_id=origin.session_id
                             AND done.provider_thread=origin.provider_thread AND done.provider_turn=origin.provider_turn
                             AND done.kind='completed')
-                        AND NOT EXISTS (SELECT 1 FROM attachment_exits x WHERE x.session_id=s.id AND x.seq>origin.seq)) THEN NULL ELSE
+                        ) THEN NULL ELSE
                         COALESCE(terminal.observed_at,(
                             SELECT MAX(done.observed_at) FROM session_events origin JOIN session_events done
                             ON done.session_id=origin.session_id AND done.provider_thread=origin.provider_thread
                             AND done.provider_turn=origin.provider_turn AND done.kind='completed'
-                            WHERE origin.session_id=s.id AND origin.captured_event=i.seq AND origin.kind='started'),(
-                            SELECT MIN(x.observed_at) FROM attachment_exits x WHERE x.session_id=s.id AND x.seq>i.seq)) END AS ended, NULL AS thread, NULL AS turn
+                            WHERE origin.session_id=s.id AND origin.captured_event=i.seq AND origin.kind='started')) END AS ended, NULL AS thread, NULL AS turn
                 FROM session_events i JOIN agent_sessions s ON s.id=i.session_id
+                LEFT JOIN processes attached ON attached.id=CASE WHEN EXISTS(
+                    SELECT 1 FROM session_events origin WHERE origin.captured_event=i.seq AND origin.kind='started')
+                    THEN (SELECT origin.lf_process_id FROM session_events origin
+                        WHERE origin.captured_event=i.seq AND origin.kind='started' ORDER BY origin.seq DESC LIMIT 1)
+                    ELSE i.lf_process_id END
                 LEFT JOIN session_events m ON m.session_id=s.id AND m.kind='observed'
                     AND m.receipt_key=i.receipt_key||':manifest.json'
                 LEFT JOIN session_events terminal ON terminal.session_id=s.id AND terminal.kind='observed'
@@ -568,11 +620,11 @@ impl SqliteStore {
                     OR EXISTS(SELECT 1 FROM session_events origin WHERE origin.captured_event=i.seq AND origin.kind='started'))
                 UNION ALL
                 SELECT NULL,NULL,e.session_id,NULL,MIN(e.observed_at),origin.task_id,origin.wave_id,
-                    COALESCE(MAX(CASE WHEN e.kind='completed' THEN e.observed_at END),(
-                        SELECT MIN(x.observed_at) FROM attachment_exits x WHERE x.session_id=e.session_id AND x.seq>MIN(e.seq))),e.provider_thread,e.provider_turn
+                    COALESCE(MAX(attached.completed_at),MAX(CASE WHEN e.kind='completed' THEN e.observed_at END)),e.provider_thread,e.provider_turn
                 FROM session_events e LEFT JOIN session_events origin
                     ON origin.session_id=e.session_id AND origin.provider_thread=e.provider_thread
                     AND origin.provider_turn=e.provider_turn AND origin.kind='started'
+                LEFT JOIN processes attached ON attached.id=origin.lf_process_id
                 WHERE ?7 IS NULL AND e.kind IN ('started','usage','completed','output')
                     AND origin.captured_event IS NULL
                 GROUP BY e.session_id,e.provider_thread,e.provider_turn)
@@ -1079,9 +1131,10 @@ impl SqliteStore {
 
     /// Every open Session.
     pub fn sessions(&self, filter: &crate::session::SessionFilter) -> StoreResult<Vec<LfSession>> {
+        let live_agents = self.live_agent_ids(filter.waiting)?;
         let conn = self.conn.lock().expect("store mutex poisoned");
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
-        let (sql, values) = inventory_query(filter, SESSION_SELECT, now)?;
+        let (sql, values) = inventory_query(filter, SESSION_SELECT, now, &live_agents)?;
         let mut query = conn.prepare(&sql)?;
         let rows = query.query_map(rusqlite::params_from_iter(values), read_session)?;
         rows.map(|row| row?).collect()

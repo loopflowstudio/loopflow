@@ -105,7 +105,6 @@ pub enum SessionState {
     Unknown,
     Active,
     Closed,
-    Interrupted,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -209,12 +208,18 @@ pub enum SessionAttention {
 }
 
 fn session_state(session: &crate::session::SessionSummary, has_clients: bool) -> SessionState {
+    if let Some(evidence) = session.agent_process_evidence {
+        return match evidence {
+            crate::journal::ProcessIdentityEvidence::Live => SessionState::Active,
+            crate::journal::ProcessIdentityEvidence::Dead => SessionState::Closed,
+            crate::journal::ProcessIdentityEvidence::Unknown => SessionState::Unknown,
+        };
+    }
+    // Only conversations with no recorded AgentProcess use client-file evidence.
     if session.completed_at.is_some() {
         SessionState::Closed
     } else if has_clients {
         SessionState::Active
-    } else if session.attachment_outcome.as_deref() == Some("interrupted") {
-        SessionState::Interrupted
     } else {
         SessionState::Unknown
     }
@@ -395,14 +400,18 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
     let mut unavailable = None;
     // Sessions run where this registry recorded them; no read places one elsewhere.
     let remote: Option<&crate::durable::MachineId> = None;
+    // Receipts locate terminals; only conversations without an AgentProcess use
+    // them to judge liveness.
     let clients = if remote.is_none() && unavailable.is_none() {
         match (&session.provider, local_capture_dir(&session.artifact_key)) {
             (Some(provider), Some(dir)) => {
                 match crate::lf::commands::util::active_provider_clients(&dir, provider) {
                     Ok(clients) => clients,
                     Err(error) => {
-                        unavailable =
-                            Some(format!("Session client observation unavailable: {error}"));
+                        if session.agent_process_id.is_none() {
+                            unavailable =
+                                Some(format!("Session client observation unavailable: {error}"));
+                        }
                         Vec::new()
                     }
                 }
@@ -683,10 +692,10 @@ pub(crate) async fn open(
     if resume && mode == OpenMode::Replace {
         native.stop_clients(crate::session_record::ProviderClientStopReason::Moved)?;
     }
-    if mode == OpenMode::Refuse && !native.clients()?.is_empty() {
-        require_session_action(SessionState::Active, SessionActionKind::Open)?;
-    }
     let mut result = surface(store, session).await?;
+    if mode == OpenMode::Refuse {
+        require_session_action(result.state, SessionActionKind::Open)?;
+    }
     if resume {
         crate::lf::commands::util::resume_session(
             native.provider,
@@ -717,18 +726,6 @@ async fn connect_live_codex(
     let Some((endpoint, thread)) = store.sqlite.session_connection(&session.id)? else {
         return Ok(false);
     };
-    match tokio::net::UnixStream::connect(&endpoint).await {
-        Ok(socket) => drop(socket),
-        Err(error)
-            if matches!(
-                error.kind(),
-                std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
-            ) =>
-        {
-            return Ok(false)
-        }
-        Err(error) => return Err(error.into()),
-    }
     if thread != provider.agent_session {
         bail!("Recorded conversation differs from the live provider thread");
     }
@@ -896,12 +893,6 @@ async fn surface(store: &SharedStore, session: &LfSession) -> Result<SessionReco
     let remote: Option<crate::durable::MachineId> = None;
     let dir = local_capture_dir(&session.artifact_key)
         .ok_or_else(|| anyhow!("Session {} has an invalid Run reference", session.id))?;
-    let clients = match &session.provider {
-        Some(provider) if remote.is_none() => {
-            crate::lf::commands::util::active_provider_clients(&dir, provider)?
-        }
-        _ => Vec::new(),
-    };
     let metadata = store
         .sqlite
         .session_summary(
@@ -909,6 +900,16 @@ async fn surface(store: &SharedStore, session: &LfSession) -> Result<SessionReco
             time::OffsetDateTime::now_utc().unix_timestamp(),
         )?
         .ok_or_else(|| session_not_found(&session.id))?;
+    let clients = match &session.provider {
+        Some(provider) if remote.is_none() => {
+            match crate::lf::commands::util::active_provider_clients(&dir, provider) {
+                Ok(clients) => clients,
+                Err(_) if metadata.agent_process_id.is_some() => Vec::new(),
+                Err(error) => return Err(error),
+            }
+        }
+        _ => Vec::new(),
+    };
     let state = session_state(&metadata, !clients.is_empty());
     let actions = session_actions(state);
     let flow_membership = match (&session.flow_lf_process_id, &metadata.flow) {
@@ -1454,6 +1455,23 @@ fn read_observation_chunk(_: &mut [u8]) -> std::io::Result<Option<usize>> {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn session_states_fixture_has_only_process_or_unknown_states() {
+        let states: Vec<super::SessionState> = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/dto/session_states.json"
+        ))
+        .unwrap();
+        assert_eq!(
+            states,
+            vec![
+                super::SessionState::Unknown,
+                super::SessionState::Active,
+                super::SessionState::Closed
+            ]
+        );
+        assert!(serde_json::from_str::<super::SessionState>("\"interrupted\"").is_err());
+    }
+
+    #[test]
     fn codex_connection_launch_preserves_provider_and_rejects_replaced_attachment() {
         use futures_util::{SinkExt, StreamExt};
         use std::os::unix::fs::PermissionsExt;
@@ -1550,8 +1568,6 @@ mod tests {
                     let server = tokio::spawn(tokio::time::timeout(
                         std::time::Duration::from_secs(5),
                         async move {
-                            // The first connection probes reachability; the second reads native history.
-                            drop(listener.accept().await?.0);
                             let mut socket = accept_async(listener.accept().await?.0).await?;
                             while let Some(message) = socket.next().await {
                                 let message = message?;
@@ -1678,7 +1694,7 @@ mod tests {
             program_status: None,
             agent_process_id: None,
             primary_scope: None,
-            attachment_outcome: None,
+            agent_process_evidence: None,
             waiting: false,
             task_terminal: false,
             task_primary: false,
@@ -1765,11 +1781,25 @@ mod tests {
         assert_eq!(row.ready_summary, summary.ready_summary);
         assert_eq!(row.attention, None);
         summary.ready_summary = None;
-        summary.attachment_outcome = Some("interrupted".into());
-        assert_eq!(
-            super::summary_surface(&summary).state,
-            super::SessionState::Interrupted
-        );
+        // Neither a stale client nor attachment outcome overrides the agent row.
+        for (evidence, expected) in [
+            (
+                crate::journal::ProcessIdentityEvidence::Live,
+                super::SessionState::Active,
+            ),
+            (
+                crate::journal::ProcessIdentityEvidence::Dead,
+                super::SessionState::Closed,
+            ),
+            (
+                crate::journal::ProcessIdentityEvidence::Unknown,
+                super::SessionState::Unknown,
+            ),
+        ] {
+            summary.agent_process_evidence = Some(evidence);
+            assert_eq!(super::session_state(&summary, true), expected);
+            assert_eq!(super::session_state(&summary, false), expected);
+        }
     }
 
     use std::collections::HashSet;

@@ -319,6 +319,16 @@ mod tests {
             let attachment = store
                 .claim_session_attachment("conversation", None, &process, false)
                 .unwrap();
+            store
+                .record_agent_process_identity(
+                    "conversation",
+                    &attachment,
+                    std::process::id(),
+                    crate::journal::process_started_at(std::process::id())
+                        .unwrap()
+                        .unwrap(),
+                )
+                .unwrap();
             Self {
                 _home: home,
                 store,

@@ -192,17 +192,14 @@ impl Part {
 
     /// Whether a commit that moved revisions from `old` to `new` can change
     /// this part. Planning conditions read Sessions, Flows and unfinished
-    /// Processes; the Session list reads no Process, and only a Wave's Session
-    /// history shows token totals.
+    /// Processes. Sessions read their AgentProcess; only Wave history shows
+    /// token totals.
     fn changed(self, mut old: StoreRevisions, new: StoreRevisions) -> bool {
         if self == Part::Activity {
             return old.processes != new.processes;
         }
         if self != Part::Wave {
             old.usage = new.usage;
-        }
-        if self == Part::Sessions {
-            old.processes = new.processes;
         }
         old != new
     }
@@ -216,11 +213,10 @@ impl Part {
             } == new
     }
 
-    fn clock(self) -> Option<Duration> {
+    fn clock(self) -> Duration {
         match self {
-            Part::Planning | Part::Wave => Some(PLANNING_CLOCK),
-            Part::Activity => Some(ACTIVITY_CLOCK),
-            _ => None,
+            Part::Planning | Part::Wave => PLANNING_CLOCK,
+            Part::Activity | Part::Sessions | Part::Task | Part::WorkActivity => ACTIVITY_CLOCK,
         }
     }
 
@@ -538,7 +534,7 @@ impl Reader {
                 (None, None) => false,
                 _ => true,
             }
-            || part.clock().is_some_and(|clock| now - read_on >= clock)
+            || now - read_on >= part.clock()
     }
 
     /// When the next clock-driven reading is due.
@@ -547,7 +543,7 @@ impl Reader {
             .into_iter()
             .filter(|part| part.selected(&self.scope))
             .filter_map(|part| {
-                let clock = part.clock()?;
+                let clock = part.clock();
                 let read_on = self.parts.get(&part)?.read_on?;
                 Some((read_on + clock).saturating_duration_since(now))
             })
@@ -931,9 +927,11 @@ mod tests {
     }
 
     #[test]
-    fn an_process_alone_does_not_reread_sessions() {
+    fn process_changes_reread_sessions_and_os_death_has_a_clock() {
         let old = revisions(1, 1, 1, 1);
-        assert!(!Part::Sessions.changed(old, revisions(1, 1, 1, 2)));
+        assert!(Part::Sessions.changed(old, revisions(1, 1, 1, 2)));
+        assert_eq!(Part::Sessions.clock(), Part::Activity.clock());
+        assert_eq!(Part::Task.clock(), Part::Activity.clock());
         assert!(Part::Planning.changed(old, revisions(1, 1, 1, 2)));
         assert!(Part::Sessions.changed(old, revisions(2, 1, 1, 1)));
         assert!(!Part::Activity.changed(old, revisions(2, 2, 2, 1)));

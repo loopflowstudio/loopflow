@@ -1,4 +1,6 @@
 //! OpenCode user messages correlate requests; assistant steps remain subordinate.
+//! One stream reader owns observation state. Writers save origins directly to the
+//! store, so dispatch never needs to lock or mutate that reader.
 
 use crate::id::AgentSessionId;
 use std::collections::{btree_map::Entry, BTreeMap};
@@ -10,9 +12,9 @@ use crate::chat::types::{ConversationEvent, Lifecycle};
 use crate::session::SessionEventKind;
 use crate::store::sqlite::SqliteStore;
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(super) struct History {
-    pub(super) owner: Option<super::agent_process::AttachmentOwner>,
+    pub(super) owner: super::agent_process::AttachmentOwner,
     requests: BTreeMap<String, Request>,
     pub(super) native_permissions: bool,
     attention: super::attention::Attention,
@@ -26,37 +28,24 @@ struct Request {
 }
 
 impl History {
-    pub(super) fn new(owner: Option<super::agent_process::AttachmentOwner>) -> Self {
+    pub(super) fn new(owner: super::agent_process::AttachmentOwner) -> Self {
         Self {
             owner,
-            ..Self::default()
+            requests: BTreeMap::new(),
+            native_permissions: false,
+            attention: Default::default(),
         }
-    }
-    /// Frozen launch authority for prompts, abort and stop; never refreshed from config.
-    pub(super) fn owner(&self) -> Result<super::agent_process::AttachmentOwner> {
-        self.owner
-            .clone()
-            .ok_or_else(|| anyhow::anyhow!("OpenCode server not started"))
     }
 
     /// One server event of conversation `thread`, read for attention only.
     pub(super) fn attend(&mut self, thread: &AgentSessionId, event: &Value) {
-        if let Some((store, session, attachment)) = &self.owner {
-            self.attention.record(
-                store,
-                session,
-                attachment,
-                super::attention::opencode(event, thread.as_str()),
-            );
-        }
-    }
-
-    pub(super) fn request(&self, thread: &AgentSessionId) -> Result<String> {
-        let id = format!("msg_{}", uuid::Uuid::new_v4().simple());
-        let (store, session, attachment) = self.owner()?;
-        let origin = store.session_turn_origin(&session, &attachment)?;
-        store.record_session_request(Some(thread), &id, &origin)?;
-        Ok(id)
+        let (store, session, attachment) = &self.owner;
+        self.attention.record(
+            store,
+            session,
+            attachment,
+            super::attention::opencode(event, thread.as_str()),
+        );
     }
 
     pub(super) fn observe(
@@ -65,9 +54,7 @@ impl History {
         messages: &[Value],
     ) -> Result<Vec<ConversationEvent>> {
         let mut events = Vec::new();
-        let Some((store, session, attachment)) = &self.owner else {
-            return Ok(events);
-        };
+        let (store, session, attachment) = &self.owner;
         let receipts = native_receipts(thread, messages);
         for (request, receipt) in receipts {
             // Origins are immutable. Recover once; subsequent observations only
@@ -130,6 +117,17 @@ impl History {
             .get(request)
             .is_some_and(|request| request.started)
     }
+}
+
+/// Save attribution before submission without sharing the reader's mutable state.
+pub(super) fn record_request(
+    (store, session, attachment): &super::agent_process::AttachmentOwner,
+    thread: &AgentSessionId,
+) -> Result<String> {
+    let id = format!("msg_{}", uuid::Uuid::new_v4().simple());
+    let origin = store.session_turn_origin(session, attachment)?;
+    store.record_session_request(Some(thread), &id, &origin)?;
+    Ok(id)
 }
 
 #[derive(Debug, Default)]
@@ -463,7 +461,7 @@ mod tests {
                 .unwrap();
             let thread = "thread".into();
             let owner = (store.clone(), "session".into(), first.clone());
-            let request = History::new(Some(owner.clone())).request(&thread).unwrap();
+            let request = super::record_request(&owner, &thread).unwrap();
             let messages = vec![json!({"info":{"id":"assistant","sessionID":"thread",
                 "parentID":request,"role":"assistant","time":{"created":1}},"parts":[]})];
             let pending = Arc::new(AtomicBool::new(true));
@@ -571,8 +569,8 @@ mod tests {
         let attachment = store
             .claim_session_attachment("session", None, &process, false)
             .unwrap();
-        let history = History::new(Some((store.clone(), "session".into(), attachment.clone())));
-        let request = history.request(&"thread".into()).unwrap();
+        let history = History::new((store.clone(), "session".into(), attachment.clone()));
+        let request = super::record_request(&history.owner, &"thread".into()).unwrap();
         let message = |id: &str, input: u64, finish: &str| {
             json!({
             "info":{"id":id,"sessionID":"thread","parentID":request,"role":"assistant",
@@ -597,7 +595,7 @@ mod tests {
             .unwrap();
         assert_eq!(current.agent_process_id, attachment.agent_process_id);
         assert_ne!(current.token, attachment.token);
-        assert!(history.request(&"thread".into()).is_err());
+        assert!(super::record_request(&history.owner, &"thread".into()).is_err());
         assert!(!history.admitted(&request));
         assert!(
             !store
@@ -615,7 +613,7 @@ mod tests {
         // Lose every launcher-local object before the first native receipt.
         drop(history);
         let reopened = SqliteStore::open_ephemeral(&path).unwrap();
-        let mut history = History::new(Some((reopened, "session".into(), current)));
+        let mut history = History::new((reopened, "session".into(), current));
         assert!(history
             .observe(&"other-thread".into(), &[])
             .unwrap()

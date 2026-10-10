@@ -391,9 +391,10 @@ fn opencode_native_history_preserves_output_tools_and_usage_missingness() {
         let attachment = store
             .claim_session_attachment(&session, None, &process, false)
             .unwrap();
-        let mut history = History::new(Some((store.clone(), session.clone(), attachment)));
+        let mut history = History::new((store.clone(), session.clone(), attachment));
         let agent_session = AgentSessionId::from(session.as_str());
-        let request = history.request(&agent_session).unwrap();
+        let request =
+            super::opencode_history::record_request(&history.owner, &agent_session).unwrap();
         let mut display =
             opencode_mapping::ReaderState::new(agent_session.clone(), None, "opencode");
         let mut message = json!({
@@ -474,8 +475,9 @@ fn opencode_native_error_completes_only_its_request() {
     let attachment = store
         .claim_session_attachment("session", None, &process, false)
         .unwrap();
-    let mut history = History::new(Some((store, "session".into(), attachment)));
-    let request = history.request(&"session".into()).unwrap();
+    let mut history = History::new((store, "session".into(), attachment));
+    let request =
+        super::opencode_history::record_request(&history.owner, &"session".into()).unwrap();
     let message = json!({"info":{"id":"assistant","parentID":request,"role":"assistant","sessionID":"session",
         "time":{"created":1,"completed":2},"error":{"name":"APIError","data":{"message":"provider rejected request"}}},"parts":[]});
     let events = history

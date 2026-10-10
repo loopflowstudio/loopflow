@@ -1,5 +1,5 @@
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
@@ -24,7 +24,9 @@ pub struct OpenCodeHarness {
     events: mpsc::UnboundedSender<ConversationEvent>,
     raw_provider: Option<mpsc::UnboundedSender<RawProviderEvent>>,
     client: reqwest::Client,
-    history: Arc<Mutex<opencode_history::History>>,
+    // Frozen launch authority, independent of mutable next-launch configuration.
+    owner: Option<super::agent_process::AttachmentOwner>,
+    native_permissions: bool,
     config: Option<AgentConfig>,
     should_seed_prompt: bool,
     turn_in_progress: Arc<AtomicBool>,
@@ -47,7 +49,8 @@ impl OpenCodeHarness {
             events,
             raw_provider: None,
             client: reqwest::Client::new(),
-            history: Arc::new(Mutex::new(opencode_history::History::default())),
+            owner: None,
+            native_permissions: false,
             config: None,
             should_seed_prompt: true,
             turn_in_progress: Arc::new(AtomicBool::new(false)),
@@ -80,36 +83,30 @@ impl OpenCodeHarness {
             .agent_session
             .as_ref()
             .ok_or_else(|| anyhow!("opencode provider session id is not available"))?;
-        let (request, owner) = {
-            let history = self.history.lock().expect("OpenCode history lock poisoned");
-            (history.request(agent_session)?, history.owner()?)
-        };
+        let owner = self.owner()?;
+        let request = opencode_history::record_request(owner, agent_session)?;
         payload["messageID"] = json!(request);
         // The blocking /message route would prevent mid-turn steering while
         // send_input holds &mut self. prompt_async only enqueues the request.
         let url = format!("{base_url}/session/{agent_session}/prompt_async");
-        opencode_history::post(owner, url, payload).await?;
+        opencode_history::post(owner.clone(), url, payload).await?;
         Ok(request)
     }
 
-    /// The attached native UI owns approval; this reader only retains history.
+    /// Configure the next reader to leave approval to the attached native UI.
     pub(crate) fn use_native_permissions(&mut self) {
-        self.history
-            .lock()
-            .expect("OpenCode history lock poisoned")
-            .native_permissions = true;
+        self.native_permissions = true;
+    }
+
+    fn owner(&self) -> Result<&super::agent_process::AttachmentOwner> {
+        self.owner
+            .as_ref()
+            .ok_or_else(|| anyhow!("OpenCode server not started"))
     }
 
     async fn start_inner(&mut self, config: &AgentConfig) -> Result<()> {
         let owner = super::agent_process::open_owner(config.session_attachment.as_ref())?;
-        let native_permissions = self
-            .history
-            .lock()
-            .expect("OpenCode history lock poisoned")
-            .native_permissions;
-        let mut history = opencode_history::History::new(Some(owner.clone()));
-        history.native_permissions = native_permissions;
-        self.history = Arc::new(Mutex::new(history));
+        self.owner = Some(owner.clone());
         let (store, session, attachment) = &owner;
         let endpoint = store.agent_process_endpoint(session)?;
         let base_url = if let Some(endpoint) = endpoint {
@@ -183,7 +180,8 @@ impl OpenCodeHarness {
         let client = self.client.clone();
         let shutdown_requested = self.shutdown_requested.clone();
         let turn_in_progress = self.turn_in_progress.clone();
-        let history = self.history.clone();
+        let mut history = opencode_history::History::new(owner);
+        history.native_permissions = self.native_permissions;
         let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
         let reader_base_url = base_url.clone();
         let reader_session_id = agent_session.clone();
@@ -244,7 +242,7 @@ impl OpenCodeHarness {
                 &client,
                 &reader_base_url,
                 &reader_session_id,
-                &history,
+                &mut history,
                 &mut state,
                 &event_tx,
                 &turn_in_progress,
@@ -305,10 +303,7 @@ impl OpenCodeHarness {
                         }
                     };
 
-                    history
-                        .lock()
-                        .expect("OpenCode history lock poisoned")
-                        .attend(&reader_session_id, &raw);
+                    history.attend(&reader_session_id, &raw);
                     let mapped = opencode_mapping::map_event(&raw, &mut state);
                     // SSE is a wake edge; native messages own request identity,
                     // completion and usage. Busy/idle cannot supply those facts.
@@ -327,7 +322,7 @@ impl OpenCodeHarness {
                             &client,
                             &reader_base_url,
                             &reader_session_id,
-                            &history,
+                            &mut history,
                             &mut state,
                             &event_tx,
                             &turn_in_progress,
@@ -397,32 +392,18 @@ async fn observe_native_messages(
     client: &reqwest::Client,
     base_url: &str,
     session: &AgentSessionId,
-    history: &Mutex<opencode_history::History>,
+    history: &mut opencode_history::History,
     state: &mut opencode_mapping::ReaderState,
     event_tx: &mpsc::UnboundedSender<ConversationEvent>,
     turn_in_progress: &AtomicBool,
 ) -> Result<()> {
     let snapshot = opencode_history::read_snapshot(client, base_url, session).await?;
-    let (mut events, current_messages, owner) = {
-        let mut history = history.lock().expect("OpenCode history lock poisoned");
-        let events = history.observe(session, &snapshot.messages)?;
-        let current_messages: Vec<_> = snapshot
-            .messages
-            .iter()
-            .filter(|message| {
-                message["info"]["parentID"]
-                    .as_str()
-                    .is_some_and(|request| history.admitted(request))
-            })
-            .collect();
-        (
-            events,
-            current_messages,
-            (!history.native_permissions)
-                .then(|| history.owner())
-                .transpose()?,
-        )
-    };
+    let mut events = history.observe(session, &snapshot.messages)?;
+    let current_messages = snapshot.messages.iter().filter(|message| {
+        message["info"]["parentID"]
+            .as_str()
+            .is_some_and(|request| history.admitted(request))
+    });
     // Emit native-correlated output between start and completion, even when
     // a snapshot gets ahead of queued SSE deltas. Empty snapshots do not idle
     // an in-flight submission.
@@ -443,9 +424,9 @@ async fn observe_native_messages(
         }
         let _ = event_tx.send(event);
     }
-    if let Some(owner) = owner {
+    if !history.native_permissions {
         snapshot
-            .reply_pending_permissions(base_url, session, &owner)
+            .reply_pending_permissions(base_url, session, &history.owner)
             .await?;
     }
     Ok(())
@@ -556,22 +537,12 @@ impl Harness for OpenCodeHarness {
             .ok_or_else(|| anyhow!("opencode provider session id is not available"))?;
 
         let abort_url = format!("{base_url}/session/{agent_session}/abort");
-        let owner = self
-            .history
-            .lock()
-            .expect("OpenCode history lock poisoned")
-            .owner()?;
-        opencode_history::post(owner, abort_url, json!({})).await
+        opencode_history::post(self.owner()?.clone(), abort_url, json!({})).await
     }
 
     async fn stop(&mut self) -> Result<()> {
         if self.child.is_some() || self.server_base_url.is_some() {
-            let owner = self
-                .history
-                .lock()
-                .expect("OpenCode history lock poisoned")
-                .owner()?;
-            super::agent_process::stop(&owner)?;
+            super::agent_process::stop(self.owner()?)?;
             self.child = None;
         }
         self.disconnect();
@@ -877,6 +848,7 @@ fn parse_data_frame(frame: &str) -> Option<String> {
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::sync::Mutex;
 
     #[tokio::test]
     async fn startup_recovers_creation_without_replay_after_takeover() {
@@ -1182,7 +1154,7 @@ mod tests {
         };
         assert_eq!(harness.pid(), Some(pid));
         let thread: AgentSessionId = "native".into();
-        let request = harness.history.lock().unwrap().request(&thread).unwrap();
+        let request = opencode_history::record_request(harness.owner().unwrap(), &thread).unwrap();
         // No SSE event follows connection: native readback alone must recover
         // this request, accepted before the launcher observed any output.
         let messages = json!([{"info":{"id":"assistant", "sessionID":"native",

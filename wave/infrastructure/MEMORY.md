@@ -229,7 +229,7 @@ unpublished code retained, without deletion or delivery authorization.
 
 ## AgentProcess (LOO-443/447, 2026-10-10)
 
-Jack Heart accepted #1519 (`71741bd4`); preserve uncertainty/history.
+Jack Heart accepted #1519 (`71741bd4`).
 LOO-447 owns Claude/OpenCode takeover/stop. Jack excluded the two-second removal demo,
 three historical orphans and configured-provider runs.
 
@@ -239,11 +239,11 @@ leader death or unknown descendants grants no signaling.
 `82b5d90d5` proves A → B → A rejection with stand-ins, not configured relay.
 CI: `be4a2b2af:wave/infrastructure/MEMORY.md`, this heading.
 
-LOO-447: fenced stop/abort, signal-free drop, standby custody until group death;
-external watchdog. OpenCode saves endpoint/attempts before effects; v1.2.0
-creation carries rules/title, not PATCH. Unknown identity stays uncertain.
-Creation, relay, native launch, permission and dispatch proofs:
-`7fec3b53f:wave/infrastructure/MEMORY.md`, this heading. Shell lacks IDs.
+LOO-447: fenced stop/abort, signal-free drop, custody until group death; external
+watchdog. OpenCode saves endpoint/attempts before effects; creation carries rules/title,
+not PATCH. Its reader owns History; writers save origins in SQLite, not shared
+reader state. Unknown identity stays uncertain; shell lacks IDs. Prior proofs:
+`7fec3b53f:wave/infrastructure/MEMORY.md`, this heading.
 `4834c18f4` retains Claude origins, not pipes. Display follows current attachment;
 caller authority stays frozen. SQLite atomically correlates results by UUID,
 rejecting conflicts and rolling back failures. Uncorrelated

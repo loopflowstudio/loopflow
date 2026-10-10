@@ -1017,14 +1017,12 @@ Jack's October 9 option A
 supersedes the transport blocker: terminal argv, no editor/paste/stdin/envelopes
 or further transport probes; the rejected runner/tests are deleted. Only an oversized
 first turn may refuse with size/cap.
-Rust: skill first, no trigger/bounding or launch-time measurement. The callback
-reads live scratch and SQLite Wave/ancestors;
-Private snapshots and one manifest retain complete sources/listings; escaping
-counts toward 10,000 bytes. Pointer UX remains proposed.
-No launcher installs it. App-server Codex is additive; fixed slots, terminal
-Codex, delivery/trust and resume/compaction/OpenCode/cmux acceptance remain open.
-Rejected transport detail: `77ec4d000`, this heading;
-[Evidence](../../scripts/benchmarks/skill-invocation/README.md).
+Rust now wires fixed additions, saved whole-file references and native callbacks;
+all Codex overrides and old inlining are removed. Fixtures prove refresh; native Codex accepts scoped trust. OpenCode plugin
+checks prove no native acceptance. A network-isolated actual lf/native launch
+failed before model input with `Operation not permitted`, cause unresolved.
+Gate owns native delivery/resume/compaction; demo owns pointer/cmux judgment.
+Saved Wave IDs pass rename/name-reuse fixtures. Earlier evidence: `6149952c8:scratch/what-goes-in-system-prompt.md`.
 
 Main `3e1e6245c` (#1512): driver lifelines own engines. Replacement resumes native
 history, not abandoned turns. Preserve context/trust without launch-input replay

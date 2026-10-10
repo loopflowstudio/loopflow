@@ -8,8 +8,8 @@ Channel contract resolved (Jack, 2026-10-09, "option B"): the added-instructions
 slot is byte-identical within a launch profile, and surface instructions,
 participant name and reply guidance stay in it. A launch profile is the surface,
 the reply settings and the participant; two launches sharing all three send the
-same bytes. First-turn preparation and the whole-file refresh operation are implemented; the
-fixed slot and provider delivery remain unfinished. Jack's later `e1fdb81b-75ff-4cca-b789-243ad84bad14` steer authorizes
+same bytes. The launch cut now wires fixed additions and whole-file callbacks; the native
+provider/resume/compaction matrix remains for gate. Jack's later `e1fdb81b-75ff-4cca-b789-243ad84bad14` steer authorizes
 that production cut. Option A below resolves first-turn transport; no fixed-slot
 or transport decision remains open.
 Reconciled 2026-10-09 at `d8cf40d54` against main `906576f39`, including
@@ -69,7 +69,7 @@ instructions; test preservation rather than a model-specific opening sentence.
 
 `AgentConfig.system_prompt` holds only additions; `task_prompt` holds skill/request.
 The context-block operation carries paths, whole documents, listed UTF-8 sizes
-and the compact-only saved active skill. Provider delivery is not connected yet.
+and the compact-only saved active skill. Native delivery is connected; its full behavioral matrix remains unproved.
 
 ## Key functions
 
@@ -139,88 +139,78 @@ Required behavior through lf's actual launch paths, not only the native probes:
 Headless gate owns model-request/transport checks; demo owns cmux presentation
 and native resume-list judgment. Native probes alone satisfy neither boundary.
 
-## Production slice and remaining cut
+## Production cut and remaining acceptance (2026-10-09)
 
-The Rust changes now send builtin skill then request as the first turn; the constant
-trigger and naming exceptions are deleted. Source-size targets measure without
-excerpting memory, scratch, messages or live steers; goal/input ceilings and the
-budget notice are removed. Measurement belongs only to `lf context` and usage
-inspection, not launch preparation. `lf context` reads authored documents directly,
-without assembling a prospective skill, Task seed, diff, clipboard or agent config.
-Its obsolete `--skill` selector and original/submitted counters are deleted; totals
-sum each complete source once. Rust/Swift usage reports drop the always-empty
-assembled-budget fields while retaining measured assembly and unknown evidence.
-Terminal dispatch checks the actual UTF-8 argument
-(including space for NUL) before spawning; headless streams have no argument cap.
-Codex app-server uses additive `developerInstructions` on start and resume.
-OpenCode includes its addition on every owned turn.
+The old `format_content_sections`, `format_wave_sections` and file-body diagnostic
+assembly are deleted. Added instructions contain the operating guide, surface and
+participant; structured-reply guidance stays in the same slot. Native skill choice
+no longer selects a separate context channel or suppresses operating guidance.
+The explicit operating-guide opt-out remains, not an old/new delivery switch.
+Codex terminal and app-server inputs use additive instructions; no production
+`model_instructions_file` writer remains. First-turn argv and its one size refusal
+are unchanged.
 
-This is an **incomplete internal slice**, not a shippable interpretation of the
-channel contract. Repository context still enters the old file-backed system
-channel; two terminal Codex writers still set `model_instructions_file`. Removing
-those safely requires the fixed slot and conversation block together. Native
-installed skills retain their invocation/argument/declaration path. No launch
-flag selects old versus new behavior. No installed or provider acceptance is claimed.
+`ContextDelivery` captures repository, Wave ID, Machine, complete active skill
+and reference paths. Task seed/steers, summaries and clipboard are private complete
+files; explicit docs remain paths, and changed-file context points to Git inspection.
+The compact-only saved skill identifies the original asset directory. The existing
+10,000-byte block/manifest builder rereads scratch and SQLite Wave/ancestor bytes.
+Metadata/skill overflow pointers remain proposed UX, not Jack's acceptance.
+Diagnostics list sources and sizes instead of recreating file-body assembly.
 
-The whole-file refresh operation now exists in Rust as `build_context_block`
-and `lf --wave <address> __context-block --repo <checkout> --moment start|compact`.
-It reads current scratch and the existing SQLite Wave/ancestor owner, snapshots
-complete Wave bytes privately under `.lf/prompts/`, and reserves metadata and the
-compact-only saved skill before selecting whole file bodies. The selected Wave's
-memory precedes the branch plan, then remaining scratch by byte size; ties use
-path order. Other inherited documents follow. Complete reference files are listed,
-not inlined. The callback returns only a SessionStart `additionalContext` envelope.
-**No launcher installs this hook yet.** Its CLI/source proof is not provider delivery.
+Claude launch settings install SessionStart startup/resume and compact callbacks.
+Codex terminal flags and app-server thread start/resume use the same declarations
+and exact session-flags trust hashes. They preserve other settings and do not
+publish global trust or bypass all hooks. The terminal spawn operation composes
+capture and context hooks together, including callers below ordinary skill launch;
+this replaces the temporary capture profile and its trust-flag parser probe.
+Callback commands explicitly name the saved source descriptor and Machine; they
+need no inherited Wave or Task environment. Sources remain private files after the
+driver exits. Captures retain inputs on terminal as well as headless launches;
+native resume restores settings/additions, never the initial request. Explicit
+replay remains headless-only. Headless continuation retains the saved active skill.
 
-The shared ceiling is 10,000 rendered UTF-8 bytes: Codex 0.161.0's default
-2,500 approximate-token limit uses [ceil(UTF-8 bytes / 4)](https://github.com/openai/codex/blob/rust-v0.161.0/codex-rs/utils/string/src/truncate.rs),
-and this also avoids the observed Claude Unicode spill. JSON metadata, reference escaping, paths and skill text
-all count. If reserved metadata does not fit alongside the skill, a complete
-private manifest replaces the inline listing; an oversized skill stays whole at
-its saved path with an explicit read instruction. This includes combined overflow,
-not only a listing that individually exceeds the cap. The manifest is now the
-single metadata representation, either included whole or read through an always
-repository-relative pointer. This removes the separate long-path fallback and
-repeated path/listing assembly. One rendered-byte check selects every complete
-section; saved skill precedes the listing, then document bodies. These remain
-proposed defaults to demonstrate, not accepted UX. Unreadable scratch
-now reports the exact failed file instead of silently claiming a complete listing.
-This repairs the review finding in the shared scratch reader; no alternate reader
-or filesystem Wave fallback was added.
+OpenCode uses a launch-scoped native plugin on terminal and server paths. Its
+conversation transform supplies startup context, detects the native summary after
+compaction and refreshes the block; its system transform adds only the fixed slot.
+The plugin retains the first owning conversation and excludes sibling Sessions.
+Existing provider config/plugins are merged, not overwritten. Node checks cover
+refresh, duplicate-addition avoidance, preserved native text and sibling isolation;
+this is not native OpenCode integration acceptance.
 
-Remaining production work (one combined cut, not separate deliveries):
+### Remaining work
 
-Source inspection at `d8cf40d54` finds the callback's only production caller in
-`commands/context.rs::emit_block`; no launch path invokes it.
+- Gate: actual lf/native fake-API startup, manual/automatic compaction, terminal and
+  app-server resume/replacement on Claude, Codex and OpenCode; preserve native base,
+  guides, naming/capture hooks, permissions, account isolation and first-turn text.
+  Exercise explicit native declarations/assets and changed launch fixtures.
+- Gate: captured reference/readability and late source changes, oversized Unicode,
+  listings and skill; verify exact trusted hashes against supported native Codex.
+  Saved delivery follows the Wave ID, including renamed/reparented storage while
+  scratch stays in its captured checkout. A rename/name-reuse fixture passes;
+  native continuation remains unproved.
+- Demo: cmux's 200 KB launch, native resume-list text, whole-pointer reads and the
+  proposed OpenCode native-guide interpretation. No transport probes or new size
+  refusals are selected.
 
-1. Connect this operation to saved native hook settings/trust on Claude and Codex
-   terminal/app-server, plus proven OpenCode terminal/compaction delivery. Callback
-   arguments explicitly name the repository, Wave, saved skill and references;
-   they must not depend on ambient LF_* surviving a native launch. Retain
-   capture/naming hooks, native resume and engine replacement without replaying
-   the launch request. No launch flag may select old versus new delivery.
-2. Replace `format_content_sections` / `format_wave_sections` in
-   `prepare_process_prompt` and diagnostic formatting with the block, then delete their old inlining. Diagnostic formatting must use
-   the final channels too. The operation alone does not remove old assembly.
-3. Make additions byte-identical per accepted profile, move participant context into
-   that slot for native skills too, and replace `build_codex_command` plus
-   `build_session_command` with additive instructions. App-server already uses
-   `developerInstructions`, but its supplied text still includes gathered files.
-   Remove the installed-skill context split; preserve assets and exact arguments.
-4. Save Task briefs/steers, clipboard and summaries as complete private files and
-   pass their paths to the callback (`--reference`); pass the captured active skill
-   as `--skill-file`. Diff/docs become commands/paths. Preserve attribution and usage.
-5. Gate owns real lf/fake-API integration and affected suites; demo owns cmux,
-   pointer-read behavior and native resume-list judgment. Source callback checks
-   establish neither automatic delivery nor the fixed-slot contract.
+An isolated native Codex `hooks/list` accepted all three generated session-flags
+hashes (two context hooks and capture):
+`/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo444-trust-ynsnmwqi/`.
+The actual lf/native fake-API startup attempt under macOS network isolation failed
+before a model request with `Operation not permitted`; adding Unix-socket allowance
+did not resolve it. This is unresolved environment/entry-point evidence, not a
+provider pass or a proven product cause:
+`/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo444-lf-wire-gcs_tci8/`.
+Release's operation-entry lesson applies; callback-only tests cannot replace this.
 
-Review removed launch-only budgeting/report state and the retired transport runner;
-Clippy also exposed its now-unused skill instruction accessor, deleted with the
-translation test retained on the surviving path. Review previously found a masked fixture dependency: Flow tests read the old system file
-instead of the provider's turn. Their stand-in now records both actual thread
-and turn requests. That is source coverage, not an executed pass.
+Review moved capture-hook composition back to terminal spawn so lower callers
+cannot lose native identity capture, connected OpenCode's generic terminal runner,
+removed duplicate additions and excluded sibling context. Wave and ancestor reads
+follow IDs rather than reacquiring a potentially reused name. No installation, publication or landing is claimed.
+The pre-cut implementation plan and complete older checks remain at
+`6149952c8:scratch/what-goes-in-system-prompt.md`.
 
-Checks: `d8cf40d54` retains network-isolated `cargo test --offline -p loopflow --lib context_block` (8) and `--test context_block_tests` (1) passes; realign reran `cargo fmt --all -- --check`, `cargo clippy --offline --all-targets -- -D warnings`, `git diff --check` and `lf context` successfully; behavior tests unchanged, provider integration/affected suites remain with gate and cmux/pointer-read judgment with demo.
+Checks: `cargo fmt --all`, offline all-target Clippy, `--lib process_prompt` (24), `--lib saved_context_follows_wave_identity_after_rename` (1), diagnostic tests (9), Node plugin behavior and native Codex trust (3 hooks) pass; `--test context_launch_tests` (3) passes; gate owns the native matrix and demo owns presentation.
 
 ### Integrated upstream boundary
 
@@ -250,8 +240,7 @@ coverage; provider-only passes cannot stand in for that integration.
 
 ## Delete — do not maintain
 
-The remaining production targets belong to the same single PR; the first Rust
-slice above removes the constant turn and launch bounding, not conversation delivery. The rejected transport runner `first_turn_transport.py` and its exclusive
+The whole channel cut remains one PR; source implementation is not native acceptance. The rejected transport runner `first_turn_transport.py` and its exclusive
 `test_first_turn_transport.py` are deleted. Their complete editor evidence/code is
 archived at `d81f12c42:scripts/benchmarks/skill-invocation/`; stdin/paste code is at
 `d008a9761`. No transport probe remains to maintain or rerun. Shared native Codex
@@ -261,22 +250,17 @@ settings in `launch.py` remain used by context-delivery and skill-fidelity probe
   fallback. The complete manifest now owns both inline and pointed metadata.
 - Removed: `INITIAL_TURN_PROMPT`, its naming special cases and exclusive tests.
   Attributed request selection and existing-name protection remain.
-- The `<lf:scratch>` block and file bodies in `format_wave_sections`.
-  `format_prompt` remains diagnostic-only; replace its duplicate assembly with the
-  final channels when conversation delivery lands. Its goldens are diagnostic
-  snapshots, never acceptance of system-channel repository content.
+- Removed: `<lf:scratch>`, `format_wave_sections`, `format_content_sections` and their exclusive assembly tests. Diagnostics retain a source inventory, not provider file bodies.
 - Removed: context bounding/excerpts, preserved-excerpt store, notice, goal/input
   ceilings and launch-time measurement. `measure_context` owns size-target reporting
   from documents only; no second submitted-source count or skill preview remains.
-- Codex terminal `model_instructions_file` in `engine/agent.rs` and
-  `lf/commands/util.rs::build_session_command`, whose comment now correctly distinguishes the native base from AGENTS.md.
-  App-server replacement in `harness/codex.rs` is removed.
-- The separate context split for installed skills in `prepare_process_prompt`,
-  retaining native invocation, declarations, argument fidelity and captured assets.
-- Removed: LOOPFLOW.md launch-excerpt guidance; scratch inlining guidance remains
-  until the conversation-block cut. Removed unused `SkillInvocation::instruction_text`,
-  formerly used only by launch budgeting; translated skill/argument coverage remains.
-- Tests asserting scratch or memory text inside `system_prompt`.
+- Removed: all Codex `model_instructions_file` writers. Both terminal writers and app-server use additive instructions.
+- Removed: the installed-skill context split; native invocation, declarations, arguments and captured assets survive.
+- Removed: LOOPFLOW.md launch-excerpt guidance and unused
+  `SkillInvocation::instruction_text`, formerly used only by launch budgeting.
+  Recursive scratch remains available whole or listed; translated skill/argument
+  coverage remains.
+- Removed: tests asserting scratch or memory bodies inside `system_prompt`; surviving checks assert refreshed conversation content.
 
 Must survive: the size targets, `lf context`, `lf monitor usage --context`,
 prompt logs under `.lf/prompts/`, source-boundary escaping.
@@ -381,7 +365,7 @@ checks despite cutting the middle, invalidating marker-only acceptance. A
 samples require provider-unit budgeting; they do not establish every boundary
 or automatic compaction. Native spill files do not satisfy whole-file inlining.
 The callback implements complete-list/skill overflow with readable pointers;
-provider pointer-read behavior, OpenCode and launch integration remain unfinished.
+provider pointer-read behavior and the native delivery matrix remain unproved.
 The old assembly deletion list is unchanged.
 
 Historical probe/check results predate the Rust cut, not production verification.

@@ -1744,11 +1744,13 @@ fn execute_command(
         }
         Some(Commands::ContextBlock {
             repo,
+            delivery,
             moment,
             skill_file,
             reference,
         }) => loopflow::lf::commands::context::emit_block(
-            repo,
+            repo.as_deref(),
+            delivery.as_deref(),
             cli.wave.as_deref(),
             *moment,
             skill_file.as_deref(),

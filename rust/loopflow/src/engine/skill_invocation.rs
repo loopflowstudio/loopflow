@@ -161,10 +161,10 @@ impl SkillInvocation {
         harness: &str,
         config: &crate::engine::agent::AgentConfig,
     ) -> anyhow::Result<(Vec<String>, String)> {
-        let context = format!("{}\n\n{}", config.system_prompt, config.task_prompt);
+        let context = &config.task_prompt;
         if self.native_for("claude") && harness == "claude" && self.native_declarations("claude") {
             self.report_native_declarations("claude");
-            return self.prepare_claude(config, Some(&context));
+            return self.prepare_claude(config, (!context.is_empty()).then_some(context.as_str()));
         }
         let prompt = if harness == "codex" {
             self.codex_prompt()

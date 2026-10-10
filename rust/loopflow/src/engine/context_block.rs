@@ -23,6 +23,156 @@ pub enum ContextMoment {
     Compact,
 }
 
+/// Captured source identities, not frozen context. Hooks reread scratch and Wave
+/// storage; references and the active skill retain their complete launch bytes.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ContextDelivery {
+    pub repo: PathBuf,
+    pub wave_id: Option<crate::id::WaveId>,
+    pub skill_file: Option<PathBuf>,
+    pub references: Vec<PathBuf>,
+    pub home: PathBuf,
+}
+
+impl ContextDelivery {
+    pub fn prepare(
+        components: &crate::engine::prompt::PromptComponents,
+    ) -> Result<Self, CoreError> {
+        let repo = fs::canonicalize(&components.repo_root)?;
+        let mut references = Vec::new();
+        for doc in components.docs.iter().chain(&components.summaries) {
+            if matches!(doc.source, DocumentSource::Scratch | DocumentSource::Wave) {
+                continue;
+            }
+            // Explicit documents remain paths. Generated summaries have no source file.
+            references.push(if doc.source == DocumentSource::Summary {
+                write_prompt_log(&repo, &doc.content, "summary", None)?
+            } else {
+                repo.join(&doc.path)
+            });
+        }
+        if let Some(text) = &components.clipboard {
+            references.push(write_prompt_log(&repo, text, "clipboard", None)?);
+        }
+        if components.diff.is_some() || !components.diff_files.is_empty() {
+            let paths = components
+                .diff_files
+                .iter()
+                .map(|doc| doc.path.as_str())
+                .collect::<Vec<_>>();
+            references.push(write_prompt_log(&repo, &format!(
+                "Inspect current changes with `git diff` and `git diff main...HEAD`.\nChanged paths: {}\n",
+                serde_json::to_string(&paths).expect("paths serialize")
+            ), "changes", None)?);
+        }
+        let skill_file = components
+            .skill
+            .as_ref()
+            .map(|skill| {
+                let source = skill
+                    .source
+                    .as_ref()
+                    .map(|source| {
+                        format!(
+                    "Original skill source: {}. Resolve relative assets from its directory.\n\n",
+                    serde_json::to_string(&source.path).expect("skill path serializes")
+                )
+                    })
+                    .unwrap_or_default();
+                write_prompt_log(
+                    &repo,
+                    &format!("{source}{}", skill.source_text()),
+                    "active-skill",
+                    None,
+                )
+            })
+            .transpose()?;
+        Ok(Self {
+            repo: repo.clone(),
+            wave_id: components
+                .wave
+                .as_deref()
+                .map(|name| {
+                    crate::work::wave::context::resolve_managed_wave_sync(Some(&repo), Some(name))
+                        .map(|wave| wave.id().clone())
+                        .map_err(|error| CoreError::IoError(error.to_string()))
+                })
+                .transpose()?,
+            skill_file,
+            references,
+            home: crate::store::lf_home_dir(),
+        })
+    }
+
+    pub fn block(&self, moment: ContextMoment) -> Result<ContextBlock, CoreError> {
+        let wave = self
+            .wave_id
+            .as_ref()
+            .map(|id| {
+                let store = crate::store::sqlite::SqliteStore::open_read_only(
+                    &crate::store::database_path_from_env()?,
+                )
+                .map_err(|error| CoreError::IoError(error.to_string()))?;
+                store
+                    .get_wave(id)
+                    .map_err(|error| CoreError::IoError(error.to_string()))?
+                    .ok_or_else(|| {
+                        CoreError::IoError(format!("Saved context Wave {id} is missing"))
+                    })
+            })
+            .transpose()?;
+        // A Wave may move while its conversation and checkout stay put. Follow
+        // its durable identity for memory, but keep scratch in this checkout.
+        let mut documents = gather_documents(&GatherSpec {
+            repo_root: self.repo.clone(),
+            ..Default::default()
+        })?;
+        if let Some(wave) = &wave {
+            let store = crate::store::sqlite::SqliteStore::open_read_only(
+                &crate::store::database_path_from_env()?,
+            )
+            .map_err(|error| CoreError::IoError(error.to_string()))?;
+            documents.extend(crate::engine::prompt::gather_saved_wave_docs(&store, wave)?);
+        }
+        let wave = wave.as_ref().map(|wave| wave.slug());
+        let branch = crate::engine::git::current_branch(&self.repo)
+            .ok()
+            .flatten();
+        order_documents(&mut documents, wave, branch.as_deref());
+        render_block(
+            &self.repo,
+            wave,
+            moment,
+            self.skill_file.as_deref(),
+            &self.references,
+            documents,
+        )
+    }
+
+    /// Saved settings are private and outlive the launching driver. Native
+    /// resumes do not need the original environment or replay the first turn.
+    pub fn hook_settings(&self) -> anyhow::Result<serde_json::Value> {
+        let path = write_prompt_log(
+            &self.repo,
+            &serde_json::to_string(self)?,
+            "context-delivery",
+            None,
+        )?;
+        let executable = crate::engine::process::resolve_lf_binary();
+        let quote = |path: &Path| crate::engine::process::shell_escape(&path.to_string_lossy());
+        let command = format!(
+            "env LF_HOME={} {} __context-block --delivery {} --moment",
+            quote(&self.home),
+            quote(&executable),
+            quote(&path)
+        );
+        Ok(serde_json::json!({"SessionStart": [
+            {"matcher": "startup|resume", "hooks": [{"type":"command", "command": format!("{command} start"), "timeout": 30}]},
+            {"matcher": "compact", "hooks": [{"type":"command", "command": format!("{command} compact"), "timeout": 30}]}
+        ]}))
+    }
+}
+
 /// One complete, readable source; logical Wave names never masquerade as files.
 #[derive(Debug, Serialize)]
 struct ContextFile {
@@ -202,6 +352,53 @@ mod tests {
             content: content.into(),
             source,
         }
+    }
+
+    #[test]
+    fn saved_context_follows_wave_identity_after_rename() {
+        let _home = crate::journal::TestLedgerGuard::new();
+        let repo = loopflow_test_support::TestRepo::new();
+        let canonical = crate::repository::CanonicalRepo::discover(repo.path()).unwrap();
+        let store = crate::store::sqlite::SqliteStore::new(
+            &crate::store::database_path_from_env().unwrap(),
+        )
+        .unwrap();
+        let wave = store.ensure_wave(&canonical.to_string(), "before").unwrap();
+        store
+            .update_wave_document(&wave, "MEMORY.md", "Retained wave memory")
+            .unwrap();
+        fs::create_dir(repo.path().join("scratch")).unwrap();
+        fs::write(repo.path().join("scratch/plan.md"), "Checkout scratch").unwrap();
+        let delivery = super::ContextDelivery::prepare(&crate::engine::prompt::PromptComponents {
+            repo_root: repo.path().display().to_string(),
+            wave: Some("before".into()),
+            ..Default::default()
+        })
+        .unwrap();
+        let parent = store.ensure_wave(&canonical.to_string(), "parent").unwrap();
+        store
+            .update_wave_document(&parent, "MEMORY.md", "Current ancestor memory")
+            .unwrap();
+        store
+            .relocate_waves(&[crate::store::WaveLocatorUpdate {
+                wave_id: wave.clone(),
+                expected_repo: canonical.to_string(),
+                expected_slug: "before".into(),
+                target: crate::work::wave::WaveLocator::new(canonical.clone(), "parent/after")
+                    .unwrap(),
+                retire_collision: None,
+            }])
+            .unwrap();
+        let replacement = store.ensure_wave(&canonical.to_string(), "before").unwrap();
+        store
+            .update_wave_document(&replacement, "MEMORY.md", "Wrong replacement memory")
+            .unwrap();
+        let block = delivery.block(ContextMoment::Compact).unwrap().text;
+        assert!(block.contains("Retained wave memory"));
+        assert!(block.contains("wave/parent/after/MEMORY.md"));
+        assert!(block.contains("Current ancestor memory"));
+        assert!(block.contains("Checkout scratch"));
+        assert!(!block.contains("Wrong replacement memory"));
     }
 
     #[test]

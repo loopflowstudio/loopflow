@@ -1459,11 +1459,14 @@ impl CodexHarness {
 
         let (thread_method, mut thread_params) =
             build_thread_request(launch, self.resume_agent_session.as_ref());
-        let config = json!({
+        let mut config = json!({
             "shell_environment_policy.set": tool_environment,
             "allow_login_shell": false,
             "features.shell_snapshot": false,
         });
+        if let Some(context) = &launch.conversation_context {
+            config["hooks"] = super::context::codex_config(Some(context), false)?["hooks"].clone();
+        }
         thread_params.insert("config".into(), config);
         // The thread params include Loopflow's conservative defaults only when
         // Codex config is missing or less permissive. More permissive user or

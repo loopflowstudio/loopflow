@@ -663,6 +663,7 @@ fn process_ci_fix(
                     launch.agent = Some(request.agent);
                     launch.provider_account_id = request.account_id;
                     launch.system_prompt = request.system_prompt;
+                    launch.conversation_context = request.conversation_context;
                     launch.task_prompt = request.task_prompt;
                     launch.skill_invocation = request.skill_invocation;
                     launch.max_turns = request.max_turns;

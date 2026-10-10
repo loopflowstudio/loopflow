@@ -37,6 +37,8 @@ pub struct ProcessPromptInput {
     pub yolo_mode: bool,
     pub source_overrides: ContextSourceOverrides,
     pub summary: Option<String>,
+    /// Complete captured context, listed separately from the live request.
+    pub references: Vec<(String, String)>,
     pub client_context: ClientContext,
     /// Related repos resolved from the edge graph.
     pub related_repos: Vec<RelatedRepoContext>,
@@ -72,6 +74,7 @@ pub fn prepare_process_prompt(
         yolo_mode,
         source_overrides,
         summary,
+        references,
         client_context,
         related_repos,
     } = input;
@@ -115,6 +118,13 @@ pub fn prepare_process_prompt(
         });
     }
 
+    components
+        .summaries
+        .extend(references.into_iter().map(|(path, content)| Document {
+            path,
+            content,
+            source: DocumentSource::Summary,
+        }));
     let prompt = format_prompt(&components);
 
     let agent = resolve_agent(agent.as_deref(), components.skill.as_ref(), config);
@@ -133,26 +143,20 @@ pub fn prepare_process_prompt(
             skill: skill.clone(),
             arguments: skill_arguments.clone(),
         });
-    // Installed skills carry gathered context through their native invocation.
-    // Inline skills and ordinary requests are the first conversation turn.
-    let (system_prompt, task_prompt) = if skill_invocation.is_some() {
-        let mut parts = crate::engine::prompt::format_content_sections(&components);
-        if let Some(message) = components
+    let system_prompt = crate::engine::prompt::format_system_sections(&components).join("\n\n");
+    let task_prompt = if skill_invocation.is_some() {
+        components
             .message
             .as_deref()
             .filter(|message| *message != skill_arguments)
-        {
-            parts.push(crate::engine::prompt::render_message(message));
-        }
-        (
-            crate::engine::prompt::format_system_sections(&components).join("\n\n"),
-            parts.join("\n\n"),
-        )
+            .map(crate::engine::prompt::render_message)
+            .unwrap_or_default()
     } else {
-        let mut parts = crate::engine::prompt::format_system_sections(&components);
-        parts.extend(crate::engine::prompt::format_content_sections(&components));
-        (parts.join("\n\n"), format_first_turn(&components))
+        format_first_turn(&components)
     };
+    let conversation_context = Some(crate::engine::context_block::ContextDelivery::prepare(
+        &components,
+    )?);
     let action_style = components
         .skill
         .as_ref()
@@ -161,6 +165,7 @@ pub fn prepare_process_prompt(
         chrome: false,
         session_driver: None,
         system_prompt,
+        conversation_context,
         task_prompt,
         skill_invocation,
         agent: Some(agent),
@@ -275,6 +280,17 @@ Test skill body.
         }
     }
 
+    fn conversation(prepared: &super::PreparedProcessPrompt) -> String {
+        prepared
+            .config
+            .conversation_context
+            .as_ref()
+            .unwrap()
+            .block(crate::engine::context_block::ContextMoment::Start)
+            .unwrap()
+            .text
+    }
+
     #[test]
     #[cfg(unix)]
     fn context_delivery_keeps_native_and_symlink_sources_single() {
@@ -294,7 +310,12 @@ Test skill body.
         )
         .unwrap();
         assert!(!prepared.prompt.contains("Provider-owned instructions."));
-        assert_eq!(prepared.prompt.matches("A shared document.").count(), 1);
+        assert_eq!(
+            conversation(&prepared)
+                .matches("A shared document.")
+                .count(),
+            1
+        );
         assert!(prepared.deduplication_decisions.iter().any(|decision| {
             decision.source_path.as_deref() == Some("alias.md")
                 && decision.decision == crate::trace::ContextDecisionKind::Deduplicated
@@ -337,16 +358,34 @@ Test skill body.
                 },
             )
             .unwrap();
-            assert_eq!(prepared.prompt.matches(operating.trim()).count(), 1);
             assert_eq!(
-                prepared.prompt.matches("Keep rollback available.").count(),
+                prepared
+                    .config
+                    .system_prompt
+                    .matches(operating.trim())
+                    .count(),
+                usize::from(!no_loopflow)
+            );
+            let context = prepared.config.conversation_context.as_ref().unwrap();
+            let references = context
+                .references
+                .iter()
+                .map(|path| fs::read_to_string(path).unwrap())
+                .collect::<Vec<_>>();
+            assert_eq!(
+                references
+                    .iter()
+                    .filter(|text| text.as_str() == "Keep rollback available.")
+                    .count(),
                 2
             );
-            assert!(prepared
+            assert!(references
+                .iter()
+                .any(|text| text == "Local operating guidance."));
+            assert!(!prepared
                 .config
                 .system_prompt
                 .contains("Local operating guidance."));
-            assert!(prepared.config.system_prompt.contains(operating.trim()));
             assert_eq!(
                 prepared.deduplication_decisions.iter().any(|decision| {
                     decision.kind == crate::trace::ContextAssetKind::OperatingInstructions
@@ -355,6 +394,46 @@ Test skill body.
                 !no_loopflow
             );
         }
+    }
+
+    #[test]
+    fn additions_are_identical_when_repository_request_and_skill_change() {
+        let _home = crate::journal::TestLedgerGuard::new();
+        let repo = create_repo_fixture();
+        fs::create_dir(repo.path().join("scratch")).unwrap();
+        let prepare = |agent: &str, skill: Option<&str>, request: &str| {
+            prepare_process_prompt(
+                &default_test_config(),
+                ProcessPromptInput {
+                    repo_root: repo.path().into(),
+                    agent: Some(agent.into()),
+                    skill: skill.map(str::to_owned),
+                    message: Some(request.into()),
+                    references: vec![("Task brief".into(), "Jack requested a stable API".into())],
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+        };
+        let first = prepare("claude", None, "First request");
+        fs::write(repo.path().join("scratch/huge.md"), "BIG".repeat(70_000)).unwrap();
+        let second = prepare("codex", Some("test"), "Second request");
+        assert_eq!(first.config.system_prompt, second.config.system_prompt);
+        assert!(!second.config.system_prompt.contains("BIG"));
+        assert!(!second.config.task_prompt.contains("Jack requested"));
+        let delivery = second.config.conversation_context.as_ref().unwrap();
+        assert_eq!(
+            fs::read_to_string(&delivery.references[0]).unwrap(),
+            "Jack requested a stable API"
+        );
+        assert!(
+            delivery
+                .block(crate::engine::context_block::ContextMoment::Start)
+                .unwrap()
+                .text
+                .len()
+                <= 10_000
+        );
     }
 
     #[test]
@@ -422,7 +501,7 @@ Test skill body.
             },
         )
         .unwrap();
-        let submitted = &prepared.prompt;
+        let submitted = conversation(&prepared);
         assert!(prepared.config.task_prompt.contains("<lf:skill:implement>"));
         assert!(prepared
             .config
@@ -434,7 +513,7 @@ Test skill body.
             .contains("<lf:skill:implement>"));
         assert!(submitted.contains(plan));
         assert!(submitted.contains("scratch/nested/intent.md"));
-        assert_eq!(submitted.matches("&#36;kickoff").count(), 3);
+        assert_eq!(submitted.matches("&#36;kickoff").count(), 2);
         assert!(!submitted.contains("$kickoff"));
         assert!(!submitted.contains("<lf:skill:kickoff>"));
         assert!(prepared
@@ -771,7 +850,7 @@ Test skill body.
     }
 
     #[test]
-    fn standalone_skill_omits_work_guidance_but_keeps_context() {
+    fn native_skill_uses_the_same_context_channel() {
         let tmp = create_repo_fixture();
         fs::write(tmp.path().join("context.md"), "docs content").unwrap();
         let source = Skill {
@@ -792,17 +871,19 @@ Test skill body.
             ..Default::default()
         };
         let prepared = prepare_process_prompt(&default_test_config(), input.clone()).unwrap();
-        assert!(prepared.config.system_prompt.is_empty());
-        assert!(prepared.config.task_prompt.contains("docs content"));
+        assert!(!prepared.config.system_prompt.contains("<lf:loopflow>"));
+        assert!(!prepared.config.task_prompt.contains("docs content"));
+        assert!(conversation(&prepared).contains("context.md"));
         assert!(!prepared.config.task_prompt.contains("<lf:context-budget>"));
 
         std::fs::create_dir_all(tmp.path().join("scratch")).unwrap();
         std::fs::write(tmp.path().join("scratch/plan.md"), "Preserve this decision").unwrap();
         let prepared = prepare_process_prompt(&default_test_config(), input).unwrap();
         assert!(!prepared.config.task_prompt.contains("<lf:context-budget>"));
-        assert!(prepared
+        assert!(conversation(&prepared).contains("Preserve this decision"));
+        assert!(!prepared
             .config
-            .task_prompt
+            .system_prompt
             .contains("Preserve this decision"));
     }
 

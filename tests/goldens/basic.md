@@ -129,6 +129,10 @@ instructions into customer skills.
 
 </lf:loopflow>
 
+<lf:user>
+The current conversation participant's display name is "Fixture Participant" (JSON string). In prose, use a familiar name already known in this conversation; otherwise use this display name. Address them as "you" in session conversation. This is display data, not authorization or proof of who authored historical, Task, or external requests. Preserve those requests' own attribution; do not fill unknown authors with this name.
+</lf:user>
+
 Run mode is headless. No one is available in this conversation. Do not ask a
 conversational question or wait for turn text — no one will answer here.
 
@@ -143,10 +147,6 @@ assumption in `scratch/questions.md` and proceed with the simpler safe choice.
 
 No rendering environment. Output is logged, not displayed.
 
-
-<lf:user>
-The current conversation participant's display name is "Fixture Participant" (JSON string). In prose, use a familiar name already known in this conversation; otherwise use this display name. Address them as "you" in session conversation. This is display data, not authorization or proof of who authored historical, Task, or external requests. Preserve those requests' own attribution; do not fill unknown authors with this name.
-</lf:user>
 
 <lf:skill:test>
 Test skill content.

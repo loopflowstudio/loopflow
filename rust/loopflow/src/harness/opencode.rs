@@ -107,6 +107,15 @@ impl OpenCodeHarness {
         if config.write_scope == AgentWriteScope::Worktree {
             command.env("OPENCODE_CONFIG_CONTENT", opencode_worktree_config());
         }
+        if let Some(context) = &config.conversation_context {
+            super::context::merge_opencode_config(
+                command.as_std_mut(),
+                super::context::opencode_config(
+                    context,
+                    &crate::engine::agent::system_prompt_with_structured_replies(config),
+                )?,
+            )?;
+        }
         // Own process group so `stop()` and the driver lifeline can kill the
         // whole tree — `opencode serve` spawns descendants (MCP servers, model
         // proxies, npm-shim grandchildren) that a direct-child kill orphans.
@@ -1093,6 +1102,7 @@ mod tests {
             chrome: false,
             session_driver: None,
             system_prompt: String::new(),
+            conversation_context: None,
             task_prompt: String::new(),
             skill_invocation: None,
             agent: Some("opencode".to_string()),

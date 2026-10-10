@@ -345,7 +345,9 @@ pub enum Commands {
     #[command(name = "__context-block", hide = true)]
     ContextBlock {
         #[arg(long)]
-        repo: std::path::PathBuf,
+        repo: Option<std::path::PathBuf>,
+        #[arg(long, required_unless_present = "repo", conflicts_with = "repo")]
+        delivery: Option<std::path::PathBuf>,
         #[arg(long, value_enum)]
         moment: crate::engine::context_block::ContextMoment,
         #[arg(long)]

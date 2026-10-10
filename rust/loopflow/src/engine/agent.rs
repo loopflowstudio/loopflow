@@ -171,6 +171,8 @@ pub struct AgentConfig {
     pub chrome: bool,
     /// System/context prompt content.
     pub system_prompt: String,
+    /// Saved sources for native startup and compaction hooks.
+    pub conversation_context: Option<crate::engine::context_block::ContextDelivery>,
     /// Task prompt content sent as the turn input.
     pub task_prompt: String,
     /// Native skill selection, kept separate from gathered reference context.
@@ -1000,15 +1002,14 @@ pub fn build_codex_command(
     cmd.push("-c".to_string());
     cmd.push(format!("service_tier=\"{CODEX_DEFAULT_SERVICE_TIER}\""));
 
-    // This overrides Codex's built-in prompt; native AGENTS.md loading is separate.
-    if let Some(ref context_file) = process.context_file {
-        cmd.push("-c".to_string());
+    let instructions = system_prompt_with_structured_replies(launch);
+    if !instructions.is_empty() {
+        cmd.push("-c".into());
         cmd.push(format!(
-            "model_instructions_file=\"{}\"",
-            context_file.display()
+            "developer_instructions={}",
+            serde_json::to_string(&instructions).expect("instructions serialize")
         ));
     }
-
     if let Some(variant) = model_variant {
         cmd.push("-c".to_string());
         cmd.push(format!("model=\"{variant}\""));
@@ -1589,7 +1590,14 @@ fn _begin_implicit_capture(
             &system_prompt_with_structured_replies(launch),
             &launch.task_prompt,
         );
-        CaptureHandle::begin_with_context(spec, &context, None)
+        CaptureHandle::begin_with_context(
+            spec,
+            &context,
+            Some(crate::session_record::AgentProcessRequest::from_prepared(
+                launch,
+                capabilities,
+            )),
+        )
     };
     capture
         .map(|capture| {
@@ -1832,10 +1840,14 @@ fn _run_agent_once(
     if !process.auto {
         validate_terminal_turn(&launch.task_prompt)?;
     }
-    let cmd_args = build_model_command(launch, process, capabilities);
+    let mut cmd_args = build_model_command(launch, process, capabilities);
     if cmd_args.is_empty() {
         return Err(CoreError::ExecutionFailed("Empty command".to_string()));
     }
+    let hooks =
+        crate::harness::context::native_args(&harness, launch.conversation_context.as_ref(), false)
+            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
+    cmd_args.splice(1..1, hooks);
 
     let program = &cmd_args[0];
     let args = &cmd_args[1..];
@@ -1850,6 +1862,19 @@ fn _run_agent_once(
         cmd.env_remove(name);
     }
     cmd.envs(&launch.env);
+    if let Some(context) = launch
+        .conversation_context
+        .as_ref()
+        .filter(|_| harness == "opencode")
+    {
+        let config = crate::harness::context::opencode_config(
+            context,
+            &system_prompt_with_structured_replies(launch),
+        )
+        .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
+        crate::harness::context::merge_opencode_config(&mut cmd, config)
+            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
+    }
     let title = if process.auto {
         None
     } else {
@@ -2778,21 +2803,21 @@ trust_level = "trusted"
     }
 
     #[test]
-    fn build_codex_command_with_context_file() {
-        let launch = default_launch();
-        let process = ProcessConfig {
-            context_file: Some(std::path::PathBuf::from("/tmp/context.md")),
-            ..Default::default()
+    fn build_codex_command_keeps_native_instructions() {
+        let launch = AgentConfig {
+            system_prompt: "Fixed additions.".into(),
+            ..default_launch()
         };
-        let cmd = build_codex_command(&launch, &process, None);
-        assert!(cmd.contains(&"-c".to_string()));
-        assert!(cmd.contains(&"model_instructions_file=\"/tmp/context.md\"".to_string()));
+        let cmd = build_codex_command(&launch, &auto_process(), None);
+        assert!(cmd.contains(&"developer_instructions=\"Fixed additions.\"".to_string()));
+        assert!(!cmd
+            .iter()
+            .any(|arg| arg.contains("model_instructions_file")));
     }
 
     #[test]
     fn build_codex_command_without_context_file() {
-        // Skill-launched skills clear the system prompt, so no context file is
-        // written. Codex must not receive an empty `model_instructions_file`.
+        // Absence of a log file must never replace the native instructions.
         let launch = default_launch();
         let process = ProcessConfig {
             context_file: None,

@@ -2,7 +2,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use fs2::FileExt;
 use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
-use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
@@ -50,6 +50,7 @@ pub(crate) struct SessionCommand {
     pub(crate) program: String,
     pub(crate) args: Vec<String>,
     pub(crate) cwd: PathBuf,
+    pub(crate) context: Option<crate::engine::context_block::ContextDelivery>,
 }
 
 #[allow(clippy::too_many_arguments)] // Provider inputs plus native skill flags and context file.
@@ -62,6 +63,7 @@ pub(crate) fn launch_session(
     agent_session: Option<&AgentSessionId>,
     flags: &[String],
     context_file: Option<&Path>,
+    context: Option<&crate::engine::context_block::ContextDelivery>,
 ) -> Result<()> {
     let worktree = absolute_path(worktree);
     let mut command = build_session_command(
@@ -73,7 +75,28 @@ pub(crate) fn launch_session(
         context_file,
     )?;
     command.args.splice(0..0, flags.iter().cloned());
-    spawn_session_command_with_env(&command, environment, agent_session, None, None)
+    command.context = context.cloned();
+    let mut environment = environment.clone();
+    if let Some(context) = context.filter(|_| harness == "opencode") {
+        let mut provider = Command::new(harness);
+        provider.envs(&environment);
+        crate::harness::context::merge_opencode_config(
+            &mut provider,
+            crate::harness::context::opencode_config(
+                context,
+                &crate::harness::context::read_instructions(context_file)?,
+            )?,
+        )?;
+        environment.extend(provider.get_envs().filter_map(|(key, value)| {
+            value.map(|value| {
+                (
+                    key.to_string_lossy().into_owned(),
+                    value.to_string_lossy().into_owned(),
+                )
+            })
+        }));
+    }
+    spawn_session_command_with_env(&command, &environment, agent_session, None, None)
 }
 
 pub(crate) fn build_session_command(
@@ -102,8 +125,8 @@ pub(crate) fn build_session_command(
             if let Some(path) = context_file {
                 args.push("-c".to_string());
                 args.push(format!(
-                    "model_instructions_file={}",
-                    serde_json::to_string(&path.to_string_lossy())?
+                    "developer_instructions={}",
+                    serde_json::to_string(&std::fs::read_to_string(path)?)?
                 ));
             }
             // Ported skill frontmatter starts with `---`, which is prompt data.
@@ -148,6 +171,7 @@ pub(crate) fn build_session_command(
         ),
     };
     Ok(SessionCommand {
+        context: None,
         program: harness.to_string(),
         args,
         cwd: worktree.to_path_buf(),
@@ -200,6 +224,53 @@ pub(crate) fn resume_session_with_env(
         crate::session_record::CAPTURE_KEY_ENV.to_string(),
         artifact_key.to_string(),
     )]);
+    let (_, saved) =
+        crate::session_record::resolve_manifest(&crate::store::lf_home_dir(), artifact_key)?;
+    if let Some(request) = saved.process {
+        command.context = request.conversation_context.clone();
+        if harness == "codex" {
+            command.args.splice(
+                0..0,
+                [
+                    "-c".into(),
+                    format!(
+                        "developer_instructions={}",
+                        serde_json::to_string(&request.system_prompt)?
+                    ),
+                ],
+            );
+        } else if harness == "claude" && !request.system_prompt.is_empty() {
+            let path = crate::engine::prompt::write_prompt_log(
+                worktree,
+                &request.system_prompt,
+                "resume-instructions",
+                None,
+            )?;
+            command.args.splice(
+                0..0,
+                [
+                    "--append-system-prompt-file".into(),
+                    path.display().to_string(),
+                ],
+            );
+        } else if harness == "opencode" {
+            if let Some(context) = request.conversation_context.as_ref() {
+                let mut provider = Command::new(harness);
+                crate::harness::context::merge_opencode_config(
+                    &mut provider,
+                    crate::harness::context::opencode_config(context, &request.system_prompt)?,
+                )?;
+                environment.extend(provider.get_envs().filter_map(|(key, value)| {
+                    value.map(|value| {
+                        (
+                            key.to_string_lossy().into_owned(),
+                            value.to_string_lossy().into_owned(),
+                        )
+                    })
+                }));
+            }
+        }
+    }
     environment.extend(extra_environment.clone());
     environment.insert(
         crate::engine::config::USER_NAME_ENV.to_string(),
@@ -520,6 +591,7 @@ fn build_resume_session_command(
         }
     };
     Ok(SessionCommand {
+        context: None,
         program: harness.to_string(),
         args,
         cwd,
@@ -700,12 +772,13 @@ fn session_command_status_with_env(
         );
         route.record_process_blocking(agent_session.cloned(), None)?;
     }
-    let codex_profile =
-        if command.program == "codex" && agent_session.is_none() && capture_dir.is_some() {
-            Some(prepare_codex_capture(&mut process)?)
-        } else {
-            None
-        };
+    let capture_codex =
+        command.program == "codex" && agent_session.is_none() && capture_dir.is_some();
+    process.args(crate::harness::context::native_args(
+        &command.program,
+        command.context.as_ref(),
+        capture_codex,
+    )?);
     process.args(&command.args);
     if let (Some(capture_dir), Some(agent_session)) = (capture_dir.as_deref(), agent_session) {
         crate::session_record::write_provider_session(
@@ -802,7 +875,7 @@ fn session_command_status_with_env(
         .map(ProviderClientGuard::take_stop_reason)
         .transpose()?
         .flatten();
-    if status.success() && stop_reason.is_none() && codex_profile.is_some() {
+    if status.success() && stop_reason.is_none() && capture_codex {
         let capture_dir = capture_dir
             .as_deref()
             .expect("Codex capture has a directory");
@@ -855,103 +928,6 @@ impl Drop for ProviderClientGuard {
             tracing::warn!(pid = self.pid, %error, "failed to clear provider client stop");
         }
     }
-}
-
-fn prepare_codex_capture(process: &mut Command) -> Result<tempfile::NamedTempFile> {
-    let home = process
-        .get_envs()
-        .find(|(key, _)| *key == "CODEX_HOME")
-        .map(|(_, value)| value.map(PathBuf::from))
-        .unwrap_or_else(|| std::env::var_os("CODEX_HOME").map(PathBuf::from))
-        .unwrap_or_else(|| {
-            dirs::home_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join(".codex")
-        });
-    std::fs::create_dir_all(&home)?;
-    let mut profile = tempfile::Builder::new()
-        .prefix("lf-capture-")
-        .suffix(".config.toml")
-        .tempfile_in(home)?;
-    let executable = std::env::current_exe()
-        .map_err(|error| anyhow!("cannot resolve lf for Codex session capture: {error}"))?;
-    let command = format!(
-        "{} __provider-session",
-        crate::engine::process::shell_escape(&executable.to_string_lossy())
-    );
-    let command = serde_json::to_string(&command).expect("shell command serializes as TOML string");
-    write!(profile, "hooks={{ SessionStart = [{{ matcher = \"startup\", hooks = [{{ type = \"command\", command = {command}, timeout = 5 }}] }}] }}")?;
-    profile.flush()?;
-    if !codex_supplies_hook_trust(process)? {
-        process.arg("--dangerously-bypass-hook-trust");
-    }
-    let name = profile
-        .path()
-        .file_name()
-        .and_then(|name| name.to_str())
-        .and_then(|name| name.strip_suffix(".config.toml"))
-        .expect("generated Codex profile has a valid name");
-    process.args(["--profile", name]);
-    Ok(profile)
-}
-
-fn codex_supplies_hook_trust(process: &Command) -> Result<bool> {
-    let mut probe = Command::new(process.get_program());
-    if let Some(cwd) = process.get_current_dir() {
-        probe.current_dir(cwd);
-    }
-    for (key, value) in process.get_envs() {
-        match value {
-            Some(value) => {
-                probe.env(key, value);
-            }
-            None => {
-                probe.env_remove(key);
-            }
-        }
-    }
-    // Help can bypass wrapper injection. An incomplete option reaches the
-    // ordinary parser, but cannot start a provider or consume terminal input.
-    let mut stderr = tempfile::tempfile()?;
-    probe
-        .args(["--dangerously-bypass-hook-trust", "--model"])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(stderr.try_clone()?);
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        probe.process_group(0);
-    }
-    let mut child = probe.spawn()?;
-    let group = crate::engine::process::ProcessGroupGuard::new(child.id());
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    while child.try_wait()?.is_none() {
-        if std::time::Instant::now() >= deadline {
-            group.terminate();
-            std::thread::spawn(move || {
-                let _ = child.wait();
-            });
-            bail!("Codex argument probe timed out before launch");
-        }
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
-    group.terminate();
-    stderr.seek(SeekFrom::Start(0))?;
-    let mut diagnostic = String::new();
-    stderr.take(65536).read_to_string(&mut diagnostic)?;
-    if diagnostic
-        .contains("the argument '--dangerously-bypass-hook-trust' cannot be used multiple times")
-    {
-        return Ok(true);
-    }
-    if diagnostic.contains("a value is required for '--model <MODEL>'") {
-        return Ok(false);
-    }
-    bail!(
-        "Codex argument probe failed before launch: {}",
-        diagnostic.trim()
-    )
 }
 
 fn observe_opencode_session(capture_dir: &Path, stderr: impl Read) -> std::io::Result<()> {
@@ -1493,6 +1469,7 @@ mod tests {
             pid
         });
         let command = SessionCommand {
+            context: None,
             program: provider.display().to_string(),
             args: Vec::new(),
             cwd: temp.path().to_path_buf(),
@@ -1547,6 +1524,7 @@ mod tests {
         )
         .unwrap();
         let command = SessionCommand {
+            context: None,
             program: provider.display().to_string(),
             args: Vec::new(),
             cwd: temp.path().to_path_buf(),
@@ -1626,6 +1604,7 @@ mod tests {
         assert_eq!(
             launch,
             SessionCommand {
+                context: None,
                 program: "claude".to_string(),
                 args: args(&["--model", "sonnet", "--", "fix it"]),
                 cwd: path(),
@@ -1823,6 +1802,7 @@ mod tests {
         )
         .unwrap();
         let command = SessionCommand {
+            context: None,
             program: "opencode".to_string(),
             args: vec![temp.path().display().to_string()],
             cwd: temp.path().to_path_buf(),
@@ -1924,6 +1904,7 @@ mod tests {
             None,
             &[],
             None,
+            None,
         )
         .unwrap();
 
@@ -2005,6 +1986,7 @@ mod tests {
             None,
             &[],
             None,
+            None,
         )
         .unwrap();
 
@@ -2042,6 +2024,7 @@ mod tests {
             None,
             &[],
             None,
+            None,
         )
         .unwrap();
     }
@@ -2061,6 +2044,7 @@ mod tests {
         assert_eq!(
             launch,
             SessionCommand {
+                context: None,
                 program: "opencode".to_string(),
                 args: args(&[
                     "/tmp/loop flow",

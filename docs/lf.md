@@ -130,10 +130,13 @@ lf flow show ID --processes --json    # one Flow's steps, by its Flow process ID
 lf -b task run EXP-12       # run fresh work
 ```
 
-Claude and Codex terminal launches load the complete assembled context from a
-system instructions file. The first user message is a short execution request;
-Wave memory, scratch, diffs, clipboard, skills and Task briefs stay out of the
-command-line argument. Provider refusals remain visible in the native terminal.
+The first turn contains the skill followed by the request. Loopflow adds fixed
+instructions without replacing the provider's native prompt or repo guide.
+Startup and compaction deliver current Wave memory and scratch as a capped
+conversation block: whole files or readable paths, never excerpts. Compaction
+also restores the saved active skill. Task direction, clipboard and summaries
+remain complete private reference files. Terminal first turns use argv; only a
+first turn exceeding the argument cap is refused before spawning the provider.
 
 Selected Wave goals are supplied once as complete `GOAL.md` documents. Repeated
 requests for the same document do not repeat its contents; distinct memory files
@@ -311,7 +314,7 @@ Its overview explains each item's state and next action. A mechanical Process ha
 no provider conclusion. JSON reads emit one document; the active watch emits
 newline-delimited snapshots. Progress and errors go to stderr.
 
-`lf context` previews local launch input; [configure context budgets](config.md#context-budgets)
+`lf context` measures authored memory and scratch against size targets; [configure context budgets](config.md#context-budgets)
 in existing personal, repository or Wave settings.
 
 ## Publish and finish

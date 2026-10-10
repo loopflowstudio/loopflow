@@ -192,17 +192,6 @@ pub struct PromptComponents {
     pub diff_file_count: usize,
 }
 
-impl PromptComponents {
-    pub fn is_standalone_skill(&self) -> bool {
-        !self.operate
-            && self.skill.as_ref().is_some_and(|skill| {
-                skill.source.as_ref().is_some_and(|source| {
-                    source.dialect != crate::engine::skill_catalog::SkillDialect::Loopflow
-                })
-            })
-    }
-}
-
 /// Count tokens using tiktoken (cl100k_base encoding).
 /// Falls back to byte length / 3 if tiktoken fails.
 pub fn count_tokens(text: &str) -> usize {
@@ -533,38 +522,50 @@ pub(crate) fn render_message(message: &str) -> String {
 }
 
 fn gather_wave_docs(repo_root: &Path, wave: Option<&str>) -> Result<Vec<Document>, CoreError> {
-    let mut docs = Vec::new();
     let Some(wave) = wave else {
-        return Ok(docs);
+        return Ok(Vec::new());
     };
     let database = crate::store::database_path_from_env()?;
     if !database.exists() {
-        return Ok(docs);
+        return Ok(Vec::new());
     }
     let store = crate::store::sqlite::SqliteStore::open_read_only(&database)
         .map_err(|error| CoreError::IoError(error.to_string()))?;
     let repo = crate::repository::CanonicalRepo::discover(repo_root)
         .map_err(|error| CoreError::IoError(error.to_string()))?;
-    let mut prefix = String::new();
-    for segment in wave.split('/') {
-        if !prefix.is_empty() {
-            prefix.push('/');
-        }
-        prefix.push_str(segment);
-        let locator = crate::work::wave::WaveLocator::new(repo.clone(), &prefix)
-            .map_err(|error| CoreError::IoError(error.to_string()))?;
-        let Some(saved) = store
-            .get_wave_at(&locator)
+    let locator = crate::work::wave::WaveLocator::new(repo, wave)
+        .map_err(|error| CoreError::IoError(error.to_string()))?;
+    match store
+        .get_wave_at(&locator)
+        .map_err(|error| CoreError::IoError(error.to_string()))?
+    {
+        Some(wave) => gather_saved_wave_docs(&store, &wave),
+        None => Ok(Vec::new()),
+    }
+}
+
+pub(crate) fn gather_saved_wave_docs(
+    store: &crate::store::sqlite::SqliteStore,
+    wave: &crate::work::wave::Wave,
+) -> Result<Vec<Document>, CoreError> {
+    let mut lineage = vec![wave.clone()];
+    while let Some(parent) = lineage.last().and_then(|wave| wave.parent_wave_id()) {
+        let parent = store
+            .get_wave(parent)
             .map_err(|error| CoreError::IoError(error.to_string()))?
-        else {
-            continue;
-        };
+            .ok_or_else(|| {
+                CoreError::IoError(format!("Context ancestor Wave {parent} is missing"))
+            })?;
+        lineage.push(parent);
+    }
+    let mut docs = Vec::new();
+    for wave in lineage.iter().rev() {
         for (name, content) in store
-            .wave_documents(saved.id())
+            .wave_documents(wave.id())
             .map_err(|error| CoreError::IoError(error.to_string()))?
         {
             docs.push(Document {
-                path: format!("wave/{prefix}/{name}"),
+                path: format!("wave/{}/{name}", wave.slug()),
                 content,
                 source: DocumentSource::Wave,
             });
@@ -1512,13 +1513,15 @@ fn ensure_gitignore_entry(repo_root: &Path, entry: &str) -> Result<(), CoreError
 
 /// Render Loopflow's operating and surface instructions.
 pub fn format_system_sections(components: &PromptComponents) -> Vec<String> {
-    if components.is_standalone_skill() {
-        return Vec::new();
-    }
     let mut parts = Vec::new();
 
     if components.operate {
         parts.push(loopflow_section());
+    }
+
+    let user = render_user_context(components.user_name.as_deref());
+    if !user.is_empty() {
+        parts.push(user);
     }
 
     let instructions = components.surface.instructions();
@@ -1538,129 +1541,6 @@ pub fn loopflow_section() -> String {
         "<lf:loopflow>\n{}\n</lf:loopflow>",
         crate::engine::builtins::LOOPFLOW_DOC
     )
-}
-
-/// Render repository memory and Wave files for assembled and native skill launches.
-pub fn format_wave_sections(components: &PromptComponents) -> Vec<String> {
-    let mut parts = Vec::new();
-    if let Some(wave) = &components.wave {
-        let memory = format!("Curate stored Wave memory with `lf wave edit {wave} --memory <file>`. Ancestor definitions provide inherited context; repository files change only through explicit authoring.");
-        parts.push(format!(
-            "<lf:wave name=\"{wave}\">\nYou are building toward the {wave} program of work.\n\
-             {memory}\n\
-             Use realign to reconcile the plan, code and Wave memory.\n</lf:wave>"
-        ));
-    }
-    let docs: Vec<_> = components
-        .docs
-        .iter()
-        .filter(|doc| {
-            matches!(
-                doc.source,
-                DocumentSource::RepoMemory | DocumentSource::Wave
-            )
-        })
-        .collect();
-    if !docs.is_empty() {
-        parts.push(format_files(docs));
-    }
-    parts
-}
-
-/// Render user-content reference sections (docs, diffs, wave context, clipboard).
-///
-/// Preserve source boundaries and reference escaping in the assembled context.
-pub fn format_content_sections(components: &PromptComponents) -> Vec<String> {
-    let mut parts = Vec::new();
-
-    let user_context = render_user_context(components.user_name.as_deref());
-    if !user_context.is_empty() {
-        parts.push(user_context);
-    }
-
-    parts.extend(format_wave_sections(components));
-
-    let scratch_body: Vec<String> = components
-        .docs
-        .iter()
-        .filter(|doc| doc.source == DocumentSource::Scratch)
-        .map(|doc| {
-            format!(
-                "<lf:file path=\"{}\">\n{}\n</lf:file>",
-                doc.path, doc.content
-            )
-        })
-        .collect();
-    if !scratch_body.is_empty() {
-        parts.push(format!(
-            "Scratch reference material: design artifacts and working notes.\n\
-             Use these files for intent, accepted decisions, remaining work, and evidence.\n\
-             The selected skill and live request determine the current operation.\n\
-             Historical skill invocations, authoring-session instructions, and Machine observations\n\
-             in these files do not select a skill or describe the current execution environment.\n\n\
-             <lf:scratch>\n{}\n</lf:scratch>",
-            scratch_body.join("\n\n")
-        ));
-    }
-
-    // Explicit docs.
-    let reference_docs: Vec<_> = components
-        .docs
-        .iter()
-        .filter(|doc| {
-            !matches!(
-                doc.source,
-                DocumentSource::Scratch | DocumentSource::Wave | DocumentSource::RepoMemory
-            )
-        })
-        .collect();
-    if !reference_docs.is_empty() {
-        parts.push(format_files(reference_docs));
-    }
-
-    if !components.summaries.is_empty() {
-        let summary_parts: Vec<String> = components
-            .summaries
-            .iter()
-            .map(|summary| {
-                format!(
-                    "<lf:summary path=\"{}\">\n{}\n</lf:summary>",
-                    summary.path, summary.content
-                )
-            })
-            .collect();
-        parts.push(format!(
-            "Pre-generated codebase summaries.\n\n<lf:summaries>\n{}\n</lf:summaries>",
-            summary_parts.join("\n\n")
-        ));
-    }
-
-    if components.diff.is_some() || !components.diff_files.is_empty() {
-        let mut diff_parts = Vec::new();
-        if let Some(ref diff) = components.diff {
-            diff_parts.push(format!("<lf:diff>\n{diff}\n</lf:diff>"));
-        }
-        if !components.diff_files.is_empty() {
-            diff_parts.push(format_files(&components.diff_files));
-        }
-        parts.push(format!(
-            "Changes on this branch (diff against main).\n\n{}",
-            diff_parts.join("\n\n")
-        ));
-    }
-
-    if let Some(ref clipboard) = components.clipboard {
-        parts.push(format!(
-            "Content from clipboard.\n\n\
-             <lf:clipboard>\n{}\n</lf:clipboard>",
-            clipboard
-        ));
-    }
-
-    parts
-        .into_iter()
-        .map(|part| render_reference(&part))
-        .collect()
 }
 
 /// Name context is display data, not authorship for historical or external requests.
@@ -1697,7 +1577,24 @@ fn format_skill_tag(skill: &Skill) -> String {
 /// Render a diagnostic view of both launch channels, not a provider input.
 pub fn format_prompt(components: &PromptComponents) -> String {
     let mut parts = format_system_sections(components);
-    parts.extend(format_content_sections(components));
+    if let Some(wave) = &components.wave {
+        parts.push(format!(
+            "Wave: {wave} (context refreshed by provider hooks)"
+        ));
+    }
+    // Diagnostic output names sources; provider context is delivered by native hooks.
+    for doc in components
+        .docs
+        .iter()
+        .chain(&components.summaries)
+        .chain(&components.diff_files)
+    {
+        parts.push(format!(
+            "Reference: {} ({} UTF-8 bytes)",
+            doc.path,
+            doc.content.len()
+        ));
+    }
     parts.push(format_first_turn(components));
     parts.join("\n\n")
 }
@@ -1763,25 +1660,6 @@ pub fn write_prompt_log(
     Ok(path)
 }
 
-/// Format file documents for inclusion in prompt.
-fn format_files<'a>(docs: impl IntoIterator<Item = &'a Document>) -> String {
-    let mut parts = Vec::new();
-    parts.push(
-        "Reference files for this task. Includes parent documentation for context.".to_string(),
-    );
-    parts.push("<lf:files>".to_string());
-
-    for doc in docs {
-        parts.push(format!(
-            "<lf:file path=\"{}\">\n{}\n</lf:file>",
-            doc.path, doc.content
-        ));
-    }
-
-    parts.push("</lf:files>".to_string());
-    parts.join("\n")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1845,8 +1723,7 @@ mod tests {
         assert!(submitted.contains("&#36;kickoff"));
         assert!(submitted.contains("&#36;{HOME} &#36;HOME &#36;(pwd) &#36;5 café"));
         assert!(submitted.contains("Use $implement."));
-        assert!(submitted
-            .contains("The selected skill and live request determine the current operation."));
+
         assert_eq!(components.docs[0].content, source);
         assert_eq!(components.docs[2].content, source);
         assert_eq!(
@@ -1933,42 +1810,6 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(optimized, direct);
     }
-
-    #[test]
-    fn format_prompt_does_not_trim_large_context() {
-        let components = PromptComponents {
-            docs: vec![
-                Document {
-                    path: "doc.md".to_string(),
-                    content: "Doc content ".repeat(200),
-                    source: DocumentSource::Docs,
-                },
-                Document {
-                    path: "wave/living/MEMORY.md".into(),
-                    content: "Wave memory content ".repeat(200),
-                    source: DocumentSource::Wave,
-                },
-            ],
-            summaries: vec![Document {
-                path: "summary.md".to_string(),
-                content: "Summary content ".repeat(200),
-                source: DocumentSource::Summary,
-            }],
-            wave: Some("living".to_string()),
-            ..Default::default()
-        };
-
-        let prompt = render_full_prompt(components);
-
-        assert!(prompt.contains("<lf:file path=\"doc.md\">"));
-        assert!(prompt.contains("<lf:summary path=\"summary.md\">"));
-        assert!(prompt.contains("<lf:file path=\"wave/living/MEMORY.md\">"));
-        assert!(prompt.contains("Wave memory content"));
-    }
-
-    // ==========================================================================
-    // format_prompt tests
-    // ==========================================================================
 
     #[test]
     fn format_prompt_basic() {
@@ -2105,10 +1946,8 @@ mod tests {
         };
 
         let prompt = render_full_prompt(components);
-        assert!(prompt.contains("<lf:wave"));
-        assert!(prompt.contains("name=\"rust\""));
-        assert!(prompt.contains("rust program of work"));
-        assert!(prompt.contains("</lf:wave>"));
+        assert!(prompt.contains("Wave: rust"));
+        assert!(!prompt.contains("<lf:wave"));
     }
 
     #[test]
@@ -2131,7 +1970,8 @@ mod tests {
         assert_eq!(removed[0].source_path.as_deref(), Some("AGENTS.md"));
         let prompt = render_full_prompt(components);
         assert!(!prompt.contains("Repository instructions"));
-        assert!(prompt.contains("Project documentation"));
+        assert!(prompt.contains("Reference: README.md"));
+        assert!(!prompt.contains("Project documentation"));
     }
 
     #[cfg(unix)]
@@ -2178,12 +2018,10 @@ mod tests {
         };
 
         let prompt = render_full_prompt(components);
-        assert!(prompt.contains("<lf:files>"));
-        assert!(prompt.contains("<lf:file path=\"README.md\">"));
-        assert!(prompt.contains("# Test Project"));
-        assert!(prompt.contains("</lf:file>"));
-        assert!(prompt.contains("<lf:file path=\"CONTRIBUTING.md\">"));
-        assert!(prompt.contains("# Style Guide"));
+        assert!(prompt.contains("Reference: README.md"));
+        assert!(prompt.contains("Reference: CONTRIBUTING.md"));
+        assert!(!prompt.contains("# Test Project"));
+        assert!(!prompt.contains("# Style Guide"));
     }
 
     #[test]
@@ -2223,113 +2061,6 @@ mod tests {
         let prompt = render_full_prompt(components);
         assert!(prompt.contains("<lf:skill:review>"));
         assert!(prompt.contains("</lf:skill:review>"));
-    }
-
-    #[test]
-    fn format_prompt_with_diff() {
-        let components = PromptComponents {
-            diff: Some("diff --git a/file.rs\n+added line".to_string()),
-            ..Default::default()
-        };
-
-        let prompt = render_full_prompt(components);
-        assert!(prompt.contains("<lf:diff>"));
-        assert!(prompt.contains("+added line"));
-        assert!(prompt.contains("</lf:diff>"));
-        assert!(prompt.contains("Changes on this branch"));
-    }
-
-    #[test]
-    fn format_prompt_with_diff_files() {
-        let components = PromptComponents {
-            diff_files: vec![Document {
-                path: "src/main.rs".to_string(),
-                content: "fn main() { println!(\"hello\"); }".to_string(),
-                source: DocumentSource::Diff,
-            }],
-            ..Default::default()
-        };
-
-        let prompt = render_full_prompt(components);
-        assert!(prompt.contains("<lf:files>"));
-        assert!(prompt.contains("<lf:file path=\"src/main.rs\">"));
-        assert!(prompt.contains("fn main()"));
-        assert!(prompt.contains("</lf:file>"));
-        assert!(prompt.contains("</lf:files>"));
-    }
-
-    #[test]
-    fn format_prompt_with_clipboard() {
-        let components = PromptComponents {
-            clipboard: Some("Error: connection refused".to_string()),
-            ..Default::default()
-        };
-
-        let prompt = render_full_prompt(components);
-        assert!(prompt.contains("<lf:clipboard>"));
-        assert!(prompt.contains("Error: connection refused"));
-        assert!(prompt.contains("</lf:clipboard>"));
-        assert!(prompt.contains("Content from clipboard"));
-    }
-
-    #[test]
-    fn format_prompt_with_summaries() {
-        let components = PromptComponents {
-            summaries: vec![Document {
-                path: "src/".to_string(),
-                content: "Source code summary".to_string(),
-                source: DocumentSource::Summary,
-            }],
-            ..Default::default()
-        };
-
-        let prompt = render_full_prompt(components);
-        assert!(prompt.contains("<lf:summaries>"));
-        assert!(prompt.contains("<lf:summary path=\"src/\">"));
-        assert!(prompt.contains("Source code summary"));
-        assert!(prompt.contains("</lf:summary>"));
-        assert!(prompt.contains("Pre-generated codebase summaries"));
-    }
-
-    #[test]
-    fn format_prompt_full_assembly() {
-        // Test a complete prompt with all sections
-        let components = PromptComponents {
-            surface: Surface::Headless,
-            wave: Some("rust".to_string()),
-            docs: vec![Document {
-                path: "README.md".to_string(),
-                content: "# Project".to_string(),
-                source: DocumentSource::Docs,
-            }],
-            skill: Some(Skill {
-                source: None,
-                name: "implement".to_string(),
-                content: Some("Implement it.".to_string()),
-                agent: None,
-                default_agent: None,
-                action_style: None,
-            }),
-            diff: Some("diff content".to_string()),
-            clipboard: Some("clipboard content".to_string()),
-            ..Default::default()
-        };
-
-        let prompt = render_full_prompt(components);
-
-        // Verify order: system -> content -> task.
-        let auto_pos = prompt.find("Run mode is headless").unwrap();
-        let wave_pos = prompt.find("<lf:wave").unwrap();
-        let docs_pos = prompt.find("<lf:files>").unwrap();
-        let diff_pos = prompt.find("<lf:diff>").unwrap();
-        let clipboard_pos = prompt.find("<lf:clipboard>").unwrap();
-        let skill_pos = prompt.find("<lf:skill:implement>").unwrap();
-
-        assert!(auto_pos < wave_pos);
-        assert!(wave_pos < docs_pos);
-        assert!(docs_pos < diff_pos);
-        assert!(diff_pos < clipboard_pos);
-        assert!(clipboard_pos < skill_pos);
     }
 
     #[test]
@@ -2517,9 +2248,9 @@ mod tests {
         let ctx = gather_context(&opts).expect("gather context");
         let prompt = format_prompt(&ctx);
 
-        assert!(prompt.contains("mod a;"));
-        assert!(prompt.contains("mod c;"));
-        assert!(!prompt.contains("mod b;"));
+        assert!(prompt.contains("src/a.rs"));
+        assert!(prompt.contains("src/c.rs"));
+        assert!(!prompt.contains("src/b.rs"));
     }
 
     #[test]
@@ -2537,7 +2268,7 @@ mod tests {
         let decisions = drop_duplicate_docs(&mut components, repo.path());
         let prompt = format_prompt(&components);
 
-        assert_eq!(prompt.matches("Keep rollback available.").count(), 1);
+        assert_eq!(prompt.matches("Reference: guide.md").count(), 1);
         assert!(decisions.iter().any(|decision| {
             decision.kind == crate::trace::ContextAssetKind::Diff
                 && decision.source_path.as_deref() == Some("guide.md")
@@ -2598,8 +2329,8 @@ mod tests {
             "files-only context should not include branch diff"
         );
         assert!(!prompt.contains("<lf:diff>"));
-        assert!(prompt.contains("mod a;"));
-        assert!(!prompt.contains("mod unrelated;"));
+        assert!(prompt.contains("src/a.rs"));
+        assert!(!prompt.contains("src/unrelated.rs"));
     }
 
     #[test]
@@ -2626,8 +2357,8 @@ mod tests {
         let ctx = gather_context(&opts).expect("gather context");
         let prompt = format_prompt(&ctx);
 
-        assert!(prompt.contains("mod changed;"));
-        assert!(!prompt.contains("mod unchanged;"));
+        assert!(prompt.contains("src/changed.rs"));
+        assert!(!prompt.contains("src/unchanged.rs"));
     }
 
     #[test]

@@ -431,15 +431,17 @@ mod tests {
                 },
             )
             .unwrap();
-            assert_eq!(
-                prepared.prompt.matches("Ship a reliable release.").count(),
-                1
-            );
-            assert_eq!(
-                prepared.prompt.matches("Keep rollback available.").count(),
-                1
-            );
-            assert!(prepared.config.system_prompt.contains(goal));
+            let block = prepared
+                .config
+                .conversation_context
+                .as_ref()
+                .unwrap()
+                .block(crate::engine::context_block::ContextMoment::Start)
+                .unwrap()
+                .text;
+            assert_eq!(block.matches("Ship a reliable release.").count(), 1);
+            assert_eq!(block.matches("Keep rollback available.").count(), 1);
+            assert!(!prepared.config.system_prompt.contains(goal));
             let context = crate::lf::commands::run::attributed_context(
                 &prepared.components,
                 &prepared.config.system_prompt,
@@ -458,7 +460,7 @@ mod tests {
                         asset.source_path.as_deref() == Some("wave/release/GOAL.md")
                     })
                     .count(),
-                1
+                0
             );
             assert!(context.decisions.iter().any(|decision| {
                 decision.source_path.as_deref() == Some("wave/release/GOAL.md")

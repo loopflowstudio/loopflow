@@ -29,21 +29,17 @@ Heart authorized for implementation and demonstration. These are not accepted UX
 
 ## Implementation boundary (2026-10-09)
 
-Jack's option A resolves transport: argv only, with an explicit first-turn cap.
-The Rust first-turn/measurement slice is not channel-contract completion. Remaining
-fixed-slot, whole-file block, native hook/trust and terminal additive-instruction
-work is listed in the design; old system-file context cannot count as acceptance.
+Jack's option A selects argv only and the explicit first-turn cap. Fixed additions,
+private source references and native delivery are now connected; they are one PR,
+not separately shippable alternatives. The design owns remaining acceptance.
 
-Compression interpretation (2026-10-09): size-target inspection no longer previews
-skills or Task messages, so remove `lf context --skill`, goal-status and duplicate
-original/submitted counters. Preserve measured context usage and DTO unknowns;
-remove only the retired assembled-budget fields. The fixed-slot/conversation-block
-cut remains incomplete and cannot ship on these reductions alone.
+OpenCode's proposed implementation uses native conversation/system transforms,
+scoped to the first owning Session; its native startup/compaction matrix is still
+unproved. Codex trust hashes are scoped to generated session-flags declarations,
+not global approval. Native `hooks/list` confirmed the generated hashes. The
+network-isolated actual lf/native startup attempt failed with `Operation not
+permitted` before any model request; cause remains unresolved and gate owns it.
 
-Refresh operation (2026-10-09): metadata/skill reservation takes priority over
-file bodies. One complete manifest owns inline and overflow metadata, always
-with a repository-relative pointer; no context-size refusal is added. The hidden callback
-reads SQLite-owned Wave/ancestor bytes and fresh scratch, but launch settings,
-trust, source-file lifetime and OpenCode delivery are still unconnected. Main
-#1511 already uses `--no-daemon` for lf Codex terminals: context hooks must follow
-the launched process and selected provider home, not its shared daemon.
+Saved delivery follows the Wave ID across renames while scratch stays in its
+captured checkout. The rename/name-reuse fixture passes; native continuation is
+still with gate. No filesystem Wave fallback is selected.

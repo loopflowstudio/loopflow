@@ -1010,10 +1010,10 @@ The production cut removes inlining, the constant trigger and Codex base overrid
 additions preserve native prompts. Capture/context hooks compose at terminal spawn,
 replacing the temporary capture profile. Budget the fully rendered 10,000 UTF-8
 bytes: native Unicode spill retained endpoint markers while losing interior text,
-so marker-only checks are insufficient. Callback/stand-in passes prove neither
-native delivery nor installed acceptance. Gate owns actual launch, compaction,
-resume and AgentProcess takeover/replacement; demo owns cmux and proposed UX.
-Release's entry-point lesson applies: provider-only probes cannot prove lf wiring.
+so marker-only checks are insufficient. `6b8f13e3f` fixes Codex skill-before-request order, proving construction only.
+Gate owns native launch, compaction, resume and AgentProcess takeover/replacement;
+demo owns cmux and proposed UX. Release's lesson applies: provider probes prove
+neither lf wiring nor installation.
 Historical LOO-428/429 decisions, native capture/reconnect proofs and limits:
 `30a4d48c8:wave/infrastructure/MEMORY.md`, this heading.
 

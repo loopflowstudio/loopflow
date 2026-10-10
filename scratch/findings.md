@@ -74,45 +74,18 @@ fallback writes; configured transport, admission and native proof remain separat
 
 ## Shared planning composition — October 9
 
-Dependency journal, receipts, transport, foreground lifetime and Work stream are
-reused. Merge review excluded `TaskSource` transfer/preparation: it violated
-started-Machine retention and effect-free preview. Copied placements stay deleted.
+Completed composition and failed attempts: `a4ba465ea:scratch/findings.md`, this
+heading. Existing journals, receipts, transport and Work-stream lifetime remain the
+owners. TaskSource transfer/preparation stays deleted. Retention cannot parent saves;
+accepted-only joint frontiers, original creation inputs, private holds and independent
+provider savepoints survive. Correspondence grants no effect or execution authority.
 
-Established-root/scoped-routing evidence: `dffdbaaa5:scratch/findings.md`, this
-heading. Locators, Work, effects and execution survive; the missing-revision failure,
-same-prefix/foreign-repository refusals and unknown-Task acquisition are retained
-there. Store/resolver proofs establish neither configured SSH nor admission.
-
-Import preparation remains immutable; scalar projection uses the portable schema.
-Per-field savepoints remain inline: the outer conflict handler must not soften a
-commit/release failure into a projection hold. Mutation identity precedes complete-
-record validation, and creation readback reconciles old and new delivery receipts.
-
-Repository/Work correspondence, creation claims and window association are separate
-boundaries. Their implementation/failure evidence is retained at
-`dffdbaaa5:scratch/findings.md`, this heading (`d378f31ae`, `28fc5274a`,
-`f898be5a8`). Opening/restoration share locator readings and an observation fence;
-A→B→A and parent-symlink counterexamples invalidated scene/per-path fences. Target
-identity renews without replacing receivers, delivery or native owners. Headless
-fixtures preserve pane/document state, not mounted surfaces. TaskSource remains
-excluded; no mixed-provider or first-start activation follows.
-
-Correspondence/snapshot lookup, creation-origin receipts and accepted-only joint
-projection evidence: `50bf78f1e:scratch/findings.md`, this heading. It retains
-`66dd3c44f`/`2afcfba1a`/`663f78256`, the WAL/zero-test/resource failures, rejected
-frontier counterexample and `1ece5cc52` foreign-bridge repair. Retention never
-parents saves; mapping validation, private holds and original journals remain.
-Store-level projection proved neither acquisition nor foreground exchange.
-
-**Foreground composition, October 9.** `5044add03:scratch/findings.md`, this
-heading, retains the public association/offline/reconnect/causal-reopening and
-lost-publication-receipt fixture, failed assertions and logs. It uses two isolated
-Homes and file-only Git; seeded execution stays unchanged. Fresh stream confirmation
-is required: cached success cannot prove repeat exchange. Git confirmation never
-acknowledges provider delivery, and comment diagnostics remain local. Mixed-provider
-exchange, exclusive admission and remote/native proof remain; delegation is composed
-below. Neither
-refusal was lifted.
+Foreground two-Home/file-Git proofs cover association, offline edits, reconnect,
+causal reopening and lost-publication receipts with unchanged seeded execution.
+Cached confirmation is not repeat-exchange proof; fresh stream confirmation is required.
+Git confirmation never acknowledges provider delivery. Locator observation fences
+retain scenes/drafts through A→B→A, not mounted native surfaces. Mixed providers,
+running Flows, exclusive admission and configured/native proof remain outstanding.
 
 ## Workflow movement explanation — October 9
 

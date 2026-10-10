@@ -118,6 +118,16 @@ fn concurrent_publication_preserves_both_revisions_and_all_source_bytes() {
         PlanningPublication::Confirmed
     );
     assert_eq!(laptop.fetch().unwrap(), Some(merged));
+    // Confirmation remains true for both divergent inputs after reconciliation.
+    // It acknowledges retained planning, not an exclusive execution winner.
+    assert_eq!(
+        laptop.confirm(&left.revision).unwrap(),
+        PlanningPublication::Confirmed
+    );
+    assert_eq!(
+        worker.confirm(&right.revision).unwrap(),
+        PlanningPublication::Confirmed
+    );
     assert_eq!(first_before, source_state(first.path()));
     assert_eq!(second_before, source_state(second.path()));
 }
@@ -254,6 +264,47 @@ fn selected_destinations_never_mix_retained_or_published_plans() {
         "refs/loopflow/planning/users/display-name"
     )
     .is_err());
+}
+
+#[test]
+fn independent_destinations_can_both_confirm_conflicting_task_delegation() {
+    let first = TestRepo::new();
+    first.push();
+    let second = tempfile::tempdir().unwrap();
+    git(
+        second.path(),
+        &["clone", first.bare_path().to_str().unwrap(), "."],
+    );
+    let personal = transport(first.path());
+    let shared = PlanningGit::new(
+        second.path(),
+        &PlanningDestination::resolve(
+            second.path(),
+            "origin",
+            "refs/loopflow/planning/shared/team",
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    // The transport carries opaque documents; the same Work can participate in
+    // several destinations. Neither destination serializes the other's writes.
+    let left = personal
+        .save(br#"{"task":"same-task","delegation":"laptop"}"#, None, None)
+        .unwrap();
+    let right = shared
+        .save(br#"{"task":"same-task","delegation":"worker"}"#, None, None)
+        .unwrap();
+    let (left_result, right_result) = std::thread::scope(|scope| {
+        let left_result = scope.spawn(|| personal.publish(&left.revision).unwrap());
+        let right_result = scope.spawn(|| shared.publish(&right.revision).unwrap());
+        (left_result.join().unwrap(), right_result.join().unwrap())
+    });
+    assert_eq!(left_result, PlanningPublication::Confirmed);
+    assert_eq!(right_result, PlanningPublication::Confirmed);
+    assert_eq!(personal.fetch().unwrap(), Some(left.clone()));
+    assert_eq!(shared.fetch().unwrap(), Some(right.clone()));
+    assert_eq!(personal.confirm(&left.revision).unwrap(), left_result);
+    assert_eq!(shared.confirm(&right.revision).unwrap(), right_result);
 }
 
 #[test]

@@ -82,11 +82,20 @@ These lookup choices grant no shared identity or publication.
 Primary and stack-parent Task selectors now carry repository-scoped full IDs through
 dispatch; an unscoped ambiguous prefix still fails.
 
-October 9 realign: the complete launch source
-`.lf/tmp/context/84f2c1c852f9f19d7b81b59a7ffd328e7912097dea78a0d885c2f32993ec2e66.md`
-was read, including its 266-file workspace inventory. `lf context --skill realign`
-reports about 34,600 generated Work-seed tokens (18,600 over 16,000). That generated
-inventory cannot be reduced by curating authored notes; limits remain unchanged.
+October 9 admission pass: complete launch source
+`.lf/tmp/context/3cd5d164677da41865fc1946879990300baef07faf077ea16966ddef54b9b947.md`
+contains the directive, steers and 266 clean committed inventory records. Current
+`lf context --skill implement` reports 34,560 generated Work-seed tokens (18,560
+over 16,000); authored-note curation cannot remove that generated inventory.
+Limits remain unchanged.
+
+## Admission authority — October 9, unresolved
+
+The plan's admission counterexample requires a shared arbitration domain, not
+another routing check. The proposed pinned admission Machine/key is unreviewed;
+its establishment, identity association and unavailable-Machine recovery need a
+decision. No coordinator was inferred from delegation, Git destinations or local
+absence. First-start refusal remains; the requested working path is unfinished.
 
 ## Explicit repository association — October 9
 

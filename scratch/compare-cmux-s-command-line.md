@@ -230,22 +230,48 @@ Existing Work resolution plus one Desktop inspection captures internal lifetime 
 LOO-412 frontier `a60d5594a` has identical `planning_git.rs`: publication/readback,
 not exclusive admission. No stack/sync or dirty-checkout edit occurred.
 
-Admission must replace the temporary refusal with an exclusive path through existing
-planning/execution owners. Two independent Machines must not allocate/start one Task;
-the winner survives retries, disconnects and delegation edits. No runtime replication,
-Task transfer, duplicate Flow, publication or merge is authorized.
+**Admission needs an authority decision before implementation can continue (October 9).**
+Both `task_location::resolve` and `require_task_planning` need the same exclusive
+result before Git preparation. Required proof remains: two independent Machines
+allocate/start exactly once; lost replies and disconnects retain the winner;
+later delegation cannot move it; repeat import cannot replay execution. No runtime
+replication, Task transfer, duplicate Flow, publication or merge is authorized.
 
-**Admission remains substantial implementation work.** `task_location::resolve`
-refuses shared work without a positive owner; `require_task_planning` independently
-refuses allocation without a retained checkout. Both boundaries need the same
-exclusive admission result before Git preparation, not just a routing exception.
-LOO-412's `PlanningGit::publish/confirm` proves revision ancestry after publication,
-not one Task's execution winner. The admission design must account for one Task
-selected into multiple destinations without placing runtime claims in planning.
-Required fixture outcomes: simultaneous independent Machines produce one allocation
-and start; lost replies/disconnects preserve that winner on retry; later delegation
-cannot move it; repeat planning import cannot replay its execution. The coordination
-mechanism remains unimplemented, not an accepted new planning authority.
+#### Admission counterexample and revised design boundary — October 9
+
+The implementation pass stopped at this boundary; Jack Heart's requested outcome
+is unchanged. `planning_git_tests` now demonstrates both failures of using planning
+confirmation as admission: divergent revisions both confirm after reconciliation,
+and two independent clones concurrently confirm conflicting delegation for the
+same Task through different refs. These are opaque transport documents, not Task
+allocation or running-Flow proof. Local checkout locks live beside each database;
+`place_task` serializes only that Machine. Peer observation has no reservation.
+The inspected LOO-412 `a60d5594a` transport is byte-identical to this checkout.
+No stack operation or peer-checkout edit supplies a missing arbitration operation.
+
+A deterministic choice among locally visible destinations does not repair this:
+Machines may see different destination sets, and delegation can change while an
+older claimant is disconnected. A late conflict cannot undo an already started
+Flow. Putting a winning claim into exchanged planning would violate the accepted
+execution boundary. The temporary refusal therefore remains, not as completion.
+
+**Unreviewed proposal:** pin one admission Machine and stable admission key for
+shared Task identity, independent of mutable delegation, repository locators and
+planning destinations. That Machine would serialize an explicit admission command
+in its existing local store and retain the winning execution Machine before either
+checkout preparation or launch. The execution Machine would retain its own Workflow,
+checkout and processes; ordinary import would never run admission or copy claims.
+Lost responses would read the same decision; unavailable arbitration could not
+permit a replacement winner. This is a new execution coordination contract, not
+an accepted planner callback or a reversible selector default.
+
+The design must settle who establishes that immutable binding, how historical and
+explicitly associated Task identities converge on it, and recovery when its Machine
+is unavailable. No existing provider receipt, Machine registry or destination
+selection establishes that authority. Choosing a coordinator silently would add a
+permanent availability dependency. Review must select this contract or another
+single arbitration domain before the two refusal boundaries can be replaced.
+Required concurrency/retry/delegation/import fixtures above remain unfinished.
 
 ### 2. Shared Work identity, delegation and routing
 
@@ -495,4 +521,4 @@ identity/delegation, open them, add shell/Files panes, retain an unfinished draf
 change focus, target a harmless command, read output, hide/restore, and verify the
 original input target and draft survive. Demo owns native usability; preserve comparison evidence and use no real accounts or live user terminals.
 
-Check: `git diff --check` — PASS (prose-only reconciliation); prior focused checks retained at `1f0f64150` and `7aa8a5eb5`, this line; broader/Linux checks remain with gate/CI, configured SSH/native usability with demo.
+Check: `cargo test -p loopflow --test planning_git_tests` — 9 PASS; `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` — PASS. Earlier checks: `1f0f64150`/`7aa8a5eb5`; broader gate/CI and configured/native demo remain.

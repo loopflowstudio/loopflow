@@ -381,7 +381,7 @@ impl Harness for ClaudeHarness {
     fn set_capture(&mut self, capture: Option<crate::agent::AgentCapture>) {
         self.capture = capture;
     }
-    fn process_id(&self) -> Option<u32> {
+    fn pid(&self) -> Option<u32> {
         self.child.as_ref().and_then(Child::id)
     }
 
@@ -633,7 +633,7 @@ mod activity_tests {
             },
         )
         .unwrap();
-        capture.observe_activity(harness.process_id()).await;
+        capture.observe_activity(harness.pid()).await;
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 if activity::read(home.path(), &capture.artifact_key()).await
@@ -659,7 +659,7 @@ mod tests {
 
     #[tokio::test]
     #[allow(clippy::await_holding_lock)] // Isolate provider and database selection.
-    async fn sequential_managed_sessions_retain_their_exact_claude_engines() {
+    async fn sequential_managed_sessions_retain_their_exact_claude_agent_processes() {
         let _lock = crate::journal::test_env_lock();
         let _ambient = crate::test_ambient::EnvGuard::new();
         let original_path = std::env::var_os("PATH").unwrap_or_default();
@@ -687,17 +687,17 @@ mod tests {
         let mut recorded = Vec::new();
         for id in ["first", "second"] {
             store.test_session(id, &crate::session_record::new_artifact_key());
-            let driver = store
+            let attachment = store
                 .claim_session_attachment(id, None, &process, true)
                 .unwrap();
             let (tx, _rx) = mpsc::unbounded_channel();
             let mut harness = ClaudeHarness::new(tx);
             let mut config = live_config();
-            config.session_attachment = Some((id.into(), driver.clone()));
+            config.session_attachment = Some((id.into(), attachment.clone()));
             harness.config = Some(config);
             harness.send_input("one turn").await.unwrap();
             recorded.push((
-                harness.process_id().unwrap(),
+                harness.pid().unwrap(),
                 store.session_provider_process(id).unwrap(),
             ));
             // Retain the first process while the same Process starts the next step.
@@ -708,7 +708,8 @@ mod tests {
         }
         assert_ne!(recorded[0].0, recorded[1].0);
         for (pid, evidence) in recorded {
-            let (saved, start) = evidence.expect("managed Claude publishes exact engine identity");
+            let (saved, start) =
+                evidence.expect("managed Claude publishes exact AgentProcess identity");
             assert_eq!(pid, saved);
             assert!(start > 0);
         }
@@ -777,7 +778,7 @@ mod tests {
                 // Pipe acceptance precedes provider execution. Interrupt only
                 // after this throwaway provider consumed its first request.
                 observed_input(home, "first request").await;
-                let first_pid = harness.process_id().unwrap();
+                let first_pid = harness.pid().unwrap();
                 // The native conversation survives the OS process's interruption.
                 harness.set_agent_session(Some("native-conversation".into()));
                 harness.interrupt().await.unwrap();
@@ -790,7 +791,7 @@ mod tests {
                 assert_ne!(first.agent_process_id, second.agent_process_id);
                 assert_ne!(first.token, second.token);
                 let running = store.process(&second.agent_process_id).unwrap().unwrap();
-                assert_eq!(running.pid, harness.process_id());
+                assert_eq!(running.pid, harness.pid());
                 assert_eq!(running.parent_lf_process_id, first.lf_process_id);
                 assert!(running.completed_at.is_none());
                 assert_eq!(store.process(&first.agent_process_id).unwrap(), Some(ended));
@@ -974,7 +975,7 @@ done
         let (status, answer, _) = tokio::time::timeout(Duration::from_secs(5), drive_turn(&mut rx))
             .await
             .unwrap();
-        let different_process = first.process_id() != resumed.process_id();
+        let different_process = first.pid() != resumed.pid();
         first.stop().await.unwrap();
         resumed.stop().await.unwrap();
         assert!(different_process);

@@ -187,7 +187,7 @@ fn execute(
         &cli.only_account,
     )?;
     report_outcome(block_on(async {
-        let driver = Driver {
+        let running = RunningFlow {
             store: open_flow_store().await?,
             process: journal::current_lf_process_id()
                 .context("a Flow requires a registered Process")?,
@@ -204,31 +204,31 @@ fn execute(
             steers: Mutex::default(),
         };
         // A chapter rotation moving this checkout's Task excludes new work in it.
-        let admission = driver
+        let admission = running
             .store
             .sqlite
-            .lock_task_checkouts(&[driver.cwd], driver.task.as_ref())?;
-        // The driver's one record of its Flow, written before any step runs.
-        driver
+            .lock_task_checkouts(&[running.cwd], running.task.as_ref())?;
+        // The Flow process's one record of its Flow, written before any step runs.
+        running
             .store
             .sqlite
             .record_flow_process(
-                &driver.process,
+                &running.process,
                 &crate::flow::graph::FlowGraph::new(flow_name, items),
-                driver.task.as_ref(),
+                running.task.as_ref(),
             )
             .context("could not record the Flow and start its Task; no steps launched")?;
         drop(admission);
-        let outcome = drive(&driver, accounts).await?;
+        let outcome = drive(&running, accounts).await?;
         // A step that completed its Task could not clean up under its own live
         // Flow; the finished Flow can.
-        if let (FlowOutcome::Completed, Some(task)) = (&outcome, &driver.task) {
-            let task = driver
+        if let (FlowOutcome::Completed, Some(task)) = (&outcome, &running.task) {
+            let task = running
                 .store
                 .get_task(task)
                 .await?
                 .context("Flow Task disappeared")?;
-            crate::ops::task::cleanup_completed_task(&driver.store, &task).await?;
+            crate::ops::task::cleanup_completed_task(&running.store, &task).await?;
         }
         Ok(outcome)
     })?)
@@ -263,27 +263,27 @@ fn report_outcome(outcome: FlowOutcome) -> Result<()> {
 }
 
 /// Run every step from the first until the Flow completes, stops or blocks.
-/// A driver that dies leaves its Processes as history; nothing resumes it.
+/// A Flow process that dies leaves its Processes as history; nothing resumes it.
 async fn drive(
-    driver: &Driver<'_>,
+    running: &RunningFlow<'_>,
     accounts: crate::provider_account::selection::AccountSelection,
 ) -> Result<FlowOutcome> {
     let fields = |extra: LfEventFields| LfEventFields {
-        flow: Some(driver.flow.to_owned()),
+        flow: Some(running.flow.to_owned()),
         ..extra
     };
     journal::emit(
-        driver.cwd,
+        running.cwd,
         LfNode::Flow,
         LfEventType::Started,
         fields(LfEventFields::default()),
     );
     let result = async {
-        let _flow_env = EnvVarGuard::set("LOOPFLOW_FLOW_NAME", driver.flow);
+        let _flow_env = EnvVarGuard::set("LOOPFLOW_FLOW_NAME", running.flow);
         let _accounts = accounts.activate()?;
         let mut cursor = ExecutionCursor::default();
-        FlowRunner::new(driver)
-            .run_with_cursor(driver.steps, &mut cursor)
+        FlowRunner::new(running)
+            .run_with_cursor(running.steps, &mut cursor)
             .await
     }
     .await;
@@ -293,7 +293,7 @@ async fn drive(
         Err(error) => (LfEventType::Errored, Some(error.to_string())),
     };
     journal::emit(
-        driver.cwd,
+        running.cwd,
         LfNode::Flow,
         event,
         fields(LfEventFields {
@@ -406,7 +406,7 @@ impl Drop for EnvVarGuard {
 /// The one Flow executor. It owns the cursor and the Flow's record. Each step
 /// is an ordinary command run as a child process; its result is read from the
 /// Process that child registered.
-struct Driver<'a> {
+struct RunningFlow<'a> {
     store: SharedStore,
     process: crate::id::LfProcessId,
     flow: &'a str,
@@ -428,7 +428,7 @@ enum StepExit {
     Stopped,
 }
 
-impl Driver<'_> {
+impl RunningFlow<'_> {
     /// The node the runner stands on and the returns taken to reach it.
     fn location(&self) -> (u32, Vec<Vec<u32>>) {
         let cursor = self.position.lock().expect("Flow position mutex poisoned");
@@ -443,7 +443,7 @@ impl Driver<'_> {
         body.get(leaf.index).cloned()
     }
 
-    /// Record the Process this driver's newest child registered, once it has.
+    /// Record the Process this Flow process's newest child registered, once it has.
     fn record_step(&self, mark: i64) -> Result<Option<crate::id::LfProcessId>> {
         let Some(step) = self.store.sqlite.child_process_after(&self.process, mark)? else {
             return Ok(None);
@@ -516,7 +516,7 @@ impl Driver<'_> {
             .validate_current_schema()
             .with_context(|| {
                 format!(
-                    "this driver cannot read the result of {label}; inspect its Process and effects with a compatible lf before launching further work"
+                    "this Flow process cannot read the result of {label}; inspect its Process and effects with a compatible lf before launching further work"
                 )
             })?;
         let status = status.context("could not execute Flow step")?;
@@ -586,7 +586,7 @@ fn answer_value(text: &str) -> Result<serde_json::Value, String> {
 }
 
 #[async_trait]
-impl SkillExecutor for &Driver<'_> {
+impl SkillExecutor for &RunningFlow<'_> {
     async fn checkpoint(&self, cursor: &ExecutionCursor) -> Result<()> {
         *self.position.lock().expect("Flow position mutex poisoned") = cursor.clone();
         Ok(())
@@ -693,7 +693,7 @@ impl SkillExecutor for &Driver<'_> {
         unreachable!("the correction loop returns or fails")
     }
 
-    /// The operation is its own `lf` command; the driver reads how it ended.
+    /// The operation is its own `lf` command; the Flow process reads how it ended.
     async fn run_command(
         &self,
         ops: &crate::flow::ConcreteCommand,

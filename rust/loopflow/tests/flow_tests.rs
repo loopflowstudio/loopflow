@@ -174,7 +174,7 @@ PYTHON
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
-        let driver: String = conn
+        let flow_process: String = conn
             .query_row("SELECT lf_process_id FROM flow_processes", [], |row| {
                 row.get(0)
             })
@@ -182,7 +182,7 @@ PYTHON
         let inspection = run_lf(
             repo.path(),
             home.path(),
-            &["flow", "show", &driver, "--processes", "--json"],
+            &["flow", "show", &flow_process, "--processes", "--json"],
             None,
         );
         assert!(
@@ -259,7 +259,7 @@ print(json.dumps({"report": {}, "metric_observations": [], "text": "finished"}))
         "survive",
         "- cmd: __telemetry-scorecard\n- cmd: sync --plan\n",
     );
-    let mut driver = lf_command(
+    let mut flow_process = lf_command(
         repo.path(),
         home.path(),
         &["--batch", "flow", "survive"],
@@ -271,20 +271,20 @@ print(json.dumps({"report": {}, "metric_observations": [], "text": "finished"}))
     .unwrap();
     wait_for("effect never started", || {
         assert!(
-            driver.try_wait().unwrap().is_none(),
-            "driver exited before the effect"
+            flow_process.try_wait().unwrap().is_none(),
+            "Flow process exited before the effect"
         );
         repo.path().join("entered").exists()
     });
-    driver.kill().unwrap();
-    driver.wait().unwrap();
+    flow_process.kill().unwrap();
+    flow_process.wait().unwrap();
     let read = || {
         let mut flows = flow_details(repo.path(), home.path());
         assert_eq!(flows.len(), 1);
         flows.remove(0)
     };
     // Reconciliation before and after the surviving effect completes must not
-    // continue the dead driver's Flow or execute its successor.
+    // continue the dead process's Flow or execute its successor.
     for effect_finished in [false, true] {
         if effect_finished {
             fs::write(repo.path().join("release"), "").unwrap();
@@ -315,7 +315,7 @@ print(json.dumps({"report": {}, "metric_observations": [], "text": "finished"}))
         );
         assert_ne!(
             flow["entry"]["state"], "completed",
-            "an effect's exit does not finish its dead driver"
+            "an effect's exit does not finish its dead Flow process"
         );
     }
     let sessions = lf_json(
@@ -1114,7 +1114,7 @@ fn operational_flow_rejects_review_before_launch_or_capture() {
 }
 
 #[test]
-fn killed_driver_leaves_its_agent_step_as_history_without_another_turn() {
+fn killed_flow_process_leaves_its_agent_step_as_history_without_another_turn() {
     let repo = loopflow_test_support::TestRepo::new();
     let home = TempDir::new().unwrap();
     let bin = TempDir::new().unwrap();
@@ -1134,7 +1134,7 @@ fn killed_driver_leaves_its_agent_step_as_history_without_another_turn() {
         bin.path().display(),
         std::env::var("PATH").unwrap()
     );
-    let mut driver = lf_command(
+    let mut flow_process = lf_command(
         repo.path(),
         home.path(),
         &["--batch", "--no-loopflow", "flow", "survive-agent"],
@@ -1146,13 +1146,13 @@ fn killed_driver_leaves_its_agent_step_as_history_without_another_turn() {
     .unwrap();
     wait_for("agent never started", || {
         assert!(
-            driver.try_wait().unwrap().is_none(),
-            "driver exited before provider input"
+            flow_process.try_wait().unwrap().is_none(),
+            "Flow process exited before provider input"
         );
         home.path().join("entered").exists()
     });
-    driver.kill().unwrap();
-    driver.wait().unwrap();
+    flow_process.kill().unwrap();
+    flow_process.wait().unwrap();
     let read = || {
         let mut flows = flow_details(repo.path(), home.path());
         assert_eq!(flows.len(), 1);
@@ -1177,7 +1177,7 @@ fn killed_driver_leaves_its_agent_step_as_history_without_another_turn() {
     assert_eq!(
         step_fields(&flow, "label"),
         ["work"],
-        "the dead driver's successor never launched"
+        "the dead Flow process's successor never launched"
     );
     assert_ne!(flow["entry"]["state"], "completed");
     assert_eq!(
@@ -2343,7 +2343,7 @@ fn a_repeated_node_receives_only_task_direction_newer_than_its_last_run() {
         run(&["--task", "INF-123", "flow", "twice"]),
         [true, true, false, false]
     );
-    // The driver asked for that with an option any run takes.
+    // The Flow process asked for that with an option any run takes.
     steer("Report the first error only.");
     let after = earlier.to_string();
     let given = run(&[

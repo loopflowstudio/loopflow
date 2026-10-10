@@ -34,11 +34,11 @@ impl History {
     }
     /// One server event of conversation `thread`, read for attention only.
     pub(super) fn attend(&mut self, thread: &AgentSessionId, event: &Value) {
-        if let Some((store, session, driver)) = &self.owner {
+        if let Some((store, session, attachment)) = &self.owner {
             self.attention.record(
                 store,
                 session,
-                driver,
+                attachment,
                 super::attention::opencode(event, thread.as_str()),
             );
         }
@@ -250,7 +250,7 @@ pub(super) async fn read_messages(
         .await?)
 }
 
-// Native submission is bounded and serialized with driver transfer. An
+// Native submission is bounded and serialized with attachment handoff. An
 // uncertain HTTP result is retained as uncertain; never submit it twice here.
 pub(super) async fn post(
     owner: Option<(SqliteStore, String, SessionAttachment)>,
@@ -272,8 +272,8 @@ pub(super) async fn post(
                     ))
                 })
         };
-        if let Some((store, session, driver)) = owner {
-            store.with_session_attachment(&session, &driver, write)
+        if let Some((store, session, attachment)) = owner {
+            store.with_session_attachment(&session, &attachment, write)
         } else {
             write()
         }
@@ -305,10 +305,10 @@ mod tests {
         )
         .unwrap();
         store.test_session("session", &input);
-        let driver = store
+        let attachment = store
             .claim_session_attachment("session", None, &process, false)
             .unwrap();
-        let mut history = History::new(Some((store.clone(), "session".into(), driver.clone())));
+        let mut history = History::new(Some((store.clone(), "session".into(), attachment.clone())));
         let request = history.request().unwrap();
         let message = |id: &str, input: u64, finish: &str| {
             json!({
@@ -330,7 +330,7 @@ mod tests {
         )
         .unwrap();
         store
-            .claim_session_attachment("session", Some(&driver), &second, true)
+            .claim_session_attachment("session", Some(&attachment), &second, true)
             .unwrap();
         assert!(!history.admitted(&request));
         for (index, input) in [20, 40, 30].into_iter().enumerate() {

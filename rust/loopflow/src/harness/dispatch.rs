@@ -111,10 +111,10 @@ mod tests {
                 [process.as_str()],
             )
             .unwrap();
-        let driver = store
+        let attachment = store
             .claim_session_attachment("conversation", None, &process, false)
             .unwrap();
-        (store, driver)
+        (store, attachment)
     }
 
     /// One worker is the smallest runtime in which a waiting reader can stop
@@ -142,21 +142,21 @@ mod tests {
     #[test]
     fn reader_waiting_for_the_fence_leaves_the_runtime_running() {
         let home = tempfile::tempdir().unwrap();
-        let (store, driver) = fenced_session(&home);
+        let (store, attachment) = fenced_session(&home);
         let (written, read, ticked) = on_one_worker(async move {
-            let (mut engine, mut peer) = UnixStream::pair().unwrap();
+            let (mut provider, mut peer) = UnixStream::pair().unwrap();
             let (held, holding) = tokio::sync::oneshot::channel();
             let ticked = Arc::new(AtomicBool::new(false));
             let writer_store = store.clone();
             let writer = tokio::task::spawn_blocking(move || {
-                writer_store.with_session_attachment("conversation", &driver, || {
+                writer_store.with_session_attachment("conversation", &attachment, || {
                     held.send(()).unwrap();
                     // Let the reader reach the fence before the write needs
                     // the runtime.
                     std::thread::sleep(Duration::from_millis(100));
                     Ok(within(
                         Duration::from_secs(10),
-                        engine.write_all(&vec![0; UNBUFFERED]),
+                        provider.write_all(&vec![0; UNBUFFERED]),
                     )
                     .map(|written| written.is_ok()))
                 })
@@ -191,17 +191,17 @@ mod tests {
     #[test]
     fn stalled_runtime_cannot_hold_the_fence_past_its_limit() {
         let home = tempfile::tempdir().unwrap();
-        let (store, driver) = fenced_session(&home);
+        let (store, attachment) = fenced_session(&home);
         let (written, read) = on_one_worker(async move {
-            let (mut engine, _unread_peer) = UnixStream::pair().unwrap();
+            let (mut provider, _unread_peer) = UnixStream::pair().unwrap();
             let (held, holding) = tokio::sync::oneshot::channel();
             let writer_store = store.clone();
             let writer = tokio::task::spawn_blocking(move || {
-                writer_store.with_session_attachment("conversation", &driver, || {
+                writer_store.with_session_attachment("conversation", &attachment, || {
                     held.send(()).unwrap();
                     Ok(within(
                         Duration::from_millis(300),
-                        engine.write_all(&vec![0; UNBUFFERED]),
+                        provider.write_all(&vec![0; UNBUFFERED]),
                     )
                     .is_some())
                 })

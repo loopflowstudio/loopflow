@@ -54,7 +54,7 @@ inside the conversation; they do not create another generic execution object.
 A child command records its causal parent and, when issued by an agent, its
 calling conversation and provider generation. That evidence grants neither
 process-control authority nor permission to move a Flow cursor. A conversation
-driver handoff retains conversation identity while fencing the old writer.
+attachment handoff retains conversation identity while fencing the old writer.
 Passive observation acquires no claim. See the [contract and cutover status](architecture-reference.md#cutover-status)
 for the remaining reader, wire and lifecycle conversion.
 
@@ -103,7 +103,7 @@ neither proves the model followed it. Provider scheduling determines when a
 live correction is consumed.
 
 On a repeated Flow step, Task Flows seed only steer IDs newer than those an
-earlier successful run of that step, under the same driver, already received. Failed or interrupted attempts acknowledge
+earlier successful run of that step, under the same Flow process, already received. Failed or interrupted attempts acknowledge
 nothing. Each structural step and each new Flow has its own history;
 unreceived late comments remain eligible. This records delivery, not proof that
 the model followed the instruction.
@@ -123,7 +123,7 @@ Loopflow never guesses signal authority from a conversation ID, Work ID, PID, or
 tmux name. Project operations are ordinary finite conversations; they have no long-running
 process to interrupt, resume, wait for, or attach to.
 
-Work survives its provider process. A Flow whose driver died leaves its Processes
+Work survives its provider process. A Flow whose process died leaves its Processes
 as history; nothing resumes it. Inspect
 `lf task status ISSUE` and `lf flow show ID --processes --json`, then launch
 fresh work with `lf task run INF-123`. The Task keeps its durable

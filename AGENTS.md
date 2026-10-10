@@ -235,8 +235,8 @@ fixed when taken up. `lf task run` chooses an edge, starts its Flow as a child
 succeeds; a stopped Flow leaves the Task on its edge;
 `lf task move` sets a node. Each move is appended to the Task's history. It
 executes nothing, and no command approves or completes a node.
-Taskless execution uses the same driver. A Flow is one lf process and the step
-Processes it starts; its id is the Flow process ID. The driver holds the cursor and
+Taskless execution uses the same Flow runner. A Flow is one lf process and the step
+Processes it starts; its id is the Flow process ID. The Flow process holds the cursor and
 return counts in memory and writes FlowProcess, append-only: the Flow's name and
 compiled graph at launch, then each step's Process, node and iteration counts.
 Every Flow process gets one; none is primary for a Task. A step is the plain command
@@ -252,10 +252,13 @@ and execution. Preserve unreviewed backlog until explicit disposition; missing e
 Current navigation stays Wave → Task and Linear retains past Projects.
 
 LfProcess is one actual lf process, including direct and agent-issued nested commands.
-Its `lfid` is durable Loopflow identity; `pid` is the optional Unix PID and may
-collide across history. References use `lf_process_id` and `parent_lf_process_id`.
+Its `id`, an `LfProcessId`, is durable Loopflow identity; `pid` is only the optional
+Unix PID and may collide across history. References are `<role>_lf_process_id`:
+`lf_process_id`, `parent_lf_process_id`. AgentProcess is the provider's OS process
+Loopflow started: one `processes` row of kind `agent`, with its parent LfProcess,
+the attached LfProcess and a fresh attachment token. It survives attachment handoff.
 LfSession is one Loopflow-owned durable conversation, interactive or headless; identity,
-name, feedback and native history survive driver replacement. Product text says
+name, feedback and native history survive attachment replacement. Product text says
 Session for interactive and Run for headless work. AgentSession is the provider-owned
 conversation, represented by an opaque AgentSessionId used for resume, native
 turn keys and account attribution. An LfSession selects one AgentSession at a

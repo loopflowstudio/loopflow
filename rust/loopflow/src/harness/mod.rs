@@ -127,17 +127,17 @@ mod environment_tests {
         config
             .env
             .insert("LF_AGENT_CALLER".into(), "current-fixture".into());
-        let mut engine = tokio::process::Command::new("vendor");
-        configure_agent_env(&mut engine, &config);
+        let mut provider = tokio::process::Command::new("vendor");
+        configure_agent_env(&mut provider, &config);
         set_vendor_std_env(
-            engine.as_std_mut(),
+            provider.as_std_mut(),
             Path::new("/control/lf"),
             Path::new("/private"),
         )
         .unwrap();
         // Provider account environment is not conversation tool authority.
-        engine.env("PROVIDER_ACCOUNT_FIXTURE", "not-for-tools");
-        let tools = super::conversation_environment(engine.as_std(), &config);
+        provider.env("PROVIDER_ACCOUNT_FIXTURE", "not-for-tools");
+        let tools = super::conversation_environment(provider.as_std(), &config);
         let script = "test -z \"${LF_DISCORD_TOKEN+x}${LOOPFLOW_DIRECTIVE_FILE+x}${PROVIDER_ACCOUNT_FIXTURE+x}\" && test \"$LF_AGENT_CALLER\" = current-fixture && test \"$LF_HOME\" = /private && test \"$LF_BIN\" = /control/lf";
         assert!(std::process::Command::new("/bin/sh")
             .env_clear()
@@ -254,7 +254,7 @@ pub trait Harness: Send + Sync {
     async fn send_input(&mut self, content: &str) -> Result<()>;
     /// Try to deliver input to the exact Turn currently active.
     ///
-    /// Drivers without same-Turn input keep the default. A rejection or race
+    /// Harnesses without same-Turn input keep the default. A rejection or race
     /// is not an error in the Work protocol; the controller seeds a later
     /// boundary instead.
     async fn send_current(&mut self, _content: &str) -> SendCurrentOutcome {
@@ -273,7 +273,7 @@ pub trait Harness: Send + Sync {
     fn agent_session(&self) -> Option<AgentSessionId>;
     /// The owned provider child, for read-only activity sampling. This does not
     /// grant process-group signal authority.
-    fn process_id(&self) -> Option<u32> {
+    fn pid(&self) -> Option<u32> {
         None
     }
     /// Independently isolated provider process group, when the harness owns
@@ -291,7 +291,7 @@ pub trait Harness: Send + Sync {
     ) {
     }
     /// Seed a previously persisted vendor session id so the next turn resumes
-    /// it. Drivers that take resume state at `start` instead ignore this.
+    /// it. Harnesses that take resume state at `start` instead ignore this.
     fn set_agent_session(&mut self, _agent_session: Option<AgentSessionId>) {}
     /// Pin this Invocation to the exact managed account already recorded in its
     /// durable route. Accountless providers keep the default no-op.
@@ -413,7 +413,7 @@ mod tests {
                     .contains("AgentProcess requires an admitted invocation"),
                 "{name}: {error}"
             );
-            assert_eq!(harness.process_id(), None, "{name}");
+            assert_eq!(harness.pid(), None, "{name}");
         }
     }
 

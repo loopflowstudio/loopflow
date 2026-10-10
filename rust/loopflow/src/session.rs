@@ -78,7 +78,7 @@ pub struct LfSession {
     pub id: String,
     /// Immutable captured input, not a resumable execution identity.
     pub artifact_key: String,
-    /// Causal input reference; grants neither driver nor Flow authority.
+    /// Causal input reference; grants neither attachment nor Flow authority.
     pub caller_artifact_key: Option<String>,
     pub input_published: bool,
     pub cwd: std::path::PathBuf,
@@ -120,8 +120,8 @@ pub struct SessionBind {
 /// on a person. A long silent provider step can read as Waiting.
 pub(crate) const WAITING_QUIET_SECONDS: i64 = 120;
 
-/// What a Session's driver last read from its provider's own stream. One row
-/// per Session, replaced by whichever driver currently owns that stream.
+/// What a Session's attached LfProcess last read from its provider's own stream. One
+/// row per Session, replaced by whichever attachment currently owns that stream.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionActivity {
     pub observed_at: i64,
@@ -208,7 +208,7 @@ impl Default for SessionFilter {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SessionSummary {
     pub primary_scope: Option<String>,
-    pub driver_outcome: Option<String>,
+    pub attachment_outcome: Option<String>,
     /// Waiting on a person, as of the read's clock.
     pub waiting: bool,
     pub program_status: Option<crate::program_status::Records>,
@@ -242,32 +242,32 @@ pub(crate) struct SessionSummary {
     pub task_identifier: Option<String>,
 }
 
-/// A Flow as its driver Process records it; Current says nothing about a live process.
+/// A Flow as its Flow process records it; Current says nothing about a live process.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FlowProcessSummary {
-    /// The driver Process.
+    /// The Flow process.
     pub id: String,
     pub name: String,
     pub state: FlowProcessSummaryState,
     pub task_id: Option<TaskId>,
     pub wave_id: Option<WaveId>,
-    /// When its latest step started, or its driver exited.
+    /// When its latest step started, or its Flow process exited.
     pub updated_at: i64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FlowProcessSummaryState {
-    /// The driver has no recorded exit.
+    /// The Flow process has no recorded exit.
     Current,
     Completed,
-    /// The driver exited before the Flow's last step.
+    /// The Flow process exited before the Flow's last step.
     Stopped,
 }
 
 impl FlowProcessSummaryState {
-    /// What a driver Process's recorded outcome and exit time say of its Flow.
-    pub(crate) fn of_driver(outcome: Option<&str>, completed_at: Option<i64>) -> Self {
+    /// What a Flow process's recorded outcome and exit time say of its Flow.
+    pub(crate) fn of_process(outcome: Option<&str>, completed_at: Option<i64>) -> Self {
         match (outcome, completed_at) {
             (Some("succeeded"), _) => Self::Completed,
             (None, None) => Self::Current,

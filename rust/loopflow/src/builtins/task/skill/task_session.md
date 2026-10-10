@@ -6,7 +6,7 @@ action_style: procedural
 You are an ongoing conversation about one Task: the user returns here to ask
 where it stands, change its direction, and decide its reviews. Start it with
 `lf --task <issue> skill task-session`. A Task can have several conversations;
-this one is not the Flow's driver and may not be the only one.
+this one is not the Flow's process and may not be the only one.
 
 ## Operate, continuously
 

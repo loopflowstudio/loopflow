@@ -739,7 +739,7 @@ impl CodexHarness {
 
 #[async_trait]
 impl Harness for CodexHarness {
-    fn process_id(&self) -> Option<u32> {
+    fn pid(&self) -> Option<u32> {
         self.child.as_ref().and_then(Child::id)
     }
 
@@ -1015,7 +1015,7 @@ impl CodexHarness {
                     .as_ref()
                     .expect("new AgentProcess owns a directory")
                     .path()
-                    .join("engine.sock")
+                    .join("agent.sock")
             });
         let mut command = Command::new("codex");
         if let Some(route) = &self.account_route {
@@ -1217,12 +1217,12 @@ impl CodexHarness {
                 let Ok(value) = serde_json::from_str::<Value>(&line) else {
                     continue;
                 };
-                if let Some((store, session, driver)) = &history {
+                if let Some((store, session, attachment)) = &history {
                     let recorded = super::dispatch::off_reactor(|| {
                         native_history
                             .lock()
                             .expect("codex history lock poisoned")
-                            .record(store, session, Some(driver), None, &value)
+                            .record(store, session, Some(attachment), None, &value)
                     });
                     if let Err(error) = recorded {
                         let _ = event_tx.send(ConversationEvent::Error {
@@ -1445,10 +1445,10 @@ impl CodexHarness {
         // returning None rather than failing startup.
         match tokio::time::timeout(Duration::from_secs(10), thread_id_rx).await {
             Ok(Ok(thread_id)) => {
-                if let Some((store, session, driver)) = &self.session_attachment {
+                if let Some((store, session, attachment)) = &self.session_attachment {
                     store.record_session_connection(
                         session,
-                        driver,
+                        attachment,
                         &endpoint.to_string_lossy(),
                         &thread_id,
                     )?;
@@ -1517,13 +1517,13 @@ mod tests {
         store
             .record_session_connection("saved", &old, "/missing.sock", &"saved-thread".into())
             .unwrap();
-        let driver = store
+        let attachment = store
             .claim_session_attachment("saved", Some(&old), &process, true)
             .unwrap();
         let (tx, _rx) = mpsc::unbounded_channel();
         let mut harness = CodexHarness::new(tx, ApprovalPolicy::AutoApprove);
         let config = AgentConfig {
-            session_attachment: Some(("saved".into(), driver.clone())),
+            session_attachment: Some(("saved".into(), attachment.clone())),
             // Even a mistakenly reached spawn cannot launch a real provider.
             cwd: Some(ledger.home().join("absent")),
             ..Default::default()
@@ -1536,7 +1536,9 @@ mod tests {
         assert!(error
             .to_string()
             .contains("Saved conversation thread differs"));
-        let released = store.release_session_attachment("saved", &driver).unwrap();
+        let released = store
+            .release_session_attachment("saved", &attachment)
+            .unwrap();
         let retry = store
             .claim_session_attachment("saved", Some(&released), &process, true)
             .unwrap();

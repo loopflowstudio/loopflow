@@ -11,14 +11,14 @@ use crate::store::{StoreError, StoreResult};
 
 use super::SqliteStore;
 
-/// The Flow whose driver recorded, as a step, the Process that captured session
+/// The Flow whose process recorded, as a step, the Process that captured session
 /// `s`'s current input. Sessions carry no Flow column of their own.
 macro_rules! session_flow {
     () => {
         "(SELECT fs.flow_lf_process_id FROM session_events captured JOIN flow_process_steps fs ON fs.lf_process_id=captured.lf_process_id WHERE captured.seq=s.current_capture)"
     };
 }
-/// That step's node and loop counts, as its driver recorded them.
+/// That step's node and loop counts, as its Flow process recorded them.
 macro_rules! session_step {
     ($column:literal) => {
         concat!("(SELECT fs.", $column, " FROM session_events captured JOIN flow_process_steps fs ON fs.lf_process_id=captured.lf_process_id WHERE captured.seq=s.current_capture)")
@@ -103,7 +103,7 @@ pub(super) fn session_in(conn: &Connection, id: &str) -> StoreResult<Option<LfSe
 }
 
 /// Reported status wins within the provider generation; otherwise use the
-/// current driver's input/hand-back/quiet reading. Filter before pagination.
+/// current attachment's input/hand-back/quiet reading. Filter before pagination.
 fn waiting_sql(session: &str, now: i64) -> String {
     format!(
         "EXISTS(SELECT 1 FROM session_activity act WHERE act.session_id={session}.id
@@ -200,9 +200,9 @@ const MEMBERSHIP_KIND: &str = "CASE WHEN json_valid(payload) THEN CASE WHEN json
 fn summary_query(page: &str, by_id: bool, now: i64) -> String {
     let waiting = waiting_sql("a", now);
     let order = if by_id { "s.id" } else { "s.title,s.id" };
-    // A Flow is the driver Process above the step that captured the current input.
+    // A Flow is the Flow process above the step that captured the current input.
     format!("WITH page AS MATERIALIZED ({page})
-        SELECT s.*,driver.id,flow.flow,driver.outcome,driver.completed_at,step.started_at,
+        SELECT s.*,flow_process.id,flow.flow,flow_process.outcome,flow_process.completed_at,step.started_at,
         (fs.seq=(SELECT MAX(later.seq) FROM flow_process_steps later WHERE later.flow_lf_process_id=fs.flow_lf_process_id)),
         w.slug,t.issue_identifier,
         ((SELECT {MEMBERSHIP_KIND} FROM session_events INDEXED BY session_input_membership
@@ -222,7 +222,7 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         LEFT JOIN flow_process_steps fs ON fs.lf_process_id=captured.lf_process_id
         LEFT JOIN flow_processes flow ON flow.lf_process_id=fs.flow_lf_process_id
         LEFT JOIN processes step ON step.id=fs.lf_process_id
-        LEFT JOIN processes driver ON driver.id=fs.flow_lf_process_id
+        LEFT JOIN processes flow_process ON flow_process.id=fs.flow_lf_process_id
         LEFT JOIN wave_addresses w ON w.id=s.wave_id
         LEFT JOIN tasks t ON t.id=s.task_id
         ORDER BY {order}", super::task_work::session_tasks("a"),
@@ -244,13 +244,13 @@ fn read_summary(
             .transpose()
             .map_err(invalid)?;
         let flow = match row.get::<_, Option<String>>(17)? {
-            Some(driver) => {
+            Some(flow_process) => {
                 let completed: Option<i64> = row.get(20)?;
                 let name: String = row.get(18)?;
                 Some(crate::session::FlowProcessSummary {
-                    id: driver,
+                    id: flow_process,
                     name,
-                    state: crate::session::FlowProcessSummaryState::of_driver(
+                    state: crate::session::FlowProcessSummaryState::of_process(
                         row.get::<_, Option<String>>(19)?.as_deref(),
                         completed,
                     ),
@@ -267,7 +267,7 @@ fn read_summary(
         Ok(crate::session::SessionSummary {
             task_ids: serde_json::from_str(&row.get::<_, String>(26)?)?,
             primary_scope: row.get(27)?,
-            driver_outcome: row.get(28)?,
+            attachment_outcome: row.get(28)?,
             waiting: row.get(29)?,
             program_status: row
                 .get::<_, Option<String>>(32)?
@@ -982,9 +982,9 @@ impl SqliteStore {
                 ));
             }
             replace_input_in(tx, &mut next, Some(process))?;
-            let driver = super::processes::attach_in(tx, &next.id, expected, process, true)?;
+            let attachment = super::processes::attach_in(tx, &next.id, expected, process, true)?;
             let next = session_in(tx, &next.id)?.ok_or(StoreError::NotFound)?;
-            Ok((next, driver))
+            Ok((next, attachment))
         })
     }
 
@@ -1596,7 +1596,8 @@ mod metadata_tests {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         let input = crate::session_record::new_artifact_key();
-        let driver = store.test_flow("retained", "/unavailable", &[("implement", None)], None);
+        let flow_process =
+            store.test_flow("retained", "/unavailable", &[("implement", None)], None);
         {
             let conn = store.conn.lock().unwrap();
             conn.execute(
@@ -1611,7 +1612,7 @@ mod metadata_tests {
                 "INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,observed_at,payload)
                  VALUES('session','captured',?1,(SELECT id FROM processes WHERE parent_lf_process_id=?2),1,
                     json_object('artifact_key',?1))",
-                params![input, driver],
+                params![input, flow_process],
             )
             .unwrap();
             conn.execute(
@@ -1631,7 +1632,10 @@ mod metadata_tests {
             .session_summaries(&SessionFilter::default(), 0)
             .unwrap();
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].flow_lf_process_id.as_deref(), Some(driver.as_str()));
+        assert_eq!(
+            rows[0].flow_lf_process_id.as_deref(),
+            Some(flow_process.as_str())
+        );
         let flow = rows[0].flow.as_ref().unwrap();
         assert_eq!(
             (flow.name.as_str(), flow.state),
@@ -1645,7 +1649,7 @@ mod metadata_tests {
                 .unwrap()
                 .flow_lf_process_id
                 .as_deref(),
-            Some(driver.as_str())
+            Some(flow_process.as_str())
         );
         assert!(
             store.input_events(&input).is_err(),
@@ -1657,7 +1661,7 @@ mod metadata_tests {
             .unwrap()
             .execute(
                 "UPDATE processes SET outcome='succeeded',completed_at=2 WHERE id=?1",
-                params![driver],
+                params![flow_process],
             )
             .unwrap();
         let flow = store

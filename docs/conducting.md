@@ -81,7 +81,7 @@ filters inventory; it cannot opt a new Session out of Task membership.
 
 Use Session identity to return to a conversation and its native history. A
 successful provider turn, the command's outcome and the Flow's progress can
-differ: the engine can finish after its driver dies, and a finished Flow
+differ: the provider process can finish after the lf process attached to it dies, and a finished Flow
 leaves its Task at a workflow node, waiting on you.
 
 `lf mon show` and `lf replay` retain their historical selectors during the conversion.
@@ -113,7 +113,7 @@ lf doctor          # check installation, Process integrity and scheduled receipt
 Use `lf ps --json` when another tool or agent needs one stable, parseable frame.
 Both contain only OS-live process trees; completed calls disappear. Run
 `lf mon prune --dry-run` before cleanup. Plain `lf mon prune` removes stale Process
-receipts and engines whose driver is provably dead, never unclaimed provider PIDs.
+receipts and provider processes whose attached lf process is provably dead, never unclaimed provider PIDs.
 `lf ci` reads the local ledger, not GitHub: it reports how
 much of CI repair happened without a person.
 
@@ -142,7 +142,7 @@ its existing status and logs; discuss unresolved judgment in the ongoing Wave
 chat. Review happens in the Task conversation; Flows hold autonomous steps only.
 Use `lf --task <task> : "<prompt>"` when another agent perspective is needed.
 
-A Flow whose driver died stays as history. Nothing resumes it. Read
+A Flow whose process died stays as history. Nothing resumes it. Read
 `lf task status <task>`, then launch fresh work with `lf task run <task>`.
 
 ## Inspect and resume

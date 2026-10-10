@@ -156,7 +156,8 @@ pub fn run_prune(json: bool, dry_run: bool) -> Result<()> {
     let processes = OsProcess::sample(now)?;
     let receipts =
         read_process_receipts_at(&lf_home).context("failed to read live Process receipts")?;
-    // Driver death is proven from Process receipts, so reap before pruning them.
+    // Attached LfProcess death is proven from Process receipts, so reap before
+    // pruning them.
     let agents = crate::harness::agent_process::reap_agent_processes(dry_run)?;
     for error in &agents.errors {
         tracing::warn!(%error, "failed to reap orphaned AgentProcess");
@@ -460,7 +461,7 @@ fn render_snapshot(snapshot: &ActivitySnapshot) -> String {
         "{} live or unresolved recorded process(es)\n\n",
         snapshot.nodes.len(),
     ));
-    output.push_str("  ELAPSED       PID  STATE      LFID                                  CALL\n");
+    output.push_str("  ELAPSED       PID  STATE      ID                                    CALL\n");
     if snapshot.nodes.is_empty() {
         output.push_str("  no live or unresolved processes recorded in this Machine\n");
     } else {

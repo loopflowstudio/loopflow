@@ -726,14 +726,14 @@ fn wait_file(path: &Path, child: &mut Child) {
     }
 }
 
-struct Driver {
+struct Attached {
     child: Child,
     id: LfProcessId,
     stop: std::path::PathBuf,
     output: std::path::PathBuf,
 }
 
-impl Driver {
+impl Attached {
     fn start(home: &Path, repo: &Path, name: &str, preload: Option<&Path>) -> Self {
         let output = home.join(format!("{name}.output"));
         let log = std::fs::File::create(&output).unwrap();
@@ -742,7 +742,7 @@ impl Driver {
             command.env("LD_PRELOAD", preload);
         }
         let mut child = command
-            .env("LF_TEST_DRIVER", name)
+            .env("LF_TEST_ATTACHED", name)
             .env("LF_TEST_BINARY", env!("CARGO_BIN_EXE_lf"))
             .stdout(log.try_clone().unwrap())
             .stderr(log)
@@ -759,7 +759,7 @@ impl Driver {
     }
 }
 
-impl Drop for Driver {
+impl Drop for Attached {
     fn drop(&mut self) {
         std::fs::write(&self.stop, "").unwrap();
         let deadline = Instant::now() + Duration::from_secs(10);
@@ -780,7 +780,7 @@ fn write_scorecard(repo: &Path) {
         r#"
 import json, os, pathlib, subprocess, time
 home = pathlib.Path(os.environ['LF_HOME'])
-name = os.environ['LF_TEST_DRIVER']
+name = os.environ['LF_TEST_ATTACHED']
 subprocess.run([os.environ['LF_TEST_BINARY'], 'session', 'list', '--all', '--json'],
                check=True, stdout=subprocess.DEVNULL)
 (home / (name + '.pid')).write_text(str(os.getpid()))
@@ -822,18 +822,18 @@ async fn interruption_records_the_process_without_a_fabricated_signal_name() {
     };
     #[cfg(not(target_os = "linux"))]
     let preload: Option<std::path::PathBuf> = None;
-    let mut driver = Driver::start(home.path(), repo.path(), "interrupt", preload.as_deref());
+    let mut attached = Attached::start(home.path(), repo.path(), "interrupt", preload.as_deref());
     // SAFETY: this PID is our still-owned child, retained until wait completes.
     assert_eq!(
-        unsafe { libc::kill(driver.child.id() as i32, libc::SIGINT) },
+        unsafe { libc::kill(attached.child.id() as i32, libc::SIGINT) },
         0
     );
-    let exit = driver.child.wait().unwrap();
+    let exit = attached.child.wait().unwrap();
     let conn = rusqlite::Connection::open(database).unwrap();
     let row: (String, i32, Option<String>) = conn
         .query_row(
             "SELECT outcome,exit_code,signal FROM processes WHERE id=?1",
-            [driver.id.as_str()],
+            [attached.id.as_str()],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .unwrap();
@@ -841,10 +841,10 @@ async fn interruption_records_the_process_without_a_fabricated_signal_name() {
         (exit.code(), row),
         (Some(130), ("interrupted".into(), 130, None)),
         "{}",
-        std::fs::read_to_string(&driver.output).unwrap()
+        std::fs::read_to_string(&attached.output).unwrap()
     );
     if preload.is_some() {
-        assert!(std::fs::read_to_string(&driver.output)
+        assert!(std::fs::read_to_string(&attached.output)
             .unwrap()
             .contains("test ordering: owned group killed before interrupt hook returns"));
     }
@@ -874,7 +874,7 @@ async fn interruption_records_the_process_without_a_fabricated_signal_name() {
         );
         // Keep fixture cleanup distinct from the interruption result. Release
         // only this script and observe exit before deleting its stop directory.
-        std::fs::write(&driver.stop, "").unwrap();
+        std::fs::write(&attached.stop, "").unwrap();
         let deadline = Instant::now() + Duration::from_secs(5);
         while alive() && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(20));
@@ -889,7 +889,7 @@ async fn interruption_records_the_process_without_a_fabricated_signal_name() {
 
 #[tokio::test]
 #[ignore = "requires actual Codex 0.157.1 and uv; only local synthetic Responses, no credentials"]
-async fn actual_engine_children_follow_driver_handoff_but_not_provider_replacement() {
+async fn actual_agent_process_children_follow_attachment_handoff_but_not_provider_replacement() {
     let home = tempfile::tempdir().unwrap();
     let repo = TestRepo::new();
     let database = home.path().join("loopflow.db");
@@ -898,11 +898,11 @@ async fn actual_engine_children_follow_driver_handoff_but_not_provider_replaceme
         .unwrap();
     let store = SqliteStore::new(&database).unwrap();
     write_scorecard(repo.path());
-    let original = Driver::start(home.path(), repo.path(), "original", None);
+    let original = Attached::start(home.path(), repo.path(), "original", None);
     let original_id = original.id.clone();
-    let replacement = Driver::start(home.path(), repo.path(), "replacement", None);
-    let restart = Driver::start(home.path(), repo.path(), "restart", None);
-    let session_id = "engine-ownership-fixture";
+    let replacement = Attached::start(home.path(), repo.path(), "replacement", None);
+    let restart = Attached::start(home.path(), repo.path(), "restart", None);
+    let session_id = "agent-process-ownership-fixture";
     reserve_session(&store, session_id, repo.path());
     let first = store
         .claim_session_attachment(session_id, None, &original.id, false)
@@ -917,7 +917,7 @@ async fn actual_engine_children_follow_driver_handoff_but_not_provider_replaceme
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let codex =
         std::env::var("CODEX_TEST_BIN").expect("set CODEX_TEST_BIN to the real Codex executable");
-    let mut engine = Command::new("uv")
+    let mut probe = Command::new("uv")
         .current_dir(&root)
         .arg("run")
         .arg("tests/e2e/codex_connect.py")
@@ -933,7 +933,7 @@ async fn actual_engine_children_follow_driver_handoff_but_not_provider_replaceme
         .arg(&control)
         .spawn()
         .unwrap();
-    wait_file(&control.join("before.done"), &mut engine);
+    wait_file(&control.join("before.done"), &mut probe);
     let vacant = store
         .release_session_attachment(session_id, &first)
         .unwrap();
@@ -954,7 +954,7 @@ async fn actual_engine_children_follow_driver_handoff_but_not_provider_replaceme
         .is_err());
     drop(original);
     std::fs::write(control.join("handoff.go"), "").unwrap();
-    wait_file(&control.join("after.done"), &mut engine);
+    wait_file(&control.join("after.done"), &mut probe);
     let restarted = store
         .claim_session_attachment(session_id, Some(&handed_off), &restart.id, true)
         .unwrap();
@@ -963,7 +963,7 @@ async fn actual_engine_children_follow_driver_handoff_but_not_provider_replaceme
         handed_off.provider_generation
     );
     std::fs::write(control.join("replace.go"), "").unwrap();
-    assert!(engine.wait().unwrap().success());
+    assert!(probe.wait().unwrap().success());
     let conn = rusqlite::Connection::open(&database).unwrap();
     let parents: Vec<String> = conn
         .prepare(
@@ -1015,7 +1015,7 @@ fn reserve_session(store: &SqliteStore, session_id: &str, repo: &Path) {
                 iterations: None,
                 interactive: true,
                 repo: None,
-                title: "Engine ownership".into(),
+                title: "AgentProcess ownership".into(),
                 title_source: TitleSource::Generated,
                 request: None,
                 ready_summary: None,
@@ -1038,8 +1038,8 @@ async fn retained_native_client_loses_writes_but_keeps_display_after_transfer() 
         .unwrap();
     let store = SqliteStore::new(&database).unwrap();
     write_scorecard(repo.path());
-    let original = Driver::start(home.path(), repo.path(), "original", None);
-    let replacement = Driver::start(home.path(), repo.path(), "replacement", None);
+    let original = Attached::start(home.path(), repo.path(), "original", None);
+    let replacement = Attached::start(home.path(), repo.path(), "replacement", None);
     let session = "native-client-transfer";
     reserve_session(&store, session, repo.path());
     let first = store
@@ -1068,15 +1068,16 @@ async fn retained_native_client_loses_writes_but_keeps_display_after_transfer() 
         .spawn()
         .unwrap();
     wait_file(&control.join("native.done"), &mut probe);
-    let engine: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(control.join("engine.json")).unwrap()).unwrap();
+    let agent_process: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(control.join("agent_process.json")).unwrap())
+            .unwrap();
     let connection = CodexConnection {
         store: store.clone(),
         session_id: session.into(),
-        thread_id: engine["thread"].as_str().unwrap().into(),
+        thread_id: agent_process["thread"].as_str().unwrap().into(),
         attachment: Some(first.clone()),
     };
-    let endpoint = Path::new(engine["endpoint"].as_str().unwrap());
+    let endpoint = Path::new(agent_process["endpoint"].as_str().unwrap());
     let old = serve_gate(&control.join("old.sock"), endpoint, connection.clone());
     let mut passive = connection.clone();
     passive.attachment = None;
@@ -1100,8 +1101,8 @@ async fn retained_native_client_loses_writes_but_keeps_display_after_transfer() 
         serde_json::from_slice(&std::fs::read(control.join("evidence/results.json")).unwrap())
             .unwrap();
     assert_eq!(result["old_client_still_receives_completion"], true);
-    assert_eq!(result["current_driver_continued"], true);
-    assert_eq!(result["engine_alive"], true);
+    assert_eq!(result["current_attachment_continued"], true);
+    assert_eq!(result["agent_process_alive"], true);
     assert_eq!(
         result["rejected_old_client_writes"]
             .as_array()
@@ -1132,19 +1133,19 @@ async fn retained_native_client_loses_writes_but_keeps_display_after_transfer() 
 
 fn serve_gate(
     socket: &Path,
-    engine: &Path,
+    endpoint: &Path,
     connection: CodexConnection,
 ) -> tokio::task::JoinHandle<()> {
     let listener = tokio::net::UnixListener::bind(socket).unwrap();
-    let engine = engine.to_path_buf();
+    let endpoint = endpoint.to_path_buf();
     tokio::spawn(async move {
         let mut clients = tokio::task::JoinSet::new();
         loop {
             let (socket, _) = listener.accept().await.unwrap();
             let connection = connection.clone();
-            let engine = engine.clone();
+            let endpoint = endpoint.clone();
             clients.spawn(async move {
-                if let Err(error) = connection.serve(socket, &engine).await {
+                if let Err(error) = connection.serve(socket, &endpoint).await {
                     eprintln!("native fixture client closed: {error}");
                 }
             });

@@ -1672,10 +1672,10 @@ mod tests {
             assert_eq!(record.item, snapshot.snapshot.items[0]);
             assert_eq!(record.project, Some(snapshot.snapshot.projects[1].clone()));
             assert_eq!(record.observed_at, 17);
-            let driver = crate::id::LfProcessId::new();
+            let process = crate::id::LfProcessId::new();
             rusqlite::Connection::open(directory.path().join("registry.db")).unwrap().execute(
                 "INSERT INTO processes(id,trace_id,started_at,completed_at,outcome) VALUES(?1,?2,1,2,'succeeded')",
-                rusqlite::params![driver,crate::id::TraceId::new()],
+                rusqlite::params![process,crate::id::TraceId::new()],
             ).unwrap();
             let definition = crate::workflow::WorkflowDefinition {
                 name: "review".into(),
@@ -1688,11 +1688,11 @@ mod tests {
             };
             store
                 .sqlite
-                .take_up_workflow(&task.id, &definition, &driver, None)
+                .take_up_workflow(&task.id, &definition, &process, None)
                 .unwrap();
             store
                 .sqlite
-                .set_workflow_node(&task.id, "review", &driver, None)
+                .set_workflow_node(&task.id, "review", &process, None)
                 .unwrap();
             let workflow = store.sqlite.workflow(&task.id).unwrap();
             snapshot.snapshot.items[0].revision = Some("2026-10-05T12:01:00Z".into());
@@ -1729,7 +1729,7 @@ mod tests {
                 .unwrap();
             store
                 .sqlite
-                .set_workflow_node(&task.id, "review", &driver, None)
+                .set_workflow_node(&task.id, "review", &process, None)
                 .unwrap();
             let reopened = store.sqlite.workflow(&task.id).unwrap();
             snapshot.snapshot.items[0].state = Some("unstarted".into());

@@ -1,4 +1,4 @@
-//! Passive terminal observation shares session_activity; no driver claim.
+//! Passive terminal observation shares session_activity; no attachment claim.
 //! A conversation Loopflow never attached to has no AgentProcess: generation 0.
 use rusqlite::params;
 
@@ -59,7 +59,7 @@ mod tests {
     use crate::store::sqlite::SqliteStore;
 
     #[test]
-    fn program_status_overrides_inference_before_paging_and_survives_driver_handoff() {
+    fn program_status_overrides_inference_before_paging_and_survives_attachment_handoff() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("session", "run_00000000000000000000000000000001");

@@ -63,8 +63,8 @@ public struct Workflow: Codable, Sendable, Equatable {
         }
     }
 
-    /// At a node the Task waits on a person. On an edge its Flow's driver
-    /// Process carries it; one that no longer runs has stopped and holds the Task.
+    /// At a node the Task waits on a person. On an edge its Flow
+    /// process carries it; one that no longer runs has stopped and holds the Task.
     public enum Position: Codable, Sendable, Equatable {
         case node(String)
         case edge(index: Int, lfProcessId: String, running: Bool)
@@ -118,7 +118,7 @@ public struct TaskSession: Codable, Sendable, Equatable, Identifiable {
     public let id: String
     public let title: String
     public let interactive: Bool
-    /// Driver Process of the Flow whose step opened the current input.
+    /// Flow process of the Flow whose step opened the current input.
     public let flowLfProcessId: String?
     public let completedAt: Int64?
 
@@ -129,7 +129,7 @@ public struct TaskSession: Codable, Sendable, Equatable, Identifiable {
     }
 }
 
-/// One Flow as its driver Process records it; `id` is that Process.
+/// One Flow as its Flow process records it; `id` is that Process.
 public struct FlowProcessInventoryEntry: Codable, Sendable, Hashable, Identifiable {
     public let id: String
     public let name: String

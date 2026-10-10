@@ -188,7 +188,7 @@ fn attachment_in(
         agent_process_id: row.4.ok_or(StoreError::NotFound)?,
         provider_generation: row.2.unwrap_or(0),
         provider_lf_process_id: parse(row.3.as_deref().ok_or_else(|| {
-            StoreError::InvalidData("Session driver has no provider origin".into())
+            StoreError::InvalidData("Session attachment has no provider origin".into())
         })?)?,
     }))
 }
@@ -222,7 +222,7 @@ pub(super) fn attach_in(
         ));
     }
     let replacing = current.is_none() || replace_provider;
-    let driver = SessionAttachment {
+    let attachment = SessionAttachment {
         agent_process_id: current
             .as_ref()
             .filter(|_| !replace_provider)
@@ -249,20 +249,20 @@ pub(super) fn attach_in(
                 started_at,agent_session_id,agent_provider,agent_interactive,provider_generation,spawn_state)
              SELECT ?2,'agent',COALESCE((SELECT trace_id FROM processes WHERE id=?3),?2),
                 ?3,s.provider,s.repo,s.cwd,?4,s.id,s.provider,s.interactive,?5,'reserved' FROM agent_sessions s WHERE s.id=?1",
-            params![session,driver.agent_process_id,process,
-                time::OffsetDateTime::now_utc().unix_timestamp(),driver.provider_generation],
+            params![session,attachment.agent_process_id,process,
+                time::OffsetDateTime::now_utc().unix_timestamp(),attachment.provider_generation],
         )?;
         tx.execute(
             "UPDATE agent_sessions SET agent_process_id=?2 WHERE id=?1",
-            params![session, driver.agent_process_id],
+            params![session, attachment.agent_process_id],
         )?;
     }
     tx.execute(
         "UPDATE processes SET attached_lf_process_id=?2,attachment_token=?3,attachment_exit_seq=NULL
          WHERE id=?1",
-        params![driver.agent_process_id, driver.lf_process_id, driver.token],
+        params![attachment.agent_process_id, attachment.lf_process_id, attachment.token],
     )?;
-    Ok(driver)
+    Ok(attachment)
 }
 
 impl SqliteStore {
@@ -547,7 +547,7 @@ impl SqliteStore {
         Ok(())
     }
 
-    // Dispatch and driver changes share a per-Session OS lock, never a SQLite
+    // Dispatch and attachment changes share a per-Session OS lock, never a SQLite
     // transaction across provider I/O. Do not unlink lock files: another process
     // may already have the inode open. Process exit releases ownership.
     pub(super) fn lock_session_attachment(&self, session: &str) -> StoreResult<File> {
@@ -592,7 +592,7 @@ impl SqliteStore {
         }
     }
 
-    /// Serialize native dispatch with driver transfer without blocking history
+    /// Serialize native dispatch with attachment handoff without blocking history
     /// or unrelated database writes while the bounded transport write runs.
     pub(crate) fn with_session_attachment<T>(
         &self,
@@ -686,9 +686,9 @@ impl SqliteStore {
         let _dispatch = self.lock_session_attachment(session)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let driver = attach_in(&tx, session, expected, process, replace_provider)?;
+        let attachment = attach_in(&tx, session, expected, process, replace_provider)?;
         tx.commit()?;
-        Ok(driver)
+        Ok(attachment)
     }
 
     /// Resume excludes takeover from observation through settlement and claim.
@@ -957,17 +957,17 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Stale providers retain their historical caller, never the new driver.
+    /// Stale providers retain their historical caller, never the new attachment.
     pub fn agent_parent(&self, caller: &AgentCaller) -> StoreResult<Option<(LfProcessId, String)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let driver = attachment_in(&conn, &caller.session_id)?;
-        let parent = driver
+        let attachment = attachment_in(&conn, &caller.session_id)?;
+        let parent = attachment
             .as_ref()
-            .filter(|driver| {
-                driver.provider_generation == caller.provider_generation
-                    && driver.provider_lf_process_id == caller.origin_lf_process_id
+            .filter(|attachment| {
+                attachment.provider_generation == caller.provider_generation
+                    && attachment.provider_lf_process_id == caller.origin_lf_process_id
             })
-            .and_then(|driver| driver.lf_process_id.as_ref())
+            .and_then(|attachment| attachment.lf_process_id.as_ref())
             .unwrap_or(&caller.origin_lf_process_id);
         conn.query_row(
             "SELECT trace_id FROM processes WHERE id=?1",
@@ -1020,7 +1020,7 @@ mod discovery_tests {
             store.test_session("conversation", &crate::session_record::new_artifact_key());
         let first = insert_process(&store, 1, 1);
         let second = insert_process(&store, 2, 2);
-        let driver = store
+        let attachment = store
             .claim_session_attachment(&session.id, None, &first, true)
             .unwrap();
         let mut next = session.clone();
@@ -1035,7 +1035,7 @@ mod discovery_tests {
         assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
         assert_eq!(
             store.session_attachment(&session.id).unwrap(),
-            Some(driver.clone())
+            Some(attachment.clone())
         );
         assert_eq!(store.session_history(&session.id, 0, 0).unwrap(), before);
         assert!(store
@@ -1044,7 +1044,7 @@ mod discovery_tests {
             .is_none());
 
         let (admitted, claimed) = store
-            .claim_session_input(next.clone(), Some(&driver), &second, || {
+            .claim_session_input(next.clone(), Some(&attachment), &second, || {
                 panic!("reserved process needs no close")
             })
             .unwrap();
@@ -1357,7 +1357,7 @@ mod discovery_tests {
             // Session is bound now; the earlier turn remains unassigned.
             conn.execute("INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,lf_process_id,observed_at,payload)
                 VALUES('session-0','thread','before-bind','started','',?1,1,'{}')",[&unbound]).unwrap();
-            // Known Task, unknown original process: neither current driver nor observer is its owner.
+            // Known Task, unknown original process: neither current attachment nor observer is its owner.
             conn.execute("INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,task_id,wave_id,observed_at,payload)
                 VALUES('session-0','thread','unmapped','started','',?1,?2,1,'{}')",params![first.as_str(),wave]).unwrap();
 
@@ -1366,7 +1366,7 @@ mod discovery_tests {
                 [&observer],
             )
             .unwrap();
-            // A Flow's driver recorded both Processes as steps in the first Task's checkout.
+            // A Flow process recorded both Processes as steps in the first Task's checkout.
             conn.execute(
                 "UPDATE tasks SET worktree='/repo.first' WHERE id=?1",
                 [first.as_str()],

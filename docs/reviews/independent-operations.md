@@ -43,7 +43,7 @@ prioritization, not approval to implement or launch them.
   are worth examining separately. It is not safe to simply delete the checks:
   unfinished edits and ambiguous external effects must survive.
 - `docs/architecture/planning.md` already gives taskless and managed Flows one
-  driver, and separates Flow completion from Task completion. `docs/architecture.md`
+  Flow runner, and separates Flow completion from Task completion. `docs/architecture.md`
   already makes a single Skill executable without Wave, Project or Task.
 - Unit 1 file access is already independent of PR bases and Project hydration.
   The remaining public file entry points are Task-based (`task_file`, `task_save`,
@@ -106,7 +106,7 @@ workflow is selected. Then test adding, changing and removing that coordination
 without replacing the object's identity or erasing evidence.
 
 Intrinsic guarantees stay below: revision checks, legal state transitions,
-transaction boundaries, exact driver ownership and truthful completion. Defaults,
+transaction boundaries, exact attachment ownership and truthful completion. Defaults,
 cadence, discovery and multi-object sequencing live above. Missing optional context
 must not block valid operations; missing required authority still must.
 
@@ -152,7 +152,7 @@ an unnecessary dependency over introducing a new product concept.
 - A Flow result cannot complete a Task with an unresolved promised delivery.
 - An unavailable provider response cannot create a second current Project.
 - A higher-level reset cannot erase a lower-level draft, checkout or saved answer.
-- A Task reassignment cannot silently acquire another execution driver's authority.
+- A Task reassignment cannot silently acquire another execution's authority.
 - A title/slug match cannot replace stable identity or prove retry equivalence.
 - A read-only CLI invocation cannot become an unannounced provider mutation.
 - Removing Desktop cannot remove the only implementation of correctness or recovery.
@@ -176,7 +176,7 @@ Projects and receipts. Configured verification belongs in the
 
 Review conclusion: the smaller API must own safe retries and authority. Optional
 coordination cannot mean optional correctness. Existing planning-only Task
-completion and the shared Flow driver are counterexamples to inventing new layers.
+completion and the shared Flow runner are counterexamples to inventing new layers.
 The first two briefs target concrete dependency removal; the remaining proposals
 need evidence and overlap review before becoming Tasks.
 

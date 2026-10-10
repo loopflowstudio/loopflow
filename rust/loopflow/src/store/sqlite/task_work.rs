@@ -49,7 +49,7 @@ pub(super) fn session_tasks(session: &str) -> String {
 }
 
 pub(super) fn lf_process_ids(selector: &str) -> String {
-    // History and drivers share one query-local membership; the partial
+    // History and attachments share one query-local membership; the partial
     // index skips retained events that name no Process.
     format!("WITH members AS MATERIALIZED ({})
         SELECT ae.id FROM processes ae JOIN ({}) tw ON ({})
@@ -1051,7 +1051,7 @@ mod tests {
             .iter()
             .any(|process| process.id == unfinished));
         // With every Process unfinished, each membership path agrees: checkout,
-        // Session event and driver.
+        // Session event and attachment.
         store
             .conn
             .lock()

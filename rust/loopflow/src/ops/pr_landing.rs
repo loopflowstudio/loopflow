@@ -1265,7 +1265,7 @@ async fn cleanup_landed_pr(store: &SharedStore, landing: &PrLanding) -> OpsResul
         .map_err(|error| OpsError::Message(error.to_string()))?
         .iter()
         .any(|flow| {
-            flow.driver.completed_at.is_none()
+            flow.process.completed_at.is_none()
                 && crate::journal::process_evidence(&store.sqlite, flow.id())
                     != crate::journal::ProcessIdentityEvidence::Dead
         })

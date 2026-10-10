@@ -106,7 +106,7 @@ put routine progress in this conversation, not Task comments.
 ## Drive work through Waves
 
 Every started, unfinished Task in the repository ends this pass with one
-disposition and its evidence: **moving** (a live driver was observed),
+disposition and its evidence: **moving** (a live Flow process was observed),
 **acted** (continued, recovered or delivered here, then verified), **waiting on
 a person** (the named review, decision or merge click and its Session or PR),
 **waiting on a dependency or capacity**, **paused** (an explicit hold or
@@ -126,12 +126,12 @@ Waves; the Wave pass owns the detailed judgment within each Wave.
 Leave live Flows running. For a failed or stopped Flow, read its log and effects,
 repair the cause, and launch only authorized remaining work through
 `lf task run <issue> <flow> --reason "<what changed>"`. Verify from
-`lf task status <issue> --json`; nothing resumes a stopped driver. A Flow ends
+`lf task status <issue> --json`; nothing resumes a stopped Flow process. A Flow ends
 where authored. Work awaiting review or a new direction stays in the Task
 conversation, with the PR and remaining scope named.
 
 Preserve Task identity, Flow history, conversations and existing execution.
-Do not create a competing driver or require a repository pass before a Task
+Do not create a competing Flow process or require a repository pass before a Task
 can progress. Follow an intervention through to its observed result, then
 include that result in the repository update.
 

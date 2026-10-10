@@ -284,7 +284,7 @@ pub struct AbandonReceipt {
     pub abandoned_at: OffsetDateTime,
 }
 
-/// Query values for Flow discovery; none carries driver authority.
+/// Query values for Flow discovery; none carries attachment authority.
 #[derive(Debug, Clone, Default)]
 pub struct FlowProcessFilter {
     pub repo: Option<String>,
@@ -321,7 +321,7 @@ pub struct FlowProcessDetail {
     /// Per-edge counts at each active nesting level, outermost first.
     pub iterations: Vec<Vec<u32>>,
     pub cwd: Option<std::path::PathBuf>,
-    /// Every step the driver launched, in order.
+    /// Every step the Flow process launched, in order.
     pub steps: Vec<FlowStepProcess>,
 }
 

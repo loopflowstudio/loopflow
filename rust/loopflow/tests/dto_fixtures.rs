@@ -313,7 +313,7 @@ fn metric_portfolio_fixture_locks_every_tagged_payload() {
 }
 
 #[test]
-fn session_history_retains_receipts_and_unknown_driver() {
+fn session_history_retains_receipts_and_unknown_lf_process() {
     let input = include_str!("../../../tests/fixtures/dto/session_history.json");
     let events: Vec<loopflow::session::SessionEvent> = serde_json::from_str(input).unwrap();
     assert_eq!(

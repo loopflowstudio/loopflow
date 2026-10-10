@@ -94,11 +94,11 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Replace the Session's reading with its current driver's.
+    /// Replace the Session's reading with its current attachment's.
     pub(crate) fn record_session_activity(
         &self,
         session: &str,
-        driver: &crate::process::SessionAttachment,
+        attachment: &crate::process::SessionAttachment,
         activity: &crate::session::SessionActivity,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -110,8 +110,8 @@ impl SqliteStore {
                 pending_input=excluded.pending_input,yielded=excluded.yielded,
                 program_status=CASE WHEN session_activity.provider_generation=excluded.provider_generation THEN session_activity.program_status END,
                 provider_generation=excluded.provider_generation",
-            params![session, driver.token, activity.observed_at,
-                activity.open_tools as i64, activity.pending_input as i64, activity.yielded, driver.provider_generation],
+            params![session, attachment.token, activity.observed_at,
+                activity.open_tools as i64, activity.pending_input as i64, activity.yielded, attachment.provider_generation],
         )?;
         Ok(())
     }
@@ -134,7 +134,7 @@ impl SqliteStore {
         )?)
     }
 
-    /// Retain a provider observation even when its conversational driver has
+    /// Retain a provider observation even when its attachment has
     /// changed. Observation grants neither native write nor Flow authority.
     pub(crate) fn record_session_event(
         &self,
@@ -839,23 +839,23 @@ mod tests {
         assert!(store
             .input_history("run_0000000000000000000000000000000a")
             .is_err());
-        // A turn left open by a driver that has exited is over: it stops
+        // A turn left open by an attachment that has exited is over: it stops
         // holding a place in the recent list.
-        let driver = crate::id::LfProcessId::new();
+        let attached = crate::id::LfProcessId::new();
         store
             .conn
             .lock()
             .unwrap()
             .execute(
                 "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
-                [driver.as_str()],
+                [attached.as_str()],
             )
             .unwrap();
         let claim = store
             .claim_session_attachment(
                 "conversation-1",
                 store.session_attachment("conversation-1").unwrap().as_ref(),
-                &driver,
+                &attached,
                 true,
             )
             .unwrap();
@@ -1042,7 +1042,7 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
-    fn session_exit_closes_engine_unless_ownership_transferred() {
+    fn session_exit_closes_agent_process_unless_ownership_transferred() {
         use std::os::unix::process::CommandExt;
         use std::process::Command;
 
@@ -1083,12 +1083,12 @@ mod tests {
             store
                 .record_session_provider_process(&session.id, &original, child.id(), started)
                 .unwrap();
-            // An engine whose socket has gone must still be reaped on exit.
+            // An AgentProcess whose socket has gone must still be reaped on exit.
             store
                 .record_session_connection(
                     &session.id,
                     &original,
-                    home.path().join("engine.sock").to_str().unwrap(),
+                    home.path().join("agent.sock").to_str().unwrap(),
                     &"saved-thread".into(),
                 )
                 .unwrap();
@@ -1188,17 +1188,17 @@ mod tests {
                     .unwrap();
                 }
             }
-            let driver = store
+            let attachment = store
                 .claim_session_attachment(id, None, &process, true)
                 .unwrap();
             store
-                .finish_session_attachment(id, &driver, "interrupted", || Ok(false))
+                .finish_session_attachment(id, &attachment, "interrupted", || Ok(false))
                 .unwrap();
             let saved = store.session(id).unwrap().unwrap();
             assert_eq!(saved.completed_at.is_some(), retired);
             assert_eq!(saved.captured, session.captured);
             let summary = store.session_summary(id, 0).unwrap().unwrap();
-            assert_eq!(summary.driver_outcome.as_deref(), Some("interrupted"));
+            assert_eq!(summary.attachment_outcome.as_deref(), Some("interrupted"));
             let history = store.session_history(id, 0, 100).unwrap();
             assert!(history
                 .iter()
@@ -1242,7 +1242,7 @@ mod tests {
     }
 
     #[test]
-    fn stopped_turn_and_stale_driver_cannot_retire_a_resumed_conversation() {
+    fn stopped_turn_and_stale_attachment_cannot_retire_a_resumed_conversation() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         let session =
@@ -1307,7 +1307,7 @@ mod tests {
     }
 
     #[test]
-    fn native_usage_survives_driver_and_input_replacement_without_double_counting() {
+    fn native_usage_survives_attachment_and_input_replacement_without_double_counting() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("conversation", "run_00000000000000000000000000000001");
@@ -1328,14 +1328,14 @@ mod tests {
                 )
                 .unwrap();
         }
-        let driver = store
+        let attachment = store
             .claim_session_attachment(&session.id, None, &first, false)
             .unwrap();
         store
             .record_session_turn_origin(
                 &"thread".into(),
                 "turn",
-                &store.session_turn_origin(&session.id, &driver).unwrap(),
+                &store.session_turn_origin(&session.id, &attachment).unwrap(),
             )
             .unwrap();
         let counts = |input, output| {
@@ -1357,7 +1357,7 @@ mod tests {
             .replace_session_input(session.captured, replacement.clone())
             .unwrap();
         store
-            .claim_session_attachment(&session.id, Some(&driver), &second, true)
+            .claim_session_attachment(&session.id, Some(&attachment), &second, true)
             .unwrap();
         // Gen 2 observes the surviving Gen 1 turn. The recorder never saw its usage.
         store

@@ -1119,7 +1119,7 @@ fn squash_parent_conflict_retains_real_target_and_can_abort_or_continue() {
     }
 }
 
-/// Run an operation step the way a Flow's driver does: as its own `lf` command.
+/// Run an operation step the way a Flow process does: as its own `lf` command.
 fn run_flow_command(repo: &std::path::Path, command: &loopflow::flow::Command) {
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
         .args(&command.argv()[1..])

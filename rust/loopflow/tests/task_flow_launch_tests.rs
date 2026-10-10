@@ -391,11 +391,11 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
         assert_eq!(flows.len(), 1, "{launch}: {status}");
         assert_eq!(flows[0]["state"], "current");
         assert_eq!(flows[0]["task_id"], task.registered.task.id.as_str());
-        let driver = flows[0]["id"].as_str().unwrap();
+        let flow_process = flows[0]["id"].as_str().unwrap();
         let recorded: (String, String) = db
             .query_row(
                 "SELECT cwd,parent_lf_process_id FROM processes WHERE id=?1",
-                [driver],
+                [flow_process],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
@@ -436,7 +436,7 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
         let inventory: loopflow::durable::FlowProcessPage =
             serde_json::from_slice(&inventory.stdout).unwrap();
         assert_eq!(inventory.entries.len(), 1);
-        assert_eq!(inventory.entries[0].summary.id, driver);
+        assert_eq!(inventory.entries[0].summary.id, flow_process);
         assert_eq!(
             inventory.entries[0].summary.task_id.as_ref(),
             Some(&task.registered.task.id)
@@ -739,7 +739,7 @@ fn a_workflow_with_no_landing_edge_reaches_its_end_without_a_pr() {
     assert_eq!(workflow["nodes"][0]["skill"], "research");
     assert_eq!(workflow["position"], at("findings"));
     assert_eq!(workflow["outgoing"], serde_json::json!([1]));
-    // The edge's Flow is an ordinary Flow process; its driver chose the edge and,
+    // The edge's Flow is an ordinary Flow process; it chose the edge and,
     // having succeeded, wrote the arrival.
     let flows = support::recorded_flows(task.home.path());
     assert_eq!(flows.len(), 1);
@@ -1641,7 +1641,7 @@ fn failed_completion_in_finishing_flow_is_retryable_without_replaying_it() {
 }
 
 #[test]
-fn provider_completion_preserves_a_live_edge_and_the_driver_records_its_real_arrival() {
+fn provider_completion_preserves_a_live_edge_and_the_flow_process_records_its_real_arrival() {
     let task = WorkflowTask::new();
     let worktree = tokio::runtime::Runtime::new()
         .unwrap()

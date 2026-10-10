@@ -604,7 +604,7 @@ impl Reader {
                         let (process, entry) = store
                             .sqlite
                             .flow_process(id)?
-                            .ok_or_else(|| anyhow!("Flow {id} has no driver record"))?;
+                            .ok_or_else(|| anyhow!("Flow {id} has no Flow process record"))?;
                         flow_processes.push(process.detail(entry));
                     }
                     let comments = store.sqlite.task_comments(&task)?;

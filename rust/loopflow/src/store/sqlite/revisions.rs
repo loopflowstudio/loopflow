@@ -173,7 +173,7 @@ mod tests {
                 [&process],
             )
             .unwrap();
-        let driver = store
+        let attachment = store
             .claim_session_attachment("conversation", None, &process, true)
             .unwrap();
         let record = |observed_at, open_tools, pending_input, yielded| {
@@ -181,7 +181,7 @@ mod tests {
             store
                 .record_session_activity(
                     "conversation",
-                    &driver,
+                    &attachment,
                     &crate::session::SessionActivity {
                         observed_at,
                         open_tools,

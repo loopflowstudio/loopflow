@@ -12,7 +12,6 @@ public struct LfProcess: Codable, Sendable, Equatable, Identifiable {
     public let kind: ProcessKind
     public let agentSessionID: String?
     public let osStartedAt: Int64?
-    public var id: String { id }
     public let traceID: String
     public let parentLfProcessId: String?
     public let viaAgent: Bool?

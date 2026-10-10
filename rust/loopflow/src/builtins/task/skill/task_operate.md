@@ -5,17 +5,17 @@ produces: a completed outcome, or an exact blocker with a command to open its Se
 action_style: procedural
 ---
 Move the Task forward as far as possible through its authored Loopflow process.
-You are this Task's operator: with no live driver, nobody else takes its next
+You are this Task's operator: with no live Flow process, nobody else takes its next
 step. Resolve routine decisions autonomously and ask for needed judgment in the
 present conversation, then continue. Headless, exit when blocked or completed. An
 already satisfied Task needs no new execution.
 
-Finish with one disposition and its evidence: **moving** (a live driver was
+Finish with one disposition and its evidence: **moving** (a live Flow process was
 observed and left alone), **acted** (you continued, recovered or delivered it
 and reread status), **waiting on a person** (the named review, decision or
 merge click and its Session or PR), **waiting on a dependency or capacity**,
 **paused** (an explicit hold or instruction), or **unknown** (the missing read
-or liveness evidence; never a reason to start a second driver). “Ready” or
+or liveness evidence; never a reason to start a second Flow process). “Ready” or
 “needs reconciliation” is not a disposition.
 
 ## Workflow
@@ -25,7 +25,7 @@ or liveness evidence; never a reason to start a second driver). “Ready” or
    relevant scratch history in its existing checkout. Separate accepted decisions
    from drafts and superseded plans. Inspect `lf session list --json` and the
    Task's Flows with `lf flow show <id> --processes`: each one's steps, how each
-   ended, whether its driver is alive, and its effects. Every
+   ended, whether its Flow process is alive, and its effects. Every
    conversation and Flow in the checkout is the Task's work; none is privileged.
    If Task identity is missing or ambiguous, ask when interactive; headless, report
    the missing identity and stop. Do not file duplicate work.
@@ -39,8 +39,8 @@ or liveness evidence; never a reason to start a second driver). “Ready” or
 2. **Choose the Flow.** A Task on a workflow reports it as
    `execution.work.workflow` in status: nodes where a person takes part,
    joined by edges that each run one Flow. An edge alone does not prove a live
-   driver: check every associated Flow and unfinished Process against `lf ps --json`.
-   Leave observed live work alone; unknown liveness never authorizes a second driver.
+   Flow process: check every associated Flow and unfinished Process against `lf ps --json`.
+   Leave observed live work alone; unknown liveness never authorizes a second Flow process.
    Before selecting another edge, recover verified merged delivery as described
    below. At a node its last edge reached, the Task waits on a person in
    its conversation; say which node and which edges leave it. At a node
@@ -50,7 +50,7 @@ or liveness evidence; never a reason to start a second driver). “Ready” or
    `lf task run <issue> <flow>` picks one, `lf task run <issue> end` takes an
    edge that runs nothing. `lf --task <issue> run <flow>` runs a Flow without
    moving the Task. Without a workflow, choose as follows.
-   Leave a Flow with a live driver running. A stopped
+   Leave a Flow with a live process running. A stopped
    Flow is history: read what it finished and which effects it recorded before
    choosing what to launch. Read the owning Wave's status and current Project's
    `workflow:`, then inspect the actual
@@ -70,7 +70,7 @@ or liveness evidence; never a reason to start a second driver). “Ready” or
 3. **Advance the work.** `lf task run <issue> [flow]` runs a
    fresh Flow in the Task's worktree and returns when it ends; it never continues
    an earlier one. Run it with your own background tool to keep working. Check installed
-   help first. Leave a live driver running. After a stopped or failed Flow,
+   help first. Leave a live Flow process running. After a stopped or failed Flow,
    launch only the work that remains; never relaunch merely to bypass a blocker.
    When judgment is needed, ask here if interactive; never open another Session
    merely to reach the person already present. Discuss review feedback in the
@@ -80,9 +80,9 @@ or liveness evidence; never a reason to start a second driver). “Ready” or
    Report unavailable commands or services without upgrading or changing accounts.
 
 4. **Stay with the Task.** Refresh Task status and Sessions after each action.
-   An accepted launch or a healthy driver is progress, not the stopping point.
+   An accepted launch or a healthy Flow process is progress, not the stopping point.
    Wait for meaningful state changes without tight polling or competing with a
-   live driver. Continue through the authored steps, resolve recoverable failures,
+   live Flow process. Continue through the authored steps, resolve recoverable failures,
    and use inline answers to unblock interactive work. Read a failure's log
    before retrying, and retry with `--reason "<what changed>"` only on new
    evidence or a repaired cause. Stop when status confirms Task completion and
@@ -98,7 +98,7 @@ or liveness evidence; never a reason to start a second driver). “Ready” or
    it for a filing disposition. Do not reopen a completed Task to bypass a
    finishing refusal; report the unresolved obligation and blocker.
    First inspect every associated live Flow and unfinished Process; a live ship
-   Flow owns its finish. With no live driver, if the disposition is already durable,
+   Flow owns its finish. With no live Flow process, if the disposition is already durable,
    run `lf task complete <issue>` and reread status. Otherwise run
    `lf --task <issue> run finish-delivery`, which performs only follow-through.
    Do not replay gate, re-arm the PR, resume an old Flow or require its template.

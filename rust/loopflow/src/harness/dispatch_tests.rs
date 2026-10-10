@@ -68,7 +68,7 @@ async fn stalled_dispatch() {
     )
     .unwrap();
     store.test_session("conversation", "run_00000000000000000000000000000001");
-    let driver = store
+    let attachment = store
         .claim_session_attachment("conversation", None, &process, false)
         .unwrap();
     let (socket, _unread_peer) = UnixStream::pair().unwrap();
@@ -76,10 +76,10 @@ async fn stalled_dispatch() {
     let (entered, ready) = oneshot::channel();
     let runtime = tokio::runtime::Handle::current();
     let sender_store = store.clone();
-    let sender_driver = driver.clone();
+    let sender_attachment = attachment.clone();
     let sender = tokio::task::spawn_blocking(move || {
         sender_store
-            .with_session_attachment("conversation", &sender_driver, || {
+            .with_session_attachment("conversation", &sender_attachment, || {
                 entered.send(()).unwrap();
                 runtime.block_on(async {
                     // The peer never drains this frame. Only the runtime's timer
@@ -104,7 +104,7 @@ async fn stalled_dispatch() {
         .record(
             &store,
             "conversation",
-            Some(&driver),
+            Some(&attachment),
             None,
             &json!({"method":"turn/started","params":{"threadId":"thread","turn":{"id":"turn"}}}),
         )
@@ -134,10 +134,10 @@ async fn stalled_dispatch() {
     let (entered, ready) = mpsc::channel();
     let (release, released) = mpsc::channel();
     let dispatch_store = store.clone();
-    let dispatch_driver = driver.clone();
+    let dispatch_attachment = attachment.clone();
     let dispatch = std::thread::spawn(move || {
         dispatch_store
-            .with_session_attachment("conversation", &dispatch_driver, || {
+            .with_session_attachment("conversation", &dispatch_attachment, || {
                 entered.send(()).unwrap();
                 released.recv().unwrap();
                 Ok(())
@@ -147,12 +147,12 @@ async fn stalled_dispatch() {
     ready.recv().unwrap();
     let (transferred, transfer) = mpsc::channel();
     let transfer_store = other_store.clone();
-    let original = driver.clone();
+    let original = attachment.clone();
     let claimant = std::thread::spawn(move || {
-        let driver = transfer_store
+        let attachment = transfer_store
             .claim_session_attachment("conversation", Some(&original), &replacement, false)
             .unwrap();
-        transferred.send(driver).unwrap();
+        transferred.send(attachment).unwrap();
     });
     // Transfer must wait for the native write, but history must not.
     assert!(transfer.recv_timeout(Duration::from_millis(100)).is_err());
@@ -165,8 +165,9 @@ async fn stalled_dispatch() {
     dispatch.join().unwrap();
     claimant.join().unwrap();
     assert!(matches!(
-        store
-            .with_session_attachment::<()>("conversation", &driver, || panic!("stale driver sent")),
+        store.with_session_attachment::<()>("conversation", &attachment, || panic!(
+            "stale attachment sent"
+        )),
         Err(StoreError::InvalidAuthority(_))
     ));
     other_store

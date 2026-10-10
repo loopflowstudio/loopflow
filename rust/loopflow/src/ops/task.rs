@@ -4593,7 +4593,7 @@ mod tests {
     }
 
     #[test]
-    fn a_dead_flow_is_history_while_a_live_driver_retains_the_checkout() {
+    fn a_dead_flow_is_history_while_a_live_flow_process_retains_the_checkout() {
         let _ledger = crate::journal::TestLedgerGuard::new();
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let fixture = runtime.block_on(task_fixture("WORK-1"));
@@ -4619,7 +4619,7 @@ mod tests {
         );
         assert!(
             blockers().is_empty(),
-            "a Flow whose driver exited is history"
+            "a Flow whose process exited is history"
         );
         let live = fixture
             .store

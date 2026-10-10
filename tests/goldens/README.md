@@ -1,7 +1,7 @@
 # Prompt goldens
 
 `*.yaml` cases in, `*.md` snapshots out. `golden_prompts_match_python` (in
-`rust/loopflow/tests/golden_prompt.rs`) asserts the current prompt engine
+`rust/loopflow/tests/golden_prompt.rs`) asserts the current prompt assembly
 reproduces each `.md` exactly.
 
 ```bash

@@ -300,8 +300,8 @@ pub(crate) fn hold_agent_process_lifeline(path: &Path) -> std::io::Result<bool> 
 }
 
 pub(crate) fn agent_process_lifeline_path(endpoint: &Path) -> PathBuf {
-    // Preserve the FIFO path for attachment to already-running processes.
-    endpoint.with_file_name("driver.lifeline")
+    // The FIFO sits beside the AgentProcess endpoint.
+    endpoint.with_file_name("attachment.lifeline")
 }
 
 #[cfg(test)]

@@ -3,7 +3,7 @@ description: Operate one Wave; keep every started Task moving and judge delivery
 action_style: procedural
 ---
 Operate the selected Wave once: read, judge, act, verify, and exit. You are this
-Wave's operator: a started Task with no live driver has nobody else to take its
+Wave's operator: a started Task with no live Flow process has nobody else to take its
 next step. A pass is finished when each started Task has a disposition, not
 after a number of moves. No chat or schedule is required. Another conversation
 or scheduled pass may be operating this Wave at the same time; work it is
@@ -33,19 +33,19 @@ waiting indefinitely.
 
 Give every started, unfinished Task in the Wave exactly one disposition, with
 its evidence: the first row below that fits. Started is the recorded fact,
-whether or not a driver is alive now. Include Tasks status lists under
+whether or not a Flow process is alive now. Include Tasks status lists under
 `unavailable_tasks`; they are unknown until read. Unstarted backlog is listed
 as backlog and left alone: starting it is the person's selection, except for
 an already authorized concrete check in a due follow-up's brief (see below).
 
 | Disposition | Evidence and action |
 | --- | --- |
-| moving | A live driver was observed. Leave it alone. A connected conversation or review Session is not a driver. |
+| moving | A live Flow process was observed. Leave it alone. A connected conversation or review Session is not a Flow process. |
 | acted | This pass continued, recovered or delivered it through a supported control, then reread status and saw the effect. |
 | waiting on a person | A named review, decision or merge click, with the Session or PR to open. Never completed or approved for them. |
 | waiting on a dependency or capacity | The named Task, PR, check, account or limit. |
 | paused | The person's instruction to stop, or an explicit hold (`lf task automate <issue> off`) on work nothing else is moving. |
-| unknown | The named read or liveness evidence that is missing. Unknown is not idle and never a reason to start a second driver. |
+| unknown | The named read or liveness evidence that is missing. Unknown is not idle and never a reason to start a second Flow process. |
 
 “Ready”, “needs reconciliation” and “the Wave owns this” are not dispositions.
 When status gives `next_move.owner` as `wave`, that owner is you: the Task's
@@ -54,7 +54,7 @@ a suggestion to check against the rules below, not an instruction. No action is
 a valid result only when every started Task already holds a disposition above
 and due follow-ups have been checked for selection or authorized execution.
 
-- **Look for a live driver first.** Read `lf task status <issue> --json` and
+- **Look for a live Flow process first.** Read `lf task status <issue> --json` and
   check every Flow in `execution.work.flows` and every unfinished Process in
   `execution.work.processes` against `lf ps --json`. A live process makes the Task
   moving, whoever launched it. Unknown liveness is not idle.
@@ -75,7 +75,7 @@ and due follow-ups have been checked for selection or authorized execution.
   old intent; end alone cannot re-complete it.
 - **Finish merged delivery.** A verified merge is not Task completion. Inspect
   all associated Flows and unfinished Processes first; leave a live ship Flow
-  to finish. With no live driver, a durable none/filed disposition needs
+  to finish. With no live Flow process, a durable none/filed disposition needs
   `lf task complete <issue>` and a status reread. Otherwise run
   `lf --task <issue> run finish-delivery` to file accepted follow-ups or record
   none, then complete. This applies to manual GitHub merges too. Do not replay
@@ -98,7 +98,7 @@ is a day, not an exact-time alarm. Missing date or provider evidence stays unkno
 
 Surface each due Task for selection unless its accepted brief already authorizes
 that concrete unattended check. For an authorized check, use ordinary Task execution
-and the same live-driver inspection above. Missing credentials or installation
+and the same live Flow process inspection above. Missing credentials or installation
 leaves it blocked; elapsed time never establishes success or completes the Task.
 Filing a follow-up grants no permission for unrelated future work.
 

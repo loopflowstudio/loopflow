@@ -196,7 +196,7 @@ pub struct AgentConfig {
     pub execution_boundary: Option<AgentExecutionBoundary>,
     /// Skip permission prompts
     pub skip_permissions: bool,
-    /// Engine-injected structured replies (rendered via harness prompt guidance).
+    /// Flow-runner-injected structured replies (rendered via harness prompt guidance).
     pub structured_replies: Vec<StructuredReply>,
     /// Temp file for relaying shell directives back to the invoking shell.
     /// When set, the agent subprocess gets `LOOPFLOW_DIRECTIVE_FILE` pointing
@@ -205,7 +205,7 @@ pub struct AgentConfig {
     pub directive_relay: Option<std::path::PathBuf>,
     /// Environment scoped to this provider process and its descendants.
     pub env: BTreeMap<String, String>,
-    /// Exact conversational driver selected before provider launch. Never
+    /// Exact attachment selected before provider launch. Never
     /// inherited by provider tools or serialized into replay input.
     pub session_attachment: Option<(String, crate::process::SessionAttachment)>,
 }
@@ -659,9 +659,9 @@ fn claude_skip_permissions(cwd: Option<&Path>, auto: bool, skip_permissions: boo
     true
 }
 
-/// Common Claude CLI arguments shared across engine and session paths.
+/// Common Claude CLI arguments shared across one-shot and session paths.
 ///
-/// The one-shot command and persistent stream driver add their mode-specific
+/// The one-shot command and persistent stream session add their mode-specific
 /// flags around these shared arguments.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ClaudeArgs {
@@ -774,7 +774,7 @@ impl ClaudeArgs {
     }
 }
 
-/// Args for the persistent stream-json driver; turn content arrives on stdin.
+/// Args for the persistent stream-json session; turn content arrives on stdin.
 pub fn build_claude_stream_session_args(
     config: &AgentConfig,
     resume_id: Option<&AgentSessionId>,
@@ -1752,7 +1752,7 @@ fn _run_harness_once(
                             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
                     }
                     _ = activity_tick.tick(), if capture.is_some() => {
-                        if let Some(capture) = capture { capture.observe_activity(harness.process_id()).await; }
+                        if let Some(capture) = capture { capture.observe_activity(harness.pid()).await; }
                     }
                     raw = raw_rx.recv(), if capture.is_some() => {
                         if let Some(raw) = raw {

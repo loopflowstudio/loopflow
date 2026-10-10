@@ -540,7 +540,7 @@ directory without Git metadata; Work operations still enforce repository ownersh
 cargo nextest run -p loopflow --test status_tests --test wave_repository_ownership --no-fail-fast
 ```
 
-Task decision feedback has a focused store-and-driver check:
+Task decision feedback has a focused store-and-Flow-runner check:
 
 ```bash
 cargo test -p loopflow --lib task_decision_live_unblock_returns_feedback_without_navigation -- --test-threads=1
@@ -597,7 +597,7 @@ Loopflow installed, a shared launch gets no account home or credential
 variable, and an isolated launch stays in its account's home. On macOS it
 writes and removes one Keychain item scoped to its temporary config directory.
 The fixture copies the candidate, uses private Machines and stops only its identified
-engine children. Native execution uses synthetic Responses, not configured
+provider process children. Native execution uses synthetic Responses, not configured
 accounts or installed data. Ordinary retry, usage, binding and review behavior
 belong in `session_lifecycle_tests`; Chapter convergence belongs in
 `ops::chapter::tests`, including interrupted rotation and second-Machine sync.
@@ -692,7 +692,7 @@ cargo test -p loopflow --test cli_discovery list_preserves_kinds_overrides_sourc
 
 Catalog retirement also affects historical migration tests. Keep their persisted
 names and data-preservation assertions at the migration boundary; current catalog
-resolution belongs in engine tests. Include the legacy Flow repair check:
+resolution belongs in skill catalog tests. Include the legacy Flow repair check:
 
 ```bash
 cargo test -p loopflow --lib legacy_task_flow_repair
@@ -1064,7 +1064,7 @@ Machine or prove configured-provider resumption.
 
 When changing how a Flow step is described or read back, include the step
 argument and Process inventory tests and the public Session lifecycle proofs. A
-Flow is its driver Process and step Processes; assert on those Processes and on the Session
+Flow is its Flow process and step Processes; assert on those Processes and on the Session
 turn a step Process captured.
 
 ```bash
@@ -1101,7 +1101,7 @@ fixture, restore it afterward, and serialize environment changes with
 in conversation tests; keep Session spawning mocked. Listing waiting Sessions
 also resolves the executable for their open command, even with spawning mocked.
 Enter `journal::with_runtime` after selecting the fixture Machine so its Process and
-the Session driver references share the same database. Simulated finite-provider
+the Session attachment references share the same database. Simulated finite-provider
 harnesses must record their owned child exit; an absent endpoint is not exit
 evidence.
 
@@ -1198,7 +1198,7 @@ must retain Wave placement before projecting accepted Projects.
 ### Shared identity fixtures
 
 When changing Session activity or Waiting, run `session_cli_tests` and
-`work_watch` together. Direct SQL fixtures must carry both driver and provider
+`work_watch` together. Direct SQL fixtures must carry both attachment and provider
 generations, matching the production activity writer. Rebuild both SwiftPM and
 the Xcode test targets after shared model renames; Foundation types such as
 `Foundation.Process` need explicit qualification where names overlap.

@@ -702,7 +702,7 @@ mod tests {
     use crate::flow::runner::{ExecutionCursor, NestedCursor};
     use crate::flow::{ConcretePath, ConcreteSkill, ConcreteStep, ConcreteXor, Skill};
 
-    /// The projection of the step `cursor` selects, as its driver records it.
+    /// The projection of the step `cursor` selects, as its Flow process records it.
     fn project(steps: &[ConcreteStep], cursor: &ExecutionCursor) -> PositionProjection {
         let (key, iterations) = super::location(steps, cursor).unwrap();
         project_position(&FlowGraph::new("", steps), key, &iterations, false)

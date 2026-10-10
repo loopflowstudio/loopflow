@@ -139,7 +139,7 @@ struct DTOFixtureTests {
         }
     }
 
-    @Test("A Flow whose driver exited early reads as stopped and requires its name")
+    @Test("A Flow whose process exited early reads as stopped and requires its name")
     func flowInventoryFixture() throws {
         struct Page: Decodable { let entries: [FlowProcessInventoryEntry] }
         let data = try loadFixtureData("flow_page.json")
@@ -207,7 +207,7 @@ struct DTOFixtureTests {
         #expect(report.totals.count == 9)
     }
 
-    @Test("Conversation history retains native evidence and unknown driver")
+    @Test("Conversation history retains native evidence and unknown LfProcess")
     func sessionHistoryFixture() throws {
         let data = try loadFixtureData("session_history.json")
         let events = try JSONDecoder().decode([SessionEvent].self, from: data)

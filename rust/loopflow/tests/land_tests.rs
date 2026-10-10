@@ -2022,18 +2022,18 @@ fi"#;
         assert_eq!(state, "merged");
         if flow {
             // The Flow stopped at its watched landing: the step's command
-            // handed off and returned, and its driver exited without running
+            // handed off and returned, and its Flow process exited without running
             // further steps. The merge resumes nothing.
-            let (step, driver): (i64, String) = conn
+            let (step, flow_process): (i64, String) = conn
                 .query_row(
-                    "SELECT step.exit_code,driver.outcome FROM processes step
+                    "SELECT step.exit_code,flow_process.outcome FROM processes step
                      JOIN flow_process_steps recorded ON recorded.lf_process_id=step.id
-                     JOIN processes driver ON driver.id=recorded.flow_lf_process_id",
+                     JOIN processes flow_process ON flow_process.id=recorded.flow_lf_process_id",
                     [],
                     |row| Ok((row.get(0)?, row.get(1)?)),
                 )
                 .unwrap();
-            assert_eq!((step, driver.as_str()), (0, "failed"));
+            assert_eq!((step, flow_process.as_str()), (0, "failed"));
         }
         assert!(!worktree.exists());
         assert!(!local_branch_exists(&repo, "watched-land"));
@@ -2655,7 +2655,7 @@ esac
     );
     // Check the interruption contract after recovery, so a bad exit code does
     // not hide lost intent, a removed checkout, or duplicate remote requests.
-    // SIGINT uses the process-wide handler; the Flow driver treats 130 as stopped.
+    // SIGINT uses the process-wide handler; the Flow process treats 130 as stopped.
     if interrupted.code() != Some(130) {
         failures.push(format!(
             "SIGINT exited {:?}, expected stopped (130): {interrupted_stderr}",

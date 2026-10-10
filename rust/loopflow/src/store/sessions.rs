@@ -166,7 +166,7 @@ impl Store {
         .await
     }
 
-    /// One Flow by driver Process id or unique prefix, drawn from its Processes.
+    /// One Flow by Flow process id or unique prefix, drawn from its Processes.
     pub async fn flow_detail(
         &self,
         selector: &str,

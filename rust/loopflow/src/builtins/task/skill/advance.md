@@ -18,7 +18,7 @@ starts nothing.
 
 ## An existing Task needs to continue
 
-Read `lf task status <issue> --json`. Leave a Flow with a live driver running.
+Read `lf task status <issue> --json`. Leave a Flow with a live process running.
 A stopped or failed Flow is history: inspect what it finished and the effects it
 recorded; historical review boundaries remain evidence. Launch fresh work with
 `lf task run <issue>` only when the current request identifies the

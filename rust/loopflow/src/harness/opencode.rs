@@ -83,8 +83,8 @@ impl OpenCodeHarness {
             .stderr(std::process::Stdio::piped())
             // Dropping the harness (e.g. a run task is aborted) must not leak a
             // live server. The direct-child kill this fires is a backstop; the
-            // group kill in `stop()` and the driver lifeline are what reach the
-            // descendants.
+            // group kill in `stop()` and the attached LfProcess lifeline are what
+            // reach the descendants.
             .kill_on_drop(true);
         if let Some(cwd) = &config.cwd {
             command.current_dir(cwd);
@@ -134,8 +134,8 @@ impl OpenCodeHarness {
         }
         {
             let history = self.history.lock().expect("OpenCode history lock poisoned");
-            if let Some((store, session, driver)) = &history.owner {
-                store.record_session_connection(session, driver, &base_url, &agent_session)?;
+            if let Some((store, session, attachment)) = &history.owner {
+                store.record_session_connection(session, attachment, &base_url, &agent_session)?;
             }
         }
 
@@ -352,7 +352,7 @@ impl OpenCodeHarness {
 
 #[async_trait]
 impl Harness for OpenCodeHarness {
-    fn process_id(&self) -> Option<u32> {
+    fn pid(&self) -> Option<u32> {
         self.child.as_ref().and_then(Child::id)
     }
 
@@ -543,7 +543,7 @@ impl Harness for OpenCodeHarness {
 
     fn process_group_id(&self) -> Option<u32> {
         // Admission makes this child the leader of its own group.
-        self.process_id().filter(|pid| *pid > 1)
+        self.pid().filter(|pid| *pid > 1)
     }
 
     fn set_agent_session(&mut self, agent_session: Option<AgentSessionId>) {
@@ -866,7 +866,7 @@ mod tests {
         harness.child = Some(child);
         assert_eq!(harness.process_group_id(), Some(pid));
         harness.stop().await.unwrap();
-        assert_eq!(harness.process_id(), None);
+        assert_eq!(harness.pid(), None);
         assert_eq!(harness.process_group_id(), None);
         assert_eq!(
             crate::journal::process_identity_evidence(pid, birth),

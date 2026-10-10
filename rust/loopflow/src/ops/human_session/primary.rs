@@ -136,7 +136,7 @@ pub(crate) fn ensure_scope_worktree(
     Ok(ensure_agent_worktree(repo, segment)?)
 }
 
-/// Adapt only at an idle driver boundary. Historical captures and native
+/// Adapt only at an idle attachment boundary. Historical captures and native
 /// conversation identity remain attached to the same Session.
 pub(super) async fn admit_workspace(
     store: &SharedStore,

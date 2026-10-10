@@ -552,11 +552,11 @@ fn every_displayed_session_fact_committed_elsewhere_is_shown() {
 
     event(
         "observed",
-        "driver:0:exit",
+        "attachment:0:exit",
         None,
         serde_json::json!({"outcome": "interrupted"}),
     );
-    write("UPDATE processes SET attachment_exit_seq=(SELECT seq FROM session_events WHERE session_id='conversation' AND receipt_key='driver:0:exit') WHERE agent_session_id='conversation'");
+    write("UPDATE processes SET attachment_exit_seq=(SELECT seq FROM session_events WHERE session_id='conversation' AND receipt_key='attachment:0:exit') WHERE agent_session_id='conversation'");
     watch.session(|record| record["state"] == "interrupted");
 
     // Transcript lines between those facts were never a reason to read.

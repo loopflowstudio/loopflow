@@ -388,10 +388,10 @@ fn opencode_native_history_preserves_output_tools_and_usage_missingness() {
         let input = crate::session_record::new_artifact_key();
         let session = format!("session-{measured:?}");
         store.test_session(&session, &input);
-        let driver = store
+        let attachment = store
             .claim_session_attachment(&session, None, &process, false)
             .unwrap();
-        let mut history = History::new(Some((store.clone(), session.clone(), driver)));
+        let mut history = History::new(Some((store.clone(), session.clone(), attachment)));
         let request = history.request().unwrap();
         let agent_session = AgentSessionId::from(session.as_str());
         let mut display =

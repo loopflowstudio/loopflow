@@ -491,22 +491,22 @@ pub fn overview(json: bool, all: bool) -> anyhow::Result<()> {
                     ("finished", "Flow completed".to_string())
                 }
                 crate::session::FlowProcessSummaryState::Stopped => {
-                    ("stopped", format!("Driver exited at {at}"))
+                    ("stopped", format!("Flow process exited at {at}"))
                 }
                 crate::session::FlowProcessSummaryState::Current => {
                     match crate::id::LfProcessId::parse(&summary.id)
-                        .map(|driver| crate::journal::process_evidence(&store.sqlite, &driver))
+                        .map(|id| crate::journal::process_evidence(&store.sqlite, &id))
                     {
                         Ok(crate::journal::ProcessIdentityEvidence::Live) => {
-                            ("running", format!("Driver is at {at}"))
+                            ("running", format!("Flow process is at {at}"))
                         }
                         Ok(crate::journal::ProcessIdentityEvidence::Dead) => (
                             "stopped",
-                            format!("Driver left no exit record; it stopped at {at}"),
+                            format!("Flow process left no exit record; it stopped at {at}"),
                         ),
                         _ => (
                             "unknown",
-                            format!("Driver process identity is unknown at {at}"),
+                            format!("Flow process identity is unknown at {at}"),
                         ),
                     }
                 }

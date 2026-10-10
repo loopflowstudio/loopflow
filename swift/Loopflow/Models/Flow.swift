@@ -124,7 +124,7 @@ public struct FlowStepProcess: Decodable, Sendable, Hashable, Identifiable {
     }
 }
 
-/// One Flow process as its driver recorded it: the graph captured at launch and
+/// One Flow process as it recorded itself: the graph captured at launch and
 /// every step it started. Any Flow reads the same way, ad hoc or a Task's edge.
 public struct FlowProcessDetail: Decodable, Sendable, Hashable {
     public let entry: FlowProcessInventoryEntry

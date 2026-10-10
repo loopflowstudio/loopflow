@@ -1,4 +1,4 @@
-//! Observed Task membership grants no driver, process or Flow authority.
+//! Observed Task membership grants no attachment, process or Flow authority.
 
 use serde::{Deserialize, Serialize};
 

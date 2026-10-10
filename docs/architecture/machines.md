@@ -85,11 +85,11 @@ shell / automation / Loopflow.app
                |
         store + repository
                |
-       Flow driver Process --> step Process --> LfSession <--> native engine
+          Flow process --> step Process --> LfSession <--> AgentProcess
 ```
 
 Wave operations are finite attributed conversations. Each Task Flow
-runs through the common driver. Cron invokes commands on schedule;
+runs through the common Flow runner. Cron invokes commands on schedule;
 local PR supervision watches and repairs delivery in the invoking process.
 
 The process that directly spawns a child owns its child handle. Cross-process
@@ -109,15 +109,15 @@ those receipts to current OS process facts. Completed processes disappear from
 the live view. This is observation, not a durable lifecycle model.
 
 `lf mon prune` removes dead command receipts only after their terminal outcome
-is recorded, and may reap only provider engines whose recorded identity is live
-and whose driver Process is provably dead. Receipts use Process IDs, so PID reuse cannot overwrite an
+is recorded, and may reap only AgentProcesses whose recorded identity is live
+and whose attached LfProcess is provably dead. Receipts use Process IDs, so PID reuse cannot overwrite an
 unfinished Process’s identity. Failed terminal writes and interrupt cleanup retain
 that identity without inventing an outcome. An unclaimed provider PID is
 never killed merely because it resembles a Loopflow child.
 
 Cross-process control requires exact PID/start identity and the applicable
 conversation/provider generation. Revalidate native scope or exclusive process
-group before signaling. A driver may disappear while its engine survives;
+group before signaling. An attached LfProcess may disappear while its AgentProcess survives;
 recorded endpoints alone do not prove liveness.
 
 ## Independent bridges

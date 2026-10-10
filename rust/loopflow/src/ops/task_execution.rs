@@ -69,7 +69,7 @@ pub(crate) async fn task_execution_and_flow(
     let mut snapshot = project_execution(
         &flow,
         entry.summary.state,
-        evidence(&flow.driver),
+        evidence(&flow.process),
         step.map_or(ProcessIdentityEvidence::Dead, evidence),
     );
     snapshot.captured = input.as_ref().map(|(_, _, captured)| *captured);
@@ -96,7 +96,7 @@ pub(crate) async fn task_execution_and_flow(
 fn project_execution(
     flow: &FlowProcess,
     state: FlowProcessSummaryState,
-    driver: ProcessIdentityEvidence,
+    flow_process: ProcessIdentityEvidence,
     step: ProcessIdentityEvidence,
 ) -> TaskExecutionSnapshot {
     if state == FlowProcessSummaryState::Completed {
@@ -107,13 +107,13 @@ fn project_execution(
             captured: None,
         };
     }
-    // A driver that has started no step is the Flow's only Process so far.
+    // A Flow process that has started no step is the Flow's only Process so far.
     let (label, process) = match flow.latest() {
         Some(latest) => (flow.label(latest), &latest.process),
-        None => (flow.name.clone(), &flow.driver),
+        None => (flow.name.clone(), &flow.process),
     };
     let label = &label;
-    let (state, reason) = match (driver, step) {
+    let (state, reason) = match (flow_process, step) {
         (_, ProcessIdentityEvidence::Live) => (
             TaskExecutionState::Running,
             format!("Step Process {} is running {label}", process.id),
@@ -165,11 +165,15 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let store = SqliteStore::new(&directory.path().join("loopflow.db")).unwrap();
         let flow = |outcome| {
-            let driver = store.test_flow("feature", "/repo", &[("implement", outcome)], None);
-            store.flow_process(driver.as_str()).unwrap().unwrap().0
+            let flow_process = store.test_flow("feature", "/repo", &[("implement", outcome)], None);
+            store
+                .flow_process(flow_process.as_str())
+                .unwrap()
+                .unwrap()
+                .0
         };
-        let state = |flow, driver, step| {
-            project_execution(flow, FlowProcessSummaryState::Current, driver, step)
+        let state = |flow, flow_process, step| {
+            project_execution(flow, FlowProcessSummaryState::Current, flow_process, step)
         };
         let running = flow(None);
         assert_eq!(
@@ -184,7 +188,7 @@ mod tests {
             state(&running, Unknown, Dead).state,
             TaskExecutionState::Unknown
         );
-        // A driver that died is history: nothing is running or resumable.
+        // A Flow process that died is history: nothing is running or resumable.
         let succeeded = flow(Some("succeeded"));
         let stopped = state(&succeeded, Dead, Dead);
         assert_eq!(stopped.state, TaskExecutionState::Idle);

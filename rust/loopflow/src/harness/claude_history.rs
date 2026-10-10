@@ -23,11 +23,11 @@ impl History {
         let Ok(value) = serde_json::from_str::<Value>(line) else {
             return Ok(());
         };
-        let Some((store, session, driver)) = &self.owner else {
+        let Some((store, session, attachment)) = &self.owner else {
             return Ok(());
         };
         self.attention
-            .record(store, session, driver, super::attention::claude(&value));
+            .record(store, session, attachment, super::attention::claude(&value));
         if value["type"] == "user" {
             let (Some(thread), Some(turn)) = (value["session_id"].as_str(), value["uuid"].as_str())
             else {
@@ -120,12 +120,14 @@ mod tests {
             [&process],
         )
         .unwrap();
-        let driver = store
+        let attachment = store
             .claim_session_attachment("conversation", None, &process, false)
             .unwrap();
-        let origin = store.session_turn_origin("conversation", &driver).unwrap();
+        let origin = store
+            .session_turn_origin("conversation", &attachment)
+            .unwrap();
         let mut history = History {
-            owner: Some((store.clone(), "conversation".into(), driver)),
+            owner: Some((store.clone(), "conversation".into(), attachment)),
             requests: std::sync::Arc::new(std::sync::Mutex::new(
                 [("request".to_string(), Some(origin))].into(),
             )),

@@ -1126,7 +1126,7 @@ fn provider_parentage_does_not_assign_work_outside_its_checkout() {
         )
         .unwrap();
     let origin = loopflow::id::LfProcessId::parse(&origin).unwrap();
-    let driver = store
+    let attachment = store
         .session_attachment(&session)
         .unwrap()
         .unwrap_or_else(|| {
@@ -1134,7 +1134,7 @@ fn provider_parentage_does_not_assign_work_outside_its_checkout() {
                 .claim_session_attachment(&session, None, &origin, true)
                 .unwrap()
         });
-    let caller = serde_json::to_string(&driver.caller(session.clone())).unwrap();
+    let caller = serde_json::to_string(&attachment.caller(session.clone())).unwrap();
     fixture.json(&["session", "bind", &session, "--task", "INF-123", "--json"]);
     // Synthetic provider provenance crosses real public CLI admission. The
     // same causal parent may issue taskless, checkout-bound or explicitly selected work.
@@ -1188,7 +1188,7 @@ fn provider_parentage_does_not_assign_work_outside_its_checkout() {
     }
     // A stale provider keeps its original causal parent and grants no Work.
     store
-        .claim_session_attachment(&session, Some(&driver), &origin, true)
+        .claim_session_attachment(&session, Some(&attachment), &origin, true)
         .unwrap();
     let before = fixture.launches().len();
     let stale = fixture
@@ -1329,10 +1329,10 @@ fn declared_agent_can_start_another_tasks_flow() {
         std::fs::read_to_string(fixture.home.path().join("step-declaration")).unwrap(),
         format!("task:{}", target.task.id)
     );
-    // The step ran in Y's checkout under a driver X's conversation started.
+    // The step ran in Y's checkout under a Flow process X's conversation started.
     let observed: (String, String) = fixture.db().query_row(
-        "SELECT step.cwd,s.task_id FROM processes step JOIN processes driver ON driver.id=step.parent_lf_process_id
-         JOIN processes launch ON launch.id=driver.parent_lf_process_id
+        "SELECT step.cwd,s.task_id FROM processes step JOIN processes flow_process ON flow_process.id=step.parent_lf_process_id
+         JOIN processes launch ON launch.id=flow_process.parent_lf_process_id
          JOIN agent_sessions s ON s.id=launch.caller_session_id
          JOIN flow_process_steps recorded ON recorded.lf_process_id=step.id",
         [],
@@ -1663,7 +1663,7 @@ fn failed_taskless_decision_stops_and_keeps_its_history() {
         std::thread::sleep(Duration::from_millis(20));
     };
     assert!(!status.success());
-    // The Flow stopped at its decision; its driver's Process says why.
+    // The Flow stopped at its decision; its Flow process says why.
     let flows = support::recorded_flows(fixture.home.path());
     assert_eq!(flows.len(), 1);
     let (outcome, steps) = &flows[0];
@@ -1758,7 +1758,7 @@ fn public_taskless_flow_records_distinct_completed_loop_passes() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    // One driver ran all three passes; each decision names its own pass.
+    // One Flow process ran all three passes; each decision names its own pass.
     let flows = support::recorded_flows(fixture.home.path());
     assert_eq!(flows.len(), 1);
     let (outcome, steps) = &flows[0];
@@ -1882,7 +1882,7 @@ fn opencode_automatic_retry_keeps_conversation_and_rejects_failed_turn_output() 
         &launches[1],
         "--final",
     ]);
-    // The answer is the provider's own text; the driver read the value in it.
+    // The answer is the provider's own text; the Flow process read the value in it.
     assert!(
         String::from_utf8_lossy(&answer.stdout).contains(r#""decision": "advance""#),
         "{answer:?}"

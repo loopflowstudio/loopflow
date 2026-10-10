@@ -48,7 +48,7 @@ CONTRACT = "Return the final answer as the declared JSON value: "
 
 
 def _contract(parts):
-    """The answer schema a Flow's driver supplied in context, if any."""
+    """The answer schema a Flow process supplied in context, if any."""
     text = "".join(part.get("text", "") for part in parts)
     start = text.rfind(CONTRACT)
     if start < 0:
@@ -115,7 +115,7 @@ def _launch(session, request, prompt):
                     value = {"path": schema["properties"]["path"]["enum"][0]}
                 with (HOME / "decide.log").open("a") as log:
                     log.write(json.dumps(value) + "\n")
-                # A provider answers in prose; the driver finds the value in it.
+                # A provider answers in prose; the Flow process finds the value in it.
                 answer = "Decision:\n```json\n" + json.dumps(value) + "\n```"
             if (HOME / "disconnect-after-tool").exists():
                 (HOME / "tool-effect").write_text("completed")

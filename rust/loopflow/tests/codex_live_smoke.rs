@@ -1,4 +1,4 @@
-//! Live smoke test for the codex app-server driver.
+//! Live smoke test for the codex app-server client.
 //!
 //! Ignored by default: it spawns the real `codex` binary, needs ChatGPT auth
 //! and network, and spends (a trivial number of) tokens. Run manually:

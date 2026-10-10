@@ -2431,7 +2431,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(workflow, ("custom".into(), "custom".into(), None));
-        // No saved Flow becomes a Flow exec: the driver-written record starts empty.
+        // No saved Flow becomes a Flow exec: the Flow process record starts empty.
         let flows: i64 = conn
             .query_row(
                 "SELECT (SELECT count(*) FROM flow_execs)+(SELECT count(*) FROM flow_exec_steps)",
@@ -2883,9 +2883,10 @@ mod tests {
             .unwrap();
         assert_eq!(merged.state, PrLandingState::Merged);
         assert_eq!(merged.merge_commit.as_deref(), Some("merge"));
-        let repeated = reconcile_pr_landing(store.clone(), merged.clone(), Arc::new(Merged))
-            .await
-            .unwrap();
+        let repeated =
+            reconcile_pr_landing(store.clone(), merged.clone(), Arc::new(Merged))
+                .await
+                .unwrap();
         assert_eq!(repeated, merged);
         assert_eq!(
             store.pending_pr_landings("owner/repo").await.unwrap().len(),

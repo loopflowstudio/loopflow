@@ -88,7 +88,7 @@ stops with the saved stash and recovery instructions. Run `lf sync` to bring in
 other upstream changes. Reuse the same branch;
 automatic pruning retains it. Moved worktrees are reused at their actual path.
 Missing checkouts recover committed state only. Live conversations retain their
-placement until an idle driver boundary permits adoption of the persistent workspace.
+placement until an idle attachment boundary permits adoption of the persistent workspace.
 
 `lf wt create <name> --persistent` creates or reuses an independent document workspace.
 PR landing clears scratch in non-persistent workspaces, whether or not a Task is

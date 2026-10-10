@@ -1236,7 +1236,7 @@ pub fn merge(
         if preserve_scratch {
             // Scratch belongs to the child, including deletions and cleanly
             // merged parent additions. Restoring changed scratch paths also resolves
-            // modify/delete conflicts which a text merge driver cannot handle.
+            // modify/delete conflicts which a text merge cannot handle.
             restore_scratch_from_head(worktree)?;
         }
         if output.status.success() || (preserve_scratch && list_conflicts(worktree)?.is_empty()) {

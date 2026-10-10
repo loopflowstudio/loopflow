@@ -35,7 +35,7 @@ fn display_title(name: &str, task: Option<&str>) -> String {
 pub(crate) struct TerminalTitle {
     store: SqliteStore,
     session: String,
-    driver: Option<SessionAttachment>,
+    attachment: Option<SessionAttachment>,
     name: String,
     cmux: Option<(String, String)>,
     checked: Instant,
@@ -85,7 +85,7 @@ impl TerminalTitle {
             return Ok(None);
         };
         Ok(Some(Self {
-            driver: store.session_attachment(&session.id)?,
+            attachment: store.session_attachment(&session.id)?,
             name: session_title(&store, &session)?,
             store,
             session: session.id,
@@ -108,7 +108,7 @@ impl TerminalTitle {
                 self.publish();
             }
             Ok(Some(_)) => {}
-            // A transferred driver must stop changing the old terminal's names.
+            // A handed-off attachment must stop changing the old terminal's names.
             Ok(None) => self.cmux = None,
             Err(error) => {
                 tracing::warn!(%error, "cannot refresh terminal Session name");
@@ -118,7 +118,7 @@ impl TerminalTitle {
     }
 
     fn read_name(&self) -> StoreResult<Option<String>> {
-        if self.store.session_attachment(&self.session)? != self.driver {
+        if self.store.session_attachment(&self.session)? != self.attachment {
             return Ok(None);
         }
         self.store
@@ -194,7 +194,7 @@ mod tests {
     use super::{display_title, TerminalTitle};
 
     #[test]
-    fn replaced_driver_stops_observing_session_names() {
+    fn replaced_attachment_stops_observing_session_names() {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("store.db");
         let store = crate::store::sqlite::SqliteStore::open_ephemeral(&path).unwrap();
@@ -208,13 +208,13 @@ mod tests {
                 [process.as_str()],
             )
             .unwrap();
-        let driver = store
+        let attachment = store
             .claim_session_attachment(&session.id, None, &process, true)
             .unwrap();
         let title = TerminalTitle {
             store,
             session: session.id,
-            driver: Some(driver.clone()),
+            attachment: Some(attachment.clone()),
             name: session.title,
             cmux: None,
             checked: std::time::Instant::now(),
@@ -230,7 +230,7 @@ mod tests {
         assert_eq!(title.read_name().unwrap().as_deref(), Some("Release notes"));
         title
             .store
-            .claim_session_attachment(&title.session, Some(&driver), &process, false)
+            .claim_session_attachment(&title.session, Some(&attachment), &process, false)
             .unwrap();
         assert_eq!(title.read_name().unwrap(), None);
     }

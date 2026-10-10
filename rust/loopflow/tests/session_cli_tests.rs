@@ -570,7 +570,7 @@ fn headless_resume_preserves_a_held_owners_capture_on_both_harnesses() {
                 [process.as_str()],
             )
             .unwrap();
-        let driver = store
+        let attachment = store
             .claim_session_attachment(&id, None, &process, true)
             .unwrap();
         let before = store.session(&id).unwrap().unwrap();
@@ -603,7 +603,7 @@ fn headless_resume_preserves_a_held_owners_capture_on_both_harnesses() {
         );
         assert!(!error.contains("unexpected-provider-launch"), "{error}");
         assert_eq!(store.session(&id).unwrap().unwrap(), before);
-        assert_eq!(store.session_attachment(&id).unwrap(), Some(driver));
+        assert_eq!(store.session_attachment(&id).unwrap(), Some(attachment));
         assert_eq!(store.session_history(&id, 0, 0).unwrap(), history);
         assert_eq!(std::fs::read(dir.join("manifest.json")).unwrap(), manifest);
         assert!(dir.join("prepared").exists());
@@ -1321,7 +1321,6 @@ fn terminal_first_launch_and_failed_startup_reopen_the_same_conversation() {
     ));
     let failed = open(&["session", "connect", &id, "--replace"]);
     assert!(!failed.status.success());
-    assert!(!String::from_utf8_lossy(&failed.stderr).contains("no confirmed engine exit"));
     write_provider("#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nprintf '%s\\n' 'message=created id=ses_retained' >&2\n");
     for args in [
         vec!["session", "resume"],
@@ -1585,7 +1584,7 @@ fn program_status_cli_observes_waiting_without_completing_work() {
         [&lf_process_id],
     )
     .unwrap();
-    // A native conversation needs no lf driver claim for passive display.
+    // A native conversation needs no attachment claim for passive display.
     let generation = "0".to_string();
     let mut observer = Child(
         command(
@@ -1686,9 +1685,9 @@ fn program_status_cli_observes_waiting_without_completing_work() {
         wait_for("done")["program_status"]["records"][0]["state"],
         "done"
     );
-    let driver = store.session_attachment(&id).unwrap();
+    let attachment = store.session_attachment(&id).unwrap();
     store
-        .claim_session_attachment(&id, driver.as_ref(), &lf_process_id, true)
+        .claim_session_attachment(&id, attachment.as_ref(), &lf_process_id, true)
         .unwrap();
     let stale = run(
         home.path(),

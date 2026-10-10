@@ -71,3 +71,7 @@ submitted input by source, flagged against budgets, with Task totals. One step
 is LOO-298-shaped (384 steers over the goal budget); the other has no retained
 capture, so every source is `null` rather than zero. Rust round-trips it and
 Swift decodes it for the Task's Session history.
+
+`cleanup_report.json` pins `lf wt prune --json`: planned decisions, actual removals,
+retention reasons and failures. Unknown byte estimates remain null. This CLI-only
+contract has no Swift or Python consumer.

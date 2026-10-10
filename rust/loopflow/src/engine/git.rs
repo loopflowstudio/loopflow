@@ -1073,6 +1073,33 @@ pub(crate) fn worktree_remove_owned(
     Ok(())
 }
 
+/// Cleanup never bypasses Git's final dirty-file check.
+pub(crate) fn worktree_remove_clean_owned(
+    repo: &Path,
+    path: &Path,
+    lease: &WorktreeLease,
+) -> Result<(), GitError> {
+    let path = normalized_worktree_path(repo, path);
+    if lease.path != path {
+        return Err(GitError::CommandFailed {
+            command: "remove clean worktree".into(),
+            stderr: "lease does not own checkout".into(),
+        });
+    }
+    let output = run_git_inheriting(
+        repo,
+        &["worktree", "remove", &path.to_string_lossy()],
+        &|command| lease.inherit(command),
+    )?;
+    if !output.status.success() {
+        return Err(GitError::CommandFailed {
+            command: "git worktree remove".into(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        });
+    }
+    Ok(())
+}
+
 /// Move a worktree to a new path.
 pub fn worktree_move(repo: &Path, old_path: &Path, new_path: &Path) -> Result<(), GitError> {
     let old_str = old_path.to_string_lossy();
@@ -1118,6 +1145,7 @@ pub(crate) fn worktree_add_inheriting(
     mode: WorktreeBranch<'_>,
     inherit: &impl Fn(&mut Command),
 ) -> Result<(), GitError> {
+    let existed = path.try_exists()?;
     let path_str = path.to_string_lossy();
     let args: Vec<&str> = match mode {
         WorktreeBranch::New { start_point } => {
@@ -1150,14 +1178,17 @@ pub(crate) fn worktree_add_inheriting(
     if !output.status.success() {
         // A failing post-checkout hook causes git to exit non-zero even when
         // the worktree was created successfully. Verify before reporting failure.
-        if path.join(".git").exists() {
-            return Ok(());
+        if existed || !path.join(".git").exists() {
+            return Err(GitError::CommandFailed {
+                command: format!("git {}", args.join(" ")),
+                stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+            });
         }
-        return Err(GitError::CommandFailed {
-            command: format!("git {}", args.join(" ")),
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        });
     }
+    fs::write(
+        absolute_git_dir(path)?.join("lf-created"),
+        rev_parse(path, "HEAD")?,
+    )?;
     Ok(())
 }
 

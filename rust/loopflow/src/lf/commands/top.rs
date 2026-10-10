@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::io::{IsTerminal, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -399,26 +399,6 @@ fn stale_process_receipt_pids(processes: &ProcessSnapshot) -> Vec<u32> {
     stale_process_receipt_pids.dedup();
 
     stale_process_receipt_pids
-}
-
-/// Best-effort snapshot of directories currently owned by a live process.
-///
-/// Worktree cleanup uses this independent ownership signal. It intentionally
-/// remains broader than the exact receipts used by the activity view.
-pub fn running_workspace_paths() -> HashSet<PathBuf> {
-    let output = Command::new("lsof").args(["-d", "cwd", "-Fn"]).output();
-    let Ok(output) = output else {
-        return HashSet::new();
-    };
-    if !output.status.success() {
-        return HashSet::new();
-    }
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter_map(|line| line.strip_prefix('n'))
-        .map(PathBuf::from)
-        .filter(|path| path.is_absolute())
-        .collect()
 }
 
 pub(crate) fn load_snapshot() -> Result<ActivitySnapshot> {

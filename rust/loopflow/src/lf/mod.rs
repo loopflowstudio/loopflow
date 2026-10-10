@@ -1808,11 +1808,14 @@ pub enum WtCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Remove clean terminal or inactive worktrees
+    /// Remove settled Loopflow checkouts, retaining unfinished or unknown work
     Prune {
         /// Show what would be pruned without removing anything
         #[arg(long)]
         dry_run: bool,
+        /// Emit cleanup decisions and results
+        #[arg(long)]
+        json: bool,
     },
     /// Delete a worktree and its local and remote branch; retain PR and Task outcomes
     Delete {

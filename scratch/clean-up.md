@@ -135,6 +135,8 @@ mutations, including Git metadata pruning.
   `branch_is_stale`, `worktree_prune_reason`, and the unused targeted-prune APIs
   with the shared classifier. Delete tests exclusively asserting stale/remote-gone
   deletion; retain dirty, persistent, unknown-PR and new-commit protection tests.
+- Remove `prepare_landed_delete`, whose automatic path also deleted remote refs.
+  Explicit `prepare_delete` / abandonment authority remains separate.
 - Remove duplicate automatic eligibility/deletion branches in
   `cleanup_completed_task` and `cleanup_landed_pr`; keep their completion and
   persistent-branch behavior, delegating filesystem collection to the owner.
@@ -153,14 +155,51 @@ ignored equaling disposable; a successful Flow equaling Task completion;
 cleanup requiring an LLM; mandatory foreground recursive disk scans; deleting
 another machine's state; moving junk to an unlimited trash directory.
 
-## Internal slices
+## Implementation checkpoint — 2026-10-09
 
-1. **This slice:** unify eligibility and remove unsafe/unused predecessor paths;
-   migrate lifecycle and manual prune consumers with protection regressions.
-2. Extend the repository tick and creation/upgrade schedule wiring with bounded,
-   retryable collection and truthful dry-run/reporting.
-3. Prove skipped-then-idle, crash recovery, idempotence and install lifecycle;
-   update worktree docs and installation references.
+The shared collector is in `ops/wt/cleanup.rs`. Manual prune, completed Tasks
+and taskless landings use it; repository reconciliation also attempts a local
+pass before network delivery observation. The predecessor prune policies,
+targeted-prune APIs, prompt-log pruner, automatic remote-branch deletion helper
+and orphan engine create/remove helpers are removed. Explicit abandonment keeps
+its separate authority. This is an internal checkpoint, not a shipping boundary.
+
+Current eligibility uses Task checkout links or recorded landing paths, and
+exact merged heads. New lf-created checkouts carry Git-administrative provenance;
+provenance alone does not settle their source. Unknown settlement retains the
+checkout. Valid `CACHEDIR.TAG` declarations classify wholly ignored directories;
+other ignored data stays. No arbitrary-name artifact exemptions were added.
+
+Review fixes: non-forced Git removal is the last dirty check; local refs use
+compare-and-delete; failed worktree creation cannot confer lf provenance on a
+preexisting checkout; assume-unchanged/sparse index entries retain the checkout;
+cache tags survive partial content removal and signature reads are bounded to 43 bytes. A removed checkout is still reported
+as removed if its local ref changed and was retained.
+
+### Remaining in this PR
+
+1. **Installation and retry coverage:** automatically ensure the repository tick
+   on first Task or taskless work; repair its executable on upgrade and retire
+   it with the supported uninstall/disable lifecycle. Current coverage requires
+   an already-installed repository tick or explicit reconciliation. There is no
+   current `self uninstall` command; installation integration must identify its
+   actual retirement boundary rather than assume one exists. Unsupported hosts
+   still need explicit coverage and the throttled ordinary-command fallback.
+2. **Bound the whole pass:** current apply limits are eight removals and 30 seconds
+   admitting removals; planning is not yet deadline-bound. Share cheap observations
+   rather than re-reading all Tasks per candidate. Add hourly full reconciliation,
+   oldest-deferred ordering, background size estimates and cron-receipt summaries.
+   Foreground JSON truthfully reports unknown byte estimates as null.
+3. **Remaining recovery/safety cases:** targeted missing-registration repair,
+   interruption after tag removal but before empty-directory removal, release-store
+   execution/admission fencing during experimental collection, and full referenced
+   Session-evidence coverage. Missing paths currently retain registration. A
+   published abandoned PR without exact-head disposition is retained.
+4. **Gate/demo:** complete the scheduled skipped-then-idle demo through the installed
+   command, install lifecycle tests, and the remaining acceptance matrix below.
+   The current focused tests exercise local retry after unknown execution resolves,
+   repeated passes, remote-ref retention, ignored data/cache contracts, post-merge
+   commits, unfinished Tasks, missing paths and checkout/Git admission conflicts.
 
 ## Done when
 
@@ -212,4 +251,4 @@ allocated bytes by category; observed free-space delta after collection; oldest
 eligible retention age. APFS sharing, hardlinks and concurrent writers mean
 directory sums are estimates, not guaranteed reclaimed bytes.
 
-Check: source/call-site inspection only; no product tests or deletion run.
+Check: `cargo test -p loopflow --lib ops::wt::cleanup::tests -- --test-threads=1` (10 passed), `cargo test -p loopflow --test dto_fixtures cleanup_report_keeps_retention_reasons_and_unknown_sizes` (1 passed), and `cargo clippy --all-targets -- -D warnings` passed; full acceptance and installed-schedule proof remain with gate after the remaining implementation.

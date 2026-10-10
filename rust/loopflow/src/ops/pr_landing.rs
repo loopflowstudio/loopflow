@@ -1269,22 +1269,22 @@ async fn cleanup_landed_pr(store: &SharedStore, landing: &PrLanding) -> OpsResul
         eprintln!("Task {} remains open; retained its checkout for further work and the next PR. Inspect remaining work with `lf task status {}`.", task.plan.identifier, task.plan.identifier);
         return Ok(());
     }
-    // Only a Flow still being driven needs the checkout; a stopped one is history.
-    if store
-        .sqlite
-        .flows_at(&landing.worktree)
-        .map_err(|error| OpsError::Message(error.to_string()))?
-        .iter()
-        .any(|flow| {
-            flow.driver.completed_at.is_none()
-                && crate::journal::process_evidence(&store.sqlite, flow.id())
-                    != crate::journal::ProcessIdentityEvidence::Dead
-        })
-    {
-        eprintln!("PR merged; retained its checkout for the Flow that landed it.");
-        return Ok(());
-    }
     if crate::engine::worktrees::is_persistent_worktree(&landing.worktree)? {
+        // Only a Flow still being driven needs the checkout; a stopped one is history.
+        if store
+            .sqlite
+            .flows_at(&landing.worktree)
+            .map_err(|error| OpsError::Message(error.to_string()))?
+            .iter()
+            .any(|flow| {
+                flow.driver.completed_at.is_none()
+                    && crate::journal::process_evidence(&store.sqlite, flow.id())
+                        != crate::journal::ProcessIdentityEvidence::Dead
+            })
+        {
+            eprintln!("PR merged; retained its checkout for the Flow that landed it.");
+            return Ok(());
+        }
         match crate::ops::sync::restart_landed_persistent(&landing.worktree) {
             Ok(true) => eprintln!("PR merged; restarted persistent branch from the default branch."),
             Ok(false) => eprintln!(
@@ -1296,33 +1296,8 @@ async fn cleanup_landed_pr(store: &SharedStore, landing: &PrLanding) -> OpsResul
         }
         return Ok(());
     }
-    let _admission = store
-        .sqlite
-        .lock_checkout(&landing.worktree)
-        .map_err(repair_error)?;
-    // A conversation is history; only a running Process holds the checkout.
-    if let Some(reason) = checkout_execution_blockers(store, &landing.worktree)?
-        .into_iter()
-        .next()
-    {
-        eprintln!(
-            "PR merged; retained its checkout: {reason}. Use lf wt delete after it finishes."
-        );
-        return Ok(());
-    }
     let repo = crate::engine::worktrees::main_repo_root(&landing.worktree)?;
-    if std::fs::canonicalize(&repo)? == std::fs::canonicalize(&landing.worktree)? {
-        eprintln!("PR merged; retained the primary checkout and branch.");
-        return Ok(());
-    }
-    let deletion =
-        crate::ops::wt::prepare_landed_delete(&repo, &landing.branch, &landing.observed_head_sha)?;
-    crate::ops::wt::apply_delete(deletion, &crate::ops::NullProgress).map_err(|error| {
-        OpsError::Message(format!(
-            "PR merged, but cleanup failed: {error}; retry `lf wt delete {}`",
-            landing.branch,
-        ))
-    })
+    crate::ops::wt::cleanup::cleanup_path(store, &repo, &landing.worktree).await
 }
 
 async fn create_landing(
@@ -1476,13 +1451,35 @@ pub fn reconcile_repository(repo: &Path) -> OpsResult<DeliveryCheck> {
             checked_at: OffsetDateTime::now_utc().unix_timestamp(),
             errors: Vec::new(),
         };
-        reconcile_repository_async(
+        match crate::ops::wt::cleanup::run_cleanup_pass(
+            &store,
+            repo,
+            crate::ops::wt::cleanup::CleanupBudget::default(),
+        )
+        .await
+        {
+            Ok(cleanup) => {
+                for path in cleanup.removed {
+                    eprintln!("Removed {}", path.display());
+                }
+                report
+                    .errors
+                    .extend(cleanup.failed.into_iter().map(|failure| {
+                        format!("cleanup {}: {}", failure.path.display(), failure.error)
+                    }));
+            }
+            Err(error) => report.errors.push(format!("checkout cleanup: {error}")),
+        }
+        if let Err(error) = reconcile_repository_async(
             repo,
             &store,
             tokio::time::Instant::now() + Duration::from_secs(45),
             &mut report.errors,
         )
-        .await?;
+        .await
+        {
+            report.errors.push(error.to_string());
+        }
         Ok(report)
     });
     // Timed-out observations retain their landing locks until the worker exits.

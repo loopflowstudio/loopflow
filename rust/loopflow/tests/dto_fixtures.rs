@@ -611,3 +611,20 @@ fn planning_sync_preserves_delivery_and_losing_values() {
     assert_eq!(serde_json::to_value(&sync).unwrap(), value);
     assert!(sync.lines()[3].contains("Linear: null"));
 }
+
+#[test]
+fn cleanup_report_keeps_retention_reasons_and_unknown_sizes() {
+    let json = include_str!("../../../tests/fixtures/dto/cleanup_report.json");
+    let report: loopflow::ops::wt::cleanup::CleanupReport = serde_json::from_str(json).unwrap();
+    assert_eq!(report.planned[0].estimated_bytes, None);
+    assert_eq!(
+        serde_json::to_value(&report).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+    let mut missing: serde_json::Value = serde_json::from_str(json).unwrap();
+    missing["planned"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("action");
+    assert!(serde_json::from_value::<loopflow::ops::wt::cleanup::CleanupReport>(missing).is_err());
+}

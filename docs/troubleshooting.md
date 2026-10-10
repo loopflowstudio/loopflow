@@ -133,12 +133,12 @@ Other options:
 
 **Symptom:** Git worktree commands fail or show stale data.
 
-List all worktrees, then clean up stale entries:
+Preview cleanup before removing settled checkouts:
 
 ```bash
 lf wt list
-lf wt prune --dry-run                  # show clean terminal or week-stale worktrees
-lf wt prune                            # remove those worktrees and their branches
+lf wt prune --dry-run --json           # explain removal and retention decisions
+lf wt prune                           # remove eligible checkouts and exact-head local refs
 ```
 
 ```bash
@@ -153,9 +153,17 @@ Interrupted runs are recorded; a run killed outright is not. The file holds
 durations, counts, the repository root and the `lf` version, and never more
 than 1,000 samples.
 
-Prune always preserves uncommitted files. Without terminal evidence, an open PR
-or branch activity in the last seven days also prevents cleanup. Use
-`lf wt delete NAME --force` only when intentionally discarding a worktree.
+Prune requires Loopflow ownership and a recorded settlement of the current head.
+It preserves primary and persistent checkouts, unfinished Tasks, live or unknown
+execution, uncommitted files and unclassified ignored data. Age, a closed PR and a
+missing remote branch are not deletion authority. Only wholly ignored directories
+with a valid `CACHEDIR.TAG` are disposable; a familiar name such as `target` or
+`.venv` is not enough. Unknown size estimates are `null`, not zero.
+
+Repository reconciliation (`lf task reconcile`) retries deferred cleanup locally,
+even if delivery observation fails. Cleanup never deletes remote branches, Task
+outcomes or Session history. Use `lf wt delete NAME --force` only when deliberately
+discarding a checkout.
 
 ```bash
 lf sync

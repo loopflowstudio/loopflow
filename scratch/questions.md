@@ -14,3 +14,11 @@
   rotation; lossless cold archives are proposed separately from diagnostic expiry.
 - Diagnostics defaults (seven days hot, 30 days retained, 4 GiB total) are proposed,
   not accepted. Native provider resume must survive any history archive scheme.
+
+- Implementation choice, 2026-10-09: the first artifact contract is a valid
+  `CACHEDIR.TAG` on a wholly ignored directory; unknown ignored data retains the
+  checkout. No user-selected artifact roots or history-expiration policy are
+  implied. Eight removals / 30 seconds admitting removals are conservative local
+  defaults, not evidence of whole-pass timing or accepted machine-wide budgets.
+- Source inspection found no `lf self uninstall` command. Schedule retirement
+  needs the actual installation/disable boundary before the keystone can ship.

@@ -6,9 +6,8 @@ use crate::engine::naming::git_user;
 use crate::engine::target::{resolve_definition, Target};
 use crate::engine::worktrees::{
     create_from_placement_plan, diff_shortstats, list_worktrees, list_worktrees_timed,
-    main_repo_root, plan_placement, prune_worktrees, sibling_worktree_name,
-    sibling_worktree_name_with_main, PlacementStrategy, PullRequestState, WorktreePrunePolicy,
-    WorktreeSegment,
+    main_repo_root, plan_placement, sibling_worktree_name, sibling_worktree_name_with_main,
+    PlacementStrategy, PullRequestState, WorktreeSegment,
 };
 use crate::engine::{
     load_skill, prepare_process_prompt, sync_skills, ContextSourceOverrides, ProcessPromptInput,
@@ -17,6 +16,9 @@ use crate::engine::{
 use crate::lf::commands::util::find_repo_root;
 use crate::lf::output::{column_width, Colors};
 use crate::lf::{CronCommand, PrCommand, ReleaseCommand, RepoCommand, WtCommand};
+use crate::ops::wt::cleanup::{
+    apply_cleanup, plan_cleanup, CleanupAction, CleanupBudget, CleanupReport,
+};
 use crate::ops::OpsError;
 use crate::ops::{
     abandon_branch, abort_sync_after_authorization, abort_sync_for_resolution, arm,
@@ -30,7 +32,6 @@ use crate::ops::{
 };
 use crate::store::RegistryUnavailable;
 use anyhow::{anyhow, Result};
-use std::collections::HashSet;
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -1149,7 +1150,7 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
             tokio::runtime::Runtime::new()?.block_on(async {
                 let store = crate::store::open_registry_for_authority()
                     .await
-                    .map_err(cron_registry_error)?;
+                    .map_err(registry_error)?;
                 if store.get_task(&owner).await?.is_none() {
                     return Err(anyhow!("repair owner {owner} is not a registered Task"));
                 }
@@ -1451,7 +1452,7 @@ fn cron_authority(wave_name: &str) -> Result<CronAuthority> {
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = crate::store::open_registry_for_authority()
             .await
-            .map_err(cron_registry_error)?;
+            .map_err(registry_error)?;
         let local = store.local_machine().await?;
         let (repo, placed_machine) = if wave_name.is_empty() {
             (main_repo_root(&repo_root)?, local.id.clone())
@@ -1492,10 +1493,10 @@ fn cron_authority(wave_name: &str) -> Result<CronAuthority> {
     })
 }
 
-fn cron_registry_error(error: RegistryUnavailable) -> anyhow::Error {
+fn registry_error(error: RegistryUnavailable) -> anyhow::Error {
     match error {
         RegistryUnavailable::MissingFile { path } => anyhow!(
-            "Machine registry is missing at {}; initialize or restore it before running cron",
+            "Machine registry is missing at {}; initialize or restore it before continuing",
             path.display()
         ),
         RegistryUnavailable::Unresolved { error } => {
@@ -1894,7 +1895,7 @@ pub fn run_wt(cmd: &WtCommand) -> Result<()> {
         WtCommand::List { json, sync } => wt_list(*json, *sync),
         WtCommand::Timing { json } => wt_timing(*json),
         WtCommand::Delete { name, force } => wt_delete(name, *force),
-        WtCommand::Prune { dry_run } => wt_prune(*dry_run),
+        WtCommand::Prune { dry_run, json } => wt_prune(*dry_run, *json),
     }
 }
 
@@ -2266,109 +2267,52 @@ fn parse_shortstat(raw: &str) -> String {
     format!("+{ins} -{del} ({files} files)")
 }
 
-fn wt_prune(dry_run: bool) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    let main_repo = main_repo_root(&repo_root)?;
-    if !dry_run {
-        crate::ops::checkout::refresh_main(&main_repo, &CliProgress)?;
-    }
-    let protected_paths = protected_worktree_paths()?;
-    let report = prune_worktrees(
-        &main_repo,
-        &repo_root,
-        &protected_paths,
-        WorktreePrunePolicy::manual(),
-        dry_run,
-    )?;
-
-    if report.candidates.is_empty() {
-        println!("No prunable worktrees.");
-        return Ok(());
-    }
-
-    if dry_run {
-        for target in &report.candidates {
-            println!(
-                "  {} ({reason})  {}",
-                target.branch.as_deref().unwrap_or("detached"),
-                target.path.display(),
-                reason = target.reason.as_str(),
-            );
-        }
-        return Ok(());
-    }
-
-    for target in &report.removed {
-        println!("Removed {}", target.path.display());
-    }
-    for failure in &report.failed {
-        eprintln!(
-            "Failed to remove {}: {}",
-            failure.target.path.display(),
-            failure.error
+fn wt_prune(dry_run: bool, json: bool) -> Result<()> {
+    let repo = find_repo_root()?;
+    let runtime = tokio::runtime::Runtime::new()?;
+    let report = runtime.block_on(async {
+        let store = std::sync::Arc::new(
+            crate::store::open_registry_for_authority()
+                .await
+                .map_err(registry_error)?,
         );
+        let plan = plan_cleanup(&store, &repo).await?;
+        if dry_run {
+            Ok::<_, anyhow::Error>(CleanupReport {
+                planned: plan,
+                removed: Vec::new(),
+                deferred: Vec::new(),
+                failed: Vec::new(),
+            })
+        } else {
+            Ok(apply_cleanup(&store, &repo, plan, CleanupBudget::default()).await?)
+        }
+    })?;
+    if json {
+        println!("{}", serde_json::to_string(&report)?);
+    } else {
+        for decision in if dry_run {
+            &report.planned
+        } else {
+            &report.deferred
+        } {
+            let reason = match &decision.action {
+                CleanupAction::RemoveCheckout => "would remove",
+                CleanupAction::Retain(reason) => reason,
+            };
+            println!("{}: {reason}", decision.path.display());
+        }
+        for path in &report.removed {
+            println!("Removed {}", path.display());
+        }
+        for failure in &report.failed {
+            eprintln!("{}: {}", failure.path.display(), failure.error);
+        }
     }
     if !report.failed.is_empty() {
-        return Err(anyhow!(
-            "failed to remove {} prunable worktree(s)",
-            report.failed.len()
-        ));
+        anyhow::bail!("{} cleanup failures", report.failed.len());
     }
     Ok(())
-}
-
-fn protected_worktree_paths() -> Result<HashSet<PathBuf>> {
-    let mut protected = crate::lf::commands::top::running_workspace_paths();
-    let runtime = tokio::runtime::Runtime::new()?;
-    match runtime.block_on(crate::store::open_registry_for_authority()) {
-        Ok(store) => {
-            let tasks = runtime.block_on(store.list_tasks(None)).map_err(|error| {
-                anyhow!("cannot verify Task worktree ownership before pruning: {error}")
-            })?;
-            for task in tasks {
-                let work = runtime
-                    .block_on(store.work_for_child(&crate::child::ChildRef::Task(task.id.clone())))
-                    .map_err(|error| anyhow!("cannot resolve Task Work: {error}"))?;
-                let status = runtime
-                    .block_on(store.work_status(&work))
-                    .map_err(|error| anyhow!("cannot read Task Work status: {error}"))?;
-                if !matches!(
-                    status,
-                    crate::durable::WorkStatus::Done | crate::durable::WorkStatus::Abandoned
-                ) {
-                    protected.extend(task.worktree);
-                }
-            }
-        }
-        Err(RegistryUnavailable::MissingFile { .. }) => {}
-        Err(RegistryUnavailable::Unresolved { error }) => {
-            return Err(anyhow!(
-                "cannot verify Task worktree ownership before pruning: {error}"
-            ));
-        }
-        Err(RegistryUnavailable::Incompatible { path, error }) => {
-            return Err(anyhow!(
-                "cannot verify Task worktree ownership from {} before pruning: {error}",
-                path.display()
-            ));
-        }
-    }
-
-    // An explicit experiment owns its own registry, but pruning is
-    // machine-wide filesystem mutation. Read the release registry without
-    // migrations so `cargo run -- lf wt prune` cannot erase release-owned Tasks.
-    let production = crate::store::production_database_path();
-    if production.exists() {
-        protected.extend(
-            crate::store::read_nonterminal_task_worktrees(&production).map_err(|error| {
-                anyhow!(
-                    "cannot verify Task worktree ownership from {} before pruning: {error}",
-                    production.display()
-                )
-            })?,
-        );
-    }
-    Ok(protected)
 }
 
 fn pr_checks(watch: bool, logs: bool) -> Result<()> {

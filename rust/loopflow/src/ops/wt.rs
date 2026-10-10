@@ -1,4 +1,5 @@
-//! Checkout and branch deletion, shared by Task and PR abandonment.
+//! Checkout collection and explicit branch deletion.
+pub mod cleanup;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -101,24 +102,6 @@ pub(crate) fn prepare_delete(
         remote_head,
         force,
     })
-}
-
-pub(crate) fn prepare_landed_delete(
-    repo: &Path,
-    branch: &str,
-    merged_head: &str,
-) -> OpsResult<BranchDeletion> {
-    let deletion = prepare_delete(repo, branch, false)?;
-    if [&deletion.local_head, &deletion.remote_head]
-        .into_iter()
-        .flatten()
-        .any(|head| head != merged_head)
-    {
-        return Err(OpsError::Message(format!(
-            "{branch} has work beyond its merged head; retained checkout and branches"
-        )));
-    }
-    Ok(deletion)
 }
 
 pub(crate) fn apply_delete(deletion: BranchDeletion, progress: &impl Progress) -> OpsResult<()> {

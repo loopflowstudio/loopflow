@@ -5039,6 +5039,28 @@ mod tests {
     }
 
     #[test]
+    fn cleanup_retains_an_unfinished_tasks_checkout() {
+        let _ledger = crate::journal::TestLedgerGuard::new();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let repo = loopflow_test_support::TestRepo::new();
+        let path = repo
+            .create_named_worktree("unfinished")
+            .canonicalize()
+            .unwrap();
+        let fixture = runtime.block_on(task_fixture_at("CLEANUP-ACTIVE", path.clone()));
+        let plan = runtime
+            .block_on(crate::ops::wt::cleanup::plan_cleanup(
+                &fixture.store,
+                repo.path(),
+            ))
+            .unwrap();
+        let decision = plan.iter().find(|item| item.path == path).unwrap();
+        assert!(matches!(&decision.action,
+            crate::ops::wt::cleanup::CleanupAction::Retain(reason) if reason.contains("unfinished Task CLEANUP-ACTIVE")));
+        assert!(path.exists());
+    }
+
+    #[test]
     fn task_decision_preserves_unknown_history_and_live_process_protection() {
         let ledger = crate::journal::TestLedgerGuard::new();
         let runtime = tokio::runtime::Runtime::new().unwrap();

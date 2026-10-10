@@ -8,7 +8,7 @@ use crate::engine::worktrees::main_repo_root;
 use crate::ops::wt::BranchDeletion;
 use crate::ops::{NullProgress, OpsResult, Progress};
 use crate::store::{open_registry_for_authority, RegistryUnavailable, SharedStore};
-use crate::work::task::{PrPhase, Task, TaskPr};
+use crate::work::task::{Task, TaskPr};
 
 use super::{block_on_task, owning_wave, task_error, task_store};
 
@@ -17,69 +17,12 @@ pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> 
     if super::task_work_status(store, task).await? != WorkStatus::Done {
         return Ok(());
     }
-    let blockers = crate::ops::task_automation::task_execution_blockers(&store.sqlite, &task.id)?;
-    if !blockers.is_empty() {
-        eprintln!(
-            "Task {} is complete; retained checkout: {}",
-            task.plan.identifier,
-            blockers.join("; ")
-        );
-        return Ok(());
+    let wave = owning_wave(store, task).await?;
+    let repo = main_repo_root(Path::new(wave.repo()))?;
+    if let Some(path) = &task.worktree {
+        crate::ops::wt::cleanup::cleanup_path(store, &repo, path).await?;
     }
-    let result = async {
-        let wave = owning_wave(store, task).await?;
-        let repo = main_repo_root(Path::new(wave.repo()))?;
-        let _mutation = if let Some(worktree) = task.worktree.as_ref().filter(|path| path.exists())
-        {
-            if std::fs::canonicalize(worktree)? == std::fs::canonicalize(&repo)? {
-                eprintln!(
-                    "Task {} is complete; retained the primary checkout and branch.",
-                    task.plan.identifier
-                );
-                return Ok(());
-            }
-            Some(super::lock_task_pr_mutation(worktree)?)
-        } else {
-            None
-        };
-        let mut deletions = Vec::new();
-        for pr in store.task_prs(&task.id).await.map_err(task_error)? {
-            let deletion = match pr.phase() {
-                PrPhase::Merged => crate::ops::wt::prepare_landed_delete(
-                    &repo,
-                    &pr.branch,
-                    pr.head_sha()
-                        .ok_or_else(|| task_error("merged PR has no recorded head"))?,
-                )?,
-                PrPhase::Abandoned if pr.publication.is_none() => {
-                    crate::ops::wt::prepare_landed_delete(&repo, &pr.branch, &pr.base_commit)?
-                }
-                PrPhase::Abandoned => crate::ops::wt::prepare_delete(&repo, &pr.branch, false)?,
-                _ => {
-                    return Err(task_error(
-                        "Task still has an unsettled PR; retained checkout",
-                    ))
-                }
-            };
-            deletions.push(deletion);
-        }
-        for deletion in deletions {
-            crate::ops::wt::apply_delete(deletion, &NullProgress)?;
-        }
-        if task.worktree.as_ref().is_some_and(|path| path.exists()) {
-            return Err(task_error(
-                "checkout is on a different branch; retained it for explicit wt delete",
-            ));
-        }
-        Ok(())
-    }
-    .await;
-    result.map_err(|error| {
-        task_error(format!(
-            "Task {} is complete, but cleanup is incomplete: {error}. Retry `lf task move {} end`.",
-            task.plan.identifier, task.plan.identifier,
-        ))
-    })
+    Ok(())
 }
 
 async fn branch_task(repo: &Path, branch: &str) -> OpsResult<Option<(SharedStore, Task)>> {

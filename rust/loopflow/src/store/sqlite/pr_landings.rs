@@ -106,6 +106,15 @@ impl super::SqliteStore {
             .optional()?)
     }
 
+    pub(crate) fn merged_landings_at(&self, path: &std::path::Path) -> StoreResult<Vec<PrLanding>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(&format!(
+            "SELECT {LANDING_COLUMNS} FROM pr_landings WHERE worktree=?1 AND state='merged' ORDER BY updated_at"
+        ))?;
+        let rows = statement.query_map([path.to_string_lossy()], map_landing)?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
     pub fn pending_pr_landings(&self, repo: &str) -> StoreResult<Vec<PrLanding>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(&format!(

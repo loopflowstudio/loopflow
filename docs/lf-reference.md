@@ -256,11 +256,12 @@ Report how long `lf wt list` has taken on this machine
 
 ## lf wt prune
 
-Remove clean terminal or inactive worktrees
+Remove settled Loopflow checkouts, retaining unfinished or unknown work
 
 | Argument | What it does |
 |---|---|
 | `--dry-run` | Show what would be pruned without removing anything Default: false. |
+| `--json` | Emit cleanup decisions and results Default: false. |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 

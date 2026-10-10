@@ -1,0 +1,23 @@
+{
+  "planned": [
+    {
+      "path": "/src/repo.finished",
+      "branch": "jack/finished",
+      "observed_head": "abcdef",
+      "action": "remove_checkout",
+      "evidence": ["landing: exact merged head"],
+      "estimated_bytes": null
+    },
+    {
+      "path": "/src/repo.active",
+      "branch": "jack/active",
+      "observed_head": "fedcba",
+      "action": {"retain": "unfinished Task LOO-1"},
+      "evidence": [],
+      "estimated_bytes": null
+    }
+  ],
+  "removed": [],
+  "deferred": [],
+  "failed": []
+}

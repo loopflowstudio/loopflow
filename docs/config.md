@@ -79,10 +79,9 @@ config files.
 ## Context budgets
 
 ```bash
-lf context                         # limits, sources, original and submitted usage
+lf context                         # size targets, sources and current usage
 lf context --wave intelligence     # local Wave memory and scratch
-lf context --task LOO-303 --json    # Task checkout and goal files
-lf context --skill implement       # preview this skill instead of realign
+lf context --task LOO-303 --json    # Task checkout, including Wave memory
 ```
 
 Edit the existing repo `.lf/config.yaml`:
@@ -104,60 +103,40 @@ context_budgets:
 
 Each field resolves from Wave frontmatter, repo config, personal config, then
 the compiled default. `lf context` shows the winning source for every value.
-The same block supports `memory_bytes`, `scratch_bytes`, `goal_tokens`,
-`goal_bytes`, `input_tokens`, and `input_bytes`. Values must be positive integers.
-Run `lf context` to see defaults; no settings file is needed to use them.
-Scratch defaults to 12,000 tokens and 96 KiB, enough for a Task's own notes;
-the [ablation study](../performance/context-ablation.md) records why each
-default stands.
+The same block supports `memory_bytes` and `scratch_bytes`. Values must be positive
+integers. These are authoring targets, not launch limits; exceeding them does not
+refuse a launch or select its context. The retired `goal_*` and `input_*` keys are removed.
 
-Usage covers gathered Wave memory (including applicable ancestors), recursive
-scratch Markdown, the selected Work's launch message, and total assembled input.
-Memory and Wave overrides are read from the execution checkout. Without a Task
-or Work seed, goal usage is reported as absent; arbitrary future messages cannot
-be measured. The query uses local stored Task direction without contacting Linear
-or launching a provider, and never reads the clipboard. Total usage is a headless
-preview of the selected skill, including budget feedback; a different skill,
-message, client, or launch source can change it.
+`lf context` measures recursive scratch Markdown and checkout Wave/ancestor memory,
+without contacting a provider or reading the clipboard. Defaults are 16,000 tokens /
+128 KiB for memory and 12,000 tokens / 96 KiB for scratch. Curate stale notes gradually,
+preserving live decisions and evidence; re-query after writing.
 
-Original usage remains visible when launch substitutes an excerpt. Complete
-sources stay on disk at the named pointer. Prompts show the overage and require
-the next memory- or scratch-writing step to curate it. `realign`, `compress`,
-`kickoff`, and `implement` preserve live decisions while consolidating notes and
-retiring historical or stacked-parent material, then re-query usage. The query
-still reports a total-input overage when an actual launch would reject it.
-Memory curation is gradual: retire the largest stale sections to git history
-until it fits just under the effective limits. Keep live decisions and evidence
-limits; memory already within budget needs no reduction merely for size.
+The first conversation turn contains the skill followed by the request. Terminal
+launches pass it as an argument; if its UTF-8 size reaches the 122,880-byte argument
+cap, launch fails before starting the provider and reports the size and cap. Headless
+message streams have no terminal-argument cap.
 
 ## Context Assembly
 
-Every skill gets context assembled automatically. Run any command to see the breakdown:
+Launch headers inventory gathered sources; those counts are not the bytes sent
+in a provider request. The harness loads its repo guide natively.
 
-```
-Tokens: 12,847
+| Content | Delivery | Selection |
+|---------|----------|-----------|
+| Operating and surface instructions, participant, reply guidance | Fixed added-instructions slot | `--no-loopflow` omits the operating guide |
+| Skill and request | First turn | Selected skill and launch message |
+| Scratch and checkout Wave/ancestor documents | Refreshed conversation block; whole files, marked start excerpts and a complete listing | Current checkout and selected Wave |
+| Explicit docs | File paths in the listing | `docs:` or `--docs` |
+| Branch changes | Git inspection commands and changed paths | `--diff patch`, `diff_files: true` |
+| Codebase summaries | Complete private reference files | `summaries:` |
+| Clipboard | Tagged block after the request in the first turn | `-c` |
 
-docs           3,842 ███
-  README.md      988 █
-scratch        3,050 ██
-clipboard      1,234 █
-```
-
-The provider loads `AGENTS.md` natively; Loopflow excludes it from injected files.
-The token breakdown shows what's included:
-
-| Section | What it contains | Config |
-|---------|------------------|--------|
-| **files** | `LOOPFLOW.md`, `scratch/`, `wave/` | always on; `--no-loopflow` drops `LOOPFLOW.md` |
-| **scratch** | `scratch/` design artifacts | always included |
-| **wave** | `wave/` docs | always included |
-| **docs** | Explicit docs files, globs, and directory markdown walks | `docs:` |
-| **diff** | Branch diff when requested | `--diff patch` |
-| **diff_files** | Files changed on this branch when requested | `diff_files: true` |
-| **summary** | Token-limited codebase overviews | `summaries:` in config |
-| **clipboard** | Pasted content (errors, context) | `-c` flag |
-
-Defaults work well for most repos. Summaries require configuration.
+The block refreshes at startup and after compaction. After compaction it also
+includes the saved active skill. Large documents include marked start excerpts
+with complete source paths and sizes.
+The rendered block stays within the provider byte cap; overflow listings and skills
+remain readable through complete-file pointers.
 
 ## Config Files
 
@@ -274,7 +253,7 @@ Use `--no-loopflow` when you want a leaner prompt without loopflow-specific proc
 
 ### Docs
 
-Prefetch specific files, globs, or directories into context. Not included by default.
+List specific files, globs, or directories for the agent to read. Not included by default.
 
 | | |
 |---|---|
@@ -283,13 +262,15 @@ Prefetch specific files, globs, or directories into context. Not included by def
 | **Default** | none (empty) |
 
 Each entry is a file (`README.md`), a glob (`'*.md'`), or a directory (`swift/`
-gathers `*.md` under it). Use this to pull in reference docs relevant to the
-task—it doesn't restrict which files the agent can edit. `scratch/` and
-`wave/` are always included automatically; you don't need `--docs` for them.
+gathers `*.md` under it). Resolved paths appear in the context listing; file
+bodies are not inlined. This doesn't restrict which files the agent can edit.
+Scratch and the selected Wave's checkout Markdown are gathered automatically.
+Wave context reads `wave/<name>/` and each path-segment ancestor, excluding siblings
+and children; listings point to those files, not database snapshots.
 
 ### Branch Files (diff_files)
 
-Full content of files modified on the current branch.
+List paths modified on the current branch for the agent to inspect.
 
 | | |
 |---|---|
@@ -297,11 +278,13 @@ Full content of files modified on the current branch.
 | **Config** | `diff_files: true` |
 | **Default** | `false` |
 
-Use `--diff files` when the agent needs complete file bodies, not just line changes. Use `--diff both` when the exact patch also matters.
+Use `--diff files` to identify changed files. The reference points to Git inspection;
+it does not preload file bodies or patches.
 
 ### Clipboard
 
-Paste content (errors, stack traces, context) into the prompt.
+Append clipboard content in its own tagged block after the request in the first turn.
+It counts toward the terminal argument cap.
 
 | | |
 |---|---|
@@ -312,7 +295,7 @@ Use `-c` when debugging: copy an error, then `lf debug -c`.
 
 ### Raw Diff
 
-Include `git diff main...HEAD` output showing exact line changes.
+Point to Git inspection commands rather than inlining a frozen patch.
 
 | | |
 |---|---|
@@ -320,11 +303,11 @@ Include `git diff main...HEAD` output showing exact line changes.
 | **Config** | `diff: true` |
 | **Default** | `false` (not included) |
 
-Use when you want the agent to see precisely what changed. Use `--diff both` to include changed file bodies too.
+Use when the agent needs to inspect exact changes. `--diff both` also lists changed paths.
 
 ### Context Files
 
-Additional files always included in every skill.
+Additional file paths listed for every skill.
 
 | | |
 |---|---|
@@ -520,17 +503,17 @@ names. The `npx/` fetch path and `rams/rams` alias are removed; an installed
 `lf -b -a claude audit` invokes a Claude bundle directly from its original
 folder through the native command parser, with gathered context separate from
 command arguments. Terminal Claude uses a captured native plugin with the same
-declarations and exact arguments; gathered context stays in its user message.
+declarations and exact arguments; gathered context uses the refreshed conversation block.
 Codex sources use explicit native skill links on both surfaces, including sources
 outside Codex's discovered catalog. Cross-harness launches translate argument
 and tool-name instructions, retain declarations and identify the original asset
 directory. Codex custom prompts expand one-based positions and `NAME=value`
 arguments. A warning names declarations the launch does not enforce.
 
-Ordinary third-party launches omit Loopflow operating and conversation guidance.
-Budget enforcement stays active; budget notices appear when managed memory,
-scratch or excerpts need them. Attributed Work and captured Flow steps retain
-their guidance. LF builtins remain inline. Captured Flow definitions survive
+Third-party and builtin launches use the same fixed additions and conversation
+context. `--no-loopflow` explicitly omits the operating guide. Memory and scratch
+budgets are authoring targets, not launch gates. LF builtins remain inline in
+the first turn. Captured Flow definitions survive
 source-file changes or removal: Claude uses a captured native definition, while
 Codex uses captured instructions. Both retain the original resource directory;
 resources removed with the bundle are not preserved.

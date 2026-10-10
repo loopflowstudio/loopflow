@@ -161,10 +161,10 @@ impl SkillInvocation {
         harness: &str,
         config: &crate::agent::AgentConfig,
     ) -> anyhow::Result<(Vec<String>, String)> {
-        let context = format!("{}\n\n{}", config.system_prompt, config.task_prompt);
+        let context = &config.task_prompt;
         if self.native_for("claude") && harness == "claude" && self.native_declarations("claude") {
             self.report_native_declarations("claude");
-            return self.prepare_claude(config, Some(&context));
+            return self.prepare_claude(config, (!context.is_empty()).then_some(context.as_str()));
         }
         let prompt = if harness == "codex" {
             self.codex_prompt()
@@ -232,14 +232,6 @@ impl SkillInvocation {
             ),
             (Some(SkillDialect::Claude), "claude") | (Some(SkillDialect::Codex), "codex")
         )
-    }
-
-    pub(crate) fn instruction_text(&self, harness: &str) -> String {
-        if self.native_for(harness) {
-            self.skill.source_text()
-        } else {
-            self.ported_text(harness)
-        }
     }
 
     fn ported_text(&self, harness: &str) -> String {
@@ -458,7 +450,7 @@ mod tests {
             },
             arguments: "the branch".into(),
         };
-        let text = invocation.instruction_text("codex");
+        let text = invocation.ported_text("codex");
         assert!(text.contains("/skills/audit/reference.md for the branch"));
         assert!(text.contains("allowed-tools: Read\nmodel: sonnet"));
         assert!(text.contains("no automatic cross-harness enforcement"));

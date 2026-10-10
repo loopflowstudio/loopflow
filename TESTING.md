@@ -83,6 +83,10 @@ Flow invoking the `default` skill must preserve their distinct launch modes.
 Prompt fixtures read the harness's actual inputs, including context files and
 stdin, rather than assuming everything remains in argv.
 
+Context byte-budget fixtures must reach their boundary with short temporary
+paths too. Run `TMPDIR=/tmp cargo test -p loopflow --lib context_block` when
+changing them; macOS's longer default paths can hide an undersized fixture.
+
 The composed delivery fixture runs a real CLI/Flow against an isolated Home and
 simulated provider observations, local follow-up filing and independent completion,
 then checks its captured CLI and monitor population in Rust
@@ -172,6 +176,13 @@ to the CI jobs below, and runs just those—fast suites first. `--reuse-passing`
 uses a prior pass only when tracked and untracked file content, the worktree,
 and the selected command plan are identical. Full and optional hosted runs never
 reuse evidence.
+
+Do not run source-tree Cargo builds alongside the materialized Rust phase.
+The materializer reuses this checkout's `target/`; rebuilding `target/debug/lf`
+from source mid-suite replaces the candidate with a different migration frontier.
+Wait for gate to finish, then run focused repairs serially (or use a separate
+`CARGO_TARGET_DIR`). Version/schema mismatches after such overlap are invalid
+verification evidence, not permission to alter a fixture or installed database.
 
 Slow suites (`loopflow`, `e2e`) stay off in changed-mode even when
 their paths change—the run prints why and how to force them:

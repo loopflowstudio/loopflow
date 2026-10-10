@@ -11,6 +11,7 @@ mod codex_mapping;
 mod common;
 #[cfg(test)]
 mod conformance_tests;
+pub(crate) mod context;
 mod dispatch;
 #[cfg(all(test, unix))]
 mod dispatch_tests;

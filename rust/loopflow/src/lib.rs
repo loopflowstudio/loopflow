@@ -5,6 +5,7 @@ pub mod chat;
 pub mod child;
 pub mod command;
 pub mod config;
+pub mod context_block;
 pub mod context_usage;
 pub mod definition;
 pub mod durable;

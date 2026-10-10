@@ -72,8 +72,9 @@ Newer explicitly active Linear evidence restores visibility and retains the lose
 inventory grants neither restoration nor execution authority. Exact slice proofs:
 `078a6642e:wave/infrastructure/MEMORY.md`, this heading; installed acceptance is unproved.
 
-SQLite owns Wave definitions/relocation, preserving IDs, files, execution, PRs,
-checkouts and uncertain effects. Personal owners and provider-first deletion stay
+SQLite retains Wave identity/relocation. Jack Heart’s October 9 LOO-444 decision
+selects checkout GOAL/MEMORY reads for launch and callbacks; LOO-449 owns remaining
+document-reader/table removal. Preserve IDs, files, execution, PRs, checkouts and uncertain effects. Personal owners and provider-first deletion stay
 removed; Project IDs precede slugs. Common-writer boundary: `84664e661`;
 earlier proofs: `bbc6eb8d3:wave/infrastructure/MEMORY.md`, this heading.
 `e68f2a423` exports saved UUIDs. Separate creation/link attempts retain uncertainty
@@ -396,17 +397,11 @@ reacquire after dropping the parent's shared handle. Parent death and elapsed
 wait grant neither mutation nor deletion authority. Main-reset/stash helpers can
 replace a held lock inode; explicit source selection avoids that failure class.
 
-Same-Home coverage, overlap, retry timing and interruption proofs remain at
-`c418953634bd101f51878d2be2b40fb3facafabd:wave/infrastructure/MEMORY.md`
-and its referenced commits `a60ac0281`, `02d6b3c00`, `95643bd50`, `d60d254ef`.
-They retain original ownership, physical failure, frozen coverage, candidate,
-caller bytes and child-held locks without republishing or double settlement.
-Synthetic proofs do not establish configured automatic settlements.
-
-PR #1457 merged installer isolation: candidate preflight and public installer
-smoke use disposable Linux containers, checking selected CLI bytes instead of
-the entry gate. Native macOS smoke stays separate. Prior simulated checks prove
-neither container/public acceptance nor automatic settlement.
+Historical same-Home overlap/interruption proofs and #1457's installer-isolation
+boundary remain at `30a4d48c8:wave/infrastructure/MEMORY.md`, this heading and its
+linked receipts. They preserve due ownership, candidate, uncertain publication,
+caller edits and child-held leases; simulated passes establish neither public
+container/macOS acceptance nor configured automatic settlement.
 
 October 6 scheduled receipt cron_a4b8b11b2a534bf99d183e677f2a6871 failed after
 recovery cron_5d930c31c7ae4a118f6b93774496991c passed continuity but the scorecard
@@ -1002,21 +997,25 @@ before tuning; archived notes authorize no work. Jack Heart's July 6
 
 ## Direct invocation and large inputs (curated 2026-10-08)
 
-Jack Heart's LOO-429 decision supersedes 428's argv/fixed-system constraints:
-all assembled context in one system/instructions file, short user trigger, no
-split, fallback or lf-side refusal wording. PR #1498 owns transport/oversized
-acceptance. Claude readback proves neither plan mode, cmux nor the combined
-candidate; shared transport proves no native resume. Jack authorized 429 landing
-despite gaps, then 428 queue/landing October 8.
+Jack Heart's October 9–10 LOO-444 decisions supersede LOO-429's all-system
+assembly: fixed additions per surface/reply-settings/participant profile; first
+turn skill, request, tagged clipboard. Terminal argv stays, with one size refusal
+naming bytes/cap; no alternative transport. Conversation context rereads checkout
+Wave/ancestor files and scratch, not SQLite. Small files stay whole; marked start
+excerpts name complete source/size. Excerpt interpretation awaits Jack's review;
+shrinking memory is undecided. Reserve listing and compact-only active skill;
+overflow pointers remain proposed UX. Plan: `scratch/what-goes-in-system-prompt.md`.
 
-Jack approved setup-free Codex coexistence: temporary native capture profile,
-bounded wrapper-trust parser probe, unchanged saved config/trust. Normal exit
-removes the profile; interruption may leave it unselected. Codex 0.160.1 composes
-profile/CLI hooks; two CLI tables replace each other; config bypass is ignored.
-Native PTYs prove capture, launch hooks and reconnect. Fresh reconnect hooks
-are absent even without lf; earlier assertions reread launch receipts. Actual
-cmux/installation remain unproved; preserve live Sessions. Launch receipts prove
-neither fresh reconnect hooks nor host tracking.
+The production cut removes inlining, the constant trigger and Codex base overrides;
+additions preserve native prompts. Capture/context hooks compose at terminal spawn,
+replacing the temporary capture profile. Budget the fully rendered 10,000 UTF-8
+bytes: native Unicode spill retained endpoint markers while losing interior text,
+so marker-only checks are insufficient. Callback/stand-in passes prove neither
+native delivery nor installed acceptance. Gate owns actual launch, compaction,
+resume and AgentProcess takeover/replacement; demo owns cmux and proposed UX.
+Release's entry-point lesson applies: provider-only probes cannot prove lf wiring.
+Historical LOO-428/429 decisions, native capture/reconnect proofs and limits:
+`30a4d48c8:wave/infrastructure/MEMORY.md`, this heading.
 
 Flow output prints position/name and messages; verbose adds accounting/INFO,
 never prompts. Started commits with Flow registration. Jack removed `--tui`

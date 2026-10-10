@@ -516,3 +516,16 @@ have to stay involved." and "You don't have to micromanage the coding."
 Jack Heart: "How your team works with agents, written down. I think this
 might be the first thing after the video?" In `x8` that section now follows
 the mock directly; the instrument thesis and the four figures come after it.
+
+Jack Heart: "its really too things: its the marriage of the work model and
+the flow model. both the what and the how", then "maybe there's a table where
+two of the columns are what and how" and "not sure what the rows are".
+
+`x9-marriage.html` (built by `x9-build.py`): after the mock, one section,
+"What you are making, and how it gets made.", holding a table with columns
+The what (work model), The how (flow model) and the example. Rows tried: a
+workstream (Wave / its workflow), one outcome (Task / Workflow), one
+conversation (Session / Skill), where it lives (Linear and the app / files in
+your repository). Two cards sit under it, the ramble becoming Tasks and the
+built-in workflows. Then "Loopflow is a software instrument." with three
+figures of one Task on one workflow. `x8` is kept.

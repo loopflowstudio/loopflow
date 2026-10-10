@@ -42,6 +42,24 @@ final class SessionsWorkspace {
     }
 
     let identity: WorkspaceIdentity
+    let isLocal: Bool
+    var executionLocation: TaskLocationObservation?
+
+    func newShell(beside pane: String? = nil, focus: Bool = true) throws {
+        let command: [String]
+        if isLocal { command = [] }
+        else {
+            guard let location = executionLocation, location.machineID == identity.machineId,
+                  case .recorded(let task, let checkout) = location.location,
+                  checkout == identity.worktree else {
+                throw RegistryQueryError("Reopen the remote Task before adding a shell; no local shell was opened.")
+            }
+            command = [try LocalWaveAgentLauncher.controlLfPath(), "--machine", location.machineID,
+                "--repository", location.repositoryID, "task", "shell", task,
+                "--checkout", identity.worktree]
+        }
+        multiplexer.newShell(command: command, beside: pane, focus: focus)
+    }
     let multiplexer = MultiplexerStore()
     let hover = PaneHover()
     private var taskFiles: [String: TaskFilesStore] = [:]
@@ -64,8 +82,9 @@ final class SessionsWorkspace {
         return store
     }
 
-    init(identity: WorkspaceIdentity, surfaces: GhosttySurfacePool = GhosttySurfacePool()) {
+    init(identity: WorkspaceIdentity, isLocal: Bool = true, surfaces: GhosttySurfacePool = GhosttySurfacePool()) {
         self.identity = identity
+        self.isLocal = isLocal
         self.surfaces = surfaces
         // The workspace outlives SessionsView, including while a shell exits
         // on the Work screen or while another repository is selected.
@@ -143,7 +162,9 @@ final class SessionsWorkspaceRegistry {
         if case .recorded(let taskID, _) = destination.location?.location { executionTask = taskID }
         else { executionTask = key }
         let workspace = workspace(for: identity)
-        let files = workspace.files(taskId: key, issue: executionTask, cwd: identity.worktree, query: query)
+        workspace.executionLocation = destination.location
+        let fileQuery = destination.location.map { query.pinFiles(to: $0) } ?? query
+        let files = workspace.files(taskId: key, issue: executionTask, cwd: identity.worktree, query: fileQuery)
         if destination.showsChanges {
             files.showsChanges = true
             workspace.multiplexer.show(.files(taskId: task.id), focus: false)
@@ -191,10 +212,7 @@ final class SessionsWorkspaceRegistry {
             }
             try surfaces.sendKey(key, terminal: terminal, surface: surface)
         case .shell:
-            guard target.machineId == localMachineId else {
-                throw RegistryQueryError("Open a shell on the execution Machine in a terminal; remote Desktop shell opening is unavailable.")
-            }
-            store.newShell(beside: target.pane, focus: false)
+            try workspace.newShell(beside: target.pane, focus: false)
         case .files(let task), .flowLog(let task):
             let identity = WorkspaceIdentity(machineId: target.machineId, worktree: target.worktree)
             guard let projection = model.task(id: task),
@@ -254,7 +272,7 @@ final class SessionsWorkspaceRegistry {
 
     func workspace(for repoPath: WorkspaceIdentity) -> SessionsWorkspace {
         if let existing = workspaces[repoPath] { return existing }
-        let workspace = SessionsWorkspace(identity: repoPath, surfaces: surfaces)
+        let workspace = SessionsWorkspace(identity: repoPath, isLocal: repoPath.machineId == localMachineId, surfaces: surfaces)
         workspaces[repoPath] = workspace
         return workspace
     }
@@ -610,7 +628,7 @@ struct SessionsContentView: View {
                     startConversation()
                 }, onNewShell: {
                     if worktreeLayout.focusedPath == nil { worktreeLayout.select(rootIdentity) }
-                    multiplexer.newShell()
+                    newShell(in: workspace)
                     navigation.content = .terminals
                 }, onShowTerminals: { navigation.content = .terminals }, onOpenTask: openTask, onNewSession: launchSessionSkill)
                     .frame(width: 320)
@@ -783,12 +801,16 @@ struct SessionsContentView: View {
         .accessibilityIdentifier("sessions-surface")
     }
 
+    private func newShell(in workspace: SessionsWorkspace) {
+        do { try workspace.newShell() }
+        catch { launchErrorTitle = "Could not open shell"; launchError = error.localizedDescription }
+    }
+
     /// One menu changes what the multiplexer shows: a shell, the Task's files
     /// or its Flow process log.
     private var workspaceCreation: some View {
         Menu {
-            Button("New shell", systemImage: "terminal") { multiplexer.newShell() }
-                .disabled(taskIdentity?.machineId != machineId)
+            Button("New shell", systemImage: "terminal") { newShell(in: workspace) }
                 .accessibilityIdentifier("work-add-shell")
             if let task = fileTask?.task.id {
                 Button("Files", systemImage: "doc") { multiplexer.show(.files(taskId: task)) }
@@ -1028,7 +1050,7 @@ struct SessionsContentView: View {
             if let path {
                 Button("New shell in this worktree") {
                     worktreeLayout.focus(slot)
-                    workspaces.workspace(for: path).multiplexer.newShell()
+                    newShell(in: workspaces.workspace(for: path))
                 }
                 .accessibilityLabel("New shell in worktree")
             }
@@ -1368,6 +1390,7 @@ private struct SplitDivider: View {
 }
 
 private struct SessionPaneView: View {
+    @State private var shellError: String?
     @Environment(WorkModel.self) private var model
     @Environment(SessionsWorkspace.self) private var workspace
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -1564,8 +1587,11 @@ private struct SessionPaneView: View {
                 emptyWorkspace
             }
         case .shell:
+            if !workspace.isLocal && store.shellCommands[pane.id] == nil {
+                Text("Reopen the Task and add a new remote shell. No local shell was opened.")
+            } else {
             GhosttyTerminalView(
-                workingDirectory: workingDirectory,
+                workingDirectory: workspace.isLocal ? workingDirectory : NSHomeDirectory(),
                 argv: store.shellCommands[pane.id] ?? [],
                 terminal: .shell(pane.id, machineId: workspace.identity.machineId),
                 surfacePool: sessions.surfaces,
@@ -1573,6 +1599,7 @@ private struct SessionPaneView: View {
                 onFocus: focusPane
             )
             .id(pane.id)
+            }
         case .flowLog(let taskId):
             FlowProcessLog(model: model, taskId: taskId)
                 .background(PaneFocusTarget(isFocused: isFocused))
@@ -1597,13 +1624,15 @@ private struct SessionPaneView: View {
             Text("Choose a session from the outline or open a shell.")
         } actions: {
             Button {
-                store.newShell()
+                do { try workspace.newShell() }
+                catch { shellError = error.localizedDescription }
             } label: {
                 Label("New shell", systemImage: "terminal")
             }
             .buttonStyle(.bordered)
             .tint(TerminalPalette.accent)
             .accessibilityIdentifier("sessions-empty-new-shell")
+            if let shellError { Text(shellError) }
         }
     }
 

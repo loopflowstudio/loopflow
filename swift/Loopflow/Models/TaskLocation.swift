@@ -51,3 +51,28 @@ public enum TaskLocation: Codable, Equatable, Sendable {
         }
     }
 }
+
+/// A checkout invalidation, not file contents or execution authority.
+public struct TaskFilesFrame: Codable, Equatable, Sendable {
+    public let request: String
+    public let taskID: String
+    public let machineID: String
+    public let checkout: String
+    public let changed: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case request, checkout, changed
+        case taskID = "task_id", machineID = "machine_id"
+    }
+}
+
+public struct TaskFilesObservation: Sendable {
+    public let frames: AsyncThrowingStream<TaskFilesFrame, any Error>
+    public let cancel: @Sendable () async -> Void
+
+    public init(frames: AsyncThrowingStream<TaskFilesFrame, any Error>,
+                cancel: @escaping @Sendable () async -> Void) {
+        self.frames = frames
+        self.cancel = cancel
+    }
+}

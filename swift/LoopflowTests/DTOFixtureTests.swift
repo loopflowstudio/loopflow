@@ -7,6 +7,15 @@ import Testing
 /// the Mac app.
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
+    @Test func taskFilesFramesKeepInvalidationSeparateFromHeartbeat() throws {
+        let data = try loadFixtureData("task_files_frames.json")
+        let frames = try JSONDecoder().decode([TaskFilesFrame].self, from: data)
+        #expect(frames.map(\.changed) == [true, false])
+        #expect(frames[0].request == frames[1].request)
+        #expect(frames[0].checkout == "/repo/task")
+        #expect(try JSONDecoder().decode([TaskFilesFrame].self, from: JSONEncoder().encode(frames)) == frames)
+    }
+
     @Test func taskLocationsRetainFreshnessAndUnavailableEvidence() throws {
         let data = try loadFixtureData("task_locations.json")
         let readings = try JSONDecoder().decode([TaskLocationObservation].self, from: data)

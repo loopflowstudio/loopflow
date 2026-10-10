@@ -1,11 +1,8 @@
 # Product decisions still open
 
 The [plan](compare-cmux-s-command-line.md) owns implementation; [findings](findings.md)
-own evidence. Jack Heart has already selected one shared Work tree, subtree
-delegation, one repository window across machines, macOS-only view control and
-one PR. Those choices are settled. Recorded location, local inspection/arrangement and
-exact-target passive read transport are local; peer composition and native I/O
-remain unfinished.
+retain evidence. Jack Heart selected shared Work, subtree delegation, one repository
+window, macOS-only control and one PR. Native/configured-peer proof remains.
 
 ## Selected decisions — October 8–9
 
@@ -14,7 +11,8 @@ exchange (406 writer/Linear, 412 exchange); imported completion never moves
 Workflow or cleans execution. Q2: nearest explicit assignment for unstarted Tasks;
 narrower overrides win, started Tasks stay put, unknown historical provenance stays
 unknown. Q3: insert at the cursor into the existing draft, with Enter separate.
-The plan owns implementation; exchange/admission and native fidelity remain unproved.
+The plan owns implementation; delegation exchange has isolated-peer proof, not
+exclusive admission, remote execution or native fidelity.
 Original Q1–Q3 record: `7d5bcf939:scratch/questions.md`, those headings.
 
 ## Reversible visibility choice — October 8
@@ -36,23 +34,15 @@ authorizes native input.
 
 ## Reversible companion choices — October 8
 
-CLI companions preserve focus, zoom and Work selection. An empty exact target is
-filled; occupied content is never replaced. Files/Flow-log reuse and unhide the
-named Task's pane only in its recorded/prepared checkout. Shell always allocates
-and remains local-only until remote opening is composed. lf3 supplies fixed-buffer extraction; native acceptance remains.
+Companions preserve focus, zoom and Work. Empty targets fill; occupied content is
+never replaced. Files/Flow-log reuse the exact Task checkout; Shell allocates on the recorded owner, rechecking its checkout before launch. lf3 extraction still needs native acceptance.
 
 ## Reversible bounded-read choice — October 8
 
-Extraction returns a prefix in terminal order, ending at a complete UTF-8 scalar,
-with explicit truncation. Empty selection is successful empty output, not an
-unavailable surface. Current selection includes a selected shell command block.
-This supplies no input authority or semantic completion inference.
-
-The read request uses a 64 KiB default and a 1 MiB maximum; the reply echoes its
-exact target and distinguishes missing/nonterminal surfaces from empty
-text. `hidden` describes pane collapse or zoom within its retained workspace,
-not compositor visibility. The composed lf3 reader uses viewport/full-screen
-selection bounds without changing the terminal's selection; no unbounded fallback.
+The plan owns the lf3 bounds and extraction contract. Truncation ends on UTF-8
+boundaries; empty selection succeeds, command-block selection participates, and
+`hidden` is pane-local rather than compositor evidence. Reads never authorize input
+or imply semantic completion.
 
 ## Command-map review — October 8
 
@@ -79,27 +69,23 @@ prompt-parity helper remain readable; neither restores a public launch switch.
 
 ## History command shape — October 8
 
-`history` defaults to the existing durable Work activity feed. `history list`
-retains bounded Process pages and their exact cursors, while `history show`,
-`replay` and `usage` move their existing readers/actions. No synthetic union or
-second history store is introduced. `history list` is a reversible spelling
-for the required command-page behavior, not a new product decision.
+`history` retains the Work activity feed; `history list` keeps Process pages and
+cursors. Show/replay/usage reuse existing owners. The `list` spelling is reversible,
+not another history store or product decision.
 
 ## Repository selection assumptions — October 9
 
 Names contain no slash; paths use `/`, `./`, `../` or `~/`. `repo_root` must be
 absolute or home-relative, avoiding caller-cwd-dependent configuration. Explicit
 remote relative paths start at the remote login directory, not its saved repo.
-These are reversible lookup choices, not shared Work identity or publication.
+These lookup choices grant no shared identity or publication.
 Primary and stack-parent Task selectors now carry repository-scoped full IDs through
 dispatch; an unscoped ambiguous prefix still fails.
 
-October 9 context: complete launch source
-`.lf/tmp/context/7060d997a648108f47fdce5e67b3efbfc71fa249160b16acf8b78336bac44709.md`
-contains the brief, 257 committed-only changed-file entries and iteration direction.
-`lf context --skill realign` reports 32,677 stored Work-seed tokens (16,677 over
-16,000). Authored notes fit; shrinking them cannot fix this generated-input producer
-gap. Historical inputs and limits remain unchanged; no Task direction is discarded.
+October 9: complete launch sources `2bd5a17e…` and `74c997a8…` read under
+`.lf/tmp/context/`. `lf context --skill implement` reports 34,545 generated Work-seed
+tokens (18,545 over 16,000); authored-note curation cannot remove the generated inventory.
+Limits remain unchanged. Pre-edit notes: `/tmp/loo427-shell-files-before/`.
 
 ## Explicit repository association — October 9
 
@@ -111,8 +97,8 @@ An ID already locating another local checkout is not reassigned. This associates
 two Machines' established roots, not two same-Machine stores or duplicate Work.
 Divergent Task/Project IDs now have separate explicit correspondence/full-ID lookup;
 joint projection now uses explicit correspondence. Binding alone grants none and never rekeys effects.
-Desktop reassociation on open/restore is local; delegation exchange and peer
-first-start admission remain. Neither binding nor a retained alias authorizes start; Git-selected Tasks
+Desktop reassociation on open/restore is local; delegation exchange is composed,
+while peer first-start admission remains. Neither binding nor a retained alias authorizes start; Git-selected Tasks
 without retained checkouts still refuse.
 LOO-412's started-Task source-transfer path conflicts with Jack Heart's retained-
 Machine decision and is excluded; dependent remote launch work stays unfinished.
@@ -173,3 +159,23 @@ Flow, not an existing cursor. Sorted alternatives and backward edges retain the
 shared graph's identity; no predicted routes or synthetic feedback are supplied.
 Native skill arguments retain the original message, separately from router
 instructions. This reversible choice is not Jack Heart's approval or complete-PR acceptance.
+
+## Portable assignment choice — October 9
+
+ID/time/provenance travel together; null restores inheritance. Unknown imported
+Machines create no connections; local assignment requires a known Machine.
+Checkout constraints and first-start refusal stay.
+
+## Recorded-location discovery assumption — October 9
+
+For shared Tasks lacking local execution, inspect currently added Machines once,
+without adding connections or polling. These connections are candidate observers,
+not a complete execution inventory. One fresh owning-Machine record routes retained
+work; conflicting positives refuse. Unavailable other peers do not invalidate that
+positive record, but missing/negative evidence can never admit first start. The
+receiving command re-resolves Work and retains admission checks. Unknown or removed
+connections do not turn delegation into a fallback. Remote Task opening now consumes these observations through existing view owners.
+A remote link without `--session` opens its primary Session, rather than presenting
+local-only execution details. Peer files now consume request-bound filesystem invalidations; disconnects retain drafts. Shell creation rechecks the recorded owner/path. No automatic shell replay on disconnect or Close/Undo is added. No local watcher
+or recovery-folder opener may interpret a peer path. These are reversible presentation
+choices, not native acceptance or a change to first-start admission.

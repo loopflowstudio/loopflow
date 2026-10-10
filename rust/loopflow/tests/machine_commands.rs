@@ -1509,3 +1509,129 @@ fn imported_execution_location_survives_delegation_and_rejects_stale_peer_reads(
     assert!(local.task(&task.id).unwrap().unwrap().worktree.is_none());
     assert!(!fixture.root.path().join("forbidden-effect").exists());
 }
+
+#[test]
+fn remote_companions_keep_the_recorded_owner_and_stream_file_changes() {
+    use loopflow::durable::RepositoryId;
+    use loopflow::ops::task::TaskFilesFrame;
+    use loopflow::store::sqlite::SqliteStore;
+    use std::io::{BufRead, BufReader};
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let fixture = preview_machines();
+    let repo = loopflow_test_support::TestRepo::new();
+    let path = repo.path().canonicalize().unwrap();
+    let remote_home = fixture.root.path().join("remote/store");
+    let registered =
+        support::register_task_with_pr(&remote_home, &path, "companions", &repo.head_sha());
+    let store = SqliteStore::new(&remote_home.join("loopflow.db")).unwrap();
+    let repository = RepositoryId::new();
+    store
+        .bind_repository(path.to_str().unwrap(), &repository)
+        .unwrap();
+    let owner = store.local_machine().unwrap().id;
+    let shell = fixture.root.path().join("remote/.local/bin/fixture-shell");
+    executable(&shell, "#!/bin/sh\nprintf 'shell at %s\\n' \"$PWD\"\ncat\n");
+    let launcher = fixture.root.path().join("remote/.local/bin/lf");
+    let script = fs::read_to_string(&launcher).unwrap();
+    fs::write(
+        &launcher,
+        script.replacen(
+            "export LF_HOME",
+            &format!("export SHELL='{}'\nexport LF_HOME", shell.display()),
+            1,
+        ),
+    )
+    .unwrap();
+    let args = [
+        "--machine",
+        "mini",
+        "--repository",
+        repository.as_str(),
+        "task",
+        "shell",
+        registered.task.id.as_str(),
+        "--checkout",
+        path.to_str().unwrap(),
+    ];
+    let mut child = fixture
+        .command(&args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all("literal ' text\n".as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert_success(&output);
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        format!("shell at {}\nliteral ' text\n", path.display())
+    );
+    let mut stale = args;
+    stale[8] = "/different-checkout";
+    let rejected = fixture.run(&stale);
+    assert!(!rejected.status.success());
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("checkout changed"));
+    assert!(rejected.stdout.is_empty());
+
+    let mut child = fixture
+        .command(&[
+            "--machine",
+            "mini",
+            "--repository",
+            repository.as_str(),
+            "task",
+            "watch-files",
+            registered.task.id.as_str(),
+            "--checkout",
+            path.to_str().unwrap(),
+            "--request",
+            "owned-request",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let (send, receive) = mpsc::channel();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines() {
+            if send.send(line.unwrap()).is_err() {
+                break;
+            }
+        }
+    });
+    let read = || -> TaskFilesFrame {
+        serde_json::from_str(&receive.recv_timeout(Duration::from_secs(10)).unwrap()).unwrap()
+    };
+    let first = read();
+    assert_eq!(first.request, "owned-request");
+    assert_eq!(first.task_id, registered.task.id);
+    assert_eq!(first.machine_id, owner);
+    assert_eq!(first.checkout, path.to_str().unwrap());
+    assert!(first.changed);
+    // An atomic replacement must invalidate even when dirty status stays dirty.
+    repo.create_file("replacement", "new peer contents\n");
+    fs::rename(path.join("replacement"), path.join("note.txt")).unwrap();
+    let mut changed = false;
+    for _ in 0..5 {
+        if read().changed {
+            changed = true;
+            break;
+        }
+    }
+    // Closing the reader's stdin must drain the remote observer, not leave it resident.
+    drop(child.stdin.take());
+    let output = child.wait_with_output().unwrap();
+    assert_success(&output);
+    assert!(changed);
+    assert!(!fixture.root.path().join("forbidden-effect").exists());
+}

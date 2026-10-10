@@ -1,7 +1,5 @@
 # product wave memory
 
-Formerly `concerto`.
-
 ## Direction after October 7
 
 LOO-387–430 briefs and LOO-427 steers supersede older designs.
@@ -166,8 +164,17 @@ provenance, not launches.
 Session/Files owners. Local cache identity differs from the peer command subject.
 Session-only/Changes links share Files preparation; recording copies transport
 classification as well as closures, or remote paths regain local affordances.
-SSH script arguments preserve stdin/native Home. Mixed exchange, admission,
-remote shells/live file observation and running-Flow/configured-SSH/native proof remain.
+SSH preserves stdin/native Home. Mixed exchange, admission and running-Flow/configured-SSH/native proof remain.
+
+October 9 remote companions: existing SSH/line transport carries owner-pinned shells
+and filesystem invalidations into retained panes/documents. Request/checkout fencing and cancellation retain drafts on stale/disconnected
+readings; no local-path fallback or shell replay. Observations are not filesystem CAS.
+Jack Heart's latest LOO-427 comments order the remaining work: finish/checkpoint remote
+companions, replace public Desktop JSON targets/tokens with `--repo`/`--task` and optional
+`--pane`, then exclusive first-start admission. A unique eligible pane may be implicit;
+ambiguity lists choices; no match has no effects. Exact lifetime tokens stay inside transport.
+Jack authorized stacking on committed LOO-412 if needed, not touching dirty peer work or
+replicating execution in ordinary planning. Existing delegation exchange is not to be redone.
 
 ## Task delivery boundary (LOO-418, reconciled 2026-10-09)
 
@@ -364,31 +371,20 @@ launching again. The [review](../../docs/reviews/session-operate-prompts.md) has
 simulations and two read-only model runs, not installed proof. Open conversations
 keep old instructions until `lf session replace`.
 
-## Capture and configurable New Session (2026-10-03 UTC)
+## Capture and configurable New Session (October 1–3)
 
-Jack Heart accepted capture on October 1, then selected New Session and the
-Linear-style compose row on October 2. Jack approved the searchable skill-picker
-prototype and requested pursue through its human demo boundary, preserving the
-existing opening prompt. New Session launches; choosing a skill only updates the
-next launch and persists per repository. The default is `capture-tasks`.
+Jack Heart accepted capture, then selected New Session and the Linear-style compose
+row. He approved the searchable picker prototype and pursuit through demo, preserving
+its opening prompt. New Session launches; skill choice changes/persists only the next
+launch per repository. Default: `capture-tasks`.
 
-Tasks express intention. Favor cohesive behavioral promises; several Tasks across
-Waves/repositories are supported, never a quota. Launch scope is a revisable clue,
-not a filing boundary. Capture stays in its repository/Wave conversation, files
-self-contained briefs without workers, and leaves operation to owners. Wave
-conversations read the same skill without changing their existing authority.
-Keep design and general/Task conversations. After an uncertain write, reconcile
-in its destination and retry identical input there; preserve each successful filing.
-
-Capture uses lf-owned discovery and `skill <name>` to avoid Flow collisions;
-presentation retains `(Home, checkout)`, both layouts and Task selection. A successful app build
-proved insufficient when its configured CLI lacked the skill: configured runtime
-and shipped packaging need their own evidence. Six focused post-sync tests cover
-selection, scope and production-control layout/error behavior; native picker
-interaction, provider/draft continuity and real cross-repository capture remain
-unproven. Prototype approval supplies no native acceptance or sustained-use KR.
-The accepted design and dated demo evidence are retained at
-[the branch checkpoint](https://github.com/loopflowstudio/loopflow/tree/25f183992969f59b42f9765d7594638cc91652dc/scratch).
+Capture stays in its repository/Wave conversation and files cohesive self-contained Tasks
+without workers or new operation authority. Scope is a revisable clue. Preserve successful
+filings; uncertain writes reconcile and retry identical input in the original destination.
+Discovery uses lf-owned `skill NAME`, retaining Home/checkout, layouts and Task selection.
+Native/configured-CLI, provider/draft and cross-repository proof remain; no KR credit.
+Six-test evidence, failures and design links:
+`5825f95d9:wave/product/MEMORY.md`, this heading.
 
 ## Session working set and Waiting (2026-10-03, revised 2026-10-06)
 

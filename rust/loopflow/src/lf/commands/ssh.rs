@@ -36,6 +36,8 @@ pub fn run(
                 | crate::lf::SessionCommand::Ensure { .. }
         }) | Some(crate::lf::Commands::Task {
             cmd: crate::lf::TaskCommand::Location { .. }
+                | crate::lf::TaskCommand::Shell { .. }
+                | crate::lf::TaskCommand::WatchFiles { .. }
                 | crate::lf::TaskCommand::Files { .. }
                 | crate::lf::TaskCommand::File { .. }
                 | crate::lf::TaskCommand::Diff { .. }

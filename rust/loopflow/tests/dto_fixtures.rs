@@ -1195,3 +1195,22 @@ fn task_locations_preserve_owner_freshness_and_unavailable_evidence() {
     ));
     assert_eq!(serde_json::to_value(readings).unwrap(), wire);
 }
+
+#[test]
+fn task_files_frames_preserve_checkout_identity_and_heartbeat() {
+    use loopflow::ops::task::TaskFilesFrame;
+    let wire: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/task_files_frames.json"
+    ))
+    .unwrap();
+    let frames: Vec<TaskFilesFrame> = serde_json::from_value(wire.clone()).unwrap();
+    assert!(frames[0].changed);
+    assert!(!frames[1].changed);
+    assert_eq!(frames[0].request, frames[1].request);
+    assert_eq!(serde_json::to_value(frames).unwrap(), wire);
+    for field in ["request", "task_id", "machine_id", "checkout", "changed"] {
+        let mut missing = wire[0].clone();
+        missing.as_object_mut().unwrap().remove(field);
+        assert!(serde_json::from_value::<TaskFilesFrame>(missing).is_err());
+    }
+}

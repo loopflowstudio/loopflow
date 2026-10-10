@@ -8,6 +8,8 @@ import os
 @testable import Loopflow
 @testable import LoopflowMac
 
+private final class RemoteCompanionBundleMarker: NSObject {}
+
 @Suite("Work destinations", .serialized)
 @MainActor
 struct WorkDestinationTests {
@@ -23,6 +25,35 @@ struct WorkDestinationTests {
 
     @Test(arguments: ["recorded", "stale", "unavailable", "unrecorded", "wrong-checkout"])
     func remoteOpeningKeepsLocalPlanningAndRetainedDrafts(outcome: String) async throws {
+        if outcome == "recorded", ProcessInfo.processInfo.environment["LOOPFLOW_REMOTE_COMPANION_HOST"] == nil {
+            let host = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            try FileManager.default.createDirectory(at: host, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: host) }
+            let executable = try #require(Bundle.main.executableURL)
+            try #require(executable.lastPathComponent == "swiftpm-testing-helper")
+            let owned = host.appendingPathComponent(executable.lastPathComponent)
+            try FileManager.default.copyItem(at: executable, to: owned)
+            let helper = host.appendingPathComponent("lf")
+            try "#!/bin/sh\nexit 93\n".write(to: helper, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
+            try JSONSerialization.data(withJSONObject: ["lf_path": helper.path])
+                .write(to: host.appendingPathComponent("LoopflowDevControl.json"))
+            let process = Process()
+            process.executableURL = owned
+            process.arguments = ["--test-bundle-path", try #require(Bundle(for: RemoteCompanionBundleMarker.self).executablePath),
+                "--testing-library", "swift-testing", "--filter", "WorkDestinationTests/remoteOpeningKeepsLocalPlanningAndRetainedDrafts", "--no-parallel"]
+            process.environment = ProcessInfo.processInfo.environment.merging(
+                ["LOOPFLOW_REMOTE_COMPANION_HOST": host.path], uniquingKeysWith: { _, new in new })
+            let output = Pipe()
+            process.standardOutput = output
+            process.standardError = output
+            try process.run()
+            let log = output.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            print(String(decoding: log, as: UTF8.self))
+            try #require(process.terminationStatus == 0)
+            return
+        }
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(try fixture().utf8))
         let wave = try #require(snapshot.waves.first)
         let task = try #require(wave.tasks.items.first)
@@ -106,6 +137,27 @@ struct WorkDestinationTests {
             #expect(companion.issue == remoteID)
             #expect(companion.query.remoteMachine == "peer")
             #expect(remote.multiplexer.layout.allPanes.count == 2)
+            let targetPane = remote.multiplexer.focusedPane
+            let focus = remote.multiplexer.focusedPaneId
+            remote.multiplexer.setZoom(targetPane.id, enabled: true)
+            let target = DesktopPaneTarget(repository: "repository", window: UUID().uuidString,
+                machineId: remoteIdentity.machineId, worktree: remoteIdentity.worktree,
+                pane: targetPane.id, incarnation: targetPane.incarnation)
+            try registry.controlPane(.init(target: target, action: .shell), model: model)
+            let shell = try #require(remote.multiplexer.layout.allPanes.first { $0.content == .shell })
+            let command = try #require(remote.multiplexer.shellCommands[shell.id])
+            #expect(Array(command.dropFirst()) == ["--machine", "peer", "--repository", "repository",
+                "task", "shell", remoteID, "--checkout", remoteIdentity.worktree])
+            #expect(remote.multiplexer.focusedPaneId == focus)
+            #expect(remote.multiplexer.zoomedPaneId == targetPane.id)
+            #expect(companion.document("remote-draft.txt").editor.string == "retained peer draft")
+            remote.multiplexer.load(sessionId: "replacement")
+            let unchanged = remote.multiplexer.layout
+            #expect(throws: RegistryQueryError.self) {
+                try registry.controlPane(.init(target: target, action: .shell), model: model)
+            }
+            #expect(remote.multiplexer.layout == unchanged)
+
             #expect(local.multiplexer.layout == layout)
         } else {
             #expect(model.linkedSession == nil)

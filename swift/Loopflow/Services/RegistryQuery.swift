@@ -40,14 +40,16 @@ public struct DiscoveryEntry: Codable, Equatable, Sendable, Identifiable {
 public struct RegistryQuery: Sendable {
     public private(set) var remoteMachine: String?
     private var run: RegistryRunner
-    private let runWithInput: @Sendable ([String], String?, String) async throws -> String
+    private var runWithInput: @Sendable ([String], String?, String) async throws -> String
     private let start: RegistryStarter?
+    private let observeFiles: (@Sendable ([String], String?) async throws -> TaskFilesObservation)?
     private let observeWork: (@Sendable () async throws -> WorkObservation)?
 
     public init(
         runWithInput: @escaping @Sendable ([String], String?, String) async throws -> String = { _, _, _ in
             throw RegistryQueryError("Draft comparison is unavailable on this transport")
         },
+        watchFiles: (@Sendable ([String], String?) async throws -> TaskFilesObservation)? = nil,
         watchWork: (@Sendable () async throws -> WorkObservation)? = nil,
         start: RegistryStarter? = nil,
         run: @escaping RegistryRunner
@@ -55,6 +57,7 @@ public struct RegistryQuery: Sendable {
         self.runWithInput = runWithInput
         self.run = run
         self.start = start
+        self.observeFiles = watchFiles
         self.observeWork = watchWork
     }
 
@@ -64,6 +67,9 @@ public struct RegistryQuery: Sendable {
         let prefix = ["--machine", machine, "--repository", repository]
         var query = RegistryQuery(runWithInput: { [runWithInput] args, _, input in
             try await runWithInput(prefix + args, nil, input)
+        }, watchFiles: { [observeFiles] args, _ in
+            guard let observeFiles else { throw RegistryQueryError("Live file observation is unavailable on this transport") }
+            return try await observeFiles(prefix + args, nil)
         }, start: { [run, start] args, _ in
             if let start { try await start(prefix + args, nil) }
             else { _ = try await run(prefix + args, nil) }
@@ -71,6 +77,38 @@ public struct RegistryQuery: Sendable {
             try await run(prefix + args, nil)
         }
         query.remoteMachine = machine
+        return query
+    }
+
+    public func watchTaskFiles(issue: String, checkout: String, request: String) async throws -> TaskFilesObservation {
+        guard let observeFiles else { throw RegistryQueryError("Live file observation is unavailable on this transport") }
+        return try await observeFiles(["task", "watch-files", issue, "--checkout", checkout, "--request", request], nil)
+    }
+
+    /// Reject delayed reads after a recorded owner changes. Neither observation
+    /// prepares a checkout or falls back to a path on the displaying Machine.
+    public func pinFiles(to location: TaskLocationObservation) -> RegistryQuery {
+        let original = self
+        let validate: @Sendable () async throws -> Void = {
+            let current = try await original.taskLocation(task: location.taskID,
+                repository: location.repositoryID, machine: location.machineID)
+            guard current.location == location.location else {
+                throw RegistryQueryError("The Task checkout changed; reopen the Task. Drafts were retained.")
+            }
+        }
+        var query = self
+        query.run = { [run] args, cwd in
+            try await validate()
+            let output = try await run(args, cwd)
+            try await validate()
+            return output
+        }
+        query.runWithInput = { [runWithInput] args, cwd, input in
+            try await validate()
+            let output = try await runWithInput(args, cwd, input)
+            try await validate()
+            return output
+        }
         return query
     }
 

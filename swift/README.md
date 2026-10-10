@@ -84,8 +84,9 @@ shows the draft comparison read-only. Task headers show the recorded checkout;
 terminal and files follow that Task without a separate worktree selector.
 Changing Work assignment leaves the recorded checkout Machine and path intact.
 Remote Task links route Files through the recorded owner; unknown owners stay unavailable.
-Remote paths are never opened or watched on the presentation Mac. Peer file changes
-are read on selection/refresh; continuous remote file observation is not implemented.
+Remote paths are never opened or watched on the presentation Mac. Filesystem events
+on the execution Machine refresh retained documents, including hidden drafts. Disconnects
+retain drafts and show an error; Refresh reconnects. Stale owner readings are discarded.
 Switching files, hiding Files and returning to the Task keeps the draft.
 Files reached through symlinks remain readable within the checkout and show a
 read-only explanation. If a regular file becomes a symlink, its retained draft
@@ -605,7 +606,8 @@ rejects stale targets, including the second target of a move or resize. Replies
 are model readings, not native-rendering proof. Shell, Files and Flow-log add
 companions beside the exact target without changing focus or zoom. Files and
 Flow-log reuse existing panes for the named Task; its recorded checkout must
-match. Shell opening is local-only.
+match. Remote shells run on the recorded execution Machine; changed or missing checkouts
+refuse launch without opening a local shell. Disconnects never replay shell commands.
 
 `lf desktop read --target "$target" --surface "$surface" --region selection --json`
 validates the retained pane and native surface without following focus or retiring

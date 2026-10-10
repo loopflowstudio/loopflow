@@ -1,3 +1,5 @@
+mod workspace;
+pub use workspace::{task_shell, watch_task_files, TaskFilesFrame};
 mod planning_explain;
 pub use planning_explain::{
     explain_task_planning, TaskPlanningAction, TaskPlanningExplanation, TaskPlanningRequest,

@@ -57,7 +57,7 @@ final class TaskFileDocument: NSObject, NSTextViewDelegate, @preconcurrency NSTe
             let merged = TaskTextEdit.merge(base: base, local: local, disk: incoming)
             return (merged, TaskTextEdit.between(local, merged))
         }.value
-        guard generation == incomingGeneration, snapshot?.content == base else { return }
+        guard !Task.isCancelled, generation == incomingGeneration, snapshot?.content == base else { return }
         guard !saving, !editor.hasMarkedText() else {
             deferredSnapshot = next
             return
@@ -297,6 +297,11 @@ final class TaskFilesStore {
     private var savedPreference = true
     private var preferenceChanges: AnyCancellable?
     private var observation: TaskFileObservation?
+    private let remoteObservation = RemoteObservation()
+    private final class RemoteObservation {
+        var task: Task<Void, Never>?
+        deinit { task?.cancel() }
+    }
     private var invalidation: Task<Void, Never>?
     private var changedPaths: Set<String> = []
     private var autosaves: [String: Task<Void, Never>] = [:]
@@ -305,12 +310,48 @@ final class TaskFilesStore {
     }
 
     func observeFiles() {
-        guard observation == nil, query.remoteMachine == nil else { return }
+        if let machine = query.remoteMachine {
+            observeRemoteFiles(machine: machine)
+            return
+        }
+        guard observation == nil else { return }
         do {
             observation = try TaskFileObservation(path: cwd) { [weak self] paths in
                 self?.invalidate(paths)
             }
         } catch { self.error = "Live file observation unavailable: \(error.localizedDescription)" }
+    }
+
+    private func observeRemoteFiles(machine: String) {
+        guard remoteObservation.task == nil else { return }
+        let request = UUID().uuidString
+        remoteObservation.task = Task { [weak self, query, issue, cwd] in
+            do {
+                let observation = try await query.watchTaskFiles(issue: issue, checkout: cwd, request: request)
+                do {
+                    for try await frame in observation.frames {
+                        try Task.checkCancellation()
+                        guard frame.request == request, frame.taskID == issue,
+                              frame.machineID == machine, frame.checkout == cwd else {
+                            throw RegistryQueryError("Stale or mismatched file observation; drafts retained. Reopen the Task.")
+                        }
+                        guard let self else { break }
+                        if frame.changed { self.error = nil; self.invalidate([""]) }
+                    }
+                    if !Task.isCancelled { throw RegistryQueryError("Live file observation disconnected; drafts retained. Refresh to reconnect.") }
+                } catch {
+                    await observation.cancel()
+                    throw error
+                }
+                await observation.cancel()
+            } catch {
+                if let self, !Task.isCancelled {
+                    self.invalidation?.cancel()
+                    self.error = "Live file observation unavailable: \(error.localizedDescription)"
+                }
+            }
+            self?.remoteObservation.task = nil
+        }
     }
 
     private func invalidate(_ paths: [String]) {
@@ -412,6 +453,7 @@ final class TaskFilesStore {
 
     /// Refresh navigation only; selection and filesystem events own document reads.
     func refresh() async {
+        if query.remoteMachine != nil { observeFiles() }
         await loadDirectory("")
         if needsComparison { await refreshChanges() }
     }

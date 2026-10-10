@@ -75,6 +75,7 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 tokio-tungstenite = "0.30"
 tempfile = "3.27"
+notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
 
 # ARM file-selection latency includes hashing the executable for install authority.
 [target.'cfg(target_arch = "aarch64")'.dependencies]

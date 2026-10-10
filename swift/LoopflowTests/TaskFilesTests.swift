@@ -31,6 +31,44 @@ struct TaskFilesTests {
                          content: text, state: .text, revision: revision ?? text, readOnlyReason: nil, sizeBytes: UInt64(text.utf8.count))
     }
 
+    @Test(arguments: ["disconnect", "stale", "changed-owner"])
+    func remoteEventsReconcileRetainedDraftsAndRejectLostOrStaleOwners(ending: String) async throws {
+        let peer = RemoteFilesFixture()
+        let location = TaskLocationObservation(request: "opened", repositoryID: "plan", taskID: "portable",
+            machineID: "peer", observedAt: 1, location: .recorded(taskID: "remote-task", checkout: "/peer/checkout"))
+        let query = RegistryQuery(watchFiles: { args, cwd in
+            try await peer.watch(args, cwd: cwd)
+        }, run: { args, cwd in
+            try await peer.read(args, cwd: cwd)
+        }).onMachine("peer", repository: "plan").pinFiles(to: location)
+        let store = TaskFilesStore(issue: "remote-task", cwd: "/peer/checkout", query: query)
+        store.autosave = false
+        store.selection = "note.txt"
+        await store.loadFile()
+        let document = try #require(store.selectedDocument)
+        document.editor.insertText("local", replacementRange: NSRange(location: 0, length: 3))
+        document.editor.setSelectedRange(NSRange(location: 2, length: 0))
+        store.selection = "other.txt" // Retained hidden documents still receive changes.
+        store.observeFiles()
+        await peer.change("one\nPEER\n")
+        try await eventually { document.text == "local\nPEER\n" }
+        #expect(store.document("note.txt") === document)
+        #expect(document.dirty)
+        #expect(document.editor.selectedRange().location == 2)
+        #expect(store.selection == "other.txt")
+        if ending == "changed-owner" {
+            await peer.change("WRONG OWNER", changeOwnerDuringRead: true)
+        } else {
+            await peer.end(stale: ending == "stale")
+        }
+        try await eventually { store.error != nil }
+        #expect(document.text == "local\nPEER\n")
+        #expect(document.snapshot?.content == "one\nPEER\n")
+        #expect(document.dirty)
+        #expect(store.selection == "other.txt")
+        await peer.end(stale: false)
+    }
+
     @Test func directoryPagesRefreshIndependentlyOfComparisonAndRetainDocuments() async throws {
         let query = RegistryQuery { args, _ in
             if args.contains("--files") { throw RegistryQueryError("Task has no active PR") }
@@ -603,4 +641,51 @@ private actor HeldTaskSave {
     func release() { pending?.resume(); pending = nil }
 }
 
+private actor RemoteFilesFixture {
+    private let stream = AsyncThrowingStream<TaskFilesFrame, any Error>.makeStream()
+    private var request: String?
+    private var content = "one\ntwo\n"
+    private var checkout = "/peer/checkout"
+    private var changeOwnerDuringRead = false
+
+    func watch(_ args: [String], cwd: String?) throws -> TaskFilesObservation {
+        guard cwd == nil, args.starts(with: ["--machine", "peer", "--repository", "plan", "task", "watch-files", "remote-task"]),
+              let flag = args.firstIndex(of: "--request") else { throw RegistryQueryError("Not the pinned peer") }
+        request = args[flag + 1]
+        emit()
+        return TaskFilesObservation(frames: stream.stream, cancel: { [stream] in stream.continuation.finish() })
+    }
+    func change(_ text: String, changeOwnerDuringRead: Bool = false) {
+        content = text
+        self.changeOwnerDuringRead = changeOwnerDuringRead
+        emit()
+    }
+    func end(stale: Bool) {
+        if stale { request = "stale"; emit() }
+        else { stream.continuation.finish(throwing: RegistryQueryError("Peer disconnected")) }
+    }
+    private func emit() {
+        guard let request else { return }
+        stream.continuation.yield(TaskFilesFrame(request: request, taskID: "remote-task", machineID: "peer",
+            checkout: "/peer/checkout", changed: true))
+    }
+    func read(_ args: [String], cwd: String?) throws -> String {
+        guard cwd == nil, args.starts(with: ["--machine", "peer", "--repository", "plan"]) else {
+            throw RegistryQueryError("Peer paths must not reach local reads")
+        }
+        let command = Array(args.dropFirst(4))
+        if command.starts(with: ["task", "location"]) {
+            let flag = try #require(command.firstIndex(of: "--request"))
+            let location = TaskLocationObservation(request: command[flag + 1], repositoryID: "plan", taskID: "portable",
+                machineID: "peer", observedAt: 1, location: .recorded(taskID: "remote-task", checkout: checkout))
+            return String(decoding: try JSONEncoder().encode([location]), as: UTF8.self)
+        }
+        guard command.starts(with: ["task", "file", "remote-task"]) else { throw RegistryQueryError("Unexpected operation") }
+        if changeOwnerDuringRead { checkout = "/changed-owner" }
+        return String(decoding: try JSONSerialization.data(withJSONObject: [
+            "recoveries": [], "issue_identifier": "TEST-1", "task_id": "remote-task", "path": "note.txt",
+            "content": content, "state": "text", "revision": content, "read_only_reason": NSNull(), "size_bytes": content.utf8.count
+        ]), as: UTF8.self)
+    }
+}
 #endif

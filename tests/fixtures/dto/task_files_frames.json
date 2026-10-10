@@ -1,0 +1,16 @@
+[
+  {
+    "request": "files-request",
+    "task_id": "task_22222222222242228222222222222222",
+    "machine_id": "home_33333333333343338333333333333333",
+    "checkout": "/repo/task",
+    "changed": true
+  },
+  {
+    "request": "files-request",
+    "task_id": "task_22222222222242228222222222222222",
+    "machine_id": "home_33333333333343338333333333333333",
+    "checkout": "/repo/task",
+    "changed": false
+  }
+]

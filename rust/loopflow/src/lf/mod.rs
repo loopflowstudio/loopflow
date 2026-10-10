@@ -1138,6 +1138,20 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Open a shell in an existing Task checkout, without preparing work
+    Shell {
+        issue: String,
+        #[arg(long)]
+        checkout: std::path::PathBuf,
+    },
+    /// Stream invalidations from an existing Task checkout (JSON lines)
+    WatchFiles {
+        issue: String,
+        #[arg(long)]
+        checkout: std::path::PathBuf,
+        #[arg(long)]
+        request: String,
+    },
     /// Show durable Task facts and its recorded work
     Status {
         /// Task issue; defaults to the Task in this checkout
@@ -1281,7 +1295,9 @@ impl TaskCommand {
             | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
             | Self::Checkout { issue, .. } => issue.as_deref(),
-            Self::Location { issue, .. }
+            Self::Shell { issue, .. }
+            | Self::WatchFiles { issue, .. }
+            | Self::Location { issue, .. }
             | Self::Sync { issue, .. }
             | Self::Move { issue, .. }
             | Self::Complete { issue, .. }
@@ -1316,7 +1332,9 @@ impl TaskCommand {
             | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
             | Self::Checkout { issue, .. } => issue.as_mut(),
-            Self::Location { issue, .. }
+            Self::Shell { issue, .. }
+            | Self::WatchFiles { issue, .. }
+            | Self::Location { issue, .. }
             | Self::Sync { issue, .. }
             | Self::Move { issue, .. }
             | Self::Complete { issue, .. }

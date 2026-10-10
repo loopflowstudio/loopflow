@@ -968,7 +968,9 @@ fn read_task_draft() -> anyhow::Result<String> {
 
 fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
     match command {
-        TaskCommand::Location { .. } => unreachable!("location reads precede admission"),
+        TaskCommand::Shell { .. }
+        | TaskCommand::WatchFiles { .. }
+        | TaskCommand::Location { .. } => unreachable!("location reads precede admission"),
         TaskCommand::Automation { json } => {
             let status = loopflow::ops::task_automation::status(repo)?;
             if *json {
@@ -1493,7 +1495,7 @@ fn run() -> anyhow::Result<()> {
             || matches!(
                 cli.command,
                 Some(Commands::Task {
-                    cmd: TaskCommand::Location { .. }
+                    cmd: TaskCommand::Location { .. } | TaskCommand::WatchFiles { .. }
                 })
             );
         if preview {
@@ -1549,7 +1551,7 @@ fn run() -> anyhow::Result<()> {
     let location_read = matches!(
         cli.command,
         Some(Commands::Task {
-            cmd: TaskCommand::Location { .. }
+            cmd: TaskCommand::Location { .. } | TaskCommand::WatchFiles { .. }
         })
     );
     if cli.context || cli.explain || planning_read || location_read {
@@ -1599,6 +1601,24 @@ fn run() -> anyhow::Result<()> {
             request.as_deref(),
             *json || cli.json,
         );
+    }
+    match &cli.command {
+        Some(Commands::Task {
+            cmd: TaskCommand::Shell { issue, checkout },
+        }) => {
+            return loopflow::ops::task::task_shell(issue, checkout);
+        }
+        Some(Commands::Task {
+            cmd:
+                TaskCommand::WatchFiles {
+                    issue,
+                    checkout,
+                    request,
+                },
+        }) => {
+            return loopflow::ops::task::watch_task_files(issue, checkout, request);
+        }
+        _ => {}
     }
     if planning_read {
         let _cwd = cli

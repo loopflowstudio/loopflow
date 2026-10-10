@@ -78,8 +78,8 @@ CLI. Canonical identity must not redirect checkout bytes into main. `10d44520f`
 removes draft storage; creation preserves bytes, relocation leaves files;
 SQLite retains identity/execution. `wave_workflows` retains Project catalog,
 selection and Task capture. Preserve LOO-444 at integration; acceptance is open.
-Jack authorized publication after mocked sync proof. At `f4314107b`, sync sends
-no summary; only creation does. Acceptance requires a writer. Draft: `scratch/read-wave-goals-and-memory.md`. Implementation and branch/main
+Jack requires mocked sync proof before publication. At `f4314107b`, only creation
+sends summaries; sync needs a writer. Draft: `scratch/read-wave-goals-and-memory.md`. Implementation and branch/main
 policy remain open; publication awaits proof.
 
 LOO-406's common writer boundary is `84664e661`; `e68f2a423` exports saved UUIDs.

@@ -22,7 +22,20 @@ fn terminal_context_refreshes_without_replacing_instructions_or_losing_failed_se
     repo.create_file("scratch/small.md", "CURRENT_SCRATCH");
     let codex_command = regex::Regex::new(r#""command" = ("(?:[^"\\]|\\.)*")"#).unwrap();
     for harness in ["claude", "codex"] {
+        repo.create_file("wave/fixture/MEMORY.md", "CURRENT_WAVE_MEMORY");
         let home = tempfile::tempdir().unwrap();
+        let store =
+            loopflow::store::sqlite::SqliteStore::new(&home.path().join("machine/loopflow.db"))
+                .unwrap();
+        store
+            .create_wave(&loopflow::work::wave::Wave::new(
+                loopflow::id::WaveId::new(),
+                "fixture".into(),
+                loopflow::repository::CanonicalRepo::discover(repo.path())
+                    .unwrap()
+                    .to_string(),
+            ))
+            .unwrap();
         let bin = home.path().join("bin");
         fs::create_dir(&bin).unwrap();
         let provider = bin.join(harness);
@@ -48,7 +61,15 @@ exit 23
             .env("CODEX_HOME", home.path().join(".codex"))
             .env("CLAUDE_CONFIG_DIR", home.path().join(".claude"))
             .current_dir(repo.path())
-            .args(["-i", "-a", harness, "probe", "Find the bug."])
+            .args([
+                "-i",
+                "-a",
+                harness,
+                "--wave",
+                "fixture",
+                "probe",
+                "Find the bug.",
+            ])
             .output()
             .unwrap();
         assert!(!output.status.success());
@@ -73,6 +94,7 @@ exit 23
             serde_json::from_str::<String>(value).unwrap()
         };
         assert!(!instructions.contains("CURRENT_SCRATCH"));
+        assert!(!instructions.contains("CURRENT_WAVE_MEMORY"));
         assert!(!instructions.contains("Saved active skill."));
         assert!(!raw.contains("model_instructions_file"));
         assert!(!raw.contains("dangerously-bypass-hook-trust"));
@@ -120,12 +142,16 @@ exit 23
         };
         let first = invoke(0);
         assert!(first.contains("CURRENT_SCRATCH"));
+        assert!(first.contains("CURRENT_WAVE_MEMORY"));
         assert!(!first.contains("Saved active skill.\n"));
         assert!(first.contains("UNCHANGED_LARGE_FILE"));
         assert!(first.contains("source=\"scratch/large.md\" excerpt=\"start\""));
         assert!(!first.contains(&large));
         repo.create_file("scratch/small.md", "FRESH_SCRATCH");
+        repo.create_file("wave/fixture/MEMORY.md", "FRESH_WAVE_MEMORY");
         let compact = invoke(1);
+        assert!(compact.contains("FRESH_WAVE_MEMORY"));
+        assert!(!compact.contains("CURRENT_WAVE_MEMORY"));
         assert!(compact.contains("FRESH_SCRATCH"));
         assert!(!compact.contains("CURRENT_SCRATCH"));
         assert!(compact.contains("Saved active skill."));

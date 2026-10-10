@@ -57,8 +57,8 @@ Bring the plan and the implementation into agreement with what the work has taug
    existing memory. Attribute decisions by name and preserve contrary evidence
    and limits of the observations. Keep the live implementation plan in its own artifact;
    memory carries what future Wave work should know, not a copy of the pass.
-   Follow the repository's memory workflow. If identified memory is unavailable,
-   state that exact gap and continue the independent local corrections.
+   Edit GOAL.md and MEMORY.md directly in the checkout like any other files.
+   If identified memory is unavailable, state that gap and continue independent corrections.
 
 4. Check the resulting agreement. The plan must distinguish what exists from
    what remains, and the code must support claims of completed behavior. Verify

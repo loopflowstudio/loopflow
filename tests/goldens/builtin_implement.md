@@ -122,7 +122,8 @@ their durable owner before shipping.
 
 Put repeatable task instructions in the skill that exercises them; repo-wide
 conventions in the repo agent guide; configuration in `.lf/config.yaml`.
-Curate Wave decisions in `wave/<address>/MEMORY.md` through `realign`. Child
+Edit Wave `wave/<address>/GOAL.md` and `MEMORY.md` like any other files in the
+checkout; launches read them directly. Curate decisions through `realign`. Child
 memories live in nested directories; find relevant ones with filesystem tools.
 Do not create miscellaneous `.lf/` handoff notes or copy maintainer
 instructions into customer skills.
@@ -271,6 +272,7 @@ If `<lf:wave>` is present, check `wave/<wave>/GOAL.md` and `MEMORY.md` in docs:
 
 - Follow the wave's intent and principles during implementation
 - Respect decisions and constraints recorded in `MEMORY.md`
+- Edit GOAL.md and MEMORY.md directly in this checkout like any other files
 - Note drift from wave constraints in `scratch/questions.md`
 
 ## When the design is wrong

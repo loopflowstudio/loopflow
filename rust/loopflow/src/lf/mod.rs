@@ -522,7 +522,7 @@ pub enum ProjectWorkflowCommand {
     Source { project: String, name: String },
     /// List Workflow definitions, including unavailable local files
     List {
-        /// Include this Project's stored Wave definitions
+        /// Include this Project's stored Wave Workflow definitions
         #[arg(long)]
         project: Option<String>,
         #[arg(long)]
@@ -731,14 +731,6 @@ pub enum SessionCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum WaveCommand {
-    /// Replace stored Wave documents without modifying repository files
-    Edit {
-        wave: String,
-        #[arg(long, required_unless_present = "memory")]
-        goal: Option<PathBuf>,
-        #[arg(long)]
-        memory: Option<PathBuf>,
-    },
     /// Rotate this Wave using its exact destination in a retained chapter plan
     NewChapter {
         wave: String,

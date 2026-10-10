@@ -125,6 +125,7 @@ If `<lf:wave>` is present, check `wave/<wave>/GOAL.md` and `MEMORY.md` in docs:
 
 - Follow the wave's intent and principles during implementation
 - Respect decisions and constraints recorded in `MEMORY.md`
+- Edit GOAL.md and MEMORY.md directly in this checkout like any other files
 - Note drift from wave constraints in `scratch/questions.md`
 
 ## When the design is wrong

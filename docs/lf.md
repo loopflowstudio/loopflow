@@ -158,11 +158,12 @@ lf task run <id> research
 
 Without a selected Wave, explicit creation uses `inbox`. A Task gets its
 identity before placement; creation starts no agent and requires no Linear login.
-Goals, memory, Projects and comments stay in SQLite. Reads create nothing.
+Projects and comments stay in SQLite; Wave goals and memory live in the checkout.
+Reads create nothing.
 
 ```bash
 lf wave ensure parser
-lf wave edit parser --goal /tmp/goal.md --memory /tmp/memory.md
+# Edit wave/parser/GOAL.md and wave/parser/MEMORY.md directly.
 lf task create --wave parser --title "Retain escaped quotes"
 ```
 
@@ -199,10 +200,12 @@ Readback cannot protect against unseen concurrent provider writes.
 Ranks are zero-based within a Project. Selected workflow definitions stay in SQLite
 for every Wave; Desktop’s Customize and Edit controls use the same editor. Stored
 definitions are imported by `lf wave ensure`; builtin definitions remain available.
-Nested Waves use names such as `parser/tokenizer`; renaming retains their IDs,
-descendants and saved documents. `lf wave ensure` imports existing Markdown and
-Workflow sources without changing them. Repeating it preserves stored edits.
-`lf wave edit` saves to SQLite in both connection modes.
+Nested Waves use names such as `parser/tokenizer`. Edit `wave/<name>/GOAL.md`
+and `wave/<name>/MEMORY.md` like any other file; the next launch reads that
+checkout's files, including ancestor context. Creation writes missing files without
+overwriting existing content. Registry renaming retains IDs and descendants;
+move the authored directory separately to match its new address. Workflow imports
+remain independent of goal and memory files.
 
 Placement, native Sessions, workflow skills and GitHub delivery use the same Task
 identity. `lf land` requests merge; `lf pr reconcile` observes delivery. After

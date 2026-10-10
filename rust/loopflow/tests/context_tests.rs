@@ -618,7 +618,7 @@ async fn worktree_reads_its_checkout_wave_memory() {
         .current_dir(&origin)
         .output()
         .expect("git worktree add");
-    // Launch context follows this checkout, not the imported Wave documents.
+    // Checkout edits are the next launch context, independent of main.
     fs::write(
         worktree.join("wave/goals/MEMORY.md"),
         "- checkout-local decisions",

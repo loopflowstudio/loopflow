@@ -504,6 +504,17 @@ mod tests {
                 )
                 .await
                 .unwrap();
+                // Registry relocation preserves bytes; authoring moves the directory.
+                assert!(repo
+                    .path()
+                    .join("wave/infrastructure/release/GOAL.md")
+                    .is_file());
+                assert!(!repo.path().join("wave/infra").exists());
+                std::fs::rename(
+                    repo.path().join("wave/infrastructure"),
+                    repo.path().join("wave/infra"),
+                )
+                .unwrap();
             } else if address == "product/release" {
                 crate::work::wave::ensure_wave_row(&store, repo.path(), "product")
                     .await
@@ -516,6 +527,13 @@ mod tests {
                     Some(address),
                 )
                 .await
+                .unwrap();
+                assert!(repo.path().join("wave/infra/release/GOAL.md").is_file());
+                assert!(!repo.path().join("wave/product/release").exists());
+                std::fs::rename(
+                    repo.path().join("wave/infra/release"),
+                    repo.path().join("wave/product/release"),
+                )
                 .unwrap();
             }
             let discovered = store.get_wave(release.id()).await.unwrap().unwrap();
@@ -563,11 +581,8 @@ mod tests {
                 "Parent memory"
             }));
         }
-        assert!(repo
-            .path()
-            .join("wave/infrastructure/release/GOAL.md")
-            .exists());
-        assert!(!repo.path().join("wave/infra").exists());
+        assert!(repo.path().join("wave/product/release/GOAL.md").is_file());
+        assert!(!repo.path().join("wave/infra/release").exists());
     }
 
     #[tokio::test]

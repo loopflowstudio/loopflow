@@ -1666,6 +1666,40 @@ mod tests {
     }
 
     #[test]
+    fn wave_context_reads_fresh_checkout_files_without_a_registry() {
+        let repo = tempfile::tempdir().unwrap();
+        let parent = repo.path().join("wave/tools");
+        let child = parent.join("parser");
+        std::fs::create_dir_all(&child).unwrap();
+        std::fs::write(parent.join("MEMORY.md"), "Inherited decision").unwrap();
+        std::fs::write(child.join("GOAL.md"), "Parse tokens").unwrap();
+        std::fs::write(child.join("MEMORY.md"), "First decision").unwrap();
+        std::fs::write(child.join("README.md"), "Additional context").unwrap();
+        let first = gather_wave_docs(repo.path(), Some("tools/parser")).unwrap();
+        assert_eq!(
+            first
+                .iter()
+                .map(|doc| doc.content.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "Inherited decision",
+                "Additional context",
+                "Parse tokens",
+                "First decision"
+            ]
+        );
+        std::fs::write(child.join("MEMORY.md"), "Edited decision λ").unwrap();
+        let next = gather_wave_docs(repo.path(), Some("tools/parser")).unwrap();
+        assert_eq!(next[3].content, "Edited decision λ");
+        std::fs::remove_file(child.join("MEMORY.md")).unwrap();
+        let absent = gather_wave_docs(repo.path(), Some("tools/parser")).unwrap();
+        assert_eq!(absent.len(), 3);
+        assert!(!absent.iter().any(|doc| doc.content.contains("decision λ")));
+        std::fs::write(child.join("GOAL.md"), [0xff]).unwrap();
+        assert!(gather_wave_docs(repo.path(), Some("tools/parser")).is_err());
+    }
+
+    #[test]
     fn scratch_check_flags_growth_thoughts_framing_and_quoted_skill_mentions() {
         let warnings = scratch_plan_warnings(
             "Jack selected local kickoff in this conversation.\n\

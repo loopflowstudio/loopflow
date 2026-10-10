@@ -64,8 +64,6 @@ fn context_targets_measure_checkout_wave_and_refresh_local_edits() {
     )
     .unwrap();
     fs::write(&scratch, "Pending work. ".repeat(500)).unwrap();
-    // Wave configuration still comes from the registry until LOO-449; only
-    // document content has moved to the checkout in this cut.
     SqliteStore::new(&home.path().join(".lf/loopflow.db"))
         .unwrap()
         .ensure_wave(

@@ -424,3 +424,18 @@ Historical probe/check results predate the Rust cut, not production verification
 Exact retained JSON paths, earlier scratch copies and compressed-probe receipts:
 `ebdfd89cd:scratch/what-goes-in-system-prompt.md`, Evidence. No provider probes
 were rerun during compression.
+
+### Main sync reconciliation (2026-10-10)
+
+Merged pinned main `df5169ab9` (LOO-449): checkout files now also own Wave
+configuration; the document cache/API is removed. Earlier notes assigning that
+removal to future work are superseded. Keep the fixed additions, first-turn
+skill/request/clipboard and refreshed capped block; do not restore inline
+formatters. Main's fresh-file test retains README-first ordering, and the terminal
+callback fixture now checks changed Wave memory as well as scratch. The callback
+fixture no longer seeds the deleted document cache; it reads without registration.
+
+Check: `cargo test -p loopflow --test context_launch_tests terminal_context_refreshes`
+passes (1), inherited LF/LOOPFLOW variables cleared and stdin closed; native
+delivery remains gate's responsibility. Review removed the stale cache setup and
+preserved main's independent storage/configuration changes.

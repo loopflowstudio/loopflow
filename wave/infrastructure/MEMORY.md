@@ -234,12 +234,12 @@ requires more than leader death; failed descendant inventory refuses signaling.
 Draft ordering and scratch-blocked CI evidence remain at
 `be4a2b2af:wave/infrastructure/MEMORY.md`, this heading.
 
-LOO-447's source inspection disproves lifeline-only takeover: Claude's pipes and
-pending correlation belong to the launcher. OpenCode saves its endpoint but still
-respawns; stop/abort/drop bypass attachment fencing. Neither finding proves
-provider takeover impossible. FIFO remains Codex-only; reaping covers headless
-providers. Common close proves no takeover. Remaining transport
-and lifetime cut: `scratch/stop-and-take-over-claude.md`.
+LOO-447: lifelines prove no takeover. Claude owns pipes/correlation; fenced stop
+waits only for its leader. OpenCode respawns; stop/abort/drop are unfenced.
+Neither proves impossibility. Holder release must preserve both death orders
+without unbounded retention. Release’s entry-point lesson applies: runtime close
+proves no public handoff. LOO-450’s `5ce7cd5e4` shares history, not transport;
+integration is open. Plan: `scratch/stop-and-take-over-claude.md`.
 
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)
 

@@ -635,7 +635,7 @@ losers and exact receipt origins. Correspondence grants no identity or authority
 private references hold groups. Causality precedes ranking; equal revisions can
 carry different ranks, so retain bodies.
 
-Earlier scalar Git/HTTPS association, recovery, ordering and #1499 proofs:
+Earlier composition proofs:
 `9d3d2ba90:wave/infrastructure/MEMORY.md`, this heading. Due dates synchronize;
 completion requests, placements and execution remain local.
 

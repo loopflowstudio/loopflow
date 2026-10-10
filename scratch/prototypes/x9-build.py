@@ -101,14 +101,20 @@ main = f'''
   <h2>What you are making, and how it gets made.</h2>
   <p class="say">Loopflow is the marriage of two models: one for the work, and one for the flow. <b>Every Task ends shipped.</b> Loopflow uses configurable workflows to ensure that Tasks are designed thoughtfully, built simply, shipped, and validated thoroughly, all automatically.</p>
   <table class="wh">
-    <thead><tr><th></th><th>The what<small>the work model</small></th><th>The how<small>the flow model</small></th><th>In the example above</th></tr></thead>
+    <thead><tr><th></th><th>The what<small>the work model</small></th><th>The how<small>the flow model</small></th><th>Who</th></tr></thead>
     <tbody>
-      <tr><th>A workstream</th><td><b>Wave</b>A persistent workstream with an objective, its key results, and its memory.</td><td><b>Its workflow</b>The one its Tasks take up, set project by project.</td><td>Exports, on <code>feature</code></td></tr>
-      <tr><th>One outcome</th><td><b>Task</b>What will be true when it is done. It ends in a merged pull request.</td><td><b>Workflow</b>The stops where you step in, and a Flow between each.</td><td>Add CSV export: design, then demo</td></tr>
-      <tr><th>One conversation</th><td><b>Session</b>Kept under the Task it was for, whichever agent ran it.</td><td><b>Skill</b>The saved prompt it starts from. A Flow is Skills in order.</td><td><code>implement</code>, inside <code>pursue</code></td></tr>
-      <tr><th>Where it lives</th><td>In Linear and in the app, in words you already use.</td><td>In files in your repository, shared with your team like any other code.</td><td><code>EXP-12</code> · <code>.lf/workflows/feature.yaml</code></td></tr>
+      <tr><th>Plan</th><td><b>Tasks under a Wave</b>Each one states what will be true when it is done.</td><td><b><code>capture-tasks</code></b>A Skill that turns what you said into Tasks.</td><td class="you">You, talking</td></tr>
+      <tr><th>Design</th><td><b>A design</b>Kept with the Task, as you left it.</td><td><b><code>task-design</code>, then the design stop</b>Your agent drafts. It redrafts until you agree.</td><td class="you">You</td></tr>
+      <tr><th>Build</th><td><b>A pull request</b>From the Task’s own copy of the code.</td><td><b><code>pursue</code></b>Implement, tidy, catch up with the rest of the code, publish.</td><td>Your agent</td></tr>
+      <tr><th>Validate</th><td><b>A change you have used</b>The Task waits, marked, until you have.</td><td><b>The demo stop</b>Not right? It goes back through <code>pursue</code>.</td><td class="you">You</td></tr>
+      <tr><th>Ship</th><td><b>A merged pull request</b>The Task is done.</td><td><b><code>ship</code></b>Run the checks, then land it.</td><td>Your agent</td></tr>
+      <tr><th>Remember</th><td><b>Every Session, and the Wave’s memory</b>Filed under the Task they were for.</td><td><b>Reviewed notes</b>Later Sessions start from what earlier ones learned.</td><td>Loopflow</td></tr>
     </tbody>
   </table>
+  <div class="ledger">
+    <div><p class="eyebrow">Stays with you</p><ul><li>What to make</li><li>How it should work</li><li>Whether the design is right</li><li>Whether it works when you use it</li><li>When it is done</li></ul></div>
+    <div><p class="eyebrow">Off your hands</p><ul><li>Writing the code</li><li>Keeping it tidy</li><li>Keeping up with the rest of the code</li><li>Opening the pull request</li><li>Running the checks and merging</li></ul></div>
+  </div>
   <div class="halves">
     <article>
       <div class="card"><p class="lab">You</p><p class="ramble">ok so people keep emailing us asking for their data. I want them to just get it out themselves. csv probably, with whatever filters they have on. maybe a weekly one? oh and the dates in the old export are wrong</p><p class="lab down">Exports</p><ul class="tl"><li>Fix the timezone in exported dates</li><li class="pick">Add CSV export<small>Done when anyone can download the table they are looking at as a CSV file, with their filters applied.</small></li><li>Schedule a weekly export</li></ul></div>
@@ -128,10 +134,6 @@ main = f'''
   <ol class="figs">
 {FIGS}
   </ol>
-  <div class="ledger">
-    <div><p class="eyebrow">Stays with you</p><ul><li>What to make</li><li>How it should work</li><li>Whether the design is right</li><li>Whether it works when you use it</li><li>When it is done</li></ul></div>
-    <div><p class="eyebrow">Off your hands</p><ul><li>Writing the code</li><li>Keeping it tidy</li><li>Keeping up with the rest of the code</li><li>Opening the pull request</li><li>Running the checks and merging</li></ul></div>
-  </div>
 </section>
 <section id="works" class="works">
   <p class="eyebrow">Works with</p>
@@ -167,13 +169,13 @@ extra = '''
 .walk .turn.new{box-shadow:inset 3px 0 0 #1f6b36}
 .walk .kept{list-style:none;margin:12px 0 0;padding:0;border:1px solid var(--border);border-radius:8px;background:#fff}
 .walk .kept li{list-style:none;margin:0;padding:10px 14px;border-bottom:1px solid var(--border);font-size:13.5px;color:#444;display:grid;grid-template-columns:150px 1fr;gap:10px}.walk .kept li:last-child{border-bottom:0}.walk .kept b{color:var(--text);font-weight:600}
-.walk .ledger{display:grid;grid-template-columns:1fr 1fr;gap:0 56px;margin-top:34px}
-.home-page .walk .ledger .eyebrow{color:var(--burgundy);margin:0 0 10px}
-.walk .ledger ul{list-style:none;margin:0;padding:0;border-top:1px solid var(--border)}
-.walk .ledger li{list-style:none;margin:0;padding:10px 0;border-bottom:1px solid var(--border);font-size:16px}
-.walk .ledger div+div li{color:var(--text-secondary)}
+.ledger{display:grid;grid-template-columns:1fr 1fr;gap:0 56px;margin-top:34px}
+.home-page .ledger .eyebrow{color:var(--burgundy);margin:0 0 10px}
+.ledger ul{list-style:none;margin:0;padding:0;border-top:1px solid var(--border)}
+.ledger li{list-style:none;margin:0;padding:10px 0;border-bottom:1px solid var(--border);font-size:16px}
+.ledger div+div li{color:var(--text-secondary)}
 .walk .figs{margin-top:26px!important}
-@media (max-width:620px){.walk .ledger{grid-template-columns:1fr;gap:26px}.walk .kept li{grid-template-columns:1fr;gap:2px}.walk .turn.you{margin-left:12px!important}}
+@media (max-width:620px){.ledger{grid-template-columns:1fr;gap:26px}.walk .kept li{grid-template-columns:1fr;gap:2px}.walk .turn.you{margin-left:12px!important}}
 
 .wh{width:100%;border-collapse:collapse;margin:30px 0 0;font-size:14.5px;line-height:1.55;background:none}
 .home-page .wh th,.home-page .wh td{background:none;border:0;border-bottom:1px solid var(--border);padding:14px 22px 14px 0;text-align:left;vertical-align:top;color:#333}
@@ -181,7 +183,7 @@ extra = '''
 .wh thead th:last-child{font:500 11px/1.6 var(--font-mono)!important;text-transform:uppercase;letter-spacing:.1em;color:var(--text-secondary)!important;vertical-align:bottom}
 .wh thead small{display:block;font:500 11px/1.6 var(--font-mono);text-transform:uppercase;letter-spacing:.1em;color:var(--text-secondary);margin-top:4px}
 .home-page .wh tbody th{font:500 11px/1.9 var(--font-mono);text-transform:uppercase;letter-spacing:.1em;color:var(--text-secondary);white-space:nowrap;width:150px}
-.wh td b{display:block;font-weight:600;color:var(--text)}
+.wh td b{display:block;font-weight:600;color:var(--text)}.home-page .wh td.you:last-child{color:var(--wine);font-weight:600}.home-page .wh tbody th{font:400 24px/1.2 var(--font-serif)!important;text-transform:none!important;letter-spacing:0!important;color:var(--burgundy)!important;width:130px}.home-page .wh td:last-child{width:14%}
 .home-page .wh td:last-child{font-size:13.5px;color:var(--text-secondary);width:24%}
 .wh code{font:12.5px var(--font-mono);background:none;padding:0;color:var(--text)}
 .pair .halves{border-top:0!important;padding-top:0!important;margin-top:28px!important}

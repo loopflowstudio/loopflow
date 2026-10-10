@@ -537,3 +537,11 @@ instead of the Task moving: three figures titled with his three duties (be
 the designer, experience using it yourself, understand what gets built), the
 first two as an exchange where what he says changes what is built, then a
 two-column ledger of what stays with you and what is off your hands.
+
+Jack Heart asked for three alternatives to the what/how heading and lede
+(given in conversation, none chosen yet), then on the table: "i also dont like
+the rows be the hierarchy, i want it to be more like parts of software
+engineering process" and "or maybe somethign more like your table should be
+here". The `x9` table's rows are now Plan, Design, Build, Validate, Ship,
+Remember, with a Who column; the stays-with-you / off-your-hands ledger moved
+up to sit under it.

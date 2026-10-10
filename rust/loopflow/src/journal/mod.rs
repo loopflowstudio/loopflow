@@ -1000,6 +1000,23 @@ pub(crate) fn process_evidence(
     recorded_process_evidence(&record, receipts.as_deref().ok(), process_identity_evidence)
 }
 
+/// Completion is final. Otherwise only the recorded OS identity proves liveness;
+/// unknown evidence never ages into permission to replace or clean up a process.
+pub(crate) fn agent_process_evidence(
+    completed_at: Option<i64>,
+    pid: Option<u32>,
+    started_at: Option<i64>,
+    mut observe: impl FnMut(u32, i64) -> ProcessIdentityEvidence,
+) -> ProcessIdentityEvidence {
+    if completed_at.is_some() {
+        ProcessIdentityEvidence::Dead
+    } else if let Some((pid, start)) = pid.zip(started_at) {
+        observe(pid, start)
+    } else {
+        ProcessIdentityEvidence::Unknown
+    }
+}
+
 /// One identity rule for control readers and sampled activity. An unavailable
 /// receipt inventory is not an empty one; neither permits invented OS identity.
 pub(crate) fn recorded_process_evidence(
@@ -1008,11 +1025,12 @@ pub(crate) fn recorded_process_evidence(
     mut observe: impl FnMut(u32, i64) -> ProcessIdentityEvidence,
 ) -> ProcessIdentityEvidence {
     if record.kind == crate::process::ProcessKind::Agent {
-        return match (record.pid, record.os_started_at) {
-            (Some(pid), Some(start)) => observe(pid, start),
-            _ if record.completed_at.is_some() => ProcessIdentityEvidence::Dead,
-            _ => ProcessIdentityEvidence::Unknown,
-        };
+        return agent_process_evidence(
+            record.completed_at,
+            record.pid,
+            record.os_started_at,
+            observe,
+        );
     }
     let Some(receipts) = receipts else {
         return ProcessIdentityEvidence::Unknown;

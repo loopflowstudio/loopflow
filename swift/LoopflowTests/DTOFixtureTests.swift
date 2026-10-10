@@ -155,6 +155,15 @@ struct DTOFixtureTests {
         }
     }
 
+    @Test("Session states follow process evidence")
+    func sessionStatesFixture() throws {
+        let states = try JSONDecoder().decode([SessionState].self, from: loadFixtureData("session_states.json"))
+        #expect(states == [.unknown, .active, .closed])
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(SessionState.self, from: Data(#""interrupted""#.utf8))
+        }
+    }
+
     @Test("Session page retains complete enumeration and requires entries")
     func sessionPageFixture() throws {
         let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()

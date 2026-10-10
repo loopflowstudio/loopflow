@@ -61,6 +61,115 @@ mod tests {
     use crate::store::sqlite::SqliteStore;
 
     #[test]
+    fn dead_agent_never_waits_for_approval_quiet_or_blocked_report() {
+        struct Child(std::process::Child);
+        impl Drop for Child {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+        for reading in ["approval", "quiet", "blocked"] {
+            for record_exit in [false, true] {
+                let home = tempfile::tempdir().unwrap();
+                let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+                store.test_session("session", &crate::session_record::new_artifact_key());
+                let attachment = store
+                    .claim_session_attachment("session", None, &LfProcessId::new(), true)
+                    .unwrap();
+                let mut child = Child(
+                    std::process::Command::new("/bin/sleep")
+                        .env_clear()
+                        .arg("60")
+                        .spawn()
+                        .unwrap(),
+                );
+                store
+                    .record_agent_process_identity(
+                        "session",
+                        &attachment,
+                        child.0.id(),
+                        crate::journal::process_started_at(child.0.id())
+                            .unwrap()
+                            .unwrap(),
+                    )
+                    .unwrap();
+                store
+                    .record_session_activity(
+                        "session",
+                        &attachment,
+                        &SessionActivity {
+                            observed_at: 1,
+                            open_tools: 0,
+                            pending_input: usize::from(reading == "approval"),
+                            yielded: false,
+                        },
+                    )
+                    .unwrap();
+                if reading == "blocked" {
+                    store
+                        .begin_program_status(
+                            "session",
+                            Some(&attachment.agent_process_id),
+                            "terminal",
+                        )
+                        .unwrap();
+                    let records = Records {
+                        seen: true,
+                        records: vec![Report {
+                            state: State::Blocked,
+                            id: None,
+                            kind: None,
+                            progress: None,
+                            app: None,
+                            title: None,
+                            msg: Some("approval".into()),
+                        }],
+                    };
+                    store
+                        .record_program_status(
+                            "session",
+                            Some(&attachment.agent_process_id),
+                            "terminal",
+                            1,
+                            &records,
+                        )
+                        .unwrap();
+                }
+                let filter = SessionFilter {
+                    waiting: true,
+                    ..SessionFilter::default()
+                };
+                assert_eq!(store.session_summaries(&filter, 500).unwrap().len(), 1);
+                child.0.kill().unwrap();
+                child.0.wait().unwrap();
+                if record_exit {
+                    store
+                        .record_agent_process_exit("session", &attachment, true)
+                        .unwrap();
+                }
+                assert!(store.sessions(&filter).unwrap().is_empty(), "{reading}");
+                assert!(
+                    store.session_summaries(&filter, 500).unwrap().is_empty(),
+                    "{reading}"
+                );
+                let summary = store.session_summary("session", 500).unwrap().unwrap();
+                assert!(!summary.waiting);
+                assert!(summary.program_status.is_none());
+                assert_eq!(
+                    summary.agent_process_evidence,
+                    Some(crate::journal::ProcessIdentityEvidence::Dead)
+                );
+                assert_eq!(
+                    store.session_attachment("session").unwrap(),
+                    Some(attachment),
+                    "death needs no token rotation"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn program_status_overrides_inference_before_paging_and_survives_attachment_handoff() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
@@ -77,6 +186,16 @@ mod tests {
             .unwrap();
         let first = store
             .claim_session_attachment("session", None, &lf_process_id, true)
+            .unwrap();
+        store
+            .record_agent_process_identity(
+                "session",
+                &first,
+                std::process::id(),
+                crate::journal::process_started_at(std::process::id())
+                    .unwrap()
+                    .unwrap(),
+            )
             .unwrap();
         store
             .record_session_activity(
@@ -209,6 +328,20 @@ mod tests {
                     pending_input: 1,
                     yielded: false,
                 },
+            )
+            .unwrap();
+        assert!(
+            store.session_summaries(&filter, 501).unwrap().is_empty(),
+            "unknown replacement is not live"
+        );
+        store
+            .record_agent_process_identity(
+                "session",
+                &third,
+                std::process::id(),
+                crate::journal::process_started_at(std::process::id())
+                    .unwrap()
+                    .unwrap(),
             )
             .unwrap();
         assert_eq!(store.session_summaries(&filter, 501).unwrap().len(), 1);

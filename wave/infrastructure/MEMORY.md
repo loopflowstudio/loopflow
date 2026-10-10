@@ -238,6 +238,13 @@ A draft must `depends_on` main's unreleased drafts: name order broke their
 frontier fixtures in the materialized run only. PR CI defers every job while
 `scratch/` holds files: no hosted proof before landing.
 
+## Process-owned liveness (LOO-451, 2026-10-10)
+
+Jack Heart requested process-backed judgment. Unknown remains unknown, never
+Waiting or cleanup authority; timeout is unselected.
+Completed processes outrank sockets and exit events. Work-watch rereads OS evidence
+without commits. Installed kill/reconnect acceptance remains unproved.
+
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)
 
 Jack Heart selected LfSession/LfProcess (#1516) and AgentSession (#1517), both
@@ -678,18 +685,15 @@ unproved; no installed repair is authorized. Exact decisions, isolation requirem
 and proofs: `32607f1d2:wave/infrastructure/MEMORY.md`, this heading; mechanics:
 [subscriptions](../../docs/subscriptions.md).
 
-## Account auth consolidation (LOO-320, curated 2026-10-08)
+## Account auth consolidation (LOO-320, curated 2026-10-10)
 
 Jack Heart approved delivery, excluding cross-account continuation, native refresh
-coordination and headroom ranking. Native OAuth/callback ownership, side-effect-free
-cached inspection and usage-window provenance: [subscriptions](../../docs/subscriptions.md).
-Selected account precedes native Session discovery. Missing windows or reset success
-prove no capacity; printed URLs and cached login prove no current OAuth success.
-Browser login without pasted code, first connection, remembered Linear profile and
-live Claude/Codex windows remain unproved; Claude returned `invalid_grant`.
-No branch binary may migrate the installed Home; fixtures prove no installed outcome.
-Exact constraints and archived evidence: `b2228bce8:wave/infrastructure/MEMORY.md`
-under this heading, retaining the October 4 source and original caveat references.
+coordination and headroom ranking. Selected account precedes native history;
+usage proves no login or capacity. Browser login, first connection, remembered
+Linear profile and live usage windows remain unproved; Claude returned
+`invalid_grant`. Branch binaries never migrate the installed Home.
+[Mechanics](../../docs/subscriptions.md); constraints and proof limits: `be4a2b2af:wave/infrastructure/MEMORY.md`, this heading and its
+`b2228bce8` archive.
 
 ## Task deletion and command ownership (LOO-305, curated 2026-10-08)
 

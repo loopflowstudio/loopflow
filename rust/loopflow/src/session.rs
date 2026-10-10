@@ -208,7 +208,7 @@ impl Default for SessionFilter {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SessionSummary {
     pub primary_scope: Option<String>,
-    pub attachment_outcome: Option<String>,
+    pub agent_process_evidence: Option<crate::journal::ProcessIdentityEvidence>,
     /// Waiting on a person, as of the read's clock.
     pub waiting: bool,
     pub program_status: Option<crate::program_status::Records>,

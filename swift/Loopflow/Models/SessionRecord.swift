@@ -5,7 +5,6 @@ public enum SessionState: String, Codable, Sendable, Hashable {
     case unknown
     case active
     case closed
-    case interrupted
 }
 
 public enum SessionAttention: String, Codable, Sendable, Hashable {
@@ -187,7 +186,6 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
         switch state {
         case .active: return "Active"
         case .closed: return "Closed"
-        case .interrupted: return "Interrupted"
         case .unknown: return interactive ? "Session" : "Run"
         }
     }

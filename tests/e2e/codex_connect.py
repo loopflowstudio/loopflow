@@ -565,6 +565,20 @@ def _public_connection_contract(
         )
         wait(control / "ready")
 
+    def _resume(prompt: str) -> subprocess.Popen:
+        server.held.clear()
+        server.release.clear()
+        child = subprocess.Popen(
+            [str(binary), "-b", "session", "resume", session, prompt],
+            cwd=work,
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+        )
+        processes.append(child)
+        assert server.held.wait(15), f"resume did not reach native provider: {prompt}"
+        return child
+
     try:
         with sqlite3.connect(_database(env)) as database:
             endpoint, thread, generation = database.execute(
@@ -736,17 +750,7 @@ def _public_connection_contract(
                 # Abruptly kill only this fixture's resumed driver. The next
                 # explicit resume must use the same native thread on a new engine;
                 # peer exchange itself must never retry the interrupted turn.
-                server.held.clear()
-                server.release.clear()
-                resumed = subprocess.Popen(
-                    [str(binary), "-b", "session", "resume", session, "held before driver death"],
-                    cwd=work,
-                    env=env,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.PIPE,
-                )
-                processes.append(resumed)
-                assert server.held.wait(15), "explicit resume did not reach native provider"
+                resumed = _resume("held before driver death")
                 planning_exchange("resumed", session)
                 resumed.kill()
                 resumed.communicate(timeout=10)
@@ -758,18 +762,8 @@ def _public_connection_contract(
                         "WHERE session_id=? ORDER BY seq",
                         (session,),
                     ).fetchall()
-                server.held.clear()
-                server.release.clear()
                 launches = set(Path(env["LF_PROBE_ENGINES"]).glob("*.json"))
-                recovered = subprocess.Popen(
-                    [str(binary), "-b", "session", "resume", session, "held after driver death"],
-                    cwd=work,
-                    env=env,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.PIPE,
-                )
-                processes.append(recovered)
-                assert server.held.wait(15), "dead-driver resume did not reach native provider"
+                recovered = _resume("held after driver death")
                 with sqlite3.connect(_database(env)) as database:
                     selected = database.execute(
                         "SELECT provider_thread FROM agent_sessions WHERE id=?",

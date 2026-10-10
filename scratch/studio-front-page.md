@@ -437,3 +437,7 @@ mutate and trust captures what matters". Figure 2 is now "The work, written
 down": Loopflow writes the Tasks, in plain words, and you can change them.
 Jack Heart on figure 3: "review the design is not quite right. \"jam\"?"
 Figure 3 is now "You jam on the design."
+Jack Heart on the subheader: "From a voice note to a set of merged pull
+requests?" then "From a rambling idea?" The `x7` subheader is "From a rambling
+idea to a set of merged pull requests." No voice input was found in the code,
+so "voice note" would have been a claim the product does not back.

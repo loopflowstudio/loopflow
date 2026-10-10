@@ -74,7 +74,7 @@ main = f'''
   </div>
 </section>
 <section class="walk">
-  <h2>From a goal to a merged pull request.</h2>
+  <h2>From a rambling idea to a set of merged pull requests.</h2>
   <p class="say">Coding with agents is about empowering people, not delegating the thinking to robots. That is why we call Loopflow a software instrument: you play it, and what comes out is yours. Your agent does the building. You decide what to make, and whether it is right. Here is one Task, followed from start to end.</p>
   <ol class="figs">
 {FIGS}

@@ -2,8 +2,8 @@
 
 Jack Heart requested provider-independent takeover and stop on 2026-10-09.
 The outcome is accepted; the transport design below remains a draft (2026-10-10).
-Source reconciliation: native command dispatch (`773f244b3`, 2026-10-10),
-including exact native permission choices and shared mutation decoding.
+Source reconciliation: shared native-client launch (`b16be2b7a`, 2026-10-10)
+and command dispatch (`773f244b3`), including exact native permission choices.
 Local main remains `df5169ab9` (#1521). Creation recovery, shared prompt
 submission and ordered readback remain implemented. Earlier iteration feedback's
 manual-permission implementation item is satisfied; rendered UX and public
@@ -110,6 +110,16 @@ death orders. Preserve frozen authority for prompts, replies, abort and stop.
    tied to the launcher. Transport extraction must preserve original turn origins
    while accepting only the current attachment for new writes; custody is not
    write authority.
+   Source inspection at `b16be2b7a` also finds two launcher-local failure paths:
+   `spawn_reader` emits failed completion on EOF, and `send_input` calls
+   `kill_process` after a seed write error. Transport extraction must distinguish
+   client disconnect, transport failure and confirmed provider death; neither
+   client loss nor an uncertain write may kill/restart the surviving provider or
+   settle its pending turn. Keep the existing parser, but separate its immutable
+   request origins from current-attachment activity writes: `History::record`
+   currently sends attention through its original attachment, which becomes stale
+   after handoff. Refreshing that observer must never refresh an old caller's
+   write authority. These are remaining transport changes, not source fixes here.
 2. **Finish OpenCode shell correlation.** Command dispatch is implemented: one
    HTTP/1 connection is polled under the fence until the complete fixed-length
    request reaches the socket, then response collection continues outside it.
@@ -130,8 +140,10 @@ death orders. Preserve frozen authority for prompts, replies, abort and stop.
 4. **Prove the public path.** Both death orders, AgentProcess identity and pending
    turns, A → B → A stale-token rejection, current stop, foreground exclusion,
    missing identity and no retained dead-provider lifelines. Include takeover before
-   first native output and while a permission is pending. Linux CI owns platform
-   acceptance. The demo attaches a second lf, SIGKILLs the launcher, checks `lf top`,
+   first native output and while a permission is pending, plus a client disconnect
+   or lost write acknowledgement while the provider still runs. Verify pending
+   history and current-owner attention separately from native-client exit. Linux CI
+   owns platform acceptance. The demo attaches a second lf, SIGKILLs the launcher, checks `lf top`,
    then stops from the current attachment, for Claude and OpenCode.
 
 Neither current transport gap proves takeover impossible or authorizes a refusal.
@@ -245,4 +257,4 @@ response collection must not poll an already-completed connection again.
 
 ## Checks
 
-Checks: `cargo check -p loopflow`, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, network-isolated `cargo test -p loopflow --lib ops::human_session::tests::{opencode_public_open_recovers_pending_identity_without_restarting_provider,codex_connection_launch_preserves_provider_and_rejects_replaced_attachment}` (each separately), and `git diff --check` pass; unchanged dispatch proofs remain at `773f244b3`, public death orders unfinished, Linux acceptance CI-owned.
+Checks: `git diff --check` passes (prose-only reconciliation); prior build, Clippy and two public connection checks remain at `b16be2b7a`; no product tests rerun, public death orders unfinished and Linux acceptance CI-owned.

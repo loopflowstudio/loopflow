@@ -384,3 +384,5 @@ including original evidence paths and archived transcript, is preserved at
 Scratch remains local/untracked. Pre-compression notes are also preserved at
 `/tmp/loo444-compress-notes-SaPexN/`; pre-reconciliation notes at
 `/tmp/loo444-realign-notes-8VzCoo/`.
+
+Sync check (2026-10-09, main `906576f39`): `cargo test --offline -p loopflow --lib harness::codex::tests::start_and_resume_add_instructions_without_replacing_native_base -- --exact` passed (1 test); retained additive instructions with typed AgentSessionId; broader verification remains with gate/CI.

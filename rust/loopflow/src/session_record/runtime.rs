@@ -45,13 +45,11 @@ pub(super) fn close_session_agent_process(store: &SqliteStore, session: &str) ->
     if agent.interactive {
         return Ok(false);
     }
-    let owners = agents
-        .iter()
-        .filter(|agent| {
-            agent.process.pid == Some(pid) && agent.process.os_started_at == Some(started)
-        })
-        .count();
-    if owners > 1 {
+    if agents.iter().any(|other| {
+        other.process.id != agent.process.id
+            && other.process.pid == Some(pid)
+            && other.process.os_started_at == Some(started)
+    }) {
         return Err(StoreError::InvalidAuthority(
             "AgentProcess OS identity has multiple owners".into(),
         ));
@@ -59,14 +57,11 @@ pub(super) fn close_session_agent_process(store: &SqliteStore, session: &str) ->
     // A Codex server may host unrelated conversations. This is a refusal check,
     // not another provider-specific signaling path.
     if agent.provider.as_deref() == Some("codex") {
-        let connection = store.session_connection(session)?.ok_or_else(|| {
+        let (endpoint, thread) = store.session_connection(session)?.ok_or_else(|| {
             StoreError::InvalidAuthority("Codex AgentProcess connection is unavailable".into())
         })?;
-        crate::harness::codex_connection::validate_agent_process_close((
-            &connection.0,
-            &connection.1,
-        ))
-        .map_err(|error| StoreError::InvalidAuthority(error.to_string()))?;
+        crate::harness::codex_connection::validate_agent_process_close((&endpoint, &thread))
+            .map_err(|error| StoreError::InvalidAuthority(error.to_string()))?;
     }
     crate::harness::agent_process::close_agent_process(pid, started)
         .map_err(|error| StoreError::InvalidAuthority(error.to_string()))?;

@@ -129,17 +129,12 @@ pub(crate) fn stop_native(
 /// Stop an exactly recorded headless process group. The caller holds its Session
 /// attachment fence and has refused ambiguous ownership before reaching here.
 pub(crate) fn close_agent_process(pid: u32, started: i64) -> Result<()> {
-    let same_process = || -> Result<bool> {
-        match crate::journal::process_identity_evidence(pid, started) {
-            crate::journal::ProcessIdentityEvidence::Live => Ok(true),
-            crate::journal::ProcessIdentityEvidence::Dead => Ok(false),
-            crate::journal::ProcessIdentityEvidence::Unknown => {
-                Err(anyhow!("AgentProcess OS identity is unavailable"))
-            }
+    match process_identity_evidence(pid, started) {
+        ProcessIdentityEvidence::Live => {}
+        ProcessIdentityEvidence::Dead => return Ok(()),
+        ProcessIdentityEvidence::Unknown => {
+            return Err(anyhow!("AgentProcess OS identity is unavailable"));
         }
-    };
-    if !same_process()? {
-        return Ok(());
     }
     let group = i32::try_from(pid)?;
     // SAFETY: getpgid reads process metadata. Only the exact recorded process
@@ -160,7 +155,7 @@ pub(crate) fn close_agent_process(pid: u32, started: i64) -> Result<()> {
     }
     // The leader may exit before its helpers. Use the same group-wide death
     // judgment as scheduled settlement rather than ending on leader death.
-    if crate::os_process::terminate_process_group(pid) {
+    if terminate_process_group(pid) {
         Ok(())
     } else {
         Err(anyhow!("AgentProcess group {pid} death is unresolved"))

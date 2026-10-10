@@ -17,10 +17,9 @@ use crate::process::SessionAttachment;
 use crate::store::sqlite::SqliteStore;
 use crate::store::{StoreError, StoreResult};
 
-/// Called under the Session attachment lock, so takeover cannot race the provider
-/// shutdown. Saved history and the provider thread ID survive. The endpoint and thread
-/// must come from the record; an AgentProcess that also serves an unrelated
-/// conversation is left running, and that is an error.
+/// Refuse shutdown if the saved endpoint serves an unrelated conversation.
+/// The caller holds the Session attachment lock through inspection and shutdown;
+/// this check neither signals the provider nor changes its saved history.
 pub(crate) fn validate_agent_process_close(
     (endpoint, thread): (&str, &AgentSessionId),
 ) -> Result<()> {

@@ -51,10 +51,11 @@ no refusal or relay design has been accepted on Jack Heart's behalf.
 
 ## Delete — do not maintain
 
-- Codex-only group termination in `harness/codex_connection.rs`: keep its native
-  unrelated-thread refusal, move signaling to the common AgentProcess owner.
-- Codex-only live-close branch in `session_record/runtime.rs`: keep exact identity,
-  duplicate-owner refusal and foreground exclusion for every provider.
+Removed: Codex-only signaling and runtime live-close dispatch. The surviving
+common close retains exact identity, duplicate-owner refusal and foreground
+exclusion; Codex connection inspection retains unrelated-thread refusal.
+
+Remaining:
 - OpenCode's unfenced stop/abort/drop cleanup and anonymous launch lifeline.
 - Claude's anonymous launch lifeline and launcher-owned-only transport, once its
   replacement preserves pending output/input and native history.
@@ -70,6 +71,10 @@ Architecture prose incorrectly claimed every harness signal was fenced; it now
 names the remaining OpenCode paths instead of overstating the runtime repair.
 No schema or installed data changed. Release memory's operation-entry lesson
 also applies here: runtime unit tests cannot establish public attachment takeover.
+
+Compression inlines the moved identity closure (now called only once) and
+short-circuits duplicate-owner lookup. The identity recheck after Codex I/O stays:
+the earlier runtime observation is not authority to signal a later process.
 
 ## Checks
 

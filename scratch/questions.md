@@ -8,7 +8,11 @@ including `"type":"driver_exit"`; no reader consumes that field.
 2026-10-09 implementation choice: `attached_lf_process_id` and
 `agent_sessions.agent_process_id` are renamed inside LOO-443's unreleased
 `agent_process` draft, because a second draft may not alter what an unreleased
-draft created. A sync onto a moved LOO-443 will conflict there.
+draft created. After #1519 merged, the same holds for the columns it added
+(`caller_agent_process_id`, `agent_process_id`): main's landed, unreleased draft
+is edited in place. Draft-bearing builds never promote, so only a disposable
+store that applied main's text keeps the old column names; recreate it. Jack
+asked that migration work stay cheap.
 
 2026-10-09 assumption: the Codex FIFO is now `attachment.lifeline` and the
 socket `agent.sock`. A Codex AgentProcess started by an earlier build keeps its
@@ -30,16 +34,19 @@ its `parent_lf_process_id` is the headless lf that launched it.
 
 2026-10-09 doc repair outside the rename: `docs/architecture/data.md` and
 TESTING.md described the attachment's generation fence, which LOO-443's draft
-replaces with `attachment_token`. Both now name the token; a sync onto a
-LOO-443 that rewrites the same sentences will conflict there.
+replaces with `attachment_token`. Both now name the token; after the sync
+TESTING.md's fixture guidance names the AgentProcess id where it said provider
+generation.
 
 2026-10-09 fixture repair outside the rename: `land_tests` read `via_agent`
 from the first child of the repair Process; with AgentProcess rows in the same
 table that child can be the provider. The query now selects `kind='lf'`.
 
-2026-10-09 observed, not repaired: `python/tests/test_checkout_refresh.py` runs
-the branch binary without a private Home; it failed on a missing column in the
-installed store before changing anything, and the installed schema is unchanged.
+2026-10-10 observed, not repaired: four `python/tests/test_checkout_refresh.py`
+cases set `LF_HOME`, yet `lf wt` verifies worktree ownership against
+`~/.lf/loopflow.db` and fails on `tasks.planning_completed`, a column from main's
+`local_planning` draft. It refuses before changing anything; the installed
+schema is unchanged. The read of the account Home predates this Task.
 `test_architecture` reports the same three map errors on LOO-443's commit.
 
 Signal worth sponsoring: a CI check that runs the Task's `rg` over the tree

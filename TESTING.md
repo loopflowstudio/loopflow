@@ -1189,7 +1189,7 @@ must retain Wave placement before projecting accepted Projects.
 
 When changing Session activity or Waiting, run `session_cli_tests` and
 `work_watch` together. Direct SQL fixtures must carry both the attachment
-token and the provider generation, matching the production activity writer. Rebuild both SwiftPM and
+token and the AgentProcess id, matching the production activity writer. Rebuild both SwiftPM and
 the Xcode test targets after shared model renames; Foundation types such as
 `Foundation.Process` need explicit qualification where names overlap.
 

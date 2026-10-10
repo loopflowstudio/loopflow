@@ -238,19 +238,20 @@ A draft must `depends_on` main's unreleased drafts: name order broke their
 frontier fixtures in the materialized run only. PR CI defers every job while
 `scratch/` holds files: no hosted proof before landing.
 
-## Execution vocabulary (LOO-441/442/446, 2026-10-09)
+## Execution vocabulary (LOO-441/442/446, 2026-10-10)
 
 Jack Heart selected LfSession/LfProcess (#1516) and AgentSession (#1517), both
-landed on his approval; AgentSessionId has no table. LOO-446 is the cleanup he
-requested, stacked on LOO-443 and not landed before it (PR #1520): LfProcess
-identity is `id`, references are `<role>_lf_process_id`, and the two retired
-words name nothing. The lf attached to a Session is the attached LfProcess; the
-lf running a Flow is the Flow process; FlowRunner executes it. One draft renames
-released columns and exit receipt keys (`attachment:`); without old-name readers
-an earlier build's live Codex lifeline and journal receipts are not adopted.
-`processes` holds both kinds: filter `kind`. Re-exports kept uncalled functions
-public, hence unreported. Installation unproved. Plan: `scratch/loo-446.md`. Prior proofs,
-LOO-442's unresolved gate failures and LOO-400 history:
+landed; AgentSessionId has no table. LOO-446 (PR #1520) is the cleanup he
+requested; after #1519 merged he asked for it to land (`dc87102b`). LfProcess
+identity is `id`, references `<role>_lf_process_id`, AgentProcess references
+`agent_process_id`; the two retired words name nothing. The lf attached to a
+Session is the attached LfProcess; the lf running a Flow is the Flow process;
+FlowRunner executes it. Main's unreleased `agent_process` draft is edited in
+place; LOO-446's draft renames released columns and exit receipt keys
+(`attachment:`). Without old-name readers an earlier build's live Codex lifeline
+and journal receipts are not adopted. `processes` holds both kinds: filter `kind`.
+Five Python gate cases await CI. Installation unproved. Plan: `scratch/loo-446.md`. Prior proofs,
+LOO-442's unexplained gate failures and LOO-400 history:
 `585cf52cd:wave/infrastructure/MEMORY.md`, LOO-441 and LOO-442 headings.
 
 ## Terminal conversation recovery (LOO-409, 2026-10-07)
@@ -621,8 +622,6 @@ Jack Heart's audit lives in [Environment](../../docs/architecture/environment.md
 `LF_HOME` selects the machine's data directory and `loopflow.db`; shared Exec
 names drive shell/tmux clearing. Earlier branch evidence remains at
 `c31279995a4ea0eec09c053e39c2f71a81d26034:wave/infrastructure/MEMORY.md`.
-LOO-370's October 6 completion above supersedes this section's pending-delivery
-claim; it establishes no physical capture conversion.
 
 ## Task worktree membership (LOO-358)
 
@@ -634,11 +633,6 @@ retains conservative cleanup. Earlier details:
 `6448e3c9e7e519585378feaffe04606bc1b55d3e:wave/infrastructure/MEMORY.md`
 Current contracts: architecture reference.
 
-## Synced planning integration (LOO-334, 2026-09-30)
-
-The landed cutover supersedes the bridge; planning preserves Task/PR identity,
-not execution progress. Detail: `57ac8b09fbbff3f3b7c82c00ecf9032f0cb792b1:wave/infrastructure/MEMORY.md`.
-
 ## Planning and launch preservation (curated 2026-10-02)
 
 The September 28–29 details remain at
@@ -649,7 +643,7 @@ intermediate migration, Run owners and provider-authority selection. Records pro
 preservation obligations below remain; no-remote policy/outward definition sync
 were unresolved, not authorization to restore old writers.
 
-LOO-334's durable constraints survive: presence, freshness and execution eligibility
+LOO-334's durable constraints survive (`57ac8b09f:wave/infrastructure/MEMORY.md`): presence, freshness and execution eligibility
 are separate; omission is not deletion; acquisition time is not provider revision.
 Partial/unknown-revision webhooks invalidate rather than invent complete facts.
 Preserve removal evidence across lookup races. Project revisions cannot order

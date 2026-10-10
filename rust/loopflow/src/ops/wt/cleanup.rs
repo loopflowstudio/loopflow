@@ -158,30 +158,9 @@ fn release_registry() -> OpsResult<Option<SqliteStore>> {
     SqliteStore::open_read_only(&path).map(Some).map_err(error)
 }
 
-fn evidence_blocks_checkout(store: &SqliteStore, checkout: &Path) -> OpsResult<bool> {
-    let overlaps = |path: &Path| -> OpsResult<bool> {
-        let root = crate::store::canonicalize_with_missing_tail(path).map_err(error)?;
-        Ok(root.starts_with(checkout) || checkout.starts_with(root))
-    };
-    let mut roots = vec![
-        crate::store::lf_home_dir(),
-        store.home_dir().map_err(error)?,
-    ];
-    if !cfg!(test) {
-        roots.push(
-            crate::store::production_database_path()
-                .parent()
-                .expect("database has a parent")
-                .to_path_buf(),
-        );
-    }
-    // A positive match is enough to retain. Never build a complete resolved
-    // inventory, or traverse history beneath an already protected home.
-    for root in roots {
-        if overlaps(&root)? {
-            return Ok(true);
-        }
-    }
+fn evidence_homes(
+    store: &SqliteStore,
+) -> OpsResult<Vec<(crate::provider_auth::Provider, PathBuf)>> {
     let mut homes = Vec::new();
     for provider in [
         crate::provider_auth::Provider::Codex,
@@ -203,26 +182,87 @@ fn evidence_blocks_checkout(store: &SqliteStore, checkout: &Path) -> OpsResult<b
     }
     let mut seen = HashSet::new();
     homes.retain(|home| seen.insert(home.clone()));
-    for (_, home) in &homes {
-        if overlaps(home)? {
-            return Ok(true);
-        }
-    }
-    for path in store.session_evidence_paths().map_err(error)? {
-        if overlaps(&path)? {
-            return Ok(true);
-        }
-    }
-    for (provider, home) in homes {
-        for path in
-            crate::ops::human_session::provider_conversation::transcript_evidence(provider, &home)?
-        {
-            if overlaps(&path)? {
-                return Ok(true);
+    Ok(homes)
+}
+
+/// Runs only in the evidence worker. Every reference is resolved now and none
+/// is kept: a positive match retains at once, and only complete coverage may
+/// answer false. `advance` reports one consumed row, resolved reference or
+/// native entry, never elapsed time.
+fn evidence_blocks_checkout(
+    store: &SqliteStore,
+    checkout: &Path,
+    advance: &mut dyn FnMut(),
+) -> OpsResult<bool> {
+    let mut visit = |path: Option<&Path>| -> OpsResult<bool> {
+        let overlaps = match path {
+            Some(path) => {
+                let root = crate::store::canonicalize_with_missing_tail(path).map_err(error)?;
+                root.starts_with(checkout) || checkout.starts_with(root)
             }
+            None => false,
+        };
+        advance();
+        Ok(overlaps)
+    };
+    let mut roots = vec![
+        crate::store::lf_home_dir(),
+        store.home_dir().map_err(error)?,
+    ];
+    if !cfg!(test) {
+        roots.push(
+            crate::store::production_database_path()
+                .parent()
+                .expect("database has a parent")
+                .to_path_buf(),
+        );
+    }
+    // Never traverse history beneath an already protected home.
+    for root in roots {
+        if visit(Some(&root))? {
+            return Ok(true);
         }
     }
-    Ok(false)
+    let homes = evidence_homes(store)?;
+    for (_, home) in &homes {
+        if visit(Some(home))? {
+            return Ok(true);
+        }
+    }
+    // Native layouts carry no change record, so they are walked before the
+    // history whose later changes can still be revalidated below.
+    for (provider, home) in &homes {
+        if crate::ops::human_session::provider_conversation::visit_transcript_evidence(
+            *provider,
+            home,
+            |path| visit(path).map_err(std::io::Error::other),
+        )? {
+            return Ok(true);
+        }
+    }
+    // References appended or edited behind the stream reappear at a later
+    // revision. Read until a snapshot adds nothing; history that never settles
+    // stays unknown instead of becoming an old snapshot's negative.
+    let mut revision = 0;
+    for _ in 0..8 {
+        let consumed = revision;
+        if store
+            .visit_session_evidence(&mut revision, |path| {
+                visit(path)
+                    .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))
+            })
+            .map_err(error)?
+        {
+            return Ok(true);
+        }
+        if revision == consumed {
+            if evidence_homes(store)? != homes {
+                return Err(error("provider accounts changed during observation"));
+            }
+            return Ok(false);
+        }
+    }
+    Err(error("Session evidence kept changing during observation"))
 }
 
 /// The selected and release registries enforce the same retention policy. Read
@@ -324,18 +364,12 @@ fn observe(
         validate_registration: validate_removal,
     })?;
     if validate_removal && decision.action == CleanupAction::ValidateCheckout {
-        // Final history observation retains its separate mechanism-review boundary.
-        // No worker result caches negative history or authorizes removal.
-        let local = store
-            .sqlite
-            .bounded_reader(Duration::from_secs(2))
-            .map_err(error)?;
-        let release = release_registry()?
-            .map(|store| store.bounded_reader(Duration::from_secs(2)))
-            .transpose()
-            .map_err(error)?;
-        for registry in std::iter::once(&local).chain(release.as_ref()) {
-            if evidence_blocks_checkout(registry, &decision.path)? {
+        // The worker exits before its answer is consumed and holds no locks.
+        // Nothing it observed outlives this attempt.
+        let local = store.sqlite.path().map_err(error)?;
+        let release: Option<PathBuf> = io::read(io::Read::ReleaseRegistry)?;
+        for database in std::iter::once(local).chain(release) {
+            if io::observe_evidence(database, decision.path.clone())? {
                 retain(decision, "local Session evidence");
                 return Ok(());
             }
@@ -2819,57 +2853,251 @@ mod tests {
         );
     }
 
+    /// Native homes owned by the test, so an observation's amount of work is
+    /// the fixture's and never the developer's own provider history.
+    struct NativeHomes {
+        directory: tempfile::TempDir,
+        previous: [Option<std::ffi::OsString>; 2],
+    }
+
+    impl NativeHomes {
+        const ENV: [&'static str; 2] = ["CODEX_HOME", "CLAUDE_CONFIG_DIR"];
+
+        fn isolated() -> Self {
+            let directory = tempfile::tempdir().unwrap();
+            let previous = Self::ENV.map(std::env::var_os);
+            std::env::set_var("CODEX_HOME", directory.path().join("codex"));
+            std::env::set_var("CLAUDE_CONFIG_DIR", directory.path().join("claude"));
+            Self {
+                directory,
+                previous,
+            }
+        }
+
+        fn codex_day(&self) -> PathBuf {
+            let day = self.directory.path().join("codex/sessions/2026/10/09");
+            std::fs::create_dir_all(&day).unwrap();
+            day
+        }
+    }
+
+    impl Drop for NativeHomes {
+        fn drop(&mut self) {
+            for hook in [
+                "LF_TEST_CLEANUP_EVIDENCE_GATE",
+                "LF_TEST_CLEANUP_EVIDENCE_GATE_AT",
+                "LF_TEST_CLEANUP_EVIDENCE_DELAY_MICROS",
+            ] {
+                std::env::remove_var(hook);
+            }
+            for (name, value) in Self::ENV.iter().zip(&self.previous) {
+                match value {
+                    Some(value) => std::env::set_var(name, value),
+                    None => std::env::remove_var(name),
+                }
+            }
+        }
+    }
+
+    fn declared_cache(path: &Path) -> PathBuf {
+        let cache = path.join("target");
+        std::fs::create_dir_all(&cache).unwrap();
+        std::fs::write(
+            cache.join("CACHEDIR.TAG"),
+            "Signature: 8a477f597d28d172789f06886806bc55",
+        )
+        .unwrap();
+        cache
+    }
+
+    fn captures(directory: &tempfile::TempDir, count: usize) -> rusqlite::Connection {
+        let conn = rusqlite::Connection::open(directory.path().join("loopflow.db")).unwrap();
+        conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd) VALUES('past','past','generated',1,1,'/')", []).unwrap();
+        let tx = conn.unchecked_transaction().unwrap();
+        for index in 0..count {
+            tx.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES('past','captured',?1,1,'{}')", [format!("{index:032x}")]).unwrap();
+        }
+        tx.commit().unwrap();
+        conn
+    }
+
+    fn mkfifo(path: &Path) {
+        assert!(std::process::Command::new("mkfifo")
+            .arg(path)
+            .status()
+            .unwrap()
+            .success());
+    }
+
+    #[tokio::test]
+    async fn cleanup_evidence_healthy_history_outlasts_the_stall_deadline() {
+        let _guard = crate::journal::TestLedgerGuard::new();
+        let _external = ExternalInspection::idle();
+        let homes = NativeHomes::isolated();
+        let (repo, directory, store, path) = fixture().await;
+        let payload = declared_cache(&path).join("native.jsonl");
+        std::fs::write(&payload, "preserved transcript").unwrap();
+        let outside = directory.path().join("outside.jsonl");
+        std::fs::write(&outside, "elsewhere").unwrap();
+        // Complete history and a symlink-heavy native layout: about 3,000
+        // units of healthy work, each slower than a millisecond.
+        let _history = captures(&directory, 300);
+        let day = homes.codex_day();
+        for index in 0..200 {
+            std::os::unix::fs::symlink(&outside, day.join(format!("rollout-{index:03}.jsonl")))
+                .unwrap();
+        }
+        // The one positive reference is far behind the old whole-set deadline.
+        let late = day.join("rollout-zzz.jsonl");
+        std::os::unix::fs::symlink(&payload, &late).unwrap();
+        std::env::set_var("LF_TEST_CLEANUP_EVIDENCE_DELAY_MICROS", "1000");
+        let report =
+            super::run_cleanup_pass(&store, repo.path(), CleanupBudget::default()).unwrap();
+        assert!(report.removed.is_empty());
+        retained(
+            report
+                .deferred
+                .iter()
+                .find(|item| item.path == path)
+                .unwrap(),
+            "Session evidence",
+        );
+        assert_eq!(
+            std::fs::read_to_string(&payload).unwrap(),
+            "preserved transcript"
+        );
+        std::fs::remove_file(&late).unwrap();
+        std::os::unix::fs::symlink(&outside, &late).unwrap();
+        let started = std::time::Instant::now();
+        let report =
+            super::run_cleanup_pass(&store, repo.path(), CleanupBudget::default()).unwrap();
+        // Same data, same two-second stall deadline: only useful work renewed it.
+        assert!(started.elapsed() > std::time::Duration::from_secs(3));
+        assert_eq!(report.removed, vec![path]);
+    }
+
+    #[tokio::test]
+    async fn cleanup_evidence_stall_or_interruption_retains_and_a_later_pass_collects() {
+        let _guard = crate::journal::TestLedgerGuard::new();
+        let _external = ExternalInspection::idle();
+        let _homes = NativeHomes::isolated();
+        let (repo, directory, store, path) = fixture().await;
+        let payload = declared_cache(&path).join("build-output");
+        std::fs::write(&payload, "regenerable").unwrap();
+        let _history = captures(&directory, 40);
+        let gate = directory.path().join("evidence-gate");
+        mkfifo(&gate);
+        std::env::set_var("LF_TEST_CLEANUP_EVIDENCE_GATE", &gate);
+        std::env::set_var("LF_TEST_CLEANUP_EVIDENCE_GATE_AT", "60");
+        // A real blocked open after useful work: nothing answers the FIFO.
+        let started = std::time::Instant::now();
+        let report =
+            super::run_cleanup_pass(&store, repo.path(), CleanupBudget::default()).unwrap();
+        assert!(started.elapsed() < std::time::Duration::from_secs(20));
+        assert!(report.removed.is_empty());
+        retained(&report.deferred[0], "observation unavailable");
+        // The stream ends cleanly but without its completed observation.
+        let writer = std::thread::spawn({
+            let gate = gate.clone();
+            move || std::fs::write(gate, "exit").unwrap()
+        });
+        let report =
+            super::run_cleanup_pass(&store, repo.path(), CleanupBudget::default()).unwrap();
+        writer.join().unwrap();
+        assert!(report.removed.is_empty());
+        retained(&report.deferred[0], "observation was interrupted");
+        assert_eq!(std::fs::read_to_string(&payload).unwrap(), "regenerable");
+        // The released attempt left admission available and no negative fact.
+        std::env::remove_var("LF_TEST_CLEANUP_EVIDENCE_GATE_AT");
+        let report =
+            super::run_cleanup_pass(&store, repo.path(), CleanupBudget::default()).unwrap();
+        assert_eq!(report.removed, vec![path]);
+    }
+
+    #[tokio::test]
+    async fn cleanup_evidence_revalidates_references_changed_behind_the_stream() {
+        let _guard = crate::journal::TestLedgerGuard::new();
+        let _external = ExternalInspection::idle();
+        let _homes = NativeHomes::isolated();
+        let (repo, directory, store, path) = fixture().await;
+        let payload = declared_cache(&path).join("past-conversation.jsonl");
+        std::fs::write(&payload, "retained provider history").unwrap();
+        let conn = captures(&directory, 40);
+        let reference = |target: &Path| {
+            serde_json::json!({"evidence":{"provider_session_path":target}}).to_string()
+        };
+        let first = format!("{:032x}", 0);
+        conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES('past','observed',?1,1,?2)",
+            rusqlite::params![format!("{first}:runs"), reference(&directory.path().join("outside"))]).unwrap();
+        // Rebuild the projection so the edited reference leads the stream.
+        conn.execute_batch("BEGIN; DELETE FROM session_evidence; INSERT INTO session_evidence(event_seq,capture_key,raw_paths) SELECT seq,capture_key,raw_paths FROM session_evidence_source ORDER BY seq DESC; COMMIT;").unwrap();
+        let gate = directory.path().join("evidence-gate");
+        mkfifo(&gate);
+        std::env::set_var("LF_TEST_CLEANUP_EVIDENCE_GATE", &gate);
+        std::env::set_var("LF_TEST_CLEANUP_EVIDENCE_GATE_AT", "120");
+        let statements: [(&str, String); 2] = [
+            (
+                "UPDATE session_events SET payload=?2 WHERE receipt_key=?1",
+                format!("{first}:runs"),
+            ),
+            (
+                "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES('past','observed',?1,1,?2)",
+                format!("{first}:terminal.json"),
+            ),
+        ];
+        for (statement, key) in statements {
+            // The worker is past the early rows when this write commits.
+            let report = std::thread::scope(|scope| {
+                let writer = scope.spawn(|| {
+                    let open = std::fs::OpenOptions::new().write(true).open(&gate).unwrap();
+                    rusqlite::Connection::open(directory.path().join("loopflow.db"))
+                        .unwrap()
+                        .execute(statement, rusqlite::params![key, reference(&payload)])
+                        .unwrap();
+                    drop(open);
+                });
+                let report =
+                    super::run_cleanup_pass(&store, repo.path(), CleanupBudget::default()).unwrap();
+                writer.join().unwrap();
+                report
+            });
+            assert!(report.removed.is_empty());
+            retained(&report.deferred[0], "Session evidence");
+            conn.execute(
+                "UPDATE session_events SET payload=?2 WHERE receipt_key=?1",
+                rusqlite::params![key, reference(&directory.path().join("outside"))],
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            std::fs::read_to_string(&payload).unwrap(),
+            "retained provider history"
+        );
+        std::env::remove_var("LF_TEST_CLEANUP_EVIDENCE_GATE_AT");
+        let report =
+            super::run_cleanup_pass(&store, repo.path(), CleanupBudget::default()).unwrap();
+        assert_eq!(report.removed, vec![path]);
+    }
+
     #[tokio::test]
     #[ignore = "opt-in evidence cost probe; creates a large disposable history"]
     async fn cleanup_evidence_cost_probe() {
         let _guard = crate::journal::TestLedgerGuard::new();
-        let (_repo, directory, store, _path) = fixture().await;
-        let conn = rusqlite::Connection::open(directory.path().join("loopflow.db")).unwrap();
-        conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd) VALUES('cost','cost','generated',1,1,'/')", []).unwrap();
-        let mut previous = 0;
-        for count in [1024, 8192, 65536] {
-            let tx = conn.unchecked_transaction().unwrap();
-            for index in previous..count {
-                tx.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES('cost','captured',?1,1,'{}')", [format!("{index:032x}")]).unwrap();
-            }
-            tx.commit().unwrap();
-            previous = count;
-            let started = std::time::Instant::now();
-            let raw = store.sqlite.session_evidence_paths();
-            let read_elapsed = started.elapsed();
-            match raw {
-                Ok(paths) => {
-                    let started = std::time::Instant::now();
-                    for path in &paths {
-                        crate::store::canonicalize_with_missing_tail(path).unwrap();
-                    }
-                    eprintln!("history rows={count} paths={} raw_read={read_elapsed:?} fresh_resolution={:?}", paths.len(), started.elapsed());
-                }
-                Err(error) => {
-                    eprintln!("history rows={count} raw_read={read_elapsed:?} unavailable={error}")
-                }
-            }
+        let homes = NativeHomes::isolated();
+        let (_repo, directory, store, path) = fixture().await;
+        let _history = captures(&directory, 65536);
+        let day = homes.codex_day();
+        for index in 0..65536 {
+            std::fs::write(day.join(format!("rollout-{index}.jsonl")), "").unwrap();
         }
-        let home = directory.path().join("native-cost");
-        let day = home.join("sessions/2026/10/09");
-        std::fs::create_dir_all(&day).unwrap();
-        let mut previous = 0;
-        for count in [1024, 8192, 65536] {
-            for index in previous..count {
-                std::fs::write(day.join(format!("rollout-{index}.jsonl")), "").unwrap();
-            }
-            previous = count;
-            let started = std::time::Instant::now();
-            let result = crate::ops::human_session::provider_conversation::transcript_evidence(
-                crate::provider_auth::Provider::Codex,
-                &home,
-            );
-            eprintln!(
-                "native entries={count} traversal={:?} complete={}",
-                started.elapsed(),
-                result.is_ok()
-            );
-        }
+        let started = std::time::Instant::now();
+        let blocked =
+            super::io::observe_evidence(store.sqlite.path().unwrap(), path.clone()).unwrap();
+        eprintln!(
+            "history rows=65536 native entries=65536 observation={:?}",
+            started.elapsed()
+        );
+        assert!(!blocked);
     }
 
     #[tokio::test]

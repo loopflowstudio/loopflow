@@ -58,6 +58,38 @@ fn transient(stderr: &str) -> bool {
 }
 
 pub(super) fn bounded_output(command: &mut Command, timeout: Duration) -> OpsResult<Output> {
+    let (status, stdout, stderr) = read_child(command, timeout, |mut stdout, _| {
+        let mut bytes = Vec::new();
+        stdout.read_to_end(&mut bytes)?;
+        Ok(bytes)
+    })?;
+    Ok(Output {
+        status,
+        stdout,
+        stderr,
+    })
+}
+
+/// Read-only child whose deadline restarts at each instant its reader reports.
+/// The reader decides what counts as useful work, bounds its own memory and
+/// never waits on the channel: only the latest instant matters.
+pub(super) fn progress_output<T: Send + 'static>(
+    command: &mut Command,
+    timeout: Duration,
+    read: impl FnOnce(std::process::ChildStdout, mpsc::SyncSender<Instant>) -> OpsResult<T>
+        + Send
+        + 'static,
+) -> OpsResult<T> {
+    read_child(command, timeout, read).map(|(_, value, _)| value)
+}
+
+fn read_child<T: Send + 'static>(
+    command: &mut Command,
+    timeout: Duration,
+    read: impl FnOnce(std::process::ChildStdout, mpsc::SyncSender<Instant>) -> OpsResult<T>
+        + Send
+        + 'static,
+) -> OpsResult<(std::process::ExitStatus, T, Vec<u8>)> {
     let program = command.get_program().to_string_lossy().into_owned();
     #[cfg(unix)]
     {
@@ -70,46 +102,51 @@ pub(super) fn bounded_output(command: &mut Command, timeout: Duration) -> OpsRes
         .stderr(Stdio::piped())
         .spawn()?;
     let group = ProcessGroupGuard::new(child.id());
-    let deadline = Instant::now() + timeout;
-    let (sender, receiver) = mpsc::channel();
+    let mut deadline = Instant::now() + timeout;
     let stdout = child.stdout.take().expect("stdout was piped");
-    let stderr = child.stderr.take().expect("stderr was piped");
-    for (index, mut pipe) in [
-        (0, Box::new(stdout) as Box<dyn Read + Send>),
-        (1, Box::new(stderr)),
-    ] {
-        let sender = sender.clone();
-        thread::spawn(move || {
-            let mut bytes = Vec::new();
-            let result = pipe.read_to_end(&mut bytes).map(|_| bytes);
-            let _ = sender.send((index, result));
-        });
-    }
-    drop(sender);
+    let mut stderr = child.stderr.take().expect("stderr was piped");
+    let (progress, updates) = mpsc::sync_channel(1);
+    let (sender, output) = mpsc::channel();
+    thread::spawn(move || {
+        let _ = sender.send(read(stdout, progress));
+    });
+    let (sender, errors) = mpsc::channel();
+    thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let result = stderr.read_to_end(&mut bytes).map(|_| bytes);
+        let _ = sender.send(result);
+    });
     let result = (|| {
-        let mut streams = [None, None];
+        let mut stdout = None;
+        let mut stderr = None;
         let mut status = None;
         loop {
-            while let Ok((index, bytes)) = receiver.try_recv() {
-                streams[index] = Some(bytes?);
+            if let Ok(at) = updates.try_recv() {
+                deadline = at + timeout;
+            }
+            if let Ok(value) = output.try_recv() {
+                stdout = Some(value?);
+            }
+            if let Ok(value) = errors.try_recv() {
+                stderr = Some(value?);
             }
             if status.is_none() {
                 status = child.try_wait()?;
             }
             if let Some(status) = status {
-                if streams.iter().all(Option::is_some) {
-                    return Ok(Output {
+                if stdout.is_some() && stderr.is_some() {
+                    return Ok((
                         status,
-                        stdout: streams[0].take().expect("stdout completed"),
-                        stderr: streams[1].take().expect("stderr completed"),
-                    });
+                        stdout.take().expect("stdout completed"),
+                        stderr.take().expect("stderr completed"),
+                    ));
                 }
             }
             if Instant::now() >= deadline {
-                return Err(std::io::Error::new(
+                return Err(OpsError::Io(std::io::Error::new(
                     std::io::ErrorKind::TimedOut,
                     format!("{program} read deadline exceeded"),
-                ));
+                )));
             }
             thread::sleep(Duration::from_millis(10));
         }
@@ -131,14 +168,14 @@ pub(super) fn bounded_output(command: &mut Command, timeout: Duration) -> OpsRes
         }
         thread::sleep(Duration::from_millis(10));
     }
-    let output = result?;
-    if !output.status.success() {
+    let (status, stdout, stderr) = result?;
+    if !status.success() {
         return Err(OpsError::CommandFailed {
             command: program,
-            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            stderr: String::from_utf8_lossy(&stderr).into_owned(),
         });
     }
-    Ok(output)
+    Ok((status, stdout, stderr))
 }
 
 #[cfg(test)]

@@ -19,8 +19,12 @@ FROM session_events
 WHERE kind='captured' OR (kind='observed' AND
     (receipt_key GLOB '*:runs' OR receipt_key GLOB '*:manifest.json' OR receipt_key GLOB '*:terminal.json'));
 
+-- Every projected or re-projected reference gets a later, never reused revision.
+-- A long observation revalidates what changed behind it by reading past the
+-- last revision it consumed, instead of restarting or trusting a frozen snapshot.
 CREATE TABLE session_evidence (
-    event_seq INTEGER PRIMARY KEY REFERENCES session_events(seq) ON DELETE CASCADE,
+    revision INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_seq INTEGER NOT NULL UNIQUE REFERENCES session_events(seq) ON DELETE CASCADE,
     capture_key TEXT,
     raw_paths TEXT NOT NULL
 );
@@ -38,14 +42,14 @@ VALUES(1,0,COALESCE((SELECT MAX(seq) FROM session_events),0),NOT EXISTS(SELECT 1
 -- make the cleanup reader fail closed, including during a partial backfill.
 CREATE TRIGGER session_evidence_insert AFTER INSERT ON session_events
 BEGIN
-    INSERT INTO session_evidence SELECT seq,capture_key,raw_paths
-    FROM session_evidence_source WHERE seq=NEW.seq;
+    INSERT INTO session_evidence(event_seq,capture_key,raw_paths)
+    SELECT seq,capture_key,raw_paths FROM session_evidence_source WHERE seq=NEW.seq;
 END;
 CREATE TRIGGER session_evidence_update AFTER UPDATE OF seq,kind,receipt_key,payload ON session_events
 BEGIN
     DELETE FROM session_evidence WHERE event_seq=OLD.seq;
-    INSERT INTO session_evidence SELECT seq,capture_key,raw_paths
-    FROM session_evidence_source WHERE seq=NEW.seq;
+    INSERT INTO session_evidence(event_seq,capture_key,raw_paths)
+    SELECT seq,capture_key,raw_paths FROM session_evidence_source WHERE seq=NEW.seq;
 END;
 CREATE TRIGGER session_evidence_delete AFTER DELETE ON session_events
 BEGIN

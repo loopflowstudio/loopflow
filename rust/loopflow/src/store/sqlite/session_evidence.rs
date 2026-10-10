@@ -1,7 +1,6 @@
 //! History owns the raw-reference projection. Coverage is transactional; paths
 //! remain unresolved here so every cleanup admission sees current symlinks.
-use std::collections::BTreeSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use rusqlite::{params, Connection, TransactionBehavior};
@@ -80,73 +79,83 @@ impl SqliteStore {
         })
     }
 
-    /// Read only complete raw coverage, including all appended observations in
-    /// the same SQLite snapshot. This never caches a negative filesystem result.
-    pub(crate) fn session_evidence_paths(&self) -> StoreResult<Vec<PathBuf>> {
+    /// Stream raw references newer than `after` from one snapshot, advancing it
+    /// past every consumed row. None marks a newly consumed row; Some is one
+    /// reference to resolve freshly. A positive visitor stops immediately and
+    /// only complete coverage may return false. Edits re-project a reference at
+    /// a later revision, so a caller repeats until a snapshot adds nothing.
+    pub(crate) fn visit_session_evidence(
+        &self,
+        after: &mut i64,
+        mut visit: impl FnMut(Option<&Path>) -> StoreResult<bool>,
+    ) -> StoreResult<bool> {
         let conn = self
             .conn
             .try_lock()
             .map_err(|_| StoreError::InvalidData("Session evidence reader is busy".into()))?;
-        bounded(&conn, || {
-            let tx = conn.unchecked_transaction()?;
-            let complete: bool = tx.query_row(
-                "SELECT complete FROM session_evidence_backfill WHERE singleton=1",
-                [],
-                |row| row.get(0),
-            )?;
-            if !complete {
-                return Err(StoreError::InvalidData(
-                    "Session evidence backfill incomplete".into(),
-                ));
+        let tx = conn.unchecked_transaction()?;
+        let complete: bool = tx.query_row(
+            "SELECT complete FROM session_evidence_backfill WHERE singleton=1",
+            [],
+            |row| row.get(0),
+        )?;
+        if !complete {
+            return Err(StoreError::InvalidData(
+                "Session evidence backfill incomplete".into(),
+            ));
+        }
+        let home = super::home_dir_in(&tx)?;
+        let mut query = tx.prepare(
+            "SELECT revision,capture_key,raw_paths FROM session_evidence WHERE revision>?1 ORDER BY revision",
+        )?;
+        let mut rows = query.query([*after])?;
+        while let Some(row) = rows.next()? {
+            if visit(None)? {
+                return Ok(true);
             }
-            let home = super::home_dir_in(&tx)?;
-            let mut query = tx.prepare("SELECT capture_key,raw_paths FROM session_evidence")?;
-            let mut rows = query.query([])?;
-            let mut paths = BTreeSet::new();
-            let deadline = Instant::now() + Duration::from_secs(2);
-            while let Some(row) = rows.next()? {
-                if Instant::now() >= deadline {
-                    return Err(StoreError::InvalidData(
-                        "Session evidence observation deadline exceeded".into(),
-                    ));
-                }
-                let key: Option<String> = row.get(0)?;
-                let dir = key
-                    .as_deref()
-                    .and_then(|key| crate::session_record::record_dir(&home, key))
-                    .ok_or_else(|| {
-                        StoreError::InvalidData("Session evidence has no capture directory".into())
-                    })?;
-                paths.insert(dir.clone());
-                // These are published files, not just current Session pointers.
-                for name in [
-                    "manifest.json",
-                    "context.json",
-                    "events.jsonl",
-                    "provider.jsonl",
-                    "provider-session.json",
-                    "conversation.jsonl",
-                    "terminal.json",
-                ] {
-                    paths.insert(dir.join(name));
-                }
-                let references: Vec<Option<String>> =
-                    serde_json::from_str(&row.get::<_, String>(1)?)?;
-                for value in references
-                    .into_iter()
-                    .flatten()
-                    .filter(|value| !value.is_empty())
-                {
-                    let path = PathBuf::from(value);
-                    paths.insert(if path.is_absolute() {
-                        path
-                    } else {
-                        dir.join(path)
-                    });
+            let key: Option<String> = row.get(1)?;
+            let dir = key
+                .as_deref()
+                .and_then(|key| crate::session_record::record_dir(&home, key))
+                .ok_or_else(|| {
+                    StoreError::InvalidData("Session evidence has no capture directory".into())
+                })?;
+            if visit(Some(&dir))? {
+                return Ok(true);
+            }
+            // These are published files, not just current Session pointers.
+            for name in [
+                "manifest.json",
+                "context.json",
+                "events.jsonl",
+                "provider.jsonl",
+                "provider-session.json",
+                "conversation.jsonl",
+                "terminal.json",
+            ] {
+                if visit(Some(&dir.join(name)))? {
+                    return Ok(true);
                 }
             }
-            Ok(paths.into_iter().collect())
-        })
+            let references: Vec<Option<String>> = serde_json::from_str(&row.get::<_, String>(2)?)?;
+            for value in references
+                .into_iter()
+                .flatten()
+                .filter(|value| !value.is_empty())
+            {
+                let path = PathBuf::from(value);
+                let path = if path.is_absolute() {
+                    path
+                } else {
+                    dir.join(path)
+                };
+                if visit(Some(&path))? {
+                    return Ok(true);
+                }
+            }
+            *after = row.get(0)?;
+        }
+        Ok(false)
     }
 }
 
@@ -154,9 +163,20 @@ impl SqliteStore {
 mod tests {
     use std::sync::{Arc, Mutex};
 
+    use std::path::{Path, PathBuf};
+
     use rusqlite::{params, Connection};
 
     use super::{SqliteStore, PAGE_SIZE};
+
+    fn paths(store: &SqliteStore) -> crate::store::StoreResult<Vec<PathBuf>> {
+        let mut paths = Vec::new();
+        store.visit_session_evidence(&mut 0, |path| {
+            paths.extend(path.map(Path::to_path_buf));
+            Ok(false)
+        })?;
+        Ok(paths)
+    }
 
     #[test]
     fn cleanup_observation_deadline_leaves_normal_history_writes_available() {
@@ -171,7 +191,7 @@ mod tests {
         assert!(result.is_err());
         let session = store.test_session("after-timeout", "00000000000000000000000000000001");
         assert_eq!(session.id, "after-timeout");
-        assert!(!store.session_evidence_paths().unwrap().is_empty());
+        assert!(!paths(&store).unwrap().is_empty());
         let _busy = store.conn.lock().unwrap();
         assert!(store
             .bounded_reader(std::time::Duration::from_secs(2))
@@ -197,9 +217,9 @@ mod tests {
         let store = SqliteStore {
             conn: Arc::new(Mutex::new(conn)),
         };
-        assert!(store.session_evidence_paths().is_err());
+        assert!(paths(&store).is_err());
         store.advance_session_evidence().unwrap();
-        assert!(store.session_evidence_paths().is_err());
+        assert!(paths(&store).is_err());
         {
             let conn = store.conn.lock().unwrap();
             // Arrivals are already projected atomically; they must not extend
@@ -229,12 +249,17 @@ mod tests {
                 .unwrap();
         }
         store.advance_session_evidence().unwrap();
-        assert!(store.session_evidence_paths().is_err());
+        assert!(paths(&store).is_err());
         store.advance_session_evidence().unwrap();
-        assert!(store
-            .session_evidence_paths()
-            .unwrap()
-            .contains(&"/before".into()));
+        let mut consumed = 0;
+        let mut seen = Vec::new();
+        store
+            .visit_session_evidence(&mut consumed, |path| {
+                seen.extend(path.map(Path::to_path_buf));
+                Ok(false)
+            })
+            .unwrap();
+        assert!(seen.contains(&"/before".into()));
         {
             let conn = store.conn.lock().unwrap();
             // Old references can change; source triggers invalidate them atomically.
@@ -250,10 +275,29 @@ mod tests {
             conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES('past','observed',?1,1,?2)",
                 params![format!("{input}:terminal.json"), r#"{"evidence":{"result_ref":"/appended"}}"#]).unwrap();
         }
-        let paths = store.session_evidence_paths().unwrap();
-        assert!(!paths.contains(&"/before".into()));
-        assert!(paths.contains(&"/after".into()));
-        assert!(paths.contains(&"/appended".into()));
+        // An observation that already passed these rows revalidates exactly
+        // what changed behind it, without restarting or trusting its snapshot.
+        let mut changed = Vec::new();
+        store
+            .visit_session_evidence(&mut consumed, |path| {
+                changed.extend(path.map(Path::to_path_buf));
+                Ok(false)
+            })
+            .unwrap();
+        assert!(changed.contains(&"/after".into()) && changed.contains(&"/appended".into()));
+        assert!(!changed.contains(&"/before".into()));
+        let mut settled = 0;
+        store
+            .visit_session_evidence(&mut consumed, |_| {
+                settled += 1;
+                Ok(false)
+            })
+            .unwrap();
+        assert_eq!(settled, 0);
+        let current = paths(&store).unwrap();
+        assert!(!current.contains(&"/before".into()));
+        assert!(current.contains(&"/after".into()));
+        assert!(current.contains(&"/appended".into()));
         {
             let conn = store.conn.lock().unwrap();
             conn.execute(
@@ -265,6 +309,6 @@ mod tests {
             )
             .unwrap();
         }
-        assert!(store.session_evidence_paths().is_err());
+        assert!(paths(&store).is_err());
     }
 }

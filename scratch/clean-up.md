@@ -177,6 +177,9 @@ source observation calls the registration reader directly inside the same isolat
 worker. Preview listing now shares the existing Git-read path. `admit_checkout`
 names the prepare/open/acquire boundary without changing deadlines or lock ownership.
 The setup window owns the 32-candidate cap; application no longer repeats it.
+Removed aggregate `session_evidence_paths` and `transcript_evidence`, their
+whole-set deadlines, and the parent-side evidence registry opens. Their streaming
+replacements keep backfill, raw-reference freshness and provider discovery readers.
 Administrative enumeration now propagates entry errors rather than treating a
 partial name set as complete. No known deletion targets remain. Explicit
 abandonment and persistent-branch restart retain their separate authority; missing-registration repair never
@@ -339,9 +342,9 @@ fixture passes with that shared key.
 Reconciled 2026-10-09 against `6cd3c7594` and `7e1a51086`. The requested
 aggregate-settlement discovery repair and preparatory isolation exist. Durable
 continuation and fixed sweep endpoints remain intact. Exact-head settlement,
-completed-Task delivery and fail-closed history remain mandatory. The final-observation mechanism is now selected in item 2; the source-alias
-locality gap remains unresolved. Neither selection nor passing focused tests makes
-the full PR ready to ship.
+completed-Task delivery and fail-closed history remain mandatory. Final observation is implemented in item 2; the source-alias locality gap
+remains unresolved and keeps this PR at its review boundary. Passing focused
+tests does not make the full PR ready to ship.
 
 1. **Preparatory isolation implemented; source progress still has a review gap.**
    Minute selection now asks a candidate-local positive SQL question using stored
@@ -410,78 +413,54 @@ the full PR ready to ship.
    Aggregate final history, its connection opens/path resolution, and native
    traversal remain item 2. Git's admitted removal may inspect siblings;
    setup isolation does not prove deletion through a permanently stalled sibling.
-2. **This slice: stream fresh evidence with a progress deadline.** On October 9,
-   Jack Heart requested finishing automatic cleanup for all users. The mechanism
-   review selects workload-sized observation below as an engineering decision;
-   it does not authorize history expiry or weaken any preservation condition.
+2. **Implemented: fresh streamed evidence with a no-progress deadline.** On
+   October 9, Jack Heart requested finishing automatic cleanup for all users; the
+   mechanism review selected workload-sized observation as an engineering
+   decision. It authorizes no history expiry and weakens no preservation condition.
+   The preceding fixed two-second whole-set reader and its 65,536-row
+   counterevidence remain at `4a6d54fa9:scratch/clean-up.md`, Remaining item 2.
 
-   Counterevidence retained: `cleanup_evidence_cost_probe` reached the fixed
-   two-second final-read deadline with 65,536 already-projected synthetic rows.
-   A constant larger timeout or restarted all-history scan still cannot guarantee
-   progress for healthy finite input. Full measurements and preceding alternatives
-   remain at `4a6d54fa9:scratch/clean-up.md`, Remaining item 2.
+   `io::observe_evidence` runs one read-only worker per registry while the parent
+   holds checkout admission. The worker owns no locks, never deletes, and exits
+   before its answer is consumed. It emits a strictly increasing count of useful
+   work: one consumed evidence row, one resolved reference, one native directory
+   entry. Emission is rate-limited to 20ms but never timer-driven. The parent
+   renews the unchanged two-second deadline only on an advancing count. A repeated
+   count, malformed line, error, EOF without a response, or silence retains.
+   A positive reference retains immediately; only complete coverage continues to
+   the existing locked deletion checks. No result outlives the attempt.
 
-   Replace the aggregate final reader with one isolated, read-only observation
-   that streams a complete SQLite snapshot and visits native evidence incrementally.
-   Parent-owned checkout admission remains held for the attempt. The child owns
-   no checkout locks, never deletes, inherits no outer exclusions, and exits before
-   its final observation can be consumed. A positive reference retains immediately.
-   Only successful complete coverage permits the parent to continue its existing
-   locked deletion checks. No intermediate negative result survives the attempt.
+   Change evidence is source-owned in the same migration draft: `session_evidence`
+   rows carry an `AUTOINCREMENT` revision, so every projection, edit and backfill
+   replacement appears after everything already read. The worker streams one
+   snapshot ordered by revision, then rereads past its last revision until a
+   snapshot adds nothing (eight rounds, then unknown). Native layouts carry no
+   change record and are walked first. The account-home list is compared before
+   and after. Destinations resolve freshly each attempt; nothing negative is stored.
 
-   **Bound stalled work, not total useful work.** Replace the two-second whole-set
-   timer in this final observation with a no-progress deadline. Progress means
-   consuming a new indexed evidence row, completing resolution of a referenced
-   path, or advancing a native directory entry. Timer heartbeats, retries and
-   repeated traversal of the same item are not progress. Stream and validate
-   monotonic counters/stages; empty or malformed output, EOF without completion,
-   error, cancellation and missing progress retain. An unchanged finite healthy
-   set can therefore finish even when its total duration exceeds two seconds.
-   A blocked SQLite open/read, path resolution or native directory syscall cannot
-   keep the parent waiting with a synthetic heartbeat. Reuse the existing isolated
-   worker/process-group termination owner; do not create a resident scanner.
+   Evidence: the composed collector retains a late native symlink into the
+   checkout after about 3,000 units of delayed healthy work, then collects the
+   same data in over three seconds without a larger timeout. A real blocked FIFO
+   open and a stream ended without its response each retain, preserve bytes and
+   leave a later pass able to collect. A reference edited or appended behind the
+   stream retains; that test fails when the reread is disabled. The opt-in probe
+   observed 65,536 rows plus 65,536 native entries in 5.1s. Delays and gates are
+   test-worker hooks; no real stalled SQLite or directory syscall was produced.
 
-   One read transaction defines the evidence cohort. Complete backfill remains
-   mandatory. Indexed keyset reads or a streaming cursor keep working memory
-   bounded; no full `Vec<PathBuf>` / `BTreeSet` is required. New history written
-   during observation must be detected and revalidated before admission proceeds
-   (using an existing history revision if suitable, otherwise source-owned
-   transactional change evidence in the same migration draft). Appended or edited
-   references must never disappear behind a frozen snapshot. Each new attempt
-   re-resolves filesystem destinations; interrupted work does not accumulate
-   negative path facts. Retargeted aliases between preview and application remain
-   covered. Arbitrary concurrent external filesystem mutation cannot be fenced by
-   lf locks; no new atomic-filesystem guarantee is claimed.
-
-   Native evidence traversal follows the supported provider layouts, bounds depth
-   as today, and reports progress only for newly visited entries. A stalled or
-   unreadable alias still retains when disjointness cannot be proved. This slice
-   fixes large **healthy** evidence sets, not the separate unresolved source-alias
-   locality contract in item 1. It must not silently reinterpret unknown as absent.
-
-   **Delete — do not maintain:** aggregate `session_evidence_paths` materialization
-   and its final whole-set deadline; aggregate `transcript_evidence` collection and
-   its per-home whole-set deadline, replacing their callers/tests with the streaming
-   owner. Retain bounded transactional backfill, raw-reference freshness, provider
-   discovery/resume readers and timeout process-group cleanup. No second evidence
-   index, cached canonical-path authority or additional migration generation.
-
-   **Proof:** a composed collection with already-complete history beyond the old
-   deadline completes without changing the data or increasing a constant timeout;
-   late positive references, appended/updated references, retargeted symlinks and
-   symlink-heavy native layouts preserve evidence. A real stalled filesystem read
-   and interrupted stream release the attempt, preserve bytes, and let a later
-   healthy retry complete. Stream progress cannot mask a stuck operation. The
-   existing preservation matrix still passes. Large finite history is the target;
-   continuous adversarial mutation remains unknown, not disposable.
+   Limits: a healthy history slower than two seconds per unit of work retains.
+   The 20ms emission limit makes the effective stall threshold slightly under
+   two seconds. Filesystem retargeting after a reference is resolved, and
+   history that changes for eight consecutive rereads, remain unknown, not
+   disposable. Developer-machine tests still walk the real native homes unless a
+   test isolates them. The source-alias locality gap in item 1 is unchanged.
 
 3. **Composed acceptance.** Native provider launch/resume, a second release CLI
    writer, full headless acceptance and regression matrix remain with gate. The
    current fixture reads a native transcript but does not launch its provider.
    Appended/updated references and interrupted pages have projection-level proofs;
    the collector's multi-page fixture now composes heavier arrivals, transactional
-   interruption, symlink retargeting and eventual unrelated collection. These do
-   not establish progress beyond the final-read deadline.
+   interruption, symlink retargeting and eventual unrelated collection. Progress
+   beyond the former final-read deadline is covered in item 2.
    Loaded OS schedule, promotion recovery, unsupported-host experience and a full
    published-upgrade exercise remain with demo. Abandoned PRs without exact-head
    disposition remain retained; no new discard authority is implied.
@@ -537,4 +516,4 @@ allocated bytes by category; observed free-space delta after collection; oldest
 eligible retention age. APFS sharing, hardlinks and concurrent writers mean
 directory sums are estimates, not guaranteed reclaimed bytes.
 
-Check: plan revision `git diff --check` — passed (prose-only); code checks recorded at `7e1a51086`: `cargo test -p loopflow --lib` with filters `cleanup_setup_` and `cleanup_apply_` — 19 passed; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` — passed (unchanged code, not rerun); prose reconciliation: `git diff --check` — passed; full acceptance/provider resume: gate; installed scheduler/upgrade: demo.
+Check: `cargo test -p loopflow --lib -- cleanup read_retry provider_conversation` — 66 passed, 2 ignored; `--ignored cleanup_evidence_cost_probe` — passed (5.1s observation); `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` — passed; integration suites, full acceptance and provider resume: gate; installed scheduler/upgrade: demo.

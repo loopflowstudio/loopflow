@@ -2,12 +2,16 @@
 //! Reads may be killed. Scheduling hints and history-projection pages retain
 //! their owners' atomic publication. File openers transfer unlocked descriptors
 //! and exit before parent admission; canceled workers cannot continue to deletion.
+//! The final evidence observation streams its useful work; only a complete
+//! response from an exited worker lets the parent continue its locked checks.
 mod descriptor;
 
+use std::io::{BufRead, Read as _};
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
-use std::time::Duration;
+use std::sync::mpsc::SyncSender;
+use std::time::{Duration, Instant};
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
@@ -16,6 +20,8 @@ use crate::ops::OpsResult;
 
 const WORKER_FLAG: &str = "--cleanup-io-worker";
 const RESPONSE: &str = "loopflow-cleanup-io:";
+const PROGRESS: &str = "loopflow-cleanup-progress:";
+const LINE_LIMIT: u64 = 64 * 1024;
 static WORKER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 const TIMEOUT: Duration = Duration::from_secs(2);
@@ -76,7 +82,14 @@ pub(crate) enum Schedule {
 enum Request {
     Read(Read),
     Schedule(Schedule),
-    OpenLock { path: PathBuf, socket: i32 },
+    OpenLock {
+        path: PathBuf,
+        socket: i32,
+    },
+    Evidence {
+        database: PathBuf,
+        checkout: PathBuf,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -102,6 +115,91 @@ pub(crate) fn open_lock(path: PathBuf) -> OpsResult<std::fs::File> {
     descriptor::receive(&receiver).map_err(Into::into)
 }
 
+/// Whether one registry's fresh Session evidence reaches `checkout`. TIMEOUT
+/// bounds the time without useful work, never the size of a healthy history:
+/// each consumed row, resolved reference and native entry renews it.
+pub(crate) fn observe_evidence(database: PathBuf, checkout: PathBuf) -> OpsResult<bool> {
+    let mut command = worker_command(&Request::Evidence { database, checkout })?;
+    let response = crate::ops::read_retry::progress_output(&mut command, TIMEOUT, read_progress)?;
+    decode(&response)
+}
+
+/// Counters must strictly increase, so a worker repeating itself earns no
+/// time. EOF without one response is an interrupted observation, never absence.
+fn read_progress(
+    stdout: std::process::ChildStdout,
+    progress: SyncSender<Instant>,
+) -> OpsResult<String> {
+    let mut reader = std::io::BufReader::new(stdout);
+    let mut line = Vec::new();
+    let mut count = 0;
+    let mut response = None;
+    loop {
+        line.clear();
+        if (&mut reader)
+            .take(LINE_LIMIT)
+            .read_until(b'\n', &mut line)?
+            == 0
+        {
+            break;
+        }
+        if line.last() != Some(&b'\n') && line.len() as u64 == LINE_LIMIT {
+            return Err(super::error("cleanup evidence stream is malformed"));
+        }
+        let text = String::from_utf8_lossy(&line);
+        if let Some(value) = text.trim_end().strip_prefix(PROGRESS) {
+            let next = value.parse::<u64>().map_err(super::error)?;
+            if next <= count || response.is_some() {
+                return Err(super::error("cleanup evidence stream did not advance"));
+            }
+            count = next;
+            // The parent keeps only the latest instant; never wait on it.
+            let _ = progress.try_send(Instant::now());
+        } else if let Some(value) = text.trim_end().strip_prefix(RESPONSE) {
+            if response.replace(value.to_string()).is_some() {
+                return Err(super::error("cleanup evidence stream is malformed"));
+            }
+        }
+    }
+    response.ok_or_else(|| super::error("cleanup evidence observation was interrupted"))
+}
+
+/// Counts useful work and publishes it at most every 20ms. Elapsed time alone
+/// never emits: a stuck operation leaves the parent's deadline running.
+#[derive(Debug)]
+struct Progress {
+    count: u64,
+    emitted: Instant,
+}
+
+impl Progress {
+    fn start() -> Self {
+        Self {
+            count: 0,
+            emitted: Instant::now(),
+        }
+    }
+
+    fn advance(&mut self) {
+        self.count += 1;
+        if self.emitted.elapsed() >= Duration::from_millis(20) {
+            println!("{PROGRESS}{}", self.count);
+            self.emitted = Instant::now();
+        }
+    }
+}
+
+fn evidence(
+    database: &Path,
+    checkout: &Path,
+    advance: &mut dyn FnMut(),
+) -> OpsResult<serde_json::Value> {
+    let store =
+        crate::store::sqlite::SqliteStore::open_read_only(database).map_err(super::error)?;
+    serde_json::to_value(super::evidence_blocks_checkout(&store, checkout, advance)?)
+        .map_err(super::error)
+}
+
 pub(crate) fn schedule(request: Schedule) -> OpsResult<()> {
     request_worker(Request::Schedule(request))
 }
@@ -119,9 +217,30 @@ pub(super) fn output(command: &mut Command, timeout: Duration) -> OpsResult<std:
 }
 
 fn request_worker<T: DeserializeOwned>(request: Request) -> OpsResult<T> {
+    let mut command = worker_command(&request)?;
+    let timeout = if matches!(&request, Request::Read(Read::RunningPaths)) {
+        Duration::from_secs(5)
+    } else {
+        TIMEOUT
+    };
+    let output = crate::ops::read_retry::bounded_output(&mut command, timeout)?;
+    let output = std::str::from_utf8(&output.stdout).map_err(super::error)?;
+    let response = output
+        .lines()
+        .find_map(|line| line.strip_prefix(RESPONSE))
+        .ok_or_else(|| super::error("cleanup I/O worker returned no response"))?;
+    decode(response)
+}
+
+fn decode<T: DeserializeOwned>(response: &str) -> OpsResult<T> {
+    let value: Result<T, String> = serde_json::from_str(response).map_err(super::error)?;
+    value.map_err(super::error)
+}
+
+fn worker_command(request: &Request) -> OpsResult<Command> {
     let mut command = Command::new(std::env::current_exe()?);
     exclude_inherited_descriptors(&mut command)?;
-    if let Request::OpenLock { socket, .. } = &request {
+    if let Request::OpenLock { socket, .. } = request {
         use std::os::unix::process::CommandExt;
         let socket = *socket;
         // SAFETY: this socket remains owned by open_lock until the child exits.
@@ -135,7 +254,7 @@ fn request_worker<T: DeserializeOwned>(request: Request) -> OpsResult<T> {
             });
         }
     }
-    let encoded = serde_json::to_string(&request).map_err(super::error)?;
+    let encoded = serde_json::to_string(request).map_err(super::error)?;
     #[cfg(not(test))]
     command.arg(WORKER_FLAG).arg(encoded);
     #[cfg(test)]
@@ -147,19 +266,7 @@ fn request_worker<T: DeserializeOwned>(request: Request) -> OpsResult<T> {
             "--nocapture",
         ])
         .env("LF_TEST_CLEANUP_IO", encoded);
-    let timeout = if matches!(&request, Request::Read(Read::RunningPaths)) {
-        Duration::from_secs(5)
-    } else {
-        TIMEOUT
-    };
-    let output = crate::ops::read_retry::bounded_output(&mut command, timeout)?;
-    let output = std::str::from_utf8(&output.stdout).map_err(super::error)?;
-    let response = output
-        .lines()
-        .find_map(|line| line.strip_prefix(RESPONSE))
-        .ok_or_else(|| super::error("cleanup I/O worker returned no response"))?;
-    let value: Result<T, String> = serde_json::from_str(response).map_err(super::error)?;
-    value.map_err(super::error)
+    Ok(command)
 }
 
 // Outer Flow/release/Git commands may deliberately inherit exclusion fds.
@@ -234,6 +341,10 @@ fn execute(request: Request) -> OpsResult<serde_json::Value> {
                 .map_err(super::error)?;
             descriptor::send(socket, &file)?;
             Ok(serde_json::Value::Null)
+        }
+        Request::Evidence { database, checkout } => {
+            let mut progress = Progress::start();
+            evidence(&database, &checkout, &mut || progress.advance())
         }
         Request::Read(Read::Admission { database, path }) => {
             let store = crate::store::sqlite::SqliteStore::open_read_only(&database)
@@ -442,6 +553,39 @@ mod tests {
     }
 
     #[test]
+    fn cleanup_evidence_stream_renews_only_for_advancing_work() {
+        let run = |script: &str| {
+            crate::ops::read_retry::progress_output(
+                std::process::Command::new("sh").args(["-c", script]),
+                std::time::Duration::from_millis(400),
+                super::read_progress,
+            )
+        };
+        let advance = "i=0; while [ $i -lt 16 ]; do i=$((i+1)); echo loopflow-cleanup-progress:$i; sleep 0.05; done";
+        // Healthy work may take twice the deadline; it still has to finish.
+        assert_eq!(
+            run(&format!(
+                "{advance}; echo 'loopflow-cleanup-io:{{\"Ok\":false}}'"
+            ))
+            .unwrap(),
+            r#"{"Ok":false}"#
+        );
+        assert!(run(advance).is_err());
+        for stuck in [
+            // A heartbeat that repeats its position is not work.
+            "while :; do echo loopflow-cleanup-progress:1; sleep 0.05; done",
+            "while :; do echo unrelated; sleep 0.05; done",
+            "echo loopflow-cleanup-progress:1; sleep 30",
+            "echo loopflow-cleanup-progress:many",
+            "echo 'loopflow-cleanup-io:{\"Ok\":false}'; echo loopflow-cleanup-progress:1",
+        ] {
+            let started = std::time::Instant::now();
+            assert!(run(stuck).is_err(), "{stuck}");
+            assert!(started.elapsed() < std::time::Duration::from_secs(3));
+        }
+    }
+
+    #[test]
     #[ignore = "subprocess entry point for the real cleanup I/O protocol"]
     fn worker() {
         super::WORKER.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -466,6 +610,32 @@ mod tests {
                 let _ =
                     std::fs::read(std::env::var_os("LF_TEST_CLEANUP_STALL_SETTLED_FIFO").unwrap());
             }
+        }
+        if let super::Request::Evidence { database, checkout } = &request {
+            // Gate: open a FIFO after the given amount of useful work. The
+            // test either lets the observation continue, ends the stream, or
+            // never answers. Delay: healthy work slower than the stall deadline.
+            let gate = std::env::var("LF_TEST_CLEANUP_EVIDENCE_GATE_AT")
+                .ok()
+                .map(|at| at.parse::<u64>().unwrap());
+            let delay = std::env::var("LF_TEST_CLEANUP_EVIDENCE_DELAY_MICROS")
+                .ok()
+                .map(|micros| std::time::Duration::from_micros(micros.parse().unwrap()));
+            let mut progress = super::Progress::start();
+            let result = super::evidence(database, checkout, &mut || {
+                progress.advance();
+                if gate == Some(progress.count) {
+                    let fifo = std::env::var_os("LF_TEST_CLEANUP_EVIDENCE_GATE").unwrap();
+                    if std::fs::read(fifo).unwrap() == b"exit" {
+                        std::process::exit(0);
+                    }
+                }
+                if let Some(delay) = delay {
+                    std::thread::sleep(delay);
+                }
+            });
+            super::respond(result);
+            return;
         }
         let stalled_lock = match &request {
             super::Request::OpenLock { path, .. } => std::env::var_os("LF_TEST_CLEANUP_STALL_LOCK")

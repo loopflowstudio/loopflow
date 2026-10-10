@@ -337,54 +337,50 @@ fn find_file(directory: &Path, depth: usize, matches: &dyn Fn(&str) -> bool) -> 
 /// Native readers follow symlinks inside their history layout. Protect those
 /// destinations as well as the account root; a home outside a checkout can
 /// otherwise point at its only transcript inside a disposable cache.
-pub(crate) fn transcript_evidence(
+pub(crate) fn visit_transcript_evidence(
     provider: Provider,
     home: &Path,
-) -> std::io::Result<Vec<PathBuf>> {
-    fn visit(
+    mut visit: impl FnMut(Option<&Path>) -> std::io::Result<bool>,
+) -> std::io::Result<bool> {
+    fn walk(
         path: &Path,
         depth: usize,
-        deadline: std::time::Instant,
-        paths: &mut Vec<PathBuf>,
-    ) -> std::io::Result<()> {
-        if std::time::Instant::now() >= deadline {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::TimedOut,
-                "native transcript observation deadline exceeded",
-            ));
-        }
+        visit: &mut impl FnMut(Option<&Path>) -> std::io::Result<bool>,
+    ) -> std::io::Result<bool> {
         let entries = match fs::read_dir(path) {
             Ok(entries) => entries,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
             Err(error) => return Err(error),
         };
         for entry in entries {
-            if std::time::Instant::now() >= deadline {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::TimedOut,
-                    "native transcript observation deadline exceeded",
-                ));
-            }
             let entry = entry?;
-            let kind = entry.file_type()?;
-            if kind.is_symlink() {
-                paths.push(entry.path());
+            if visit(None)? {
+                return Ok(true);
             }
-            if depth > 0 && (kind.is_dir() || (kind.is_symlink() && entry.path().is_dir())) {
-                visit(&entry.path(), depth - 1, deadline, paths)?;
+            let kind = entry.file_type()?;
+            if kind.is_symlink() && visit(Some(&entry.path()))? {
+                return Ok(true);
+            }
+            let directory = if kind.is_symlink() && depth > 0 {
+                match fs::metadata(entry.path()) {
+                    Ok(metadata) => metadata.is_dir(),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+                    Err(error) => return Err(error),
+                }
+            } else {
+                kind.is_dir()
+            };
+            if depth > 0 && directory && walk(&entry.path(), depth - 1, visit)? {
+                return Ok(true);
             }
         }
-        Ok(())
+        Ok(false)
     }
     let (root, depth) = transcript_layout(provider, home);
-    let mut paths = vec![root.clone(), home.join("history.jsonl")];
-    visit(
-        &root,
-        depth,
-        std::time::Instant::now() + std::time::Duration::from_secs(2),
-        &mut paths,
-    )?;
-    Ok(paths)
+    if visit(Some(&root))? || visit(Some(&home.join("history.jsonl")))? {
+        return Ok(true);
+    }
+    walk(&root, depth, &mut visit)
 }
 
 /// The directory the conversation ran in, from the head of its transcript.

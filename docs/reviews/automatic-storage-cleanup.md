@@ -32,12 +32,12 @@ schedule activation/repair automatically; explicit disable survives upgrade.
 Unsupported schedulers get the documented foreground fallback, not an idle-time
 promise. Experiments must not install production services.
 
-Remaining: stream fresh safety evidence so large healthy histories do not hit the
-same whole-set timeout forever; resolve the separate unknown-alias locality
-contract without interpreting unknown as safe; run composed gate and installation
-proof. Final observation uses a no-progress deadline, not a larger fixed timeout
-or persisted negative filesystem observations. Healthy finite work can take longer
-than the admission window; stalls retain safely and report why.
+Final safety evidence is now streamed: a no-progress deadline replaces the
+whole-set timeout, with no larger constant and no persisted negative filesystem
+observations. Healthy finite work can take longer than the admission window;
+stalls retain safely and report why. Remaining: resolve the separate
+unknown-alias locality contract without interpreting unknown as safe; run
+composed gate and installation proof.
 
 The demo is a real Process exiting after a finished Task: the configured tick then
 removes its checkout without another agent. An unfinished neighbor, post-merge

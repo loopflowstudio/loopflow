@@ -570,7 +570,7 @@ fn sigint_records_session_interruption_and_retires_the_orphan() {
         .as_array()
         .unwrap()
         .iter()
-        .any(|event| event["payload"]["type"] == "driver_exit"
+        .any(|event| event["payload"]["type"] == "attachment_exit"
             && event["payload"]["outcome"] == "interrupted"));
 }
 
@@ -1120,17 +1120,20 @@ fn provider_parentage_does_not_assign_work_outside_its_checkout() {
     let origin: String = fixture
         .db()
         .query_row(
-            "SELECT lfid FROM processes ORDER BY started_at,lfid LIMIT 1",
+            "SELECT lfid FROM processes WHERE kind='lf' ORDER BY rowid LIMIT 1",
             [],
             |row| row.get(0),
         )
         .unwrap();
     let origin = loopflow::id::ProcessLfid::parse(&origin).unwrap();
-    let driver = store.session_driver(&session).unwrap().unwrap_or_else(|| {
-        store
-            .claim_session_driver(&session, None, &origin, true)
-            .unwrap()
-    });
+    let driver = store
+        .session_attachment(&session)
+        .unwrap()
+        .unwrap_or_else(|| {
+            store
+                .claim_session_attachment(&session, None, &origin, true)
+                .unwrap()
+        });
     let caller = serde_json::to_string(&driver.caller(session.clone())).unwrap();
     fixture.json(&["session", "bind", &session, "--task", "INF-123", "--json"]);
     // Synthetic provider provenance crosses real public CLI admission. The
@@ -1185,7 +1188,7 @@ fn provider_parentage_does_not_assign_work_outside_its_checkout() {
     }
     // A stale provider keeps its original causal parent and grants no Work.
     store
-        .claim_session_driver(&session, Some(&driver), &origin, true)
+        .claim_session_attachment(&session, Some(&driver), &origin, true)
         .unwrap();
     let before = fixture.launches().len();
     let stale = fixture
@@ -1238,7 +1241,7 @@ fn declared_agent_tools_use_their_checkout_and_keep_the_process_parent() {
         Some(sibling.id.to_string())
     );
     let (caller, ..) = fixture.session_row(&captures[0]);
-    let parent: (String, String) = fixture.db().query_row("SELECT c.parent_process_lfid,s.provider_process_lfid FROM processes c JOIN agent_sessions s ON s.id=c.caller_session_id WHERE c.caller_session_id=?1", [&caller], |row| Ok((row.get(0)?,row.get(1)?))).unwrap();
+    let parent: (String, String) = fixture.db().query_row("SELECT c.parent_process_lfid,a.parent_process_lfid FROM processes c JOIN agent_sessions s ON s.id=c.caller_session_id JOIN processes a ON a.lfid=s.agent_process_lfid WHERE c.caller_session_id=?1", [&caller], |row| Ok((row.get(0)?,row.get(1)?))).unwrap();
     assert_eq!(parent.0, parent.1);
     for line in std::fs::read_to_string(fixture.home.path().join("declarations"))
         .unwrap()
@@ -1417,7 +1420,7 @@ fn malformed_caller_cannot_use_library_agent_admission() {
         assert_eq!(output.status.code(), Some(1), "{output:?}");
         assert!(
             String::from_utf8_lossy(&output.stderr)
-                .contains("agent Process requires an admitted Process"),
+                .contains("AgentProcess requires an admitted invocation"),
             "{output:?}"
         );
         assert!(

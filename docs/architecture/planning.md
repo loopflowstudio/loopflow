@@ -534,7 +534,7 @@ conversation or releases a Flow. The caller inspects outcomes and effects
 before selecting further work; pane closure and provider exit grant no authority.
 
 Saved handoffs retain executable, Machine and database together. Renaming, binding
-and driver replacement retain conversation identity and feedback. Desktop reads
+and takeover retain conversation identity and feedback. Desktop reads
 the same record and keys its terminal surface on LfSession identity.
 
 ## Work, steering and execution

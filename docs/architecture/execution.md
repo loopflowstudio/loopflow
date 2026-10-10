@@ -22,7 +22,7 @@ argv -> Process admission -> Skill discovery -> prompt -> provider route
                                      LfSession reservation + input capture
                                                         |
                                                         v
-                                        native engine and conversation
+                                      AgentProcess and native conversation
                                                         |
                                      provider outcomes / retries / usage
                                                         |
@@ -54,11 +54,15 @@ not evidence that old captured intent changed.
 Process admission records one actual lf process and immutable causal ancestry.
 Nested wrappers reuse the process identity and cannot finish the outer command
 early. Direct child commands name their invoking Process. Agent-issued commands
-record the incoming agent bit plus stable Session/provider-generation provenance,
-then resolve the current matching driver once at admission.
+record the incoming agent bit plus stable Session/AgentProcess provenance,
+then resolve the current attached LfProcess once at admission.
 
-The provider and shell do not become fake Processes. After driver handoff, new
-commands from the continuing provider name the new driver; delayed commands from
+AgentProcess rows use the same `processes` inventory, with kind `agent`, exact
+PID/birth, served Session, original parent and current attachment. Session rows
+retain the current AgentProcess reference and native thread. Detached and replaced
+rows survive until positive terminal evidence; attachment absence never removes
+them from inventory. Shell helpers do not become fake lf invocations. After handoff, new
+commands from the continuing provider name the newly attached lf invocation; delayed commands from
 a replaced provider retain their historical origin. A parent exiting never
 rewrites existing descendants. These causal links grant neither signaling nor
 Flow authority.
@@ -69,42 +73,130 @@ commands must reach their exact-store authority checks before any logging-induce
 store open; unavailable-store coverage is reported explicitly. An inspection
 Process does not reserve agent work or mark a Task Started.
 
+The source cut is incomplete: optional/unattributed launches still need conversion.
+Captured Claude and native restarts reserve a fresh AgentProcess and update the
+capture's attachment; pending operations retain their old snapshots. Owned native
+launches record before exec without changing their terminal or process group.
+Focused admission, replacement and cleanup fixtures pass. Top and Task gates
+share unfinished-row selection and identity judgment. Missing lf receipts,
+missing agent birth and unavailable OS samples remain Unknown rows with LFIDs;
+active Sessions retain their records while reporting unavailable sampling.
+Zombies, birth mismatch and valid absence count as death. Observations grant no
+signal or settlement authority. Public Task-status/scheduled agreement and
+installed acceptance remain unproved.
+Invocation-owned retry settles the exact old AgentProcess before reserving its
+replacement, retaining native/account history. Account failover selects a fresh
+thread; same-account retry retains it. Generic stop still preserves takeover.
+Generation-based caller/status wires and optional launches remain publication
+blockers.
+
 ## Publish before spawn
 
 1. Resolve one Machine for the store and payload root; validate typed ancestry.
-2. Reserve the conversation, history/capture reference and exact driver together.
+2. Reserve the conversation, history/capture reference and exact attachment together.
 3. Publish immutable launch input and record publication before spawning.
-4. Start or connect the native provider and retain exact engine/thread/client
-   evidence, distinct from the conversation driver.
+4. Start or connect the native provider and retain exact AgentProcess/thread/client
+   evidence, distinct from the attached lf invocation.
 5. Append correlated provider outcomes and usage; settle command completion
    under its Process lifetime.
 
-Prepared rows without publication are recoverable preparation failures. A missing
-spawn receipt is uncertainty, not permission to duplicate a possibly live engine.
+Headless Claude, Codex and OpenCode prepare their lifeline before spawning. The child
+establishes its process group, waits for watchdog readiness, then asks a parent
+thread to run its recording callback before exec. For an attached Session, this
+persists OS identity in the AgentProcess row; without an attachment it writes
+nothing. The shared harness launch holds the attachment fence through recording
+and saves failed spawns on the record. Admission is synchronous so async cancellation
+cannot discard an admitted child before the harness receives it. Failed recording refuses exec;
+a failed exec retains any recorded identity without claiming provider execution.
+No post-spawn bind is needed. Codex reconnect holds the endpoint's FIFO;
+Claude and OpenCode currently use anonymous lifelines without that handoff path.
+Writers remain held until OS exit, even after attachment transfer;
+only the last holder's exit closes the lifeline and stops the group, including
+after SIGKILL. The lifeline does not itself enforce current attachment authority.
+Headless launch requires the invocation's attachment: Claude, Codex and OpenCode
+refuse to start a provider without one, and their writes and signals have no
+unfenced path. Owned native launches use the same pre-exec recording channel under
+the attachment lock, but no headless group/watchdog setup. Failed recording prevents provider code
+from running. Captured native waits retain the spawned attachment snapshot: a late
+wait cannot mark a replacement exited. Native terminal process groups are unchanged;
+foreground orphan cleanup remains unfinished.
+Fresh native launches and saved-history resumes share invocation admission and
+attachment settlement. A recorded client move is an intentional command exit,
+not provider failure; it does not establish a successful provider turn.
+
+Scheduled settlement reads unfinished AgentProcess rows, but live-orphan
+termination covers noninteractive providers only: Codex app-server, OpenCode
+serve and headless Claude groups. Native foreground coverage remains unfinished;
+recording a foreground provider alone does not establish orphan cleanup. Unknown identities and
+duplicate PID/birth records remain non-signallable. Failed OS observation makes
+scheduled reconciliation fail with the affected LFID, without settling that row.
+The reaper's identity, command and descendant observations use the shared OS
+reader; failed descendant inventory refuses before signaling. Codex close and
+scheduled termination share group-wide observation: unreaped zombies are dead,
+but a live helper prevents settlement even after the leader exits.
+
+Prepared rows without publication are recoverable preparation failures. Missing
+spawn evidence is uncertainty, not permission to duplicate a possibly live AgentProcess.
 Recovery preserves recorded inputs and exact native evidence. File publication
 and SQLite settlement have an explicit recoverable boundary; neither alone is a
 claim of successful execution.
 
-## Connect and transfer the driver
+Resume checks the attached LfProcess through the shared record/OS judgment.
+One attachment lock spans observation, exact AgentProcess close and replacement;
+SQLite is released during provider I/O. Detached does not imply dead. Resume and
+invocation retry use the recorded provider/interactivity and refuse duplicate
+live PID/birth ownership. Unknown spawn remains unresolved; never-launched
+reservations can retire without claiming OS exit. Death and the new attachment
+commit together, preserving native history and without inventing an outcome.
+Native foreground and non-Codex live close still require their own lifecycle
+coverage; this source path does not establish configured resume acceptance.
+
+## Connect and transfer attachment
 
 Codex's private Unix WebSocket supports multiple clients on one active native
 thread. Attachment alone does not revoke the old client's writes. Loopflow's
-conversation-scoped relay therefore checks the Session driver at actual socket
+conversation-scoped relay therefore checks the exact Session attachment at socket
 dispatch, including queued requests and approval replies. A bounded native send
-and driver transfer serialize through the same SQLite transaction. A send timeout
+and attachment transfer hold the same per-Session OS lock, without holding a
+SQLite transaction over transport I/O. A send timeout
 has an unknown outcome and is not retried automatically.
 
-A passive viewer subscribes without claiming the Session. A former driver can
-keep receiving events after transfer but cannot start or steer a turn or mutate
-Session state. The continuing engine retains its provider generation while the
-new driver receives a new driver generation. Engine ownership and driver ownership
-must not be collapsed into one counter.
+Native launch carries the capture or connection owner's frozen attachment in
+memory, separately from stable tool provenance. Admission validates that token;
+it never reconstructs authority from the current record. The client connects to
+the local relay, while the recorded upstream endpoint identifies the AgentProcess.
+Both initial validation and actual spawn reject a replaced attachment, including
+A → B → A. Connection exit or interruption records an attachment outcome without
+closing or ending the surviving provider; orphan settlement remains independent.
+Composed stand-ins cover launch and pre-launch takeover, not configured Codex or
+a complete native-client relay exchange.
+
+A passive viewer subscribes without claiming the Session. A formerly attached lf invocation can
+keep receiving and retaining provider history after transfer but cannot start or
+steer a turn or change current attachment, connection, process evidence or stream
+attention. Retaining history grants no native-write or Flow authority.
+
+Native request correlation freezes its initiating Process, Work and capture before sending, not when a delayed
+start arrives. Claude input UUIDs, OpenCode message IDs and Codex request/reply
+correlation carry that snapshot. Broadcast-only starts retain unknown attribution;
+late correlated replies can fill it, but cannot borrow a newer capture or bind.
+The snapshot supplies history only and never authorizes dispatch.
+
+The continuing AgentProcess retains its identity while each attachment
+receives a fresh opaque token, including reattachment of the same lf Process.
+Release revokes that token as well. The token is a compare-and-swap witness,
+not another process identity or lifecycle owner. Caller provenance, turn origin
+and Program Status name the AgentProcess itself; no generation counter remains.
+
+Attachment exit retains an exact history-event reference rather than deriving a
+receipt from counter arithmetic. Migration preserves old event keys and payloads,
+including captured input, native identity and historical outcomes.
 
 `session connect --replace` stops the exact owned clients and reconnects to the
-live engine, preserving the active turn and sibling conversations.
-There is no separate Session engine-restart operation. Mere process silence,
+live AgentProcess, preserving the active turn and sibling conversations.
+There is no separate Session AgentProcess-restart operation. Mere process silence,
 tmux visibility, causal ancestry or a stored active label grants no termination
-authority, and recovery never authorizes killing a shared engine for one thread.
+authority, and recovery never authorizes killing a shared AgentProcess for one thread.
 
 ## Outcomes, retries and usage
 
@@ -167,7 +259,7 @@ tuples vary in size, and listing checks exact client receipts. The query therefo
 has no constant-byte or constant-time guarantee. Measurement status belongs in
 the [cutover status](../architecture-reference.md#cutover-status).
 
-Typed Task/Wave links survive landing and provider/driver replacement. Readers
+Typed Task/Wave links survive landing and provider replacement and takeover. Readers
 never use live PR eligibility, path names or mutable manifests to recover identity.
 Default interactive visibility does not hide headless history from explicit queries
 or make it impossible to resume. Desktop and CLI consume the same fields.

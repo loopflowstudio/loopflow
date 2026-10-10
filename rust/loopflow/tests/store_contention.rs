@@ -21,13 +21,16 @@ const EVENTS_PER_WRITER: usize = 20;
 fn process() -> LfProcess {
     let ts = 1_700_000_000;
     LfProcess {
+        kind: loopflow::process::ProcessKind::Lf,
+        agent_session_id: None,
+        os_started_at: None,
         lfid: loopflow::id::ProcessLfid::new(),
         pid: None,
         trace_id: loopflow::id::TraceId::new(),
         parent_process_lfid: None,
         via_agent: Some(false),
         caller_session_id: None,
-        caller_provider_generation: None,
+        caller_agent_process_lfid: None,
         command: Some(r#"["lf","flow","telemetry-daily"]"#.into()),
         repo: Some("/src/loopflow".into()),
         cwd: None,

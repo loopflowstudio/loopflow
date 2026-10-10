@@ -470,7 +470,7 @@ Observe validated Program Status snapshots from an active local terminal
 |---|---|
 | `<id>` | id |
 | `--terminal` | The terminal marker in the current provider client receipt |
-| `--generation` | Provider generation from the Session reading |
+| `--agent-process` | AgentProcess from the Session reading; omit when it reported none |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 

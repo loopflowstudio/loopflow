@@ -34,7 +34,8 @@ Retired history stores and intermediate branch schemas have no runtime readers.
 | Shared planning | Linear Initiatives, Projects and Issues |
 | Commits, PR heads, checks and merge | Git and GitHub |
 | Actual lf command process, causal parent and observed command outcome | `processes` |
-| Agent conversation, title, feedback, native identity and driver | `agent_sessions` |
+| The provider's OS process, its served Session, original parent and current attachment | AgentProcess rows in `processes` |
+| Agent conversation, title, feedback and native identity | `agent_sessions` |
 | Native starts, outcomes, retries and usage | LfSession history, correlated to native turn and driving Process |
 | A Flow's identity, state and step results | Its driver Process and child step processes in `processes` |
 | A Flow's name, launched graph and each step's node | FlowProcess: `flow_processes` and `flow_process_steps`, appended by the driver |
@@ -59,11 +60,11 @@ Each executed Flow step has its own child lf Process. Multiple provider turns ma
 belong to that Process; their results remain distinct in LfSession history.
 A provider may succeed before its command fails later.
 
-LfSession identity, name and feedback survive driver replacement. Its current
-driver is a nullable Process reference with a generation fence. The native engine
-has separate identity and generation: a driver can die while the engine continues.
-History retains the original Process and provider generation when a later driver
-recovers a missed native completion. Missing command outcome, usage or process
+LfSession identity, name and feedback survive attachment replacement. The
+attached LfProcess is a nullable reference on the AgentProcess record, fenced by a
+fresh token per claim. The AgentProcess has separate identity: its attached
+LfProcess can die while it continues. History retains the original Process and
+AgentProcess when a later attachment recovers a missed native completion. Missing command outcome, usage or process
 evidence stays unknown.
 
 A capture's `events.jsonl` holds every provider event verbatim. SQLite history
@@ -99,7 +100,7 @@ Reserve the conversation and captured-input reference, publish immutable input,
 and record publication before starting the provider. Filesystem publication and
 SQLite commit are separate boundaries with recoverable evidence. After a crash,
 reconcile the exact saved input and launch evidence. An unpublished reservation
-is not a successful launch; an absent receipt cannot prove that no engine started.
+is not a successful launch; an absent receipt cannot prove that no provider started.
 
 General Process observation cannot bypass installation preflight to open or migrate
 an incompatible store. Observation failures remain explicit; they never justify

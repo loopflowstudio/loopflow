@@ -14,6 +14,316 @@ use loopflow::store::{open_ephemeral_store, StorageConfig};
 use loopflow_test_support::TestRepo;
 
 #[tokio::test]
+async fn scheduled_agent_settlement_reports_failed_observation_and_recovers_without_losing_history()
+{
+    use std::os::unix::process::CommandExt;
+
+    use loopflow::lf::commands::top::{ActivityNodeKind, ActivitySnapshot};
+
+    struct Agent(Child);
+    impl Drop for Agent {
+        fn drop(&mut self) {
+            if matches!(self.0.try_wait(), Ok(None)) {
+                // SAFETY: this unreaped fixture child created its own process
+                // group; only that owned group is signaled during cleanup.
+                unsafe { libc::kill(-(self.0.id() as i32), libc::SIGKILL) };
+            }
+            let _ = self.0.wait();
+        }
+    }
+
+    let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    let database = home.path().join("loopflow.db");
+    let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
+        .await
+        .unwrap();
+    let store = SqliteStore::new(&database).unwrap();
+    reserve_session(&store, "orphan", repo.path());
+    let sql = rusqlite::Connection::open(&database).unwrap();
+    sql.execute(
+        "UPDATE agent_sessions SET interactive=0 WHERE id='orphan'",
+        [],
+    )
+    .unwrap();
+    let parent = ProcessLfid::new();
+    let attachment = store
+        .claim_session_attachment("orphan", None, &parent, true)
+        .unwrap();
+    // Only this throwaway group can be signaled. The shell supplies the server
+    // argv shape, not a configured provider, account or conversation.
+    let started = time::OffsetDateTime::now_utc().unix_timestamp();
+    let mut agent = Agent(
+        Command::new("/bin/sh")
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .args([
+                "-c",
+                "sleep 60 & wait; :",
+                "codex",
+                "app-server",
+                "--listen",
+                "fixture",
+            ])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .process_group(0)
+            .spawn()
+            .unwrap(),
+    );
+    sql.execute(
+        "UPDATE processes SET pid=?2,os_started_at=?3,spawn_state='spawn_requested' WHERE lfid=?1",
+        rusqlite::params![attachment.agent_process_lfid, agent.0.id(), started],
+    )
+    .unwrap();
+    let detached = store
+        .release_session_attachment("orphan", &attachment)
+        .unwrap();
+    let before = store
+        .process(&attachment.agent_process_lfid)
+        .unwrap()
+        .unwrap();
+    let history = store.session_history("orphan", 0, 0).unwrap();
+    let snapshot = || {
+        let output = command(home.path(), repo.path(), &["monitor", "ps", "--json"])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        serde_json::from_slice::<ActivitySnapshot>(&output.stdout).unwrap()
+    };
+    let id = format!("process:{}", attachment.agent_process_lfid);
+    let live = snapshot();
+    let row = live.nodes.iter().find(|row| row.id == id).unwrap();
+    assert_eq!(row.kind, ActivityNodeKind::AgentProcess);
+    assert_eq!(row.pid, Some(agent.0.id()));
+
+    let bin = home.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let ps = bin.join("ps");
+    for (args, single_pid_reads) in [
+        (["task", "reconcile", "--json"], false),
+        (["monitor", "prune", "--json"], false),
+        // Exact leader observation succeeds, but descendant inventory fails.
+        // The reaper must refuse before signaling, not assume no descendants.
+        (["task", "reconcile", "--json"], true),
+    ] {
+        let forward = if single_pid_reads {
+            "if [ \"$1\" = -p ]; then exec /bin/ps \"$@\"; fi\n"
+        } else {
+            ""
+        };
+        std::fs::write(
+            &ps,
+            format!("#!/bin/sh\n{forward}printf 'fixture sampling unavailable' >&2\nexit 2\n"),
+        )
+        .unwrap();
+        std::fs::set_permissions(&ps, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let output = command(home.path(), repo.path(), &args)
+            .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+            .output()
+            .unwrap();
+        assert!(
+            !output.status.success(),
+            "failed observation was reported successful: {output:?}"
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("fixture sampling unavailable"),
+            "{output:?}"
+        );
+        if args[0] == "task" {
+            let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert!(
+                result["errors"].as_array().unwrap().iter().any(|error| {
+                    error
+                        .as_str()
+                        .unwrap()
+                        .contains(attachment.agent_process_lfid.as_str())
+                }),
+                "{result}"
+            );
+        }
+        assert!(agent.0.try_wait().unwrap().is_none());
+        assert_eq!(
+            store.process(&attachment.agent_process_lfid).unwrap(),
+            Some(before.clone())
+        );
+        assert_eq!(
+            store.session_attachment("orphan").unwrap(),
+            Some(detached.clone())
+        );
+        assert_eq!(store.session_history("orphan", 0, 0).unwrap(), history);
+    }
+
+    // This is the same operation the schedule invokes, not evidence of an
+    // installed schedule firing. It must settle a detached row without receipts.
+    let output = command(home.path(), repo.path(), &["task", "reconcile", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["errors"], serde_json::json!([]));
+    assert!(!agent
+        .0
+        .try_wait()
+        .unwrap()
+        .expect("reconciled provider exited")
+        .success());
+    assert!(snapshot().nodes.iter().all(|row| row.id != id));
+    let ended = store
+        .process(&attachment.agent_process_lfid)
+        .unwrap()
+        .unwrap();
+    assert!(ended.completed_at.is_some());
+    assert!(
+        ended.outcome.is_none(),
+        "observed death is not successful work"
+    );
+    assert_eq!(ended.pid, before.pid);
+    assert_eq!(ended.parent_process_lfid, Some(parent));
+    assert_eq!(store.session_history("orphan", 0, 0).unwrap(), history);
+}
+
+/// The Task gate and the activity list read one inventory: a held checkout
+/// never names a Process the list omits, including an agent with no OS identity.
+#[test]
+fn task_checkout_blockers_are_rows_in_the_activity_list() {
+    use loopflow::lf::commands::top::{ActivityNodeKind, ActivitySnapshot};
+
+    let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    let lf = |cwd: &Path, args: &[&str]| {
+        let mut command = command(home.path(), cwd, args);
+        command
+            .env("HOME", home.path())
+            .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+            .env("LF_USER_NAME", "Fixture Person")
+            .stdin(std::process::Stdio::null());
+        command.output().unwrap()
+    };
+    let json = |cwd: &Path, args: &[&str]| {
+        let output = lf(cwd, args);
+        assert!(output.status.success(), "{args:?}: {output:?}");
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+    };
+    let created = json(
+        repo.path(),
+        &["task", "create", "--title", "Hold a Task", "--json"],
+    );
+    let id = created["id"].as_str().unwrap();
+    let placed = json(repo.path(), &["checkout", id, "--json"]);
+    let worktree = Path::new(placed["worktree"].as_str().unwrap());
+
+    let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    reserve_session(&store, "held", worktree);
+    let attachment = store
+        .claim_session_attachment("held", None, &ProcessLfid::new(), true)
+        .unwrap();
+    let agent = attachment.agent_process_lfid.as_str();
+
+    let output = lf(repo.path(), &["monitor", "ps", "--json"]);
+    assert!(output.status.success(), "{output:?}");
+    let listed: ActivitySnapshot = serde_json::from_slice(&output.stdout).unwrap();
+    let row = listed
+        .nodes
+        .iter()
+        .find(|row| row.id == format!("process:{agent}"))
+        .expect("reserved AgentProcess is listed");
+    assert_eq!(row.kind, ActivityNodeKind::AgentProcess);
+
+    let status = json(repo.path(), &["task", "status", id, "--json"]);
+    assert!(status.to_string().contains(agent), "{status}");
+
+    // Cancellation is the Task's decision; only checkout cleanup is held.
+    let abandoned = lf(repo.path(), &["task", "abandon", id]);
+    assert!(abandoned.status.success(), "{abandoned:?}");
+    let reason = String::from_utf8_lossy(&abandoned.stderr);
+    let named = reason
+        .split("Process ")
+        .skip(1)
+        .filter_map(|rest| rest.split_whitespace().next())
+        .collect::<Vec<_>>();
+    assert!(named.contains(&agent), "{reason}");
+    for lfid in named {
+        assert!(
+            listed
+                .nodes
+                .iter()
+                .any(|row| row.id == format!("process:{lfid}")),
+            "blocker {lfid} is not a listed row: {reason}"
+        );
+    }
+    assert!(worktree.exists());
+}
+
+#[tokio::test]
+async fn activity_lists_unresolved_records_without_receipts_or_os_sampling() {
+    use loopflow::lf::commands::top::{ActivitySnapshot, ActivityState};
+
+    let home = tempfile::tempdir().unwrap();
+    let database = home.path().join("loopflow.db");
+    let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
+        .await
+        .unwrap();
+    let sql = rusqlite::Connection::open(database).unwrap();
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    let parent = ProcessLfid::new();
+    let agent = ProcessLfid::new();
+    sql.execute(
+        "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,?1,?2)",
+        rusqlite::params![parent, now],
+    )
+    .unwrap();
+    sql.execute(
+        "INSERT INTO processes(lfid,trace_id,kind,parent_process_lfid,started_at,pid,os_started_at)
+         VALUES(?1,?1,'agent',?2,?3,4242,?3)",
+        rusqlite::params![agent, parent, now],
+    )
+    .unwrap();
+    let bin = home.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let ps = bin.join("ps");
+    std::fs::write(
+        &ps,
+        "#!/bin/sh\nprintf 'sampling unavailable' >&2\nexit 2\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&ps, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let output = command(home.path(), home.path(), &["monitor", "ps", "--json"])
+        .env("PATH", &bin)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let snapshot: ActivitySnapshot = serde_json::from_slice(&output.stdout).unwrap();
+    for id in [&parent, &agent] {
+        let node = snapshot
+            .nodes
+            .iter()
+            .find(|node| node.id == format!("process:{id}"))
+            .unwrap();
+        assert_eq!(node.state, ActivityState::Unknown);
+    }
+    assert_eq!(
+        snapshot
+            .nodes
+            .iter()
+            .find(|node| node.id == format!("process:{agent}"))
+            .unwrap()
+            .parent_id,
+        Some(format!("process:{parent}"))
+    );
+    let retained: i64 = sql
+        .query_row(
+            "SELECT count(*) FROM processes WHERE lfid IN (?1,?2) AND completed_at IS NULL",
+            rusqlite::params![parent, agent],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(retained, 2, "observation grants no settlement authority");
+}
+
+#[tokio::test]
 async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
     use loopflow::process::{LfProcess, LfProcessPage};
     let home = tempfile::tempdir().unwrap();
@@ -667,7 +977,7 @@ async fn actual_engine_children_follow_driver_handoff_but_not_provider_replaceme
     let session_id = "engine-ownership-fixture";
     reserve_session(&store, session_id, repo.path());
     let first = store
-        .claim_session_driver(session_id, None, &original.id, false)
+        .claim_session_attachment(session_id, None, &original.id, false)
         .unwrap();
     let control = home.path().join("control");
     std::fs::create_dir(&control).unwrap();
@@ -696,32 +1006,31 @@ async fn actual_engine_children_follow_driver_handoff_but_not_provider_replaceme
         .spawn()
         .unwrap();
     wait_file(&control.join("before.done"), &mut engine);
-    let vacant = store.release_session_driver(session_id, &first).unwrap();
+    let vacant = store
+        .release_session_attachment(session_id, &first)
+        .unwrap();
     assert_eq!(vacant.process_lfid, None);
-    assert_eq!(vacant.provider_generation, first.provider_generation);
+    assert_eq!(vacant.agent_process_lfid, first.agent_process_lfid);
     assert_eq!(vacant.provider_process_lfid, first.provider_process_lfid);
     assert_eq!(
-        store.session_driver(session_id).unwrap(),
+        store.session_attachment(session_id).unwrap(),
         Some(vacant.clone())
     );
     let handed_off = store
-        .claim_session_driver(session_id, Some(&vacant), &replacement.id, false)
+        .claim_session_attachment(session_id, Some(&vacant), &replacement.id, false)
         .unwrap();
-    assert_eq!(handed_off.provider_generation, first.provider_generation);
-    assert_ne!(handed_off.generation, first.generation);
+    assert_eq!(handed_off.agent_process_lfid, first.agent_process_lfid);
+    assert_ne!(handed_off.token, first.token);
     assert!(store
-        .claim_session_driver(session_id, Some(&first), &original.id, false)
+        .claim_session_attachment(session_id, Some(&first), &original.id, false)
         .is_err());
     drop(original);
     std::fs::write(control.join("handoff.go"), "").unwrap();
     wait_file(&control.join("after.done"), &mut engine);
     let restarted = store
-        .claim_session_driver(session_id, Some(&handed_off), &restart.id, true)
+        .claim_session_attachment(session_id, Some(&handed_off), &restart.id, true)
         .unwrap();
-    assert_ne!(
-        restarted.provider_generation,
-        handed_off.provider_generation
-    );
+    assert_ne!(restarted.agent_process_lfid, handed_off.agent_process_lfid);
     std::fs::write(control.join("replace.go"), "").unwrap();
     assert!(engine.wait().unwrap().success());
     let conn = rusqlite::Connection::open(&database).unwrap();
@@ -803,7 +1112,7 @@ async fn retained_native_client_loses_writes_but_keeps_display_after_transfer() 
     let session = "native-client-transfer";
     reserve_session(&store, session, repo.path());
     let first = store
-        .claim_session_driver(session, None, &original.id, false)
+        .claim_session_attachment(session, None, &original.id, false)
         .unwrap();
     let control = home.path().join("gate");
     std::fs::create_dir(&control).unwrap();
@@ -834,25 +1143,25 @@ async fn retained_native_client_loses_writes_but_keeps_display_after_transfer() 
         store: store.clone(),
         session_id: session.into(),
         thread_id: engine["thread"].as_str().unwrap().into(),
-        driver: Some(first.clone()),
+        attachment: Some(first.clone()),
     };
     let endpoint = Path::new(engine["endpoint"].as_str().unwrap());
     let old = serve_gate(&control.join("old.sock"), endpoint, connection.clone());
     let mut passive = connection.clone();
-    passive.driver = None;
+    passive.attachment = None;
     let observer = serve_gate(&control.join("observer.sock"), endpoint, passive);
     std::fs::write(control.join("sockets.go"), "").unwrap();
     wait_file(&control.join("attached.done"), &mut probe);
     assert_eq!(
-        store.session_driver(session).unwrap(),
+        store.session_attachment(session).unwrap(),
         Some(first.clone()),
         "passive display must not claim the conversation"
     );
     let second = store
-        .claim_session_driver(session, Some(&first), &replacement.id, false)
+        .claim_session_attachment(session, Some(&first), &replacement.id, false)
         .unwrap();
     let mut current = connection;
-    current.driver = Some(second.clone());
+    current.attachment = Some(second.clone());
     let current = serve_gate(&control.join("current.sock"), endpoint, current);
     std::fs::write(control.join("transfer.go"), "").unwrap();
     assert!(probe.wait().unwrap().success());
@@ -869,7 +1178,7 @@ async fn retained_native_client_loses_writes_but_keeps_display_after_transfer() 
             .len(),
         4
     );
-    assert_eq!(store.session_driver(session).unwrap(), Some(second));
+    assert_eq!(store.session_attachment(session).unwrap(), Some(second));
     let conn = rusqlite::Connection::open(database).unwrap();
     let parents: Vec<String> = conn.prepare(
         "SELECT parent_process_lfid FROM processes WHERE caller_session_id=?1 AND via_agent=1 ORDER BY rowid"

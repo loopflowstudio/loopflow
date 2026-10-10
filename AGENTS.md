@@ -174,6 +174,9 @@ When editing Rust tests:
 - Use `#[test]` for unit tests in the same file
 - Integration tests go in `tests/` directory
 - Mock via closures or `#[cfg(test)]`, not factory traits or extra abstractions
+- Pin fixture `LF_BIN` inside the network boundary; the runner clears inherited `LF_*`. Never let an installed provider outrank a stand-in.
+- From an lf-launched shell, run `cargo test` with inherited `LF_*` unset and `< /dev/null`: capture fixtures follow `LF_HOME`, and `lf task create` reads a piped report from open stdin.
+- Native library fixtures use `TestLedgerGuard` so invocation and capture share a store. Pin blocking workers with `journal::with_test_ledger`; thread-local fixture selection does not follow `LF_HOME`.
 
 # Goals
 
@@ -253,7 +256,7 @@ LfProcess is one actual lf process, including direct and agent-issued nested com
 Its `lfid` is durable Loopflow identity; `pid` is the optional Unix PID and may
 collide across history. References use `process_lfid` and `parent_process_lfid`.
 LfSession is one Loopflow-owned durable conversation, interactive or headless; identity,
-name, feedback and native history survive driver replacement. Product text says
+name, feedback and native history survive takeover. Product text says
 Session for interactive and Run for headless work. AgentSession is the provider-owned
 conversation, represented by an opaque AgentSessionId used for resume, native
 turn keys and account attribution. An LfSession selects one AgentSession at a
@@ -272,9 +275,9 @@ including to done/landed Tasks. Prospective attribution preserves earlier usage 
 owns that single choice. Actual work
 reservation sets Started once; logging an inspection Process does not. Every
 denormalization is removed or validated on writes. Causal ancestry grants neither
-process control nor Flow settlement. Current driver and provider generations
-are separate: an unchanged engine survives driver handoff while old clients lose
-write authority. Passive display acquires no claim.
+process control nor Flow settlement. Attachment claims and provider identity
+are separate: a fresh claim token fences every attachment and release, including
+A → B → A, while an unchanged provider survives handoff. Passive display acquires no claim.
 
 The full contract and current cutover status live in
 [Architecture Reference](docs/architecture-reference.md#core-models-and-apis).

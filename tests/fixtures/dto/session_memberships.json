@@ -60,7 +60,7 @@
     "attention": "waiting",
     "task_primary": false,
     "program_status": null,
-    "provider_generation": 1
+    "agent_process_lfid": "44444444-4444-4444-8444-444444444444"
   },
   {
     "id": "run_00000000000000000000000000000002",
@@ -123,7 +123,7 @@
     "attention": null,
     "task_primary": false,
     "program_status": null,
-    "provider_generation": 1
+    "agent_process_lfid": "44444444-4444-4444-8444-444444444444"
   },
   {
     "id": "run_00000000000000000000000000000003",
@@ -178,7 +178,7 @@
     "attention": null,
     "task_primary": false,
     "program_status": null,
-    "provider_generation": 1
+    "agent_process_lfid": "44444444-4444-4444-8444-444444444444"
   },
   {
     "id": "run_00000000000000000000000000000004",
@@ -228,7 +228,7 @@
     "attention": null,
     "task_primary": false,
     "program_status": null,
-    "provider_generation": 1
+    "agent_process_lfid": "44444444-4444-4444-8444-444444444444"
   },
   {
     "id": "run_00000000000000000000000000000006",
@@ -288,7 +288,7 @@
     "attention": null,
     "task_primary": false,
     "program_status": null,
-    "provider_generation": 1
+    "agent_process_lfid": "44444444-4444-4444-8444-444444444444"
   },
   {
     "id": "run_00000000000000000000000000000007",
@@ -343,7 +343,7 @@
     "attention": null,
     "task_primary": false,
     "program_status": null,
-    "provider_generation": 1
+    "agent_process_lfid": "44444444-4444-4444-8444-444444444444"
   },
   {
     "id": "task_00000000000000000000000000000001:feature:demo:0",
@@ -405,6 +405,6 @@
     "attention": "waiting",
     "task_primary": false,
     "program_status": null,
-    "provider_generation": 1
+    "agent_process_lfid": "44444444-4444-4444-8444-444444444444"
   }
 ]

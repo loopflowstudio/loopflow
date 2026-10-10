@@ -745,14 +745,21 @@ mod tests {
             let history = crate::session_record::read_provider_session(&capture.artifact_dir())
                 .unwrap()
                 .unwrap();
-            let resumed = crate::lf::commands::util::resume_session(
-                "codex",
-                None,
-                repo.path(),
-                &capture.artifact_key(),
-                &history,
+            // The resuming invocation and its capture share this fixture's store.
+            let resumed = crate::journal::with_test_ledger(
+                crate::store::database_path_from_env().unwrap(),
+                || {
+                    crate::lf::commands::util::resume_session(
+                        "codex",
+                        None,
+                        repo.path(),
+                        &capture.artifact_key(),
+                        &history,
+                    )
+                },
             );
-            assert!(resumed.unwrap_err().to_string().contains("was deleted"));
+            let error = resumed.unwrap_err().to_string();
+            assert!(error.contains("was deleted"), "{error}");
             assert!(
                 crate::session_record::read_provider_clients(&capture.artifact_dir())
                     .unwrap()

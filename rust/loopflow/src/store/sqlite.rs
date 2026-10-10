@@ -24,7 +24,6 @@ mod chapters;
 mod children;
 mod ci_incidents;
 mod durable;
-pub(crate) mod engine_orphans;
 mod flow_inventory;
 mod metrics;
 mod plan_read;
@@ -628,38 +627,6 @@ impl SqliteStore {
             })
         })?;
         rows.map(|row| row.map_err(StoreError::from)).collect()
-    }
-
-    /// Run several ledger queries against one SQLite read snapshot.
-    ///
-    /// The store must not be cloned into the closure: each query briefly takes
-    /// the same connection lock while the connection-level transaction stays
-    /// open. Observability callers create a private read-only store for this
-    /// operation, so no unrelated reader can join the transaction.
-    pub(crate) fn read_process_snapshot<T>(
-        &self,
-        read: impl FnOnce(&Self) -> StoreResult<T>,
-    ) -> StoreResult<T> {
-        {
-            let conn = self.conn.lock().expect("store mutex poisoned");
-            conn.execute_batch("BEGIN DEFERRED TRANSACTION")?;
-        }
-        let result = read(self);
-        let finish = {
-            let conn = self.conn.lock().expect("store mutex poisoned");
-            if result.is_ok() {
-                conn.execute_batch("COMMIT")
-            } else {
-                conn.execute_batch("ROLLBACK")
-            }
-        };
-        match result {
-            Ok(value) => {
-                finish?;
-                Ok(value)
-            }
-            Err(error) => Err(error),
-        }
     }
 
     #[cfg(test)]
@@ -2078,13 +2045,13 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "INSERT INTO processes(lfid,trace_id,parent_process_lfid,command,repo,cwd,started_at,
-                via_agent,caller_session_id,caller_provider_generation,completed_at,outcome,exit_code,signal,error,pid)
+                via_agent,caller_session_id,caller_agent_process_lfid,completed_at,outcome,exit_code,signal,error,pid)
              VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)
              ON CONFLICT(lfid) DO UPDATE SET completed_at=excluded.completed_at,
                 outcome=excluded.outcome,exit_code=excluded.exit_code,signal=excluded.signal,error=excluded.error
              WHERE processes.completed_at IS NULL AND excluded.completed_at IS NOT NULL",
             params![process.lfid,process.trace_id,process.parent_process_lfid,process.command,process.repo,process.cwd,
-                process.started_at,process.via_agent,process.caller_session_id,process.caller_provider_generation,
+                process.started_at,process.via_agent,process.caller_session_id,process.caller_agent_process_lfid,
                 process.completed_at,process.outcome,process.exit_code,process.signal,process.error,process.pid],
         )?;
         Ok(())

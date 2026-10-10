@@ -592,6 +592,7 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
                 agent_session.as_ref(),
                 &flags,
                 context_file.as_deref(),
+                capture.session_attachment(),
             )
         })();
         if let Some(provider_session) =
@@ -751,7 +752,7 @@ fn begin_capture(
     .map_err(|error| {
         anyhow!("failed to publish Session capture manifest before agent launch: {error}")
     })?;
-    capture.claim_conversation_driver()?;
+    capture.claim_session_attachment()?;
     capture.record_input("initial", &built.context.task.text);
     debug!(
         elapsed_ms = started.elapsed().as_millis(),
@@ -1342,23 +1343,31 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             subjects: vec!["task:LOO-265".to_string()],
             work: None,
         };
-        let capture = begin_capture(&built, "headless", &built.agent_config, None).unwrap();
-        let artifact_key = capture.artifact_key();
-        let run_dir = capture.artifact_dir();
+        // Capture admission attaches the recorded lf invocation, as the CLI does.
+        let command = vec!["lf".to_string(), "implement".to_string()];
+        let admitted = || {
+            crate::journal::with_runtime(home.path(), &command, || {
+                let capture = begin_capture(&built, "headless", &built.agent_config, None)?;
+                let artifact_key = capture.artifact_key();
+                let run_dir = capture.artifact_dir();
 
-        assert!(run_dir.join("manifest.json").is_file());
-        let manifest = std::fs::read_to_string(run_dir.join("manifest.json")).unwrap();
-        assert!(manifest.contains("task:LOO-265"));
-        assert!(!run_dir.join("terminal.json").exists());
-        let result = run_headless_prompt(&built, &capture, &built.agent_config);
-        capture
-            .finish(if result.is_ok() {
-                "completed"
-            } else {
-                "failed"
+                assert!(run_dir.join("manifest.json").is_file());
+                let manifest = std::fs::read_to_string(run_dir.join("manifest.json"))?;
+                assert!(manifest.contains("task:LOO-265"));
+                assert!(!run_dir.join("terminal.json").exists());
+                let result = run_headless_prompt(&built, &capture, &built.agent_config);
+                capture.finish(if result.is_ok() {
+                    "completed"
+                } else {
+                    "failed"
+                })?;
+                result?;
+                Ok((artifact_key, run_dir))
             })
-            .unwrap();
-        result.unwrap();
+        };
+        // The invocation and its capture share this fixture's store.
+        let (artifact_key, run_dir) =
+            crate::journal::with_test_ledger(registry.clone(), admitted).unwrap();
 
         let provider_identity = std::fs::read_to_string(evidence).unwrap();
         assert_eq!(
@@ -1377,7 +1386,10 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             "LF_TEST_ATTEMPT_FILE".to_string(),
             home.path().join("implicit-attempt").display().to_string(),
         );
-        let result = run_agent(&implicit_launch, &built.process, &built.capabilities).unwrap();
+        let result = crate::journal::with_test_ledger(registry.clone(), || {
+            run_agent(&implicit_launch, &built.process, &built.capabilities)
+        })
+        .unwrap();
         assert_eq!(result.exit_code, 0);
         let implicit_identities = std::fs::read_to_string(implicit_evidence).unwrap();
         let identities = implicit_identities.lines().collect::<Vec<_>>();
@@ -1513,9 +1525,17 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         );
         let cli = Cli::default();
 
+        // Each run is its own recorded lf invocation, as from the CLI.
+        let command = vec!["lf".to_string(), "research".to_string()];
+        let ledger = crate::store::database_path_from_env().unwrap();
+        let admitted = |built: &PromptBuild| {
+            crate::journal::with_test_ledger(ledger.clone(), || {
+                crate::journal::with_runtime(repo.path(), &command, || run_prompt(built, &cli))
+            })
+        };
         std::thread::scope(|scope| {
-            let first = scope.spawn(|| run_prompt(&first, &cli));
-            let second = scope.spawn(|| run_prompt(&second, &cli));
+            let first = scope.spawn(|| admitted(&first));
+            let second = scope.spawn(|| admitted(&second));
             first.join().unwrap().unwrap();
             second.join().unwrap().unwrap();
         });

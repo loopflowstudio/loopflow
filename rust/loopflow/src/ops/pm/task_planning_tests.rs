@@ -603,7 +603,17 @@ fn task_deletion_active_sync_reconnect_retains_execution_and_history() {
         )
         .unwrap();
         conn.execute("INSERT INTO processes(lfid,trace_id,command,cwd,started_at) VALUES('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222','lf run code',?1,2)",[repo.to_str().unwrap()]).unwrap();
-        conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,cwd,task_id,wave_id,driver_process_lfid,provider_thread,input_published) VALUES('session-retained','Conversation','human',2,?1,?2,?3,'11111111-1111-4111-8111-111111111111','native-retained',1)",rusqlite::params![repo.to_str().unwrap(),task.id.as_str(),task.wave_id.as_str()]).unwrap();
+        conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,cwd,task_id,wave_id,provider_thread,input_published) VALUES('session-retained','Conversation','human',2,?1,?2,?3,'native-retained',1)",rusqlite::params![repo.to_str().unwrap(),task.id.as_str(),task.wave_id.as_str()]).unwrap();
+        fixture
+            .store
+            .sqlite
+            .claim_session_attachment(
+                "session-retained",
+                None,
+                &crate::id::ProcessLfid::parse("11111111-1111-4111-8111-111111111111").unwrap(),
+                true,
+            )
+            .unwrap();
         conn.execute("INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,created_at,updated_at) VALUES('pr-retained',?1,1,'task','retain/branch','retained-base',1,7)",[task.id.as_str()]).unwrap();
         let graph = json!({"name":"code", "nodes":[{"name":"review","skill":"review","description":null}],
             "edges":[{"from":"start","to":"review","flow":"implement"},{"from":"review","to":"end","flow":null}]});
@@ -1433,13 +1443,16 @@ fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
             .unwrap();
         assert!(fixture.store.sqlite.attempt_task_state(&completed).unwrap());
         let process = crate::process::LfProcess {
+            kind: crate::process::ProcessKind::Lf,
+            agent_session_id: None,
+            os_started_at: None,
             lfid: crate::id::ProcessLfid::new(),
             pid: None,
             trace_id: crate::id::TraceId::new(),
             parent_process_lfid: None,
             via_agent: None,
             caller_session_id: None,
-            caller_provider_generation: None,
+            caller_agent_process_lfid: None,
             command: Some("task move start".into()),
             repo: None,
             cwd: None,
@@ -1812,14 +1825,17 @@ exit 0
                 ..Default::default()
             };
             let context = PM_TEST_CONTEXT.with(Clone::clone);
+            let database = fixture.database.clone();
             runtime.block_on(async {
-                let running = tokio::task::spawn_blocking(move || {
-                    PM_TEST_CONTEXT.sync_scope(context, || {
-                        crate::engine::agent::run_agent(
-                            &launch,
-                            &process,
-                            &crate::engine::agent::AgentCapabilities::default(),
-                        )
+                let mut running = tokio::task::spawn_blocking(move || {
+                    crate::journal::with_test_ledger(database, || {
+                        PM_TEST_CONTEXT.sync_scope(context, || {
+                            crate::engine::agent::run_agent(
+                                &launch,
+                                &process,
+                                &crate::engine::agent::AgentCapabilities::default(),
+                            )
+                        })
                     })
                 });
                 let observed = tokio::time::timeout(std::time::Duration::from_secs(45), async {
@@ -1833,7 +1849,12 @@ exit 0
                         {
                             break;
                         }
-                        assert!(!running.is_finished(), "provider exited during outage");
+                        if running.is_finished() {
+                            panic!(
+                                "provider exited during outage: {:?}",
+                                (&mut running).await.unwrap()
+                            );
+                        }
                         tokio::time::sleep(std::time::Duration::from_millis(25)).await;
                     }
                     assert_eq!(

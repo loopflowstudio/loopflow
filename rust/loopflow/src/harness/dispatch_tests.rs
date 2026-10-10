@@ -69,7 +69,7 @@ async fn stalled_dispatch() {
     .unwrap();
     store.test_session("conversation", "run_00000000000000000000000000000001");
     let driver = store
-        .claim_session_driver("conversation", None, &process, false)
+        .claim_session_attachment("conversation", None, &process, false)
         .unwrap();
     let (socket, _unread_peer) = UnixStream::pair().unwrap();
     let mut socket = WebSocketStream::from_raw_socket(socket, Role::Client, None).await;
@@ -79,7 +79,7 @@ async fn stalled_dispatch() {
     let sender_driver = driver.clone();
     let sender = tokio::task::spawn_blocking(move || {
         sender_store
-            .with_session_driver("conversation", &sender_driver, || {
+            .with_session_attachment("conversation", &sender_driver, || {
                 entered.send(()).unwrap();
                 runtime.block_on(async {
                     // The peer never drains this frame. Only the runtime's timer
@@ -137,7 +137,7 @@ async fn stalled_dispatch() {
     let dispatch_driver = driver.clone();
     let dispatch = std::thread::spawn(move || {
         dispatch_store
-            .with_session_driver("conversation", &dispatch_driver, || {
+            .with_session_attachment("conversation", &dispatch_driver, || {
                 entered.send(()).unwrap();
                 released.recv().unwrap();
                 Ok(())
@@ -150,7 +150,7 @@ async fn stalled_dispatch() {
     let original = driver.clone();
     let claimant = std::thread::spawn(move || {
         let driver = transfer_store
-            .claim_session_driver("conversation", Some(&original), &replacement, false)
+            .claim_session_attachment("conversation", Some(&original), &replacement, false)
             .unwrap();
         transferred.send(driver).unwrap();
     });
@@ -165,10 +165,11 @@ async fn stalled_dispatch() {
     dispatch.join().unwrap();
     claimant.join().unwrap();
     assert!(matches!(
-        store.with_session_driver::<()>("conversation", &driver, || panic!("stale driver sent")),
+        store
+            .with_session_attachment::<()>("conversation", &driver, || panic!("stale driver sent")),
         Err(StoreError::InvalidAuthority(_))
     ));
     other_store
-        .with_session_driver("conversation", &replacement, || Ok(()))
+        .with_session_attachment("conversation", &replacement, || Ok(()))
         .unwrap();
 }

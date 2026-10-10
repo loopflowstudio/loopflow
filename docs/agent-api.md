@@ -52,9 +52,9 @@ the step processes it starts. Provider turns and retries remain history
 inside the conversation; they do not create another generic execution object.
 
 A child command records its causal parent and, when issued by an agent, its
-calling conversation and provider generation. That evidence grants neither
-process-control authority nor permission to move a Flow cursor. A conversation
-driver handoff retains conversation identity while fencing the old writer.
+calling conversation and AgentProcess. That evidence grants neither
+process-control authority nor permission to move a Flow cursor. An attachment
+handoff retains conversation identity while fencing the old writer.
 Passive observation acquires no claim. See the [contract and cutover status](architecture-reference.md#cutover-status)
 for the remaining reader, wire and lifecycle conversion.
 

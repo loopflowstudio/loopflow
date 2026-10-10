@@ -102,17 +102,17 @@ pub(super) fn session_in(conn: &Connection, id: &str) -> StoreResult<Option<LfSe
     .transpose()
 }
 
-/// Reported status wins within the provider generation; otherwise use the
-/// current driver's input/hand-back/quiet reading. Filter before pagination.
+/// Reported status wins for the current AgentProcess; otherwise use the
+/// current attachment's input/hand-back/quiet reading. Filter before pagination.
 fn waiting_sql(session: &str, now: i64) -> String {
     format!(
         "EXISTS(SELECT 1 FROM session_activity act WHERE act.session_id={session}.id
-            AND {session}.completed_at IS NULL AND act.provider_generation={session}.provider_generation
+            AND {session}.completed_at IS NULL AND act.agent_process_lfid IS {session}.agent_process_lfid
             AND CASE WHEN act.program_status IS NOT NULL THEN
                 EXISTS(SELECT 1 FROM json_each(act.program_status,'$.records') r
                     WHERE json_extract(r.value,'$.state')='blocked'
                     OR ({session}.interactive=1 AND json_extract(r.value,'$.state')='idle'))
-            ELSE act.driver_generation={session}.driver_generation
+            ELSE act.attachment_token=(SELECT attachment_token FROM processes WHERE lfid={session}.agent_process_lfid)
                 AND (act.pending_input>0 OR (act.open_tools=0 AND (({session}.interactive=1 AND act.yielded=1)
                     OR {now}-act.observed_at>={quiet}))) END)",
         quiet = crate::session::WAITING_QUIET_SECONDS
@@ -210,13 +210,14 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
          AND kind='observed' AND substr(receipt_key,-14)=':manifest.json')='independent'),
         (SELECT json_group_array(id) FROM ({})),
         a.primary_scope,
-        (SELECT CASE WHEN json_valid(e.payload) THEN json_extract(e.payload,'$.outcome') END FROM session_events e INDEXED BY session_driver_exit
-            WHERE e.session_id=s.id AND e.receipt_key='driver:'||(a.driver_generation-1)||':exit' AND e.kind='observed'),
+        (SELECT CASE WHEN json_valid(e.payload) THEN json_extract(e.payload,'$.outcome') END FROM session_events e
+            WHERE e.session_id=s.id AND e.seq=(SELECT attachment_exit_seq FROM processes WHERE lfid=a.agent_process_lfid) AND e.kind='observed'),
         {waiting},
         COALESCE(({task_state}) IN ('done','abandoned'),0),
         EXISTS(SELECT 1 FROM tasks p WHERE p.primary_session_id=s.id),
-        (SELECT act.program_status FROM session_activity act WHERE act.session_id=s.id AND act.provider_generation=a.provider_generation),a.provider_generation
+        (SELECT act.program_status FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_lfid IS a.agent_process_lfid),a.agent_process_lfid
         FROM page s JOIN agent_sessions a ON a.id=s.id
+        LEFT JOIN processes p ON p.lfid=a.agent_process_lfid
         LEFT JOIN session_events captured ON captured.seq=s.current_capture
         LEFT JOIN flow_process_steps fs ON fs.process_lfid=captured.process_lfid
         LEFT JOIN flow_processes flow ON flow.process_lfid=fs.flow_process_lfid
@@ -266,13 +267,13 @@ fn read_summary(
         Ok(crate::session::SessionSummary {
             task_ids: serde_json::from_str(&row.get::<_, String>(26)?)?,
             primary_scope: row.get(27)?,
-            driver_outcome: row.get(28)?,
+            attachment_outcome: row.get(28)?,
             waiting: row.get(29)?,
             program_status: row
                 .get::<_, Option<String>>(32)?
                 .map(|json| serde_json::from_str(&json))
                 .transpose()?,
-            provider_generation: row.get(33)?,
+            agent_process_lfid: row.get(33)?,
             task_terminal: row.get(30)?,
             task_primary: row.get(31)?,
             captured: row.get(16)?,
@@ -527,10 +528,15 @@ impl SqliteStore {
         input: Option<&str>,
     ) -> StoreResult<(Vec<crate::session_record::SessionHistory>, bool)> {
         // An input has ended once its terminal record, its turns' completions or
-        // its driver's exit says so: a turn left open by an exited driver is over.
+        // its attachment's exit says so: a turn left open at exit is over.
         let inputs = {
             let conn = self.conn.lock().expect("store mutex poisoned");
-            let mut query = conn.prepare("WITH inputs AS (
+            let mut query = conn.prepare("WITH attachment_exits AS NOT MATERIALIZED (
+                SELECT session_id,seq,observed_at FROM session_events
+                WHERE kind='observed' AND substr(receipt_key,-5)=':exit'
+                    AND ((receipt_key>='driver:' AND receipt_key<'driver;')
+                        OR (receipt_key>='attachment:' AND receipt_key<'attachment;'))
+            ), inputs AS (
                 SELECT i.seq AS captured,i.receipt_key AS input_id,i.session_id,json_extract(i.payload,'$.caller_key') AS caller_input_id,
                     COALESCE(m.observed_at,i.observed_at) AS started,
                     CASE WHEN m.seq IS NOT NULL THEN m.task_id ELSE i.task_id END AS task_id,
@@ -545,13 +551,13 @@ impl SqliteStore {
                             SELECT 1 FROM session_events done WHERE done.session_id=origin.session_id
                             AND done.provider_thread=origin.provider_thread AND done.provider_turn=origin.provider_turn
                             AND done.kind='completed')
-                        AND NOT EXISTS (SELECT 1 FROM session_events x WHERE x.session_id=s.id AND x.kind='observed' AND x.receipt_key>='driver:' AND x.receipt_key<'driver;' AND substr(x.receipt_key,-5)=':exit' AND x.seq>origin.seq)) THEN NULL ELSE
+                        AND NOT EXISTS (SELECT 1 FROM attachment_exits x WHERE x.session_id=s.id AND x.seq>origin.seq)) THEN NULL ELSE
                         COALESCE(terminal.observed_at,(
                             SELECT MAX(done.observed_at) FROM session_events origin JOIN session_events done
                             ON done.session_id=origin.session_id AND done.provider_thread=origin.provider_thread
                             AND done.provider_turn=origin.provider_turn AND done.kind='completed'
                             WHERE origin.session_id=s.id AND origin.captured_event=i.seq AND origin.kind='started'),(
-                            SELECT MIN(x.observed_at) FROM session_events x WHERE x.session_id=s.id AND x.kind='observed' AND x.receipt_key>='driver:' AND x.receipt_key<'driver;' AND substr(x.receipt_key,-5)=':exit' AND x.seq>i.seq)) END AS ended, NULL AS thread, NULL AS turn
+                            SELECT MIN(x.observed_at) FROM attachment_exits x WHERE x.session_id=s.id AND x.seq>i.seq)) END AS ended, NULL AS thread, NULL AS turn
                 FROM session_events i JOIN agent_sessions s ON s.id=i.session_id
                 LEFT JOIN session_events m ON m.session_id=s.id AND m.kind='observed'
                     AND m.receipt_key=i.receipt_key||':manifest.json'
@@ -564,7 +570,7 @@ impl SqliteStore {
                 UNION ALL
                 SELECT NULL,NULL,e.session_id,NULL,MIN(e.observed_at),origin.task_id,origin.wave_id,
                     COALESCE(MAX(CASE WHEN e.kind='completed' THEN e.observed_at END),(
-                        SELECT MIN(x.observed_at) FROM session_events x WHERE x.session_id=e.session_id AND x.kind='observed' AND x.receipt_key>='driver:' AND x.receipt_key<'driver;' AND substr(x.receipt_key,-5)=':exit' AND x.seq>MIN(e.seq))),e.provider_thread,e.provider_turn
+                        SELECT MIN(x.observed_at) FROM attachment_exits x WHERE x.session_id=e.session_id AND x.seq>MIN(e.seq))),e.provider_thread,e.provider_turn
                 FROM session_events e LEFT JOIN session_events origin
                     ON origin.session_id=e.session_id AND origin.provider_thread=e.provider_thread
                     AND origin.provider_turn=e.provider_turn AND origin.kind='started'
@@ -954,40 +960,33 @@ impl SqliteStore {
         Ok(session)
     }
 
-    /// Reserve the next input and its driver together; a losing claimant changes neither.
+    /// Reserve the next input and its attachment together; a losing claimant changes neither.
     pub(crate) fn claim_session_input(
         &self,
         mut next: LfSession,
-        expected_driver: Option<&crate::process::SessionDriver>,
+        expected: Option<&crate::process::SessionAttachment>,
         process: &crate::id::ProcessLfid,
-        replace_provider: bool,
-    ) -> StoreResult<(LfSession, crate::process::SessionDriver)> {
+        close: impl FnOnce() -> StoreResult<bool>,
+    ) -> StoreResult<(LfSession, crate::process::SessionAttachment)> {
         let _admission = self.lock_session_checkouts(&next)?;
-        let _dispatch = self.lock_session_driver(&next.id)?;
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let previous = session_in(&tx, &next.id)?.ok_or(StoreError::NotFound)?;
-        if previous.captured != next.captured
-            || previous.completed_at.is_some()
-            || previous.cwd != next.cwd
-            || previous.task_id != next.task_id
-            || previous.wave_id != next.wave_id
-        {
-            return Err(StoreError::InvalidAuthority(
-                "conversation changed before input admission".into(),
-            ));
-        }
-        replace_input_in(&tx, &mut next, Some(process))?;
-        let driver = super::processes::claim_driver_in(
-            &tx,
-            &next.id,
-            expected_driver,
-            process,
-            replace_provider,
-        )?;
-        let next = session_in(&tx, &next.id)?.ok_or(StoreError::NotFound)?;
-        tx.commit()?;
-        Ok((next, driver))
+        let session = next.id.clone();
+        self.with_session_resume(&session, expected, close, |tx| {
+            let previous = session_in(tx, &next.id)?.ok_or(StoreError::NotFound)?;
+            if previous.captured != next.captured
+                || previous.completed_at.is_some()
+                || previous.cwd != next.cwd
+                || previous.task_id != next.task_id
+                || previous.wave_id != next.wave_id
+            {
+                return Err(StoreError::InvalidAuthority(
+                    "conversation changed before input admission".into(),
+                ));
+            }
+            replace_input_in(tx, &mut next, Some(process))?;
+            let driver = super::processes::attach_in(tx, &next.id, expected, process, true)?;
+            let next = session_in(tx, &next.id)?.ok_or(StoreError::NotFound)?;
+            Ok((next, driver))
+        })
     }
 
     /// Choose the agent of an unpublished capture. A published capture keeps
@@ -1189,10 +1188,10 @@ fn resolve_ancestry_in(conn: &Connection, session: &mut LfSession) -> StoreResul
 fn require_current_actor_in(conn: &Connection, id: &str) -> StoreResult<()> {
     if let Some(caller) = crate::journal::agent_caller().filter(|caller| caller.session_id == id) {
         let current: bool = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE id=?1
-                AND provider_generation=?2 AND provider_process_lfid=?3
-                AND driver_process_lfid IS NOT NULL)",
-            params![id, caller.provider_generation, caller.origin_process_lfid],
+            "SELECT EXISTS(SELECT 1 FROM agent_sessions s JOIN processes p ON p.lfid=s.agent_process_lfid WHERE s.id=?1
+                AND p.lfid=?2 AND p.parent_process_lfid=?3
+                AND p.attached_process_lfid IS NOT NULL)",
+            params![id, caller.agent_process_lfid, caller.origin_process_lfid],
             |row| row.get(0),
         )?;
         if !current {

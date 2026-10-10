@@ -10,7 +10,7 @@ use serde::Deserialize;
 use tokio_util::sync::CancellationToken;
 
 use crate::durable::WorkRef;
-use crate::session_record::active::{ActiveSessionReader, ActiveSessionsSnapshot, DiscoveryState};
+use crate::session_record::active::{snapshot, ActiveSessionsSnapshot, DiscoveryState};
 use crate::store::SharedStore;
 
 const PERIOD: Duration = Duration::from_secs(2);
@@ -46,17 +46,11 @@ fn frame(mut snapshot: ActiveSessionsSnapshot) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-pub(super) fn run(
-    home: &Path,
-    store: &SharedStore,
-    task: Option<WorkRef>,
-    runtime: &tokio::runtime::Runtime,
-) -> Result<()> {
+pub(super) fn run(home: &Path, store: &SharedStore, task: Option<WorkRef>) -> Result<()> {
     let cancel = CancellationToken::new();
-    let mut reader = ActiveSessionReader::start(home, true, cancel.clone())?;
     let mailbox: Mailbox = Arc::new((Mutex::new(Delivery::default()), Condvar::new()));
     let pending = ActiveSessionsSnapshot {
-        home: reader.home().to_owned(),
+        home: home.to_owned(),
         observed_at: time::OffsetDateTime::now_utc().unix_timestamp(),
         task: task.clone(),
         discovery: DiscoveryState::Scanning,
@@ -65,7 +59,7 @@ pub(super) fn run(
     };
 
     // These pipe threads belong to the foreground command. They never own or
-    // signal providers. On EOF the main thread cancels/drains the native reader;
+    // signal providers. EOF stops observation;
     // process exit also releases a writer blocked on an undrained output pipe.
     let input = mailbox.clone();
     let input_cancel = cancel.clone();
@@ -158,9 +152,6 @@ pub(super) fn run(
                     break;
                 }
                 let rescan = std::mem::take(&mut state.rescan);
-                if rescan {
-                    reader.invalidate();
-                }
                 state.refresh = false;
                 state.busy = true;
                 if initial || rescan {
@@ -169,7 +160,7 @@ pub(super) fn run(
                 }
                 mailbox.1.notify_all();
             }
-            let snapshot = runtime.block_on(reader.observe(store, task.clone()));
+            let snapshot = snapshot(home, &store.sqlite, task.clone());
             let unavailable = snapshot.discovery == DiscoveryState::Unavailable;
             let mut state = mailbox.0.lock().expect("active reader mailbox poisoned");
             state.busy = false;
@@ -198,7 +189,6 @@ pub(super) fn run(
     heartbeat_thread
         .join()
         .expect("active reader heartbeat panicked");
-    drop(reader);
     result
 }
 

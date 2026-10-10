@@ -9,6 +9,25 @@ const ROADMAP: &str = include_str!("../../../tests/fixtures/dto/roadmap_snapshot
 const METRIC_PORTFOLIO: &str = include_str!("../../../tests/fixtures/dto/metric_portfolio.json");
 
 #[test]
+fn activity_retains_unknown_record_identity_without_a_pid() {
+    use loopflow::lf::commands::top::{ActivitySnapshot, ActivityState};
+    let snapshot: ActivitySnapshot = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/activity_snapshot.json"
+    ))
+    .unwrap();
+    let unknown = &snapshot.nodes[2];
+    assert_eq!(unknown.state, ActivityState::Unknown);
+    assert_eq!(unknown.pid, None);
+    assert_eq!(unknown.parent_id.as_ref(), Some(&snapshot.nodes[0].id));
+    assert!(unknown.id.starts_with("process:"));
+    assert_eq!(
+        serde_json::from_str::<ActivitySnapshot>(&serde_json::to_string(&snapshot).unwrap())
+            .unwrap(),
+        snapshot
+    );
+}
+
+#[test]
 fn active_sessions_preserve_identity_waiting_clients_and_incomplete_evidence() {
     use loopflow::lf::commands::session_history::ActiveSessionsSnapshot;
     use loopflow::lf::commands::top::ActivityState;
@@ -16,13 +35,18 @@ fn active_sessions_preserve_identity_waiting_clients_and_incomplete_evidence() {
     let snapshot: ActiveSessionsSnapshot = serde_json::from_str(json).unwrap();
     assert_eq!(
         snapshot.discovery,
-        loopflow::lf::commands::session_history::DiscoveryState::Ready
+        loopflow::lf::commands::session_history::DiscoveryState::Unavailable
     );
     assert_eq!(snapshot.sessions[0].work, snapshot.task);
     assert_eq!(
         snapshot.sessions[0].processes[0].state,
         ActivityState::Waiting
     );
+    assert_eq!(
+        snapshot.sessions[0].processes[1].state,
+        ActivityState::Unknown
+    );
+    assert_eq!(snapshot.sessions[0].processes[1].pid, None);
     assert_eq!(snapshot.gaps.len(), 1);
     assert_eq!(
         serde_json::from_str::<ActiveSessionsSnapshot>(&serde_json::to_string(&snapshot).unwrap())
@@ -343,6 +367,12 @@ fn process_page_retains_outcomes_unknowns_and_continuation() {
     assert_eq!(page.entries[0].via_agent, None);
     assert_eq!(page.entries[0].pid, None);
     assert_eq!(page.entries[1].pid, Some(4242));
+    assert_eq!(page.entries[1].kind, loopflow::process::ProcessKind::Agent);
+    assert_eq!(
+        page.entries[1].agent_session_id.as_deref(),
+        Some("conversation")
+    );
+    assert_eq!(page.entries[1].os_started_at, Some(1790640000));
     assert_eq!(
         page.entries[1].parent_process_lfid.as_ref(),
         Some(&page.entries[0].lfid)

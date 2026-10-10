@@ -4270,13 +4270,16 @@ mod tests {
             )
             .unwrap();
         let process = crate::process::LfProcess {
+            kind: crate::process::ProcessKind::Lf,
+            agent_session_id: None,
+            os_started_at: None,
             lfid: crate::id::ProcessLfid::new(),
             pid: None,
             trace_id: crate::id::TraceId::new(),
             parent_process_lfid: None,
             via_agent: None,
             caller_session_id: None,
-            caller_provider_generation: None,
+            caller_agent_process_lfid: None,
             command: Some("historical diagnostic".into()),
             repo: None,
             cwd: Some(repo.path().to_string_lossy().into_owned()),
@@ -4640,13 +4643,16 @@ mod tests {
         // A reboot proves stale execution exited without settling the Flow.
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
         let process = crate::process::LfProcess {
+            kind: crate::process::ProcessKind::Lf,
+            agent_session_id: None,
+            os_started_at: None,
             lfid: crate::id::ProcessLfid::new(),
             pid: None,
             trace_id: crate::id::TraceId::new(),
             parent_process_lfid: None,
             via_agent: None,
             caller_session_id: None,
-            caller_provider_generation: None,
+            caller_agent_process_lfid: None,
             command: Some("implement".into()),
             repo: None,
             cwd: Some(

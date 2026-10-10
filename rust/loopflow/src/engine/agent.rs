@@ -205,7 +205,7 @@ pub struct AgentConfig {
     pub env: BTreeMap<String, String>,
     /// Exact conversational driver selected before provider launch. Never
     /// inherited by provider tools or serialized into replay input.
-    pub session_driver: Option<(String, crate::process::SessionDriver)>,
+    pub session_attachment: Option<(String, crate::process::SessionAttachment)>,
 }
 
 impl AgentConfig {
@@ -373,6 +373,16 @@ pub struct AgentCapture(CaptureHandle);
 impl From<CaptureHandle> for AgentCapture {
     fn from(capture: CaptureHandle) -> Self {
         Self(capture)
+    }
+}
+
+impl AgentCapture {
+    pub(crate) fn prepare_agent_process(
+        &self,
+        session: &str,
+        expected: &crate::process::SessionAttachment,
+    ) -> crate::store::StoreResult<crate::process::SessionAttachment> {
+        self.0.prepare_agent_process(session, expected)
     }
 }
 
@@ -1182,6 +1192,26 @@ pub fn run_agent(
     process: &ProcessConfig,
     capabilities: &AgentCapabilities,
 ) -> Result<AgentProcessResult, CoreError> {
+    let cwd = match &launch.cwd {
+        Some(cwd) => cwd.clone(),
+        None => std::env::current_dir()?,
+    };
+    let command = std::env::args().collect::<Vec<_>>();
+    crate::journal::with_runtime(&cwd, &command, || {
+        run_admitted_agent(launch, process, capabilities).map_err(Into::into)
+    })
+    .map_err(|error| {
+        error
+            .downcast::<CoreError>()
+            .unwrap_or_else(|error| CoreError::ExecutionFailed(error.to_string()))
+    })
+}
+
+fn run_admitted_agent(
+    launch: &AgentConfig,
+    process: &ProcessConfig,
+    capabilities: &AgentCapabilities,
+) -> Result<AgentProcessResult, CoreError> {
     let mut launch = launch.clone();
     launch.chrome = capabilities.chrome;
     if launch.resume_token.is_none() {
@@ -1212,10 +1242,10 @@ pub fn run_agent(
         process.capture = Some(capture.clone());
     }
     if let Some(capture) = &process.capture {
-        capture.0.claim_conversation_driver().map_err(|error| {
+        capture.0.claim_session_attachment().map_err(|error| {
             CoreError::ExecutionFailed(format!("conversation admission failed: {error}"))
         })?;
-        launch.session_driver = capture.0.session_driver();
+        launch.session_attachment = capture.0.session_attachment();
         if launch.resume_token.is_none() {
             launch.resume_token = capture.0.conversation_resume_token().map_err(|error| {
                 CoreError::ExecutionFailed(format!("conversation recovery failed: {error}"))
@@ -1319,6 +1349,7 @@ fn _run_with_transient_retries(
             AgentFailure::AccountSubscriptionLimit { .. } => {
                 account_failure = Some(result.clone());
                 attempt_config.provider_account_id = None;
+                attempt_config.resume_token = None;
                 attempt_config.task_prompt = format!(
                     "{LIMIT_FAILOVER_PROMPT}\n\nOriginal task:\n\n{}",
                     launch.task_prompt
@@ -1328,6 +1359,7 @@ fn _run_with_transient_retries(
             AgentFailure::AccountCredentialInvalidated => {
                 account_failure = Some(result.clone());
                 attempt_config.provider_account_id = None;
+                attempt_config.resume_token = None;
                 attempt_config.task_prompt = format!(
                     "{CREDENTIAL_FAILOVER_PROMPT}\n\nOriginal task:\n\n{}",
                     launch.task_prompt
@@ -1635,17 +1667,26 @@ fn _run_harness_once(
     };
     if retry {
         if let Some(capture) = capture {
-            capture.fail_and_begin_attempt(
-                provider.clone(),
-                model,
-                account_route
-                    .as_ref()
-                    .map(|route| route.account_id().clone()),
-            );
+            capture
+                .retry_agent_process(
+                    provider.clone(),
+                    model,
+                    account_route
+                        .as_ref()
+                        .map(|route| route.account_id().clone()),
+                    launch.resume_token.as_ref(),
+                )
+                .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
         }
     }
 
     let mut config = launch.clone();
+    if let Some(capture) = capture {
+        // A new harness gets the invocation owner's current snapshot. Existing
+        // dispatch/history operations never refresh theirs from the capture.
+        config.session_attachment = capture.session_attachment();
+        config.env.extend(capture.environment());
+    }
     let prompt = std::mem::take(&mut config.task_prompt);
     let launch_worktree = config.cwd.clone().or_else(|| std::env::current_dir().ok());
     if let Some(cwd) = launch_worktree.as_deref() {
@@ -1671,6 +1712,7 @@ fn _run_harness_once(
                 .map(|route| route.account_id().clone()),
         );
         harness.set_agent_session(launch.resume_token.clone());
+        harness.set_capture(process.capture.clone());
         if capture.is_some() {
             harness.set_raw_provider_sender(Some(raw_tx));
         }
@@ -1790,7 +1832,8 @@ fn _run_harness_once(
             },
             None => drive.await,
         };
-        let _ = harness.stop().await;
+        harness.stop().await
+            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
         result.map(|result| AgentAttempt::Finished {
             result,
             can_failover,
@@ -1956,13 +1999,16 @@ fn _run_agent_once(
     let capture = process.capture.as_ref().map(|capture| &capture.0);
     if retry {
         if let Some(capture) = capture {
-            capture.fail_and_begin_attempt(
-                harness.clone(),
-                model.clone(),
-                account_route
-                    .as_ref()
-                    .map(|route| route.account_id().clone()),
-            );
+            capture
+                .retry_agent_process(
+                    harness.clone(),
+                    model.clone(),
+                    account_route
+                        .as_ref()
+                        .map(|route| route.account_id().clone()),
+                    launch.resume_token.as_ref(),
+                )
+                .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
         }
     }
     apply_harness_env(&harness, &mut cmd, launch, process);
@@ -1976,21 +2022,24 @@ fn _run_agent_once(
         );
     }
 
+    let admitted_capture = capture.ok_or_else(|| {
+        CoreError::ExecutionFailed("AgentProcess launch has no admitted capture".into())
+    })?;
     let result = if process.auto && process.stream {
         // Stream mode: capture stdout line by line
         run_streaming(
-            &mut cmd,
+            cmd,
             process.stream_format,
             process.timeout,
-            capture,
+            admitted_capture,
             activation,
         )
     } else if process.auto {
         // Batch mode: capture all output
-        run_batch(&mut cmd, process.timeout, capture, activation)
+        run_batch(cmd, process.timeout, admitted_capture, activation)
     } else {
         // Interactive mode: inherit stdio
-        run_interactive(&mut cmd, process.timeout, capture, activation, title)
+        run_interactive(cmd, process.timeout, admitted_capture, activation, title)
     };
     if let (Some(capture), Ok(result)) = (capture, &result) {
         capture.observe_provider(
@@ -2031,37 +2080,27 @@ fn _run_agent_once(
 /// `activation` is the native credential lock a shared launch took; it is
 /// released once the provider process exists.
 fn spawn_agent_child(
-    cmd: &mut Command,
-    capture: Option<&CaptureHandle>,
+    cmd: Command,
+    capture: &CaptureHandle,
     activation: Option<std::fs::File>,
-) -> Result<Child, CoreError> {
-    if let Some(capture) = capture {
-        capture
-            .begin_provider_spawn()
-            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
-    }
-    let mut child = cmd.spawn()?;
+) -> Result<(Child, crate::process::SessionAttachment), CoreError> {
+    let child = capture
+        .spawn_native_agent(cmd)
+        .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     drop(activation);
-    if let Some(capture) = capture {
-        if let Err(error) = capture.record_provider_process(child.id()) {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(CoreError::ExecutionFailed(error.to_string()));
-        }
-    }
     Ok(child)
 }
 
 fn run_batch(
-    cmd: &mut Command,
+    mut cmd: Command,
     timeout: Option<Duration>,
-    capture: Option<&CaptureHandle>,
+    capture: &CaptureHandle,
     activation: Option<std::fs::File>,
 ) -> Result<AgentProcessResult, CoreError> {
     let start = Instant::now();
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
-    let mut child = spawn_agent_child(cmd, capture, activation)?;
+    let (mut child, attachment) = spawn_agent_child(cmd, capture, activation)?;
     let _pid_guard = ChildPidGuard::new(child.id());
 
     let stdout = child
@@ -2087,6 +2126,9 @@ fn run_batch(
     });
 
     let (status, timed_out) = wait_for_exit(&mut child, timeout, || {})?;
+    capture
+        .record_native_agent_exit(&attachment)
+        .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     tracing::debug!(
         elapsed_ms = start.elapsed().as_millis(),
         "agent batch completed"
@@ -2101,19 +2143,17 @@ fn run_batch(
         .map_err(|_| CoreError::ExecutionFailed("stderr reader thread panicked".to_string()))?
         .map_err(|err| CoreError::ExecutionFailed(err.to_string()))?;
 
-    if let Some(capture) = capture {
-        let mut parser = StreamParser::new();
-        for line in String::from_utf8_lossy(&stdout_bytes).lines() {
-            capture.record_raw("stdout", line);
-            if let ParseResult::Events(events) = parser.feed_line(line) {
-                for event in &events {
-                    capture.record_stream_event(event);
-                }
+    let mut parser = StreamParser::new();
+    for line in String::from_utf8_lossy(&stdout_bytes).lines() {
+        capture.record_raw("stdout", line);
+        if let ParseResult::Events(events) = parser.feed_line(line) {
+            for event in &events {
+                capture.record_stream_event(event);
             }
         }
-        for line in String::from_utf8_lossy(&stderr_bytes).lines() {
-            capture.record_raw("stderr", line);
-        }
+    }
+    for line in String::from_utf8_lossy(&stderr_bytes).lines() {
+        capture.record_raw("stderr", line);
     }
 
     if timed_out {
@@ -2133,14 +2173,14 @@ fn run_batch(
 }
 
 fn run_interactive(
-    cmd: &mut Command,
+    cmd: Command,
     timeout: Option<Duration>,
-    capture: Option<&CaptureHandle>,
+    capture: &CaptureHandle,
     activation: Option<std::fs::File>,
     mut title: Option<crate::engine::terminal_title::TerminalTitle>,
 ) -> Result<AgentProcessResult, CoreError> {
     let start = Instant::now();
-    let mut child = spawn_agent_child(cmd, capture, activation)?;
+    let (mut child, attachment) = spawn_agent_child(cmd, capture, activation)?;
     let _pid_guard = ChildPidGuard::new(child.id());
     tracing::debug!(
         elapsed_ms = start.elapsed().as_millis(),
@@ -2151,6 +2191,9 @@ fn run_interactive(
             title.refresh();
         }
     })?;
+    capture
+        .record_native_agent_exit(&attachment)
+        .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     tracing::debug!(
         elapsed_ms = start.elapsed().as_millis(),
         "agent interactive completed"
@@ -2171,17 +2214,17 @@ fn run_interactive(
 }
 
 fn run_streaming(
-    cmd: &mut Command,
+    mut cmd: Command,
     stream_format: StreamFormat,
     timeout: Option<Duration>,
-    capture: Option<&CaptureHandle>,
+    capture: &CaptureHandle,
     activation: Option<std::fs::File>,
 ) -> Result<AgentProcessResult, CoreError> {
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
 
     let start = Instant::now();
-    let mut child = spawn_agent_child(cmd, capture, activation)?;
+    let (mut child, attachment) = spawn_agent_child(cmd, capture, activation)?;
     let _pid_guard = ChildPidGuard::new(child.id());
     tracing::debug!(elapsed_ms = start.elapsed().as_millis(), "agent spawned");
 
@@ -2243,16 +2286,14 @@ fn run_streaming(
                 }
                 match stream {
                     StreamKind::Stdout => {
-                        if let Some(capture) = capture {
-                            capture.record_raw("stdout", &line);
-                        }
+                        capture.record_raw("stdout", &line);
+
                         if let Some(color) = use_color {
                             match parser.feed_line(&line) {
                                 ParseResult::Events(events) => {
                                     for event in &events {
-                                        if let Some(capture) = capture {
-                                            capture.record_stream_event(event);
-                                        }
+                                        capture.record_stream_event(event);
+
                                         format_event(event, color);
                                     }
                                 }
@@ -2262,9 +2303,7 @@ fn run_streaming(
                         } else {
                             if let ParseResult::Events(events) = parser.feed_line(&line) {
                                 for event in &events {
-                                    if let Some(capture) = capture {
-                                        capture.record_stream_event(event);
-                                    }
+                                    capture.record_stream_event(event);
                                 }
                             }
                             println!("{line}");
@@ -2273,9 +2312,8 @@ fn run_streaming(
                         stdout_content.push('\n');
                     }
                     StreamKind::Stderr => {
-                        if let Some(capture) = capture {
-                            capture.record_raw("stderr", &line);
-                        }
+                        capture.record_raw("stderr", &line);
+
                         if use_color.is_some() {
                             // In Human mode, Claude --verbose duplicates stream-json
                             // on stderr. Parse it and skip recognized events to avoid
@@ -2303,6 +2341,9 @@ fn run_streaming(
     }
 
     let status = child.wait()?;
+    capture
+        .record_native_agent_exit(&attachment)
+        .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     tracing::debug!(
         elapsed_ms = start.elapsed().as_millis(),
         "agent streaming completed"
@@ -3210,6 +3251,7 @@ trust_level = "trusted"
         let launch = AgentConfig {
             agent: Some("claude:opus".to_string()),
             task_prompt: "compress the branch".to_string(),
+            resume_token: Some("session-123".into()),
             ..Default::default()
         };
         let process = auto_process();

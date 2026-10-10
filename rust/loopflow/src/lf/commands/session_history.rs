@@ -30,25 +30,23 @@ pub fn list_active(json: bool, watch: bool, task: Option<&str>) -> Result<()> {
         Ok::<_, anyhow::Error>((home, store, task))
     })?;
     if watch {
-        return super::session_watch::run(&home, &store, task, &runtime);
+        return super::session_watch::run(&home, &store, task);
     }
-    runtime.block_on(async {
-        let snapshot = crate::session_record::active::snapshot(&home, &store, task).await;
-        if json {
-            println!("{}", serde_json::to_string(&snapshot)?);
-        } else {
-            for session in &snapshot.sessions {
-                println!("{}  {}", session.id, session.title);
-            }
-            for gap in &snapshot.gaps {
-                println!("Unavailable: {gap}");
-            }
-            if snapshot.sessions.is_empty() && snapshot.gaps.is_empty() {
-                println!("No active Sessions.");
-            }
+    let snapshot = crate::session_record::active::snapshot(&home, &store.sqlite, task);
+    if json {
+        println!("{}", serde_json::to_string(&snapshot)?);
+    } else {
+        for session in &snapshot.sessions {
+            println!("{}  {}", session.id, session.title);
         }
-        Ok(())
-    })
+        for gap in &snapshot.gaps {
+            println!("Unavailable: {gap}");
+        }
+        if snapshot.sessions.is_empty() && snapshot.gaps.is_empty() {
+            println!("No active Sessions.");
+        }
+    }
+    Ok(())
 }
 
 /// Shared Session history, newest input first. SQL selects the recent budget

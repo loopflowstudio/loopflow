@@ -194,7 +194,7 @@ pub(crate) fn preview_process_prompt(
         .and_then(|skill| skill.action_style.as_deref());
     let launch = AgentConfig {
         chrome: false,
-        session_driver: None,
+        session_attachment: None,
         system_prompt,
         task_prompt,
         skill_invocation,

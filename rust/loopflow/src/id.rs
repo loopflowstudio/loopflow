@@ -95,6 +95,9 @@ uuid_id!(WaveId);
 uuid_id!(TraceId);
 uuid_id!(ProcessLfid);
 
+// One claim, not a Process identity. Never reused after attachment transfer.
+uuid_id!(AttachmentToken);
+
 /// A provider-owned conversation id. Opaque vendor bytes, never an lf identity.
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,

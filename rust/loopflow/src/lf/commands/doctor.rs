@@ -721,13 +721,16 @@ mod tests {
 
     fn row(ts: i64, event: &str) -> LfProcess {
         LfProcess {
+            kind: crate::process::ProcessKind::Lf,
+            agent_session_id: None,
+            os_started_at: None,
             lfid: crate::id::ProcessLfid::new(),
             pid: None,
             trace_id: crate::id::TraceId::new(),
             parent_process_lfid: None,
             via_agent: Some(false),
             caller_session_id: None,
-            caller_provider_generation: None,
+            caller_agent_process_lfid: None,
             command: None,
             repo: Some("/src/loopflow".into()),
             cwd: None,

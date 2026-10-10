@@ -5,6 +5,18 @@ use serde::{Deserialize, Serialize};
 use crate::durable::TaskId;
 use crate::id::{AgentSessionId, WaveId};
 
+/// Attribution captured before a native request, never from its delayed reply.
+/// This is observation context, not a capability to write to the provider.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SessionTurnOrigin {
+    pub session_id: String,
+    pub process_lfid: crate::id::ProcessLfid,
+    pub agent_process_lfid: crate::id::ProcessLfid,
+    pub captured_event: Option<i64>,
+    pub task_id: Option<String>,
+    pub wave_id: Option<String>,
+}
+
 /// Immutable native evidence. Missing start, attribution or usage stays missing.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SessionEvent {
@@ -15,7 +27,7 @@ pub struct SessionEvent {
     pub agent_session: Option<AgentSessionId>,
     pub provider_turn: Option<String>,
     pub kind: SessionEventKind,
-    pub provider_generation: Option<i64>,
+    pub agent_process_lfid: Option<String>,
     pub process_lfid: Option<String>,
     pub task_id: Option<String>,
     pub wave_id: Option<String>,
@@ -108,8 +120,8 @@ pub struct SessionBind {
 /// on a person. A long silent provider step can read as Waiting.
 pub(crate) const WAITING_QUIET_SECONDS: i64 = 120;
 
-/// What a Session's driver last read from its provider's own stream. One row
-/// per Session, replaced by whichever driver currently owns that stream.
+/// What a Session's attached invocation last read from its provider's own stream. One row
+/// per Session, replaced by whichever attachment currently owns that stream.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionActivity {
     pub observed_at: i64,
@@ -196,11 +208,12 @@ impl Default for SessionFilter {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SessionSummary {
     pub primary_scope: Option<String>,
-    pub driver_outcome: Option<String>,
+    pub attachment_outcome: Option<String>,
     /// Waiting on a person, as of the read's clock.
     pub waiting: bool,
     pub program_status: Option<crate::program_status::Records>,
-    pub provider_generation: i64,
+    /// None for a conversation Loopflow never attached to.
+    pub agent_process_lfid: Option<crate::id::ProcessLfid>,
     pub task_terminal: bool,
     /// Its Task names it as the Task's primary conversation.
     pub task_primary: bool,

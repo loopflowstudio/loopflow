@@ -7,6 +7,16 @@ import Testing
 /// the Mac app.
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
+    @Test("Activity retains unknown record identity without a PID")
+    func activityFixture() throws {
+        let snapshot = try JSONDecoder().decode(ActivitySnapshot.self, from: loadFixtureData("activity_snapshot.json"))
+        let unknown = snapshot.nodes[2]
+        #expect(unknown.state == .unknown)
+        #expect(unknown.pid == nil)
+        #expect(unknown.parentId == snapshot.nodes[0].id)
+        #expect(unknown.id.hasPrefix("process:"))
+        #expect(try JSONDecoder().decode(ActivitySnapshot.self, from: JSONEncoder().encode(snapshot)) == snapshot)
+    }
 
     @Test("Composed delivery keeps completion independent of the running Flow and its arrival")
     func composedTaskLifecycle() throws {
@@ -69,6 +79,7 @@ struct DTOFixtureTests {
         #expect(rows["unrelated"]?.task.followUpSources.isEmpty == true)
         #expect(due.task.followUpLabel == "Follow-up to W2-SOURCE · Due 2026-10-08")
     }
+
     @Test("Planning delivery retains uncertainty, errors and both conflict values")
     func planningSyncFixture() throws {
         let sync = try JSONDecoder().decode(PlanningSyncStatus.self, from: loadFixtureData("planning_sync.json"))
@@ -152,7 +163,7 @@ struct DTOFixtureTests {
         let data = try Data(contentsOf: url)
         let page = try JSONDecoder().decode(SessionPage.self, from: data)
         #expect(page.entries.count == 1)
-        #expect(page.entries[0].providerGeneration == 1)
+        #expect(page.entries[0].agentProcessLFID == "44444444-4444-4444-8444-444444444444")
         #expect(page.entries[0].programStatus?.summary?.state == .blocked)
         #expect(page.entries[0].programStatus?.summary?.kind == .question)
         #expect(page.entries[0].programStatus?.summary?.msg == "Use **literal** text?")
@@ -170,6 +181,9 @@ struct DTOFixtureTests {
         #expect(page.entries[0].viaAgent == nil)
         #expect(page.entries[0].pid == nil)
         #expect(page.entries[1].pid == 4242)
+        #expect(page.entries[1].kind == .agent)
+        #expect(page.entries[1].agentSessionID == "conversation")
+        #expect(page.entries[1].osStartedAt == 1790640000)
         #expect(page.entries[1].parentProcessLFID == page.entries[0].lfid)
         #expect(page.entries[1].outcome == nil)
         #expect(page.next?.lfid == page.entries[1].lfid)

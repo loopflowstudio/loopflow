@@ -500,7 +500,7 @@ lf session list --task LOO-358 --interactive all --history
 `--waiting` narrows that selection to conversations waiting on you. In Desktop,
 a program's OSC 7501 report takes precedence: any blocked record means Waiting,
 as does idle for an interactive Session. Working, done, error and explicit clear
-suppress the quiet-time inference for that provider generation. A blocked child
+suppress the quiet-time inference for that AgentProcess. A blocked child
 still counts when its parent reports working.
 
 Without reports, the existing provider stream supplies questions, hand-back and
@@ -539,7 +539,7 @@ workspace; enter its printed path before editing.
 Primary conversations reuse their respective worktrees, including after replacement.
 They display a workspace without gaining Task membership. Moved checkouts are
 rediscovered; missing checkouts recover committed branch state. Live conversations
-keep their placement until an idle driver boundary.
+keep their placement until their attached invocation is idle.
 
 Persistent workspaces retain scratch locally through commit, sync, publication and
 landing. Selected-path commits preserve unrelated staged edits. Publication pushes

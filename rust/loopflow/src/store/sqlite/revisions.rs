@@ -163,20 +163,19 @@ mod tests {
     fn a_session_reading_moves_sessions_only_when_waiting_could_change() {
         let (_dir, store) = store();
         session(&store, "conversation");
-        let generation = store
+        let process = ProcessLfid::new();
+        store
             .conn
             .lock()
             .unwrap()
-            .query_row("SELECT driver_generation FROM agent_sessions", [], |row| {
-                row.get(0)
-            })
+            .execute(
+                "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+                [&process],
+            )
             .unwrap();
-        let driver = crate::process::SessionDriver {
-            process_lfid: None,
-            generation,
-            provider_generation: 0,
-            provider_process_lfid: ProcessLfid::new(),
-        };
+        let driver = store
+            .claim_session_attachment("conversation", None, &process, true)
+            .unwrap();
         let record = |observed_at, open_tools, pending_input, yielded| {
             let before = store.revisions().unwrap();
             store

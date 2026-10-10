@@ -219,24 +219,39 @@ Process `ef54b06d-9896-467f-a920-f8d4648f9d8b`, and interrupted research Process
 closure is not yet observed. LOO-378 is explicitly paused with substantial
 unpublished code retained, without deletion or delivery authorization.
 
+## AgentProcess (LOO-443, 2026-10-09)
+
+Jack Heart requested one inventory; #1512/#1516/#1499 integrated. Unknown stays visible; retry retains history.
+`82b5d90d5` separates attachment/provenance and relay/upstream; stand-ins
+prove takeover rejection (A → B → A), not configured relay.
+Client exit never settles its provider, nor provider death an unknown attachment.
+
+Reaper and Codex close share group judgment: leader death is insufficient;
+failed descendant inventory refuses before signaling.
+
+Headless launch refuses a missing attachment. AgentProcess identity replaced
+provider generation; released counters stay unread, pre-upgrade callers read stale.
+Jack's `71741bd4` accepted #1519 as it stands: LOO-447 owns Claude/OpenCode
+takeover and stop; two-second removal, the three orphans and live-provider runs
+are accepted unproven. FIFO is Codex-only; reaping covers noninteractive providers.
+A draft must `depends_on` main's unreleased drafts: name order broke their
+frontier fixtures in the materialized run only. PR CI defers every job while
+`scratch/` holds files: no hosted proof before landing.
+
 ## Execution ownership names (LOO-441, 2026-10-09)
 
-Jack Heart selected LfSession/LfProcess; provider names remain LOO-442. He approved
-#1516 landing. The rename preserves wire/storage/fixtures, ProcessLfid,
-variants and product Session/Process; SQL/profiling retain historical names.
-`2b183c547` implements Rust/Swift/docs. Gate: fmt/Clippy pass; disk-blocked suites
-defer to CI. Installation unproved.
-LFID durable; PID reusable. LOO-400 history, mapping, placement and proofs:
-`6130a4eed:wave/infrastructure/MEMORY.md`, “Process vocabulary.”
+Jack Heart selected LfSession/LfProcess; #1516 merged. The rename preserves
+wire/storage/fixtures, ProcessLfid, variants and product Session/Process;
+SQL/profiling retain historical names. Installation unproved.
+LFID durable; PID reusable. Gate detail, LOO-400 history, mapping and proofs:
+`8b18110cf:wave/infrastructure/MEMORY.md`, this heading and “Process vocabulary” reference.
 
 ## Provider conversations (LOO-442, 2026-10-09)
 
-Jack approved #1517 landing October 9; `adf3f9e4b` integrates merged #1516.
-AgentSessionId has no table; retain history/account attribution, SQL/JSON bytes
-and Swift ids. LOO-443 owns engine/driver. Identity, Clippy, DTO and headless Swift
-checks pass. Gate fails: copied-shell retention exits -9; checkout-watch times out.
-Canonical TMPDIR resolves three fixture failures.
-Installation unproved.
+Jack approved #1517 landing October 9; it merged. AgentSessionId has no table;
+retain history/account attribution, SQL/JSON bytes and Swift ids. LOO-443 owns
+engine/driver. Gate failures (copied-shell retention -9, checkout-watch timeout)
+stay unexplained; canonical TMPDIR resolved three fixtures. Installation unproved.
 
 ## Terminal conversation recovery (LOO-409, 2026-10-07)
 
@@ -337,40 +352,25 @@ so an interruption before replacement otherwise destroys retry evidence. The
 public restart fixture reproduces that boundary with no Session provider PID;
 retry uses saved identities. Unknown ownership and independent reviews still block.
 
-## Transient recovery (LOO-326, curated 2026-10-08)
+## Transient recovery (LOO-326, curated 2026-10-09)
 
-Jack Heart approved existing Tasks using valid cached planning regardless of age;
-known invalidation, removal, terminal state or ownership mismatch still blocks.
-Apply this at restart, continuation and managed worker boundaries. New advice
-still needs successful Linear publication before worker replacement. Preserve
-observation age; a stale response is never fresh evidence.
+Jack Heart approved cached planning regardless of age for existing Task restart,
+continuation and worker launch. Invalidation, removal, terminal state and ownership
+mismatch still block; retain observation age. New advice needs Linear publication
+before worker replacement. Retry failed provider reads only, never publisher writes.
+Bound pipe collection and exit: descendants can retain stdout. Artifact attempts
+retain candidate identity in separate temporary directories.
 
-Retry only the failed provider read. Artifact attempts use separate temporary
-directories and retain candidate identity. Bound pipe collection as well as exit:
-a descendant can retain stdout. Never retry publisher writes or invent checks.
+LOO-326 completed October 6 after v0.13.5. Jack accepted its read-only Exec's
+uncertainty, retaining the unknown outcome and checkout. Session closure and
+missing receipts grant no control or cleanup authority. Receipts survive terminal
+write failure; pruning requires exact death and matching persisted outcome.
+Cleanup independently reacquires its lease: terminal receipts can precede
+descriptor closure. This proves neither the loss cause nor recovered evidence.
+Release owns re-entry leases, transfer deadlines and pending-version lessons.
 
-Jack accepted read-only Exec `5f239ead-89f9-49c4-92c4-4c2f8b97ca94`'s historical
-uncertainty. PRs #1413/#1435/#1445/#1455 shipped through v0.13.5. October 6's
-supported completion of LOO-326 retained its unknown outcome and checkout; fresh
-status confirmed done/current writeback. Acceptance grants no process control or
-cleanup authority. Session closure and missing receipts cannot prove child exit.
-
-Process receipts now use Exec identity and survive until a successful terminal
-write. Pruning requires exact death and matching persisted outcome; PID reuse,
-interruptions and failed writes retain unfinished identity. This prevention does
-not reconstruct the missing receipt or establish the original loss cause.
-Release's retained-landing incident still separates death evidence from re-entry
-leases. Checkout cleanup independently reacquires its lease; #1435's delayed
-child fixture proves a terminal receipt can precede descriptor closure.
-
-#1459 repaired #1456's incorrect PR base using exact remote-tracking reflog
-evidence, preserving feature history; missing evidence and foreign ancestry
-still refuse. It shipped in v0.13.5, and #1456 merged October 6.
-Release owns the healthy-transfer deadline and pending-version lessons in
-[its memory](release/MEMORY.md). Detailed shipped proofs, acceptance command,
-exact commits and contrary evidence remain at
-`4e6770cbf550aa5f9d653650295481ced737a640:wave/infrastructure/MEMORY.md`
-under this heading.
+#1459's exact-reflog PR-base repair shipped in v0.13.5; #1456 merged October 6.
+Absent evidence and foreign ancestry refuse. Evidence: `cad03fe6d:wave/infrastructure/MEMORY.md`, this heading and its references.
 
 ## Scheduled release accounting (LOO-285, source reconciliation October 2)
 
@@ -463,8 +463,6 @@ threshold such as 90% redirects future launches only; actual exhaustion triggers
 automatic shared failover. Isolated agents retain their own account/fallback.
 The updated Linear brief owns the current scope; stop-bundling's branch evidence
 does not yet establish shipment.
-
-Renamed from `systems` July 8; current schedules supersede history.
 
 The 2026-09-30 [LOO-298 decisions](#data-model-and-performance-decisions-reconciled-2026-09-30)
 supersede older Run-owner, historical-import, pinned-development-Home and
@@ -758,8 +756,8 @@ captures and manually transferred Tasks; import neither old turns nor driver aut
 
 September 29–30's detailed owner/compilation decisions and superseded schema
 proofs remain at `fe07245a3614334aea71dc40e802b54b47ccaf17:wave/infrastructure/MEMORY.md`
-under this heading. Current vocabulary supersedes Exec/FlowSession names:
-one LfProcess, one durable LfSession conversation and one compiled
+under this heading. Current Process vocabulary supersedes Exec/FlowSession names:
+one actual lf Process, one durable AgentSession conversation and one compiled
 Flow graph with step Processes. History has no independent lifecycle. Skill steps
 use ordinary `lf skill`; operations use their own commands. Parent means Process
 ancestry, matched to Session/provider generation and origin, never Task or Flow

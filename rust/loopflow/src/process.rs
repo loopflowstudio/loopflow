@@ -10,11 +10,14 @@ use crate::id::{ProcessLfid, TraceId, WaveId};
 pub struct LfProcess {
     pub lfid: ProcessLfid,
     pub pid: Option<u32>,
+    pub kind: ProcessKind,
+    pub agent_session_id: Option<String>,
+    pub os_started_at: Option<i64>,
     pub trace_id: TraceId,
     pub parent_process_lfid: Option<ProcessLfid>,
     pub via_agent: Option<bool>,
     pub caller_session_id: Option<String>,
-    pub caller_provider_generation: Option<i64>,
+    pub caller_agent_process_lfid: Option<ProcessLfid>,
     pub command: Option<String>,
     pub repo: Option<String>,
     pub cwd: Option<String>,
@@ -24,6 +27,14 @@ pub struct LfProcess {
     pub exit_code: Option<i32>,
     pub signal: Option<String>,
     pub error: Option<String>,
+}
+
+/// Both kinds have one durable identity and one inventory entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProcessKind {
+    Lf,
+    Agent,
 }
 
 /// Command discovery filters. Work means recorded work, never today's caller binding.
@@ -96,46 +107,40 @@ impl FlowHeld {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentCaller {
     pub session_id: String,
-    pub provider_generation: i64,
+    /// Absent in an environment installed before AgentProcess records: such a
+    /// caller keeps its causal history and is never the current provider.
+    pub agent_process_lfid: Option<ProcessLfid>,
     #[serde(rename = "origin_exec_id")] // Retained provider environments use this format.
     pub origin_process_lfid: ProcessLfid,
 }
 
-/// Separate fences: reconnecting a driver does not replace its live provider.
+/// An exact attachment capability, not another process or lifecycle owner.
+/// Every claim gets a new token, even when the same lf process reattaches.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SessionDriver {
+pub struct SessionAttachment {
+    pub agent_process_lfid: ProcessLfid,
     pub process_lfid: Option<ProcessLfid>,
-    pub generation: i64,
-    pub provider_generation: i64,
+    pub token: crate::id::AttachmentToken,
     pub provider_process_lfid: ProcessLfid,
 }
 
-impl SessionDriver {
+impl SessionAttachment {
     pub fn caller(&self, session_id: String) -> AgentCaller {
         AgentCaller {
             session_id,
-            provider_generation: self.provider_generation,
+            agent_process_lfid: Some(self.agent_process_lfid.clone()),
             origin_process_lfid: self.provider_process_lfid.clone(),
         }
     }
 }
 
-/// Read-local ownership evidence; never a liveness or control claim.
+/// The provider OS process, including its current attachment. History survives
+/// release and replacement; attachment and parent are independent identities.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SessionProcessObservation {
-    pub id: String,
-    pub title: String,
-    pub work: Option<crate::durable::WorkRef>,
-    pub driver_process_lfid: Option<ProcessLfid>,
-    pub driver_trace_id: Option<String>,
-    pub driver_generation: i64,
-    pub provider_process_lfid: Option<ProcessLfid>,
-    pub provider_pid: Option<u32>,
-    pub provider_started_at: Option<i64>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SessionProcessOwnership {
-    pub sessions: Vec<SessionProcessObservation>,
-    pub inputs: std::collections::BTreeMap<String, String>,
+pub(crate) struct AgentProcess {
+    pub process: LfProcess,
+    pub attached_process_lfid: Option<ProcessLfid>,
+    pub attachment_token: Option<crate::id::AttachmentToken>,
+    pub provider: Option<String>,
+    pub interactive: bool,
 }

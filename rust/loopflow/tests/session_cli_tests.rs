@@ -375,17 +375,17 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
             serde_json::from_slice(&std::fs::read(home.path().join("resumed.caller")).unwrap())
                 .unwrap();
         assert_eq!(caller.session_id, id);
-        let recorded: (i64, String) = rusqlite::Connection::open(home.path().join("loopflow.db"))
+        let recorded: (Option<loopflow::id::ProcessLfid>, String) = rusqlite::Connection::open(home.path().join("loopflow.db"))
             .unwrap()
             .query_row(
-                "SELECT provider_generation,provider_process_lfid FROM agent_sessions WHERE id=?1",
+                "SELECT p.lfid,p.parent_process_lfid FROM agent_sessions s JOIN processes p ON p.lfid=s.agent_process_lfid WHERE s.id=?1",
                 [id],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
         assert_eq!(
             (
-                caller.provider_generation,
+                caller.agent_process_lfid,
                 caller.origin_process_lfid.to_string()
             ),
             recorded
@@ -571,7 +571,7 @@ fn headless_resume_preserves_a_held_owners_capture_on_both_harnesses() {
             )
             .unwrap();
         let driver = store
-            .claim_session_driver(&id, None, &process, true)
+            .claim_session_attachment(&id, None, &process, true)
             .unwrap();
         let before = store.session(&id).unwrap().unwrap();
         let history = store.session_history(&id, 0, 0).unwrap();
@@ -597,10 +597,13 @@ fn headless_resume_preserves_a_held_owners_capture_on_both_harnesses() {
         .unwrap();
         assert!(!output.status.success());
         let error = String::from_utf8_lossy(&output.stderr);
-        assert!(error.contains("already has a driver"), "{harness}: {error}");
+        assert!(
+            error.contains("already has an attached LfProcess"),
+            "{harness}: {error}"
+        );
         assert!(!error.contains("unexpected-provider-launch"), "{error}");
         assert_eq!(store.session(&id).unwrap().unwrap(), before);
-        assert_eq!(store.session_driver(&id).unwrap(), Some(driver));
+        assert_eq!(store.session_attachment(&id).unwrap(), Some(driver));
         assert_eq!(store.session_history(&id, 0, 0).unwrap(), history);
         assert_eq!(std::fs::read(dir.join("manifest.json")).unwrap(), manifest);
         assert!(dir.join("prepared").exists());
@@ -756,10 +759,21 @@ fn waiting_lists_only_conversations_waiting_on_a_person() {
     let (working, _, _) = prepare_conversation(home.path(), &cwd, "codex", "Working");
     let (asked, _, _) = prepare_conversation(home.path(), &cwd, "codex", "Asked");
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let store =
+        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let parent = loopflow::id::ProcessLfid::new();
+    db.execute(
+        "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+        [&parent],
+    )
+    .unwrap();
     for (id, pending) in [(&working, 0), (&asked, 1)] {
+        store
+            .claim_session_attachment(id, None, &parent, true)
+            .unwrap();
         db.execute(
-            "INSERT INTO session_activity(session_id,driver_generation,provider_generation,observed_at,open_tools,pending_input,yielded)
-             SELECT id,driver_generation,provider_generation,unixepoch(),1,?2,0 FROM agent_sessions WHERE id=?1",
+            "INSERT INTO session_activity(session_id,attachment_token,agent_process_lfid,observed_at,open_tools,pending_input,yielded)
+             SELECT s.id,p.attachment_token,p.lfid,unixepoch(),1,?2,0 FROM agent_sessions s JOIN processes p ON p.lfid=s.agent_process_lfid WHERE s.id=?1",
             rusqlite::params![id, pending],
         )
         .unwrap();
@@ -1321,12 +1335,19 @@ fn terminal_first_launch_and_failed_startup_reopen_the_same_conversation() {
     let session = store.session(&id).unwrap().unwrap();
     assert_eq!(session.id, id);
     let history = store.session_history(&id, 0, 1000).unwrap();
-    assert!(history
-        .iter()
-        .any(|event| event.payload["phase"] == "spawn_failed"));
-    assert!(history
-        .iter()
-        .any(|event| event.payload["phase"] == "exited"));
+    // Failed and exited starts are retained as their own AgentProcess records.
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    for (state, minimum) in [("spawn_failed", 1), ("exited", 1)] {
+        let recorded: i64 = db
+            .query_row(
+                "SELECT count(*) FROM processes
+                 WHERE kind='agent' AND agent_session_id=?1 AND spawn_state=?2",
+                [id.as_str(), state],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(recorded >= minimum, "{state}: {recorded}");
+    }
     assert!(
         history
             .iter()
@@ -1334,7 +1355,6 @@ fn terminal_first_launch_and_failed_startup_reopen_the_same_conversation() {
             .count()
             >= 2
     );
-    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     let count: i64 = db
         .query_row("SELECT count(*) FROM agent_sessions", [], |row| row.get(0))
         .unwrap();
@@ -1565,8 +1585,8 @@ fn program_status_cli_observes_waiting_without_completing_work() {
         [&process_lfid],
     )
     .unwrap();
-    // A native conversation needs no lf driver claim for passive display.
-    let generation = "0".to_string();
+    // A native conversation needs no lf attachment for passive display: the
+    // reading reports no AgentProcess, so the observer names none.
     let mut observer = Child(
         command(
             home.path(),
@@ -1576,8 +1596,6 @@ fn program_status_cli_observes_waiting_without_completing_work() {
                 &id,
                 "--terminal",
                 "fixture-pane",
-                "--generation",
-                &generation,
             ],
         )
         .stdin(Stdio::piped())
@@ -1666,9 +1684,9 @@ fn program_status_cli_observes_waiting_without_completing_work() {
         wait_for("done")["program_status"]["records"][0]["state"],
         "done"
     );
-    let driver = store.session_driver(&id).unwrap();
+    let driver = store.session_attachment(&id).unwrap();
     store
-        .claim_session_driver(&id, driver.as_ref(), &process_lfid, true)
+        .claim_session_attachment(&id, driver.as_ref(), &process_lfid, true)
         .unwrap();
     let stale = run(
         home.path(),
@@ -1678,8 +1696,6 @@ fn program_status_cli_observes_waiting_without_completing_work() {
             &id,
             "--terminal",
             "fixture-pane",
-            "--generation",
-            &generation,
         ],
     );
     assert!(!stale.status.success());

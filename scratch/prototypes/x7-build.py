@@ -14,10 +14,10 @@ def row(chip, cls=""):
 def fig(n, title, text, card):
     return f'<li><div class="capt"><span>Fig. {n}</span><h3>{title}</h3><p>{text}</p></div><div class="card">{card}</div></li>'
 FIGS = "\n".join([
-fig(1, "A Wave", "A Wave is a persistent workstream with an objective. Tasks come and go under it, and the Wave keeps its key results, its plan, and its memory.",
-    '<p class="wname">Exports</p><p class="wobj">People can get their data out of the app in the form they need it, without asking us.</p><p class="lab">Key results</p><ul class="krs"><li>Half of active accounts export something each month.</li><li>No support request asks us for a data dump.</li></ul>'),
-fig(2, "The work, written down", "Say what you want and Loopflow writes it down as Tasks, in words you already use. Each one states what will be true when it is done. Change it, and that is what your agent works from.",
-    row("start") + strip("start") + '<div class="doc"><b>Done when</b><p>Anyone can download the table they are looking at as a CSV file, with their filters applied.</p></div>'),
+fig(1, "A rambling idea", "Say it however it comes out, typed or dictated. Half-formed is fine.",
+    '<p class="lab">You</p><p class="ramble">ok so people keep emailing us asking for their data. I want them to just get it out themselves. csv probably, with whatever filters they have on. maybe a weekly one that shows up by itself? sheets would be cool at some point. oh and the dates in the old export are wrong, that needs fixing first</p>'),
+fig(2, "The work, written down", "Loopflow writes it down in words you already use: a Wave, which is a persistent workstream with an objective, and the Tasks under it. Each Task states what will be true when it is done. Change any of it, and that is what your agent works from.",
+    '<p class="wname">Exports</p><p class="wobj">People can get their data out of the app in the form they need it, without asking us.</p><ul class="tl"><li>Fix the timezone in exported dates</li><li class="pick">Add CSV export<small>Done when anyone can download the table they are looking at as a CSV file, with their filters applied.</small></li><li>Schedule a weekly export</li><li>Export to Google Sheets</li></ul>'),
 fig(3, "You jam on the design.", "Your agent drafts a plan and brings it to you. You go back and forth: push on it, answer its questions, change your mind. It redrafts until the design is yours.",
     row("design · waiting on you", "w") + strip("design") + '<div class="doc"><b>Plan</b><p>An Export button in the table header. Rows stream as CSV, so large tables do not time out.</p><p><i>Open question:</i> should archived rows be included?</p></div>'),
 fig(4, "It gets built without you.", "The next Flow implements the plan, tidies it, catches up with the rest of the code, and opens the pull request. Each step is a Session of its own.",
@@ -87,6 +87,16 @@ main = f'''
   </ul>
   <p class="more"><a href="/cli">Underneath, it is all <code>lf</code> ↗</a><a href="/docs/waves">Tasks and Waves ↗</a></p>
 </section>
+<section id="works" class="works">
+  <p class="eyebrow">Works with</p>
+  <ul>
+    <li><b>Claude Code · Codex · OpenCode</b><span>the coding agent, on your own account</span></li>
+    <li><b>GitHub</b><span>your code and your pull requests</span></li>
+    <li><b>Linear</b><span>your Tasks are Linear issues</span></li>
+    <li><b>Wispr Flow</b><span>talk instead of typing</span></li>
+    <li><b>cmux · herdr</b><span><code>lf</code> runs inside them</span></li>
+  </ul>
+</section>
 <section id="yours" class="reading">
   <h2>Free and open source (MIT).</h2>
   <ul class="plain">
@@ -105,7 +115,7 @@ main = f'''
 </section>
 '''
 extra = '''
-.walk{padding-top:64px}.walk h2{font-size:clamp(30px,3.2vw,42px);margin:0 0 10px}.home-page .walk .say{font-size:18px;line-height:1.6;color:#333;margin:0 0 30px;max-width:720px}
+.walk{padding-top:64px}.works{padding-top:56px}.home-page .works .eyebrow{color:var(--burgundy);margin-bottom:14px}.works ul{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:0;border-top:1px solid var(--border);border-bottom:1px solid var(--border)}.works li{list-style:none;margin:0;padding:18px 18px 18px 0;display:grid;gap:4px}.works b{font:500 15px var(--font-sans)}.works span{font-size:13px;line-height:1.5;color:var(--text-secondary)}.walk h2{font-size:clamp(30px,3.2vw,42px);margin:0 0 10px}.home-page .walk .say{font-size:18px;line-height:1.6;color:#333;margin:0 0 30px;max-width:720px}
 .home-page .walk .say:not(.lead){margin-bottom:12px}.walk .figs{list-style:none;margin:0;padding:0;border-top:1px solid var(--border)}
 .walk .figs>li{list-style:none;margin:0;display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:24px 56px;align-items:center;padding:34px 0;border-bottom:1px solid var(--border)}
 .walk .capt span{font:500 11px var(--font-mono);text-transform:uppercase;letter-spacing:.1em;color:var(--burgundy)}
@@ -123,7 +133,7 @@ extra = '''
 .walk .steps{margin:14px 0 0;padding:12px 14px;background:#fff;border:1px solid var(--border);border-radius:7px;font:12px/1.75 var(--font-mono);color:#a39b90;white-space:pre;overflow:auto}
 .walk .steps .ok{color:#1f6b36}.walk .steps .run{color:var(--wine)}
 .walk .sess{margin-top:12px!important;font:12px/1.6 var(--font-mono);color:var(--text-secondary)}.walk .sess b{color:var(--text);font-weight:500;margin-right:8px}
-.walk .wname{font:400 28px/1.1 var(--font-serif)}.walk .wobj{font:16px/1.5 var(--font-serif);color:#3a3532;margin:6px 0 14px!important}
+.walk .ramble{font:16.5px/1.6 var(--font-serif);color:#3a3532;margin-top:6px!important}.walk .tl{list-style:none;margin:6px 0 0;padding:0;border:1px solid var(--border);border-radius:7px;background:#fff}.walk .tl li{list-style:none;margin:0;padding:9px 14px;border-bottom:1px solid var(--border);font-size:14.5px}.walk .tl li:last-child{border-bottom:0}.walk .tl .pick{font-weight:600;background:#fbf2f4;box-shadow:inset 3px 0 0 var(--wine)}.walk .tl small{display:block;font-weight:400;font-size:13px;line-height:1.5;color:#444;margin-top:3px}.walk .wname{font:400 28px/1.1 var(--font-serif)}.walk .wobj{font:16px/1.5 var(--font-serif);color:#3a3532;margin:6px 0 14px!important}
 .walk .lab{font:500 11px/1.6 var(--font-mono);text-transform:uppercase;letter-spacing:.1em;color:var(--text-secondary)}
 .walk .krs{list-style:none;padding:0;margin:4px 0 0}.walk .krs li{list-style:none;margin:0;padding:3px 0 3px 24px;position:relative;font-size:14px}
 .walk .krs li::before{content:"";position:absolute;left:2px;top:9px;width:11px;height:11px;border:1.5px solid #b9b1a6;border-radius:50%}

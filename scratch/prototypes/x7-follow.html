@@ -48,7 +48,7 @@
 .x5 .wfnote{font-size:13.5px;line-height:1.6;color:#444;max-width:74ch;margin:0 0 28px}
 @media (max-width:900px){.x5 .wf{flex-direction:column;align-items:stretch;gap:12px}.x5 .wf .node{flex:none}.x5 .wf .edge i{width:2px;height:22px;margin:0 auto}.x5 .wf .edge i::after{right:-4px;top:auto;bottom:-1px;border-top:8px solid #b9b1a6;border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:0}}
 
-.walk{padding-top:64px}.walk h2{font-size:clamp(30px,3.2vw,42px);margin:0 0 10px}.home-page .walk .say{font-size:18px;line-height:1.6;color:#333;margin:0 0 30px;max-width:720px}
+.walk{padding-top:64px}.works{padding-top:56px}.home-page .works .eyebrow{color:var(--burgundy);margin-bottom:14px}.works ul{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:0;border-top:1px solid var(--border);border-bottom:1px solid var(--border)}.works li{list-style:none;margin:0;padding:18px 18px 18px 0;display:grid;gap:4px}.works b{font:500 15px var(--font-sans)}.works span{font-size:13px;line-height:1.5;color:var(--text-secondary)}.walk h2{font-size:clamp(30px,3.2vw,42px);margin:0 0 10px}.home-page .walk .say{font-size:18px;line-height:1.6;color:#333;margin:0 0 30px;max-width:720px}
 .home-page .walk .say:not(.lead){margin-bottom:12px}.walk .figs{list-style:none;margin:0;padding:0;border-top:1px solid var(--border)}
 .walk .figs>li{list-style:none;margin:0;display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:24px 56px;align-items:center;padding:34px 0;border-bottom:1px solid var(--border)}
 .walk .capt span{font:500 11px var(--font-mono);text-transform:uppercase;letter-spacing:.1em;color:var(--burgundy)}
@@ -66,7 +66,7 @@
 .walk .steps{margin:14px 0 0;padding:12px 14px;background:#fff;border:1px solid var(--border);border-radius:7px;font:12px/1.75 var(--font-mono);color:#a39b90;white-space:pre;overflow:auto}
 .walk .steps .ok{color:#1f6b36}.walk .steps .run{color:var(--wine)}
 .walk .sess{margin-top:12px!important;font:12px/1.6 var(--font-mono);color:var(--text-secondary)}.walk .sess b{color:var(--text);font-weight:500;margin-right:8px}
-.walk .wname{font:400 28px/1.1 var(--font-serif)}.walk .wobj{font:16px/1.5 var(--font-serif);color:#3a3532;margin:6px 0 14px!important}
+.walk .ramble{font:16.5px/1.6 var(--font-serif);color:#3a3532;margin-top:6px!important}.walk .tl{list-style:none;margin:6px 0 0;padding:0;border:1px solid var(--border);border-radius:7px;background:#fff}.walk .tl li{list-style:none;margin:0;padding:9px 14px;border-bottom:1px solid var(--border);font-size:14.5px}.walk .tl li:last-child{border-bottom:0}.walk .tl .pick{font-weight:600;background:#fbf2f4;box-shadow:inset 3px 0 0 var(--wine)}.walk .tl small{display:block;font-weight:400;font-size:13px;line-height:1.5;color:#444;margin-top:3px}.walk .wname{font:400 28px/1.1 var(--font-serif)}.walk .wobj{font:16px/1.5 var(--font-serif);color:#3a3532;margin:6px 0 14px!important}
 .walk .lab{font:500 11px/1.6 var(--font-mono);text-transform:uppercase;letter-spacing:.1em;color:var(--text-secondary)}
 .walk .krs{list-style:none;padding:0;margin:4px 0 0}.walk .krs li{list-style:none;margin:0;padding:3px 0 3px 24px;position:relative;font-size:14px}
 .walk .krs li::before{content:"";position:absolute;left:2px;top:9px;width:11px;height:11px;border:1.5px solid #b9b1a6;border-radius:50%}
@@ -152,8 +152,8 @@
   <p class="say">Coding with agents is about empowering people, not delegating the thinking to robots. An instrument is something you play, and what comes out is yours. Your agent does the building. You decide what to make, and whether it is right.</p>
   <p class="say lead">Here is how it goes, from a rambling idea to a set of merged pull requests.</p>
   <ol class="figs">
-<li><div class="capt"><span>Fig. 1</span><h3>A Wave</h3><p>A Wave is a persistent workstream with an objective. Tasks come and go under it, and the Wave keeps its key results, its plan, and its memory.</p></div><div class="card"><p class="wname">Exports</p><p class="wobj">People can get their data out of the app in the form they need it, without asking us.</p><p class="lab">Key results</p><ul class="krs"><li>Half of active accounts export something each month.</li><li>No support request asks us for a data dump.</li></ul></div></li>
-<li><div class="capt"><span>Fig. 2</span><h3>The work, written down</h3><p>Say what you want and Loopflow writes it down as Tasks, in words you already use. Each one states what will be true when it is done. Change it, and that is what your agent works from.</p></div><div class="card"><p class="trow"><b>Add CSV export</b><span class="pos ">start</span><span class="id">EXP-12</span></p><p class="strip"><span class="now">start</span><span class="next">task-design</span><span class="next">design</span><span class="next">pursue</span><span class="next">demo</span><span class="next">ship</span><span class="next">end</span></p><div class="doc"><b>Done when</b><p>Anyone can download the table they are looking at as a CSV file, with their filters applied.</p></div></div></li>
+<li><div class="capt"><span>Fig. 1</span><h3>A rambling idea</h3><p>Say it however it comes out, typed or dictated. Half-formed is fine.</p></div><div class="card"><p class="lab">You</p><p class="ramble">ok so people keep emailing us asking for their data. I want them to just get it out themselves. csv probably, with whatever filters they have on. maybe a weekly one that shows up by itself? sheets would be cool at some point. oh and the dates in the old export are wrong, that needs fixing first</p></div></li>
+<li><div class="capt"><span>Fig. 2</span><h3>The work, written down</h3><p>Loopflow writes it down in words you already use: a Wave, which is a persistent workstream with an objective, and the Tasks under it. Each Task states what will be true when it is done. Change any of it, and that is what your agent works from.</p></div><div class="card"><p class="wname">Exports</p><p class="wobj">People can get their data out of the app in the form they need it, without asking us.</p><ul class="tl"><li>Fix the timezone in exported dates</li><li class="pick">Add CSV export<small>Done when anyone can download the table they are looking at as a CSV file, with their filters applied.</small></li><li>Schedule a weekly export</li><li>Export to Google Sheets</li></ul></div></li>
 <li><div class="capt"><span>Fig. 3</span><h3>You jam on the design.</h3><p>Your agent drafts a plan and brings it to you. You go back and forth: push on it, answer its questions, change your mind. It redrafts until the design is yours.</p></div><div class="card"><p class="trow"><b>Add CSV export</b><span class="pos w">design · waiting on you</span><span class="id">EXP-12</span></p><p class="strip"><span class="done">start</span><span class="done">task-design</span><span class="now">design</span><span class="next">pursue</span><span class="next">demo</span><span class="next">ship</span><span class="next">end</span></p><div class="doc"><b>Plan</b><p>An Export button in the table header. Rows stream as CSV, so large tables do not time out.</p><p><i>Open question:</i> should archived rows be included?</p></div></div></li>
 <li><div class="capt"><span>Fig. 4</span><h3>It gets built without you.</h3><p>The next Flow implements the plan, tidies it, catches up with the rest of the code, and opens the pull request. Each step is a Session of its own.</p></div><div class="card"><p class="trow"><b>Add CSV export</b><span class="pos ">pursue · flow: refresh</span><span class="id">EXP-12</span></p><p class="strip"><span class="done">start</span><span class="done">task-design</span><span class="done">design</span><span class="now">pursue</span><span class="next">demo</span><span class="next">ship</span><span class="next">end</span></p><pre class="steps"><span class="ok">✓ implement</span>
 <span class="ok">✓ compress</span>
@@ -170,6 +170,16 @@
     <li><b>Underneath</b> A native Mac terminal, running Claude Code, Codex, or OpenCode on your own account, with <code>lf</code> included.</li>
   </ul>
   <p class="more"><a href="/cli">Underneath, it is all <code>lf</code> ↗</a><a href="/docs/waves">Tasks and Waves ↗</a></p>
+</section>
+<section id="works" class="works">
+  <p class="eyebrow">Works with</p>
+  <ul>
+    <li><b>Claude Code · Codex · OpenCode</b><span>the coding agent, on your own account</span></li>
+    <li><b>GitHub</b><span>your code and your pull requests</span></li>
+    <li><b>Linear</b><span>your Tasks are Linear issues</span></li>
+    <li><b>Wispr Flow</b><span>talk instead of typing</span></li>
+    <li><b>cmux · herdr</b><span><code>lf</code> runs inside them</span></li>
+  </ul>
 </section>
 <section id="yours" class="reading">
   <h2>Free and open source (MIT).</h2>

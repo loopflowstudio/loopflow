@@ -446,3 +446,11 @@ this should be Loopflow is a software instrment. Then launch into what we mean
 by that". The `x7` subheader is "Loopflow is a software instrument.", the
 thesis under it says what that means, and the rambling-idea line introduces
 the figures.
+
+Jack Heart: "I use wispr flow for voice entry", then "I think we need a Works
+with: for Linear, Wispr Flow, cmux, herdr, etc". `x7` has a Works with strip
+before the closing section, in text with one line each: the three agents,
+GitHub, Linear, Wispr Flow, cmux and herdr. Naming Linear on `/` reverses an
+earlier rule that a homepage test still enforces; the test changes at port.
+Figures 1 and 2 were also reworked: 1 is the rambling idea as said, 2 is the
+Wave and its four Tasks written down, with "Add CSV export" picked to follow.

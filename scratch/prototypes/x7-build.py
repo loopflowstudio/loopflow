@@ -16,8 +16,8 @@ def fig(n, title, text, card):
 FIGS = "\n".join([
 fig(1, "A Wave", "A Wave is a persistent workstream with an objective. Tasks come and go under it, and the Wave keeps its key results, its plan, and its memory.",
     '<p class="wname">Exports</p><p class="wobj">People can get their data out of the app in the form they need it, without asking us.</p><p class="lab">Key results</p><ul class="krs"><li>Half of active accounts export something each month.</li><li>No support request asks us for a data dump.</li></ul>'),
-fig(2, "A Task", "You name one outcome. It will end in one pull request, and it is done when that merges.",
-    row("start") + strip("start")),
+fig(2, "The work, written down", "Say what you want and Loopflow writes it down as Tasks, in words you already use. Each one states what will be true when it is done. Change it, and that is what your agent works from.",
+    row("start") + strip("start") + '<div class="doc"><b>Done when</b><p>Anyone can download the table they are looking at as a CSV file, with their filters applied.</p></div>'),
 fig(3, "Your agent plans. You review the design.", "The first Flow drafts a plan and stops. You answer its questions and it redrafts until you agree.",
     row("design · waiting on you", "w") + strip("design") + '<div class="doc"><b>Plan</b><p>An Export button in the table header. Rows stream as CSV, so large tables do not time out.</p><p><i>Open question:</i> should archived rows be included?</p></div>'),
 fig(4, "It gets built without you.", "The next Flow implements the plan, tidies it, catches up with the rest of the code, and opens the pull request. Each step is a Session of its own.",

@@ -429,3 +429,9 @@ it, not standing alone as a label.
 Jack Heart on figure 1: "goals can be long or short. Not good enough.
 persistent workstream and objective?" Figure 1 is now "A Wave": a persistent
 workstream with an objective.
+Jack Heart on figure 2 ("A Task. You name one outcome…"): "Still a little too
+much on what you have to do. this is a language you understand (we dont need
+to define task or proejct to you, you said dont define our noun: wave)
+loopflow does it for you but does it in a language you can understand and
+mutate and trust captures what matters". Figure 2 is now "The work, written
+down": Loopflow writes the Tasks, in plain words, and you can change them.

@@ -71,7 +71,7 @@
 .wh td b{display:block;font-weight:600;color:var(--text)}.home-page .wh td.you:last-child{color:var(--wine);font-weight:600}.home-page .wh tbody th{font:400 24px/1.2 var(--font-serif)!important;text-transform:none!important;letter-spacing:0!important;color:var(--burgundy)!important;width:130px}.home-page .wh td:last-child{width:14%}
 .home-page .wh td:last-child{font-size:13.5px;color:var(--text-secondary);width:24%}
 .wh code{font:12.5px var(--font-mono);background:none;padding:0;color:var(--text)}
-.pair .halves{border-top:0!important;padding-top:0!important;margin-top:28px!important}
+.pair .halves{border-top:0!important;padding-top:0!important;margin-top:44px!important;align-items:center}
 @media (max-width:820px){.wh thead{display:none}.wh tr{display:block;padding:12px 0;border-bottom:1px solid var(--border)}.home-page .wh th,.home-page .wh td{display:block;border:0;padding:3px 0;width:auto!important}.wh td:nth-child(2)::before{content:"What · "}.wh td:nth-child(3)::before{content:"How · "}.wh td::before{font:500 10.5px var(--font-mono);text-transform:uppercase;letter-spacing:.1em;color:var(--burgundy)}}
 
 .pair{padding-top:64px}.pair h2{font-size:clamp(30px,3.2vw,42px);margin:0 0 14px}
@@ -227,14 +227,15 @@
   </div>
   <div class="halves">
     <article>
-      <div class="card"><p class="lab">You</p><p class="ramble">ok so people keep emailing us asking for their data. I want them to just get it out themselves. csv probably, with whatever filters they have on. maybe a weekly one? oh and the dates in the old export are wrong</p><p class="lab down">Exports</p><ul class="tl"><li>Fix the timezone in exported dates</li><li class="pick">Add CSV export<small>Done when anyone can download the table they are looking at as a CSV file, with their filters applied.</small></li><li>Schedule a weekly export</li></ul></div>
+      <p class="eyebrow">How involved you are is a setting</p>
+      <h3>Scale back as the work matures.</h3>
+      <p>A new Wave starts hands-on: you design each Task and try each change. As the program matures and you trust how its work goes, you scale your involvement back, to one stop and then to none. Each Wave’s project sets its own, so a young one and a settled one can run side by side.</p>
     </article>
     <article>
       <div class="card"><ul class="wfs">
-<li><code>feature</code><p class="line"><i>start</i><span>task-design →</span><b>design</b><span>pursue →</span><b>demo</b><span>ship →</span><i>end</i></p><small>Design, build and land. The one above.</small></li>
-<li><code>code</code><p class="line"><i>start</i><span>pursue →</span><b>demo</b><span>ship →</span><i>end</i></p><small>Build and land. You come in once.</small></li>
-<li><code>research</code><p class="line"><i>start</i><span>research →</span><b>findings</b><i>end</i></p><small>Investigate and report. No pull request.</small></li>
-<li><code>yours</code><p class="line"><i>start</i><span>… →</span><b>wherever you want to be</b><span>… →</span><i>end</i></p><small>Any stops, any Flows between them, any agent on any step.</small></li>
+<li><code>Hands-on</code><p class="line"><i>start</i><span>task-design →</span><b>design</b><span>pursue →</span><b>demo</b><span>ship →</span><i>end</i></p><small>The default. You are the designer, and you try every change before it ships.</small></li>
+<li><code>One stop</code><p class="line"><i>start</i><span>pursue →</span><b>demo</b><span>ship →</span><i>end</i></p><small>Design only, or demo only. You come in once and the rest runs.</small></li>
+<li><code>Autonomous loop</code><p class="line"><i>start</i><span>optimize ↺ →</span><span>ship →</span><i>end</i></p><small>No stops. It runs, measures, and goes again, like the loop that speeds up Manabot’s simulator.</small></li>
       </ul></div>
     </article>
   </div>

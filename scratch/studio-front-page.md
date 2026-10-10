@@ -545,3 +545,15 @@ engineering process" and "or maybe somethign more like your table should be
 here". The `x9` table's rows are now Plan, Design, Build, Validate, Ship,
 Remember, with a Who column; the stays-with-you / off-your-hands ledger moved
 up to sit under it.
+
+Jack Heart on the workflows card: "I kinda like this. not perfect but i like
+showing how you can have lots of different flows. would prefer 3 flows. -
+fully autonomous optimization loops (e.g. optimizing the simulator of
+manabot) - design-only, or demo-only - hands-on default with some text about
+how you scale back involvement as a program/wave matures". On the ramble
+card: "dont know what this is trying to do".
+
+`x9`: the ramble card is gone. The card now shows three flows by involvement
+(hands-on, one stop, autonomous loop) beside "Scale back as the work
+matures." The autonomous row's `optimize` Flow is an example name, not a
+built-in, and the Manabot simulator loop is cited on Jack Heart's word.

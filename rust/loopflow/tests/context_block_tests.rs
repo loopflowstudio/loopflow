@@ -41,7 +41,7 @@ fn hook(repo: &Path, home: &Path, moment: &str) -> String {
 }
 
 #[test]
-fn hook_refreshes_sqlite_ancestors_and_scratch_without_replaying_the_request() {
+fn hook_refreshes_checkout_ancestors_and_scratch_without_replaying_the_request() {
     let _env = support::EnvGuard::new(&[]);
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
@@ -55,15 +55,20 @@ fn hook_refreshes_sqlite_ancestors_and_scratch_without_replaying_the_request() {
         .ensure_wave(repo_path.to_str().unwrap(), "parent/child")
         .unwrap();
     store
-        .update_wave_document(&parent, "MEMORY.md", "Inherited saved direction")
+        .update_wave_document(&parent, "MEMORY.md", "STALE STORED PARENT")
         .unwrap();
     store
-        .update_wave_document(&child, "MEMORY.md", "Current saved memory")
+        .update_wave_document(&child, "MEMORY.md", "STALE STORED CHILD")
         .unwrap();
     fs::create_dir_all(repo.path().join("wave/parent/child")).unwrap();
     fs::write(
         repo.path().join("wave/parent/child/MEMORY.md"),
-        "STALE CHECKOUT",
+        "Current checkout memory",
+    )
+    .unwrap();
+    fs::write(
+        repo.path().join("wave/parent/MEMORY.md"),
+        "Inherited checkout direction",
     )
     .unwrap();
     fs::create_dir(repo.path().join("scratch")).unwrap();
@@ -71,7 +76,7 @@ fn hook_refreshes_sqlite_ancestors_and_scratch_without_replaying_the_request() {
     fs::write(repo.path().join("active.md"), "Saved active skill\n").unwrap();
     let delivery = ContextDelivery {
         repo: repo_path,
-        wave_id: Some(child.clone()),
+        wave: Some("parent/child".into()),
         skill_file: Some(repo.path().join("active.md")),
         references: Vec::new(),
         home: home.path().join("machine"),
@@ -82,18 +87,22 @@ fn hook_refreshes_sqlite_ancestors_and_scratch_without_replaying_the_request() {
     )
     .unwrap();
     let start = hook(repo.path(), home.path(), "start");
-    assert!(start.contains("Inherited saved direction"));
-    assert!(start.contains("Current saved memory"));
+    assert!(start.contains("Inherited checkout direction"));
+    assert!(start.contains("Current checkout memory"));
     assert!(start.contains("CURRENT_SCRATCH"));
-    assert!(!start.contains("STALE CHECKOUT"));
+    assert!(!start.contains("STALE STORED"));
     assert!(!start.contains("Saved active skill\n"));
 
-    store
-        .update_wave_document(&parent, "MEMORY.md", "Fresh inherited direction")
-        .unwrap();
-    store
-        .update_wave_document(&child, "MEMORY.md", "Fresh child memory")
-        .unwrap();
+    fs::write(
+        repo.path().join("wave/parent/MEMORY.md"),
+        "Fresh inherited direction",
+    )
+    .unwrap();
+    fs::write(
+        repo.path().join("wave/parent/child/MEMORY.md"),
+        "Fresh child memory",
+    )
+    .unwrap();
     fs::write(repo.path().join("scratch/plan.md"), "FRESH_SCRATCH").unwrap();
     let compact = hook(repo.path(), home.path(), "compact");
     for fresh in [
@@ -105,14 +114,14 @@ fn hook_refreshes_sqlite_ancestors_and_scratch_without_replaying_the_request() {
         assert!(compact.contains(fresh), "missing {fresh}: {compact}");
     }
     for stale in [
-        "Inherited saved direction",
-        "Current saved memory",
+        "Inherited checkout direction",
+        "STALE STORED",
         "CURRENT_SCRATCH",
-        "STALE CHECKOUT",
+        "Current checkout memory",
     ] {
         assert!(!compact.contains(stale));
     }
-    // Logical Wave paths have complete, private snapshots with the saved bytes.
+    // Wave listings point to the real checkout files, not generated snapshots.
     let marker = "Read the complete context listing and any files not preloaded below: ";
     let path = compact
         .split_once(marker)
@@ -125,15 +134,25 @@ fn hook_refreshes_sqlite_ancestors_and_scratch_without_replaying_the_request() {
     let path: String = serde_json::from_str(path).unwrap();
     let manifest: Value =
         serde_json::from_slice(&fs::read(repo.path().join(path)).unwrap()).unwrap();
-    let snapshots: Vec<_> = manifest["files"]
+    let wave_files: Vec<_> = manifest["files"]
         .as_array()
         .unwrap()
         .iter()
         .filter(|file| file["source"].as_str().unwrap().starts_with("wave/"))
-        .map(|file| fs::read_to_string(file["path"].as_str().unwrap()).unwrap())
         .collect();
-    assert!(snapshots
-        .iter()
-        .any(|text| text == "Fresh inherited direction"));
-    assert!(snapshots.iter().any(|text| text == "Fresh child memory"));
+    assert_eq!(wave_files.len(), 2);
+    for file in wave_files {
+        let path = Path::new(file["path"].as_str().unwrap());
+        assert_eq!(
+            path,
+            repo.path()
+                .canonicalize()
+                .unwrap()
+                .join(file["source"].as_str().unwrap())
+        );
+        assert_eq!(
+            fs::read(path).unwrap().len() as u64,
+            file["bytes"].as_u64().unwrap()
+        );
+    }
 }

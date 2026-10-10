@@ -12,7 +12,7 @@ same bytes. The launch cut now wires fixed additions and whole-file callbacks; t
 provider/resume/compaction matrix remains for gate. Jack's later `e1fdb81b-75ff-4cca-b789-243ad84bad14` steer authorizes
 that production cut. Option A below resolves first-turn transport; no fixed-slot
 or transport decision remains open.
-Reconciled 2026-10-09 through `d3c01464e` against main `906576f39`, including
+Prior reconciliation: `d3c01464e` against main `906576f39`, including
 `3e1e6245c` (#1512) and `e69d5103f` (#1511).
 Local main and origin/main both name `906576f39`; no remote fetch or newer
 upstream inspection is claimed.
@@ -30,6 +30,17 @@ transport is built. A first turn that would exceed the terminal's argument cap
 fails before launch with a message naming the size and the cap; that is the one
 permitted size refusal. The editor and paste probes are evidence only and are
 not a production path. No further transport probes are authorized.
+
+Wave source resolved (Jack Heart, 2026-10-09, comment
+`cbc13fa5-0a1e-4dec-b638-52b29589edc1`): launch context and context callbacks read
+Wave Markdown from this repo checkout, with ancestors by path segment as before
+#1503. The saved delivery keeps the Wave name, not its database ID; listings name
+real files. `gather_saved_wave_docs`, callback Wave-ID lookup and generated Wave
+snapshots are removed. The `wave_documents` table, `lf wave edit` and other
+readers are unchanged; LOO-449 owns their removal. This supersedes the stored-Wave
+requirements and rename/name-reuse proof at `8b41e0327`.
+Clipboard placement in the first turn and shrinking Wave memory to fit the
+10,000-byte block remain open with Jack; neither is decided by this change.
 
 ## Problem
 
@@ -81,7 +92,7 @@ and the compact-only saved active skill. Native delivery is connected; its full 
 ## Key functions
 
 - `ContextDelivery::block(moment) -> ContextBlock` rereads the captured checkout
-  and the saved Machine's SQLite Wave ID; `moment` is start or after-compaction.
+  and its Wave files by captured name; `moment` is start or after-compaction.
 - `lf __context-block --delivery <saved-file> --moment <start|compact>` is the
   single hidden callback used by launchers and CLI fixtures. No ad-hoc source mode.
 - Claude/Codex: `SessionStart` with startup and compact sources. Codex
@@ -91,10 +102,9 @@ and the compact-only saved active skill. Native delivery is connected; its full 
 - OpenCode: the same fixed `system` addition on each owned user turn, not only
   the first. The launch-scoped plugin supplies conversation context on terminal
   and server paths; native startup/compaction acceptance remains unproved.
-- Wave content: read the existing SQLite owner each time, including the selected
-  Wave's ancestors as `gather_wave_docs` does today. Logical `wave/...` names are
-  not proof that checkout files contain those bytes. Listed snapshots must be
-  complete and readable; scratch reads current local files.
+- Wave content: read `wave/<name>/` Markdown from the checkout each time,
+  including each path-segment ancestor, never siblings or children. Listings
+  point to the real files; scratch also reads current local files.
 
 ## Constraints
 
@@ -157,11 +167,11 @@ Codex terminal and app-server inputs use additive instructions; no production
 `model_instructions_file` writer remains. First-turn argv and its one size refusal
 are unchanged.
 
-`ContextDelivery` captures repository, Wave ID, Machine, complete active skill
+`ContextDelivery` captures repository, Wave name, Machine, complete active skill
 and reference paths. Task seed/steers, summaries and clipboard are private complete
 files; explicit docs remain paths, and changed-file context points to Git inspection.
 The compact-only saved skill identifies the original asset directory. The existing
-10,000-byte block/manifest builder rereads scratch and SQLite Wave/ancestor bytes.
+10,000-byte block/manifest builder rereads scratch and checkout Wave/ancestor files.
 Metadata/skill overflow pointers remain proposed UX, not Jack's acceptance.
 Diagnostics list sources and sizes instead of recreating file-body assembly.
 
@@ -198,9 +208,9 @@ this is not native OpenCode integration acceptance.
   Exercise explicit native declarations/assets and changed launch fixtures.
 - Gate: captured reference/readability and late source changes, oversized Unicode,
   listings and skill; verify exact trusted hashes against supported native Codex.
-  Saved delivery follows the Wave ID, including renamed/reparented storage while
-  scratch stays in its captured checkout. A rename/name-reuse fixture passes;
-  native continuation remains unproved.
+  Saved delivery rereads the captured checkout and Wave path; native continuation
+  remains unproved. Checkout edits, ancestors, real listing paths and stale stored
+  documents are covered by focused source/callback fixtures.
 - Demo: cmux's 200 KB launch, native resume-list text, whole-pointer reads and the
   proposed OpenCode native-guide interpretation. No transport probes or new size
   refusals are selected.
@@ -218,11 +228,11 @@ Release's operation-entry lesson applies; callback-only tests cannot replace thi
 Review moved capture-hook composition back to terminal spawn so lower callers
 cannot lose native identity capture, connected OpenCode's generic terminal runner,
 removed duplicate additions and excluded sibling context. Wave and ancestor reads
-follow IDs rather than reacquiring a potentially reused name. No installation, publication or landing is claimed.
+follow checkout paths under Jack's later source decision. No installation, publication or landing is claimed.
 The pre-cut implementation plan and complete older checks remain at
 `6149952c8:scratch/what-goes-in-system-prompt.md`.
 
-Checks: `git diff --check` passes; `lf context --json` fits after memory curation; prior focused Rust/fmt/Clippy results remain at `d3c01464e:scratch/what-goes-in-system-prompt.md` (no code changed); gate owns native acceptance and demo owns presentation.
+Checks: network-isolated `cargo test -p loopflow --lib engine::context_block::tests` (8) and `cargo test -p loopflow --test context_block_tests --test context_tests checkout` (3), `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` pass; `lf context --json` fits (memory 15,998/16,000 tokens); gate owns native acceptance and demo owns presentation.
 
 ### Integrated upstream boundary
 
@@ -254,7 +264,7 @@ coverage; provider-only passes cannot stand in for that integration.
 
 Compression removes the prototype callback's `--repo`, `--skill-file` and
 `--reference` mode plus `build_context_block`; all refreshes use saved
-`ContextDelivery`. Wave lookup and document reads share one store open.
+`ContextDelivery`. Wave context reads no longer open the store.
 `PreparedProcessPrompt.prompt` is removed: diagnostics still use `format_prompt`
 on demand, not a second string assembled for every launch. OpenCode config
 composition appends its plugin directly to existing settings, without temporary
@@ -273,6 +283,11 @@ archived at `d81f12c42:scripts/benchmarks/skill-invocation/`; stdin/paste code i
 `d008a9761`. No transport probe remains to maintain or rerun. Shared native Codex
 settings in `launch.py` remain used by context-delivery and skill-fidelity probes.
 
+- Removed: `gather_saved_wave_docs`, `ContextDelivery.wave_id`, its database lookup,
+  Wave snapshot generation and the exclusive rename/private-snapshot tests.
+  Checkout-source fixtures retain ancestor ordering, sibling/child exclusion,
+  stale database rejection, refresh and readable real paths. Review also corrected
+  these fixtures to inspect gathered documents, not obsolete diagnostic inlining.
 - Removed: duplicate context listing/header metadata and the separate long-root
   fallback. The complete manifest now owns both inline and pointed metadata.
 - Removed: `INITIAL_TURN_PROMPT`, its naming special cases and exclusive tests.

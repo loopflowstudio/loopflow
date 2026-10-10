@@ -522,51 +522,34 @@ pub(crate) fn render_message(message: &str) -> String {
 }
 
 fn gather_wave_docs(repo_root: &Path, wave: Option<&str>) -> Result<Vec<Document>, CoreError> {
-    let Some(wave) = wave else {
-        return Ok(Vec::new());
-    };
-    let database = crate::store::database_path_from_env()?;
-    if !database.exists() {
-        return Ok(Vec::new());
-    }
-    let store = crate::store::sqlite::SqliteStore::open_read_only(&database)
-        .map_err(|error| CoreError::IoError(error.to_string()))?;
-    let repo = crate::repository::CanonicalRepo::discover(repo_root)
-        .map_err(|error| CoreError::IoError(error.to_string()))?;
-    let locator = crate::work::wave::WaveLocator::new(repo, wave)
-        .map_err(|error| CoreError::IoError(error.to_string()))?;
-    match store
-        .get_wave_at(&locator)
-        .map_err(|error| CoreError::IoError(error.to_string()))?
-    {
-        Some(wave) => gather_saved_wave_docs(&store, &wave),
-        None => Ok(Vec::new()),
-    }
-}
-
-pub(crate) fn gather_saved_wave_docs(
-    store: &crate::store::sqlite::SqliteStore,
-    wave: &crate::work::wave::Wave,
-) -> Result<Vec<Document>, CoreError> {
-    let mut lineage = vec![wave.clone()];
-    while let Some(parent) = lineage.last().and_then(|wave| wave.parent_wave_id()) {
-        let parent = store
-            .get_wave(parent)
-            .map_err(|error| CoreError::IoError(error.to_string()))?
-            .ok_or_else(|| {
-                CoreError::IoError(format!("Context ancestor Wave {parent} is missing"))
-            })?;
-        lineage.push(parent);
-    }
     let mut docs = Vec::new();
-    for wave in lineage.iter().rev() {
-        for (name, content) in store
-            .wave_documents(wave.id())
-            .map_err(|error| CoreError::IoError(error.to_string()))?
-        {
+    let Some(wave) = wave else {
+        return Ok(docs);
+    };
+    let mut directory = PathBuf::from("wave");
+    for segment in Path::new(wave).components() {
+        directory.push(segment);
+        let absolute = repo_root.join(&directory);
+        if !absolute.is_dir() {
+            continue;
+        }
+        let mut paths = fs::read_dir(&absolute)?
+            .map(|entry| entry.map(|entry| entry.path()))
+            .collect::<Result<Vec<_>, _>>()?;
+        paths.retain(|path| path.is_file() && path.extension().is_some_and(|ext| ext == "md"));
+        paths.sort_by_key(|path| {
+            (
+                path.file_name().is_none_or(|name| name != "README.md"),
+                path.clone(),
+            )
+        });
+        for path in paths {
             docs.push(Document {
-                path: format!("wave/{}/{name}", wave.slug()),
-                content,
+                path: directory
+                    .join(path.file_name().expect("directory entry has a name"))
+                    .to_string_lossy()
+                    .into_owned(),
+                content: fs::read_to_string(&path)?,
                 source: DocumentSource::Wave,
             });
         }

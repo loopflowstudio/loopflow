@@ -81,7 +81,7 @@ config files.
 ```bash
 lf context                         # size targets, sources and current usage
 lf context --wave intelligence     # local Wave memory and scratch
-lf context --task LOO-303 --json    # Task checkout and stored Wave memory
+lf context --task LOO-303 --json    # Task checkout, including Wave memory
 ```
 
 Edit the existing repo `.lf/config.yaml`:
@@ -107,7 +107,7 @@ The same block supports `memory_bytes` and `scratch_bytes`. Values must be posit
 integers. These are authoring targets, not launch limits: sources are never excerpted
 or refused for exceeding them. The retired `goal_*` and `input_*` keys are removed.
 
-`lf context` measures recursive scratch Markdown and stored Wave/ancestor memory,
+`lf context` measures recursive scratch Markdown and checkout Wave/ancestor memory,
 without contacting a provider or reading the clipboard. Defaults are 16,000 tokens /
 128 KiB for memory and 12,000 tokens / 96 KiB for scratch. Curate stale notes gradually,
 preserving live decisions and evidence; re-query after writing.
@@ -126,7 +126,7 @@ in a provider request. The harness loads its repo guide natively.
 |---------|----------|-----------|
 | Operating and surface instructions, participant, reply guidance | Fixed added-instructions slot | `--no-loopflow` omits the operating guide |
 | Skill and request | First turn | Selected skill and launch message |
-| Scratch and stored Wave/ancestor documents | Refreshed conversation block; whole files or a complete listing | Current checkout and selected Wave |
+| Scratch and checkout Wave/ancestor documents | Refreshed conversation block; whole files or a complete listing | Current checkout and selected Wave |
 | Explicit docs | File paths in the listing | `docs:` or `--docs` |
 | Branch changes | Git inspection commands and changed paths | `--diff patch`, `diff_files: true` |
 | Codebase summaries and clipboard | Complete private reference files | `summaries:`, `-c` |
@@ -260,7 +260,9 @@ List specific files, globs, or directories for the agent to read. Not included b
 Each entry is a file (`README.md`), a glob (`'*.md'`), or a directory (`swift/`
 gathers `*.md` under it). Resolved paths appear in the context listing; file
 bodies are not inlined. This doesn't restrict which files the agent can edit.
-Scratch and the selected Wave's stored documents are gathered automatically.
+Scratch and the selected Wave's checkout Markdown are gathered automatically.
+Wave context reads `wave/<name>/` and each path-segment ancestor, excluding siblings
+and children; listings point to those files, not database snapshots.
 
 ### Branch Files (diff_files)
 

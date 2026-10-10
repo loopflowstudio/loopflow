@@ -173,7 +173,7 @@ mod tests {
         let context = ContextDelivery {
             repo: repo.path().to_owned(),
             home: repo.path().join("machine"),
-            wave_id: None,
+            wave: None,
             skill_file: None,
             references: Vec::new(),
         };

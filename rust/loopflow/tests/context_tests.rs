@@ -624,9 +624,8 @@ fn wave_filtering_includes_all_files_in_wave_directory() {
 }
 
 #[test]
-fn nested_wave_reads_stored_ancestor_markdown_in_order() {
+fn nested_wave_reads_checkout_ancestor_markdown_in_order() {
     let _env = support::EnvGuard::new(&[]);
-    // Import the definition once; context reads the stored hierarchy.
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     for (path, content) in [
@@ -650,7 +649,6 @@ fn nested_wave_reads_stored_ancestor_markdown_in_order() {
         fs::create_dir_all(file.parent().unwrap()).unwrap();
         fs::write(file, content).unwrap();
     }
-    import_wave(repo, "infrastructure/release");
     let mut components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
         wave: Some("infrastructure/release".into()),
@@ -674,15 +672,20 @@ fn nested_wave_reads_stored_ancestor_markdown_in_order() {
         paths,
         [
             "MEMORY.md",
+            "wave/infrastructure/README.md",
             "wave/infrastructure/GOAL.md",
             "wave/infrastructure/MEMORY.md",
-            "wave/infrastructure/README.md",
             "wave/infrastructure/release/GOAL.md",
             "wave/infrastructure/release/MEMORY.md",
             "wave/infrastructure/release/notes.md",
         ]
     );
-    let prompt = render_prompt(components);
+    let prompt = components
+        .docs
+        .iter()
+        .map(|doc| doc.content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
     assert!(prompt.contains("Recursive scratch"));
     for content in [
         "Repository decisions",
@@ -751,7 +754,7 @@ fn run_outside_any_wave_assembles_no_memory_section() {
 }
 
 #[tokio::test]
-async fn worktree_reads_shared_stored_wave_memory() {
+async fn worktree_reads_its_checkout_wave_memory() {
     let _env = support::EnvGuard::new(&[]);
     let temp = TempDir::new().unwrap();
     let origin = temp.path().join("repo");
@@ -779,7 +782,7 @@ async fn worktree_reads_shared_stored_wave_memory() {
         .current_dir(&origin)
         .output()
         .expect("git worktree add");
-    // Checkout edits do not replace the stored plan.
+    // Launch context follows this checkout, not the imported Wave documents.
     fs::write(
         worktree.join("wave/goals/MEMORY.md"),
         "- checkout-local decisions",
@@ -811,11 +814,14 @@ async fn worktree_reads_shared_stored_wave_memory() {
     })
     .unwrap();
 
-    let prompt = render_prompt(components);
-    assert_eq!(prompt.matches("previous committed memory").count(), 1);
-    assert_eq!(prompt.matches("Origin goal.").count(), 1);
-    assert_eq!(prompt.matches("<lf:loopflow>").count(), 1);
-    assert!(prompt.contains("Curate stored Wave memory with `lf wave edit goals --memory <file>`."));
-    assert!(!prompt.contains("checkout-local decisions"));
-    assert!(!prompt.contains("Checkout goal."));
+    let prompt = components
+        .docs
+        .iter()
+        .map(|doc| doc.content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(prompt.matches("checkout-local decisions").count(), 1);
+    assert_eq!(prompt.matches("Checkout goal.").count(), 1);
+    assert!(!prompt.contains("previous committed memory"));
+    assert!(!prompt.contains("Origin goal."));
 }

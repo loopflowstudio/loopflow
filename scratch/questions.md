@@ -8,9 +8,9 @@ Heart authorized for implementation and demonstration. These are not accepted UX
 
 ## Remaining choices and proof gaps
 
-- Wave/ancestor context comes from SQLite (`gather_wave_docs`); the plan now
-  preserves that owner and requires readable complete snapshots. Local scratch
-  remains live; logical Wave paths must not point at stale checkout copies.
+- Jack Heart has not decided whether clipboard content moves into the first turn
+  or whether Wave memory should shrink to fit the 10,000-byte context block.
+  Existing clipboard references and size targets are unchanged.
 - The callback now uses complete manifest/saved-skill pointers when the reserved
   listing and skill cannot fit together, including combined overflow. Proposed
   default, not accepted UX: demonstrate reading the omitted text through providers.
@@ -40,6 +40,6 @@ not global approval. Native `hooks/list` confirmed the generated hashes. The
 network-isolated actual lf/native startup attempt failed with `Operation not
 permitted` before any model request; cause remains unresolved and gate owns it.
 
-Saved delivery follows the Wave ID across renames while scratch stays in its
-captured checkout. The rename/name-reuse fixture passes; native continuation is
-still with gate. No filesystem Wave fallback is selected.
+Jack Heart selected checkout Wave files on 2026-10-09: launch and callback context
+read the saved Wave path and its ancestors, listing real paths. Database document
+storage and other readers remain LOO-449's work. Native continuation stays with gate.

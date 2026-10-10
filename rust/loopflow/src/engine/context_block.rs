@@ -24,11 +24,11 @@ pub enum ContextMoment {
 }
 
 /// Captured source identities, not frozen context. Hooks reread scratch and Wave
-/// storage; references and the active skill retain their complete launch bytes.
+/// files; references and the active skill retain their complete launch bytes.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ContextDelivery {
     pub repo: PathBuf,
-    pub wave_id: Option<crate::id::WaveId>,
+    pub wave: Option<String>,
     pub skill_file: Option<PathBuf>,
     pub references: Vec<PathBuf>,
     pub home: PathBuf,
@@ -89,15 +89,7 @@ impl ContextDelivery {
             .transpose()?;
         Ok(Self {
             repo: repo.clone(),
-            wave_id: components
-                .wave
-                .as_deref()
-                .map(|name| {
-                    crate::work::wave::context::resolve_managed_wave_sync(Some(&repo), Some(name))
-                        .map(|wave| wave.id().clone())
-                        .map_err(|error| CoreError::IoError(error.to_string()))
-                })
-                .transpose()?,
+            wave: components.wave.clone(),
             skill_file,
             references,
             home: crate::store::lf_home_dir(),
@@ -105,29 +97,12 @@ impl ContextDelivery {
     }
 
     pub fn block(&self, moment: ContextMoment) -> Result<ContextBlock, CoreError> {
-        // A Wave may move while its conversation and checkout stay put. Follow
-        // its durable identity for memory, but keep scratch in this checkout.
+        let wave = self.wave.as_deref();
         let mut documents = gather_documents(&GatherSpec {
             repo_root: self.repo.clone(),
+            wave: self.wave.clone(),
             ..Default::default()
         })?;
-        let wave = if let Some(id) = &self.wave_id {
-            let store = crate::store::sqlite::SqliteStore::open_read_only(
-                &crate::store::database_path_from_env()?,
-            )
-            .map_err(|error| CoreError::IoError(error.to_string()))?;
-            let wave = store
-                .get_wave(id)
-                .map_err(|error| CoreError::IoError(error.to_string()))?
-                .ok_or_else(|| CoreError::IoError(format!("Saved context Wave {id} is missing")))?;
-            documents.extend(crate::engine::prompt::gather_saved_wave_docs(
-                &store, &wave,
-            )?);
-            Some(wave)
-        } else {
-            None
-        };
-        let wave = wave.as_ref().map(|wave| wave.slug());
         let branch = crate::engine::git::current_branch(&self.repo)
             .ok()
             .flatten();
@@ -166,7 +141,7 @@ impl ContextDelivery {
     }
 }
 
-/// One complete, readable source; logical Wave names never masquerade as files.
+/// One complete, readable source in the checkout or saved launch references.
 #[derive(Debug, Serialize)]
 struct ContextFile {
     source: String,
@@ -210,16 +185,9 @@ fn render_block(
 ) -> Result<ContextBlock, CoreError> {
     let mut files = Vec::new();
     for doc in &documents {
-        // Wave bytes belong to SQLite. Retain an immutable complete snapshot;
-        // a similarly named checkout file may be stale or may not exist at all.
-        let path = if doc.source == DocumentSource::Wave {
-            write_prompt_log(repo_root, &doc.content, "wave-snapshot", None)?
-        } else {
-            repo_root.join(&doc.path)
-        };
         files.push(ContextFile {
             source: doc.path.clone(),
-            path,
+            path: repo_root.join(&doc.path),
             bytes: doc.content.len(),
         });
     }
@@ -248,8 +216,7 @@ fn render_block(
     // exactly the same sources, including the scratch/Wave roots and saved skill.
     let manifest = serde_json::to_string_pretty(&serde_json::json!({
         "scratch": repo_root.join("scratch"),
-        "wave": wave.map(|wave| format!("wave/{wave}")),
-        "wave_source": "SQLite; read the snapshot paths below, not checkout copies",
+        "wave": wave.map(|wave| repo_root.join("wave").join(wave)),
         "files": files,
     }))
     .expect("context manifest is JSON serializable");
@@ -319,7 +286,7 @@ mod tests {
     fn delivery(repo: &Path) -> ContextDelivery {
         ContextDelivery {
             repo: repo.canonicalize().unwrap(),
-            wave_id: None,
+            wave: None,
             skill_file: None,
             references: Vec::new(),
             home: repo.join("machine"),
@@ -335,50 +302,37 @@ mod tests {
     }
 
     #[test]
-    fn saved_context_follows_wave_identity_after_rename() {
-        let _home = crate::journal::TestLedgerGuard::new();
-        let repo = loopflow_test_support::TestRepo::new();
-        let canonical = crate::repository::CanonicalRepo::discover(repo.path()).unwrap();
-        let store = crate::store::sqlite::SqliteStore::new(
-            &crate::store::database_path_from_env().unwrap(),
-        )
-        .unwrap();
-        let wave = store.ensure_wave(&canonical.to_string(), "before").unwrap();
-        store
-            .update_wave_document(&wave, "MEMORY.md", "Retained wave memory")
-            .unwrap();
-        fs::create_dir(repo.path().join("scratch")).unwrap();
-        fs::write(repo.path().join("scratch/plan.md"), "Checkout scratch").unwrap();
-        let delivery = super::ContextDelivery::prepare(&crate::engine::prompt::PromptComponents {
+    fn saved_context_reads_checkout_wave_without_registration() {
+        let repo = tempdir().unwrap();
+        fs::create_dir_all(repo.path().join("wave/parent/child")).unwrap();
+        fs::write(repo.path().join("wave/parent/GOAL.md"), "Ancestor goal").unwrap();
+        let memory = repo.path().join("wave/parent/child/MEMORY.md");
+        fs::write(&memory, "Initial memory").unwrap();
+        let delivery = ContextDelivery::prepare(&crate::engine::prompt::PromptComponents {
             repo_root: repo.path().display().to_string(),
-            wave: Some("before".into()),
+            wave: Some("parent/child".into()),
             ..Default::default()
         })
         .unwrap();
-        let parent = store.ensure_wave(&canonical.to_string(), "parent").unwrap();
-        store
-            .update_wave_document(&parent, "MEMORY.md", "Current ancestor memory")
+        let start = delivery.block(ContextMoment::Start).unwrap();
+        assert!(start.text.contains("Ancestor goal"));
+        assert!(start.text.contains("Initial memory"));
+        fs::write(&memory, "Current memory").unwrap();
+        let compact = delivery.block(ContextMoment::Compact).unwrap();
+        assert!(compact.text.contains("Current memory"));
+        assert!(!compact.text.contains("Initial memory"));
+        let manifest: Value =
+            serde_json::from_slice(&fs::read(compact.manifest_path).unwrap()).unwrap();
+        let file = manifest["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|file| file["source"] == "wave/parent/child/MEMORY.md")
             .unwrap();
-        store
-            .relocate_waves(&[crate::store::WaveLocatorUpdate {
-                wave_id: wave.clone(),
-                expected_repo: canonical.to_string(),
-                expected_slug: "before".into(),
-                target: crate::work::wave::WaveLocator::new(canonical.clone(), "parent/after")
-                    .unwrap(),
-                retire_collision: None,
-            }])
-            .unwrap();
-        let replacement = store.ensure_wave(&canonical.to_string(), "before").unwrap();
-        store
-            .update_wave_document(&replacement, "MEMORY.md", "Wrong replacement memory")
-            .unwrap();
-        let block = delivery.block(ContextMoment::Compact).unwrap().text;
-        assert!(block.contains("Retained wave memory"));
-        assert!(block.contains("wave/parent/after/MEMORY.md"));
-        assert!(block.contains("Current ancestor memory"));
-        assert!(block.contains("Checkout scratch"));
-        assert!(!block.contains("Wrong replacement memory"));
+        assert_eq!(
+            Path::new(file["path"].as_str().unwrap()),
+            memory.canonicalize().unwrap()
+        );
     }
 
     #[test]
@@ -452,51 +406,6 @@ mod tests {
                 "wave/parent/MEMORY.md",
             ]
         );
-    }
-
-    #[test]
-    fn context_block_retains_wave_bytes_at_readable_private_paths_not_checkout_copies() {
-        let repo = tempdir().unwrap();
-        let saved = "saved Wave memory 🦀\r\nwith final whitespace \t\n";
-        fs::create_dir_all(repo.path().join("wave/example")).unwrap();
-        let checkout = repo.path().join("wave/example/MEMORY.md");
-        fs::write(&checkout, "stale checkout copy").unwrap();
-        let block = render_block(
-            repo.path(),
-            Some("example"),
-            ContextMoment::Start,
-            None,
-            &[],
-            vec![document(
-                "wave/example/MEMORY.md",
-                saved,
-                DocumentSource::Wave,
-            )],
-        )
-        .unwrap();
-        let manifest = fs::read_to_string(&block.manifest_path).unwrap();
-        assert!(block.text.contains(&render_reference(&manifest)));
-        let manifest: Value = serde_json::from_str(&manifest).unwrap();
-        let path = std::path::Path::new(manifest["files"][0]["path"].as_str().unwrap());
-        assert_ne!(path, checkout);
-        assert_eq!(fs::read_to_string(path).unwrap(), saved);
-        assert_eq!(fs::read_to_string(checkout).unwrap(), "stale checkout copy");
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            assert_eq!(
-                fs::metadata(path).unwrap().permissions().mode() & 0o777,
-                0o600
-            );
-            assert_eq!(
-                fs::metadata(block.manifest_path)
-                    .unwrap()
-                    .permissions()
-                    .mode()
-                    & 0o777,
-                0o600
-            );
-        }
     }
 
     #[test]

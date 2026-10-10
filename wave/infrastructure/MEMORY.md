@@ -72,7 +72,7 @@ Newer explicitly active Linear evidence restores visibility and retains the lose
 inventory grants neither restoration nor execution authority. Exact slice proofs:
 `078a6642e:wave/infrastructure/MEMORY.md`, this heading; installed acceptance is unproved.
 
-SQLite owns Wave definitions/relocation, preserving IDs, files, execution, PRs,
+SQLite owns Wave identity/relocation, preserving IDs, files, execution, PRs,
 checkouts and uncertain effects. Personal owners and provider-first deletion stay
 removed; Project IDs precede slugs. Common-writer boundary: `84664e661`;
 earlier proofs: `bbc6eb8d3:wave/infrastructure/MEMORY.md`, this heading.
@@ -997,37 +997,36 @@ invented completion date. No fourth user-facing planning noun was selected.
 
 ## Earlier follow-ups (reselect through the accepted chapter)
 
-Unselected suggestions, #818's resolved rebase work and the unbuilt policy
-harness: `adf3f9e4b:wave/infrastructure/MEMORY.md`, this heading. Measure drift
-before tuning; archived notes authorize no work. Jack Heart's July 6
-“up/down 5ths” referent remains unresolved and deferred.
+Unselected suggestions and resolved proofs: `adf3f9e4b:wave/infrastructure/MEMORY.md`,
+this heading. Jack Heart's July 6 “up/down 5ths” remains unresolved and deferred;
+archives authorize no work.
 
 ## Direct invocation and large inputs (curated 2026-10-09)
 
 Jack Heart's LOO-444: native prompts/guides, skill/request first, whole-file
 start/compact context. Option B fixes additions per surface/reply/participant.
-Production authorized; native-guide wording proposed. Wave bytes stay
-SQLite-owned. Preserve request attribution, custom titles and native/lf naming.
+Production authorized; native-guide wording proposed. Preserve attribution and titles.
+Jack's October 9 `cbc13fa5` selects checkout Wave Markdown and path-segment ancestors
+for launch/callback context, with real listing paths. Delete saved Wave-ID lookup
+and snapshots; LOO-449 owns the table, `lf wave edit` and other readers.
+Clipboard-first-turn and shrinking memory to 10,000 bytes remain undecided.
 
-Fake APIs: Claude 2.1.295/Codex 0.161.0 preserve 10 KB ASCII hooks; truncate
-10,000 emoji scalars. Codex retains markers: compare whole strings and budget
-provider units. SessionStart injects, PostCompact not; native base/guides/additions
-survive; scoped trust.
+Claude 2.1.295/Codex 0.161.0 fake APIs preserve 10 KB ASCII hooks, truncate
+10,000 emoji scalars. Compare whole strings, not retained markers; budget bytes.
+SessionStart injects, PostCompact not; base/guides/additions survive scoped trust.
 Jack's October 9 option A
 supersedes the transport blocker: terminal argv, no editor/paste/stdin/envelopes
 or further transport probes; the rejected runner/tests are deleted. Only an oversized
 first turn may refuse with size/cap.
-`d3c01464e` wires fixed additions/references/hooks and removes overrides/inlining.
-Stand-ins plus separate callbacks prove wiring/refresh, not native delivery.
-Codex accepts scoped trust; OpenCode has plugin-only proof. An isolated lf/native launch
-failed before model input with `Operation not permitted`, cause unresolved.
+`d3c01464e` wires additions/references/hooks, deleting overrides/inlining.
+Stand-ins prove wiring/refresh; Codex accepts scoped trust; OpenCode is plugin-only.
+Isolated native startup failed before model input (`Operation not permitted`, unexplained).
 Gate owns native delivery/resume/compaction; demo owns pointer/cmux judgment.
-Saved Wave IDs pass rename/name-reuse fixtures. Earlier evidence: `6149952c8:scratch/what-goes-in-system-prompt.md`.
+Superseded stored-Wave proof: `8b41e0327:scratch/what-goes-in-system-prompt.md`.
 
-Main `3e1e6245c` (#1512): driver lifelines own engines. Replacement resumes native
-history, not abandoned turns. Preserve context/trust without launch-input replay
-or deleted engine recovery. #1511's `--no-daemon` terminals need process-local
-hook delivery. Fixtures prove no installed/provider acceptance.
+Main #1512 (`3e1e6245c`): driver lifelines own engines; replacement resumes history,
+not abandoned turns. Preserve context/trust without input replay or deleted recovery.
+#1511's `--no-daemon` needs process-local hooks. Native/installed proof remains open.
 
 Retain setup-free capture, saved config/trust, native identity and caller checkpoints.
 Interrupted profiles may remain unselected; PTYs prove no fresh reconnect hooks or

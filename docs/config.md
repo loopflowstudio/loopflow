@@ -249,7 +249,7 @@ Use `--no-loopflow` when you want a leaner prompt without loopflow-specific proc
 
 ### Docs
 
-Prefetch specific files, globs, or directories into context. Not included by default.
+List specific files, globs, or directories for the agent to read. Not included by default.
 
 | | |
 |---|---|
@@ -258,13 +258,13 @@ Prefetch specific files, globs, or directories into context. Not included by def
 | **Default** | none (empty) |
 
 Each entry is a file (`README.md`), a glob (`'*.md'`), or a directory (`swift/`
-gathers `*.md` under it). Use this to pull in reference docs relevant to the
-task—it doesn't restrict which files the agent can edit. `scratch/` and
-`wave/` are always included automatically; you don't need `--docs` for them.
+gathers `*.md` under it). Resolved paths appear in the context listing; file
+bodies are not inlined. This doesn't restrict which files the agent can edit.
+Scratch and the selected Wave's stored documents are gathered automatically.
 
 ### Branch Files (diff_files)
 
-Full content of files modified on the current branch.
+List paths modified on the current branch for the agent to inspect.
 
 | | |
 |---|---|
@@ -272,11 +272,12 @@ Full content of files modified on the current branch.
 | **Config** | `diff_files: true` |
 | **Default** | `false` |
 
-Use `--diff files` when the agent needs complete file bodies, not just line changes. Use `--diff both` when the exact patch also matters.
+Use `--diff files` to identify changed files. The reference points to Git inspection;
+it does not preload file bodies or patches.
 
 ### Clipboard
 
-Paste content (errors, stack traces, context) into the prompt.
+Save clipboard content in a complete private file referenced by the context listing.
 
 | | |
 |---|---|
@@ -287,7 +288,7 @@ Use `-c` when debugging: copy an error, then `lf debug -c`.
 
 ### Raw Diff
 
-Include `git diff main...HEAD` output showing exact line changes.
+Point to Git inspection commands rather than inlining a frozen patch.
 
 | | |
 |---|---|
@@ -295,11 +296,11 @@ Include `git diff main...HEAD` output showing exact line changes.
 | **Config** | `diff: true` |
 | **Default** | `false` (not included) |
 
-Use when you want the agent to see precisely what changed. Use `--diff both` to include changed file bodies too.
+Use when the agent needs to inspect exact changes. `--diff both` also lists changed paths.
 
 ### Context Files
 
-Additional files always included in every skill.
+Additional file paths listed for every skill.
 
 | | |
 |---|---|
@@ -495,17 +496,17 @@ names. The `npx/` fetch path and `rams/rams` alias are removed; an installed
 `lf -b -a claude audit` invokes a Claude bundle directly from its original
 folder through the native command parser, with gathered context separate from
 command arguments. Terminal Claude uses a captured native plugin with the same
-declarations and exact arguments; gathered context stays in its user message.
+declarations and exact arguments; gathered context uses the refreshed conversation block.
 Codex sources use explicit native skill links on both surfaces, including sources
 outside Codex's discovered catalog. Cross-harness launches translate argument
 and tool-name instructions, retain declarations and identify the original asset
 directory. Codex custom prompts expand one-based positions and `NAME=value`
 arguments. A warning names declarations the launch does not enforce.
 
-Ordinary third-party launches omit Loopflow operating and conversation guidance.
-Budget enforcement stays active; budget notices appear when managed memory,
-scratch or excerpts need them. Attributed Work and captured Flow steps retain
-their guidance. LF builtins remain inline. Captured Flow definitions survive
+Third-party and builtin launches use the same fixed additions and conversation
+context. `--no-loopflow` explicitly omits the operating guide. Memory and scratch
+budgets are authoring targets, not launch gates. LF builtins remain inline in
+the first turn. Captured Flow definitions survive
 source-file changes or removal: Claude uses a captured native definition, while
 Codex uses captured instructions. Both retain the original resource directory;
 resources removed with the bundle are not preserved.

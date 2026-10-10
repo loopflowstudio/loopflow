@@ -1017,9 +1017,9 @@ Jack's October 9 option A
 supersedes the transport blocker: terminal argv, no editor/paste/stdin/envelopes
 or further transport probes; the rejected runner/tests are deleted. Only an oversized
 first turn may refuse with size/cap.
-Rust now wires fixed additions, saved whole-file references and native callbacks;
-all Codex overrides and old inlining are removed. Fixtures prove refresh; native Codex accepts scoped trust. OpenCode plugin
-checks prove no native acceptance. A network-isolated actual lf/native launch
+`d3c01464e` wires fixed additions/references/hooks and removes overrides/inlining.
+Stand-ins plus separate callbacks prove wiring/refresh, not native delivery.
+Codex accepts scoped trust; OpenCode has plugin-only proof. An isolated lf/native launch
 failed before model input with `Operation not permitted`, cause unresolved.
 Gate owns native delivery/resume/compaction; demo owns pointer/cmux judgment.
 Saved Wave IDs pass rename/name-reuse fixtures. Earlier evidence: `6149952c8:scratch/what-goes-in-system-prompt.md`.
@@ -1064,10 +1064,10 @@ No catalog mount or second resolver is required. Single-file custom prompts keep
 one-based positions and named assignments; valid metadata does not make them skill
 bundles. Unfamiliar native declarations are reported, not silently discarded.
 
-Ordinary unbound third-party launches omit operating/conversation guidance;
-attributed Work and captured Flows retain it. Budget checks remain; notices accompany
-managed context or excerpts. Captured input identifies a Flow; ordinary selection
-also retains an in-memory invocation. PATH discovery replaces availability's
+LOO-444 supersedes third-party guidance suppression and launch budget checks:
+all skills share fixed additions and conversation context; `--no-loopflow` remains
+explicit. Size targets do not gate launch. Captured input identifies a Flow;
+ordinary selection retains its invocation. PATH discovery replaces availability's
 `--version` subprocess/cache without changing actual launch failure handling.
 
 Fixtures prove native model/argument/context fidelity, collisions, out-of-catalog

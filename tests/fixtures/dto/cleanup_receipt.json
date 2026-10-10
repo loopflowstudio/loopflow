@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "id": "cron_00000000000000000000000000000001",
+  "runner_pid": 42,
+  "runner_started_at": 1791500000,
+  "cleanup": {
+    "sequence": 3,
+    "full_scan_at": null,
+    "full_scan_after": "/src/repo.finished",
+    "retry_after": "/src/repo.finished",
+    "observed": 8,
+    "removed": 2,
+    "deferred": 5,
+    "failed": 1
+  },
+  "machine_id": "home_00000000000000000000000000000001",
+  "wave": "",
+  "flow": "repository-example-cleanup",
+  "target_kind": "repository",
+  "source": "manual",
+  "schedule": "every-minute",
+  "repo": "/src/repo",
+  "lf_path": "/bin/lf",
+  "log_path": "/src/repo/.lf/logs/cron..repository-example-cleanup.log",
+  "started_at": 1791500000,
+  "finished_at": 1791500001,
+  "outcome": "failed",
+  "exit_code": 1,
+  "error": "1 checkout removals failed"
+}

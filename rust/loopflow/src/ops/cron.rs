@@ -1,5 +1,6 @@
 pub mod accounting;
 pub(crate) mod calendar;
+pub(crate) mod cleanup;
 pub mod history;
 
 use std::collections::HashSet;
@@ -133,6 +134,7 @@ pub struct CronReceipt {
     pub id: CronReceiptId,
     pub runner_pid: u32,
     pub runner_started_at: Option<i64>,
+    pub cleanup: Option<crate::ops::wt::cleanup::CleanupProgress>,
     #[serde(alias = "home_id")]
     pub machine_id: MachineId,
     pub wave: String,
@@ -1333,6 +1335,7 @@ fn validate_installed_spec(spec: &CronSpec, wave: &str, flow: &str) -> OpsResult
 
 fn new_receipt(spec: &CronSpec, machine_id: &MachineId, source: CronSource) -> CronReceipt {
     CronReceipt {
+        cleanup: None,
         schema_version: 1,
         id: CronReceiptId::new(),
         runner_pid: std::process::id(),
@@ -2639,6 +2642,7 @@ mod tests {
         let temp = tempfile::TempDir::new().unwrap();
         let started_at = Utc::now().timestamp();
         let receipt = CronReceipt {
+            cleanup: None,
             schema_version: 1,
             id: CronReceiptId::new(),
             runner_pid: u32::MAX,

@@ -81,6 +81,22 @@ const LANDING_COLUMNS: &str = "
     blocked_reason, created_at, updated_at";
 
 impl super::SqliteStore {
+    /// Candidate discovery only. Delivery, execution and exact HEAD are checked
+    /// again by the collector; this query grants no disposal authority.
+    pub(crate) fn settled_checkout_paths(&self) -> StoreResult<Vec<PathBuf>> {
+        let conn = self
+            .conn
+            .try_lock()
+            .map_err(|_| StoreError::InvalidData("checkout discovery reader is busy".into()))?;
+        let mut query = conn.prepare(
+            "SELECT worktree FROM pr_landings WHERE state='merged'
+             UNION SELECT t.worktree FROM tasks t JOIN task_prs p ON p.task_id=t.id
+             WHERE p.merge_commit IS NOT NULL AND t.worktree IS NOT NULL",
+        )?;
+        let rows = query.query_map([], |row| row.get::<_, String>(0).map(PathBuf::from))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     /// A landing of `worktree` that still awaits its merge.
     pub(crate) fn pending_landing_at(
         &self,

@@ -108,6 +108,7 @@ fn install_current_telemetry_obligation(home: &Path) {
     )
     .unwrap();
     let receipt = CronReceipt {
+        cleanup: None,
         schema_version: 1,
         id: CronReceiptId::new(),
         runner_pid: 123,

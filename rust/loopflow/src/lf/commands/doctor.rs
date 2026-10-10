@@ -776,6 +776,7 @@ mod tests {
 
     fn receipt(obligation: &CronObligation, started_at: i64, source: CronSource) -> CronReceipt {
         CronReceipt {
+            cleanup: None,
             schema_version: 1,
             id: CronReceiptId::new(),
             runner_pid: 123,

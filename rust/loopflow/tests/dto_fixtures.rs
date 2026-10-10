@@ -761,3 +761,26 @@ fn cleanup_report_json_preserves_deferred_reasons_and_unknown_sizes() {
         loopflow::ops::wt::cleanup::CleanupAction::Retain(reason) if reason == "running external process"));
     assert_eq!(serde_json::to_value(report).unwrap(), value);
 }
+
+#[test]
+fn cleanup_receipt_preserves_partial_scan_progress() {
+    let input = include_str!("../../../tests/fixtures/dto/cleanup_receipt.json");
+    let receipt: loopflow::ops::CronReceipt = serde_json::from_str(input).unwrap();
+    let progress = receipt.cleanup.as_ref().unwrap();
+    assert_eq!(progress.sequence, 3);
+    assert_eq!(progress.full_scan_at, None);
+    assert_eq!(progress.observed, 8);
+    assert_eq!(progress.removed, 2);
+    assert_eq!(
+        serde_json::to_value(&receipt).unwrap(),
+        serde_json::from_str::<serde_json::Value>(input).unwrap()
+    );
+    let mut historical = serde_json::to_value(receipt).unwrap();
+    historical.as_object_mut().unwrap().remove("cleanup");
+    assert!(
+        serde_json::from_value::<loopflow::ops::CronReceipt>(historical)
+            .unwrap()
+            .cleanup
+            .is_none()
+    );
+}

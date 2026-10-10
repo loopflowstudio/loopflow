@@ -10,8 +10,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::durable::{WorkRef, WorkStatus};
 use crate::engine::git::{
-    acquire_worktree_lease, current_branch, get_default_branch, is_clean, rev_parse,
-    worktree_remove_owned, WorktreeRemoval,
+    acquire_worktree_lease, current_branch, get_default_branch, rev_parse, worktree_remove_owned,
+    WorktreeRemoval,
 };
 use crate::engine::worktrees::{is_persistent_worktree, list_porcelain, main_repo_root};
 use crate::journal::{process_evidence_at, ProcessIdentityEvidence};
@@ -51,6 +51,35 @@ pub struct CleanupReport {
 pub struct CleanupFailure {
     pub path: PathBuf,
     pub error: String,
+}
+
+/// Constant-size scheduling hints carried by bounded cron receipts. Neither a
+/// cursor nor a prior success can substitute for fresh removal evidence.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CleanupProgress {
+    pub sequence: u64,
+    pub full_scan_at: Option<i64>,
+    pub full_scan_after: Option<PathBuf>,
+    pub retry_after: Option<PathBuf>,
+    pub observed: usize,
+    pub removed: usize,
+    pub deferred: usize,
+    pub failed: usize,
+}
+
+impl CleanupProgress {
+    pub(crate) fn initial() -> Self {
+        Self {
+            sequence: 0,
+            full_scan_at: None,
+            full_scan_after: None,
+            retry_after: None,
+            observed: 0,
+            removed: 0,
+            deferred: 0,
+            failed: 0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -153,7 +182,7 @@ struct RegistryObservations {
     home: PathBuf,
     tasks: Vec<crate::store::sqlite::TaskCheckout>,
     open: crate::store::sqlite::task_work::OpenProcesses,
-    evidence_roots: Vec<PathBuf>,
+    evidence_roots: std::cell::OnceCell<OpsResult<Vec<PathBuf>>>,
 }
 
 impl RegistryObservations {
@@ -167,7 +196,7 @@ impl RegistryObservations {
             home: store.home_dir().map_err(error)?,
             tasks,
             open: store.open_processes().map_err(error)?,
-            evidence_roots: evidence_roots(store)?,
+            evidence_roots: std::cell::OnceCell::new(),
         })
     }
 
@@ -225,14 +254,19 @@ impl RegistryObservations {
                 process.lfid
             )));
         }
-        if self
-            .evidence_roots
-            .iter()
-            .any(|root| root.starts_with(path))
-        {
-            return Ok(Some("local Session evidence".into()));
-        }
+
         Ok(None)
+    }
+
+    fn evidence_blocker(&self, path: &Path) -> OpsResult<bool> {
+        let roots = self
+            .evidence_roots
+            .get_or_init(|| evidence_roots(&self.store));
+        Ok(roots
+            .as_ref()
+            .map_err(error)?
+            .iter()
+            .any(|root| root.starts_with(path)))
     }
 }
 
@@ -291,29 +325,75 @@ fn observe_with_snapshot(
         retain(decision, "primary checkout");
         return Ok(());
     }
-    if !path.try_exists()? {
-        // Do not prune another owner's administrative record as a side effect.
-        retain(decision, "missing checkout; registration retained");
-        return Ok(());
-    }
-    if normalized(&main_repo_root(path)?) != normalized(repo) || !snapshot.registered.contains(path)
-    {
-        retain(decision, "checkout registration changed");
-        return Ok(());
-    }
-    decision.branch = current_branch(path)?;
-    decision.observed_head = Some(rev_parse(path, "HEAD")?);
+    let missing = match std::fs::symlink_metadata(path) {
+        Ok(_) => false,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
+        Err(error) => return Err(error.into()),
+    };
+    let admin = if missing {
+        let Some((admin, started)) = interrupted_removal(repo, path)? else {
+            retain(decision, "missing checkout; registration retained");
+            return Ok(());
+        };
+        let Some(branch) = &started.branch else {
+            retain(
+                decision,
+                "interrupted detached checkout; registration retained",
+            );
+            return Ok(());
+        };
+        // The administrative HEAD and local ref must still name the exact
+        // source observed before removal. A missing path alone proves nothing.
+        if !snapshot.registered.contains(path)
+            || std::fs::read_to_string(admin.join("HEAD"))?.trim()
+                != format!("ref: refs/heads/{branch}")
+            || Some(rev_parse(repo, &format!("refs/heads/{branch}"))?) != started.observed_head
+        {
+            retain(decision, "interrupted checkout registration changed");
+            return Ok(());
+        }
+        decision.branch = started.branch;
+        decision.observed_head = started.observed_head;
+        admin
+    } else {
+        if normalized(&main_repo_root(path)?) != normalized(repo)
+            || !snapshot.registered.contains(path)
+        {
+            retain(decision, "checkout registration changed");
+            return Ok(());
+        }
+        decision.branch = current_branch(path)?;
+        decision.observed_head = Some(rev_parse(path, "HEAD")?);
+        crate::engine::git::absolute_git_dir(path)?
+    };
     if decision.branch.as_deref() == Some(snapshot.default_branch.as_str()) {
         retain(decision, "default branch");
         return Ok(());
     }
-    if is_persistent_worktree(path)? {
+    let persistent = if missing {
+        let branch = decision
+            .branch
+            .as_deref()
+            .expect("recovery requires a branch");
+        read_git(
+            repo,
+            &[
+                "config",
+                "--default",
+                "false",
+                "--bool",
+                "--get",
+                &format!("branch.{branch}.loopflow-persistent"),
+            ],
+        )? == "true"
+    } else {
+        is_persistent_worktree(path)?
+    };
+    if persistent {
         retain(decision, "persistent checkout");
         return Ok(());
     }
-    let mut owned = crate::engine::git::absolute_git_dir(path)?
-        .join("lf-created")
-        .is_file();
+    let mut owned = admin.join("lf-created").is_file();
     if let Some(reason) = snapshot.local.blocker(path)? {
         retain(decision, reason);
         return Ok(());
@@ -375,7 +455,29 @@ fn observe_with_snapshot(
         }
         Ok(_) => {}
     }
-    if super::git(path, &["ls-files", "-v"])?.lines().any(|line| {
+    // History can be much larger than the checkout registry. Read it only for
+    // settled candidates; an incomplete scan still never authorizes removal.
+    if snapshot.local.evidence_blocker(path)?
+        || snapshot
+            .release
+            .as_ref()
+            .map_err(error)?
+            .as_ref()
+            .map(|registry| registry.evidence_blocker(path))
+            .transpose()?
+            .unwrap_or(false)
+    {
+        retain(decision, "local Session evidence");
+        return Ok(());
+    }
+    if missing {
+        decision
+            .evidence
+            .push("interrupted cleanup: exact administrative HEAD".into());
+        decision.action = CleanupAction::RemoveCheckout;
+        return Ok(());
+    }
+    if read_git(path, &["ls-files", "-v"])?.lines().any(|line| {
         line.as_bytes()
             .first()
             .is_some_and(|flag| flag.is_ascii_lowercase() || *flag == b'S')
@@ -383,7 +485,7 @@ fn observe_with_snapshot(
         retain(decision, "tracked files excluded from Git change detection");
         return Ok(());
     }
-    if !is_clean(path)? {
+    if !read_git(path, &["status", "--porcelain"])?.is_empty() {
         retain(decision, "uncommitted or untracked files");
         return Ok(());
     }
@@ -401,10 +503,64 @@ fn observe_with_snapshot(
     Ok(())
 }
 
+/// A removal-intent file lives with Git's registration and disappears with it.
+/// Only an absent checkout with this exact registration can use it for repair.
+fn interrupted_removal(repo: &Path, path: &Path) -> OpsResult<Option<(PathBuf, CleanupDecision)>> {
+    let root = crate::engine::worktrees::git_common_dir(repo)?.join("worktrees");
+    if !root.try_exists()? {
+        return Ok(None);
+    }
+    for entry in std::fs::read_dir(root)? {
+        let admin = entry?.path();
+        let marker = admin.join("lf-cleanup.json");
+        if !marker.try_exists()? {
+            continue;
+        }
+        if normalized(Path::new(
+            std::fs::read_to_string(admin.join("gitdir"))?.trim(),
+        )) != path.join(".git")
+        {
+            continue;
+        }
+        let started: CleanupDecision =
+            serde_json::from_slice(&std::fs::read(marker)?).map_err(error)?;
+        if started.path == path && started.action == CleanupAction::RemoveCheckout {
+            return Ok(Some((admin, started)));
+        }
+    }
+    Ok(None)
+}
+
+fn record_removal(decision: &CleanupDecision) -> OpsResult<()> {
+    let admin = crate::engine::git::absolute_git_dir(&decision.path)?;
+    let temporary = admin.join("lf-cleanup.tmp");
+    crate::ops::cron::write_private_file(
+        &temporary,
+        &serde_json::to_vec(decision).map_err(error)?,
+    )?;
+    std::fs::rename(temporary, admin.join("lf-cleanup.json"))?;
+    std::fs::File::open(admin)?.sync_all()?;
+    Ok(())
+}
+
+// Filesystem-sensitive Git reads must not hold up every later candidate.
+fn read_git(path: &Path, args: &[&str]) -> OpsResult<String> {
+    let output = crate::ops::read_retry::bounded_output(
+        Command::new("git")
+            .current_dir(path)
+            .args(args)
+            .env("GIT_OPTIONAL_LOCKS", "0"),
+        Duration::from_secs(2),
+    )?;
+    String::from_utf8(output.stdout)
+        .map(|text| text.trim().to_owned())
+        .map_err(error)
+}
+
 /// A cache tag is an explicit tool contract, not a guess from a directory name.
 /// Only wholly ignored directories qualify; tracked source is never an artifact.
 fn disposable_artifacts(path: &Path) -> OpsResult<Vec<PathBuf>> {
-    let ignored = super::git(
+    let ignored = read_git(
         path,
         &[
             "ls-files",
@@ -422,7 +578,7 @@ fn disposable_artifacts(path: &Path) -> OpsResult<Vec<PathBuf>> {
             || relative.starts_with(".lf/")
             || !std::fs::symlink_metadata(&root)?.is_dir()
             || !has_cache_tag(&root)?
-            || !super::git(path, &["ls-files", "-z", "--", relative])?.is_empty()
+            || !read_git(path, &["ls-files", "-z", "--", relative])?.is_empty()
         {
             return Err(error(format!("unclassified ignored content: {relative}")));
         }
@@ -467,7 +623,7 @@ fn remove_artifact(root: &Path) -> OpsResult<()> {
 }
 
 pub fn plan_cleanup(store: &SharedStore, repo: &Path) -> OpsResult<Vec<CleanupDecision>> {
-    plan_selected(store, repo, None, None)
+    plan_selected(store, repo, None)
 }
 
 /// Allocated bytes, without following symlinks or crossing filesystems. A
@@ -495,7 +651,6 @@ fn plan_selected(
     store: &SharedStore,
     repo: &Path,
     selected: Option<&Path>,
-    deadline: Option<Instant>,
 ) -> OpsResult<Vec<CleanupDecision>> {
     let repo = main_repo_root(repo)?;
     let selected = selected.map(normalized);
@@ -523,24 +678,14 @@ fn plan_selected(
             evidence: Vec::new(),
             estimated_bytes: None,
         };
-        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
-            retain(&mut decision, "planning budget exhausted");
-        } else {
-            match &snapshot {
-                Ok(snapshot) => {
-                    if let Err(error) =
-                        observe_with_snapshot(&repo, &mut decision, &external, snapshot)
-                    {
-                        retain(&mut decision, format!("observation unavailable: {error}"));
-                    }
+        match &snapshot {
+            Ok(snapshot) => {
+                if let Err(error) = observe_with_snapshot(&repo, &mut decision, &external, snapshot)
+                {
+                    retain(&mut decision, format!("observation unavailable: {error}"));
                 }
-                Err(error) => retain(&mut decision, format!("observation unavailable: {error}")),
             }
-        }
-        if decision.action == CleanupAction::RemoveCheckout {
-            // Only finite background passes measure; previews and lifecycle
-            // callers never acquire a foreground recursive scanning cost.
-            decision.estimated_bytes = deadline.and_then(|at| estimate_bytes(&decision.path, at));
+            Err(error) => retain(&mut decision, format!("observation unavailable: {error}")),
         }
         plan.push(decision);
     }
@@ -604,8 +749,11 @@ pub fn apply_cleanup(
             if decision.action != CleanupAction::RemoveCheckout {
                 return Ok(false);
             }
-            for root in disposable_artifacts(&decision.path)? {
-                remove_artifact(&root)?;
+            if decision.path.try_exists()? {
+                record_removal(&decision)?;
+                for root in disposable_artifacts(&decision.path)? {
+                    remove_artifact(&root)?;
+                }
             }
             worktree_remove_owned(&repo, &lease, WorktreeRemoval::Clean, &|_| {})?;
             if let (Some(branch), Some(head)) = (&decision.branch, &decision.observed_head) {
@@ -674,17 +822,138 @@ pub fn run_cleanup_pass(
         }
         Err(error) => return Err(error.into()),
     }
-    let started = Instant::now();
-    let plan = plan_selected(store, repo, None, Some(started + budget.admission_time))?;
-    apply_cleanup(
-        store,
-        repo,
-        plan,
-        CleanupBudget {
-            admission_time: budget.admission_time.saturating_sub(started.elapsed()),
-            ..budget
-        },
-    )
+    let repo = main_repo_root(repo)?;
+    let mut receipt = crate::ops::cron::cleanup::CleanupReceipt::begin(&store.sqlite, &repo)?;
+    let mut progress = receipt.progress();
+    let result = collect_pass(store, &repo, budget, &mut progress, |progress| {
+        receipt.save(progress.clone())
+    });
+    receipt.finish(progress, result.as_ref().err().map(ToString::to_string))?;
+    result
+}
+
+/// Observe and apply one admitted candidate before starting another. Expensive
+/// planning can no longer consume the application budget for an entire batch.
+fn collect_pass(
+    store: &SharedStore,
+    repo: &Path,
+    budget: CleanupBudget,
+    progress: &mut CleanupProgress,
+    mut save: impl FnMut(&CleanupProgress) -> OpsResult<()>,
+) -> OpsResult<CleanupReport> {
+    let deadline = Instant::now() + budget.admission_time;
+    let now = chrono::Utc::now().timestamp();
+    let full = progress.full_scan_after.is_some()
+        || progress
+            .full_scan_at
+            .is_none_or(|last| now.saturating_sub(last) >= 3600);
+    let mut registered = list_porcelain(repo)?;
+    registered.sort_by(|a, b| a.0.cmp(&b.0));
+    let paths: HashSet<_> = registered
+        .iter()
+        .map(|(path, _)| normalized(path))
+        .collect();
+    if full {
+        registered.retain(|(path, _)| {
+            progress
+                .full_scan_after
+                .as_ref()
+                .is_none_or(|after| path > after)
+        });
+    } else {
+        let settled: HashSet<_> = store
+            .sqlite
+            .settled_checkout_paths()
+            .map_err(error)?
+            .into_iter()
+            .map(|path| normalized(&path))
+            .collect();
+        registered.retain(|(path, _)| settled.contains(&normalized(path)));
+        // Retried observations go to the back. Slow/blocked early paths cannot
+        // monopolize every tick; never-observed/deferred paths get their turn.
+        if let Some(after) = &progress.retry_after {
+            let split = registered.partition_point(|(path, _)| path <= after);
+            registered.rotate_left(split);
+        }
+    }
+    let mut report = CleanupReport {
+        planned: Vec::new(),
+        removed: Vec::new(),
+        deferred: Vec::new(),
+        failed: Vec::new(),
+    };
+    progress.observed = 0;
+    progress.removed = 0;
+    progress.deferred = 0;
+    progress.failed = 0;
+    // Empty cheap ticks never inspect Processes, Session history or filesystems.
+    if !registered.is_empty() {
+        let external = std::cell::OnceCell::new();
+        let snapshot = std::cell::OnceCell::new();
+        for (path, branch) in &registered {
+            if Instant::now() >= deadline
+                || report.removed.len() >= budget.removals
+                || progress.observed >= 32
+            {
+                save(progress)?;
+                return Ok(report);
+            }
+            progress.retry_after = Some(path.clone());
+            if full {
+                progress.full_scan_after = Some(path.clone());
+            }
+            progress.observed += 1;
+            // Save before observation: even a killed/stalled read relinquishes
+            // its position on the next pass. This never records eligibility.
+            save(progress)?;
+            let mut decision = CleanupDecision {
+                path: normalized(path),
+                branch: branch.clone(),
+                observed_head: None,
+                action: CleanupAction::Retain("not observed".into()),
+                evidence: Vec::new(),
+                estimated_bytes: None,
+            };
+            let external = external.get_or_init(running_paths);
+            let snapshot = snapshot.get_or_init(|| Observations::read(store, repo, paths.clone()));
+            match snapshot {
+                Ok(snapshot) => {
+                    if let Err(error) =
+                        observe_with_snapshot(repo, &mut decision, external, snapshot)
+                    {
+                        retain(&mut decision, format!("observation unavailable: {error}"));
+                    }
+                }
+                Err(error) => retain(&mut decision, format!("observation unavailable: {error}")),
+            }
+            if decision.action == CleanupAction::RemoveCheckout {
+                // Size is optional; it cannot prevent this admitted removal.
+                decision.estimated_bytes = estimate_bytes(&decision.path, deadline);
+            }
+            let applied = apply_cleanup(
+                store,
+                repo,
+                vec![decision],
+                CleanupBudget {
+                    removals: 1,
+                    admission_time: budget.admission_time,
+                },
+            )?;
+            report.planned.extend(applied.planned);
+            report.removed.extend(applied.removed);
+            report.deferred.extend(applied.deferred);
+            report.failed.extend(applied.failed);
+            progress.removed = report.removed.len();
+            progress.deferred = report.deferred.len();
+            progress.failed = report.failed.len();
+        }
+    }
+    if full {
+        progress.full_scan_at = Some(now);
+        progress.full_scan_after = None;
+    }
+    save(progress)?;
+    Ok(report)
 }
 
 /// Keep filesystem work off the async lifecycle caller. One worker owns the
@@ -692,7 +961,7 @@ pub fn run_cleanup_pass(
 pub(crate) async fn cleanup_path(store: &SharedStore, repo: &Path, path: &Path) -> OpsResult<()> {
     let (store, repo, path) = (store.clone(), repo.to_path_buf(), path.to_path_buf());
     tokio::task::spawn_blocking(move || {
-        let plan = plan_selected(&store, &repo, Some(&path), None)?;
+        let plan = plan_selected(&store, &repo, Some(&path))?;
         let report = apply_cleanup(&store, &repo, plan, CleanupBudget::default())?;
         for decision in report.deferred {
             if let CleanupAction::Retain(reason) = decision.action {
@@ -792,6 +1061,136 @@ mod tests {
         );
     }
 
+    fn add_settled(repo: &TestRepo, directory: &tempfile::TempDir, name: &str) -> PathBuf {
+        let path = repo.create_named_worktree(name).canonicalize().unwrap();
+        let head = rev_parse(&path, "HEAD").unwrap();
+        let conn = rusqlite::Connection::open(directory.path().join("store.db")).unwrap();
+        conn.execute("INSERT INTO pr_landings(id,repo,pr_number,worktree,branch,requested_head_sha,observed_head_sha,merge_commit,state,generation,created_at,updated_at)
+            VALUES(?1,'test/repo',2,?2,?1,?3,?3,?3,'merged',1,1,1)",
+            rusqlite::params![name, path.to_str().unwrap(), head]).unwrap();
+        path
+    }
+
+    #[tokio::test]
+    async fn cleanup_collection_repairs_only_its_interrupted_registration() {
+        let _guard = crate::journal::TestLedgerGuard::new();
+        let _external = ExternalInspection::idle();
+        let (repo, directory, store, path) = fixture().await;
+        let unrelated = add_settled(&repo, &directory, "unrelated");
+        let initial = decision(&store, &repo, &path);
+        super::record_removal(&initial).unwrap();
+        // Simulate interruption after checkout deletion, before Git unregisters it.
+        std::fs::remove_dir_all(&path).unwrap();
+        std::fs::remove_dir_all(&unrelated).unwrap();
+        let before = git(repo.path(), &["worktree", "list", "--porcelain"]).unwrap();
+        let plan = plan_cleanup(&store, repo.path()).unwrap();
+        assert_eq!(
+            git(repo.path(), &["worktree", "list", "--porcelain"]).unwrap(),
+            before
+        );
+        assert_eq!(
+            plan.iter().find(|item| item.path == path).unwrap().action,
+            CleanupAction::RemoveCheckout
+        );
+        retained(
+            plan.iter().find(|item| item.path == unrelated).unwrap(),
+            "missing checkout",
+        );
+        let report = apply_cleanup(&store, repo.path(), plan, CleanupBudget::default()).unwrap();
+        assert_eq!(report.removed, vec![path.clone()], "{report:?}");
+        let after = git(repo.path(), &["worktree", "list", "--porcelain"]).unwrap();
+        assert!(!after.contains(path.to_str().unwrap()));
+        assert!(after.contains(unrelated.to_str().unwrap()));
+    }
+
+    #[tokio::test]
+    async fn cleanup_collection_interrupted_registration_rechecks_new_commits() {
+        let _guard = crate::journal::TestLedgerGuard::new();
+        let (repo, _directory, store, path) = fixture().await;
+        super::record_removal(&decision(&store, &repo, &path)).unwrap();
+        git(&path, &["commit", "--allow-empty", "-m", "new source"]).unwrap();
+        std::fs::remove_dir_all(&path).unwrap();
+        retained(&decision(&store, &repo, &path), "registration changed");
+        assert!(git(repo.path(), &["rev-parse", "landed"]).is_ok());
+    }
+
+    #[tokio::test]
+    async fn cleanup_collection_passes_advance_past_slow_candidates_and_reconcile_hourly() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::time::Duration;
+        let _guard = crate::journal::TestLedgerGuard::new();
+        let external = ExternalInspection::idle();
+        let (repo, directory, store, path) = fixture().await;
+        let slow = add_settled(&repo, &directory, "aaa-slow");
+        std::fs::write(slow.join("unfinished"), "keep").unwrap();
+        let mut eligible = vec![path];
+        for name in ["bbb", "ccc", "ddd"] {
+            eligible.push(add_settled(&repo, &directory, name));
+        }
+        let unowned = repo
+            .create_named_worktree("unowned")
+            .canonicalize()
+            .unwrap();
+        // A real slow Git read in the first candidate exhausts admission. The
+        // next invocation must not start there again while later work waits.
+        let real_git = std::env::split_paths(&external.previous_path)
+            .map(|path| path.join("git"))
+            .find(|path| path.is_file())
+            .unwrap();
+        let script = external._directory.path().join("git");
+        std::fs::write(&script, format!("#!/bin/sh\nif [ \"$PWD\" = '{}' ] && [ \"$1\" = status ]; then sleep 0.3; fi\nexec '{}' \"$@\"\n", slow.display(), real_git.display())).unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let budget = CleanupBudget {
+            removals: 1,
+            admission_time: Duration::from_millis(200),
+        };
+        let mut removed = Vec::new();
+        for _ in 0..12 {
+            let report = super::run_cleanup_pass(&store, repo.path(), budget).unwrap();
+            assert!(report.removed.len() <= 1);
+            removed.extend(report.removed);
+            if eligible.iter().all(|path| !path.exists()) {
+                break;
+            }
+        }
+        assert_eq!(removed.len(), eligible.len());
+        assert!(slow.join("unfinished").exists());
+        assert!(unowned.exists());
+        // Finish the full scan, then cheap ticks inspect settled owners only.
+        let mut receipt =
+            crate::ops::cron::cleanup::CleanupReceipt::begin(&store.sqlite, repo.path()).unwrap();
+        let mut progress = receipt.progress();
+        super::collect_pass(
+            &store,
+            repo.path(),
+            CleanupBudget::default(),
+            &mut progress,
+            |_| Ok(()),
+        )
+        .unwrap();
+        assert!(progress.full_scan_at.is_some());
+        let cheap = super::collect_pass(
+            &store,
+            repo.path(),
+            CleanupBudget::default(),
+            &mut progress,
+            |_| Ok(()),
+        )
+        .unwrap();
+        assert!(!cheap.planned.iter().any(|item| item.path == unowned));
+        progress.full_scan_at = Some(chrono::Utc::now().timestamp() - 3601);
+        let hourly = super::collect_pass(
+            &store,
+            repo.path(),
+            CleanupBudget::default(),
+            &mut progress,
+            |_| Ok(()),
+        )
+        .unwrap();
+        assert!(hourly.planned.iter().any(|item| item.path == unowned));
+        receipt.finish(progress, None).unwrap();
+    }
+
     #[test]
     fn cleanup_size_estimate_is_unknown_on_deadline_or_failed_observation() {
         let dir = tempfile::tempdir().unwrap();
@@ -835,6 +1234,35 @@ mod tests {
         fn drop(&mut self) {
             std::env::set_var("PATH", &self.previous_path);
         }
+    }
+
+    #[tokio::test]
+    async fn cleanup_collection_receipts_are_bounded_and_resume_the_cursor() {
+        let _guard = crate::journal::TestLedgerGuard::new();
+        let (repo, _directory, store, path) = fixture().await;
+        for sequence in 1..=15 {
+            let mut receipt =
+                crate::ops::cron::cleanup::CleanupReceipt::begin(&store.sqlite, repo.path())
+                    .unwrap();
+            let mut progress = receipt.progress();
+            assert_eq!(progress.sequence, sequence);
+            if sequence > 1 {
+                assert_eq!(progress.retry_after, Some(path.clone()));
+            }
+            progress.retry_after = Some(path.clone());
+            receipt.finish(progress, None).unwrap();
+        }
+        let root = crate::ops::cron::receipt_root(&store.sqlite.home_dir().unwrap());
+        let receipts = crate::ops::cron::list_cron_receipts(&root, "", None, 1).unwrap();
+        assert!(receipts.len() <= 11, "{} receipts", receipts.len());
+        assert_eq!(
+            receipts
+                .iter()
+                .filter_map(|r| r.cleanup.as_ref())
+                .map(|p| p.sequence)
+                .max(),
+            Some(15)
+        );
     }
 
     #[tokio::test]
@@ -1071,7 +1499,7 @@ mod tests {
         let neighbor = repo.create_named_worktree("unfinished");
         std::fs::write(neighbor.join("notes"), "keep me").unwrap();
 
-        let plan = super::plan_selected(&store, repo.path(), Some(&path), None).unwrap();
+        let plan = super::plan_selected(&store, repo.path(), Some(&path)).unwrap();
         assert_eq!(plan.len(), 1);
         assert_eq!(plan[0].path, path);
         let report = apply_cleanup(&store, repo.path(), plan, CleanupBudget::default()).unwrap();
@@ -1177,8 +1605,18 @@ mod tests {
             [],
         )
         .unwrap();
-        let evidence = serde_json::json!({"input_id":"00000000000000000000000000000001", "source":"runs", "evidence":{"provider_session_path":payload}});
+        let capture =
+            crate::session_record::record_dir(directory.path(), "00000000000000000000000000000001")
+                .unwrap();
+        std::fs::create_dir_all(&capture).unwrap();
+        std::os::unix::fs::symlink(&payload, capture.join("provider.jsonl")).unwrap();
+        let evidence = serde_json::json!({"input_id":"00000000000000000000000000000001", "source":"runs", "evidence":{"provider_session_path":capture.join("provider.jsonl")}});
         conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES('past','observed','00000000000000000000000000000001:runs',1,?1)", [evidence.to_string()]).unwrap();
+        let native_id = "0199a213-81c0-7800-8aa1-bbab2a035a53";
+        let reference = serde_json::json!({"source":"provider-session:fixture", "evidence": {
+            "schema_version":1, "provider_session_id":native_id, "account_id":null
+        }});
+        conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES('past','observed','00000000000000000000000000000001:provider-session:fixture',1,?1)", [reference.to_string()]).unwrap();
         retained(&decision(&store, &repo, &path), "Session evidence");
         // Evidence recorded after planning must also veto the destructive recheck.
         let report =
@@ -1189,20 +1627,90 @@ mod tests {
             std::fs::read_to_string(&payload).unwrap(),
             "retained provider history\n"
         );
-        assert!(store.sqlite.session_history("past", 0, 0).is_ok());
+        assert_eq!(
+            std::fs::read_to_string(capture.join("provider.jsonl")).unwrap(),
+            "retained provider history\n"
+        );
+        let historical = store
+            .sqlite
+            .input_provider_session("00000000000000000000000000000001")
+            .unwrap()
+            .unwrap();
+        assert_eq!(historical.agent_session.as_str(), native_id);
+        // The native resume lookup still resolves the older provider identity
+        // to its Session, even though that Session now has a newer capture.
+        let resumed = crate::ops::human_session::provider_conversation::admit(&store, native_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(resumed.id, "past");
+        assert_eq!(resumed.artifact_key, "00000000000000000000000000000002");
     }
 
     #[tokio::test]
-    async fn cleanup_planning_budget_retains_unobserved_checkouts() {
+    async fn cleanup_collection_incomplete_history_never_settles_source() {
         let _guard = crate::journal::TestLedgerGuard::new();
         let _external = ExternalInspection::idle();
-        let (repo, _directory, store, path) = fixture().await;
-        let plan = super::plan_selected(&store, repo.path(), None, Some(std::time::Instant::now()))
+        let (repo, directory, store, path) = fixture().await;
+        let unowned = repo
+            .create_named_worktree("unowned")
+            .canonicalize()
             .unwrap();
+        let conn = rusqlite::Connection::open(directory.path().join("store.db")).unwrap();
+        conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd) VALUES('past','past','generated',1,1,?1)", [repo.path().to_str().unwrap()]).unwrap();
+        for input in [
+            "00000000000000000000000000000001",
+            "00000000000000000000000000000002",
+        ] {
+            conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES('past','captured',?1,1,'{}')", [input]).unwrap();
+        }
+        // A later malformed reference invalidates the entire history reading,
+        // even after an earlier capture yielded usable paths.
+        conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES('past','observed','00000000000000000000000000000002:runs',1,?1)",
+            [serde_json::json!({"evidence":{"provider_session_path":17}}).to_string()]).unwrap();
+        let report =
+            super::run_cleanup_pass(&store, repo.path(), CleanupBudget::default()).unwrap();
+        assert!(report.removed.is_empty());
         retained(
-            plan.iter().find(|item| item.path == path).unwrap(),
-            "planning budget exhausted",
+            report
+                .deferred
+                .iter()
+                .find(|item| item.path == path)
+                .unwrap(),
+            "observation unavailable",
         );
+        retained(
+            report
+                .deferred
+                .iter()
+                .find(|item| item.path == unowned)
+                .unwrap(),
+            "unknown Loopflow ownership",
+        );
+        assert!(path.exists());
+    }
+
+    #[tokio::test]
+    async fn cleanup_collection_exhausted_budget_keeps_unobserved_candidates_waiting() {
+        let _guard = crate::journal::TestLedgerGuard::new();
+        let (repo, _directory, store, path) = fixture().await;
+        let mut progress = super::CleanupProgress::initial();
+        let report = super::collect_pass(
+            &store,
+            repo.path(),
+            CleanupBudget {
+                removals: 1,
+                admission_time: std::time::Duration::ZERO,
+            },
+            &mut progress,
+            |_| Ok(()),
+        )
+        .unwrap();
+        assert!(report.planned.is_empty());
+        assert!(report.removed.is_empty());
+        assert!(progress.full_scan_at.is_none());
+        assert!(progress.full_scan_after.is_none());
+        assert!(progress.retry_after.is_none());
         assert!(path.exists());
     }
 

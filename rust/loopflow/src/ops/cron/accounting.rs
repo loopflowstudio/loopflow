@@ -1469,6 +1469,7 @@ mod tests {
 
     fn receipt(spec: &CronSpec, now: i64) -> CronReceipt {
         CronReceipt {
+            cleanup: None,
             schema_version: 1,
             id: CronReceiptId::new(),
             runner_pid: 1,

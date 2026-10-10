@@ -153,6 +153,10 @@ Interrupted runs are recorded; a run killed outright is not. The file holds
 durations, counts, the repository root and the `lf` version, and never more
 than 1,000 samples.
 
+Missing checkouts retain their Git registration unless an exact removal record
+proves cleanup had started. Prune repairs only that registration, after fresh
+delivery and execution checks; previews never prune metadata.
+
 Prune requires Loopflow ownership and a recorded settlement of the current head.
 It preserves primary and persistent checkouts, unfinished Tasks, live or unknown
 execution, uncommitted files and unclassified ignored data. Age, a closed PR and a

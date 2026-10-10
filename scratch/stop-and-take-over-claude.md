@@ -2,7 +2,7 @@
 
 Jack Heart requested provider-independent takeover and stop on 2026-10-09.
 The outcome is accepted; the remaining Claude transport proposal is a draft.
-Source boundary: `ac0f659aa` (2026-10-10). Dependencies #1519/#1520 are integrated
+Reconciled 2026-10-10 against `b62086390`; implementation boundary: `ac0f659aa`. Dependencies #1519/#1520 are integrated
 at `be4a2b2af`, satisfying Jack's steer `28e0c5cc`; #1521 is integrated through
 `df5169ab9`. LOO-443's remaining item 3 was read at
 `4f6ed76b2^:scratch/introduce-agentprocess-record-the-provider.md`.
@@ -28,6 +28,13 @@ shippable or Task completion. This plan grants no installation or delivery autho
    attachments at the transport owner before writes. Lost acknowledgements and
    transport death retain uncertain inputs without replay. This is unimplemented,
    not an accepted relay design.
+
+   The draft must preserve `dispatch.rs`'s bounded write fence: the transport
+   owner validates and holds it through the provider write, not the caller while
+   waiting for a second process to acquire the same fence. Responses and stream
+   draining stay outside it. Transport survival must not create a permanent
+   lifeline writer that prevents last-client-exit cleanup. These are design
+   constraints, not implemented transport behavior.
 
    `ops/human_session.rs::open` reaches live dispatch before requiring native
    identity, but `connect_live_agent` still excludes Claude. Extend it without
@@ -195,4 +202,4 @@ Release's entry-point lesson applies: harness fixtures cannot prove public hando
 
 ## Checks
 
-`git diff --check`: pass; prose-only compression, prior `ac0f659aa` build/focused tests/fmt/Clippy remain applicable; public death orders unfinished, Linux acceptance CI-owned.
+`git diff --check`: pass; prose-only reconciliation, prior `ac0f659aa` checks remain applicable; public death orders unfinished, Linux acceptance CI-owned.

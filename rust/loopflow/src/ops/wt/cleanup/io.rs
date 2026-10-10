@@ -18,6 +18,9 @@ const TIMEOUT: Duration = Duration::from_secs(2);
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) enum Read {
     Registrations(PathBuf),
+    Checkouts(PathBuf),
+    Checkout(PathBuf),
+    Settled(PathBuf),
     Attempt(PathBuf),
     Receipts { root: PathBuf, flow: String },
 }
@@ -49,6 +52,7 @@ enum Request {
 pub(crate) struct Attempt {
     pub path: PathBuf,
     pub marker: PathBuf,
+    pub branch: Option<String>,
     /// Missing hints are initialized by the owner, never by a read worker.
     pub at: Option<i64>,
 }
@@ -142,8 +146,54 @@ fn respond(result: OpsResult<serde_json::Value>) {
     );
 }
 
+fn checkout_path(admin: &Path) -> OpsResult<PathBuf> {
+    let gitdir = std::fs::read_to_string(admin.join("gitdir"))?;
+    let path = Path::new(gitdir.trim_end_matches('\n'))
+        .parent()
+        .ok_or_else(|| super::error("registration has no checkout path"))?;
+    crate::store::canonicalize_with_missing_tail(path).map_err(super::error)
+}
+
 fn execute(request: Request) -> OpsResult<serde_json::Value> {
     match request {
+        Request::Read(Read::Checkout(admin)) => {
+            serde_json::to_value(checkout_path(&admin)?).map_err(super::error)
+        }
+        Request::Read(Read::Checkouts(repo)) => {
+            // Keep Git and path resolution in the same cancellable process
+            // group. A nested bounded_output would create an escaping group.
+            let output = Command::new("git")
+                .current_dir(repo)
+                .args(["worktree", "list", "--porcelain", "-z"])
+                .env("GIT_OPTIONAL_LOCKS", "0")
+                .output()?;
+            if !output.status.success() {
+                return Err(super::error("cleanup registration listing failed"));
+            }
+            let output = String::from_utf8(output.stdout).map_err(super::error)?;
+            let registered = crate::engine::worktrees::parse_porcelain(&output)
+                .into_iter()
+                .map(|(path, branch)| {
+                    crate::store::canonicalize_with_missing_tail(&path)
+                        .map(|path| (path, branch))
+                        .map_err(super::error)
+                })
+                .collect::<OpsResult<Vec<_>>>()?;
+            serde_json::to_value(registered).map_err(super::error)
+        }
+        Request::Read(Read::Settled(database)) => {
+            let store = crate::store::sqlite::SqliteStore::open_read_only(&database)
+                .map_err(super::error)?;
+            let paths = store
+                .settled_checkout_paths()
+                .map_err(super::error)?
+                .into_iter()
+                .map(|path| {
+                    crate::store::canonicalize_with_missing_tail(&path).map_err(super::error)
+                })
+                .collect::<OpsResult<Vec<_>>>()?;
+            serde_json::to_value(paths).map_err(super::error)
+        }
         Request::Read(Read::Registrations(common)) => {
             let mut admins = Vec::new();
             match std::fs::read_dir(common.join("worktrees")) {
@@ -165,11 +215,12 @@ fn execute(request: Request) -> OpsResult<serde_json::Value> {
             serde_json::to_value(admins).map_err(super::error)
         }
         Request::Read(Read::Attempt(admin)) => {
-            let gitdir = std::fs::read_to_string(admin.join("gitdir"))?;
-            let path = Path::new(gitdir.trim_end_matches('\n'))
-                .parent()
-                .ok_or_else(|| super::error("registration has no checkout path"))?;
-            let path = crate::store::canonicalize_with_missing_tail(path).map_err(super::error)?;
+            let path = checkout_path(&admin)?;
+            let head = std::fs::read_to_string(admin.join("HEAD"))?;
+            let branch = head
+                .trim()
+                .strip_prefix("ref: refs/heads/")
+                .map(str::to_string);
             let marker = admin.join("lf-cleanup-attempt");
             let at = match std::fs::read_to_string(&marker) {
                 Ok(value) => Some(
@@ -183,7 +234,13 @@ fn execute(request: Request) -> OpsResult<serde_json::Value> {
                 // An unreadable hint is oldest priority, never ownership.
                 Err(_) => Some(0),
             };
-            serde_json::to_value(Attempt { path, marker, at }).map_err(super::error)
+            serde_json::to_value(Attempt {
+                path,
+                marker,
+                branch,
+                at,
+            })
+            .map_err(super::error)
         }
         Request::Read(Read::Receipts { root, flow }) => {
             serde_json::to_value(cron::read_receipts(&root, "", Some(&flow))?).map_err(super::error)
@@ -233,6 +290,7 @@ mod tests {
             0
         );
         let marker = directory.path().join("lf-cleanup-attempt");
+        std::fs::write(directory.path().join("HEAD"), "ref: refs/heads/fixture\n").unwrap();
         std::fs::write(
             directory.path().join("gitdir"),
             directory.path().join(".git").to_str().unwrap(),
@@ -276,7 +334,8 @@ mod tests {
         let request = std::env::var("LF_TEST_CLEANUP_IO").expect("worker request");
         let request: super::Request = serde_json::from_str(&request).unwrap();
         if let super::Request::Schedule(super::Schedule::Attempt { marker, .. }) = &request {
-            if std::env::var_os("LF_TEST_CLEANUP_STALL_HINT").as_deref() == Some(marker.as_os_str())
+            if std::env::var_os("LF_TEST_CLEANUP_STALL_HINT")
+                .is_some_and(|paths| std::env::split_paths(&paths).any(|path| path == *marker))
             {
                 let temporary = marker.with_extension(format!("{}.tmp", std::process::id()));
                 assert!(std::process::Command::new("mkfifo")

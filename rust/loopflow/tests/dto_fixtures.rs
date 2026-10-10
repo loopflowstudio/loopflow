@@ -773,16 +773,19 @@ fn cleanup_receipt_preserves_partial_scan_progress() {
     let progress = receipt.cleanup.as_ref().unwrap();
     assert_eq!(progress.sequence, 3);
     assert_eq!(
-        progress.fairness_after.as_deref(),
-        Some(std::path::Path::new("/src/repo.deferred"))
+        progress.pending_registrations,
+        vec![std::path::PathBuf::from("/src/repo/.git/worktrees/pending")]
     );
     assert_eq!(
         progress.registration_after.as_deref(),
         Some(std::path::Path::new("/src/repo/.git/worktrees/deferred"))
     );
+    assert_eq!(
+        progress.registration_through.as_deref(),
+        Some(std::path::Path::new("/src/repo/.git/worktrees/z-last"))
+    );
     assert_eq!(progress.registrations_observed, 12);
     assert!(progress.full_scan_pending);
-    assert!(progress.fairness_next);
     assert_eq!(progress.full_scan_at, None);
     assert_eq!(progress.observed, 8);
     assert_eq!(progress.removed, 2);

@@ -34,20 +34,20 @@
   neither install services nor activate fallback work automatically.
 - Implementation choice, 2026-10-09: admission starts after setup. Git observation
   subprocesses and independent registry SQL readers have two-second deadlines;
-  initial normalization, registry filesystem I/O, lease discovery and aggregate locked
+  candidate registry filesystem I/O, lease discovery and aggregate locked
   observation remain unbounded. Hint/receipt requests use isolated children
   with two-second deadlines plus bounded reaping; descriptor enumeration and spawn
   precede that clock. Per-registration setup now has its own 32-entry window,
   capped at five seconds admitting work and durably resumed before each read.
-  Initial listing/normalization remains outside that bound. An admitted destructive
+  Background setup now uses registration-local reads; manual listing/normalization
+  is isolated. Remaining admission preparation is outside that bound. An admitted destructive
   removal is never canceled by these budgets.
-- Implementation choice, 2026-10-09: retain the 32-observation/eight-removal caps,
-  using last-attempt timestamps and a fixed hourly cohort. A receipt-owned fairness
-  sweep now interleaves with oldest-first scheduling because failed hint writes cannot
-  relinquish priority themselves. The 41-failure fixture covers healthy progress,
-  retries, interruption and arrivals beyond the 32-observation cap; it does not cover
-  stalled I/O or arbitrary arrival rates. Neither scheduling lane authorizes deletion;
-  no second checkout registry is introduced. Wall-clock rollback remains unproved.
+- Implementation choice, 2026-10-09: candidate continuation is carried by at most
+  32 pending administrative paths in the existing cron receipt, consumed before
+  publication and drained before another setup window. This replaces both fairness
+  fields, not ownership or deletion evidence. Last-attempt priority applies within
+  the remaining window. A fixed lexical sweep endpoint excludes later tail arrivals;
+  arbitrary adversarial arrivals below that endpoint remain unproved.
 - Implementation choice, 2026-10-09: one Session-history migration materializes raw
   references, backfilled 256 rows per tick to a fixed high-water mark. Source triggers
   maintain later appends/edits/deletes atomically. Complete coverage is required and
@@ -72,20 +72,16 @@
 - Implementation choice, 2026-10-09: read-only registration/hint/receipt requests
   and atomic scheduling writes use distinct subprocess operations, with neither
   checkout admission nor source-removal capability. Two-second request timeouts
-  do not bound the initial snapshot I/O. Lost receipt-write acknowledgments end that receipt's
+  do not bound parent-side admission preparation. Lost receipt-write acknowledgments end that receipt's
   writer; later passes resume published progress under a new receipt. This does not
   select a final-history mechanism, cancel admitted removal, or bound inline lock
   discovery. Interrupted writes may leave administrative temporaries; retained-root
   artifact reclamation remains a follow-up.
 
-- Implementation choice, 2026-10-09: last-attempt priority now applies within bounded
-  registration windows, with receipt-owned continuation between them. A failed hint
-  writer yields the first candidate slot to the fairness sweep on the next pass.
-  Eight stalled hint FIFOs plus three arrivals per tick demonstrate eventual healthy
-  collection and interrupted-entry retry in that fixture. A source-derived two-window
-  trace now shows that the shared candidate cursor can alternate the first failed
-  writer of each window forever when writes exhaust candidate admission. Candidate
-  continuation across windows needs repair and a composed proof; arbitrary arrival
-  rates also remain unproved.
-  Hints first discovered after the hourly cutoff enter settled-owner retries or the
-  next hourly cohort. This changes scheduling only, never source disposition.
+- Implementation choice, 2026-10-09: background and locked observations no longer
+  require the aggregate Git worktree listing; registration-local reads validate
+  reciprocal administrative paths. Manual listings and settled-path discovery run
+  in read-only workers, including path normalization. Remaining inline admission
+  preparation and final evidence are named in the design. A stalled-gitdir fixture
+  proves setup isolation and recovery, not Git removal through a stalled sibling.
+  Item 2's final-history mechanism remains unselected.

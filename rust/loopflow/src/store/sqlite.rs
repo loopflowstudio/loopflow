@@ -570,15 +570,7 @@ impl SqliteStore {
     /// Its VM deadline cannot interrupt the caller's normal writes or another
     /// connection's transaction. Never use it for admitted destructive work.
     pub(crate) fn bounded_reader(&self, timeout: Duration) -> StoreResult<Self> {
-        let path = {
-            let conn = self
-                .conn
-                .try_lock()
-                .map_err(|_| StoreError::InvalidData("observation reader is busy".into()))?;
-            conn.path()
-                .map(PathBuf::from)
-                .ok_or_else(|| StoreError::InvalidData("observation store has no path".into()))?
-        };
+        let path = self.path()?;
         let reader = Self::open_read_only(&path)?;
         {
             let conn = reader.conn.lock().expect("new reader mutex poisoned");
@@ -587,6 +579,16 @@ impl SqliteStore {
             conn.progress_handler(100, Some(move || std::time::Instant::now() >= deadline))?;
         }
         Ok(reader)
+    }
+
+    pub(crate) fn path(&self) -> StoreResult<PathBuf> {
+        let conn = self
+            .conn
+            .try_lock()
+            .map_err(|_| StoreError::InvalidData("observation reader is busy".into()))?;
+        conn.path()
+            .map(PathBuf::from)
+            .ok_or_else(|| StoreError::InvalidData("observation store has no path".into()))
     }
 
     pub(crate) fn open_read_only(path: &Path) -> StoreResult<Self> {

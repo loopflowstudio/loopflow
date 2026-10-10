@@ -2,7 +2,7 @@
 pub(crate) mod io;
 #[doc(hidden)]
 pub use io::worker_entry;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fs::OpenOptions;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -13,7 +13,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::durable::{WorkRef, WorkStatus};
 use crate::engine::git::{acquire_worktree_lease, worktree_remove_owned, WorktreeRemoval};
-use crate::engine::worktrees::parse_porcelain;
 use crate::journal::{process_evidence_at, ProcessIdentityEvidence};
 use crate::ops::{OpsError, OpsResult};
 use crate::store::{sqlite::SqliteStore, SharedStore};
@@ -55,19 +54,20 @@ pub struct CleanupFailure {
     pub error: String,
 }
 
-/// Constant-size scan coverage carried by bounded cron receipts. Neither scan
+/// Bounded scan continuation carried by cron receipts. Neither scan
 /// coverage nor a prior success can substitute for fresh removal evidence.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CleanupProgress {
     pub sequence: u64,
     pub full_scan_at: Option<i64>,
     pub full_scan_started: Option<i64>,
-    /// A receipt-owned fairness lane survives failed writes to registration hints.
-    pub fairness_after: Option<PathBuf>,
-    /// A failed/interrupted scheduling write yields the first slot next time.
-    pub fairness_next: bool,
+    /// Unattempted members of one setup window (at most 32 registrations).
+    /// Drain this continuation before discovering another window.
+    pub pending_registrations: Vec<PathBuf>,
     /// Registration setup resumes independently of checkout admission.
     pub registration_after: Option<PathBuf>,
+    /// Freeze each registration sweep so arrivals cannot postpone wrap forever.
+    pub registration_through: Option<PathBuf>,
     pub registrations_observed: usize,
     /// A sweep with skipped cohort members must wrap again before completing.
     pub full_scan_pending: bool,
@@ -83,9 +83,9 @@ impl CleanupProgress {
             sequence: 0,
             full_scan_at: None,
             full_scan_started: None,
-            fairness_after: None,
-            fairness_next: false,
+            pending_registrations: Vec::new(),
             registration_after: None,
+            registration_through: None,
             registrations_observed: 0,
             full_scan_pending: false,
             observed: 0,
@@ -312,17 +312,27 @@ fn observe(
     decision: &mut CleanupDecision,
     external: &OpsResult<HashSet<PathBuf>>,
 ) -> OpsResult<()> {
-    observe_registered(
-        store,
-        repo,
-        decision,
-        external,
-        &list_porcelain(repo)?
-            .into_iter()
-            .map(|(path, _)| path)
-            .collect(),
-        true,
-    )
+    if normalized(&decision.path) == normalized(repo) {
+        retain(decision, "primary checkout");
+        return Ok(());
+    }
+    // Validate only this registration. A stalled sibling gitdir must not make
+    // Git's repository-wide worktree listing a prerequisite for its removal.
+    let registered = if decision.path.try_exists()? {
+        let admin = git_directory(&decision.path, "--absolute-git-dir")?;
+        let common = git_directory(repo, "--git-common-dir")?;
+        let path: PathBuf = io::read(io::Read::Checkout(admin.clone()))?;
+        if admin.parent() == Some(common.join("worktrees").as_path()) && path == decision.path {
+            HashSet::from([path])
+        } else {
+            HashSet::new()
+        }
+    } else if interrupted_removal(repo, &decision.path)?.is_some() {
+        HashSet::from([decision.path.clone()])
+    } else {
+        HashSet::new()
+    };
+    observe_registered(store, repo, decision, external, &registered, true)
 }
 
 fn observe_registered(
@@ -581,12 +591,7 @@ fn main_repo_root(repo: &Path) -> OpsResult<PathBuf> {
 }
 
 fn list_porcelain(repo: &Path) -> OpsResult<Vec<(PathBuf, Option<String>)>> {
-    Ok(
-        parse_porcelain(&read_git(repo, &["worktree", "list", "--porcelain", "-z"])?)
-            .into_iter()
-            .map(|(path, branch)| (normalized(&path), branch))
-            .collect(),
-    )
+    io::read(io::Read::Checkouts(repo.to_path_buf()))
 }
 
 // Filesystem-sensitive Git reads must not hold up every later candidate.
@@ -909,6 +914,7 @@ fn write_attempt(marker: &Path, at: i64) -> OpsResult<()> {
 /// A registration joined to its retry hint, never removal authority.
 #[derive(Debug)]
 struct CheckoutAttempt {
+    admin: PathBuf,
     path: PathBuf,
     branch: Option<String>,
     marker: PathBuf,
@@ -920,7 +926,6 @@ struct CheckoutAttempt {
 /// Scheduling hints order this window only; none are checkout authority.
 fn checkout_attempts(
     repo: &Path,
-    registered: &HashMap<PathBuf, Option<String>>,
     budget: CleanupBudget,
     progress: &mut CleanupProgress,
     save: &mut impl FnMut(&CleanupProgress) -> OpsResult<()>,
@@ -929,6 +934,13 @@ fn checkout_attempts(
     let common = git_directory(repo, "--git-common-dir")?;
     let mut admins: Vec<PathBuf> = io::read(io::Read::Registrations(common))?;
     admins.sort();
+    if progress.registration_through.is_none() {
+        progress.registration_through = admins.last().cloned();
+        save(progress)?;
+    }
+    if let Some(through) = &progress.registration_through {
+        admins.retain(|admin| admin <= through);
+    }
     let start = progress
         .registration_after
         .as_ref()
@@ -937,13 +949,25 @@ fn checkout_attempts(
     // opportunity to apply the healthy candidates already observed. One admitted
     // read/initialization pair finishes; no checkout locks are held here.
     let deadline = Instant::now() + budget.admission_time.min(Duration::from_secs(5));
-    let mut attempts = HashMap::new();
+    let mut attempts = Vec::new();
     progress.registrations_observed = 0;
-    for admin in &admins[start..] {
+    let resuming = !progress.pending_registrations.is_empty();
+    let window = if resuming {
+        progress.pending_registrations.clone()
+    } else {
+        admins[start..].iter().take(32).cloned().collect()
+    };
+    for admin in &window {
         if progress.registrations_observed >= 32 || Instant::now() >= deadline {
             break;
         }
-        progress.registration_after = Some(admin.clone());
+        if !resuming {
+            progress.registration_after = Some(admin.clone());
+        }
+        // A failed read yields its slot until the next registration sweep.
+        progress
+            .pending_registrations
+            .retain(|pending| pending != admin);
         progress.registrations_observed += 1;
         // An interruption may skip this read until the next sweep. Do not report
         // the hourly cohort complete on that incomplete sweep.
@@ -962,9 +986,6 @@ fn checkout_attempts(
                 continue;
             }
         };
-        let Some(branch) = registered.get(&attempt.path) else {
-            continue;
-        };
         let at = match attempt.at {
             Some(at) => at,
             None => {
@@ -976,20 +997,20 @@ fn checkout_attempts(
                 }
             }
         };
-        attempts.insert(
-            attempt.path.clone(),
-            CheckoutAttempt {
-                path: attempt.path,
-                branch: branch.clone(),
-                marker: attempt.marker,
-                at,
-            },
-        );
+        progress.pending_registrations.push(admin.clone());
+        attempts.push(CheckoutAttempt {
+            admin: admin.clone(),
+            path: attempt.path,
+            branch: attempt.branch,
+            marker: attempt.marker,
+            at,
+        });
     }
-    if start + progress.registrations_observed == admins.len() {
+    if !resuming && start + progress.registrations_observed == admins.len() {
         progress.registration_after = None;
     }
-    Ok(attempts.into_values().collect())
+    save(progress)?;
+    Ok(attempts)
 }
 
 /// Observe and apply one admitted candidate before starting another. Expensive
@@ -1010,11 +1031,6 @@ fn collect_pass(
         });
     }
     let now = chrono::Utc::now().timestamp();
-    let mut registered: HashMap<_, _> = list_porcelain(repo)?.into_iter().collect();
-    // Primary checkouts are never candidates. Keep their preview explanation,
-    // but do not spend retry slots or create scheduling hints for them.
-    registered.remove(&normalized(repo));
-    let paths: HashSet<_> = registered.keys().cloned().collect();
     let mut report = CleanupReport {
         planned: Vec::new(),
         removed: Vec::new(),
@@ -1025,8 +1041,11 @@ fn collect_pass(
     progress.removed = 0;
     progress.deferred = 0;
     progress.failed = 0;
-    let mut attempts =
-        checkout_attempts(repo, &registered, budget, progress, &mut save, &mut report)?;
+    let mut attempts = checkout_attempts(repo, budget, progress, &mut save, &mut report)?;
+    let paths = attempts
+        .iter()
+        .map(|attempt| attempt.path.clone())
+        .collect();
     let setup_finished = progress.registration_after.is_none();
     if progress.full_scan_started.is_none()
         && progress
@@ -1038,19 +1057,20 @@ fn collect_pass(
         progress.full_scan_started = Some(chrono::Utc::now().timestamp_micros());
         save(progress)?;
     }
-    let settled: HashSet<_> = store
-        .sqlite
-        .bounded_reader(Duration::from_secs(2))
-        .map_err(error)?
-        .settled_checkout_paths()
-        .map_err(error)?
-        .into_iter()
-        .map(|path| normalized(&path))
-        .collect();
+    let settled: HashSet<PathBuf> =
+        io::read(io::Read::Settled(store.sqlite.path().map_err(error)?))?;
     let cutoff = progress.full_scan_started;
     let in_scan = |attempt: &CheckoutAttempt| cutoff.is_some_and(|cutoff| attempt.at <= cutoff);
     let mut pending_scan = attempts.iter().filter(|attempt| in_scan(attempt)).count();
-    attempts.retain(|attempt| in_scan(attempt) || settled.contains(&attempt.path));
+    attempts.retain(|attempt| {
+        let eligible = in_scan(attempt) || settled.contains(&attempt.path);
+        if !eligible {
+            progress
+                .pending_registrations
+                .retain(|admin| admin != &attempt.admin);
+        }
+        eligible
+    });
     // Within this setup window, persisted last-attempt times put old deferrals
     // ahead of arrivals. The registration cursor covers the other windows;
     // neither that cursor nor these hints can authorize removal.
@@ -1059,32 +1079,17 @@ fn collect_pass(
             .cmp(&right.at)
             .then_with(|| left.path.cmp(&right.path))
     });
-    // Hints are best-effort. Interleave oldest-first retries with a receipt-owned
-    // sweep, so even a full window of persistently unwritable hints cannot pin
-    // all subsequent passes to the same candidates. This cursor is scheduling
-    // only; every candidate still receives fresh observation under admission.
-    let mut sweep: Vec<_> = attempts.iter().collect();
-    sweep.sort_by(|left, right| left.path.cmp(&right.path));
-    let pivot = progress.fairness_after.as_ref().map_or(0, |after| {
-        sweep.partition_point(|attempt| attempt.path <= *after)
-    });
-    sweep.rotate_left(pivot);
-    let fairness_first = progress.fairness_next;
-    let scheduled = attempts.iter().zip(sweep).flat_map(|(oldest, next)| {
-        if fairness_first {
-            [next, oldest]
-        } else {
-            [oldest, next]
-        }
-    });
+    // Failed publications consume their receipt slot before I/O. Remaining
+    // members survive the next pass, so neither a stalled oldest hint nor a new
+    // setup window can restart candidate coverage.
     // Setup must not spend the admission window before the first candidate
     // can persist its attempt. Each admitted application still finishes.
     let deadline = Instant::now() + budget.admission_time;
     // Empty cheap ticks need no execution or Session history observations.
     let external = std::cell::OnceCell::new();
-    let mut seen = HashSet::new();
-    for attempt in scheduled {
+    for attempt in &attempts {
         let CheckoutAttempt {
+            admin,
             path,
             branch,
             marker,
@@ -1096,14 +1101,10 @@ fn collect_pass(
         {
             break;
         }
-        if !seen.insert(path) {
-            continue;
-        }
         progress.observed += 1;
-        // If this write fails or the process exits, the next pass starts with
-        // the sweep rather than repeating an oldest hint that cannot advance.
-        progress.fairness_after = Some(path.clone());
-        progress.fairness_next = true;
+        progress
+            .pending_registrations
+            .retain(|pending| pending != admin);
         let pending = progress.full_scan_pending;
         progress.full_scan_pending |= pending_scan > 0;
         save(progress)?;
@@ -1125,7 +1126,6 @@ fn collect_pass(
             progress.deferred = report.deferred.len();
             continue;
         }
-        progress.fairness_next = false;
         let mut decision = plan_checkout(
             store,
             repo,
@@ -1145,7 +1145,8 @@ fn collect_pass(
         progress.failed = report.failed.len();
     }
     progress.full_scan_pending |= pending_scan > 0;
-    if setup_finished {
+    if setup_finished && progress.pending_registrations.is_empty() {
+        progress.registration_through = None;
         if cutoff.is_some() && !progress.full_scan_pending {
             progress.full_scan_at = Some(now);
             progress.full_scan_started = None;
@@ -1592,6 +1593,112 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cleanup_setup_candidate_continuation_crosses_windows_with_stalls_and_arrivals() {
+        let _guard = crate::journal::TestLedgerGuard::new();
+        let _external = ExternalInspection::idle();
+        let (repo, directory, store, first) = fixture().await;
+        let mut original = vec![first];
+        let mut stalled = Vec::new();
+        let mut healthy = Vec::new();
+        for prefix in ["a", "b"] {
+            for index in 0..32 {
+                let path = add_settled(&repo, &directory, &format!("{prefix}{index:02}"));
+                let marker = crate::engine::git::absolute_git_dir(&path)
+                    .unwrap()
+                    .join("lf-cleanup-attempt");
+                std::fs::write(&marker, "0").unwrap();
+                if index == 0 {
+                    stalled.push(marker);
+                } else if index == 1 {
+                    healthy.push(path.clone());
+                } else {
+                    // Keep the finite cohort present across multiple sweeps.
+                    std::fs::write(path.join("unfinished"), "preserve").unwrap();
+                }
+                original.push(path);
+            }
+        }
+        let budget = CleanupBudget {
+            removals: 1,
+            admission_time: std::time::Duration::from_millis(1900),
+        };
+        std::env::set_var(
+            "LF_TEST_CLEANUP_STALL_HINT",
+            std::env::join_paths(&stalled).unwrap(),
+        );
+        let result = (|| {
+            let first = super::run_cleanup_pass(&store, repo.path(), budget)?;
+            assert!(first
+                .deferred
+                .iter()
+                .any(|decision| decision.branch.as_deref() == Some("a00")));
+            assert!(
+                first.removed.is_empty(),
+                "stalled publication consumes candidate deadline"
+            );
+            let mut attempted: HashSet<_> = first.planned.into_iter().map(|d| d.path).collect();
+            let mut receipt = begin_receipt(&store, &repo);
+            let mut progress = receipt.progress();
+            assert_eq!(
+                progress.registrations_observed, 32,
+                "fixture crosses the count cap, not only the setup deadline"
+            );
+            assert!(!progress.pending_registrations.is_empty());
+            assert!(
+                progress.registration_after.is_some(),
+                "fixture exceeds setup cap"
+            );
+            let interrupted =
+                super::collect_pass(&store, repo.path(), budget, &mut progress, |progress| {
+                    receipt.save(progress.clone())?;
+                    if progress.observed == 1 {
+                        return Err(super::error(
+                            "interrupted after candidate continuation publication",
+                        ));
+                    }
+                    Ok(())
+                });
+            assert!(interrupted.is_err());
+            drop(receipt);
+            assert_eq!(
+                begin_receipt(&store, &repo)
+                    .progress()
+                    .pending_registrations,
+                progress.pending_registrations
+            );
+            for tick in 0..32 {
+                for prefix in ["0", "m", "zzz"] {
+                    add_settled(&repo, &directory, &format!("{prefix}-arrival-{tick:02}"));
+                }
+                let report = super::run_cleanup_pass(&store, repo.path(), budget)?;
+                attempted.extend(report.planned.into_iter().map(|decision| decision.path));
+                assert!(report.removed.len() <= 1);
+                let progress = begin_receipt(&store, &repo).progress();
+                assert!(progress.pending_registrations.len() <= 32);
+                if healthy.iter().all(|path| !path.exists())
+                    && original.iter().all(|path| attempted.contains(path))
+                {
+                    break;
+                }
+            }
+            assert!(
+                healthy.iter().all(|path| !path.exists()),
+                "both windows must collect despite interruption and heavier arrivals"
+            );
+            assert!(
+                original.iter().all(|path| attempted.contains(path)),
+                "the interrupted candidate and failed publications must retry"
+            );
+            for marker in &stalled {
+                assert_eq!(std::fs::read_to_string(marker).unwrap(), "0");
+            }
+            Ok::<_, super::OpsError>(())
+        })();
+        std::env::remove_var("LF_TEST_CLEANUP_STALL_HINT");
+        result.unwrap();
+    }
+
+    #[tokio::test]
     async fn cleanup_setup_interrupted_hint_write_retries_without_blocking_neighbors() {
         let _guard = crate::journal::TestLedgerGuard::new();
         let _external = ExternalInspection::idle();
@@ -1679,7 +1786,7 @@ mod tests {
         let (repo, directory, store, path) = fixture().await;
         let mut receipt = begin_receipt(&store, &repo);
         let mut progress = receipt.progress();
-        progress.fairness_after = Some(path.clone());
+        progress.pending_registrations = vec![path.clone()];
         progress.observed = 7;
         let stall = directory.path().join("receipt-response");
         fifo(&stall);
@@ -1695,7 +1802,10 @@ mod tests {
         let next = begin_receipt(&store, &repo);
         let resumed = next.progress();
         assert_eq!(resumed.sequence, progress.sequence + 1);
-        assert_eq!(resumed.fairness_after, progress.fairness_after);
+        assert_eq!(
+            resumed.pending_registrations,
+            progress.pending_registrations
+        );
         assert_eq!(resumed.observed, 7);
         assert!(path.exists());
         drop(store.sqlite.lock_checkout(&path).unwrap());
@@ -1791,33 +1901,71 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cleanup_slow_registration_read_does_not_spend_candidate_admission() {
+    async fn cleanup_setup_stalled_gitdir_is_local_to_its_registration() {
+        let _guard = crate::journal::TestLedgerGuard::new();
+        let _external = ExternalInspection::idle();
+        let (repo, directory, store, healthy) = fixture().await;
+        std::fs::write(healthy.join("unfinished"), "preserve").unwrap();
+        let blocked = add_settled(&repo, &directory, "a-blocked");
+        let admin = crate::engine::git::absolute_git_dir(&blocked).unwrap();
+        let gitdir = admin.join("gitdir");
+        let contents = std::fs::read(&gitdir).unwrap();
+        std::fs::remove_file(&gitdir).unwrap();
+        fifo(&gitdir);
+        let report =
+            super::run_cleanup_pass(&store, repo.path(), CleanupBudget::default()).unwrap();
+        assert!(report.failed.iter().any(|failure| failure.path == admin));
+        retained(
+            report
+                .deferred
+                .iter()
+                .find(|decision| decision.path == healthy)
+                .unwrap(),
+            "uncommitted",
+        );
+        assert!(blocked.exists());
+        assert_no_fifo_reader(&gitdir);
+        std::fs::remove_file(&gitdir).unwrap();
+        std::fs::write(&gitdir, contents).unwrap();
+        std::fs::remove_file(healthy.join("unfinished")).unwrap();
+        let report =
+            super::run_cleanup_pass(&store, repo.path(), CleanupBudget::default()).unwrap();
+        assert!(report.removed.contains(&healthy));
+        assert!(report.removed.contains(&blocked));
+    }
+
+    #[tokio::test]
+    async fn cleanup_apply_rechecks_registration_backlink() {
+        let _guard = crate::journal::TestLedgerGuard::new();
+        let _external = ExternalInspection::idle();
+        let (repo, directory, store, path) = fixture().await;
+        let neighbor = add_settled(&repo, &directory, "neighbor");
+        let plan = super::plan_selected(&store, repo.path(), Some(&path)).unwrap();
+        let admin = crate::engine::git::absolute_git_dir(&path).unwrap();
+        std::fs::write(
+            admin.join("gitdir"),
+            neighbor.join(".git").to_str().unwrap(),
+        )
+        .unwrap();
+        let report = apply_cleanup(&store, repo.path(), plan, CleanupBudget::default()).unwrap();
+        assert!(report.removed.is_empty());
+        retained(&report.deferred[0], "registration changed");
+        assert!(path.exists());
+        assert!(neighbor.exists());
+    }
+
+    #[tokio::test]
+    async fn cleanup_setup_does_not_require_aggregate_git_listing() {
         let _guard = crate::journal::TestLedgerGuard::new();
         let external = ExternalInspection::idle();
         let (repo, _directory, store, path) = fixture().await;
-        external.wrap_git("if [ \"$1\" = worktree ] && [ \"$2\" = list ]; then sleep 0.3; fi");
-        for _ in 0..3 {
-            super::run_cleanup_pass(
-                &store,
-                repo.path(),
-                CleanupBudget {
-                    removals: 1,
-                    admission_time: std::time::Duration::from_millis(200),
-                },
-            )
-            .unwrap();
-            if !path.exists() {
-                break;
-            }
-        }
-        assert!(
-            !path.exists(),
-            "slow initial reads must still admit candidates"
-        );
-        // A genuinely stuck registration subprocess is bounded and never authorizes deletion.
         external.wrap_git("if [ \"$1\" = worktree ] && [ \"$2\" = list ]; then sleep 30; fi");
+        let report =
+            super::run_cleanup_pass(&store, repo.path(), CleanupBudget::default()).unwrap();
+        assert_eq!(report.removed, vec![path]);
+        // Manual previews still use Git's full listing, in a read-only worker.
         let started = std::time::Instant::now();
-        assert!(super::run_cleanup_pass(&store, repo.path(), CleanupBudget::default()).is_err());
+        assert!(super::list_porcelain(repo.path()).is_err());
         assert!(started.elapsed() < std::time::Duration::from_secs(5));
         assert!(repo.path().exists());
     }

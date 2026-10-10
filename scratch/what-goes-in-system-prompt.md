@@ -12,10 +12,17 @@ same bytes. The launch cut now wires fixed additions and whole-file callbacks; t
 provider/resume/compaction matrix remains for gate. Jack's later `e1fdb81b-75ff-4cca-b789-243ad84bad14` steer authorizes
 that production cut. Option A below resolves first-turn transport; no fixed-slot
 or transport decision remains open.
-Reconciled 2026-10-09 at `d8cf40d54` against main `906576f39`, including
+Reconciled 2026-10-09 through `d3c01464e` against main `906576f39`, including
 `3e1e6245c` (#1512) and `e69d5103f` (#1511).
 Local main and origin/main both name `906576f39`; no remote fetch or newer
 upstream inspection is claimed.
+
+The supplied callback-only review describes the pre-production checkpoint.
+`494210e37` connects the launchers and removes inlining/overrides;
+`d3c01464e` reduces callbacks to saved delivery and preserves OpenCode resume
+settings. Source inspection confirms those changes, not native acceptance.
+The remaining work below is integration proof and review of proposed UX,
+not another channel cutover.
 
 First-turn transport resolved (Jack, 2026-10-09, "A is fine"): the first turn
 stays a command-line argument on terminal launches. No editor, paste or stdin
@@ -82,8 +89,8 @@ and the compact-only saved active skill. Native delivery is connected; its full 
 - Codex app-server: additive `developerInstructions`, with session-scoped hook
   configuration/trust; the TUI bypass flag does not cover this surface.
 - OpenCode: the same fixed `system` addition on each owned user turn, not only
-  the first. Native terminal/compaction conversation delivery needs a proven
-  integration before the obsolete assembly is deleted.
+  the first. The launch-scoped plugin supplies conversation context on terminal
+  and server paths; native startup/compaction acceptance remains unproved.
 - Wave content: read the existing SQLite owner each time, including the selected
   Wave's ancestors as `gather_wave_docs` does today. Logical `wave/...` names are
   not proof that checkout files contain those bytes. Listed snapshots must be
@@ -180,6 +187,11 @@ this is not native OpenCode integration acceptance.
 
 ### Remaining work
 
+- The terminal launch fixture uses stand-in providers and invokes the emitted
+  callbacks separately. The headless Codex fixture observes thread/turn inputs,
+  not native hook execution. These establish wiring and refreshed callback output,
+  not delivery into a native model request. The existing provider-only probes
+  remain prerequisite evidence, not substitutes for the matrix below.
 - Gate: actual lf/native fake-API startup, manual/automatic compaction, terminal and
   app-server resume/replacement on Claude, Codex and OpenCode; preserve native base,
   guides, naming/capture hooks, permissions, account isolation and first-turn text.
@@ -210,7 +222,7 @@ follow IDs rather than reacquiring a potentially reused name. No installation, p
 The pre-cut implementation plan and complete older checks remain at
 `6149952c8:scratch/what-goes-in-system-prompt.md`.
 
-Checks: `cargo fmt --all`, `cargo clippy --offline --all-targets -- -D warnings`, and `cargo test --offline -p loopflow` with `--lib context_block` (9), `--lib harness::context::tests` (1), `--lib process_prompt` (24), and `--test context_block_tests --test context_launch_tests` (4) pass; `lf context` fits. Gate owns native acceptance; demo owns presentation. Earlier checks: `494210e37:scratch/what-goes-in-system-prompt.md`.
+Checks: `git diff --check` passes; `lf context --json` fits after memory curation; prior focused Rust/fmt/Clippy results remain at `d3c01464e:scratch/what-goes-in-system-prompt.md` (no code changed); gate owns native acceptance and demo owns presentation.
 
 ### Integrated upstream boundary
 
@@ -249,6 +261,11 @@ composition appends its plugin directly to existing settings, without temporary
 Command objects or a generic config merge; resume applies caller settings before
 appending the plugin so those settings cannot overwrite it. These are source
 reductions, not native acceptance.
+
+The config guide's detailed docs/diff/clipboard and third-party sections now match
+the channel table: paths or private references, no obsolete preloading, budget
+enforcement or implicit operating-guide opt-out. No launch code changed during
+this reconciliation.
 
 The whole channel cut remains one PR; source implementation is not native acceptance. The rejected transport runner `first_turn_transport.py` and its exclusive
 `test_first_turn_transport.py` are deleted. Their complete editor evidence/code is

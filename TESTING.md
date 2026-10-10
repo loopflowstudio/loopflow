@@ -83,6 +83,10 @@ Flow invoking the `default` skill must preserve their distinct launch modes.
 Prompt fixtures read the harness's actual inputs, including context files and
 stdin, rather than assuming everything remains in argv.
 
+Context byte-budget fixtures must reach their boundary with short temporary
+paths too. Run `TMPDIR=/tmp cargo test -p loopflow --lib context_block` when
+changing them; macOS's longer default paths can hide an undersized fixture.
+
 The composed delivery fixture runs a real CLI/Flow against an isolated Home and
 simulated provider observations, local follow-up filing and independent completion,
 then checks its captured CLI and monitor population in Rust

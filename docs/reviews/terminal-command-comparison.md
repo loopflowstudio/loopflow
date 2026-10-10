@@ -81,9 +81,13 @@ and the peer's command subject. Recorded query copies retain remote classificati
 SSH closures alone cannot prevent accidental local watchers or recovery-folder opens.
 SSH carries its script as an argument, preserving stdin and remote native argv/Home.
 Headless fixtures and simulated SSH cover these boundaries, not mounted terminals
-or configured peers. Remote shells/live file observation, exclusive first start,
-mixed-provider exchange, running-Flow composition and broader explanation remain.
-The original host judgments remain unchanged.
+or configured peers. `7aa8a5eb5` adds owner-pinned remote shells and filesystem
+invalidations through the existing transport; stale/disconnected readings retain drafts.
+`2c5610ca4` replaces public JSON targets and lifetime tokens with `--repo`/`--task`
+and optional `--pane`. One eligible pane is implicit; ambiguity lists choices without
+mutation. Move/resize peers stay in that inspected workspace. Native/configured-peer
+acceptance, exclusive first start, mixed-provider exchange, running-Flow composition
+and broader explanation remain. The original host judgments remain unchanged.
 Earlier command names below are dated evidence, not compatibility aliases.
 
 ## Evidence and version boundary

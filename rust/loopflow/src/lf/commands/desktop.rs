@@ -456,26 +456,31 @@ fn opening_url(
         "--diff needs a Task; select --task or a Task-associated --session. No app was opened."
     );
     anyhow::ensure!(session.is_none() || task.is_some(), "This Session has no single Task workspace; use `lf session connect` in a terminal. No app was opened.");
-    if task.is_some() {
+    let remote = if task.is_some() {
         match (&resolution.execution_machine, &resolution.machine) {
             (ContextFact::Bound { value: owner, .. }, ContextFact::Bound { value: local, .. })
                 if owner != local =>
             {
-                anyhow::ensure!(
-                    matches!(&resolution.repository, ContextFact::Bound { .. }),
-                    "Shared repository identity unavailable; no app was opened."
-                );
+                let ContextFact::Bound {
+                    value: repository, ..
+                } = &resolution.repository
+                else {
+                    bail!("Shared repository identity unavailable; no app was opened.");
+                };
                 anyhow::ensure!(
                     matches!(&resolution.checkout, ContextFact::Bound { .. }),
                     "Recorded checkout unavailable on Machine {owner}; no app was opened."
                 );
+                Some((owner, repository))
             }
             (ContextFact::Unavailable { reason }, _) => {
                 bail!("Task execution location unavailable: {reason}. No app was opened.");
             }
-            _ => {}
+            _ => None,
         }
-    }
+    } else {
+        None
+    };
     let mut url = reqwest::Url::parse(if task.is_some() {
         "loopflow://task"
     } else {
@@ -487,22 +492,10 @@ fn opening_url(
             .push(task);
     }
     url.query_pairs_mut().append_pair("repo", repo);
-    if let (
-        ContextFact::Bound { value: owner, .. },
-        ContextFact::Bound { value: local, .. },
-        ContextFact::Bound {
-            value: repository, ..
-        },
-    ) = (
-        &resolution.execution_machine,
-        &resolution.machine,
-        &resolution.repository,
-    ) {
-        if task.is_some() && owner != local {
-            url.query_pairs_mut()
-                .append_pair("machine", owner)
-                .append_pair("repository", repository);
-        }
+    if let Some((owner, repository)) = remote {
+        url.query_pairs_mut()
+            .append_pair("machine", owner)
+            .append_pair("repository", repository);
     }
     if let Some(session) = session {
         url.query_pairs_mut().append_pair("session", session);
@@ -534,14 +527,15 @@ pub fn run(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<
     let resolution = opening_context(cli, None)?;
     let inspection: DesktopInspection = serde_json::from_slice(&contact(None, false)?)
         .context("Desktop returned an invalid reading")?;
-    let (target, surface) = inspection.resolve_pane(&resolution, command)?;
+    let selected = inspection.resolve_pane(&resolution, command)?;
+    let target = selected.target()?;
     let (action, json) = match command {
         DesktopCommand::Open { .. } | DesktopCommand::List { .. } => unreachable!("handled above"),
         DesktopCommand::Text { text, json, .. } => {
             validate_literal_text(text)?;
             (
                 DesktopPaneAction::Text {
-                    surface: surface.context("Terminal surface unavailable")?,
+                    surface: selected.surface()?,
                     text: text.clone(),
                 },
                 json,
@@ -549,7 +543,7 @@ pub fn run(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<
         }
         DesktopCommand::Key { key, json, .. } => (
             DesktopPaneAction::Key {
-                surface: surface.context("Terminal surface unavailable")?,
+                surface: selected.surface()?,
                 key: *key,
             },
             json,
@@ -567,7 +561,7 @@ pub fn run(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<
             return read_text(
                 DesktopTextRequest {
                     target,
-                    surface: surface.context("Terminal surface unavailable")?,
+                    surface: selected.surface()?,
                     region: *region,
                     max_bytes: *max_bytes,
                 },
@@ -600,7 +594,7 @@ pub fn run(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<
             ..
         } => (
             DesktopPaneAction::Move {
-                destination: inspection.peer_pane(&target, destination)?,
+                destination: selected.peer(destination)?.target()?,
                 axis: *axis,
             },
             json,
@@ -617,7 +611,7 @@ pub fn run(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<
             );
             (
                 DesktopPaneAction::Resize {
-                    toward: inspection.peer_pane(&target, toward)?,
+                    toward: selected.peer(toward)?.target()?,
                     ratio: *ratio,
                 },
                 json,
@@ -652,7 +646,7 @@ impl DesktopInspection {
         &self,
         work: &crate::ops::context::ContextExplanation,
         command: &crate::lf::DesktopCommand,
-    ) -> Result<(DesktopPaneTarget, Option<String>)> {
+    ) -> Result<ResolvedPane<'_>> {
         use crate::lf::DesktopCommand;
         use crate::ops::context::ContextFact;
         let (pane, terminal, peer) = match command {
@@ -732,51 +726,87 @@ impl DesktopInspection {
                 candidates.push((workspace, leaf));
             }
         }
-        let choices = candidates
-            .iter()
-            .map(|(_, leaf)| {
-                format!(
-                    "{} ({})",
-                    leaf.pane.as_deref().unwrap_or("unavailable"),
-                    leaf.content.as_deref().unwrap_or("empty")
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(", ");
-        anyhow::ensure!(!candidates.is_empty(), "No eligible pane{} in the selected Work. Inspect with `lf desktop list`; no pane was changed.", pane.as_ref().map(|id| format!(" {id}")).unwrap_or_default());
-        anyhow::ensure!(
-            candidates.len() == 1,
-            "Multiple eligible panes: {choices}. Choose --pane; no pane was changed."
-        );
-        let (workspace, leaf) = candidates[0];
-        Ok((window.pane_target(workspace, leaf)?, leaf.surface.clone()))
+        match candidates.as_slice() {
+            [(workspace, leaf)] => Ok(ResolvedPane {
+                window,
+                workspace,
+                leaf,
+            }),
+            [] => bail!(
+                "No eligible pane{} in the selected Work. Inspect with `lf desktop list`; no pane was changed.",
+                pane.as_ref().map(|id| format!(" {id}")).unwrap_or_default()
+            ),
+            _ => {
+                let choices = candidates
+                    .iter()
+                    .map(|(_, leaf)| {
+                        format!(
+                            "{} ({})",
+                            leaf.pane.as_deref().unwrap_or("unavailable"),
+                            leaf.content.as_deref().unwrap_or("empty")
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                bail!("Multiple eligible panes: {choices}. Choose --pane; no pane was changed.")
+            }
+        }
+    }
+}
+
+/// A selection borrows one inspection, including the workspace for a move/resize
+/// peer. Wire targets are captured here, never re-resolved from focus at dispatch.
+#[derive(Debug)]
+struct ResolvedPane<'a> {
+    window: &'a DesktopWindowInspection,
+    workspace: &'a DesktopWorkspaceInspection,
+    leaf: &'a DesktopLayoutInspection,
+}
+
+impl ResolvedPane<'_> {
+    fn surface(&self) -> Result<String> {
+        self.leaf
+            .surface
+            .clone()
+            .context("Terminal surface unavailable")
     }
 
-    fn peer_pane(&self, target: &DesktopPaneTarget, selector: &str) -> Result<DesktopPaneTarget> {
+    fn peer(&self, selector: &str) -> Result<Self> {
         anyhow::ensure!(
-            selector != target.pane,
+            self.leaf.pane.as_deref() != Some(selector),
             "Choose two distinct panes; no pane was changed."
         );
-        let window = self
-            .windows
-            .iter()
-            .find(|window| window.repository == target.repository && window.window == target.window)
-            .context("Repository window unavailable")?;
-        let workspace = window
-            .workspaces
-            .iter()
-            .find(|workspace| {
-                workspace.machine_id == target.machine_id && workspace.worktree == target.worktree
-            })
-            .context("Task workspace unavailable")?;
-        let panes = workspace
+        let panes = self
+            .workspace
             .layout
             .leaves()
             .into_iter()
             .filter(|leaf| leaf.pane.as_deref() == Some(selector))
             .collect::<Vec<_>>();
         anyhow::ensure!(panes.len() == 1, "Destination pane {selector} is unavailable in the same workspace; no pane was changed.");
-        window.pane_target(workspace, panes[0])
+        Ok(Self {
+            leaf: panes[0],
+            ..*self
+        })
+    }
+
+    fn target(&self) -> Result<DesktopPaneTarget> {
+        Ok(DesktopPaneTarget {
+            repository: self.window.repository.clone(),
+            window: self.window.window.clone(),
+            machine_id: self.workspace.machine_id.clone(),
+            worktree: self.workspace.worktree.clone(),
+            pane: self
+                .leaf
+                .pane
+                .clone()
+                .context("Pane identity unavailable")?,
+            incarnation: self
+                .leaf
+                .incarnation
+                .clone()
+                .context("Pane content identity unavailable")?,
+        })
     }
 }
 
@@ -787,26 +817,6 @@ impl DesktopLayoutInspection {
         } else {
             self.children.iter().flat_map(Self::leaves).collect()
         }
-    }
-}
-
-impl DesktopWindowInspection {
-    fn pane_target(
-        &self,
-        workspace: &DesktopWorkspaceInspection,
-        leaf: &DesktopLayoutInspection,
-    ) -> Result<DesktopPaneTarget> {
-        Ok(DesktopPaneTarget {
-            repository: self.repository.clone(),
-            window: self.window.clone(),
-            machine_id: workspace.machine_id.clone(),
-            worktree: workspace.worktree.clone(),
-            pane: leaf.pane.clone().context("Pane identity unavailable")?,
-            incarnation: leaf
-                .incarnation
-                .clone()
-                .context("Pane content identity unavailable")?,
-        })
     }
 }
 
@@ -1095,9 +1105,11 @@ mod tests {
             text: "draft".into(),
             json: true,
         };
-        let (target, surface) = inspection.resolve_pane(&work, &text).unwrap();
+        let selected = inspection.resolve_pane(&work, &text).unwrap();
+        let target = selected.target().unwrap();
+        let surface = selected.surface().unwrap();
         assert_eq!(target.pane, "session-pane");
-        assert_eq!(surface.as_deref(), Some("native-surface-incarnation"));
+        assert_eq!(surface, "native-surface-incarnation");
         let workspace = &mut inspection.windows[0].workspaces[0];
         let mut other = workspace.layout.children[0].clone();
         other.pane = Some("second-terminal".into());
@@ -1120,10 +1132,9 @@ mod tests {
             text: "draft".into(),
             json: false,
         };
-        assert_eq!(
-            inspection.resolve_pane(&work, &explicit).unwrap(),
-            (target.clone(), surface.clone())
-        );
+        let explicit_selection = inspection.resolve_pane(&work, &explicit).unwrap();
+        assert_eq!(explicit_selection.target().unwrap(), target);
+        assert_eq!(explicit_selection.surface().unwrap(), surface);
         // The already resolved transport request retains the old lifetime, not
         // the replacement or the newly focused surface. Desktop validates it.
         inspection.windows[0].workspaces[0].layout.children[0].incarnation =
@@ -1131,8 +1142,8 @@ mod tests {
         inspection.windows[0].workspaces[0].layout.children[0].surface =
             Some("replacement-surface".into());
         let replacement = inspection.resolve_pane(&work, &explicit).unwrap();
-        assert_ne!(replacement.0, target);
-        assert_ne!(replacement.1, surface);
+        assert_ne!(replacement.target().unwrap(), target);
+        assert_ne!(replacement.surface().unwrap(), surface);
         assert_eq!(target.incarnation, "occurrence-session-pane");
     }
 
@@ -1169,7 +1180,12 @@ mod tests {
             json: false,
         };
         assert_eq!(
-            inspection.resolve_pane(&work, &restore).unwrap().0.pane,
+            inspection
+                .resolve_pane(&work, &restore)
+                .unwrap()
+                .target()
+                .unwrap()
+                .pane,
             "files-pane"
         );
         work.checkout = ContextFact::Bound {
@@ -1190,20 +1206,27 @@ mod tests {
     #[test]
     fn pane_destinations_are_plain_selectors_in_the_same_worktree() {
         use crate::lf::DesktopCommand;
-        let (inspection, work) = pane_fixture();
+        let (mut inspection, work) = pane_fixture();
+        let mut other = inspection.windows[0].workspaces[0].clone();
+        other.machine_id = "other-machine".into();
+        other.layout.children[1].pane = Some("other-workspace".into());
+        inspection.windows[0].workspaces.push(other);
         let command = DesktopCommand::Move {
             pane: None,
             destination: "files-pane".into(),
             axis: super::DesktopSplitAxis::Vertical,
             json: false,
         };
-        let target = inspection.resolve_pane(&work, &command).unwrap().0;
+        let selected = inspection.resolve_pane(&work, &command).unwrap();
+        let target = selected.target().unwrap();
         assert_eq!(target.pane, "session-pane");
-        let destination = inspection.peer_pane(&target, "files-pane").unwrap();
+        let destination = selected.peer("files-pane").unwrap().target().unwrap();
         assert_eq!(destination.incarnation, "occurrence-files-pane");
         assert_eq!(destination.window, target.window);
-        assert!(inspection.peer_pane(&target, "session-pane").is_err());
-        assert!(inspection.peer_pane(&target, "other-workspace").is_err());
+        assert_eq!(destination.machine_id, target.machine_id);
+        assert_eq!(destination.worktree, target.worktree);
+        assert!(selected.peer("session-pane").is_err());
+        assert!(selected.peer("other-workspace").is_err());
     }
 
     #[test]
@@ -1245,6 +1268,53 @@ mod tests {
             reason: "offline".into(),
         };
         assert!(opening_url(&resolution, false).is_err());
+    }
+
+    #[test]
+    fn remote_opening_carries_the_validated_owner_and_repository() {
+        let (_, mut work) = pane_fixture();
+        work.repository_path = ContextFact::Bound {
+            value: "/presentation/repo".into(),
+            source: "local_locator".into(),
+        };
+        work.machine = ContextFact::Bound {
+            value: "presentation-machine".into(),
+            source: "local".into(),
+        };
+        let url = opening_url(&work, true).unwrap();
+        let query = url
+            .query_pairs()
+            .collect::<std::collections::HashMap<_, _>>();
+        assert_eq!(query["repo"], "/presentation/repo");
+        assert_eq!(
+            query["machine"],
+            super::bound(&work.execution_machine, "Machine").unwrap()
+        );
+        assert_eq!(
+            query["repository"],
+            super::bound(&work.repository, "Repository").unwrap()
+        );
+        assert_eq!(query["diff"], "true");
+
+        work.checkout = ContextFact::Unavailable {
+            reason: "owner offline".into(),
+        };
+        assert!(opening_url(&work, true)
+            .unwrap_err()
+            .to_string()
+            .contains("Recorded checkout unavailable"));
+        work.repository = ContextFact::Unbound;
+        assert!(opening_url(&work, true)
+            .unwrap_err()
+            .to_string()
+            .contains("Shared repository identity unavailable"));
+        work.execution_machine = ContextFact::Unavailable {
+            reason: "conflicting owners".into(),
+        };
+        assert!(opening_url(&work, true)
+            .unwrap_err()
+            .to_string()
+            .contains("conflicting owners"));
     }
 
     #[test]

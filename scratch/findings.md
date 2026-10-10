@@ -39,9 +39,12 @@ publication. Machine-qualified owners and bounded reads are composed; headless
 checks prove neither mounted surfaces nor native drafts/responders.
 
 October 9 selector cut deletes public JSON targets/surface tokens. One inspection
-pins window/content/surface before dispatch; eligibility never uses focus. Ambiguous
-or missing matches dispatch nothing. Existing receiver tests reject delayed/replaced
-lifetimes; logs: `/tmp/loo427-selectors-{rust,swift,clippy}.log`. No native proof.
+pins window/content/surface before dispatch; eligibility never uses focus. The
+resolved pane borrows that window/workspace, removing the second repository/workspace
+lookup for move/resize peers. Opening URLs reuse the validated remote owner/repository
+pair. Ambiguous or missing matches dispatch nothing. Cross-workspace peer rejection
+and remote URL refusals have unit coverage; existing receiver tests reject delayed/replaced
+lifetimes. Earlier selector logs: `/tmp/loo427-selectors-{rust,swift,clippy}.log`. No native proof.
 
 ## Scoped dispatch and preview — October 9
 
@@ -195,31 +198,15 @@ remote opening added. Native acceptance remains demo work.
 
 ## Remote Task opening — October 9
 
-TaskLink and the existing repository router preserve Machine/repository selectors
-without changing the scene. RegistryQuery consumes nonce-bound TaskLocation, including
-explicit Task correspondence; Session/Files stay on the owner. Local planning is not
-replaced by remote snapshots, and a partial peer Session read cannot retire local panes.
-Session connection rechecks location before returning owner-pinned native argv. File
-drafts use SSH stdin; script-as-stdin had discarded command input. Remote paths never
-become Ghostty's local cwd, file watchers or local recovery-folder opens.
-
-Review repaired peer-wide Session publication, a later Files open using a local
-query, lost Wave/Session validation, and Files cache keys for Tasks without local runtime. Failed attempts omitted machine-add's
-repository and misbound a Rust Option (`/tmp/loo427-remote-*.log`). Headless and
-simulated-SSH checks cover refusal, window/draft retention, preparation and Home/input
-transport—not configured SSH or mounted-native acceptance. Continuous remote file observation,
-remote shells, mixed providers and exclusive first start remain. Pre-edit scratch: `/tmp/loo427-remote-opening-before/`. Installed `lf commit` failed
-empty; the source CLI checkpoint `faebb042e` succeeded.
-
-Compression keeps one linked-Files preparation path for Session-only remote links
-and Changes, using the local cache key and remote command subject. Recording now
-copies RegistryQuery instead of reconstructing it: reconstruction lost remoteMachine
-while retaining SSH closures, incorrectly enabling local filesystem affordances.
-Focused fixtures cover both recording orders and a retained peer draft across
-Session-only/Changes opening. No native or configured-peer acceptance follows.
-The comparison's obsolete remote-opening refusal is corrected. Product has no child directories in
-this checkout. Infrastructure's writer/exchange and Session recovery findings retain
-the same execution boundary; this cut grants no mixed-provider or admission authority.
+`5387e5220:scratch/findings.md`, this heading, retains the opening/recording
+repairs, failed fixtures and commit attempts. TaskLink keeps the repository scene;
+nonce-bound location and explicit correspondence keep Session/Files on the owner.
+Partial inventories cannot retire local panes. Session-only/Changes links share
+Files preparation with local cache identity and the remote command subject.
+Recording preserves transport classification as well as closures: otherwise peer
+paths regain local affordances. SSH script arguments preserve draft stdin.
+Headless/simulated-SSH checks prove neither configured peers nor mounted surfaces.
+Companions are now composed below; mixed providers and first start remain unfinished.
 
 ## Remote companions — October 9
 

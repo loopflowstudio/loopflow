@@ -208,9 +208,10 @@ this heading; pre-edit reconciled notes: `/tmp/loo427-shell-files-before/`.
   script arguments, leaving stdin for drafts or shells; peer paths never become local cwd,
   watchers or recovery-folder opens. File readers reuse the owned-line transport, not another
   Work stream, planning poller or layout store.
-- Jack Heart's latest selector direction deletes public `--target` and caller-supplied
-  window/content/surface tokens, with no compatibility alias. Exact tokens stay internal.
-  Replace public destination/toward JSON with pane selectors on the same retained owners.
+- Public `--target`, window/content/surface tokens and destination/toward JSON are
+  deleted, without aliases. Pane selectors capture internal tokens from one inspection.
+  `ResolvedPane` retains the inspected workspace; the second window/workspace lookup
+  for move/resize peers is deleted. Remote URLs reuse the validated owner/repository pair.
 
 ## Implementation sequence — one PR
 
@@ -222,7 +223,7 @@ then finish exclusive first-start admission. Existing delegation exchange and re
 observation must not be redone. Stacking on LOO-412 is authorized if necessary: inspect
 its committed API/integration state and use supported lf operations, never dirty peer code.
 
-Remote companions are checkpointed at `7aa8a5eb5`; selectors are implemented locally.
+Remote companions are checkpointed at `7aa8a5eb5`, selectors at `2c5610ca4`.
 Existing Work resolution plus one Desktop inspection captures internal lifetime tokens.
 LOO-412 frontier `a60d5594a` has identical `planning_git.rs`: publication/readback,
 not exclusive admission. No stack/sync or dirty-checkout edit occurred.
@@ -488,4 +489,4 @@ identity/delegation, open them, add shell/Files panes, retain an unfinished draf
 change focus, target a harmless command, read output, hide/restore, and verify the
 original input target and draft survive. Demo owns native usability; preserve comparison evidence and use no real accounts or live user terminals.
 
-Check: `cargo test` pane-selector unit/CLI tests (4), focused Desktop lifetime tests (4), `cargo clippy --all-targets -- -D warnings` — PASS; `7aa8a5eb5` retains companion checks; gate/CI broader/Linux checks, demo configured SSH/native usability.
+Check: `cargo test -p loopflow --lib lf::commands::desktop::tests` — PASS (6); `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` — PASS. Earlier CLI/Desktop/companion checks: `5387e5220`, this line; gate/CI broader/Linux checks, demo configured SSH/native usability.

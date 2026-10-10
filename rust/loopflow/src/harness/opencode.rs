@@ -19,7 +19,6 @@ use crate::harness::{
     SendCurrentOutcome,
 };
 use crate::id::AgentSessionId;
-use crate::os_process::kill_process_group;
 
 pub(crate) const OPENCODE_DISCONNECTED_CODE: &str = "opencode_disconnected";
 
@@ -81,11 +80,9 @@ impl OpenCodeHarness {
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::piped())
-            // Dropping the harness (e.g. a run task is aborted) must not leak a
-            // live server. The direct-child kill this fires is a backstop; the
-            // group kill in `stop()` and the attached LfProcess lifeline are what
-            // reach the descendants.
-            .kill_on_drop(true);
+            // Lifetime belongs to the lifeline; dropping a superseded harness
+            // must never signal the provider now held by another attachment.
+            .kill_on_drop(false);
         if let Some(cwd) = &config.cwd {
             command.current_dir(cwd);
         }
@@ -94,26 +91,17 @@ impl OpenCodeHarness {
             command.env("OPENCODE_CONFIG_CONTENT", opencode_worktree_config());
         }
         super::configure_vendor_std_env(command.as_std_mut())?;
-        let mut child = super::agent_process::spawn(command, None, &owner)?;
+        self.child = Some(super::agent_process::spawn(command, None, &owner)?);
+        let child = self.child.as_mut().expect("admitted OpenCode child");
         let stderr = child
             .stderr
             .take()
             .ok_or_else(|| anyhow!("missing opencode stderr"))?;
 
         let base_url = format!("http://127.0.0.1:{port}");
-        if let Err(err) = wait_for_server(&self.client, &base_url, &mut child).await {
-            shutdown_child(&mut child).await;
-            return Err(err);
-        }
-
+        wait_for_server(&self.client, &base_url, child).await?;
         let agent_session =
-            match open_agent_session(&self.client, &base_url, self.agent_session.as_ref()).await {
-                Ok(id) => id,
-                Err(error) => {
-                    shutdown_child(&mut child).await;
-                    return Err(error);
-                }
-            };
+            open_agent_session(&self.client, &base_url, self.agent_session.as_ref()).await?;
         // The dedicated server answers each native permission once, after the
         // originating user message has been selected under the Session owner.
         let mut permissions = vec![json!({"permission":"*","pattern":"*","action":"ask"})];
@@ -121,17 +109,12 @@ impl OpenCodeHarness {
             permissions
                 .push(json!({"permission":"external_directory","pattern":"*","action":"deny"}));
         }
-        if let Err(error) = self
-            .client
+        self.client
             .patch(format!("{base_url}/session/{agent_session}"))
             .json(&json!({"permission":permissions}))
             .send()
             .await?
-            .error_for_status()
-        {
-            shutdown_child(&mut child).await;
-            return Err(error.into());
-        }
+            .error_for_status()?;
         let (store, session, attachment) = &owner;
         store.record_session_connection(session, attachment, &base_url, &agent_session)?;
 
@@ -334,7 +317,6 @@ impl OpenCodeHarness {
 
         let stderr_task = spawn_stderr_logger(stderr, "harness::opencode");
 
-        self.child = Some(child);
         self.stderr_task = Some(stderr_task);
         self.sse_task = Some(sse_task);
         self.server_base_url = Some(base_url);
@@ -370,7 +352,9 @@ impl Harness for OpenCodeHarness {
 
         let start_result = self.start_inner(config).await;
         if let Err(err) = start_result {
-            let _ = self.stop().await;
+            if let Err(cleanup) = self.stop().await {
+                return Err(err.context(format!("OpenCode startup cleanup refused: {cleanup}")));
+            }
             return Err(err);
         }
         Ok(())
@@ -484,36 +468,25 @@ impl Harness for OpenCodeHarness {
             .ok_or_else(|| anyhow!("opencode provider session id is not available"))?;
 
         let abort_url = format!("{base_url}/session/{agent_session}/abort");
-        send_request_with_retry(&self.client, Method::POST, &abort_url, Some(json!({}))).await?;
-        Ok(())
+        let owner = super::agent_process::open_owner(
+            self.config
+                .as_ref()
+                .and_then(|config| config.session_attachment.as_ref()),
+        )?;
+        opencode_history::post(owner, abort_url, json!({})).await
     }
 
     async fn stop(&mut self) -> Result<()> {
+        if self.child.is_some() || self.server_base_url.is_some() {
+            let owner = super::agent_process::open_owner(
+                self.config
+                    .as_ref()
+                    .and_then(|config| config.session_attachment.as_ref()),
+            )?;
+            super::agent_process::stop(&owner)?;
+            self.child = None;
+        }
         self.shutdown_requested.store(true, Ordering::SeqCst);
-
-        if let (Some(base_url), Some(agent_session)) = (&self.server_base_url, &self.agent_session)
-        {
-            // Abort any in-flight turn but leave the session in opencode's
-            // storage — the persisted id lets the next launch resume the
-            // conversation (and its provider-side prompt cache) instead of
-            // starting cold, matching the claude/codex harnesses.
-            let abort_url = format!("{base_url}/session/{agent_session}/abort");
-            let _ =
-                send_request_with_retry(&self.client, Method::POST, &abort_url, Some(json!({})))
-                    .await;
-        }
-
-        let opencode_pid = self.child.as_ref().and_then(|child| child.id());
-        if let Some(pid) = opencode_pid {
-            // Kill the whole process group before awaiting the direct child,
-            // so descendants (MCP servers, model proxies, npm-shim
-            // grandchildren) come down with the server instead of orphaning.
-            kill_process_group(pid);
-        }
-        if let Some(child) = self.child.as_mut() {
-            shutdown_child(child).await;
-        }
-        self.child = None;
 
         if let Some(task) = self.sse_task.take() {
             task.abort();
@@ -544,11 +517,6 @@ impl Harness for OpenCodeHarness {
     fn set_agent_session(&mut self, agent_session: Option<AgentSessionId>) {
         self.agent_session = agent_session;
     }
-}
-
-async fn shutdown_child(child: &mut Child) {
-    let _ = child.start_kill();
-    let _ = child.wait().await;
 }
 
 /// A saved conversation must remain the same conversation after a retry.
@@ -846,27 +814,97 @@ mod tests {
     use serde_json::json;
 
     #[tokio::test]
-    async fn stop_clears_the_child_and_its_group() {
-        let child = Command::new("/bin/sleep")
-            .env_clear()
-            .arg("60")
-            .process_group(0)
-            .kill_on_drop(true)
-            .spawn()
+    #[allow(clippy::await_holding_lock)] // Isolate the disposable store selection.
+    async fn stop_and_drop_preserve_a_superseding_attachment() {
+        let _lock = crate::journal::test_env_lock();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let original_path = std::env::var_os("PATH").unwrap_or_default();
+        let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN", "PATH"]);
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_HOME", home.path());
+        let database = home.path().join("loopflow.db");
+        let store = crate::store::sqlite::SqliteStore::open_ephemeral(&database).unwrap();
+        let sql = rusqlite::Connection::open(&database).unwrap();
+        let process = crate::id::LfProcessId::new();
+        sql.execute(
+            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?1,1)",
+            [&process],
+        )
+        .unwrap();
+        store.test_session("opencode", &crate::session_record::new_artifact_key());
+        sql.execute(
+            "UPDATE agent_sessions SET interactive=0, provider='opencode'",
+            [],
+        )
+        .unwrap();
+        let first = store
+            .claim_session_attachment("opencode", None, &process, true)
             .unwrap();
-        let pid = child.id().unwrap();
-        let birth = crate::journal::process_started_at(pid).unwrap().unwrap();
         let (tx, _rx) = mpsc::unbounded_channel();
         let mut harness = OpenCodeHarness::new(tx, ApprovalPolicy::AutoApprove);
-        harness.child = Some(child);
-        assert_eq!(harness.process_group_id(), Some(pid));
-        harness.stop().await.unwrap();
-        assert_eq!(harness.pid(), None);
-        assert_eq!(harness.process_group_id(), None);
+        let config = AgentConfig {
+            session_attachment: Some(("opencode".into(), first.clone())),
+            ..Default::default()
+        };
+        // Exercise the actual launch configuration, including its drop policy.
+        // Cancel startup after admission but before this stand-in serves HTTP.
+        let script = home.path().join("opencode");
+        std::fs::write(&script, "#!/bin/sh\nexec /bin/sleep 60\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut paths = vec![home.path().to_path_buf()];
+        paths.extend(std::env::split_paths(&original_path));
+        std::env::set_var("PATH", std::env::join_paths(paths).unwrap());
+        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
+        let (pid, birth) = tokio::select! {
+            result = harness.start(&config) => panic!("stand-in unexpectedly finished startup: {result:?}"),
+            identity = async {
+                tokio::time::timeout(Duration::from_secs(10), async {
+                    loop {
+                        if let Some(identity) = store.agent_process_identity("opencode").unwrap() {
+                            break identity;
+                        }
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
+                }).await.unwrap()
+            } => identity,
+        };
+        assert_eq!(harness.pid(), Some(pid));
+        let replacement = store
+            .claim_session_attachment("opencode", Some(&first), &process, false)
+            .unwrap();
+        assert!(harness.stop().await.is_err());
+        assert_eq!(harness.pid(), Some(pid));
+        // Stale abort must refuse before attempting HTTP.
+        harness.turn_in_progress.store(true, Ordering::SeqCst);
+        harness.server_base_url = Some("http://127.0.0.1:1".into());
+        harness.agent_session = Some("native".into());
+        let error = harness.interrupt().await.unwrap_err();
+        assert!(matches!(
+            error.downcast_ref::<crate::store::StoreError>(),
+            Some(crate::store::StoreError::InvalidAuthority(_))
+        ));
+        drop(harness);
         assert_eq!(
             crate::journal::process_identity_evidence(pid, birth),
-            crate::journal::ProcessIdentityEvidence::Dead
+            crate::journal::ProcessIdentityEvidence::Live
         );
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mut current = OpenCodeHarness::new(tx, ApprovalPolicy::AutoApprove);
+        current.config = Some(AgentConfig {
+            session_attachment: Some(("opencode".into(), replacement)),
+            ..Default::default()
+        });
+        current.server_base_url = Some("http://127.0.0.1:1".into());
+        current.stop().await.unwrap();
+        assert!(current.server_base_url.is_none());
+        assert!(!crate::journal::OsProcess::group_is_alive(pid).unwrap());
+        assert!(store
+            .process(&first.agent_process_id)
+            .unwrap()
+            .unwrap()
+            .completed_at
+            .is_some());
     }
     #[test]
     fn sanitize_error_message_redacts_credentials() {

@@ -234,10 +234,11 @@ requires more than leader death; failed descendant inventory refuses signaling.
 Draft ordering and scratch-blocked CI evidence remain at
 `be4a2b2af:wave/infrastructure/MEMORY.md`, this heading.
 
-LOO-447: Claude stop shares fenced group close; pipes/correlation remain launcher-owned.
-OpenCode respawns; stop/abort/drop are unfenced. Public live connection is Codex-only
-and claims before FIFO custody. Repair custody before claim. Both death orders remain required; standby cannot write. Release's
-entry-point lesson applies: runtime close proves no public handoff. Plan:
+LOO-447: Claude/OpenCode stop shares fenced group close; OpenCode abort is fenced,
+drop cannot signal. Claude pipes remain launcher-owned; OpenCode still respawns.
+Public connection is Codex-only and claims before FIFO custody. Repair custody
+before claim. Both death orders remain required; standby cannot write. Release's
+entry-point lesson applies: harness proofs establish no public handoff. Plan:
 `scratch/stop-and-take-over-claude.md`.
 
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)

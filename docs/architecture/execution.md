@@ -115,9 +115,10 @@ after SIGKILL. The lifeline does not itself enforce current attachment authority
 Headless launch requires the invocation's attachment: Claude, Codex and OpenCode
 refuse to start a provider without one. Runtime settlement closes their recorded
 headless groups under that attachment fence, refusing ambiguous OS ownership;
-Codex additionally refuses a server hosting unrelated conversations. OpenCode's
-harness stop/abort/drop paths still need the same fence. Claude harness stop and
-interrupt use the common group close, recording death before releasing the fence.
+Codex additionally refuses a server hosting unrelated conversations. Claude stop/
+interrupt and OpenCode stop use common group close, recording death under the fence.
+OpenCode abort uses bounded fenced HTTP without retries; drop never signals its
+child. Failed startup retains the child for fenced cleanup and reports refusal.
 Runtime settlement alone does not establish takeover safety. Public live connection
 currently dispatches only to Codex; Claude and OpenCode still take native resume.
 Codex's public connection claims before acquiring its FIFO writer; closing that

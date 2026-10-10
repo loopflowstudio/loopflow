@@ -290,7 +290,7 @@ PR-less Tasks and unresolved follow-through retain checkouts. Compare-and-delete
 local refs; cache tags never override Session history.
 
 `c99c18972` repairs schedules before binary pruning, as Release's incident requires;
-disable/failure preserve binaries. Installed proof remains.
+explicit disable survives; repair failure retains old binaries. Installed proof remains.
 Disposable OS accounts isolate release reads; `LF_HOME` does not.
 
 `fae554e2a`/`000811423` interleave observation/removal and rotate bounded receipt

@@ -563,3 +563,5 @@ works with foooter". Done in `x9`: the page is header, video slot, the
 what/how section, Works with, the closing list, download. The instrument
 definition and the three "your mark" figures are off the page; they remain in
 `x8` and in git.
+Jack Heart: "works with should be links". Each name in the `x9` Works with
+strip links to its own site in a new tab.

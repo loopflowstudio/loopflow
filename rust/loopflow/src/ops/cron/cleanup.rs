@@ -17,6 +17,9 @@ pub(crate) struct CleanupReceipt {
 
 impl CleanupReceipt {
     pub(crate) fn begin(store: &SqliteStore, repo: &Path) -> OpsResult<Self> {
+        let store = store
+            .bounded_reader(std::time::Duration::from_secs(2))
+            .map_err(|e| OpsError::Message(e.to_string()))?;
         let machine = store
             .local_machine()
             .map_err(|e| OpsError::Message(e.to_string()))?;

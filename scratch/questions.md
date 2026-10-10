@@ -32,18 +32,28 @@
   never on prune previews. Unsupported hosts have no idle-time guarantee until
   they provide an OS scheduler; the fallback reports that limitation. Experiments
   neither install services nor activate fallback work automatically.
-- The 30-second budget bounds admission, not initial snapshots or every started
-  Git/SQL read. Each admitted candidate now reaches its locked application before
-  another is admitted. Hourly scans, rotating retries and bounded receipt cursors
-  are implemented; initial snapshots/receipt reads can still consume admission
-  before any cursor advances. Bounding observation must not cancel an admitted
-  destructive removal or omit its fresh locked evidence.
-- Implementation choice, 2026-10-09: at most 32 candidate observations per pass;
-  constant-size path cursors rotate retries and resume hourly reconciliation. This
-  proves fair progress for a stable set, not strict wall-clock oldest-retention
-  ordering under continual arrivals. These are scheduling hints, never authority.
-- Incremental history requires design work: a partial negative scan cannot survive
-  changing symlink destinations merely by carrying its SQL cursor across ticks.
-  Preserve raw historical references and revalidate their destinations, plus newly
-  appended evidence, before using a completed scan. The existing reader remains
-  fail-closed on timeout; large-store progress is not claimed by this checkpoint.
+- Implementation choice, 2026-10-09: admission starts after setup. Git observation
+  subprocesses and independent registry SQL readers have two-second deadlines;
+  filesystem/receipt I/O, lease discovery and aggregate locked observation remain
+  unbounded. An admitted destructive removal is never canceled by these budgets.
+- Implementation choice, 2026-10-09: retain the 32-observation/eight-removal caps,
+  but replace path rotation with last-attempt timestamps in existing Git registrations
+  and a fixed hourly cohort. These disposable hints never establish ownership.
+  A one-removal fixture with three arrivals per tick proves older deferrals go first;
+  wall-clock rollback remains outside that proof.
+- Implementation choice, 2026-10-09: one Session-history migration materializes raw
+  references, backfilled 256 rows per tick to a fixed high-water mark. Source triggers
+  maintain later appends/edits/deletes atomically. Complete coverage is required and
+  destinations are resolved afresh under removal admission; partial/negative filesystem
+  results are never cached. The final full reference read and native-symlink traversal
+  can still exceed their deadlines on very large stores. This remains unfinished
+  progress behavior, not a reason to relax evidence protection.
+- Native historical-owner inspection found a provider home can contain a transcript
+  symlink into a disposable checkout. Cleanup now checks the supported native layouts
+  and the composed test invokes the real transcript-discovery reader after retention.
+  Provider launch/resume and arbitrary provider archive layouts are not proved.
+- Review boundary, 2026-10-09: the native symlink safety fix currently traverses
+  known history layouts during manual previews too. That conflicts with the design's
+  no-mandatory-foreground-recursive-scan constraint. Resolve the observation/cost
+  contract before expanding this path or shipping; a stale negative scan is not an
+  acceptable shortcut. The current checkpoint preserves evidence but is unfinished.

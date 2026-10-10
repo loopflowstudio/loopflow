@@ -232,7 +232,7 @@ pub(crate) fn list_porcelain(repo: &Path) -> Result<Vec<(PathBuf, Option<String>
     let output = Command::new("git")
         .arg("-C")
         .arg(repo)
-        .args(["worktree", "list", "--porcelain"])
+        .args(["worktree", "list", "--porcelain", "-z"])
         .output()?;
     if !output.status.success() {
         return Err(GitError::CommandFailed {
@@ -240,31 +240,27 @@ pub(crate) fn list_porcelain(repo: &Path) -> Result<Vec<(PathBuf, Option<String>
             stderr: String::from_utf8_lossy(&output.stderr).to_string(),
         });
     }
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(parse_porcelain(&String::from_utf8_lossy(&output.stdout)))
+}
+
+pub(crate) fn parse_porcelain(stdout: &str) -> Vec<(PathBuf, Option<String>)> {
     let mut items = Vec::new();
     let mut current_path: Option<PathBuf> = None;
     let mut current_branch: Option<String> = None;
-
-    for line in stdout.lines() {
-        if let Some(path) = line.strip_prefix("worktree ") {
+    for field in stdout.split('\0') {
+        if let Some(path) = field.strip_prefix("worktree ") {
             if let Some(path) = current_path.take() {
                 items.push((path, current_branch.take()));
             }
-            current_path = Some(PathBuf::from(path.trim()));
-            current_branch = None;
-        } else if let Some(branch) = line.strip_prefix("branch ") {
-            let branch = branch.trim().strip_prefix("refs/heads/").unwrap_or(branch);
+            current_path = Some(PathBuf::from(path));
+        } else if let Some(branch) = field.strip_prefix("branch refs/heads/") {
             current_branch = Some(branch.to_string());
-        } else if line.trim() == "detached" {
-            current_branch = None;
         }
     }
-
-    if let Some(path) = current_path.take() {
-        items.push((path, current_branch.take()));
+    if let Some(path) = current_path {
+        items.push((path, current_branch));
     }
-
-    Ok(items)
+    items
 }
 
 /// Parse GitHub owner/repo from the origin remote URL.

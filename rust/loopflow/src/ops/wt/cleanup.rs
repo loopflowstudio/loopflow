@@ -1,5 +1,5 @@
 //! Collection is local-only. Missing facts retain a checkout, never imply abandonment.
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs::OpenOptions;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -9,11 +9,8 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 use crate::durable::{WorkRef, WorkStatus};
-use crate::engine::git::{
-    acquire_worktree_lease, current_branch, get_default_branch, rev_parse, worktree_remove_owned,
-    WorktreeRemoval,
-};
-use crate::engine::worktrees::{list_porcelain, main_repo_root};
+use crate::engine::git::{acquire_worktree_lease, worktree_remove_owned, WorktreeRemoval};
+use crate::engine::worktrees::parse_porcelain;
 use crate::journal::{process_evidence_at, ProcessIdentityEvidence};
 use crate::ops::{OpsError, OpsResult};
 use crate::store::{sqlite::SqliteStore, SharedStore};
@@ -53,14 +50,13 @@ pub struct CleanupFailure {
     pub error: String,
 }
 
-/// Constant-size scheduling hints carried by bounded cron receipts. Neither a
-/// cursor nor a prior success can substitute for fresh removal evidence.
+/// Constant-size scan coverage carried by bounded cron receipts. Neither scan
+/// coverage nor a prior success can substitute for fresh removal evidence.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CleanupProgress {
     pub sequence: u64,
     pub full_scan_at: Option<i64>,
-    pub full_scan_after: Option<PathBuf>,
-    pub retry_after: Option<PathBuf>,
+    pub full_scan_started: Option<i64>,
     pub observed: usize,
     pub removed: usize,
     pub deferred: usize,
@@ -72,8 +68,7 @@ impl CleanupProgress {
         Self {
             sequence: 0,
             full_scan_at: None,
-            full_scan_after: None,
-            retry_after: None,
+            full_scan_started: None,
             observed: 0,
             removed: 0,
             deferred: 0,
@@ -144,7 +139,6 @@ fn evidence_roots(store: &SqliteStore) -> OpsResult<Vec<PathBuf>> {
         crate::store::lf_home_dir(),
         store.home_dir().map_err(error)?,
     ];
-    roots.extend(store.session_evidence_paths().map_err(error)?);
     if !cfg!(test) {
         roots.push(
             crate::store::production_database_path()
@@ -153,21 +147,32 @@ fn evidence_roots(store: &SqliteStore) -> OpsResult<Vec<PathBuf>> {
                 .to_path_buf(),
         );
     }
+    let mut homes = Vec::new();
     for provider in [
         crate::provider_auth::Provider::Codex,
         crate::provider_auth::Provider::Claude,
     ] {
-        roots.push(crate::provider_account::activation::native_home(
-            provider, None,
+        homes.push((
+            provider,
+            crate::provider_account::activation::native_home(provider, None),
         ));
     }
-    roots.extend(
-        store
-            .list_provider_accounts(None)
-            .map_err(error)?
-            .into_iter()
-            .filter_map(|account| account.home),
-    );
+    for account in store.list_provider_accounts(None).map_err(error)? {
+        if let Some(home) = account.home {
+            let provider = account
+                .provider
+                .parse::<crate::provider_auth::Provider>()
+                .map_err(error)?;
+            homes.push((provider, home));
+        }
+    }
+    roots.extend(store.session_evidence_paths().map_err(error)?);
+    for (provider, home) in homes {
+        roots.extend(
+            crate::ops::human_session::provider_conversation::transcript_evidence(provider, &home)?,
+        );
+        roots.push(home);
+    }
     roots
         .into_iter()
         .map(|path| crate::store::canonicalize_with_missing_tail(&path).map_err(error))
@@ -175,7 +180,7 @@ fn evidence_roots(store: &SqliteStore) -> OpsResult<Vec<PathBuf>> {
 }
 
 /// The selected and release registries enforce the same retention policy. Read
-/// checkout links and unfinished Processes once per plan, then again under locks.
+/// checkout links and unfinished Processes per candidate, then again under locks.
 #[derive(Debug)]
 struct RegistryObservations {
     store: SqliteStore,
@@ -187,6 +192,9 @@ struct RegistryObservations {
 
 impl RegistryObservations {
     fn read(store: &SqliteStore) -> OpsResult<Self> {
+        let store = store
+            .bounded_reader(Duration::from_secs(2))
+            .map_err(error)?;
         let mut tasks = store.task_checkouts().map_err(error)?;
         for task in &mut tasks {
             task.worktree = normalized(&task.worktree);
@@ -266,7 +274,7 @@ impl RegistryObservations {
             .as_ref()
             .map_err(error)?
             .iter()
-            .any(|root| root.starts_with(path)))
+            .any(|root| root.starts_with(path) || path.starts_with(root)))
     }
 }
 
@@ -286,7 +294,21 @@ impl Observations {
             release: release_registry()
                 .and_then(|store| store.as_ref().map(RegistryObservations::read).transpose()),
             registered,
-            default_branch: get_default_branch(repo)?,
+            default_branch: {
+                let branch = read_git(
+                    repo,
+                    &[
+                        "for-each-ref",
+                        "--format=%(symref:short)",
+                        "refs/remotes/origin/HEAD",
+                    ],
+                )?;
+                branch
+                    .trim()
+                    .strip_prefix("origin/")
+                    .unwrap_or("main")
+                    .to_string()
+            },
         })
     }
 }
@@ -347,7 +369,11 @@ fn observe_with_snapshot(
         if !snapshot.registered.contains(path)
             || std::fs::read_to_string(admin.join("HEAD"))?.trim()
                 != format!("ref: refs/heads/{branch}")
-            || Some(rev_parse(repo, &format!("refs/heads/{branch}"))?) != started.observed_head
+            || Some(
+                read_git(repo, &["rev-parse", &format!("refs/heads/{branch}")])?
+                    .trim()
+                    .to_string(),
+            ) != started.observed_head
         {
             retain(decision, "interrupted checkout registration changed");
             return Ok(());
@@ -362,9 +388,10 @@ fn observe_with_snapshot(
             retain(decision, "checkout registration changed");
             return Ok(());
         }
-        decision.branch = current_branch(path)?;
-        decision.observed_head = Some(rev_parse(path, "HEAD")?);
-        crate::engine::git::absolute_git_dir(path)?
+        let branch = read_git(path, &["rev-parse", "--abbrev-ref", "HEAD"])?;
+        decision.branch = (branch.trim() != "HEAD").then(|| branch.trim().to_string());
+        decision.observed_head = Some(read_git(path, &["rev-parse", "HEAD"])?.trim().to_string());
+        git_directory(path, "--absolute-git-dir")?
     };
     if decision.branch.as_deref() == Some(snapshot.default_branch.as_str()) {
         retain(decision, "default branch");
@@ -494,7 +521,7 @@ fn observe_with_snapshot(
 /// A removal-intent file lives with Git's registration and disappears with it.
 /// Only an absent checkout with this exact registration can use it for repair.
 fn interrupted_removal(repo: &Path, path: &Path) -> OpsResult<Option<(PathBuf, CleanupDecision)>> {
-    let root = crate::engine::worktrees::git_common_dir(repo)?.join("worktrees");
+    let root = git_directory(repo, "--git-common-dir")?.join("worktrees");
     if !root.try_exists()? {
         return Ok(None);
     }
@@ -520,7 +547,7 @@ fn interrupted_removal(repo: &Path, path: &Path) -> OpsResult<Option<(PathBuf, C
 }
 
 fn record_removal(decision: &CleanupDecision) -> OpsResult<()> {
-    let admin = crate::engine::git::absolute_git_dir(&decision.path)?;
+    let admin = git_directory(&decision.path, "--absolute-git-dir")?;
     let temporary = admin.join("lf-cleanup.tmp");
     crate::ops::cron::write_private_file(
         &temporary,
@@ -529,6 +556,29 @@ fn record_removal(decision: &CleanupDecision) -> OpsResult<()> {
     std::fs::rename(temporary, admin.join("lf-cleanup.json"))?;
     std::fs::File::open(admin)?.sync_all()?;
     Ok(())
+}
+
+fn git_directory(repo: &Path, option: &str) -> OpsResult<PathBuf> {
+    let path =
+        PathBuf::from(read_git(repo, &["rev-parse", "--path-format=absolute", option])?.trim());
+    if !path.is_absolute() {
+        return Err(error("Git returned a non-absolute administrative path"));
+    }
+    Ok(path)
+}
+
+fn main_repo_root(repo: &Path) -> OpsResult<PathBuf> {
+    git_directory(repo, "--git-common-dir")?
+        .parent()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| error("Git common directory has no parent"))
+}
+
+fn list_porcelain(repo: &Path) -> OpsResult<Vec<(PathBuf, Option<String>)>> {
+    Ok(parse_porcelain(&read_git(
+        repo,
+        &["worktree", "list", "--porcelain", "-z"],
+    )?))
 }
 
 // Filesystem-sensitive Git reads must not hold up every later candidate.
@@ -644,20 +694,17 @@ fn plan_selected(
     let selected = selected.map(normalized);
     let external = running_paths();
     let registered = list_porcelain(&repo)?;
-    let snapshot = Observations::read(
-        store,
-        &repo,
-        registered
-            .iter()
-            .map(|(path, _)| normalized(path))
-            .collect(),
-    );
+    let paths = registered
+        .iter()
+        .map(|(path, _)| normalized(path))
+        .collect::<HashSet<_>>();
     let mut plan = Vec::new();
     for (path, branch) in registered {
         let path = normalized(&path);
         if selected.as_ref().is_some_and(|selected| *selected != path) {
             continue;
         }
+        let snapshot = Observations::read(store, &repo, paths.clone());
         plan.push(plan_checkout(&repo, path, branch, &external, &snapshot));
     }
     Ok(plan)
@@ -831,6 +878,11 @@ pub fn run_cleanup_pass(
         Err(error) => return Err(error.into()),
     }
     let repo = main_repo_root(repo)?;
+    // A failed/partial page cannot authorize removal; the history reader below
+    // reports incomplete coverage. Do not make unrelated checkout facts disappear.
+    if let Err(error) = store.sqlite.advance_session_evidence() {
+        tracing::warn!(%error, "cleanup history backfill deferred");
+    }
     let mut receipt = crate::ops::cron::cleanup::CleanupReceipt::begin(&store.sqlite, &repo)?;
     let mut progress = receipt.progress();
     let result = collect_pass(store, &repo, budget, &mut progress, |progress| {
@@ -838,6 +890,72 @@ pub fn run_cleanup_pass(
     });
     receipt.finish(progress, result.as_ref().err().map(ToString::to_string))?;
     result
+}
+
+fn write_attempt(marker: &Path, at: i64) -> OpsResult<()> {
+    let temporary = marker.with_extension("tmp");
+    crate::ops::cron::write_private_file(&temporary, at.to_string().as_bytes())?;
+    std::fs::rename(temporary, marker)?;
+    Ok(())
+}
+
+/// Scheduling hints live with existing Git registrations, not in an independent
+/// checkout registry. They are disposable: losing one delays priority, never
+/// changes source ownership or evidence. Foreground previews do not write them.
+fn checkout_attempts(
+    repo: &Path,
+    registered: &HashSet<PathBuf>,
+) -> OpsResult<HashMap<PathBuf, (PathBuf, i64)>> {
+    let common = git_directory(repo, "--git-common-dir")?;
+    let mut admins = vec![(normalized(repo), common.clone())];
+    match std::fs::read_dir(common.join("worktrees")) {
+        Ok(entries) => {
+            for entry in entries {
+                let entry = entry?;
+                if !entry.file_type()?.is_dir() {
+                    continue;
+                }
+                let admin = entry.path();
+                let Ok(gitdir) = std::fs::read_to_string(admin.join("gitdir")) else {
+                    // Incomplete/unreadable registrations are not cleanup authority.
+                    // Their listed paths retain below; healthy neighbors still run.
+                    continue;
+                };
+                if let Some(path) = Path::new(gitdir.trim_end_matches('\n')).parent() {
+                    admins.push((normalized(path), admin));
+                }
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
+    }
+    let mut attempts = HashMap::new();
+    for (path, admin) in admins {
+        if !registered.contains(&path) {
+            continue;
+        }
+        let marker = admin.join("lf-cleanup-attempt");
+        let at = match std::fs::read_to_string(&marker) {
+            Ok(value) => value
+                .parse::<i64>()
+                .ok()
+                .filter(|at| *at <= chrono::Utc::now().timestamp_micros())
+                .unwrap_or(0),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let now = chrono::Utc::now().timestamp_micros();
+                // A hint-write failure belongs to this candidate, not the repository.
+                // Its admitted attempt below will report the failure if it persists.
+                if write_attempt(&marker, now).is_ok() {
+                    now
+                } else {
+                    0
+                }
+            }
+            Err(_) => 0,
+        };
+        attempts.insert(path, (marker, at));
+    }
+    Ok(attempts)
 }
 
 /// Observe and apply one admitted candidate before starting another. Expensive
@@ -849,41 +967,67 @@ fn collect_pass(
     progress: &mut CleanupProgress,
     mut save: impl FnMut(&CleanupProgress) -> OpsResult<()>,
 ) -> OpsResult<CleanupReport> {
-    let deadline = Instant::now() + budget.admission_time;
+    if budget.removals == 0 || budget.admission_time.is_zero() {
+        return Ok(CleanupReport {
+            planned: Vec::new(),
+            removed: Vec::new(),
+            deferred: Vec::new(),
+            failed: Vec::new(),
+        });
+    }
     let now = chrono::Utc::now().timestamp();
-    let full = progress.full_scan_after.is_some()
-        || progress
-            .full_scan_at
-            .is_none_or(|last| now.saturating_sub(last) >= 3600);
     let mut registered = list_porcelain(repo)?;
-    registered.sort_by(|a, b| a.0.cmp(&b.0));
     let paths: HashSet<_> = registered
         .iter()
         .map(|(path, _)| normalized(path))
         .collect();
-    if full {
-        registered.retain(|(path, _)| {
-            progress
-                .full_scan_after
-                .as_ref()
-                .is_none_or(|after| path > after)
-        });
-    } else {
-        let settled: HashSet<_> = store
-            .sqlite
-            .settled_checkout_paths()
-            .map_err(error)?
-            .into_iter()
-            .map(|path| normalized(&path))
-            .collect();
-        registered.retain(|(path, _)| settled.contains(&normalized(path)));
-        // Retried observations go to the back. Slow/blocked early paths cannot
-        // monopolize every tick; never-observed/deferred paths get their turn.
-        if let Some(after) = &progress.retry_after {
-            let split = registered.partition_point(|(path, _)| path <= after);
-            registered.rotate_left(split);
-        }
+    let attempts = checkout_attempts(repo, &paths)?;
+    let full = progress.full_scan_started.is_some()
+        || progress
+            .full_scan_at
+            .is_none_or(|last| now.saturating_sub(last) >= 3600);
+    if full && progress.full_scan_started.is_none() {
+        // Freeze the discovery cohort. Later arrivals cannot extend this scan
+        // forever; settled arrivals still enter the ordinary retry queue.
+        progress.full_scan_started = Some(chrono::Utc::now().timestamp_micros());
+        save(progress)?;
     }
+    let settled: HashSet<_> = store
+        .sqlite
+        .bounded_reader(Duration::from_secs(2))
+        .map_err(error)?
+        .settled_checkout_paths()
+        .map_err(error)?
+        .into_iter()
+        .map(|path| normalized(&path))
+        .collect();
+    let in_scan = |path: &Path| {
+        progress.full_scan_started.is_some_and(|cutoff| {
+            attempts
+                .get(&normalized(path))
+                .is_some_and(|(_, at)| *at <= cutoff)
+        })
+    };
+    let mut pending_scan = registered.iter().filter(|(path, _)| in_scan(path)).count();
+    registered.retain(|(path, _)| {
+        in_scan(path)
+            || settled.contains(&normalized(path))
+            || (full && !attempts.contains_key(&normalized(path)))
+    });
+    // Persisted last-attempt times put old deferrals ahead of arrivals, while
+    // every attempted checkout goes behind its waiting neighbors. Names have
+    // no scheduling priority and no hint can authorize a removal.
+    registered.sort_by_key(|(path, _)| {
+        (
+            attempts
+                .get(&normalized(path))
+                .map_or(i64::MAX, |(_, at)| *at),
+            path.clone(),
+        )
+    });
+    // Setup must not spend the admission window before the first candidate
+    // can persist its attempt. Each admitted application still finishes.
+    let deadline = Instant::now() + budget.admission_time;
     let mut report = CleanupReport {
         planned: Vec::new(),
         removed: Vec::new(),
@@ -896,29 +1040,54 @@ fn collect_pass(
     progress.failed = 0;
     // Empty cheap ticks need no execution or Session history observations.
     let external = std::cell::OnceCell::new();
-    let snapshot = std::cell::OnceCell::new();
     for (path, branch) in &registered {
         if Instant::now() >= deadline
             || report.removed.len() >= budget.removals
             || progress.observed >= 32
         {
+            if full && pending_scan == 0 {
+                progress.full_scan_at = Some(now);
+                progress.full_scan_started = None;
+            }
             save(progress)?;
             return Ok(report);
         }
-        progress.retry_after = Some(path.clone());
-        if full {
-            progress.full_scan_after = Some(path.clone());
-        }
         progress.observed += 1;
+        let scheduled = (|| {
+            let (marker, at) = attempts
+                .get(&normalized(path))
+                .ok_or_else(|| error("checkout registration has no scheduling hint"))?;
+            if progress
+                .full_scan_started
+                .is_some_and(|cutoff| *at <= cutoff)
+            {
+                pending_scan -= 1;
+            }
+            write_attempt(marker, chrono::Utc::now().timestamp_micros())
+        })();
         // Save before observation: even a killed/stalled read relinquishes
-        // its position on the next pass. This never records eligibility.
+        // its priority on the next pass. This never records eligibility.
         save(progress)?;
+        if let Err(error) = scheduled {
+            let decision = CleanupDecision {
+                path: path.clone(),
+                branch: branch.clone(),
+                observed_head: None,
+                action: CleanupAction::Retain(format!("cleanup scheduling unavailable: {error}")),
+                evidence: Vec::new(),
+                estimated_bytes: None,
+            };
+            report.planned.push(decision.clone());
+            report.deferred.push(decision);
+            progress.deferred = report.deferred.len();
+            continue;
+        }
         let mut decision = plan_checkout(
             repo,
             normalized(path),
             branch.clone(),
             external.get_or_init(running_paths),
-            snapshot.get_or_init(|| Observations::read(store, repo, paths.clone())),
+            &Observations::read(store, repo, paths.clone()),
         );
         if decision.action == CleanupAction::RemoveCheckout {
             // Size is optional; it cannot prevent this admitted removal.
@@ -932,7 +1101,7 @@ fn collect_pass(
     }
     if full {
         progress.full_scan_at = Some(now);
-        progress.full_scan_after = None;
+        progress.full_scan_started = None;
     }
     save(progress)?;
     Ok(report)
@@ -943,6 +1112,9 @@ fn collect_pass(
 pub(crate) async fn cleanup_path(store: &SharedStore, repo: &Path, path: &Path) -> OpsResult<()> {
     let (store, repo, path) = (store.clone(), repo.to_path_buf(), path.to_path_buf());
     tokio::task::spawn_blocking(move || {
+        if let Err(error) = store.sqlite.advance_session_evidence() {
+            tracing::warn!(%error, "cleanup history backfill deferred");
+        }
         let plan = plan_selected(&store, &repo, Some(&path))?;
         let report = apply_cleanup(&store, &repo, plan, CleanupBudget::default())?;
         for decision in report.deferred {
@@ -980,7 +1152,7 @@ mod tests {
         let repo = TestRepo::new();
         let directory = tempfile::tempdir().unwrap();
         let store = Arc::new(
-            open_ephemeral_store(&StorageConfig::sqlite(directory.path().join("store.db")))
+            open_ephemeral_store(&StorageConfig::sqlite(directory.path().join("loopflow.db")))
                 .await
                 .unwrap(),
         );
@@ -1046,7 +1218,7 @@ mod tests {
     fn add_settled(repo: &TestRepo, directory: &tempfile::TempDir, name: &str) -> PathBuf {
         let path = repo.create_named_worktree(name).canonicalize().unwrap();
         let head = rev_parse(&path, "HEAD").unwrap();
-        let conn = rusqlite::Connection::open(directory.path().join("store.db")).unwrap();
+        let conn = rusqlite::Connection::open(directory.path().join("loopflow.db")).unwrap();
         conn.execute("INSERT INTO pr_landings(id,repo,pr_number,worktree,branch,requested_head_sha,observed_head_sha,merge_commit,state,generation,created_at,updated_at)
             VALUES(?1,'test/repo',2,?2,?1,?3,?3,?3,'merged',1,1,1)",
             rusqlite::params![name, path.to_str().unwrap(), head]).unwrap();
@@ -1173,6 +1345,107 @@ mod tests {
         receipt.finish(progress, None).unwrap();
     }
 
+    #[tokio::test]
+    async fn cleanup_oldest_deferrals_precede_continual_arrivals() {
+        let _guard = crate::journal::TestLedgerGuard::new();
+        let _external = ExternalInspection::idle();
+        let (repo, directory, store, first) = fixture().await;
+        let second = add_settled(&repo, &directory, "z-older-deferred");
+        for path in [&first, &second] {
+            std::fs::write(path.join("unfinished"), "keep").unwrap();
+        }
+        let report =
+            super::run_cleanup_pass(&store, repo.path(), CleanupBudget::default()).unwrap();
+        assert!(report.removed.is_empty());
+        let older: Vec<_> = report
+            .deferred
+            .iter()
+            .filter(|d| d.path == first || d.path == second)
+            .map(|d| d.path.clone())
+            .collect();
+        assert_eq!(older.len(), 2);
+        for path in &older {
+            std::fs::remove_file(path.join("unfinished")).unwrap();
+        }
+        let admin = crate::engine::git::absolute_git_dir(&older[0]).unwrap();
+        std::fs::write(admin.join("lf-cleanup-attempt"), "interrupted hint").unwrap();
+        // Arrival rate exceeds the removal cap; both lexically earlier and
+        // later names must wait behind the already deferred checkouts.
+        for (tick, expected) in older.iter().enumerate() {
+            for prefix in ["a", "zz", "m"] {
+                add_settled(&repo, &directory, &format!("{prefix}-arrival-{tick}"));
+            }
+            let report = super::run_cleanup_pass(
+                &store,
+                repo.path(),
+                CleanupBudget {
+                    removals: 1,
+                    ..CleanupBudget::default()
+                },
+            )
+            .unwrap();
+            assert_eq!(&report.removed, &vec![expected.clone()]);
+        }
+    }
+
+    #[tokio::test]
+    async fn cleanup_unavailable_scheduling_hint_does_not_block_neighbors() {
+        let _guard = crate::journal::TestLedgerGuard::new();
+        let _external = ExternalInspection::idle();
+        let (repo, directory, store, path) = fixture().await;
+        let neighbor = add_settled(&repo, &directory, "healthy-neighbor");
+        let admin = crate::engine::git::absolute_git_dir(&path).unwrap();
+        // A directory cannot be replaced by the atomic hint-file rename.
+        std::fs::create_dir(admin.join("lf-cleanup-attempt")).unwrap();
+        let report =
+            super::run_cleanup_pass(&store, repo.path(), CleanupBudget::default()).unwrap();
+        assert_eq!(report.removed, vec![neighbor]);
+        retained(
+            report.deferred.iter().find(|d| d.path == path).unwrap(),
+            "scheduling unavailable",
+        );
+        assert!(path.exists());
+    }
+
+    #[tokio::test]
+    async fn cleanup_slow_registration_read_does_not_spend_candidate_admission() {
+        use std::os::unix::fs::PermissionsExt;
+        let _guard = crate::journal::TestLedgerGuard::new();
+        let external = ExternalInspection::idle();
+        let (repo, _directory, store, path) = fixture().await;
+        let real_git = std::env::split_paths(&external.previous_path)
+            .map(|path| path.join("git"))
+            .find(|path| path.is_file())
+            .unwrap();
+        let script = external._directory.path().join("git");
+        std::fs::write(&script, format!("#!/bin/sh\nif [ \"$1\" = worktree ] && [ \"$2\" = list ]; then sleep 0.3; fi\nexec '{}' \"$@\"\n", real_git.display())).unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        for _ in 0..3 {
+            super::run_cleanup_pass(
+                &store,
+                repo.path(),
+                CleanupBudget {
+                    removals: 1,
+                    admission_time: std::time::Duration::from_millis(200),
+                },
+            )
+            .unwrap();
+            if !path.exists() {
+                break;
+            }
+        }
+        assert!(
+            !path.exists(),
+            "slow initial reads must still admit candidates"
+        );
+        // A genuinely stuck registration subprocess is bounded and never authorizes deletion.
+        std::fs::write(&script, format!("#!/bin/sh\nif [ \"$1\" = worktree ] && [ \"$2\" = list ]; then sleep 30; fi\nexec '{}' \"$@\"\n", real_git.display())).unwrap();
+        let started = std::time::Instant::now();
+        assert!(super::run_cleanup_pass(&store, repo.path(), CleanupBudget::default()).is_err());
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+        assert!(repo.path().exists());
+    }
+
     #[test]
     fn cleanup_size_estimate_is_unknown_on_deadline_or_failed_observation() {
         let dir = tempfile::tempdir().unwrap();
@@ -1221,7 +1494,7 @@ mod tests {
     #[tokio::test]
     async fn cleanup_collection_receipts_are_bounded_and_resume_the_cursor() {
         let _guard = crate::journal::TestLedgerGuard::new();
-        let (repo, _directory, store, path) = fixture().await;
+        let (repo, _directory, store, _path) = fixture().await;
         for sequence in 1..=15 {
             let mut receipt =
                 crate::ops::cron::cleanup::CleanupReceipt::begin(&store.sqlite, repo.path())
@@ -1229,9 +1502,9 @@ mod tests {
             let mut progress = receipt.progress();
             assert_eq!(progress.sequence, sequence);
             if sequence > 1 {
-                assert_eq!(progress.retry_after, Some(path.clone()));
+                assert_eq!(progress.full_scan_started, Some(42));
             }
-            progress.retry_after = Some(path.clone());
+            progress.full_scan_started = Some(42);
             receipt.finish(progress, None).unwrap();
         }
         let root = crate::ops::cron::receipt_root(&store.sqlite.home_dir().unwrap());
@@ -1257,7 +1530,7 @@ mod tests {
         let pr = crate::work::task::TaskPrId::new();
         let head = rev_parse(&path, "HEAD").unwrap();
         {
-            let conn = rusqlite::Connection::open(_directory.path().join("store.db")).unwrap();
+            let conn = rusqlite::Connection::open(_directory.path().join("loopflow.db")).unwrap();
             conn.execute(
                 "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'cleanup',?2,1)",
                 rusqlite::params![wave, repo.path().to_string_lossy()],
@@ -1276,7 +1549,7 @@ mod tests {
         }
         retained(&decision(&store, &repo, &path), "PR-less");
         {
-            let conn = rusqlite::Connection::open(_directory.path().join("store.db")).unwrap();
+            let conn = rusqlite::Connection::open(_directory.path().join("loopflow.db")).unwrap();
             conn.execute(
                 "INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,publication_requested_at,github_number,github_url,github_head_sha,merge_commit,created_at,updated_at) VALUES(?1,?2,1,'landed','landed',?3,1,1,'https://github.com/example/repo/pull/1',?3,?3,1,1)",
                 rusqlite::params![pr.as_str(), task.as_str(), head],
@@ -1576,7 +1849,7 @@ mod tests {
         )
         .unwrap();
         std::fs::write(home.join("history.jsonl"), "retained conversation").unwrap();
-        let connection = rusqlite::Connection::open(directory.path().join("store.db")).unwrap();
+        let connection = rusqlite::Connection::open(directory.path().join("loopflow.db")).unwrap();
         connection.execute("INSERT INTO provider_accounts(provider,account_id,home,credential_state,routing_state,created_at,updated_at) VALUES('codex','account',?1,'missing','disabled',1,1)", [home.to_str().unwrap()]).unwrap();
         retained(&decision(&store, &repo, &path), "Session evidence");
         connection
@@ -1588,6 +1861,50 @@ mod tests {
             std::fs::read_to_string(home.join("history.jsonl")).unwrap(),
             "retained conversation"
         );
+    }
+
+    #[tokio::test]
+    async fn cleanup_preserves_native_transcripts_reached_through_account_symlinks() {
+        let guard = crate::journal::TestLedgerGuard::new();
+        let _external = ExternalInspection::idle();
+        let (repo, directory, store, path) = fixture().await;
+        guard.set_db_path(directory.path().join("loopflow.db"));
+        std::env::set_var("LF_HOME", directory.path());
+        let initial = decision(&store, &repo, &path);
+        let cache = path.join("target");
+        std::fs::create_dir_all(&cache).unwrap();
+        std::fs::write(
+            cache.join("CACHEDIR.TAG"),
+            "Signature: 8a477f597d28d172789f06886806bc55",
+        )
+        .unwrap();
+        let id = "0199a213-81c0-7800-8aa1-bbab2a035a54";
+        let payload = cache.join("native.jsonl");
+        let transcript = format!(
+            "{}\n",
+            serde_json::json!({"type":"session_meta", "payload":{"id":id,"cwd":repo.path()}})
+        );
+        std::fs::write(&payload, &transcript).unwrap();
+        let home = directory.path().join("native-account");
+        let day = home.join("sessions/2026/10/09");
+        std::fs::create_dir_all(&day).unwrap();
+        std::os::unix::fs::symlink(&payload, day.join(format!("rollout-2026-10-09-{id}.jsonl")))
+            .unwrap();
+        let conn = rusqlite::Connection::open(directory.path().join("loopflow.db")).unwrap();
+        conn.execute("INSERT INTO provider_accounts(provider,account_id,home,credential_state,routing_state,created_at,updated_at) VALUES('codex','native-account',?1,'missing','disabled',1,1)", [home.to_str().unwrap()]).unwrap();
+        let report =
+            apply_cleanup(&store, repo.path(), vec![initial], CleanupBudget::default()).unwrap();
+        assert!(report.removed.is_empty());
+        retained(&report.deferred[0], "Session evidence");
+        assert_eq!(std::fs::read_to_string(payload).unwrap(), transcript);
+        // No recorded identity exists: admit must discover and read the native
+        // rollout to recover its working directory. This does not launch a provider.
+        let resumed = crate::ops::human_session::provider_conversation::admit(&store, id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(resumed.cwd, repo.path());
+        assert_eq!(resumed.provider.as_deref(), Some("codex"));
     }
 
     #[tokio::test]
@@ -1605,7 +1922,7 @@ mod tests {
         .unwrap();
         let payload = cache.join("past-conversation.jsonl");
         std::fs::write(&payload, "retained provider history\n").unwrap();
-        let conn = rusqlite::Connection::open(directory.path().join("store.db")).unwrap();
+        let conn = rusqlite::Connection::open(directory.path().join("loopflow.db")).unwrap();
         conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd) VALUES('past','past','generated',1,1,?1)", [repo.path().to_str().unwrap()]).unwrap();
         for input in [
             "00000000000000000000000000000001",
@@ -1661,6 +1978,62 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cleanup_history_pages_eventually_collect_and_resolve_retargeted_paths() {
+        let _guard = crate::journal::TestLedgerGuard::new();
+        let _external = ExternalInspection::idle();
+        let (repo, directory, store, path) = fixture().await;
+        let disposable = add_settled(&repo, &directory, "disposable");
+        let cache = path.join("target");
+        std::fs::create_dir_all(&cache).unwrap();
+        std::fs::write(
+            cache.join("CACHEDIR.TAG"),
+            "Signature: 8a477f597d28d172789f06886806bc55",
+        )
+        .unwrap();
+        let payload = cache.join("history.jsonl");
+        std::fs::write(&payload, "preserved history").unwrap();
+        let alias = directory.path().join("historical-payload");
+        std::os::unix::fs::symlink(directory.path().join("outside"), &alias).unwrap();
+        let conn = rusqlite::Connection::open(directory.path().join("loopflow.db")).unwrap();
+        conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd) VALUES('past','past','generated',1,1,'/')", []).unwrap();
+        for index in 0..520 {
+            conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES('past','captured',?1,1,'{}')", [format!("{index:032x}")]).unwrap();
+        }
+        conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES('past','observed','00000000000000000000000000000000:runs',1,?1)",
+            [serde_json::json!({"evidence":{"provider_session_path":alias}}).to_string()]).unwrap();
+        // Rebuild the derived projection, as after upgrading a populated store.
+        conn.execute_batch("BEGIN; DELETE FROM session_evidence; UPDATE session_evidence_backfill SET through_seq=0,target_seq=(SELECT MAX(seq) FROM session_events),complete=0; COMMIT;").unwrap();
+        for _ in 0..2 {
+            let report =
+                super::run_cleanup_pass(&store, repo.path(), CleanupBudget::default()).unwrap();
+            assert!(report.removed.is_empty());
+            assert!(path.exists() && disposable.exists());
+        }
+        // The next maintenance page resumes from durable coverage.
+        store.sqlite.advance_session_evidence().unwrap();
+        let before_retarget = decision(&store, &repo, &path);
+        assert_eq!(before_retarget.action, CleanupAction::RemoveCheckout);
+        std::fs::remove_file(&alias).unwrap();
+        std::os::unix::fs::symlink(&payload, &alias).unwrap();
+        let report = apply_cleanup(
+            &store,
+            repo.path(),
+            vec![before_retarget],
+            CleanupBudget::default(),
+        )
+        .unwrap();
+        assert!(report.removed.is_empty());
+        retained(&report.deferred[0], "Session evidence");
+        let report =
+            super::run_cleanup_pass(&store, repo.path(), CleanupBudget::default()).unwrap();
+        assert_eq!(report.removed, vec![disposable]);
+        assert_eq!(
+            std::fs::read_to_string(payload).unwrap(),
+            "preserved history"
+        );
+    }
+
+    #[tokio::test]
     async fn cleanup_collection_incomplete_history_never_settles_source() {
         let _guard = crate::journal::TestLedgerGuard::new();
         let _external = ExternalInspection::idle();
@@ -1669,7 +2042,7 @@ mod tests {
             .create_named_worktree("unowned")
             .canonicalize()
             .unwrap();
-        let conn = rusqlite::Connection::open(directory.path().join("store.db")).unwrap();
+        let conn = rusqlite::Connection::open(directory.path().join("loopflow.db")).unwrap();
         conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd) VALUES('past','past','generated',1,1,?1)", [repo.path().to_str().unwrap()]).unwrap();
         for input in [
             "00000000000000000000000000000001",
@@ -1722,8 +2095,7 @@ mod tests {
         assert!(report.planned.is_empty());
         assert!(report.removed.is_empty());
         assert!(progress.full_scan_at.is_none());
-        assert!(progress.full_scan_after.is_none());
-        assert!(progress.retry_after.is_none());
+        assert!(progress.full_scan_started.is_none());
         assert!(path.exists());
     }
 

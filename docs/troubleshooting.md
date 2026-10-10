@@ -172,8 +172,12 @@ first work and repair its executable during installation upgrades and later work
 Explicit disable survives those repairs. Without launchd, work-producing commands start at most one fallback check
 per minute. Cleanup leaves remote branches and Task outcomes intact. It protects
 recorded historical capture references and provider homes, including paths inside
-declared caches; unavailable evidence retains the checkout. Use
-`lf wt delete NAME --force` only when deliberately discarding a checkout.
+declared caches and native transcript symlinks; unavailable evidence retains the checkout.
+Older deferrals are retried before newly discovered checkouts. After an upgrade,
+large Session histories may report `Session evidence backfill incomplete` while
+maintenance fills the raw-reference index in pages. Partial history never permits
+removal; previews do not advance this index. Use `lf wt delete NAME --force` only
+when deliberately discarding a checkout.
 
 ```bash
 lf sync

@@ -326,6 +326,62 @@ fn find_file(directory: &Path, depth: usize, matches: &dyn Fn(&str) -> bool) -> 
     })
 }
 
+/// Native readers follow symlinks inside their history layout. Protect those
+/// destinations as well as the account root; a home outside a checkout can
+/// otherwise point at its only transcript inside a disposable cache.
+pub(crate) fn transcript_evidence(
+    provider: Provider,
+    home: &Path,
+) -> std::io::Result<Vec<PathBuf>> {
+    fn visit(
+        path: &Path,
+        depth: usize,
+        deadline: std::time::Instant,
+        paths: &mut Vec<PathBuf>,
+    ) -> std::io::Result<()> {
+        if std::time::Instant::now() >= deadline {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "native transcript observation deadline exceeded",
+            ));
+        }
+        let entries = match fs::read_dir(path) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error),
+        };
+        for entry in entries {
+            if std::time::Instant::now() >= deadline {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "native transcript observation deadline exceeded",
+                ));
+            }
+            let entry = entry?;
+            let kind = entry.file_type()?;
+            if kind.is_symlink() {
+                paths.push(entry.path());
+            }
+            if depth > 0 && (kind.is_dir() || (kind.is_symlink() && entry.path().is_dir())) {
+                visit(&entry.path(), depth - 1, deadline, paths)?;
+            }
+        }
+        Ok(())
+    }
+    let (root, depth) = match provider {
+        Provider::Codex => (home.join("sessions"), 3),
+        _ => (home.join("projects"), 1),
+    };
+    let mut paths = vec![root.clone(), home.join("history.jsonl")];
+    visit(
+        &root,
+        depth,
+        std::time::Instant::now() + std::time::Duration::from_secs(2),
+        &mut paths,
+    )?;
+    Ok(paths)
+}
+
 /// The directory the conversation ran in, from the head of its transcript.
 fn recorded_cwd(transcript: &Path) -> Option<PathBuf> {
     BufReader::new(fs::File::open(transcript).ok()?)

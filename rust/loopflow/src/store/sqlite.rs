@@ -42,6 +42,7 @@ pub(crate) mod project_selection;
 mod project_transitions;
 mod revisions;
 mod session_events;
+mod session_evidence;
 pub(crate) mod sessions;
 mod task_comments;
 mod task_content;
@@ -563,6 +564,29 @@ impl SqliteStore {
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
+    }
+
+    /// An independent, nonblocking read connection for one finite observation.
+    /// Its VM deadline cannot interrupt the caller's normal writes or another
+    /// connection's transaction. Never use it for admitted destructive work.
+    pub(crate) fn bounded_reader(&self, timeout: Duration) -> StoreResult<Self> {
+        let path = {
+            let conn = self
+                .conn
+                .try_lock()
+                .map_err(|_| StoreError::InvalidData("observation reader is busy".into()))?;
+            conn.path()
+                .map(PathBuf::from)
+                .ok_or_else(|| StoreError::InvalidData("observation store has no path".into()))?
+        };
+        let reader = Self::open_read_only(&path)?;
+        {
+            let conn = reader.conn.lock().expect("new reader mutex poisoned");
+            conn.busy_timeout(Duration::ZERO)?;
+            let deadline = std::time::Instant::now() + timeout;
+            conn.progress_handler(100, Some(move || std::time::Instant::now() >= deadline))?;
+        }
+        Ok(reader)
     }
 
     pub(crate) fn open_read_only(path: &Path) -> StoreResult<Self> {

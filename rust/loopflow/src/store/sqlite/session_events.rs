@@ -1,7 +1,3 @@
-use std::collections::BTreeSet;
-use std::path::PathBuf;
-use std::time::{Duration, Instant};
-
 use rusqlite::{params, OptionalExtension, TransactionBehavior};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -14,95 +10,6 @@ use crate::store::{StoreError, StoreResult};
 use super::SqliteStore;
 
 impl SqliteStore {
-    /// Files referenced by every retained input, not just the Session's current
-    /// capture. Keep this beside the history reader: replacing a provider or
-    /// moving a conversation does not dispose of its earlier evidence.
-    pub(crate) fn session_evidence_paths(&self) -> StoreResult<Vec<PathBuf>> {
-        let conn = self
-            .conn
-            .try_lock()
-            .map_err(|_| StoreError::InvalidData("Session evidence reader is busy".into()))?;
-        let home = super::home_dir_in(&conn)?;
-        let busy: u32 = conn.pragma_query_value(None, "busy_timeout", |row| row.get(0))?;
-        conn.busy_timeout(Duration::ZERO)?;
-        let deadline = Instant::now() + Duration::from_secs(2);
-        if let Err(error) = conn.progress_handler(1000, Some(move || Instant::now() >= deadline)) {
-            conn.busy_timeout(Duration::from_millis(u64::from(busy)))?;
-            return Err(error.into());
-        }
-        let result = (|| {
-            let mut query = conn.prepare(
-                "SELECT receipt_key, NULL FROM session_events WHERE kind='captured'
-             UNION ALL
-             SELECT c.receipt_key, json_extract(e.payload,
-                '$.evidence.artifact_dir', '$.evidence.conversation_path',
-                '$.evidence.provider_events_path', '$.evidence.provider_session_path',
-                '$.evidence.runtime_path', '$.evidence.result_ref', '$.evidence.context.path')
-             FROM session_events c INDEXED BY session_capture_key
-             CROSS JOIN session_events e INDEXED BY session_event_receipt
-               ON e.session_id=c.session_id
-               AND COALESCE(e.provider_thread,'')='' AND COALESCE(e.provider_turn,'')=''
-               AND e.kind='observed'
-               AND e.receipt_key IN (c.receipt_key||':runs', c.receipt_key||':manifest.json', c.receipt_key||':terminal.json')
-             WHERE c.kind='captured'",
-            )?;
-            let mut rows = query.query([])?;
-            let mut paths = BTreeSet::new();
-            while let Some(row) = rows.next()? {
-                if Instant::now() >= deadline {
-                    return Err(StoreError::InvalidData(
-                        "Session evidence observation deadline exceeded".into(),
-                    ));
-                }
-                let input: Option<String> = row.get(0)?;
-                let dir = input
-                    .as_deref()
-                    .and_then(|key| crate::session_record::record_dir(&home, key));
-                if let Some(dir) = &dir {
-                    paths.insert(dir.clone());
-                    // Individual payload files may be symlinks out of the owning home.
-                    for name in [
-                        "manifest.json",
-                        "context.json",
-                        "events.jsonl",
-                        "provider.jsonl",
-                        "conversation.jsonl",
-                        "terminal.json",
-                    ] {
-                        paths.insert(dir.join(name));
-                    }
-                }
-                let Some(body) = row.get::<_, Option<String>>(1)? else {
-                    continue;
-                };
-                // Project only references in SQL; manifests can contain megabytes
-                // of replay input that collection neither needs nor should decode.
-                let references: Vec<Option<String>> = serde_json::from_str(&body)?;
-                for value in references
-                    .into_iter()
-                    .flatten()
-                    .filter(|value| !value.is_empty())
-                {
-                    let path = PathBuf::from(value);
-                    if path.is_absolute() {
-                        paths.insert(path);
-                    } else if let Some(dir) = &dir {
-                        paths.insert(dir.join(path));
-                    } else {
-                        return Err(StoreError::InvalidData(
-                            "Session evidence has no capture directory".into(),
-                        ));
-                    }
-                }
-            }
-            Ok(paths.into_iter().collect())
-        })();
-        let cleared = conn.progress_handler(0, None::<fn() -> bool>);
-        conn.busy_timeout(Duration::from_millis(u64::from(busy)))?;
-        cleared?;
-        result
-    }
-
     pub(crate) fn input_provider_session(
         &self,
         input: &str,

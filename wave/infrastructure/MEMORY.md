@@ -1006,7 +1006,7 @@ archives authorize no work.
 Jack Heart's LOO-444: native prompts/guides, skill then request, whole-file
 start/compact context. Option B fixes additions per surface/reply/participant.
 Production authorized; native-guide wording proposed. Preserve attribution/titles.
-Jack's October 9 `cbc13fa5`: checkout Wave Markdown and path-segment ancestors.
+Jack's `cbc13fa5`: checkout Wave Markdown and path-segment ancestors.
 `5e8fdde2f` supplies real paths, deleting Wave-ID lookup/snapshots.
 GOAL config still reads SQLite; LOO-449 owns it, the table and other readers.
 Clipboard-first-turn and shrinking memory to 10,000 bytes remain undecided.

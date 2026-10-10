@@ -149,6 +149,7 @@ When changing the SQLite schema:
 - Keep one draft per Task: `uv run python scripts/new_migration.py <name>` creates it or prints the one the branch already has
 - Edit that draft in place until landing; never add a draft that alters or drops what an unreleased draft created
 - Test the released frontier against the finished draft, not the steps between
+- Seed a released schema from SQL under `rust/loopflow/tests/fixtures/migrations/`; test sources name only current columns
 
 When editing `*.rs` files:
 - Run `cargo fmt` before committing; CI enforces it

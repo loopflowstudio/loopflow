@@ -2,7 +2,9 @@
 
 Jack Heart selected direct repository-file ownership on 2026-10-09 (steer
 507b173a-3969-469d-8c91-028d57ae225f). This is the implementation plan for that
-accepted direction, not authorization to publish or land.
+accepted direction. Jack Heart’s October 9 steer `2991ceb1-c0a7-40a7-90db-b61280abf36d`
+authorizes publication after a mocked sync proves direct file-edit propagation;
+it does not authorize landing or settle divergent-checkout selection.
 
 ## Design
 
@@ -85,17 +87,33 @@ historical file was not reread. Its operation-entry lesson applies to Linear syn
 as well as native launch: a config-reader proof alone cannot prove dispatch uses
 the invoking checkout. Release-specific evidence remains in the child.
 
+## Sync counterexample (2026-10-09)
+
+The previous plan incorrectly described Linear sync as a summary reader. At
+`c756414c8`, public dispatch in `lf/commands/ops/mod.rs::sync_planning` calls
+`ops/pm.rs::pm_sync` / `pm_sync_async`. That operation reads checkout PM bindings,
+validates ownership, optionally renames Initiatives, adopts legacy Projects and
+refreshes snapshots. It never reads or sends the Wave summary. Its only Initiative
+update is `LinearClient::rename_wave`; `UPDATE_INITIATIVE_MUTATION` accepts only
+ID and name. `pm_init_async` reads the checkout summary, but sends it only when
+creating an Initiative, not when reconnecting an existing binding.
+
+Thus the requested test cannot pass through the current sync entry point. This
+is missing behavior, not merely missing verification. No new outbound writer or
+checkout-selection policy was added under the narrow test-and-publish steer.
+Publication remains withheld; the acceptance has not been weakened to testing
+creation or the config reader. A reviewed sync-writing design is needed before
+continuing this dependent slice. Jack’s choice between branch and main remains
+open; currently sync publishes neither checkout’s summary.
+
 ## Remaining
 
-Gate owns affected planning/PM/cron/metrics/context suites, Linear sync entry-path
-coverage and materialized migration checks. CI owns the full platform matrix.
-The sync proof must distinguish main and worktree goal bytes, edit the worktree
-file between invocations and inspect the provider-bound summary without a save
-or import. Existing public checkout status and native launch fixtures cover their
-own boundaries, not this one.
-Reconcile LOO-444's context-reader overlap when integrating its committed change;
-the locally available main ref is still `906576f39`, so no integrated LOO-444
-result is claimed. No transport changes or installed-store access occurred here. `wave_workflows`
-removal remains Jack's open decision, not a dependency for this cut.
+Resolve the summary-writing mismatch above, then prove two sync invocations around
+a direct GOAL.md edit against a mocked provider, without import/save. Preserve
+separate main/worktree bytes and state the observed selection in PR notes without
+presenting it as Jack’s policy choice. Gate owns broader affected suites and
+materialized migrations; CI owns the platform matrix. Reconcile LOO-444’s context
+reader at integration; no integrated result is claimed. `wave_workflows` stays
+unchanged, with its consumers inventoried above.
 
-Checks: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, and network-isolated `cargo test --offline -p loopflow --lib` with `work::wave::config::tests` / `store::sqlite::wave_definitions::tests` pass (11 tests); gate/CI own broader acceptance. Earlier checkout/native-launch proofs remain at `3db1e0c00:scratch/read-wave-goals-and-memory.md`.
+Checks: source trace confirms sync has no summary write; no code changed or tests rerun in this reconciliation. Prior `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, and network-isolated `cargo test --offline -p loopflow --lib` with `work::wave::config::tests` / `store::sqlite::wave_definitions::tests` pass (11 tests); gate/CI own broader acceptance. Earlier checkout/native-launch proofs remain at `3db1e0c00:scratch/read-wave-goals-and-memory.md`.

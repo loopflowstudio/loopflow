@@ -75,11 +75,12 @@ inventory grants neither restoration nor execution authority. Exact slice proofs
 Jack Heart's October 9 LOO-449 decision makes checkout files own GOAL.md,
 MEMORY.md and ancestor Markdown; edit them directly, without CLI/import/cache.
 Canonical identity must not redirect checkout reads/writes into main.
-`10d44520f` removes draft document storage; creation preserves bytes;
-relocation leaves files. SQLite retains identity/execution.
-`wave_workflows` stays: Project catalog/source/selection and Task capture read it;
-removal is unselected. Gate/installed acceptance remain open. Preserve LOO-444's
-overlapping context transport at integration.
+`10d44520f` removes draft document storage; creation preserves bytes, relocation
+leaves files; SQLite keeps identity/execution. Jack’s October 9 steer authorizes
+publication after mocked sync proof. At `c756414c8`, sync never sends summaries;
+only Initiative creation does. Publication is withheld pending writer design;
+branch/main selection stays open. `wave_workflows` retains Project catalog,
+selection and Task capture. Preserve LOO-444 at integration; acceptance is open.
 
 LOO-406's common writer boundary is `84664e661`; `e68f2a423` exports saved UUIDs.
 Separate creation/link attempts retain uncertainty without replay; identity attachment
@@ -924,9 +925,7 @@ reinstall does not heal a truncated entry gate.
 
 ## Shipped history
 
-Historical delivery records:
-`4b4ad05186e85ba8a48924a6294ba9ec2e6df65f:wave/infrastructure/MEMORY.md`,
-this heading and its archive link. Current contracts supersede history.
+Archive: `c756414c8:wave/infrastructure/MEMORY.md`, this heading.
 Cron continuity judges the latest due against exact scheduled receipts; manual
 runs prove no firing, and old gaps do not keep later telemetry red.
 

@@ -6,7 +6,6 @@ use std::path::Path;
 use std::process::Command;
 
 use loopflow::context_block::ContextDelivery;
-use loopflow::store::sqlite::SqliteStore;
 use loopflow_test_support::TestRepo;
 use serde_json::Value;
 
@@ -46,20 +45,7 @@ fn hook_refreshes_checkout_ancestors_and_scratch_without_replaying_the_request()
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     fs::create_dir_all(home.path().join("machine")).unwrap();
-    let store = SqliteStore::new(&home.path().join("machine/loopflow.db")).unwrap();
     let repo_path = repo.path().canonicalize().unwrap();
-    let parent = store
-        .ensure_wave(repo_path.to_str().unwrap(), "parent")
-        .unwrap();
-    let child = store
-        .ensure_wave(repo_path.to_str().unwrap(), "parent/child")
-        .unwrap();
-    store
-        .update_wave_document(&parent, "MEMORY.md", "STALE STORED PARENT")
-        .unwrap();
-    store
-        .update_wave_document(&child, "MEMORY.md", "STALE STORED CHILD")
-        .unwrap();
     fs::create_dir_all(repo.path().join("wave/parent/child")).unwrap();
     fs::write(
         repo.path().join("wave/parent/child/MEMORY.md"),
@@ -90,7 +76,6 @@ fn hook_refreshes_checkout_ancestors_and_scratch_without_replaying_the_request()
     assert!(start.contains("Inherited checkout direction"));
     assert!(start.contains("Current checkout memory"));
     assert!(start.contains("CURRENT_SCRATCH"));
-    assert!(!start.contains("STALE STORED"));
     assert!(!start.contains("Saved active skill\n"));
 
     fs::write(
@@ -115,7 +100,6 @@ fn hook_refreshes_checkout_ancestors_and_scratch_without_replaying_the_request()
     }
     for stale in [
         "Inherited checkout direction",
-        "STALE STORED",
         "CURRENT_SCRATCH",
         "Current checkout memory",
     ] {

@@ -51,16 +51,15 @@ main = f'''
   </div>
 </section>
 <section class="reading">
-  <h2>Every Task ends shipped.</h2>
-  <p class="say">Loopflow uses configurable workflows to ensure that Tasks are designed thoughtfully, built simply, shipped, and validated thoroughly, all automatically.</p>
   <ul class="plain">
 {items([
+("Every Task ends shipped", "Loopflow uses configurable workflows to ensure that Tasks are designed thoughtfully, built simply, shipped, and validated thoroughly, all automatically."),
 ("It starts with a goal", "A Wave is a goal that outlasts any one conversation, like getting people’s data out of your app. It keeps its key results, its plan, and its memory."),
 ("One Task, one outcome", "“Add CSV export” is a Task. It ends in one pull request, and it is done when that merges."),
 ("Your agent plans, you review the design", "The Task’s workflow starts its first Flow. Your agent drafts a plan and stops. This stop is yours."),
 ("It gets built without you", "The next Flow implements the plan, tidies it, catches up with the rest of the code, and opens the pull request. Each step is a Session of its own."),
 ("You try it", "The Task waits at demo, marked, until you have tried the change. Send it back as often as it takes."),
-("It ships", "Checks run, then it merges. Every Session that got it there is kept under the Task, whichever agent ran it."),
+("Sessions stay with the work", "Every Session that got it there is kept under the Task, whichever agent ran it, so you follow the work and not a trail of chats."),
 ("You choose the stops", "The workflow is a file. Steer every step, come in at design and demo, or let it run, project by project."),
 ("Underneath", "A native Mac terminal, running Claude Code, Codex, or OpenCode on your own account, with <code>lf</code> included."),
 ])}

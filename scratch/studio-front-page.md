@@ -400,3 +400,7 @@ automatically. sometign closer to that". Both now head the list under the
 video in `x6`, the sentence in his words.
 Jack Heart: "the lower case in exports and your-app in the mock are also
 killing me". The mock's repository and Wave names are capitalised.
+Jack Heart: "Sorry every task ends shipped is just a single line in the
+section. its not the overall title for the seciton". It is now the first item
+of the list, with his sentence as its text; the section has no heading. "It
+ships" became "Sessions stay with the work".

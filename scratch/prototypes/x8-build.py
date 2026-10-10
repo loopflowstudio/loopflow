@@ -93,7 +93,8 @@ main = f'''
 <section class="walk">
   <h2>Loopflow is a software instrument.</h2>
   <p class="say">It doesn’t make the software for you; you make the software through it.</p>
-  <p class="say">All you have to do is share what you want to make and how it should work. Loopflow turns that into a plan you can read and change, and carries that plan out for you, stopping to talk with you according to how you like to work.</p>
+  <p class="say">You share what you want to make and how it should work. Loopflow turns that into a plan you can read and change, and carries that plan out, stopping to talk with you according to how you like to work.</p>
+  <p class="say">You have to stay involved. You don’t have to micromanage the coding.</p>
   <p class="say lead">Here is how it goes, from a rambling idea to a set of merged pull requests.</p>
   <ol class="figs">
 {FIGS}

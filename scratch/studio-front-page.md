@@ -503,3 +503,10 @@ the sessions, the prompts, etc\"". The `x8` section after the figures is now
 "How your team works with agents, written down.": his sentence, the patterns
 around your sessions as files you commit, the four directories, the real
 `feature.yaml` and the built-in workflows.
+
+Jack Heart on reconciling the two thesis claims: "I do think there's
+something else to it which about the touch points. We're not advocating for
+just spit and ship. We are saying... you have to stay involved. But you dont
+have to micromanage the coding." The `x8` thesis now ends on "You have to stay
+involved. You don't have to micromanage the coding." and "All you have to do
+is" is gone, since it said the opposite.

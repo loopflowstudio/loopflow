@@ -617,7 +617,11 @@ The associated-origin case seeds divergent historical Task/Project captures,
 then enters public association, Git exchange and HTTPS readback. It requires only
 the exact provider UUID to settle, retains the other origin's uncertainty and
 later saves, and compares populated execution across repeated older documents.
-This seeds historical attempts; it does not prove their original dispatch.
+Its private-origin variant also requires selected acknowledgements to reach their
+retained origins without publishing private parents, captures or later edits, while
+independent public Task saves propagate. Freeze exchange comparisons after explicit
+local activation, checking that setup preserves all earlier execution rows. Neither
+variant proves original dispatch of its seeded attempts or native engine continuity.
 Only attempted effects acknowledge; equal-desired provider readback can instead
 retire an unattempted intention without another write. The portable `work_watch` offline-completion test requires a foreground delivery error
 with no Task selected; local frame propagation alone cannot establish sync lifetime.

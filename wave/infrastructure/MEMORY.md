@@ -239,7 +239,7 @@ open. FIFO is Codex-only; reaping noninteractive Codex/OpenCode.
 
 Jack Heart selected LfSession/LfProcess (#1516) and AgentSession (#1517), both
 landed on his approval; AgentSessionId has no table. LOO-446 is the cleanup he
-requested, stacked on LOO-443 and not landed before it (no PR yet): LfProcess
+requested, stacked on LOO-443 and not landed before it (PR #1520): LfProcess
 identity is `id`, references are `<role>_lf_process_id`, and the two retired
 words name nothing. The lf attached to a Session is the attached LfProcess; the
 lf running a Flow is the Flow process; FlowRunner executes it. One draft renames

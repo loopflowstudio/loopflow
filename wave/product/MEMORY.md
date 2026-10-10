@@ -166,16 +166,16 @@ Session-only/Changes links share Files preparation; recording copies transport
 classification as well as closures, or remote paths regain local affordances.
 SSH preserves stdin/native Home. Mixed exchange, admission and running-Flow/configured-SSH/native proof remain.
 
-October 9: `7aa8a5eb5` carries owner-pinned shells and filesystem invalidations
-over existing SSH/line transport into retained panes/documents. Request/checkout
-fencing and cancellation retain drafts; no local fallback or shell replay.
-Observations are not filesystem CAS. Jack Heart ordered companions, simpler
-selectors, then exclusive first-start admission. `2c5610ca4` replaces public JSON
-targets/tokens with `--repo`/`--task` and optional `--pane`. One eligible pane is
-implicit; ambiguity lists choices and absence dispatches nothing. Retain the
-inspected workspace for move/resize peers; focus cannot retarget. Native proof
-and admission remain. Jack authorized stacking on committed LOO-412 if needed,
-never dirty peer work or planning replication of execution. Do not redo delegation exchange.
+October 9: `7aa8a5eb5` composes owner-pinned shells/file invalidations over SSH.
+Fencing retains drafts; no local fallback, shell replay or filesystem CAS.
+Jack Heart ordered companions, selectors, then exclusive first-start admission.
+`2c5610ca4`/`1f0f64150` replace public JSON targets/tokens with
+`--repo`/`--task` and optional `--pane`. One eligible pane is implicit; ambiguity
+lists choices, absence dispatches nothing. Move/resize retain the inspected workspace;
+focus cannot retarget. Native acceptance remains unproved. Admission remains
+unimplemented: planning confirmation establishes ancestry, not an execution winner. Jack authorized stacking
+on committed LOO-412 if needed, never dirty peer work or runtime replication.
+Delegation exchange and recorded-owner observation remain composed.
 
 ## Task delivery boundary (LOO-418, reconciled 2026-10-09)
 

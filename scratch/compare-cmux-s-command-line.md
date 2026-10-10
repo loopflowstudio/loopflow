@@ -223,7 +223,9 @@ then finish exclusive first-start admission. Existing delegation exchange and re
 observation must not be redone. Stacking on LOO-412 is authorized if necessary: inspect
 its committed API/integration state and use supported lf operations, never dirty peer code.
 
-Remote companions are checkpointed at `7aa8a5eb5`, selectors at `2c5610ca4`.
+Remote companions are checkpointed at `7aa8a5eb5`, selectors at `2c5610ca4`,
+and inspected-owner simplification at `1f0f64150`. These supersede the earlier
+step feedback naming remote shells/file observation as the next missing behavior.
 Existing Work resolution plus one Desktop inspection captures internal lifetime tokens.
 LOO-412 frontier `a60d5594a` has identical `planning_git.rs`: publication/readback,
 not exclusive admission. No stack/sync or dirty-checkout edit occurred.
@@ -233,13 +235,17 @@ planning/execution owners. Two independent Machines must not allocate/start one 
 the winner survives retries, disconnects and delegation edits. No runtime replication,
 Task transfer, duplicate Flow, publication or merge is authorized.
 
-Remote companions now use `task shell --checkout` and `task watch-files --checkout` on
-recorded execution. Shell admission rechecks Task/Machine/path before running the remote
-login shell. The retained Files store consumes request-bound filesystem invalidations and
-heartbeats over the existing SSH/line transport; retained documents reconcile disjoint edits.
-Disconnected/stale streams cancel pending reads and retain drafts. Read replies recheck
-location before/after transport; these observations are not filesystem compare-and-swap.
-The cross-platform notifier adds no planning or execution store. Native/configured SSH remains.
+**Admission remains substantial implementation work.** `task_location::resolve`
+refuses shared work without a positive owner; `require_task_planning` independently
+refuses allocation without a retained checkout. Both boundaries need the same
+exclusive admission result before Git preparation, not just a routing exception.
+LOO-412's `PlanningGit::publish/confirm` proves revision ancestry after publication,
+not one Task's execution winner. The admission design must account for one Task
+selected into multiple destinations without placing runtime claims in planning.
+Required fixture outcomes: simultaneous independent Machines produce one allocation
+and start; lost replies/disconnects preserve that winner on retry; later delegation
+cannot move it; repeat planning import cannot replay its execution. The coordination
+mechanism remains unimplemented, not an accepted new planning authority.
 
 ### 2. Shared Work identity, delegation and routing
 
@@ -489,4 +495,4 @@ identity/delegation, open them, add shell/Files panes, retain an unfinished draf
 change focus, target a harmless command, read output, hide/restore, and verify the
 original input target and draft survive. Demo owns native usability; preserve comparison evidence and use no real accounts or live user terminals.
 
-Check: `cargo test -p loopflow --lib lf::commands::desktop::tests` — PASS (6); `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` — PASS. Earlier CLI/Desktop/companion checks: `5387e5220`, this line; gate/CI broader/Linux checks, demo configured SSH/native usability.
+Check: `git diff --check` — PASS (prose-only reconciliation); prior focused checks retained at `1f0f64150` and `7aa8a5eb5`, this line; broader/Linux checks remain with gate/CI, configured SSH/native usability with demo.

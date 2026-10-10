@@ -141,8 +141,12 @@ nearest assignment. No execution-location cache or second placement writer exist
 
 Task-run, move, checkout and Desktop opening explanations share one location
 projection, including local/peer provenance and unavailable checkout paths for
-retained execution. Desktop reports a remote owner but refuses remote opening
-before app launch, with a terminal alternative; native remote opening remains unfinished.
+retained execution. Desktop opens recorded remote Tasks in the existing local
+repository window through the owner's Session/Files transport. Shells recheck the
+recorded Task/Machine/checkout before launch; file invalidations use the same
+owned-line transport and retain drafts on disconnect. Missing or stale ownership
+prepares nothing and never falls back to local paths. Headless fixtures cover
+these paths; configured SSH and mounted native usability remain unproved.
 
 Exclusive first-start admission is still unavailable. Tasks selected into any Git
 destination without a retained checkout refuse first start, including user refs.

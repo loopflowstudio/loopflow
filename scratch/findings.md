@@ -46,6 +46,10 @@ pair. Ambiguous or missing matches dispatch nothing. Cross-workspace peer reject
 and remote URL refusals have unit coverage; existing receiver tests reject delayed/replaced
 lifetimes. Earlier selector logs: `/tmp/loo427-selectors-{rust,swift,clippy}.log`. No native proof.
 
+October 9 realign found `docs/architecture/machines.md` still describing the retired
+remote-opening refusal; it now matches the composed Session/Files/shell path.
+`wave/product/` has no child directories or child memories in this checkout.
+
 ## Scoped dispatch and preview — October 9
 
 `42a6cb7f7:scratch/findings.md`, this heading, retains discarded-ID/reparsed-argv

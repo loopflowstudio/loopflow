@@ -245,10 +245,10 @@ not PATCH. Its reader owns History; writers save origins in SQLite, not shared
 reader state. Unknown identity stays uncertain; shell lacks IDs. Prior proofs:
 `7fec3b53f:wave/infrastructure/MEMORY.md`, this heading.
 `4834c18f4` retains origins, not pipes. Display follows the current attachment;
-caller authority stays frozen. Atomic UUID result receipts retain uncorrelated
-output and return their original sequence/disposition on replay. Client counters
-still ignore them. Independent ordered transport, receipt-based projection and
-public death orders remain unfinished. No fence reacquisition or permanent custody;
+caller authority stays frozen. Atomic UUID receipts retain uncorrelated output and original replay disposition.
+Client counters ignore them; rate-limit completion bypasses History. Ordered
+transport, receipt-based projection and public death orders remain unfinished.
+No fence reacquisition or permanent custody;
 EOF/history/write errors grant no settlement or teardown.
 Foreground exclusion precedes death inspection: an exited terminal provider
 still cannot be settled by headless close.

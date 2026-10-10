@@ -119,7 +119,9 @@ helpers. Custody grants no write authority.
 
 Runtime settlement, Claude stop/interrupt and OpenCode stop close the recorded
 headless group and record death under the frozen attachment fence. Ambiguous OS
-ownership refuses; Codex additionally refuses unrelated conversations. OpenCode
+ownership refuses; foreground providers are excluded before OS death inspection,
+so even an exited terminal provider cannot be settled by headless close.
+Codex additionally refuses unrelated conversations. OpenCode
 abort uses bounded fenced HTTP without retries. Its startup failure and drop
 detach without signaling or erasing admitted providers and uncertain effects.
 

@@ -34,8 +34,9 @@
   neither install services nor activate fallback work automatically.
 - Implementation choice, 2026-10-09: admission starts after setup. Git observation
   subprocesses and independent registry SQL readers have two-second deadlines;
-  filesystem/receipt I/O, lease discovery and aggregate locked observation remain
-  unbounded. An admitted destructive removal is never canceled by these budgets.
+  initial normalization, registry filesystem I/O, lease discovery and aggregate locked
+  observation remain unbounded. Hint/receipt filesystem requests now use isolated
+  two-second subprocesses; their aggregate setup cost still scales with registrations. An admitted destructive removal is never canceled by these budgets.
 - Implementation choice, 2026-10-09: retain the 32-observation/eight-removal caps,
   using last-attempt timestamps and a fixed hourly cohort. A receipt-owned fairness
   sweep now interleaves with oldest-first scheduling because failed hint writes cannot
@@ -64,7 +65,11 @@
   negative filesystem results as authority. Final observation needs design review
   of workload-sized bounded observation plus isolated I/O, or a history-owner fresh
   view. Neither is selected here; no preservation constraint has been relaxed.
-- Reconciliation, 2026-10-09: setup isolation must distinguish read-only observation
-  from missing-hint writes and receipt creation/pruning. Cancellation must neither
-  leave a worker capable of deleting later nor strand checkout admission. Bounded
-  scheduling-write ownership remains implementation work, not deletion authority.
+- Implementation choice, 2026-10-09: read-only registration/hint/receipt requests
+  and atomic scheduling writes use distinct subprocess operations, with neither
+  checkout admission nor source-removal capability. Two-second request timeouts do
+  not bound aggregate setup. Lost receipt-write acknowledgments end that receipt's
+  writer; later passes resume published progress under a new receipt. This does not
+  select a final-history mechanism, cancel admitted removal, or bound inline lock
+  discovery. Interrupted writes may leave administrative temporaries; retained-root
+  artifact reclamation remains a follow-up.

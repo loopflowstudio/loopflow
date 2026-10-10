@@ -903,21 +903,17 @@ fn checkout_attempts(
     registered: &HashSet<PathBuf>,
 ) -> OpsResult<HashMap<PathBuf, (PathBuf, i64)>> {
     let common = git_directory(repo, "--git-common-dir")?;
-    let admins: Vec<PathBuf> = io::read(io::Read::Registrations(common.clone()))?;
-    let mut observed = Vec::new();
-    for (admin, primary) in std::iter::once((common, Some(repo.to_path_buf())))
-        .chain(admins.into_iter().map(|admin| (admin, None)))
-    {
-        match io::read::<io::Attempt>(io::Read::Attempt { admin, primary }) {
-            Ok(attempt) if registered.contains(&attempt.path) => observed.push(attempt),
-            Ok(_) => {}
-            Err(error) => {
-                tracing::warn!(%error, "cleanup registration hint observation unavailable")
-            }
-        }
-    }
+    let admins: Vec<PathBuf> = io::read(io::Read::Registrations(common))?;
     let mut attempts = HashMap::new();
-    for attempt in observed {
+    for admin in admins {
+        let attempt = match io::read::<io::Attempt>(io::Read::Attempt(admin)) {
+            Ok(attempt) if registered.contains(&attempt.path) => attempt,
+            Ok(_) => continue,
+            Err(error) => {
+                tracing::warn!(%error, "cleanup registration hint observation unavailable");
+                continue;
+            }
+        };
         let at = match attempt.at {
             Some(at) => at,
             None => {
@@ -953,6 +949,10 @@ fn collect_pass(
     }
     let now = chrono::Utc::now().timestamp();
     let mut registered = list_porcelain(repo)?;
+    // Primary checkouts are never candidates. Keep their preview explanation,
+    // but do not spend retry slots or create scheduling hints for them.
+    let primary = normalized(repo);
+    registered.retain(|(path, _)| *path != primary);
     let paths: HashSet<_> = registered.iter().map(|(path, _)| path.clone()).collect();
     let attempts = checkout_attempts(repo, &paths)?;
     let full = progress.full_scan_started.is_some()
@@ -1227,7 +1227,6 @@ mod tests {
 
     #[tokio::test]
     async fn cleanup_collection_passes_advance_past_slow_candidates_and_reconcile_hourly() {
-        use std::os::unix::fs::PermissionsExt;
         use std::time::Duration;
         let _guard = crate::journal::TestLedgerGuard::new();
         let external = ExternalInspection::idle();
@@ -1244,13 +1243,7 @@ mod tests {
             .unwrap();
         // Both a blocked and an eligible candidate outlast admission. The former
         // must yield its place; the latter must finish its admitted removal.
-        let real_git = std::env::split_paths(&external.previous_path)
-            .map(|path| path.join("git"))
-            .find(|path| path.is_file())
-            .unwrap();
-        let script = external._directory.path().join("git");
-        std::fs::write(&script, format!("#!/bin/sh\nif {{ [ \"$PWD\" = '{}' ] || [ \"$PWD\" = '{}' ]; }} && [ \"$1\" = status ]; then sleep 0.3; fi\nexec '{}' \"$@\"\n", slow.display(), eligible[1].display(), real_git.display())).unwrap();
-        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        external.wrap_git(&format!("if {{ [ \"$PWD\" = '{}' ] || [ \"$PWD\" = '{}' ]; }} && [ \"$1\" = status ]; then sleep 0.3; fi", slow.display(), eligible[1].display()));
         let budget = CleanupBudget {
             removals: 1,
             admission_time: Duration::from_millis(200),
@@ -1268,11 +1261,7 @@ mod tests {
         assert!(slow.join("unfinished").exists());
         assert!(unowned.exists());
         // Finish the full scan, then cheap ticks inspect settled owners only.
-        let mut receipt = crate::ops::cron::cleanup::CleanupReceipt::begin(
-            &store.sqlite,
-            &super::main_repo_root(repo.path()).unwrap(),
-        )
-        .unwrap();
+        let mut receipt = begin_receipt(&store, &repo);
         let mut progress = receipt.progress();
         super::collect_pass(
             &store,
@@ -1348,6 +1337,18 @@ mod tests {
         }
     }
 
+    fn begin_receipt(
+        store: &SharedStore,
+        repo: &TestRepo,
+    ) -> crate::ops::cron::cleanup::CleanupReceipt {
+        // Use maintenance's canonical repository key, not the fixture's alias.
+        crate::ops::cron::cleanup::CleanupReceipt::begin(
+            &store.sqlite,
+            &super::main_repo_root(repo.path()).unwrap(),
+        )
+        .unwrap()
+    }
+
     fn fifo(path: &Path) {
         assert!(std::process::Command::new("mkfifo")
             .arg(path)
@@ -1368,6 +1369,29 @@ mod tests {
             Some(libc::ENXIO),
             "timed-out worker still reads the FIFO"
         );
+    }
+
+    #[tokio::test]
+    async fn cleanup_setup_leaves_primary_out_of_retry_scheduling() {
+        let _guard = crate::journal::TestLedgerGuard::new();
+        let _external = ExternalInspection::idle();
+        let (repo, _directory, store, path) = fixture().await;
+        let primary = repo.path().canonicalize().unwrap();
+        let plan = plan_cleanup(&store, repo.path()).unwrap();
+        retained(
+            plan.iter().find(|item| item.path == primary).unwrap(),
+            "primary checkout",
+        );
+
+        let report =
+            super::run_cleanup_pass(&store, repo.path(), CleanupBudget::default()).unwrap();
+        assert_eq!(report.removed, vec![path]);
+        assert!(report.planned.iter().all(|item| item.path != primary));
+        assert!(!crate::engine::git::absolute_git_dir(&primary)
+            .unwrap()
+            .join("lf-cleanup-attempt")
+            .exists());
+        assert!(primary.exists());
     }
 
     #[tokio::test]
@@ -1431,18 +1455,11 @@ mod tests {
 
     #[tokio::test]
     async fn cleanup_setup_deadlines_never_cancel_admitted_removal() {
-        use std::os::unix::fs::PermissionsExt;
         let _guard = crate::journal::TestLedgerGuard::new();
         let external = ExternalInspection::idle();
         let (repo, _directory, store, path) = fixture().await;
         let plan = super::plan_selected(&store, repo.path(), Some(&path)).unwrap();
-        let real_git = std::env::split_paths(&external.previous_path)
-            .map(|path| path.join("git"))
-            .find(|path| path.is_file())
-            .unwrap();
-        let script = external._directory.path().join("git");
-        std::fs::write(&script, format!("#!/bin/sh\nif [ \"$3\" = worktree ] && [ \"$4\" = remove ]; then sleep 3; fi\nexec '{}' \"$@\"\n", real_git.display())).unwrap();
-        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        external.wrap_git("if [ \"$3\" = worktree ] && [ \"$4\" = remove ]; then sleep 3; fi");
         let started = std::time::Instant::now();
         let report = apply_cleanup(
             &store,
@@ -1463,11 +1480,7 @@ mod tests {
         let _guard = crate::journal::TestLedgerGuard::new();
         let _external = ExternalInspection::idle();
         let (repo, _directory, store, path) = fixture().await;
-        let receipt = crate::ops::cron::cleanup::CleanupReceipt::begin(
-            &store.sqlite,
-            &super::main_repo_root(repo.path()).unwrap(),
-        )
-        .unwrap();
+        let receipt = begin_receipt(&store, &repo);
         let root = crate::ops::cron::receipt_root(&store.sqlite.home_dir().unwrap());
         let recorded = crate::ops::cron::list_cron_receipts(&root, "", None, 1)
             .unwrap()
@@ -1497,11 +1510,7 @@ mod tests {
     async fn cleanup_setup_receipt_interruption_resumes_published_progress() {
         let _guard = crate::journal::TestLedgerGuard::new();
         let (repo, directory, store, path) = fixture().await;
-        let mut receipt = crate::ops::cron::cleanup::CleanupReceipt::begin(
-            &store.sqlite,
-            &super::main_repo_root(repo.path()).unwrap(),
-        )
-        .unwrap();
+        let mut receipt = begin_receipt(&store, &repo);
         let mut progress = receipt.progress();
         progress.fairness_after = Some(path.clone());
         progress.observed = 7;
@@ -1516,11 +1525,7 @@ mod tests {
         assert!(receipt
             .finish(super::CleanupProgress::initial(), None)
             .is_err());
-        let next = crate::ops::cron::cleanup::CleanupReceipt::begin(
-            &store.sqlite,
-            &super::main_repo_root(repo.path()).unwrap(),
-        )
-        .unwrap();
+        let next = begin_receipt(&store, &repo);
         let resumed = next.progress();
         assert_eq!(resumed.sequence, progress.sequence + 1);
         assert_eq!(resumed.fairness_after, progress.fairness_after);
@@ -1566,11 +1571,7 @@ mod tests {
             std::fs::create_dir(admin.join("lf-cleanup-attempt")).unwrap();
         }
         let healthy = add_settled(&repo, &directory, "zz-healthy");
-        let mut receipt = crate::ops::cron::cleanup::CleanupReceipt::begin(
-            &store.sqlite,
-            &super::main_repo_root(repo.path()).unwrap(),
-        )
-        .unwrap();
+        let mut receipt = begin_receipt(&store, &repo);
         let mut progress = receipt.progress();
         let interrupted = super::collect_pass(
             &store,
@@ -1624,17 +1625,10 @@ mod tests {
 
     #[tokio::test]
     async fn cleanup_slow_registration_read_does_not_spend_candidate_admission() {
-        use std::os::unix::fs::PermissionsExt;
         let _guard = crate::journal::TestLedgerGuard::new();
         let external = ExternalInspection::idle();
         let (repo, _directory, store, path) = fixture().await;
-        let real_git = std::env::split_paths(&external.previous_path)
-            .map(|path| path.join("git"))
-            .find(|path| path.is_file())
-            .unwrap();
-        let script = external._directory.path().join("git");
-        std::fs::write(&script, format!("#!/bin/sh\nif [ \"$1\" = worktree ] && [ \"$2\" = list ]; then sleep 0.3; fi\nexec '{}' \"$@\"\n", real_git.display())).unwrap();
-        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        external.wrap_git("if [ \"$1\" = worktree ] && [ \"$2\" = list ]; then sleep 0.3; fi");
         for _ in 0..3 {
             super::run_cleanup_pass(
                 &store,
@@ -1654,7 +1648,7 @@ mod tests {
             "slow initial reads must still admit candidates"
         );
         // A genuinely stuck registration subprocess is bounded and never authorizes deletion.
-        std::fs::write(&script, format!("#!/bin/sh\nif [ \"$1\" = worktree ] && [ \"$2\" = list ]; then sleep 30; fi\nexec '{}' \"$@\"\n", real_git.display())).unwrap();
+        external.wrap_git("if [ \"$1\" = worktree ] && [ \"$2\" = list ]; then sleep 30; fi");
         let started = std::time::Instant::now();
         assert!(super::run_cleanup_pass(&store, repo.path(), CleanupBudget::default()).is_err());
         assert!(started.elapsed() < std::time::Duration::from_secs(5));
@@ -1683,6 +1677,24 @@ mod tests {
     }
 
     impl ExternalInspection {
+        fn wrap_git(&self, script: &str) {
+            use std::os::unix::fs::PermissionsExt;
+            let real_git = std::env::split_paths(&self.previous_path)
+                .map(|path| path.join("git"))
+                .find(|path| path.is_file())
+                .unwrap();
+            let path = self._directory.path().join("git");
+            std::fs::write(
+                &path,
+                format!(
+                    "#!/bin/sh\n{script}\nexec '{}' \"$@\"\n",
+                    real_git.display()
+                ),
+            )
+            .unwrap();
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
         fn idle() -> Self {
             use std::os::unix::fs::PermissionsExt;
             let directory = tempfile::tempdir().unwrap();
@@ -1711,11 +1723,7 @@ mod tests {
         let _guard = crate::journal::TestLedgerGuard::new();
         let (repo, _directory, store, _path) = fixture().await;
         for sequence in 1..=15 {
-            let mut receipt = crate::ops::cron::cleanup::CleanupReceipt::begin(
-                &store.sqlite,
-                &super::main_repo_root(repo.path()).unwrap(),
-            )
-            .unwrap();
+            let mut receipt = begin_receipt(&store, &repo);
             let mut progress = receipt.progress();
             assert_eq!(progress.sequence, sequence);
             if sequence > 1 {

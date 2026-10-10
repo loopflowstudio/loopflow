@@ -18,14 +18,8 @@ const TIMEOUT: Duration = Duration::from_secs(2);
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) enum Read {
     Registrations(PathBuf),
-    Attempt {
-        admin: PathBuf,
-        primary: Option<PathBuf>,
-    },
-    Receipts {
-        root: PathBuf,
-        flow: String,
-    },
+    Attempt(PathBuf),
+    Receipts { root: PathBuf, flow: String },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -88,9 +82,8 @@ fn request_worker<T: DeserializeOwned>(request: Request) -> OpsResult<T> {
         .lines()
         .find_map(|line| line.strip_prefix(RESPONSE))
         .ok_or_else(|| super::error("cleanup I/O worker returned no response"))?;
-    let value: Result<serde_json::Value, String> =
-        serde_json::from_str(response).map_err(super::error)?;
-    serde_json::from_value(value.map_err(super::error)?).map_err(super::error)
+    let value: Result<T, String> = serde_json::from_str(response).map_err(super::error)?;
+    value.map_err(super::error)
 }
 
 // Outer Flow/release/Git commands may deliberately inherit exclusion fds.
@@ -171,18 +164,12 @@ fn execute(request: Request) -> OpsResult<serde_json::Value> {
             }
             serde_json::to_value(admins).map_err(super::error)
         }
-        Request::Read(Read::Attempt { admin, primary }) => {
-            let path = match primary {
-                Some(path) => path,
-                None => {
-                    let gitdir = std::fs::read_to_string(admin.join("gitdir"))?;
-                    Path::new(gitdir.trim_end_matches('\n'))
-                        .parent()
-                        .ok_or_else(|| super::error("registration has no checkout path"))?
-                        .to_path_buf()
-                }
-            };
-            let path = crate::store::canonicalize_with_missing_tail(&path).map_err(super::error)?;
+        Request::Read(Read::Attempt(admin)) => {
+            let gitdir = std::fs::read_to_string(admin.join("gitdir"))?;
+            let path = Path::new(gitdir.trim_end_matches('\n'))
+                .parent()
+                .ok_or_else(|| super::error("registration has no checkout path"))?;
+            let path = crate::store::canonicalize_with_missing_tail(path).map_err(super::error)?;
             let marker = admin.join("lf-cleanup-attempt");
             let at = match std::fs::read_to_string(&marker) {
                 Ok(value) => Some(
@@ -246,18 +233,19 @@ mod tests {
             0
         );
         let marker = directory.path().join("lf-cleanup-attempt");
+        std::fs::write(
+            directory.path().join("gitdir"),
+            directory.path().join(".git").to_str().unwrap(),
+        )
+        .unwrap();
         assert!(std::process::Command::new("mkfifo")
             .arg(&marker)
             .status()
             .unwrap()
             .success());
         let admin = directory.path().to_path_buf();
-        let worker = std::thread::spawn(move || {
-            super::read::<super::Attempt>(super::Read::Attempt {
-                primary: Some(admin.clone()),
-                admin,
-            })
-        });
+        let worker =
+            std::thread::spawn(move || super::read::<super::Attempt>(super::Read::Attempt(admin)));
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
         let writer = loop {
             match std::fs::OpenOptions::new()

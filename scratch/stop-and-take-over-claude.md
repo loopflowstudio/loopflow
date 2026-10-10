@@ -70,8 +70,10 @@ the existing harness reader and native `attach` through an authenticated local
 HTTP relay. Pending native identity reaches saved-creation readback before
 ordinary resume. Prompts and abort are fenced; answer streaming is outside
 the fence. Repeated prompt IDs refuse replay. Native reads preserve queries
-while pinning the saved working directory. Other native mutations currently
-refuse explicitly; native command/shell and manual permission UX are not proved.
+while pinning the saved working directory. Manual permission replies now share the saved-origin, no-replay writer with
+headless recovery. The native reader leaves choices pending for its UI; stale,
+foreign and repeated replies refuse. Command/shell mutations still refuse;
+rendered native permission UX is unproved.
 The public stand-in fixture covers identity recovery and client-only exit,
 not process-death orders. Retain the implemented permission recovery above.
 Startup saves the endpoint before spawn and creation intent before HTTP.
@@ -106,11 +108,15 @@ death orders. Preserve frozen authority for prompts, replies, abort and stop.
    tied to the launcher. Transport extraction must preserve original turn origins
    while accepting only the current attachment for new writes; custody is not
    write authority.
-2. **Complete OpenCode native mutation coverage.** The public connection and
-   pending-identity recovery exist. Native command/shell and manual permission
-   mutations still refuse at the relay; preserve frozen authority and saved request
-   origins when completing them. These are not accepted scope exclusions.
-   Public process-death proofs remain in step 4, distinct from creation-worker death.
+2. **Revise OpenCode command/shell dispatch before implementing it.** The pinned
+   v1.2.0 routes await execution before sending headers, unlike message/prompt_async.
+   The current relay fence would block takeover/stop until execution or timeout;
+   merely admitting these routes is unsafe. Separate proven dispatch from response
+   collection, retaining frozen authority and no replay. Native shell also omits
+   messageID; its correlation needs a supported solution. Manual permission replies
+   are implemented through the existing receipt writer, and native readers no longer
+   auto-approve. Command/shell remain required, not accepted exclusions. Public
+   process-death proofs remain in step 4, distinct from creation-worker death.
 3. **Carry common custody through new public transports.** The anonymous
    lifelines, optional launch path, endpoint-derived FIFO and `HELD_LIFELINES`
    are deleted. Codex/OpenCode public connection acquires common custody before
@@ -152,6 +158,9 @@ Codex and OpenCode transports have separate client functions. OpenCode's discard
 event-drain task is deleted: its native UI renders output while the reader retains
 history and permission recovery. GET and mutation responses share one streaming
 translation, preserving status/content type and leaving answers outside the fence.
+The native permission path reuses the existing reply writer rather than adding
+another authority or receipt format. Automatic replies are removed from native
+attachment readers; headless readers retain recovery.
 Duplicated OpenCode blocking-worker/fence/client setup is replaced by
 `with_attached_http`; creation, replies, prompts and abort retain
 one timeout and cancellation boundary. Native receipt grouping borrows messages
@@ -204,6 +213,10 @@ These contracts explain the saved creation payload and dispatch-only fence above
 Creation-worker cancellation/SIGKILL fixtures cover applied, unapplied, ambiguous
 and renamed readback without replay. The relay fixture withholds an answer across
 A → B → A, rejects stale writes, preserves attribution, then drains that answer.
+Manual permission fixtures retain a rejection's explanation and reject foreign,
+repeated and stale choices; reconnect covers headless automatic recovery and
+native pending-choice preservation. The native reply uses the pinned
+[permission route](https://github.com/anomalyco/opencode/blob/v1.2.0/packages/opencode/src/server/routes/permission.ts).
 They establish neither public process-death orders nor configured-provider behavior.
 Full protocol correction and replaced PATCH evidence:
 `b10b6ff065:scratch/stop-and-take-over-claude.md`, “Startup protocol correction”
@@ -211,4 +224,4 @@ and “Public OpenCode transport.”
 
 ## Checks
 
-Checks: `git diff --check` passes (prose-only reconciliation); prior focused build/fmt/Clippy and three isolated public-connection/relay fixtures passed before #1521; merged-code verification and Linux acceptance remain gate/CI-owned.
+Checks: `cargo check -p loopflow`, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, three focused `cargo test -p loopflow --lib` cases (native permission relay, reconnect in both approval modes, uncertain permission recovery) and `git diff --check` pass; public death-order acceptance remains unfinished and Linux acceptance CI-owned.

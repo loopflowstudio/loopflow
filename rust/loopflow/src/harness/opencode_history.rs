@@ -14,6 +14,7 @@ use crate::store::sqlite::SqliteStore;
 pub(super) struct History {
     pub(super) owner: Option<super::agent_process::AttachmentOwner>,
     requests: BTreeMap<String, Request>,
+    pub(super) native_permissions: bool,
     attention: super::attention::Attention,
 }
 
@@ -295,65 +296,101 @@ impl Snapshot {
         owner: &super::agent_process::AttachmentOwner,
     ) -> Result<()> {
         for permission in &self.pending {
-            let id = permission["id"]
-                .as_str()
-                .ok_or_else(|| anyhow::anyhow!("OpenCode permission has no identity"))?;
-            let assistant = permission["tool"]["messageID"].as_str().ok_or_else(|| {
-                anyhow::anyhow!("OpenCode permission has no originating assistant message")
-            })?;
-            let request = self
-                .messages
-                .iter()
-                .find(|message| message["info"]["id"] == assistant)
-                .and_then(|message| message["info"]["parentID"].as_str())
-                .ok_or_else(|| anyhow::anyhow!("OpenCode permission has no originating request"))?;
-            let (store, session, attachment) = owner;
-            if !store
-                .session_request(session, thread, request)?
-                .is_some_and(|(origin, _)| origin.agent_process_id == attachment.agent_process_id)
-            {
-                return Err(anyhow::anyhow!(
-                    "OpenCode permission belongs to an unselected request"
-                ));
-            }
-            let owner = owner.clone();
-            let endpoint = endpoint.to_string();
-            let thread = thread.clone();
-            let id = id.to_string();
-            let request = request.to_string();
-            with_attached_http(owner, move |(store, session, _), client| {
-                let first_attempt =
-                    store.record_session_permission_reply(session, &thread, &id, &request)?;
-                if first_attempt {
-                    let response = client
-                        .post(format!("{endpoint}/permission/{id}/reply"))
-                        .json(&json!({"reply":"once"}))
-                        .send()
-                        .and_then(reqwest::blocking::Response::error_for_status);
-                    if response.is_ok() {
-                        return Ok(());
-                    }
-                }
-                // A lost response can follow acceptance. Readback may settle
-                // absence, but a still-pending permission never permits replay.
-                let pending: Vec<Value> = client
-                    .get(format!("{endpoint}/permission"))
-                    .send()
-                    .and_then(reqwest::blocking::Response::error_for_status)
-                    .and_then(|response| response.json())
-                    .context("OpenCode permission reply readback")?;
-                if pending.iter().any(|permission| {
-                    permission["sessionID"] == thread.as_str() && permission["id"] == id
-                }) {
-                    return Err(anyhow!(
-                        "OpenCode permission {id} reply is uncertain; not replaying"
-                    ));
-                }
-                Ok(())
-            })
-            .await?;
+            self.reply_permission(endpoint, thread, owner, permission, json!({"reply":"once"}))
+                .await?;
         }
         Ok(())
+    }
+
+    pub(super) async fn reply_native_permission(
+        &self,
+        endpoint: &str,
+        thread: &AgentSessionId,
+        owner: &super::agent_process::AttachmentOwner,
+        id: &str,
+        payload: Value,
+    ) -> Result<()> {
+        anyhow::ensure!(
+            matches!(
+                payload["reply"].as_str(),
+                Some("once" | "always" | "reject")
+            ),
+            "Invalid native permission reply"
+        );
+        let permission = self
+            .pending
+            .iter()
+            .find(|permission| permission["id"] == id)
+            .ok_or_else(|| anyhow!("Permission is not pending in this conversation"))?;
+        self.reply_permission(endpoint, thread, owner, permission, payload)
+            .await
+    }
+
+    async fn reply_permission(
+        &self,
+        endpoint: &str,
+        thread: &AgentSessionId,
+        owner: &super::agent_process::AttachmentOwner,
+        permission: &Value,
+        payload: Value,
+    ) -> Result<()> {
+        let id = permission["id"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("OpenCode permission has no identity"))?;
+        let assistant = permission["tool"]["messageID"].as_str().ok_or_else(|| {
+            anyhow::anyhow!("OpenCode permission has no originating assistant message")
+        })?;
+        let request = self
+            .messages
+            .iter()
+            .find(|message| message["info"]["id"] == assistant)
+            .and_then(|message| message["info"]["parentID"].as_str())
+            .ok_or_else(|| anyhow::anyhow!("OpenCode permission has no originating request"))?;
+        let (store, session, attachment) = owner;
+        if !store
+            .session_request(session, thread, request)?
+            .is_some_and(|(origin, _)| origin.agent_process_id == attachment.agent_process_id)
+        {
+            return Err(anyhow::anyhow!(
+                "OpenCode permission belongs to an unselected request"
+            ));
+        }
+        let owner = owner.clone();
+        let endpoint = endpoint.to_string();
+        let thread = thread.clone();
+        let id = id.to_string();
+        let request = request.to_string();
+        with_attached_http(owner, move |(store, session, _), client| {
+            let first_attempt =
+                store.record_session_permission_reply(session, &thread, &id, &request)?;
+            if first_attempt {
+                let response = client
+                    .post(format!("{endpoint}/permission/{id}/reply"))
+                    .json(&payload)
+                    .send()
+                    .and_then(reqwest::blocking::Response::error_for_status);
+                if response.is_ok() {
+                    return Ok(());
+                }
+            }
+            // A lost response can follow acceptance. Readback may settle
+            // absence, but a still-pending permission never permits replay.
+            let pending: Vec<Value> = client
+                .get(format!("{endpoint}/permission"))
+                .send()
+                .and_then(reqwest::blocking::Response::error_for_status)
+                .and_then(|response| response.json())
+                .context("OpenCode permission reply readback")?;
+            if pending.iter().any(|permission| {
+                permission["sessionID"] == thread.as_str() && permission["id"] == id
+            }) {
+                return Err(anyhow!(
+                    "OpenCode permission {id} reply is uncertain; not replaying"
+                ));
+            }
+            Ok(())
+        })
+        .await
     }
 }
 

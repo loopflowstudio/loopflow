@@ -96,11 +96,24 @@ impl OpenCodeHarness {
         Ok(request)
     }
 
+    /// The attached native UI owns approval; this reader only retains history.
+    pub(crate) fn use_native_permissions(&mut self) {
+        self.history
+            .lock()
+            .expect("OpenCode history lock poisoned")
+            .native_permissions = true;
+    }
+
     async fn start_inner(&mut self, config: &AgentConfig) -> Result<()> {
         let owner = super::agent_process::open_owner(config.session_attachment.as_ref())?;
-        self.history = Arc::new(Mutex::new(opencode_history::History::new(Some(
-            owner.clone(),
-        ))));
+        let native_permissions = self
+            .history
+            .lock()
+            .expect("OpenCode history lock poisoned")
+            .native_permissions;
+        let mut history = opencode_history::History::new(Some(owner.clone()));
+        history.native_permissions = native_permissions;
+        self.history = Arc::new(Mutex::new(history));
         let (store, session, attachment) = &owner;
         let endpoint = store.agent_process_endpoint(session)?;
         let base_url = if let Some(endpoint) = endpoint {
@@ -406,7 +419,13 @@ async fn observe_native_messages(
                     .is_some_and(|request| history.admitted(request))
             })
             .collect();
-        (events, current_messages, history.owner()?)
+        (
+            events,
+            current_messages,
+            (!history.native_permissions)
+                .then(|| history.owner())
+                .transpose()?,
+        )
     };
     // Emit native-correlated output between start and completion, even when
     // a snapshot gets ahead of queued SSE deltas. Empty snapshots do not idle
@@ -429,9 +448,12 @@ async fn observe_native_messages(
         }
         let _ = event_tx.send(event);
     }
-    snapshot
-        .reply_pending_permissions(base_url, session, &owner)
-        .await
+    if let Some(owner) = owner {
+        snapshot
+            .reply_pending_permissions(base_url, session, &owner)
+            .await?;
+    }
+    Ok(())
 }
 
 #[async_trait]
@@ -1103,8 +1125,13 @@ mod tests {
     }
 
     #[tokio::test]
-    #[allow(clippy::await_holding_lock)] // Isolate the disposable store selection.
     async fn reconnect_recovers_pending_input_without_spawning_or_replaying() {
+        reconnect_with_permissions(false).await;
+        reconnect_with_permissions(true).await;
+    }
+
+    #[allow(clippy::await_holding_lock)] // Isolate the disposable store selection.
+    async fn reconnect_with_permissions(native_permissions: bool) {
         let _lock = crate::journal::test_env_lock();
         let _ambient = crate::test_ambient::EnvGuard::new();
         let original_path = std::env::var_os("PATH").unwrap_or_default();
@@ -1273,6 +1300,9 @@ mod tests {
         .unwrap();
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mut current = OpenCodeHarness::new(tx, ApprovalPolicy::AutoApprove);
+        if native_permissions {
+            current.use_native_permissions();
+        }
         let config = AgentConfig {
             session_attachment: Some(("opencode".into(), replacement.clone())),
             ..Default::default()
@@ -1323,7 +1353,11 @@ mod tests {
                     || request.starts_with("POST /permission/pending/reply ")),
             "recovery must not replay input or reconfigure the server"
         );
-        assert!(!permission_pending.load(Ordering::SeqCst));
+        assert_eq!(
+            permission_pending.load(Ordering::SeqCst),
+            native_permissions,
+            "native attachment must leave the permission for its UI"
+        );
         assert_eq!(
             store.agent_process_identity("opencode").unwrap(),
             Some((pid, birth))

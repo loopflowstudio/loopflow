@@ -130,9 +130,11 @@ Runtime settlement alone does not establish takeover safety. Public OpenCode
 connection reuses the saved server, including recovery before native identity was
 saved. Its native TUI uses an authenticated local HTTP relay: prompts and abort
 hold the frozen attachment fence through dispatch, not through streamed answers.
-Repeated prompt identities refuse replay. Reads retain native streaming; other
-mutations refuse explicitly. The existing headless reader retains history and
-permission recovery. Client exit settles only its attachment, not the provider.
+Repeated prompt identities refuse replay. Native permission choices use the same
+saved-origin and no-replay writer as headless recovery; their reader leaves pending
+choices for the native UI instead of automatically approving. Reads retain native
+streaming; command/shell and other mutations still refuse explicitly. Client exit
+settles only its attachment, not the provider.
 Claude still lacks launcher-independent pipes and public live connection.
 OpenCode saves request IDs and frozen origins in Session history before HTTP
 submission. Native receipts recover pending correlation after launcher loss;

@@ -25,3 +25,11 @@ than bypassing the fence. Full native command/shell and manual permission UX
 remain unproved, not accepted exclusions. The pinned native prompt route streams
 headers before generation, so only dispatch holds the fence; the answer drains
 outside it. Claude's separate transport proposal remains unchanged.
+
+2026-10-10: pinned OpenCode v1.2.0 command/shell routes return headers only after
+execution, unlike message/prompt_async. Extending the current dispatch fence to
+those routes would hold takeover/stop through execution (or the ten-second timeout).
+Do not extend that path. Remaining design must separate proven request dispatch
+from response collection without permitting stale dispatch or replay; shell's
+native client also omits messageID. Manual permission replies are independent:
+the native UI owns choices while its history reader does not auto-approve.

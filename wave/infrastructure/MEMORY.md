@@ -247,8 +247,9 @@ Missing/ambiguous identity readback stays uncertain.
 `07529ac3d`: creation-worker death/readback without replay.
 `b10b6ff065`: OpenCode identity recovery/fenced relay; answers stream outside
 the fence. `9df773fa3` separates clients from shared attachment ownership.
-Public dispatch now admits pending OpenCode identity, but excludes Claude.
-Death orders unproved; Claude transport remains launcher-owned.
+Public OpenCode admits pending identity and fenced manual permissions; Claude
+transport remains launcher-owned. Command/shell await headers after execution:
+the prompt dispatch fence cannot be reused. Public death orders remain unproved.
 Plan: `scratch/stop-and-take-over-claude.md`.
 
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)

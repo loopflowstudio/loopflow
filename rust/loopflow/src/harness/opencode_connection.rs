@@ -81,6 +81,29 @@ impl OpenCodeConnection {
                 .await?;
             return stream_response(response);
         }
+        if method == Method::POST {
+            if let Some(id) = path
+                .strip_prefix("/permission/")
+                .and_then(|path| path.strip_suffix("/reply"))
+            {
+                ensure!(
+                    !id.is_empty() && !id.contains('/'),
+                    "Invalid permission identity"
+                );
+                let bytes = to_bytes(request.into_body(), 16 * 1024 * 1024).await?;
+                let payload = serde_json::from_slice(&bytes)?;
+                let snapshot = super::opencode_history::read_snapshot(
+                    &reqwest::Client::new(),
+                    &self.endpoint,
+                    &self.thread,
+                )
+                .await?;
+                snapshot
+                    .reply_native_permission(&self.endpoint, &self.thread, &self.owner, id, payload)
+                    .await?;
+                return Ok(axum::Json(true).into_response());
+            }
+        }
         let prefix = format!("/session/{}/", self.thread);
         let operation = path.strip_prefix(&prefix).unwrap_or_default();
         // Admission, deletion, global configuration and provider shutdown do not
@@ -312,6 +335,104 @@ mod tests {
             response.json::<Value>().await.unwrap(),
             json!({"result":"preserved"})
         );
+        relay.abort();
+        server.abort();
+    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn native_permissions_preserve_choice_and_refuse_foreign_repeated_and_stale_replies() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("store.db");
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        store.test_session("conversation", &crate::session_record::new_artifact_key());
+        let process = LfProcessId::new();
+        rusqlite::Connection::open(&path)
+            .unwrap()
+            .execute(
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+                [&process],
+            )
+            .unwrap();
+        let attachment = store
+            .claim_session_attachment("conversation", None, &process, false)
+            .unwrap();
+        let thread = "thread".into();
+        let origin = store
+            .session_turn_origin("conversation", &attachment)
+            .unwrap();
+        store
+            .record_session_request(&thread, "request", &origin)
+            .unwrap();
+        let replies = Arc::new(Mutex::new(Vec::<Value>::new()));
+        let server =
+            axum::Router::new()
+                .route(
+                    "/permission",
+                    axum::routing::get(|| async {
+                        Json(json!([
+                            {"id":"choice","sessionID":"thread","tool":{"messageID":"assistant"}},
+                            {"id":"stale","sessionID":"thread","tool":{"messageID":"assistant"}},
+                            {"id":"foreign","sessionID":"other","tool":{"messageID":"assistant"}}
+                        ]))
+                    }),
+                )
+                .route(
+                    "/session/thread/message",
+                    axum::routing::get(|| async {
+                        Json(json!([
+                            {"info":{"id":"assistant","sessionID":"thread","parentID":"request"}}
+                        ]))
+                    }),
+                )
+                .route(
+                    "/permission/{id}/reply",
+                    post(
+                        |State(replies): State<Arc<Mutex<Vec<Value>>>>,
+                         Json(value): Json<Value>| async move {
+                            replies.lock().await.push(value);
+                            Json(true)
+                        },
+                    ),
+                )
+                .with_state(replies.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move { axum::serve(listener, server).await.unwrap() });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let relay = tokio::spawn(
+            OpenCodeConnection {
+                owner: (store.clone(), "conversation".into(), attachment.clone()),
+                thread,
+                endpoint,
+                directory: "/fixture".into(),
+                password: "fixture".into(),
+            }
+            .serve(listener),
+        );
+        let client = reqwest::Client::new();
+        let payload = json!({"reply":"reject","message":"Keep this file unchanged"});
+        for (id, status) in [("foreign", 409), ("choice", 200), ("choice", 409)] {
+            let response = client
+                .post(format!("{url}/permission/{id}/reply"))
+                .basic_auth("opencode", Some("fixture"))
+                .json(&payload)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), status);
+        }
+        store
+            .claim_session_attachment("conversation", Some(&attachment), &process, false)
+            .unwrap();
+        let response = client
+            .post(format!("{url}/permission/stale/reply"))
+            .basic_auth("opencode", Some("fixture"))
+            .json(&json!({"reply":"always"}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 409);
+        assert_eq!(*replies.lock().await, vec![payload]);
         relay.abort();
         server.abort();
     }

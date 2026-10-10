@@ -921,6 +921,7 @@ async fn connect_opencode_client(
     let (events, _) = tokio::sync::mpsc::unbounded_channel();
     let mut harness =
         crate::harness::opencode::OpenCodeHarness::new(events, ApprovalPolicy::AutoApprove);
+    harness.use_native_permissions();
     harness.set_agent_session(thread);
     let config = crate::agent::AgentConfig {
         agent: Some("opencode".into()),

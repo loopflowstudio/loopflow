@@ -1372,6 +1372,9 @@ fn piped_task_report() -> anyhow::Result<Option<String>> {
 }
 
 fn main() -> std::process::ExitCode {
+    if let Some(code) = loopflow::ops::wt::cleanup::worker_entry() {
+        return code;
+    }
     let _measurement = loopflow::performance::ProcessMeasurement::start();
     let result = journal::with_process(run);
     let code = journal::command_exit_code(&result);

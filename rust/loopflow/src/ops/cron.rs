@@ -891,7 +891,7 @@ pub(crate) fn run_cron_recorded(
     }
     write_receipt(&root, &receipt)?;
     if spec.schedule.every_minute {
-        let _ = prune_minute_receipts(&root, &spec, &receipt.id);
+        let _ = prune_minute_receipts(&root, &spec.wave, &spec.flow, &receipt.id);
     }
     if status.success() {
         Ok(receipt)
@@ -1411,8 +1411,13 @@ const MINUTE_RECEIPTS_KEPT: usize = 10;
 const MINUTE_LOG_LIMIT: u64 = 1024 * 1024;
 
 /// Keep recent receipts plus the latest success and failure.
-fn prune_minute_receipts(root: &Path, spec: &CronSpec, current: &CronReceiptId) -> OpsResult<()> {
-    let mut receipts = read_receipts(root, &spec.wave, Some(&spec.flow))?;
+pub(crate) fn prune_minute_receipts(
+    root: &Path,
+    wave: &str,
+    flow: &str,
+    current: &CronReceiptId,
+) -> OpsResult<()> {
+    let mut receipts = read_receipts(root, wave, Some(flow))?;
     receipts.sort_by_key(|receipt| std::cmp::Reverse(receipt.started_at));
     let latest = |outcome| {
         receipts
@@ -1421,9 +1426,7 @@ fn prune_minute_receipts(root: &Path, spec: &CronSpec, current: &CronReceiptId) 
             .map(|receipt| receipt.id.clone())
     };
     let kept = [latest(CronOutcome::Succeeded), latest(CronOutcome::Failed)];
-    let dir = root
-        .join(safe_component(&spec.wave))
-        .join(safe_component(&spec.flow));
+    let dir = root.join(safe_component(wave)).join(safe_component(flow));
     for receipt in receipts.iter().skip(MINUTE_RECEIPTS_KEPT) {
         if &receipt.id == current || kept.contains(&Some(receipt.id.clone())) {
             continue;
@@ -1437,7 +1440,7 @@ fn prune_minute_receipts(root: &Path, spec: &CronSpec, current: &CronReceiptId) 
     Ok(())
 }
 
-fn write_receipt(root: &Path, receipt: &CronReceipt) -> OpsResult<()> {
+pub(crate) fn write_receipt(root: &Path, receipt: &CronReceipt) -> OpsResult<()> {
     let dir = root
         .join(safe_component(&receipt.wave))
         .join(safe_component(&receipt.flow));

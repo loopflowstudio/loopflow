@@ -2,10 +2,10 @@
 use std::path::{Path, PathBuf};
 
 use super::{
-    new_receipt, parse_schedule, prune_minute_receipts, read_receipts, receipt_root, write_receipt,
-    CronHost, CronOutcome, CronReceipt, CronSource, CronSpec, CronTargetKind,
+    new_receipt, parse_schedule, receipt_root, CronHost, CronOutcome, CronReceipt, CronSource,
+    CronSpec, CronTargetKind,
 };
-use crate::ops::wt::cleanup::CleanupProgress;
+use crate::ops::wt::cleanup::{io, CleanupProgress};
 use crate::ops::{OpsError, OpsResult};
 use crate::store::sqlite::SqliteStore;
 
@@ -13,6 +13,7 @@ use crate::store::sqlite::SqliteStore;
 pub(crate) struct CleanupReceipt {
     root: PathBuf,
     receipt: CronReceipt,
+    writable: bool,
 }
 
 impl CleanupReceipt {
@@ -40,7 +41,11 @@ impl CleanupReceipt {
             },
         };
         let root = receipt_root(&spec.host.lf_home);
-        let prior = read_receipts(&root, "", Some(&spec.flow))?
+        let receipts: Vec<CronReceipt> = io::read(io::Read::Receipts {
+            root: root.clone(),
+            flow: spec.flow.clone(),
+        })?;
+        let prior = receipts
             .into_iter()
             .filter_map(|receipt| receipt.cleanup)
             .max_by_key(|progress| progress.sequence);
@@ -48,9 +53,20 @@ impl CleanupReceipt {
         progress.sequence += 1;
         let mut receipt = new_receipt(&spec, &spec.host.machine_id, CronSource::Manual);
         receipt.cleanup = Some(progress);
-        write_receipt(&root, &receipt)?;
-        prune_minute_receipts(&root, &spec, &receipt.id)?;
-        Ok(Self { root, receipt })
+        io::schedule(io::Schedule::Receipt {
+            root: root.clone(),
+            receipt: Box::new(receipt.clone()),
+        })?;
+        io::schedule(io::Schedule::Prune {
+            root: root.clone(),
+            flow: spec.flow,
+            current: receipt.id.clone(),
+        })?;
+        Ok(Self {
+            root,
+            receipt,
+            writable: true,
+        })
     }
 
     pub(crate) fn progress(&self) -> CleanupProgress {
@@ -61,8 +77,20 @@ impl CleanupReceipt {
     }
 
     pub(crate) fn save(&mut self, progress: CleanupProgress) -> OpsResult<()> {
+        // A failed write may have committed. Never race a timed-out writer with
+        // another update to this receipt; the next pass creates a new receipt.
+        if !self.writable {
+            return Err(OpsError::Message(
+                "cleanup receipt write interrupted; retry next pass".into(),
+            ));
+        }
         self.receipt.cleanup = Some(progress);
-        write_receipt(&self.root, &self.receipt)
+        let result = io::schedule(io::Schedule::Receipt {
+            root: self.root.clone(),
+            receipt: Box::new(self.receipt.clone()),
+        });
+        self.writable = result.is_ok();
+        result
     }
 
     pub(crate) fn finish(

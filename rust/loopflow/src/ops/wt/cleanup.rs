@@ -1,4 +1,7 @@
 //! Collection is local-only. Missing facts retain a checkout, never imply abandonment.
+pub(crate) mod io;
+#[doc(hidden)]
+pub use io::worker_entry;
 use std::collections::{HashMap, HashSet};
 use std::fs::OpenOptions;
 use std::io::Read;
@@ -886,80 +889,47 @@ pub fn run_cleanup_pass(
 }
 
 fn write_attempt(marker: &Path, at: i64) -> OpsResult<()> {
-    let temporary = marker.with_extension("tmp");
-    crate::ops::cron::write_private_file(&temporary, at.to_string().as_bytes())?;
-    std::fs::rename(temporary, marker)?;
-    Ok(())
+    io::schedule(io::Schedule::Attempt {
+        marker: marker.to_path_buf(),
+        at,
+    })
 }
 
-/// Scheduling hints live with existing Git registrations, not in an independent
-/// checkout registry. They are disposable: losing one delays priority, never
-/// changes source ownership or evidence. Foreground previews do not write them.
+/// Read each registration in an isolated process. A stuck path cannot retain
+/// checkout admission or prevent observation of another registration. Reads
+/// never initialize hints; the owner explicitly admits those scheduling writes.
 fn checkout_attempts(
     repo: &Path,
     registered: &HashSet<PathBuf>,
 ) -> OpsResult<HashMap<PathBuf, (PathBuf, i64)>> {
     let common = git_directory(repo, "--git-common-dir")?;
-    let mut admins = vec![(normalized(repo), common.clone())];
-    match std::fs::read_dir(common.join("worktrees")) {
-        Ok(entries) => {
-            for entry in entries {
-                let entry = match entry {
-                    Ok(entry) => entry,
-                    Err(error) => {
-                        tracing::warn!(%error, "cleanup registration entry unavailable");
-                        continue;
-                    }
-                };
-                match entry.file_type() {
-                    Ok(kind) if kind.is_dir() => {}
-                    Ok(_) => continue,
-                    Err(error) => {
-                        tracing::warn!(%error, "cleanup registration type unavailable");
-                        continue;
-                    }
-                }
-                let admin = entry.path();
-                let Ok(gitdir) = std::fs::read_to_string(admin.join("gitdir")) else {
-                    // Incomplete/unreadable registrations are not cleanup authority.
-                    // Their listed paths retain below; healthy neighbors still run.
-                    continue;
-                };
-                if let Some(path) = Path::new(gitdir.trim_end_matches('\n')).parent() {
-                    admins.push((normalized(path), admin));
-                }
+    let admins: Vec<PathBuf> = io::read(io::Read::Registrations(common.clone()))?;
+    let mut observed = Vec::new();
+    for (admin, primary) in std::iter::once((common, Some(repo.to_path_buf())))
+        .chain(admins.into_iter().map(|admin| (admin, None)))
+    {
+        match io::read::<io::Attempt>(io::Read::Attempt { admin, primary }) {
+            Ok(attempt) if registered.contains(&attempt.path) => observed.push(attempt),
+            Ok(_) => {}
+            Err(error) => {
+                tracing::warn!(%error, "cleanup registration hint observation unavailable")
             }
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => {
-            tracing::warn!(%error, "cleanup registration hints unavailable");
         }
     }
     let mut attempts = HashMap::new();
-    for (path, admin) in admins {
-        if !registered.contains(&path) {
-            continue;
-        }
-        let marker = admin.join("lf-cleanup-attempt");
-        let at = match std::fs::read_to_string(&marker) {
-            Ok(value) => value
-                .parse::<i64>()
-                .ok()
-                .filter(|at| *at <= chrono::Utc::now().timestamp_micros())
-                .unwrap_or(0),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+    for attempt in observed {
+        let at = match attempt.at {
+            Some(at) => at,
+            None => {
                 let now = chrono::Utc::now().timestamp_micros();
-                // A hint-write failure belongs to this candidate, not the repository.
-                // Its admitted attempt below will report the failure if it persists.
-                if write_attempt(&marker, now).is_ok() {
+                if write_attempt(&attempt.marker, now).is_ok() {
                     now
                 } else {
                     0
                 }
             }
-            Err(_) => 0,
         };
-        attempts.insert(path, (marker, at));
+        attempts.insert(attempt.path, (attempt.marker, at));
     }
     Ok(attempts)
 }
@@ -1148,7 +1118,7 @@ pub(crate) async fn cleanup_path(store: &SharedStore, repo: &Path, path: &Path) 
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
     use loopflow_test_support::TestRepo;
@@ -1298,8 +1268,11 @@ mod tests {
         assert!(slow.join("unfinished").exists());
         assert!(unowned.exists());
         // Finish the full scan, then cheap ticks inspect settled owners only.
-        let mut receipt =
-            crate::ops::cron::cleanup::CleanupReceipt::begin(&store.sqlite, repo.path()).unwrap();
+        let mut receipt = crate::ops::cron::cleanup::CleanupReceipt::begin(
+            &store.sqlite,
+            &super::main_repo_root(repo.path()).unwrap(),
+        )
+        .unwrap();
         let mut progress = receipt.progress();
         super::collect_pass(
             &store,
@@ -1375,6 +1348,187 @@ mod tests {
         }
     }
 
+    fn fifo(path: &Path) {
+        assert!(std::process::Command::new("mkfifo")
+            .arg(path)
+            .status()
+            .unwrap()
+            .success());
+    }
+
+    fn assert_no_fifo_reader(path: &Path) {
+        use std::os::unix::fs::OpenOptionsExt;
+        let error = std::fs::OpenOptions::new()
+            .write(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(path)
+            .unwrap_err();
+        assert_eq!(
+            error.raw_os_error(),
+            Some(libc::ENXIO),
+            "timed-out worker still reads the FIFO"
+        );
+    }
+
+    #[tokio::test]
+    async fn cleanup_setup_stalled_read_releases_workers_and_preserves_neighbors() {
+        let _guard = crate::journal::TestLedgerGuard::new();
+        let _external = ExternalInspection::idle();
+        let (repo, directory, store, path) = fixture().await;
+        let neighbor = add_settled(&repo, &directory, "healthy-neighbor");
+        let admin = crate::engine::git::absolute_git_dir(&path).unwrap();
+        let marker = admin.join("lf-cleanup-attempt");
+        fifo(&marker);
+        let started = std::time::Instant::now();
+        let report =
+            super::run_cleanup_pass(&store, repo.path(), CleanupBudget::default()).unwrap();
+        assert!(started.elapsed() < std::time::Duration::from_secs(10));
+        assert_eq!(report.removed, vec![neighbor]);
+        assert!(path.exists());
+        assert_no_fifo_reader(&marker);
+        // The timed-out process neither owns admission nor has a continuation
+        // into deletion. Both ownership domains are immediately available.
+        drop(store.sqlite.lock_checkout(&path).unwrap());
+        drop(
+            crate::engine::git::acquire_worktree_lease(repo.path(), &path, "test after timeout")
+                .unwrap(),
+        );
+        std::fs::remove_file(&marker).unwrap();
+        assert!(path.exists());
+        let report =
+            super::run_cleanup_pass(&store, repo.path(), CleanupBudget::default()).unwrap();
+        assert_eq!(report.removed, vec![path]);
+    }
+
+    #[tokio::test]
+    async fn cleanup_setup_interrupted_hint_write_retries_without_blocking_neighbors() {
+        let _guard = crate::journal::TestLedgerGuard::new();
+        let _external = ExternalInspection::idle();
+        let (repo, directory, store, path) = fixture().await;
+        let neighbor = add_settled(&repo, &directory, "healthy-neighbor");
+        let admin = crate::engine::git::absolute_git_dir(&path).unwrap();
+        let marker = admin.join("lf-cleanup-attempt");
+        std::fs::write(&marker, "0").unwrap();
+        std::env::set_var("LF_TEST_CLEANUP_STALL_HINT", &marker);
+        let result = super::run_cleanup_pass(&store, repo.path(), CleanupBudget::default());
+        std::env::remove_var("LF_TEST_CLEANUP_STALL_HINT");
+        let report = result.unwrap();
+        assert_eq!(report.removed, vec![neighbor]);
+        retained(
+            report
+                .deferred
+                .iter()
+                .find(|decision| decision.path == path)
+                .unwrap(),
+            "scheduling unavailable",
+        );
+        assert_eq!(std::fs::read_to_string(&marker).unwrap(), "0");
+        drop(store.sqlite.lock_checkout(&path).unwrap());
+        let report =
+            super::run_cleanup_pass(&store, repo.path(), CleanupBudget::default()).unwrap();
+        assert_eq!(report.removed, vec![path]);
+    }
+
+    #[tokio::test]
+    async fn cleanup_setup_deadlines_never_cancel_admitted_removal() {
+        use std::os::unix::fs::PermissionsExt;
+        let _guard = crate::journal::TestLedgerGuard::new();
+        let external = ExternalInspection::idle();
+        let (repo, _directory, store, path) = fixture().await;
+        let plan = super::plan_selected(&store, repo.path(), Some(&path)).unwrap();
+        let real_git = std::env::split_paths(&external.previous_path)
+            .map(|path| path.join("git"))
+            .find(|path| path.is_file())
+            .unwrap();
+        let script = external._directory.path().join("git");
+        std::fs::write(&script, format!("#!/bin/sh\nif [ \"$3\" = worktree ] && [ \"$4\" = remove ]; then sleep 3; fi\nexec '{}' \"$@\"\n", real_git.display())).unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let started = std::time::Instant::now();
+        let report = apply_cleanup(
+            &store,
+            repo.path(),
+            plan,
+            CleanupBudget {
+                removals: 1,
+                admission_time: std::time::Duration::from_millis(100),
+            },
+        )
+        .unwrap();
+        assert_eq!(report.removed, vec![path], "{report:?}");
+        assert!(started.elapsed() >= std::time::Duration::from_secs(3));
+    }
+
+    #[tokio::test]
+    async fn cleanup_setup_stalled_receipt_read_does_not_strand_the_next_pass() {
+        let _guard = crate::journal::TestLedgerGuard::new();
+        let _external = ExternalInspection::idle();
+        let (repo, _directory, store, path) = fixture().await;
+        let receipt = crate::ops::cron::cleanup::CleanupReceipt::begin(
+            &store.sqlite,
+            &super::main_repo_root(repo.path()).unwrap(),
+        )
+        .unwrap();
+        let root = crate::ops::cron::receipt_root(&store.sqlite.home_dir().unwrap());
+        let recorded = crate::ops::cron::list_cron_receipts(&root, "", None, 1)
+            .unwrap()
+            .pop()
+            .unwrap();
+        let file = root
+            .join(&recorded.flow)
+            .join(format!("{}-{}.json", recorded.started_at, recorded.id));
+        let bytes = std::fs::read(&file).unwrap();
+        std::fs::remove_file(&file).unwrap();
+        fifo(&file);
+        let started = std::time::Instant::now();
+        assert!(super::run_cleanup_pass(&store, repo.path(), CleanupBudget::default()).is_err());
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+        assert!(path.exists());
+        assert_no_fifo_reader(&file);
+        drop(store.sqlite.lock_checkout(&path).unwrap());
+        std::fs::remove_file(&file).unwrap();
+        std::fs::write(&file, bytes).unwrap();
+        drop(receipt);
+        let report =
+            super::run_cleanup_pass(&store, repo.path(), CleanupBudget::default()).unwrap();
+        assert_eq!(report.removed, vec![path]);
+    }
+
+    #[tokio::test]
+    async fn cleanup_setup_receipt_interruption_resumes_published_progress() {
+        let _guard = crate::journal::TestLedgerGuard::new();
+        let (repo, directory, store, path) = fixture().await;
+        let mut receipt = crate::ops::cron::cleanup::CleanupReceipt::begin(
+            &store.sqlite,
+            &super::main_repo_root(repo.path()).unwrap(),
+        )
+        .unwrap();
+        let mut progress = receipt.progress();
+        progress.fairness_after = Some(path.clone());
+        progress.observed = 7;
+        let stall = directory.path().join("receipt-response");
+        fifo(&stall);
+        std::env::set_var("LF_TEST_CLEANUP_STALL_RECEIPT", &stall);
+        let result = receipt.save(progress.clone());
+        std::env::remove_var("LF_TEST_CLEANUP_STALL_RECEIPT");
+        assert!(result.is_err());
+        assert_no_fifo_reader(&stall);
+        // A lost acknowledgment cannot lead to a second writer for this receipt.
+        assert!(receipt
+            .finish(super::CleanupProgress::initial(), None)
+            .is_err());
+        let next = crate::ops::cron::cleanup::CleanupReceipt::begin(
+            &store.sqlite,
+            &super::main_repo_root(repo.path()).unwrap(),
+        )
+        .unwrap();
+        let resumed = next.progress();
+        assert_eq!(resumed.sequence, progress.sequence + 1);
+        assert_eq!(resumed.fairness_after, progress.fairness_after);
+        assert_eq!(resumed.observed, 7);
+        assert!(path.exists());
+        drop(store.sqlite.lock_checkout(&path).unwrap());
+    }
+
     #[tokio::test]
     async fn cleanup_unavailable_scheduling_hint_does_not_block_neighbors() {
         let _guard = crate::journal::TestLedgerGuard::new();
@@ -1412,8 +1566,11 @@ mod tests {
             std::fs::create_dir(admin.join("lf-cleanup-attempt")).unwrap();
         }
         let healthy = add_settled(&repo, &directory, "zz-healthy");
-        let mut receipt =
-            crate::ops::cron::cleanup::CleanupReceipt::begin(&store.sqlite, repo.path()).unwrap();
+        let mut receipt = crate::ops::cron::cleanup::CleanupReceipt::begin(
+            &store.sqlite,
+            &super::main_repo_root(repo.path()).unwrap(),
+        )
+        .unwrap();
         let mut progress = receipt.progress();
         let interrupted = super::collect_pass(
             &store,
@@ -1554,9 +1711,11 @@ mod tests {
         let _guard = crate::journal::TestLedgerGuard::new();
         let (repo, _directory, store, _path) = fixture().await;
         for sequence in 1..=15 {
-            let mut receipt =
-                crate::ops::cron::cleanup::CleanupReceipt::begin(&store.sqlite, repo.path())
-                    .unwrap();
+            let mut receipt = crate::ops::cron::cleanup::CleanupReceipt::begin(
+                &store.sqlite,
+                &super::main_repo_root(repo.path()).unwrap(),
+            )
+            .unwrap();
             let mut progress = receipt.progress();
             assert_eq!(progress.sequence, sequence);
             if sequence > 1 {

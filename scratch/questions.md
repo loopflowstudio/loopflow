@@ -40,7 +40,10 @@
   but replace path rotation with last-attempt timestamps in existing Git registrations
   and a fixed hourly cohort. These disposable hints never establish ownership.
   A one-removal fixture with three arrivals per tick proves older deferrals go first;
-  wall-clock rollback remains outside that proof.
+  wall-clock rollback remains outside that proof. October 9 source reconciliation
+  also identifies repeated unwritable hints as a starvation risk when they fill
+  the observation window; the existing single-failure fixture proves only local
+  isolation, not this larger progress case.
 - Implementation choice, 2026-10-09: one Session-history migration materializes raw
   references, backfilled 256 rows per tick to a fixed high-water mark. Source triggers
   maintain later appends/edits/deletes atomically. Complete coverage is required and
@@ -56,4 +59,6 @@
   known history layouts during manual previews too. That conflicts with the design's
   no-mandatory-foreground-recursive-scan constraint. Resolve the observation/cost
   contract before expanding this path or shipping; a stale negative scan is not an
-  acceptable shortcut. The current checkpoint preserves evidence but is unfinished.
+  acceptable shortcut. Cheap previews that report deferred fresh validation are
+  one unselected implementation option. Mandatory foreground traversal would need
+  an explicit change to the accepted constraint; no such change is recorded.

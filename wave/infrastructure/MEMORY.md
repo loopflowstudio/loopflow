@@ -289,21 +289,22 @@ age, remote disappearance, ignored status and completion cannot substitute.
 PR-less Tasks and unresolved follow-through retain checkouts. Compare-and-delete
 local refs; cache tags never override Session history.
 
-`c99c18972` repairs schedules before binary pruning, as Release's incident requires;
-explicit disable survives; repair failure retains old binaries. Installed proof remains.
-Disposable OS accounts isolate release reads; `LF_HOME` does not.
+Schedule repair precedes binary pruning; failure retains old binaries and disable
+survives. Installed proof remains. Release tests need disposable OS accounts.
 
-`fae554e2a`/`000811423` interleave observation/removal and rotate bounded receipt
-cursors through cheap/hourly scans. Stable-set progress proves neither oldest-first
-ordering under arrivals nor whole-pass timing. Registration repair requires an
-exact-head marker and fresh evidence; interruption is simulated.
+`713058ab3`/`dfcebffd6` replace cursors with last-attempt registration hints and
+fixed hourly cohorts. Fixtures prove slow Git setup and oldest-deferred progress
+under heavier arrivals, not whole-pass bounds or fairness with unwritable hints.
+Hints grant no deletion authority.
 
-Historical references/provider homes veto both registries, including recheck. A
-paged negative scan cannot survive symlink retargeting: retain raw references,
-cover new observations and revalidate destinations. Large histories still fail closed;
-identifier lookup proves no native transcript resume. Real-child retry and direct
-release-admission fixtures prove neither provider launch nor a release CLI writer.
-Earlier proofs: `000811423:wave/infrastructure/MEMORY.md`, this heading.
+History owns transactional raw-reference backfill and appended/changed coverage.
+Complete coverage and fresh destinations remain mandatory: cached negatives cannot
+survive symlink retargeting. Three-page collection proves no arbitrary-size final
+scan. Native traversal still conflicts with foreground cost constraints. Transcript
+discovery now reads preserved rollout bytes but proves no provider launch/resume.
+Real-child/direct-admission fixtures prove no release
+CLI writer; generated schedules prove no loaded firing (Release's incident).
+Earlier proofs: `4ac9ca4ca:wave/infrastructure/MEMORY.md`, this heading.
 Plan: `scratch/clean-up.md`.
 
 ## Project configuration and review direction (2026-10-05)

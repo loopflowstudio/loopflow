@@ -217,7 +217,9 @@ has a fixed start timestamp; settled retries remain eligible while discovery is 
 progress. Tests introduce three eligible arrivals per tick with a one-removal cap
 and prove previously deferred checkouts go first. Receipts retain constant-size
 cohort coverage and counts, with an updated Rust-only DTO fixture. Wall-clock rollback
-is not covered by this fairness proof. Previews do not write scheduling hints.
+and repeated hint-write failures are not covered by this fairness proof. The
+unavailable-hint fixture covers one failing checkout beside one healthy neighbor,
+not failures filling the 32-observation window. Previews do not write scheduling hints.
 
 ### History observation contract
 
@@ -256,28 +258,41 @@ launched; this is not a provider-resume proof.
 
 ### Remaining in this PR
 
-1. **Finish bounded observation.** Git and SQL bounds plus the slow-setup fixture
-   are implemented, but filesystem normalization, administrative hint/receipt I/O,
-   lease-discovery internals and the aggregate locked observation still lack one
-   finite bound. Receipt retention bounds normal file counts, not every stalled
-   filesystem call. Failures in initial administrative discovery can still abort
-   the repository pass. Preserve affected-path isolation and fair progress when
-   tightening these reads; never cancel an admitted destructive removal.
-2. **Scale final evidence validation.** Paginated projection and atomic appended
-   coverage are implemented. Reading the completed raw-reference set still has a
-   two-second limit, and fresh symlink resolution/native-history traversal is not
-   incremental. Very large reference/native-directory sets can remain retained.
-   Do not cache a negative filesystem result to conceal this limit. Demonstrate
-   adequate progress on measured large stores or revise the history observation
-   contract for this remaining cost. Native layout traversal currently also runs
-   in manual previews: this conflicts with the no-mandatory-foreground-recursive-scan
-   constraint and must be reconciled before shipping, without skipping fresh evidence
-   or treating a saved negative scan as authority. Dependent scan expansion stops at
-   this checkpoint. The native audit covers supported reader layouts, not arbitrary
-   provider-owned storage/archive or every filesystem alias.
+1. **Finish bounded observation and failure isolation.** Git/SQL deadlines and
+   setup-before-admission are implemented; filesystem normalization, administrative
+   hint/receipt I/O, lease discovery and aggregate locked observation remain
+   unbounded. Receipt retention bounds normal file counts, not stalled filesystem
+   calls. Initial directory-entry/type errors can still abort the repository pass.
+   Source inspection on October 9 also found a fairness hole: unreadable hints sort
+   at zero, and failed writes cannot relinquish that priority. Enough persistent
+   failures can consume every 32-observation window before a healthy neighbor is
+   admitted. This is an inferred counterexample, not a measured failure; the
+   one-bad-neighbor fixture does not cover it. Remaining implementation must isolate
+   these failures and prove healthy progress across more failures than one window,
+   while retaining failed candidates and fair retries. Never cancel an admitted
+   destructive removal.
+2. **Resolve final evidence cost without weakening preservation.** Raw-history
+   backfill now progresses across ticks; final validation does not. Every eligible
+   observation rereads the complete raw set under a two-second limit, resolves all
+   destinations and traverses native layouts; apply repeats it under admission.
+   Large reference/native-directory sets can therefore retain forever even after
+   backfill completes. Measure final-read/traversal costs separately from backfill,
+   then implement adequate progress or revise the mechanism. A cached negative
+   filesystem result is not authority. Manual previews currently traverse native
+   layouts too, violating the no-mandatory-foreground-recursive-scan constraint.
+   A cheap conservative preview with explicit deferred validation is a possible
+   approach, not implemented or selected; allowing mandatory foreground traversal
+   instead would require changing the accepted constraint. This substantial
+   observation-contract work remains before shipping, not a gate-only check.
+   Native-owner coverage is limited to supported reader layouts, not arbitrary
+   provider storage/archive or every filesystem alias.
 3. **Composed acceptance.** Native provider launch/resume, a second release CLI
    writer, full headless acceptance and regression matrix remain with gate. The
    current fixture reads a native transcript but does not launch its provider.
+   Appended/updated references and interrupted pages have projection-level proofs;
+   the collector's multi-page fixture composes symlink retargeting and eventual
+   unrelated collection. Composed arrivals/interruption remain distinct checks,
+   not claims supplied by those separate fixtures.
    Loaded OS schedule, promotion recovery, unsupported-host experience and a full
    published-upgrade exercise remain with demo. Abandoned PRs without exact-head
    disposition remain retained; no new discard authority is implied.
@@ -333,4 +348,4 @@ allocated bytes by category; observed free-space delta after collection; oldest
 eligible retention age. APFS sharing, hardlinks and concurrent writers mean
 directory sums are estimates, not guaranteed reclaimed bytes.
 
-Check: `cargo test -p loopflow --lib cleanup_` — 33 passed, including dirty-neighbor retention with malformed history; `cargo fmt`/`git diff --check` and `cargo clippy --all-targets -- -D warnings` — passed; unchanged DTO fixture result reused; full acceptance: gate; loaded-scheduler/upgrade experience: demo.
+Check: `git diff --check` — passed (prose-only reconciliation); prior `cargo test -p loopflow --lib cleanup_` (33 passed), fmt/Clippy and DTO evidence reused unchanged; full acceptance: gate; loaded-scheduler/upgrade experience: demo.

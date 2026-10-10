@@ -337,13 +337,7 @@ impl ClaudeHarness {
         Ok(())
     }
 
-    fn owner(
-        &self,
-    ) -> Result<(
-        crate::store::sqlite::SqliteStore,
-        String,
-        crate::process::SessionAttachment,
-    )> {
+    fn owner(&self) -> Result<super::agent_process::AttachmentOwner> {
         super::agent_process::open_owner(
             self.config
                 .as_ref()

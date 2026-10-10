@@ -595,11 +595,7 @@ pub struct CodexHarness {
     /// installed. The harness alone mutates it; the lifeline covers lf death.
     child_group: Option<u32>,
     agent_directory: Option<tempfile::TempDir>,
-    session_attachment: Option<(
-        crate::store::sqlite::SqliteStore,
-        String,
-        crate::process::SessionAttachment,
-    )>,
+    session_attachment: Option<super::agent_process::AttachmentOwner>,
 }
 
 impl std::fmt::Debug for CodexHarness {
@@ -989,8 +985,9 @@ impl CodexHarness {
     async fn start_inner(&mut self, launch: &AgentConfig) -> Result<()> {
         let owner = super::agent_process::open_owner(launch.session_attachment.as_ref())?;
         self.session_attachment = Some(owner.clone());
-        let connection = owner.0.session_connection(&owner.1)?;
-        let saved_thread = owner.0.session_thread(&owner.1)?;
+        let (store, session, _) = &owner;
+        let connection = store.session_connection(session)?;
+        let saved_thread = store.session_thread(session)?;
         if let Some(thread) = &saved_thread {
             if self.resume_agent_session.as_ref() != Some(thread) {
                 anyhow::bail!(

@@ -6,13 +6,11 @@ use std::sync::{Arc, Mutex};
 use anyhow::Result;
 use serde_json::{json, Value};
 
-use crate::process::SessionAttachment;
 use crate::session::SessionEventKind;
-use crate::store::sqlite::SqliteStore;
 
 #[derive(Debug)]
 pub(super) struct History {
-    pub owner: Option<(SqliteStore, String, SessionAttachment)>,
+    pub owner: Option<super::agent_process::AttachmentOwner>,
     pub requests: Arc<Mutex<HashMap<String, Option<crate::session::SessionTurnOrigin>>>>,
     pub pending: VecDeque<(AgentSessionId, String)>,
     pub attention: super::attention::Attention,

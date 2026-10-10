@@ -1,6 +1,7 @@
 //! Only the current attachment may close an AgentProcess. A replaced lf
 //! invocation may settle its own capture, not stop the new owner's provider.
 
+use crate::journal::{process_identity_evidence, ProcessIdentityEvidence};
 use crate::process::SessionAttachment;
 use crate::store::sqlite::SqliteStore;
 use crate::store::{StoreError, StoreResult};
@@ -33,14 +34,14 @@ pub(super) fn close_session_agent_process(store: &SqliteStore, session: &str) ->
     let Some((pid, started)) = agent.process.pid.zip(agent.process.os_started_at) else {
         return Ok(false);
     };
-    match crate::journal::process_identity_evidence(pid, started) {
-        crate::journal::ProcessIdentityEvidence::Dead => return Ok(true),
-        crate::journal::ProcessIdentityEvidence::Unknown => {
+    match process_identity_evidence(pid, started) {
+        ProcessIdentityEvidence::Dead => return Ok(true),
+        ProcessIdentityEvidence::Unknown => {
             return Err(StoreError::InvalidAuthority(
                 "AgentProcess OS identity is unavailable".into(),
             ))
         }
-        crate::journal::ProcessIdentityEvidence::Live => {}
+        ProcessIdentityEvidence::Live => {}
     }
     #[cfg(unix)]
     if agent.provider.as_deref() == Some("codex") && !agent.interactive {

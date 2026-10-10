@@ -423,7 +423,7 @@ LfSession's selected AgentSession. Branch-only fixtures use the typed identity.
 Earlier native-util/planning-reconnect, 16-test isolated lifecycle and typed-identity
 sync checks are retained at `e87e9d643`, this plan.
 
-Compress check: `cargo clippy -p loopflow --all-targets -- -D warnings` passes; `cargo test -p loopflow --lib` for `harness::agent_process`, `store::sqlite::processes`, `session_record::runtime`: 27 passed. Wider suites stay with gate.
+Compress check (2026-10-09, after the generation cut): the store/LfSession/attachment triple is named `AttachmentOwner`; the reaper shares one attached-invocation death judgment. No behavior change. `cargo clippy -p loopflow --all-targets -- -D warnings` passes; `cargo test -p loopflow --lib` for `harness::agent_process`, `session_record::runtime` and the Claude/OpenCode history modules: 15 passed. Wider suites stay with gate.
 
 Realign check (2026-10-09): the Task's `rg -i 'provider_pid|driver_generation|SessionDriver|engine_orphans' rust/loopflow/src` returns nothing outside migrations; `render_architecture_html.py --check` and `cargo fmt --all --check` pass after the prose repair. No suite rerun; gate owns it.
 

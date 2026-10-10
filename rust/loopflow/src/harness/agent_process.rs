@@ -1,6 +1,7 @@
 //! Launch and settle AgentProcesses in the inventory used by gates and live views.
 //! Unknown identity, duplicate PID/birth and unknown attachment life grant no signal authority.
 use crate::engine::process::terminate_process_group;
+use crate::id::ProcessLfid;
 use crate::journal::{
     process_evidence, process_identity_evidence, process_started_at, OsProcess,
     ProcessIdentityEvidence,
@@ -11,11 +12,15 @@ use crate::store::{StoreError, StoreResult};
 use anyhow::Result;
 use std::collections::{HashMap, HashSet};
 
+/// The store, LfSession and frozen attachment one invocation launches and
+/// writes under.
+pub(crate) type AttachmentOwner = (SqliteStore, String, SessionAttachment);
+
 /// Open the invocation's attachment without refreshing its authority from the
 /// store. A launch without one is refused: every AgentProcess is recorded.
 pub(super) fn open_owner(
     attachment: Option<&(String, SessionAttachment)>,
-) -> Result<(SqliteStore, String, SessionAttachment)> {
+) -> Result<AttachmentOwner> {
     let (session, attachment) = attachment
         .ok_or_else(|| anyhow::anyhow!("AgentProcess requires an admitted invocation"))?;
     Ok((
@@ -28,7 +33,7 @@ pub(super) fn open_owner(
 /// The pre-exec recorder both launch paths share: the child's PID and birth
 /// reach its record under the owner's attachment before the provider runs.
 fn record_identity(
-    (store, session, attachment): &(SqliteStore, String, SessionAttachment),
+    (store, session, attachment): &AttachmentOwner,
 ) -> impl FnOnce(u32) -> std::io::Result<()> + Send + '_ {
     move |pid| {
         let started_at = process_started_at(pid)?
@@ -45,7 +50,7 @@ fn record_identity(
 pub(super) fn spawn(
     command: tokio::process::Command,
     lifeline: Option<&std::path::Path>,
-    owner: &(SqliteStore, String, SessionAttachment),
+    owner: &AttachmentOwner,
 ) -> Result<tokio::process::Child> {
     let (store, session, attachment) = owner;
     super::dispatch::off_reactor(|| {
@@ -77,7 +82,7 @@ pub(super) fn spawn(
 /// pre-exec recording as headless launches.
 pub(crate) fn spawn_native(
     command: std::process::Command,
-    owner: &(SqliteStore, String, SessionAttachment),
+    owner: &AttachmentOwner,
 ) -> Result<std::process::Child> {
     let (store, session, attachment) = owner;
     store
@@ -99,7 +104,7 @@ pub(crate) fn spawn_native(
 /// no provider attachment; ending it must not settle the surviving provider.
 pub(crate) fn stop_native(
     child: &mut std::process::Child,
-    owner: Option<&(SqliteStore, String, SessionAttachment)>,
+    owner: Option<&AttachmentOwner>,
 ) -> Result<()> {
     let mut stop = || {
         let mut wait = || -> std::io::Result<()> {
@@ -144,6 +149,8 @@ fn reap_in(store: &SqliteStore, dry_run: bool) -> StoreResult<AgentProcessReapRe
             *counts.entry(identity).or_insert(0usize) += 1;
         }
     }
+    let dead_lf =
+        |process: &ProcessLfid| process_evidence(store, process) == ProcessIdentityEvidence::Dead;
     let mut report = AgentProcessReapReport::default();
     for agent in &agents {
         let Some((pid, start)) = agent.process.pid.zip(agent.process.os_started_at) else {
@@ -167,9 +174,7 @@ fn reap_in(store: &SqliteStore, dry_run: bool) -> StoreResult<AgentProcessReapRe
         let dead = evidence == ProcessIdentityEvidence::Dead;
         let orphaned = counts[&(pid, start)] == 1
             && !agent.interactive
-            && agent.attached_process_lfid.as_ref().is_none_or(|attached| {
-                process_evidence(store, attached) == ProcessIdentityEvidence::Dead
-            })
+            && agent.attached_process_lfid.as_ref().is_none_or(dead_lf)
             && observed
                 .as_ref()
                 .is_some_and(|process| is_agent_process(process, start, agent.provider.as_deref()));
@@ -188,13 +193,7 @@ fn reap_in(store: &SqliteStore, dry_run: bool) -> StoreResult<AgentProcessReapRe
                 }
             } else {
                 // Attachment life is sampled again beneath the transfer lock.
-                if agent
-                    .attached_process_lfid
-                    .as_ref()
-                    .is_some_and(|attached| {
-                        process_evidence(store, attached) != ProcessIdentityEvidence::Dead
-                    })
-                {
+                if !agent.attached_process_lfid.as_ref().is_none_or(dead_lf) {
                     return Err(StoreError::InvalidAuthority(
                         "attached LfProcess death is unresolved".into(),
                     ));
@@ -221,9 +220,7 @@ fn reap_in(store: &SqliteStore, dry_run: bool) -> StoreResult<AgentProcessReapRe
             continue;
         };
         if attachment.agent_process_lfid != agent.process.lfid
-            || !attachment.process_lfid.as_ref().is_some_and(|attached| {
-                process_evidence(store, attached) == ProcessIdentityEvidence::Dead
-            })
+            || !attachment.process_lfid.as_ref().is_some_and(dead_lf)
         {
             continue;
         }

@@ -567,7 +567,7 @@ fn record_interactive_opened(environment: &BTreeMap<String, String>) -> Result<(
 fn native_provider_attachment(
     command: &SessionCommand,
     environment: &BTreeMap<String, String>,
-) -> Result<(SqliteStore, String, crate::process::SessionAttachment)> {
+) -> Result<crate::harness::agent_process::AttachmentOwner> {
     let (session, attachment) = command
         .attachment
         .as_ref()

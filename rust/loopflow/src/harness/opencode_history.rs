@@ -7,13 +7,12 @@ use anyhow::Result;
 use serde_json::{json, Value};
 
 use crate::chat::types::{ConversationEvent, Lifecycle};
-use crate::process::SessionAttachment;
 use crate::session::{SessionEventKind, SessionTurnOrigin};
 use crate::store::sqlite::SqliteStore;
 
 #[derive(Debug, Default)]
 pub(super) struct History {
-    pub(super) owner: Option<(SqliteStore, String, SessionAttachment)>,
+    pub(super) owner: Option<super::agent_process::AttachmentOwner>,
     requests: BTreeMap<String, Request>,
     attention: super::attention::Attention,
 }
@@ -26,7 +25,7 @@ struct Request {
 }
 
 impl History {
-    pub(super) fn new(owner: Option<(SqliteStore, String, SessionAttachment)>) -> Self {
+    pub(super) fn new(owner: Option<super::agent_process::AttachmentOwner>) -> Self {
         Self {
             owner,
             ..Self::default()
@@ -253,7 +252,7 @@ pub(super) async fn read_messages(
 // Native submission is bounded and serialized with driver transfer. An
 // uncertain HTTP result is retained as uncertain; never submit it twice here.
 pub(super) async fn post(
-    owner: Option<(SqliteStore, String, SessionAttachment)>,
+    owner: Option<super::agent_process::AttachmentOwner>,
     url: String,
     payload: Value,
 ) -> Result<()> {

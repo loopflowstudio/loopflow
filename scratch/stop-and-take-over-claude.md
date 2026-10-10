@@ -72,32 +72,23 @@ in Claude fixtures were repaired; production schema and installed data are uncha
    It subscribes to SSE before initial message readback, recovering request origins
    without another edge or replay. New servers write stderr to a private per-AgentProcess
    file beside the FIFO; no launcher-local pipe/logger remains. Reader failure and
-   harness drop detach without stopping a reused provider; pre-exec failures retain non-start evidence. Startup reads back the saved permission rules; it may finish previously
-   unattempted setup, but never repeats an uncertain write or adopts changed configuration.
+   harness drop detach without stopping a reused provider; pre-exec failures retain non-start evidence. Reconnect preserves native permissions
+   without another setup mutation.
    Public `ops/human_session.rs::open` still dispatches live connection only for
    Codex. Replace that dispatch and preserve client-only settlement: harness reuse
    alone cannot satisfy the demo. Retain the implemented permission recovery above.
-   Startup now saves the endpoint before spawn/readiness and records creation
-   attempts in existing Session observations before fenced HTTP. Returned native
-   identity commits before permission setup. One bounded blocking writer retains
-   the fence through caller cancellation; attempts are keyed by AgentProcess,
-   not attachment. Reconnect with an uncertain creation never creates another
-   native Session. Permission setup retains its original rules and attempt;
-   readback can settle an applied write, but an unresolved write never replays.
-   Failed startup with saved reachability detaches without erasing the endpoint.
-   Loopback fixtures reopen SQLite and transfer attachment after lost creation
-   and applied/unapplied permission responses, including changed configuration
-   and stale-writer rejection. These are startup-owner proofs, not public
-   SIGKILL/takeover or actual process-death proofs. Public interruption before native identity remains open. The
-   cancellation fixture now pauses creation and permission responses after
-   acceptance, aborts the caller and races transfer through a separately opened
-   SQLite store. Transfer waits for response/receipt settlement; reopening and
-   reconnecting retain identity and original permissions without replay.
-   A lost creation response still has no recoverable native ID: retaining its
-   attempt prevents duplication but does not yet provide a usable public takeover.
-   Keep frozen ownership for recovered prompts, permission replies, abort and stop.
-   Include public recovery after HTTP acceptance but before first observation,
-   and both launcher/attacher death orders. Never resubmit uncertain input.
+   Startup saves the endpoint before spawn and creation intent before HTTP.
+   The October 10 protocol correction below removes separate permission setup:
+   creation saves/sends the original rules together with a per-AgentProcess title.
+   A lost response is recovered by exact-title native listing; zero or multiple
+   matches retain uncertainty without another create. Native title changes before
+   identity recovery remain unresolved, not permission to choose a nearby Session.
+   Attachment transfer retains the same AgentProcess and saved payload despite
+   changed configuration. Existing native conversations retain their permissions.
+   The focused fixture kills a throwaway creation worker after HTTP acceptance,
+   before response/identity persistence, reopens SQLite and recovers on takeover.
+   This is process-death startup recovery, not public attachment or both provider
+   death orders. Preserve frozen authority for prompts, replies, abort and stop.
 3. **Carry common custody through new public transports.** The anonymous
    lifelines, optional launch path, endpoint-derived FIFO and `HELD_LIFELINES`
    are deleted. Claude/OpenCode connection must acquire the existing common
@@ -130,6 +121,8 @@ anonymous/optional lifelines, endpoint-derived FIFO location,
 `HELD_LIFELINES`, and claim-before-custody in public Codex connection;
 `open_agent_session`'s unfenced startup HTTP and its helper-only creation fixtures,
 replaced by persisted startup attempts, readback and attachment-transfer proofs.
+Removed in the protocol correction: unsupported permission PATCH and its
+exclusive fixtures; saved native permissions survive on creation/reconnect.
 Duplicated OpenCode blocking-worker/fence/client setup is replaced by
 `with_attached_http`; creation, configuration, replies, prompts and abort retain
 one timeout and cancellation boundary. Native receipt grouping borrows messages
@@ -229,27 +222,27 @@ and no-replay evidence. Message projection borrows the shared snapshot instead o
 SSE mapping returns events directly after deletion of its permission side channel.
 Public takeover and the remaining deletion targets are unchanged.
 
-## Startup review (2026-10-10)
+## Startup protocol correction (2026-10-10)
 
-Endpoint persistence precedes provider spawn, making the earlier failed-startup
-stop branch unreachable for an admitted child; it is deleted. Readback needs the
-originally attempted permissions, not a new attachment's
-mutable configuration; the persisted attempt now retains those rules. Existing
-Session observations own uncertainty without a schema or another lifecycle.
-The shared HTTP worker keeps the attachment fence through the operation and its
-receipts, even if the async caller detaches. Store and transport errors retain
-their original types rather than being reclassified as invalid stored data.
-Caller-cancellation during creation and permission HTTP is covered in step 2;
-public interruption remains unproved. `cd9f78dd0` aborts the async caller while
-its blocking HTTP worker survives; it does not kill the worker's LfProcess.
-SIGKILL can lose the response and its receipt together. The saved attempt prevents
-replay but cannot recover an unknown native identity. The public death-order
-fixtures must cross this boundary, not reuse async cancellation as its proof.
-OpenCode v1.2.0's [Session schema and readback](https://github.com/anomalyco/opencode/blob/v1.2.0/packages/opencode/src/session/index.ts)
-include saved permission rules. The disposable HTTP provider now retains them.
-Release's operation-entry lesson still applies: these fixtures do not prove
-public `open`, launcher-independent Claude transport or either death order.
+The earlier permission PATCH fixture accepted a mutation the pinned provider does
+not support. OpenCode v1.2.0's [Session routes](https://github.com/anomalyco/opencode/blob/v1.2.0/packages/opencode/src/server/routes/session.ts)
+accept only title/time in PATCH; its [creation schema](https://github.com/anomalyco/opencode/blob/v1.2.0/packages/opencode/src/session/index.ts)
+accepts permissions. The separate permission writer, attempt and permissive
+PATCH fixtures are deleted. Creation now persists and sends the rules in its original payload;
+reconnect preserves existing native rules. The same saved payload supplies an exact
+correlation title for lost-response readback, without another schema or lifecycle.
+Missing, renamed or ambiguous native evidence never authorizes replay.
+
+The replaced cancellation/permission evidence and full previous plan are retained
+at `894bc61e5:scratch/stop-and-take-over-claude.md`; those simulated PATCH successes
+establish no provider support. The surviving fixture covers cancellation with a
+live blocking writer and SIGKILL of a separate throwaway creation worker before
+its response, plus lost/unapplied/ambiguous/renamed creation evidence. It reopens
+SQLite, transfers ownership, preserves AgentProcess identity and rejects the stale
+owner without creating another conversation. It does not exercise public `open`,
+provider lifeline death orders or launcher-independent Claude transport.
+Release's entry-point lesson still applies. Public transport work remains open.
 
 ## Checks
 
-Recorded at `196b57ac2`: network-isolated `cargo test --offline -p loopflow --lib harness::opencode -- --test-threads=1` passed (14 passed, 2 configured-provider tests ignored), fmt/Clippy passed; realign: `git diff --check` passed (prose only, no suite rerun); public takeover remains implementation work, Linux acceptance belongs to CI.
+Network-isolated `cargo test --offline -p loopflow --lib harness::opencode -- --test-threads=1`: 14 passed, 2 configured-provider tests ignored; lib build, fmt, all-target Clippy and `git diff --check` passed. Public takeover remains implementation work; Linux acceptance belongs to CI.

@@ -226,18 +226,19 @@ LOO-447 owns Claude/OpenCode takeover/stop; two-second removal, three orphans
 and configured-provider runs are accepted unproven.
 
 Headless launch requires attachment. AgentProcess replaces generation;
-released counters stay unread, old callers stale. Client and provider death remain
-independent. Leader death alone or failed descendant inventory grants no signal authority.
+released counters stay unread, old callers stale. Client/provider death is independent.
+Leader death or unknown descendants grants no signaling.
 `82b5d90d5` proves A → B → A rejection with stand-ins, not configured relay.
 CI: `be4a2b2af:wave/infrastructure/MEMORY.md`, this heading.
 
-LOO-447: fenced stop/abort; drop never signals. Codex takes custody before claim;
+LOO-447: fenced stop/abort; drop never signals. Codex acquires custody before claim;
 standbys cannot write. Group death releases custody; watchdog stays outside.
-OpenCode saves reachability before creation, identity before setup and attempts
-before HTTP; unknown creation identity remains unresolved. `cd9f78dd0` proves
-caller cancellation retains the fence, not process-death recovery.
-`196b57ac2` shares permission/message readback; saved origins fence replies without
-replay. Claude transport, pre-identity takeover and both public death orders remain open.
+OpenCode persists reachability and attempts before effects. v1.2.0 supports
+permissions at creation, not PATCH; prior fixtures were wrong (`894bc61e5`).
+Creation retains rules and a correlation title for no-replay identity readback.
+Missing/ambiguous matches remain uncertain.
+`196b57ac2`: ordered readback, fenced replies.
+Claude transport and public takeover remain open.
 Plan: `scratch/stop-and-take-over-claude.md`.
 
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)

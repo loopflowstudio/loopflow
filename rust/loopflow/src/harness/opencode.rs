@@ -588,9 +588,8 @@ impl Harness for OpenCodeHarness {
     }
 }
 
-/// One startup writer survives caller cancellation and holds frozen authority
-/// through HTTP and persistence. Readback can settle configuration, never repeat
-/// an uncertain native creation or permission write.
+/// Persist the creation payload before HTTP. A lost response is recovered by
+/// native readback, never by repeating creation. Reconnect preserves native rules.
 async fn prepare_agent_session(
     owner: super::agent_process::AttachmentOwner,
     base_url: String,
@@ -598,54 +597,45 @@ async fn prepare_agent_session(
     write_scope: AgentWriteScope,
 ) -> Result<AgentSessionId> {
     opencode_history::with_attached_http(owner, move |(store, session, attachment), client| {
-        let thread = if let Some(thread) = store.session_thread(session)?.or(stored) {
-            thread
-        } else {
-            let (first_attempt, _) = store.record_agent_process_startup_attempt(
-                session,
-                attachment,
-                "opencode-create",
-                &json!({}),
-            )?;
-            if !first_attempt {
-                return Err(anyhow!("OpenCode native Session creation is uncertain; not creating another conversation"));
-            }
-            let body: Value = client
-                .post(format!("{base_url}/session"))
-                .json(&json!({}))
-                .send()?
-                .error_for_status()?
-                .json()?;
-            parse_session_id(&body)
-                .ok_or_else(|| anyhow!("OpenCode creation returned no native Session identity"))?
-        };
-        // Retain identity before permission I/O: losing that response must
-        // not lose the conversation which the server already created.
-        store.record_session_connection(session, attachment, &base_url, &thread)?;
+        if let Some(thread) = store.session_thread(session)?.or(stored) {
+            store.record_session_connection(session, attachment, &base_url, &thread)?;
+            return Ok(thread);
+        }
         let mut permissions = vec![json!({"permission":"*","pattern":"*","action":"ask"})];
         if write_scope == AgentWriteScope::Worktree {
             permissions.push(json!({
                 "permission":"external_directory", "pattern":"*", "action":"deny"
             }));
         }
-        let url = format!("{base_url}/session/{thread}");
-        let observed: Value = client.get(&url).send()?.error_for_status()?.json()?;
-        let (first_attempt, permissions) = store.record_agent_process_startup_attempt(
+        let (first_attempt, payload) = store.record_agent_process_startup_attempt(
             session,
             attachment,
-            "opencode-permissions",
-            &json!(permissions),
+            "opencode-create",
+            &json!({
+                "title":format!("Loopflow {}", attachment.agent_process_id),
+                "permission":permissions,
+            }),
         )?;
-        if observed["permission"] != permissions {
-            if !first_attempt {
-                return Err(anyhow!("OpenCode permission configuration is uncertain; not replaying"));
+        let body: Value = if first_attempt {
+            client.post(format!("{base_url}/session"))
+                .json(&payload).send()?.error_for_status()?.json()?
+        } else {
+            let title = payload["title"].as_str().ok_or_else(||
+                anyhow!("OpenCode creation has no saved correlation title; identity remains uncertain"))?;
+            let mut url = reqwest::Url::parse(&format!("{base_url}/session"))?;
+            url.query_pairs_mut().append_pair("search", title);
+            let sessions: Vec<Value> = client.get(url).send()?.error_for_status()?.json()?;
+            let mut matching = sessions.into_iter().filter(|item| item["title"] == title);
+            let found = matching.next().ok_or_else(||
+                anyhow!("OpenCode native Session creation remains uncertain; not creating another conversation"))?;
+            if matching.next().is_some() {
+                return Err(anyhow!("OpenCode creation matches multiple native Sessions; identity remains uncertain"));
             }
-            client
-                .patch(&url)
-                .json(&json!({"permission":permissions}))
-                .send()?
-                .error_for_status()?;
-        }
+            found
+        };
+        let thread = parse_session_id(&body)
+            .ok_or_else(|| anyhow!("OpenCode creation returned no native Session identity"))?;
+        store.record_session_connection(session, attachment, &base_url, &thread)?;
         Ok(thread)
     })
     .await
@@ -884,14 +874,32 @@ mod tests {
     use serde_json::json;
 
     #[tokio::test]
-    async fn startup_retains_creation_and_permissions_after_cancellation_and_takeover() {
+    async fn startup_recovers_creation_without_replay_after_takeover() {
         use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+        const CHILD: &str = "LOO447_CREATION_CHILD";
+        if let Ok(database) = std::env::var(CHILD) {
+            let store =
+                crate::store::sqlite::SqliteStore::open_ephemeral(std::path::Path::new(&database))
+                    .unwrap();
+            let attachment = store.session_attachment("opencode").unwrap().unwrap();
+            let endpoint = store.agent_process_endpoint("opencode").unwrap().unwrap();
+            prepare_agent_session(
+                (store, "opencode".into(), attachment),
+                endpoint,
+                None,
+                AgentWriteScope::Configured,
+            )
+            .await
+            .unwrap();
+            panic!("parent must kill the creation worker before its response");
+        }
         for failure in [
-            "creation",
-            "permissions-applied",
-            "permissions-unapplied",
+            "lost-response",
+            "killed-creation",
+            "not-created",
+            "ambiguous",
+            "renamed",
             "cancelled-creation",
-            "cancelled-permissions",
         ] {
             let home = tempfile::tempdir().unwrap();
             let database = home.path().join("loopflow.db");
@@ -916,16 +924,14 @@ mod tests {
                 .record_agent_process_endpoint("opencode", &first, &endpoint)
                 .unwrap();
             let creations = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-            let patches = Arc::new(std::sync::atomic::AtomicUsize::new(0));
             let accepted = Arc::new(tokio::sync::Notify::new());
             let release = Arc::new(tokio::sync::Notify::new());
             let server = {
                 let accepted = accepted.clone();
                 let release = release.clone();
                 let creations = creations.clone();
-                let patches = patches.clone();
                 tokio::spawn(async move {
-                    let mut configured = false;
+                    let mut native = Value::Null;
                     loop {
                         let (socket, _) = listener.accept().await.unwrap();
                         let mut socket = BufReader::new(socket);
@@ -947,42 +953,63 @@ mod tests {
                         socket.read_exact(&mut body).await.unwrap();
                         let response = if request.starts_with("POST /session ") {
                             creations.fetch_add(1, Ordering::SeqCst);
-                            if failure == "cancelled-creation" {
+                            let payload: Value = serde_json::from_slice(&body).unwrap();
+                            assert_eq!(payload["permission"],
+                                json!([{"permission":"*","pattern":"*","action":"ask"}]));
+                            native = json!({"id":"native", "title":payload["title"], "permission":payload["permission"]});
+                            if matches!(failure, "cancelled-creation" | "killed-creation") {
                                 accepted.notify_one();
                                 release.notified().await;
-                            }
-                            if failure == "creation" { continue; }
-                            json!({"id":"native"})
-                        } else if request.starts_with("PATCH /session/native ") {
-                            patches.fetch_add(1, Ordering::SeqCst);
-                            assert_eq!(serde_json::from_slice::<Value>(&body).unwrap(),
-                                json!({"permission":[{"permission":"*","pattern":"*","action":"ask"}]}));
-                            configured = failure != "permissions-unapplied";
-                            if failure == "cancelled-permissions" {
-                                accepted.notify_one();
-                                release.notified().await;
-                            }
-                            if failure.starts_with("permissions-") {
-                                // The response is lost whether the mutation applied or not.
+                                if failure == "killed-creation" { continue; }
+                                native.clone()
+                            } else {
+                                // Lose the response after the provider applied the creation,
+                                // or before it applied anything. Neither permits replay.
                                 continue;
                             }
-                            json!({"id":"native"})
                         } else {
-                            assert!(request.starts_with("GET /session/native "));
-                            json!({"id":"native","permission":if configured {
-                                json!([{"permission":"*","pattern":"*","action":"ask"}])
-                            } else { json!([]) }})
+                            assert!(request.starts_with("GET /session?search="));
+                            match failure {
+                                "not-created" => json!([]),
+                                "ambiguous" => json!([native, {"id":"another", "title":native["title"]}]),
+                                "renamed" => json!([{ "id":"native", "title":"changed elsewhere" }]),
+                                _ => json!([native]),
+                            }
                         }.to_string();
                         socket.get_mut().write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}", response.len()).as_bytes()).await.unwrap();
                     }
                 })
             };
-            let startup = tokio::spawn(prepare_agent_session(
-                (store.clone(), "opencode".into(), first.clone()),
-                endpoint.clone(),
-                None,
-                AgentWriteScope::Configured,
-            ));
+            let startup = if failure == "killed-creation" {
+                let mut child = tokio::process::Command::new(std::env::current_exe().unwrap());
+                child.args(["--exact", "harness::opencode::tests::startup_recovers_creation_without_replay_after_takeover", "--nocapture"])
+                    .kill_on_drop(true)
+                    .env_clear().env("HOME", home.path()).env(CHILD, &database)
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null());
+                let mut child = child.spawn().unwrap();
+                let accepted = accepted.clone();
+                let release = release.clone();
+                tokio::spawn(async move {
+                    tokio::time::timeout(Duration::from_secs(10), accepted.notified())
+                        .await
+                        .unwrap();
+                    // SIGKILL the actual disposable LfProcess stand-in, including
+                    // its blocking HTTP writer; no receipt can commit afterward.
+                    child.kill().await.unwrap();
+                    child.wait().await.unwrap();
+                    release.notify_one();
+                    Err(anyhow!("creation worker killed"))
+                })
+            } else {
+                tokio::spawn(prepare_agent_session(
+                    (store.clone(), "opencode".into(), first.clone()),
+                    endpoint.clone(),
+                    None,
+                    AgentWriteScope::Configured,
+                ))
+            };
             let transferred = if failure.starts_with("cancelled-") {
                 tokio::time::timeout(Duration::from_secs(5), accepted.notified())
                     .await
@@ -1040,7 +1067,7 @@ mod tests {
             );
             assert_eq!(
                 store.session_thread("opencode").unwrap(),
-                if failure == "creation" {
+                if failure != "cancelled-creation" {
                     None
                 } else {
                     Some("native".into())
@@ -1061,10 +1088,13 @@ mod tests {
             .await;
             assert_eq!(
                 result.is_ok(),
-                failure == "permissions-applied" || failure.starts_with("cancelled-")
+                matches!(
+                    failure,
+                    "lost-response" | "cancelled-creation" | "killed-creation"
+                )
             );
             assert!(prepare_agent_session(
-                (store, "opencode".into(), first),
+                (store.clone(), "opencode".into(), first),
                 endpoint,
                 None,
                 AgentWriteScope::Configured
@@ -1073,8 +1103,12 @@ mod tests {
             .is_err());
             assert_eq!(creations.load(Ordering::SeqCst), 1);
             assert_eq!(
-                patches.load(Ordering::SeqCst),
-                usize::from(failure != "creation")
+                store.session_thread("opencode").unwrap(),
+                if result.is_ok() {
+                    Some("native".into())
+                } else {
+                    None
+                }
             );
             server.abort();
         }

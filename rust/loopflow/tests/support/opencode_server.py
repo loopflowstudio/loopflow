@@ -176,18 +176,13 @@ class Server(BaseHTTPRequestHandler):
         else:
             self._json({})
 
-    def do_PATCH(self):
-        body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
-        with LOCK:
-            SESSION_PERMISSIONS[self.path.split("/")[2]] = body["permission"]
-        self._json({})
-
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
         if self.path == "/session":
             session = "ses_" + uuid.uuid4().hex
             with LOCK:
                 sessions[session] = []
+                SESSION_PERMISSIONS[session] = body.get("permission", [])
                 _save(sessions)
             self._json({"id": session})
         elif self.path.endswith("/prompt_async"):

@@ -139,11 +139,14 @@ at reader startup and on native wake edges. Replies select saved request origins
 and retain attempts in Session observations before fenced HTTP. Lost responses
 read back pending permissions; unresolved attempts never replay after reconnect.
 The server endpoint is saved before launch/readiness, independently of native
-Session selection. Creation and permission setup retain AgentProcess-keyed
-attempts in Session observations before bounded fenced HTTP. Returned identity
-is saved before permission setup. Reconnect never repeats uncertain creation;
-permission readback uses the original saved rules, not replacement configuration.
-Public connection and process-death recovery before native identity remain unfinished.
+Session selection. Creation retains an AgentProcess-keyed attempt with its title
+and permission rules in Session observations before bounded fenced HTTP. OpenCode
+accepts these rules during creation, not through its Session PATCH route. After
+losing the response, exact-title native readback can recover the identity without
+creating another conversation. Missing or ambiguous matches remain uncertain;
+externally renamed titles cannot recover identity this way. Reconnect preserves
+native permissions rather than applying replacement configuration. Public
+connection and provider death-order proofs remain unfinished.
 
 Owned native launches use the same pre-exec recording channel under the attachment
 lock, but no headless group/watchdog setup. Failed recording prevents provider code

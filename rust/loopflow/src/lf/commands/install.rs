@@ -2251,6 +2251,27 @@ fn settle_switch(
     receipt.active_selection_committed = true;
     crate::installation::write_switch(root, receipt)?;
     crate::installation::settle_switch(root, receipt, active)?;
+    // Schedules must follow the gate before obsolete immutable binaries go away.
+    // Repair failure must not roll back a successfully settled installation.
+    let repaired = (|| -> Result<()> {
+        crate::ops::cron::repair_repository_tick_executables(
+            &crate::ops::cron::default_launch_agents_dir()?,
+            receipt
+                .target
+                .store
+                .parent()
+                .context("installed store has no home")?,
+            &crate::installation::entry_gate_path(root, &crate::installation::ArtifactRole::Cli)?,
+            &crate::ops::cron::SystemLaunchctl,
+        )?;
+        Ok(())
+    })();
+    if let Err(error) = repaired {
+        eprintln!(
+            "warning: repository schedule repair failed ({error:#}); superseded binaries retained"
+        );
+        return Ok(());
+    }
     prune_superseded_artifacts(root, &lf_bin_dir(), active);
     Ok(())
 }

@@ -360,6 +360,55 @@ fn ensure_repository_tick_locked(
     Ok(())
 }
 
+/// Upgrade existing declarations without changing their repository, Machine,
+/// cadence, activation time, or explicit disable choice.
+pub(crate) fn repair_repository_tick_executables(
+    agents: &Path,
+    home: &Path,
+    gate: &Path,
+    launchctl: &dyn Launchctl,
+) -> OpsResult<()> {
+    if !agents.try_exists()? {
+        return Ok(());
+    }
+    let mut failures = Vec::new();
+    for entry in fs::read_dir(agents)? {
+        let path = entry?.path();
+        if !path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(is_cron_plist)
+        {
+            continue;
+        }
+        let result = (|| {
+            let spec = read_cron_spec(&path)?;
+            if spec.target_kind != CronTargetKind::Repository || spec.host.lf_home != home {
+                return Ok(());
+            }
+            let _lock = lock_repository_tick(&spec)?;
+            // Another sync may have changed the declaration while acquiring admission.
+            let mut spec = read_cron_spec(&path)?;
+            if spec.target_kind != CronTargetKind::Repository
+                || spec.host.lf_home != home
+                || repository_tick_disabled(home, &spec.flow)?
+            {
+                return Ok(());
+            }
+            spec.lf_path = gate.to_path_buf();
+            ensure_repository_tick_locked(agents, &spec, launchctl)?;
+            Ok::<_, OpsError>(())
+        })();
+        if let Err(error) = result {
+            failures.push(format!("{}: {error}", path.display()));
+        }
+    }
+    if !failures.is_empty() {
+        return Err(OpsError::Message(failures.join("; ")));
+    }
+    Ok(())
+}
+
 /// First work and later ordinary writes repair scheduling without an agent.
 /// Experimental binaries must never install themselves in the login session.
 pub fn maintain_repository_tick(repo: &Path) -> OpsResult<()> {
@@ -2071,6 +2120,56 @@ mod tests {
         assert!(list_crons(&agents, &launchctl).unwrap().is_empty());
         super::sync_repository_tick(&agents, &cron, false, &launchctl).unwrap();
         assert!(list_crons(&agents, &launchctl).unwrap()[0].loaded);
+    }
+
+    #[test]
+    fn installation_repairs_only_its_repository_ticks_without_reactivation() {
+        let temp = tempfile::tempdir().unwrap();
+        let agents = temp.path().join("agents");
+        let launchctl = FakeLaunchctl::default();
+        let mut cron = spec(temp.path(), Path::new("/old/immutable/lf"));
+        cron.wave.clear();
+        cron.target_kind = CronTargetKind::Repository;
+        cron.flow = super::repository_cron_key(&cron.working_directory, &cron.host.machine_id);
+        fs::create_dir_all(&cron.working_directory).unwrap();
+        let prior = add_cron(&agents, &cron, &launchctl).unwrap();
+        let mut disabled = cron.clone();
+        disabled.flow = "disabled".into();
+        add_cron(&agents, &disabled, &launchctl).unwrap();
+        // Persisted disable still wins if unloading previously failed.
+        let choice = super::repository_disable_path(&disabled.host.lf_home, &disabled.flow);
+        fs::create_dir_all(choice.parent().unwrap()).unwrap();
+        fs::write(choice, "disabled\n").unwrap();
+        let mut foreign = cron.clone();
+        foreign.flow = "foreign".into();
+        foreign.host.lf_home = temp.path().join("other-home");
+        add_cron(&agents, &foreign, &launchctl).unwrap();
+        let gate = Path::new("/installed/gate/lf");
+        for _ in 0..2 {
+            super::repair_repository_tick_executables(
+                &agents,
+                &cron.host.lf_home,
+                gate,
+                &launchctl,
+            )
+            .unwrap();
+            let rows = list_crons(&agents, &launchctl).unwrap();
+            let repaired = rows.iter().find(|row| row.flow == cron.flow).unwrap();
+            assert_eq!(repaired.lf_path, gate);
+            assert_eq!(repaired.activated_at, prior.activated_at);
+            assert_eq!(repaired.schedule, prior.schedule);
+            assert_eq!(repaired.machine_id, prior.machine_id);
+            assert_eq!(repaired.repo, prior.repo);
+            for untouched in [&disabled, &foreign] {
+                assert_eq!(
+                    rows.iter()
+                        .find(|row| row.flow == untouched.flow)
+                        .unwrap()
+                        .lf_path,
+                    untouched.lf_path
+                );
+            }
+        }
     }
 
     #[test]

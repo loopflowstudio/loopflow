@@ -109,7 +109,11 @@ fn release_registry() -> OpsResult<Option<SqliteStore>> {
 }
 
 fn evidence_roots(store: &SqliteStore) -> OpsResult<Vec<PathBuf>> {
-    let mut roots = vec![crate::store::lf_home_dir()];
+    let mut roots = vec![
+        crate::store::lf_home_dir(),
+        store.home_dir().map_err(error)?,
+    ];
+    roots.extend(store.session_evidence_paths().map_err(error)?);
     if !cfg!(test) {
         roots.push(
             crate::store::production_database_path()
@@ -133,7 +137,10 @@ fn evidence_roots(store: &SqliteStore) -> OpsResult<Vec<PathBuf>> {
             .into_iter()
             .filter_map(|account| account.home),
     );
-    Ok(roots.into_iter().map(|path| normalized(&path)).collect())
+    roots
+        .into_iter()
+        .map(|path| crate::store::canonicalize_with_missing_tail(&path).map_err(error))
+        .collect()
 }
 
 /// The selected and release registries enforce the same retention policy. Read
@@ -464,6 +471,27 @@ pub fn plan_cleanup(store: &SharedStore, repo: &Path) -> OpsResult<Vec<CleanupDe
     plan_selected(store, repo, None, None)
 }
 
+/// Allocated bytes, without following symlinks or crossing filesystems. A
+/// partial traversal is unknown, never a misleading zero or partial sum.
+fn estimate_bytes(path: &Path, deadline: Instant) -> Option<u64> {
+    let remaining = deadline.checked_duration_since(Instant::now())?;
+    let output = crate::ops::read_retry::bounded_output(
+        Command::new("du").args(["-skx"]).arg(path),
+        remaining.min(Duration::from_secs(1)),
+    )
+    .ok()?;
+    if !output.stderr.is_empty() {
+        return None;
+    }
+    String::from_utf8(output.stdout)
+        .ok()?
+        .split_whitespace()
+        .next()?
+        .parse::<u64>()
+        .ok()?
+        .checked_mul(1024)
+}
+
 fn plan_selected(
     store: &SharedStore,
     repo: &Path,
@@ -510,6 +538,11 @@ fn plan_selected(
                 Err(error) => retain(&mut decision, format!("observation unavailable: {error}")),
             }
         }
+        if decision.action == CleanupAction::RemoveCheckout {
+            // Only finite background passes measure; previews and lifecycle
+            // callers never acquire a foreground recursive scanning cost.
+            decision.estimated_bytes = deadline.and_then(|at| estimate_bytes(&decision.path, at));
+        }
         plan.push(decision);
     }
     Ok(plan)
@@ -540,14 +573,27 @@ pub fn apply_cleanup(
             continue;
         }
         let result = (|| {
-            let _admission = store.sqlite.lock_checkout(&decision.path).map_err(error)?;
-            let release = release_registry()?;
-            let _release_admission = release
-                .as_ref()
-                .map(|release| release.lock_checkout(&decision.path))
-                .transpose()
-                .map_err(error)?;
-            let lease = acquire_worktree_lease(&repo, &decision.path, "checkout cleanup")?;
+            let admission = (|| {
+                let local = store.sqlite.lock_checkout(&decision.path).map_err(error)?;
+                let release = release_registry()?;
+                let release = release
+                    .as_ref()
+                    .map(|release| release.lock_checkout(&decision.path))
+                    .transpose()
+                    .map_err(error)?;
+                let lease = acquire_worktree_lease(&repo, &decision.path, "checkout cleanup")?;
+                Ok::<_, OpsError>((local, release, lease))
+            })();
+            let (_admission, _release_admission, lease) = match admission {
+                Ok(locks) => locks,
+                Err(error) => {
+                    retain(
+                        &mut decision,
+                        format!("cleanup admission unavailable: {error}"),
+                    );
+                    return Ok(false);
+                }
+            };
             let expected_head = decision.observed_head.clone();
             let expected_branch = decision.branch.clone();
             // Refresh all authority and filesystem facts under both locks.
@@ -743,6 +789,22 @@ mod tests {
         assert!(
             matches!(&decision.action, CleanupAction::Retain(message) if message.contains(reason)),
             "{decision:?}"
+        );
+    }
+
+    #[test]
+    fn cleanup_size_estimate_is_unknown_on_deadline_or_failed_observation() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("payload"), vec![1_u8; 8192]).unwrap();
+        let deadline = || std::time::Instant::now() + std::time::Duration::from_secs(1);
+        assert!(super::estimate_bytes(dir.path(), deadline()).unwrap() >= 8192);
+        assert_eq!(
+            super::estimate_bytes(dir.path(), std::time::Instant::now()),
+            None
+        );
+        assert_eq!(
+            super::estimate_bytes(&dir.path().join("absent"), deadline()),
+            None
         );
     }
 
@@ -1033,7 +1095,8 @@ mod tests {
             CleanupBudget::default(),
         )
         .unwrap();
-        assert_eq!(report.failed.len(), 1);
+        assert!(report.failed.is_empty());
+        retained(&report.deferred[0], "admission unavailable");
         assert!(path.exists());
         drop(lease);
         let admission = store.sqlite.lock_checkout(&path).unwrap();
@@ -1044,7 +1107,8 @@ mod tests {
             CleanupBudget::default(),
         )
         .unwrap();
-        assert_eq!(report.failed.len(), 1);
+        assert!(report.failed.is_empty());
+        retained(&report.deferred[0], "admission unavailable");
         assert!(path.exists());
         drop(admission);
         git(
@@ -1083,6 +1147,49 @@ mod tests {
             std::fs::read_to_string(home.join("history.jsonl")).unwrap(),
             "retained conversation"
         );
+    }
+
+    #[tokio::test]
+    async fn cleanup_preserves_historical_payloads_even_after_a_new_capture() {
+        let _guard = crate::journal::TestLedgerGuard::new();
+        let _external = ExternalInspection::idle();
+        let (repo, directory, store, path) = fixture().await;
+        let initial = decision(&store, &repo, &path);
+        let cache = path.join("target");
+        std::fs::create_dir_all(&cache).unwrap();
+        std::fs::write(
+            cache.join("CACHEDIR.TAG"),
+            "Signature: 8a477f597d28d172789f06886806bc55",
+        )
+        .unwrap();
+        let payload = cache.join("past-conversation.jsonl");
+        std::fs::write(&payload, "retained provider history\n").unwrap();
+        let conn = rusqlite::Connection::open(directory.path().join("store.db")).unwrap();
+        conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd) VALUES('past','past','generated',1,1,?1)", [repo.path().to_str().unwrap()]).unwrap();
+        for input in [
+            "00000000000000000000000000000001",
+            "00000000000000000000000000000002",
+        ] {
+            conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES('past','captured',?1,1,'{}')", [input]).unwrap();
+        }
+        conn.execute(
+            "UPDATE agent_sessions SET current_capture=last_insert_rowid() WHERE id='past'",
+            [],
+        )
+        .unwrap();
+        let evidence = serde_json::json!({"input_id":"00000000000000000000000000000001", "source":"runs", "evidence":{"provider_session_path":payload}});
+        conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES('past','observed','00000000000000000000000000000001:runs',1,?1)", [evidence.to_string()]).unwrap();
+        retained(&decision(&store, &repo, &path), "Session evidence");
+        // Evidence recorded after planning must also veto the destructive recheck.
+        let report =
+            apply_cleanup(&store, repo.path(), vec![initial], CleanupBudget::default()).unwrap();
+        assert!(report.removed.is_empty());
+        retained(&report.deferred[0], "Session evidence");
+        assert_eq!(
+            std::fs::read_to_string(&payload).unwrap(),
+            "retained provider history\n"
+        );
+        assert!(store.sqlite.session_history("past", 0, 0).is_ok());
     }
 
     #[tokio::test]

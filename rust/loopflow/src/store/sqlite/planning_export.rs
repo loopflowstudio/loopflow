@@ -535,11 +535,23 @@ pub(super) fn import_peer_receipts(
 fn merge_receipt(saved: &mut CreationReceipt, incoming: &CreationReceipt) -> StoreResult<()> {
     // No clock can discard a competing effect. Keep both in the journal and
     // isolate projection until that ambiguity is resolved.
-    let mut before = saved.export.clone();
-    let mut after = incoming.export.clone();
-    before.input = Value::Null;
-    after.input = Value::Null;
-    if before != after
+    // The input can gain a resolved state before its first attempt. Everything
+    // else is the immutable capture; compare it without copying its JSON bodies.
+    let PlanningExport {
+        id,
+        model,
+        parent,
+        captured,
+        input: _,
+        initiative,
+        link_id,
+    } = &saved.export;
+    if id != &incoming.export.id
+        || model != &incoming.export.model
+        || parent != &incoming.export.parent
+        || captured != &incoming.export.captured
+        || initiative != &incoming.export.initiative
+        || link_id != &incoming.export.link_id
         || saved.attempted && incoming.attempted && saved.export.input != incoming.export.input
     {
         return Err(StoreError::PlanningReceiptConflict { effect: "creation" });

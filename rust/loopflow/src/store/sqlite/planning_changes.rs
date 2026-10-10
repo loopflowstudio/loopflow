@@ -527,7 +527,7 @@ pub(super) fn import_peer_deletion(
     id: &str,
     history: &[DeletionReceipt],
 ) -> StoreResult<()> {
-    let mut receipts = history.iter().cloned();
+    let mut receipts = history.iter();
     let local: Option<(String, String, String)> = conn.query_row(
         "SELECT task_id,field,json_object('deleted_at',deletion_saved_at,'base',json(base_json),'attempted',json(CASE WHEN attempted THEN 'true' ELSE 'false' END),
         'acknowledged',json(CASE WHEN acknowledged THEN 'true' ELSE 'false' END),'acknowledged_revision',acknowledged_revision,
@@ -543,6 +543,7 @@ pub(super) fn import_peer_deletion(
         receipts
             .next_back()
             .expect("a deletion field has at least one mutation")
+            .clone()
     };
     for receipt in receipts {
         let baseline_conflict = match (&merged.base, &receipt.base) {
@@ -566,7 +567,7 @@ pub(super) fn import_peer_deletion(
         // Creation readback may fill an unattempted, baseline-free deletion.
         // A captured attempt's baseline cannot subsequently change.
         if merged.base.is_none() {
-            merged.base = receipt.base;
+            merged.base.clone_from(&receipt.base);
         }
         merged.deleted_at = merged.deleted_at.or(receipt.deleted_at);
         merged.attempted |= receipt.attempted;
@@ -574,7 +575,9 @@ pub(super) fn import_peer_deletion(
         if super::planning::revision_nanos(receipt.acknowledged_revision.as_deref())?
             > super::planning::revision_nanos(merged.acknowledged_revision.as_deref())?
         {
-            merged.acknowledged_revision = receipt.acknowledged_revision;
+            merged
+                .acknowledged_revision
+                .clone_from(&receipt.acknowledged_revision);
         }
         if super::planning::revision_nanos(
             receipt
@@ -584,11 +587,13 @@ pub(super) fn import_peer_deletion(
         )? > super::planning::revision_nanos(
             merged.conflict.as_ref().and_then(|c| c.revision.as_deref()),
         )? {
-            merged.conflict = receipt.conflict;
+            merged.conflict.clone_from(&receipt.conflict);
         }
         // Diagnostics do not order effects. Keep a deterministic one here; all
         // original messages and losing values remain in the immutable journal.
-        merged.error = merged.error.max(receipt.error);
+        if receipt.error > merged.error {
+            merged.error.clone_from(&receipt.error);
+        }
     }
     if merged.acknowledged || merged.conflict.is_some() {
         merged.error = None;

@@ -217,34 +217,6 @@ fn first_prose_paragraph(content: &str) -> String {
         .unwrap_or_default()
 }
 
-fn goal_value_from_content(repo: &Path, name: &str) -> Result<(Value, String), String> {
-    let path = goal_path(repo, name);
-    let content = std::fs::read_to_string(&path)
-        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
-    let Some((frontmatter, body)) = split_frontmatter(&content) else {
-        return Ok((Value::Mapping(Mapping::new()), content));
-    };
-
-    let value = serde_yaml_ng::from_str::<Value>(&frontmatter)
-        .map_err(|err| format!("invalid yaml in {}: {err}", path.display()))?;
-    Ok((value, body))
-}
-
-fn render_goal_md(value: &Value, body: &str) -> Result<String, String> {
-    let rendered = serde_yaml_ng::to_string(value)
-        .map_err(|err| format!("failed to render wave goal frontmatter: {err}"))?;
-    Ok(format!("---\n{}---\n{}", rendered, body))
-}
-
-fn wave_config_map<'a>(value: &'a mut Value, path: &Path) -> Result<&'a mut Mapping, String> {
-    value.as_mapping_mut().ok_or_else(|| {
-        format!(
-            "wave goal frontmatter at {} must be a mapping",
-            path.display()
-        )
-    })
-}
-
 /// Update checkout Wave frontmatter, preserving its objective body.
 pub(crate) fn update_wave_goal_config(
     repo: &Path,
@@ -252,14 +224,28 @@ pub(crate) fn update_wave_goal_config(
     update: impl FnOnce(&mut Mapping) -> Result<(), String>,
 ) -> Result<(), String> {
     let path = goal_path(repo, name);
-    let (mut value, body) = goal_value_from_content(repo, name)?;
-    let map = wave_config_map(&mut value, &path)?;
+    let content = std::fs::read_to_string(&path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    let (mut value, body) = match split_frontmatter(&content) {
+        Some((frontmatter, body)) => {
+            let value = serde_yaml_ng::from_str::<Value>(&frontmatter)
+                .map_err(|error| format!("invalid yaml in {}: {error}", path.display()))?;
+            (value, body)
+        }
+        None => (Value::Mapping(Mapping::new()), content),
+    };
+    let map = value.as_mapping_mut().ok_or_else(|| {
+        format!(
+            "wave goal frontmatter at {} must be a mapping",
+            path.display()
+        )
+    })?;
     update(map)?;
 
-    let rendered = render_goal_md(&value, &body)?;
-    std::fs::write(&path, &rendered)
-        .map_err(|err| format!("failed to write {}: {err}", path.display()))?;
-    Ok(())
+    let frontmatter = serde_yaml_ng::to_string(&value)
+        .map_err(|error| format!("failed to render wave goal frontmatter: {error}"))?;
+    std::fs::write(&path, format!("---\n{frontmatter}---\n{body}"))
+        .map_err(|error| format!("failed to write {}: {error}", path.display()))
 }
 
 #[cfg(test)]

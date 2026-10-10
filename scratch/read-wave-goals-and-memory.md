@@ -26,7 +26,10 @@ Complete: `wave_documents` and its revision triggers in the unreleased
 `local_planning.sql` draft; document CRUD/import/fallback readers;
 `WaveCommand::Edit` and flags; unused `update_wave_agent_config` and helpers;
 their exclusive stored-copy fixtures. No compatibility path or new migration.
-Workflow import and PM metadata updates remain separate.
+Workflow import and PM metadata updates remain separate. The remaining PM
+frontmatter writer keeps its read/parse/update/write sequence together; the three
+single-caller helpers left by the deleted editing API are gone. The sync fixture
+uses one commit helper for default and feature branches.
 
 ## Surviving readers and writers
 
@@ -92,4 +95,4 @@ Release is the only immediate child directory with memory. Its top-level goal
 and full memory were read; the operation-entry lesson above remains applicable,
 with release-specific history retained there.
 
-Checks: `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo test -p loopflow --lib sync_ -- --test-threads=1` (17), and the focused foreign-Project sync test (1) pass; broader/platform/installed acceptance remains with gate/CI.
+Checks: `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, and `cargo test -p loopflow --lib <filter> -- --test-threads=1` with `work::wave::config::tests` (8) and `wave_summary_sync_reads_committed_default_branch` (1) pass; broader/platform/installed acceptance remains with gate/CI.

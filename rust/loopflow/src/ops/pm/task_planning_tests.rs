@@ -4257,19 +4257,22 @@ fn wave_summary_sync_reads_committed_default_branch() {
             "refs/remotes/origin/trunk",
         ],
     );
-    git(&repo, &["add", "."]);
-    git(
-        &repo,
-        &[
-            "-c",
-            "user.name=Fixture",
-            "-c",
-            "user.email=fixture@example.invalid",
-            "commit",
-            "-qm",
-            "fixture",
-        ],
-    );
+    let commit = |repo: &Path| {
+        git(repo, &["add", "."]);
+        git(
+            repo,
+            &[
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "commit",
+                "-qm",
+                "fixture goal",
+            ],
+        );
+    };
+    commit(&repo);
     let checkout = fixture.directory.path().join("checkout");
     git(
         &repo,
@@ -4289,21 +4292,6 @@ fn wave_summary_sync_reads_committed_default_branch() {
         )
         .unwrap();
     };
-    let commit = || {
-        git(&repo, &["add", "."]);
-        git(
-            &repo,
-            &[
-                "-c",
-                "user.name=Fixture",
-                "-c",
-                "user.email=fixture@example.invalid",
-                "commit",
-                "-qm",
-                "update merged goal",
-            ],
-        );
-    };
     let state = Arc::new(tokio::sync::Mutex::new(PlanningState::default()));
     let (url, server) = runtime.block_on(serve(state.clone()));
     PM_TEST_CONTEXT.sync_scope(fixture.context(&url), || {
@@ -4314,9 +4302,7 @@ fn wave_summary_sync_reads_committed_default_branch() {
             checkout.join("wave/product/GOAL.md"),
             "---\npm:\n  linear_initiative: initiative-1\n---\n\n## Objective\n\nEdited directly.\n",
         ).unwrap();
-        git(&checkout, &["add", "."]);
-        git(&checkout, &["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
-            "commit", "-qm", "unmerged objective"]);
+        commit(&checkout);
         sync(false).unwrap();
         assert_eq!(
             runtime.block_on(async { state.lock().await.wave_summary.clone() }),
@@ -4329,7 +4315,7 @@ fn wave_summary_sync_reads_committed_default_branch() {
             runtime.block_on(async { state.lock().await.wave_summary.clone() }),
             "Keep working."
         );
-        commit();
+        commit(&repo);
         sync(false).unwrap();
         assert_eq!(
             runtime.block_on(async { state.lock().await.wave_summary.clone() }),
@@ -4342,21 +4328,21 @@ fn wave_summary_sync_reads_committed_default_branch() {
             2
         );
         write("Plan only.");
-        commit();
+        commit(&repo);
         sync(true).unwrap();
         assert_eq!(
             runtime.block_on(async { state.lock().await.wave_summary.clone() }),
             "Edited directly."
         );
         std::fs::remove_file(&goal).unwrap();
-        commit();
+        commit(&repo);
         assert!(sync(false).unwrap_err().to_string().contains("missing"));
         assert_eq!(
             runtime.block_on(async { state.lock().await.wave_updates }),
             2
         );
         write("Rejected update.");
-        commit();
+        commit(&repo);
         runtime.block_on(async { state.lock().await.reject_wave_update = true });
         assert!(sync(false)
             .unwrap_err()
@@ -4372,7 +4358,7 @@ fn wave_summary_sync_reads_committed_default_branch() {
         );
         runtime.block_on(async { state.lock().await.reject_wave_update = false });
         write("");
-        commit();
+        commit(&repo);
         sync(false).unwrap();
         assert_eq!(
             runtime.block_on(async { state.lock().await.wave_summary.clone() }),

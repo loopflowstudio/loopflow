@@ -406,3 +406,19 @@ of the list, with his sentence as its text; the section has no heading. "It
 ships" became "Sessions stay with the work".
 Jack Heart: "i do think we need a subheader still". Placed over the list in
 `x6`: "From a goal to a merged pull request." Wording open.
+
+Jack Heart on the study's finding that the best pages follow one concrete
+thing through its states: "Yeah ive tried stuff like this before. Let's try it
+here!" On sections following the life of the work with the person's part as a
+visible state: "sounds good". On the cmux feature-list shape: "yes this is
+more the cli page, not for here". On asserted outcomes and thesis-only pages:
+"I think these are not us", then "although there might be room for a little
+more of a thesis around: that coding with agents is aboout empowering humans,
+not delegating the thinking to robots".
+
+`x7-follow.html` (built by `x7-build.py`) keeps `x6` down to the mock, then
+follows "Add CSV export" in six figures, each a caption beside a small card:
+a goal, a Task, design waiting on you, built without you, demo waiting on
+you, shipped. Every card shows the Task's row and a strip of the workflow
+with its current stop. The thesis sits under the subheader. `x6` is kept for
+comparison.

@@ -91,7 +91,7 @@ impl OpenCodeHarness {
             command.env("OPENCODE_CONFIG_CONTENT", opencode_worktree_config());
         }
         super::configure_vendor_std_env(command.as_std_mut())?;
-        self.child = Some(super::agent_process::spawn(command, None, &owner)?);
+        self.child = Some(super::agent_process::spawn(command, &owner)?);
         let child = self.child.as_mut().expect("admitted OpenCode child");
         let stderr = child
             .stderr

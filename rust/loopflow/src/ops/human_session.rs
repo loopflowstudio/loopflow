@@ -734,6 +734,19 @@ async fn connect_live_codex(
     }
     let process = crate::journal::current_lf_process_id()
         .ok_or_else(|| anyhow!("Connecting requires the current lf Process"))?;
+    let expected_owner = expected
+        .as_ref()
+        .ok_or_else(|| anyhow!("AgentProcess attachment is unavailable"))?;
+    let custody = crate::os_process::hold_agent_process_lifeline(
+        &store
+            .sqlite
+            .agent_process_lifeline_path(&expected_owner.agent_process_id)?,
+    )
+    .context("AgentProcess is stopping after its attached lf exited")?;
+    let (pid, started) = store
+        .sqlite
+        .agent_process_identity(&session.id)?
+        .ok_or_else(|| anyhow!("AgentProcess identity is unavailable"))?;
     let attachment =
         match store
             .sqlite
@@ -748,6 +761,7 @@ async fn connect_live_codex(
             }
             Err(error) => return Err(error.into()),
         };
+    custody.retain(pid, started);
     let interrupted_store = store.sqlite.clone();
     let interrupted_session = session.id.clone();
     let interrupted_attachment = attachment.clone();
@@ -764,11 +778,6 @@ async fn connect_live_codex(
         }
     });
     let connected = async {
-        // Retain the AgentProcess while this lf invocation is attached.
-        crate::os_process::hold_agent_process_lifeline(
-            &crate::os_process::agent_process_lifeline_path(Path::new(&endpoint)),
-        )
-        .context("Codex AgentProcess is stopping after its attached lf exited")?;
         if replace_clients {
             NativeSession::of(session)?.stop_clients(crate::session_record::ProviderClientStopReason::Moved)?;
         }
@@ -1526,14 +1535,14 @@ mod tests {
                         &crate::id::LfProcessId::new(),
                         true,
                     )?;
-                    let mut command = std::process::Command::new("/bin/sleep");
+                    let mut command = tokio::process::Command::new("/bin/sleep");
                     command
                         .env_clear()
                         .arg("60")
                         .stdin(std::process::Stdio::null())
                         .stdout(std::process::Stdio::null())
                         .stderr(std::process::Stdio::null());
-                    let mut provider = crate::harness::agent_process::spawn_native(
+                    let mut provider = crate::harness::agent_process::spawn(
                         command,
                         &(store.sqlite.clone(), session.id.clone(), original.clone()),
                     )?;
@@ -1617,8 +1626,8 @@ mod tests {
                     let attachment = store.sqlite.session_attachment(&session.id)?.unwrap();
                     let retained = store.sqlite.session_connection(&session.id)?;
                     // Only the test's throwaway child is stopped, after observing client effects.
-                    provider.kill()?;
-                    provider.wait()?;
+                    provider.kill().await?;
+                    provider.wait().await?;
                     history???;
                     assert!(alive && row.completed_at.is_none());
                     assert_eq!(

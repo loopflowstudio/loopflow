@@ -143,7 +143,7 @@ impl ClaudeHarness {
         self.shutdown_requested.store(false, Ordering::SeqCst);
 
         let owner = self.owner()?;
-        let mut child = super::agent_process::spawn(cmd, None, &owner)?;
+        let mut child = super::agent_process::spawn(cmd, &owner)?;
         drop(activation);
         let stdin = child
             .stdin

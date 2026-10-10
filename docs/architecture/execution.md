@@ -107,11 +107,17 @@ without an attachment is refused. The shared harness launch holds the attachment
 and saves failed spawns on the record. Admission is synchronous so async cancellation
 cannot discard an admitted child before the harness receives it. Failed recording refuses exec;
 a failed exec retains any recorded identity without claiming provider execution.
-No post-spawn bind is needed. Codex reconnect holds the endpoint's FIFO;
-Claude and OpenCode currently use anonymous lifelines without that handoff path.
-Writers remain held until OS exit, even after attachment transfer;
-only the last holder's exit closes the lifeline and stops the group, including
-after SIGKILL. The lifeline does not itself enforce current attachment authority.
+No post-spawn bind is needed. Every provider uses a private named FIFO keyed by
+AgentProcess ID beside its store, independent of its communication endpoint.
+Codex's public connection acquires custody before claiming the attachment;
+a failed claim drops only its prospective writer. Successful holders remain
+non-writing standbys through attachment transfer and harness teardown until lf
+exit or confirmed provider-group death. The last writer's exit closes the lifeline and
+stops the group, including after SIGKILL. A custody worker releases its descriptor
+when the provider group dies or the watchdog closes; no process-global writer list remains.
+The watchdog runs outside the provider group to avoid counting itself as a live
+helper. Leader death alone never releases custody; unknown evidence retains it.
+Custody never grants write authority.
 Headless launch requires the invocation's attachment: Claude, Codex and OpenCode
 refuse to start a provider without one. Runtime settlement closes their recorded
 headless groups under that attachment fence, refusing ambiguous OS ownership;
@@ -124,8 +130,6 @@ currently dispatches only to Codex; Claude and OpenCode still take native resume
 OpenCode's saved server URL is not sufficient for takeover: its request map is
 launcher-local, and origin is saved only when native output is observed. Reconnect
 must preserve pending request correlation as well as the server and native Session.
-Codex's public connection claims before acquiring its FIFO writer; closing that
-handoff race is part of the common custody replacement.
 
 Owned native launches use the same pre-exec recording channel under the attachment
 lock, but no headless group/watchdog setup. Failed recording prevents provider code

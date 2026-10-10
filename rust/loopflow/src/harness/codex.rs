@@ -37,9 +37,7 @@ use crate::harness::lf_tag::LfTagParser;
 use crate::harness::{
     codex_mapping, ApprovalPolicy, Harness, HarnessError, RawProviderEvent, SendCurrentOutcome,
 };
-use crate::os_process::{
-    agent_process_lifeline_path, hold_agent_process_lifeline, kill_process_group,
-};
+use crate::os_process::{hold_agent_process_lifeline, kill_process_group};
 use crate::provider_account::{resolve_provider_account_exact, ProviderAccountRoute};
 use crate::provider_auth::Provider;
 use crate::store::ProviderAccountId;
@@ -1061,13 +1059,9 @@ impl CodexHarness {
             command.env_remove(name);
         }
 
-        let lifeline = agent_process_lifeline_path(&endpoint);
+        let lifeline = store.agent_process_lifeline_path(&owner.2.agent_process_id)?;
         let mut child = if connection.is_none() {
-            Some(super::agent_process::spawn(
-                command,
-                Some(&lifeline),
-                &owner,
-            )?)
+            Some(super::agent_process::spawn(command, &owner)?)
         } else {
             None
         };
@@ -1080,12 +1074,16 @@ impl CodexHarness {
         if let Some(pid) = child.as_ref().and_then(tokio::process::Child::id) {
             self.child_group = Some(pid);
         } else {
-            // Reconnecting adopts the AgentProcess; one that predates lifelines has none.
-            hold_agent_process_lifeline(&lifeline).map_err(|error| {
+            // Reconnecting retains custody independently of harness teardown.
+            let custody = hold_agent_process_lifeline(&lifeline).map_err(|error| {
                 anyhow!(
                     "Codex AgentProcess is stopping after its attached lf exited ({error}); retry"
                 )
             })?;
+            let (pid, started) = store
+                .agent_process_identity(session)?
+                .ok_or_else(|| anyhow!("AgentProcess identity is unavailable"))?;
+            custody.retain(pid, started);
         }
 
         self.agent_directory = directory;

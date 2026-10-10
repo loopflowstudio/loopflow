@@ -4,14 +4,10 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::fs::OpenOptionsExt;
-use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::path::Path;
 
-// A connected lf invocation holds its writer until OS exit, including SIGKILL.
-static HELD_LIFELINES: Mutex<Vec<File>> = Mutex::new(Vec::new());
-
-// stdout acknowledges watchdog startup, not provider output. Ignoring TERM
-// lets the watchdog and its sleep survive the group signal to deliver KILL.
+// stdout acknowledges watchdog startup, not provider output. The watchdog has
+// its own group so it survives provider shutdown and can deliver the final KILL.
 // dash needs `kill -s TERM -- -pgid`, not `kill -TERM -- -pgid`.
 const WATCHDOG: &std::ffi::CStr = cr#"printf .; exec 1>&-
 while read -r _; do :; done
@@ -26,25 +22,38 @@ kill -s KILL -- "-$1" 2>/dev/null"#;
 /// exec. A successful launch holds the lifeline until this lf invocation exits.
 pub(crate) fn spawn_agent_process(
     mut command: tokio::process::Command,
-    path: Option<&Path>,
+    path: &Path,
     record: impl FnOnce(u32) -> std::io::Result<()> + Send,
 ) -> std::io::Result<tokio::process::Child> {
     let (reader, writer) = open_lifeline(path)?;
     let null = above_stdio(File::options().write(true).open("/dev/null")?)?;
     command.process_group(0);
     let writer_fd = writer.as_raw_fd();
+    let custody = AgentProcessCustody::new(writer)?;
     let recording = SpawnRecording::prepare(command.as_std_mut(), move || {
         // SAFETY: this hook runs only after fork. Neither provider nor watchdog
         // may keep the parent's lifeline writer open.
         unsafe { libc::close(writer_fd) };
         start_watchdog(reader.as_raw_fd(), null.as_raw_fd())
     })?;
-    let child = recording.spawn(record, move || {
-        let spawned = command.spawn();
-        drop(command);
-        spawned
-    })?;
-    retain_lifeline(writer);
+    let mut identity = None;
+    let child = recording.spawn(
+        |pid| {
+            let started = crate::journal::process_started_at(pid)?.ok_or_else(|| {
+                std::io::Error::other("AgentProcess birth unavailable before exec")
+            })?;
+            record(pid)?;
+            identity = Some((pid, started));
+            Ok(())
+        },
+        move || {
+            let spawned = command.spawn();
+            drop(command);
+            spawned
+        },
+    )?;
+    let (pid, started) = identity.expect("spawned provider was recorded before exec");
+    custody.retain(pid, started);
     Ok(child)
 }
 
@@ -160,42 +169,78 @@ fn transfer(fd: libc::c_int, bytes: &mut [u8], write: bool) -> std::io::Result<(
     Ok(())
 }
 
-fn open_lifeline(path: Option<&Path>) -> std::io::Result<(File, File)> {
-    match path {
-        Some(path) => {
-            let name = std::ffi::CString::new(path.as_os_str().as_encoded_bytes())?;
-            // SAFETY: name is a valid NUL-terminated path.
-            if unsafe { libc::mkfifo(name.as_ptr(), 0o600) } != 0 {
-                return Err(std::io::Error::last_os_error());
-            }
-            let reader = above_stdio(
-                File::options()
-                    .read(true)
-                    .custom_flags(libc::O_NONBLOCK)
-                    .open(path)?,
-            )?;
-            let writer = above_stdio(File::options().write(true).open(path)?)?;
-            // SAFETY: reader is owned here; the watchdog needs blocking read.
-            if unsafe { libc::fcntl(reader.as_raw_fd(), libc::F_SETFL, 0) } != 0 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok((reader, writer))
-        }
-        None => {
-            let (reader, writer) = std::io::pipe()?;
-            Ok((
-                above_stdio(File::from(OwnedFd::from(reader)))?,
-                above_stdio(File::from(OwnedFd::from(writer)))?,
-            ))
-        }
+fn open_lifeline(path: &Path) -> std::io::Result<(File, File)> {
+    let name = std::ffi::CString::new(path.as_os_str().as_encoded_bytes())?;
+    // SAFETY: name is a valid NUL-terminated path.
+    if unsafe { libc::mkfifo(name.as_ptr(), 0o600) } != 0 {
+        return Err(std::io::Error::last_os_error());
     }
+    let reader = above_stdio(
+        File::options()
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(path)?,
+    )?;
+    let writer = above_stdio(File::options().write(true).open(path)?)?;
+    // SAFETY: reader is owned here; the watchdog needs blocking read.
+    if unsafe { libc::fcntl(reader.as_raw_fd(), libc::F_SETFL, 0) } != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok((reader, writer))
 }
 
-fn retain_lifeline(writer: File) {
-    HELD_LIFELINES
-        .lock()
-        .expect("lifeline list poisoned")
-        .push(writer);
+/// A prospective attachment owns only this writer until its claim succeeds.
+/// Dropping a failed claim cannot release another invocation's custody.
+#[derive(Debug)]
+pub(crate) struct AgentProcessCustody(std::sync::mpsc::Sender<(u32, i64)>);
+
+impl AgentProcessCustody {
+    fn new(writer: File) -> std::io::Result<Self> {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::Builder::new()
+            .name("agent-custody".into())
+            .spawn(move || {
+                // Until a successful claim, dropping the guard releases this writer.
+                let Ok((pid, started)) = receiver.recv() else {
+                    return;
+                };
+                loop {
+                    // Leader death alone cannot release surviving helpers. The
+                    // watchdog is outside this group so it cannot keep its own
+                    // custody alive after the complete provider group exits.
+                    if crate::journal::process_identity_evidence(pid, started)
+                        == crate::journal::ProcessIdentityEvidence::Dead
+                        && matches!(crate::journal::OsProcess::group_is_alive(pid), Ok(false))
+                    {
+                        break;
+                    }
+                    let mut fd = libc::pollfd {
+                        fd: writer.as_raw_fd(),
+                        events: 0,
+                        revents: 0,
+                    };
+                    // SAFETY: poll borrows one initialized descriptor for this call.
+                    let result = unsafe { libc::poll(&mut fd, 1, 250) };
+                    if result > 0
+                        && fd.revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0
+                    {
+                        break;
+                    }
+                    if result < 0 {
+                        std::thread::sleep(std::time::Duration::from_millis(250));
+                    }
+                }
+            })?;
+        Ok(Self(sender))
+    }
+
+    /// Keep a non-writing standby through harness teardown and attachment loss.
+    /// The OS closes it on lf exit; confirmed group death releases it earlier.
+    pub(crate) fn retain(self, pid: u32, started: i64) {
+        self.0
+            .send((pid, started))
+            .expect("custody worker waits for its owner");
+    }
 }
 
 // Command installs native stdio before pre_exec. An invocation with a closed
@@ -230,11 +275,17 @@ fn start_watchdog(reader: libc::c_int, null: libc::c_int) -> std::io::Result<()>
                 return Err(std::io::Error::last_os_error());
             }
         }
+        let provider_group = libc::getpgrp() as u32;
         let pid = libc::fork();
         if pid == -1 {
             return Err(std::io::Error::last_os_error());
         }
         if pid == 0 {
+            // The watchdog must not count as a surviving provider helper when
+            // custody observes group death. It still targets the captured group.
+            if libc::setpgid(0, 0) != 0 {
+                libc::_exit(127);
+            }
             libc::close(ready[0].as_raw_fd());
             if libc::dup2(reader, libc::STDIN_FILENO) == -1
                 || libc::dup2(ready[1].as_raw_fd(), libc::STDOUT_FILENO) == -1
@@ -244,7 +295,7 @@ fn start_watchdog(reader: libc::c_int, null: libc::c_int) -> std::io::Result<()>
             }
             // Format the inherited group ID without an allocator. The final
             // byte stays NUL; a Unix pid fits in ten decimal digits.
-            let mut group = libc::getpgrp() as u32;
+            let mut group = provider_group;
             let mut digits = [0u8; 11];
             let mut start = 10;
             loop {
@@ -282,26 +333,14 @@ fn await_ready(fd: libc::c_int) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Hold a running AgentProcess across attachment transfer. Absent paths belong
-/// to launches before lifelines; ENXIO means shutdown already began.
-pub(crate) fn hold_agent_process_lifeline(path: &Path) -> std::io::Result<bool> {
-    match File::options()
+/// Acquire lifetime custody before claiming an attachment. Missing FIFOs and
+/// ENXIO refuse handoff rather than claiming an already stopping provider.
+pub(crate) fn hold_agent_process_lifeline(path: &Path) -> std::io::Result<AgentProcessCustody> {
+    let writer = File::options()
         .write(true)
-        .custom_flags(libc::O_NONBLOCK)
-        .open(path)
-    {
-        Ok(writer) => {
-            retain_lifeline(writer);
-            Ok(true)
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(error),
-    }
-}
-
-pub(crate) fn agent_process_lifeline_path(endpoint: &Path) -> PathBuf {
-    // The FIFO sits beside the AgentProcess endpoint.
-    endpoint.with_file_name("attachment.lifeline")
+        .custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW)
+        .open(path)?;
+    AgentProcessCustody::new(above_stdio(writer)?)
 }
 
 #[cfg(test)]
@@ -415,6 +454,22 @@ mod tests {
         let Ok(mode) = std::env::var(ATTACHED_MODE) else {
             return;
         };
+        if mode == "holder" {
+            let fifo = std::env::var_os(ATTACHED_FIFO).unwrap();
+            let pid = std::env::var("LF_TEST_LIFELINE_PID")
+                .unwrap()
+                .parse()
+                .unwrap();
+            hold_agent_process_lifeline(Path::new(&fifo))
+                .unwrap()
+                .retain(
+                    pid,
+                    crate::journal::process_started_at(pid).unwrap().unwrap(),
+                );
+            publish_pid(&std::env::var(ATTACHED_OUT).unwrap(), pid);
+            std::thread::sleep(Duration::from_secs(60));
+            return;
+        }
         if mode == "closed_stdio" {
             // SAFETY: this is only the re-executed throwaway lf process.
             unsafe {
@@ -429,9 +484,9 @@ mod tests {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
-        let fifo = std::env::var_os(ATTACHED_FIFO);
+        let fifo = std::env::var_os(ATTACHED_FIFO).unwrap();
         let out = std::env::var(ATTACHED_OUT).unwrap();
-        let agent = spawn_agent_process(command, fifo.as_deref().map(Path::new), |pid| {
+        let agent = spawn_agent_process(command, Path::new(&fifo), |pid| {
             if mode == "before_exec" {
                 // The parent recorder stalls after watchdog readiness, before
                 // exec. Killing this lf must end the waiting child too.
@@ -470,9 +525,11 @@ mod tests {
             .env(ATTACHED_OUT, &out)
             .stdout(Stdio::null())
             .stderr(Stdio::null());
-        if let Some(fifo) = fifo {
-            command.env(ATTACHED_FIFO, fifo);
-        }
+        command.env(
+            ATTACHED_FIFO,
+            fifo.map(Path::to_path_buf)
+                .unwrap_or_else(|| dir.join(format!("{mode}.lifeline"))),
+        );
         let attached_lf = command.spawn().unwrap();
         assert!(
             wait_until(|| out.exists()),
@@ -521,17 +578,94 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let fifo = dir.path().join("agent.lifeline");
         let (mut attached_lf, agent) = spawn_attached_lf("handoff", dir.path(), Some(&fifo));
-        // This test process takes the agent over, then the first lf process dies.
-        assert!(hold_agent_process_lifeline(&fifo).unwrap());
+        // Acquire before the claim: launcher death in that interval is safe.
+        let custody = hold_agent_process_lifeline(&fifo).unwrap();
+        let started = crate::journal::process_started_at(agent).unwrap().unwrap();
         // SAFETY: signals only the throwaway lf process this test spawned.
         unsafe { libc::kill(attached_lf.id() as i32, libc::SIGKILL) };
         attached_lf.wait().unwrap();
         std::thread::sleep(Duration::from_secs(3));
         let alive = group_alive(agent);
+        custody.retain(agent, started);
         assert!(terminate_process_group(agent));
         assert!(alive, "agent died although a second lf process held it");
-        // An agent with no lifeline predates them; there is nothing to hold.
-        assert!(!hold_agent_process_lifeline(&dir.path().join("absent")).unwrap());
+        // Missing custody must refuse takeover.
+        assert!(hold_agent_process_lifeline(&dir.path().join("absent")).is_err());
+    }
+
+    #[test]
+    fn either_holder_can_die_first_and_failed_custody_does_not_end_the_provider() {
+        for launcher_first in [true, false] {
+            let dir = tempfile::tempdir().unwrap();
+            let fifo = dir.path().join("agent.lifeline");
+            let (mut launcher, agent) = spawn_attached_lf("launcher", dir.path(), Some(&fifo));
+            // A failed attachment drops only its prospective custody.
+            drop(hold_agent_process_lifeline(&fifo).unwrap());
+            let ready = dir.path().join("holder-ready");
+            let mut holder = Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "os_process::lifeline::tests::lifeline_attached_lf_process",
+                    "--test-threads=1",
+                ])
+                .env(ATTACHED_MODE, "holder")
+                .env(ATTACHED_FIFO, &fifo)
+                .env(ATTACHED_OUT, &ready)
+                .env("LF_TEST_LIFELINE_PID", agent.to_string())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap();
+            assert!(wait_until(|| ready.exists()));
+            let (first, last) = if launcher_first {
+                (&mut launcher, &mut holder)
+            } else {
+                (&mut holder, &mut launcher)
+            };
+            first.kill().unwrap();
+            first.wait().unwrap();
+            std::thread::sleep(Duration::from_secs(3));
+            let survived = group_alive(agent);
+            last.kill().unwrap();
+            last.wait().unwrap();
+            let ended = wait_until(|| !group_alive(agent));
+            kill_process_group(agent);
+            assert!(survived, "first holder's death ended the provider");
+            assert!(ended, "last holder's death retained the provider");
+        }
+    }
+
+    #[tokio::test]
+    async fn leader_exit_does_not_release_surviving_helpers() {
+        let dir = tempfile::tempdir().unwrap();
+        let fifo = dir.path().join("lifeline");
+        let mut command = tokio::process::Command::new("/bin/sh");
+        command.env_clear().args(["-c", "/bin/sleep 60 & exit 0"]);
+        let mut child = spawn_agent_process(command, &fifo, |_| Ok(())).unwrap();
+        let pid = child.id().unwrap();
+        assert!(child.wait().await.unwrap().success());
+        std::thread::sleep(Duration::from_secs(3));
+        let alive = group_alive(pid);
+        assert!(terminate_process_group(pid));
+        assert!(
+            alive,
+            "leader exit released custody of its surviving helper"
+        );
+        assert!(wait_until(|| hold_agent_process_lifeline(&fifo).is_err()));
+    }
+
+    #[tokio::test]
+    async fn natural_provider_exit_releases_custody_and_watchdog() {
+        let dir = tempfile::tempdir().unwrap();
+        let fifo = dir.path().join("lifeline");
+        let mut command = tokio::process::Command::new("/bin/sh");
+        command.args(["-c", "exit 0"]);
+        let mut child = spawn_agent_process(command, &fifo, |_| Ok(())).unwrap();
+        let pid = child.id().unwrap();
+        assert!(child.wait().await.unwrap().success());
+        assert!(wait_until(|| !group_alive(pid)));
+        // Custody observes death asynchronously; wait for watchdog EOF too.
+        assert!(wait_until(|| hold_agent_process_lifeline(&fifo).is_err()));
     }
 
     #[test]
@@ -549,7 +683,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let fifo = dir.path().join("lifeline");
         let command = tokio::process::Command::new(dir.path().join("absent-provider"));
-        let error = spawn_agent_process(command, Some(&fifo), |_| Ok(())).unwrap_err();
+        let error = spawn_agent_process(command, &fifo, |_| Ok(())).unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
         assert!(
             wait_until(|| {
@@ -577,7 +711,7 @@ mod tests {
             ])
             .arg(&record)
             .arg(&executed);
-        let mut child = spawn_agent_process(command, None, |pid| {
+        let mut child = spawn_agent_process(command, &dir.path().join("lifeline"), |pid| {
             assert!(!executed.exists());
             // SAFETY: read metadata of the throwaway child supplied by spawn.
             assert_eq!(unsafe { libc::getpgid(pid as i32) }, pid as i32);
@@ -597,7 +731,7 @@ mod tests {
         command
             .args(["-c", "printf executed > \"$1\"", "fixture"])
             .arg(&executed);
-        let error = spawn_agent_process(command, Some(&fifo), |_| {
+        let error = spawn_agent_process(command, &fifo, |_| {
             Err(std::io::Error::new(
                 std::io::ErrorKind::PermissionDenied,
                 "attachment changed",
@@ -620,7 +754,7 @@ mod tests {
         let record = dir.path().join("record");
         let mut command = tokio::process::Command::new("/bin/sh");
         command.current_dir(dir.path().join("absent"));
-        let error = spawn_agent_process(command, None, |pid| {
+        let error = spawn_agent_process(command, &dir.path().join("lifeline"), |pid| {
             std::fs::write(&record, pid.to_string())
         })
         .unwrap_err();
@@ -631,6 +765,7 @@ mod tests {
     #[tokio::test]
     async fn launch_preserves_native_stdio_arguments_and_exit_status() {
         use tokio::io::AsyncWriteExt;
+        let dir = tempfile::tempdir().unwrap();
         let mut command = tokio::process::Command::new("/bin/sh");
         command
             .args([
@@ -642,7 +777,8 @@ mod tests {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        let mut child = spawn_agent_process(command, None, |_| Ok(())).unwrap();
+        let mut child =
+            spawn_agent_process(command, &dir.path().join("lifeline"), |_| Ok(())).unwrap();
         child
             .stdin
             .take()

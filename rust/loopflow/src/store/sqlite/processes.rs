@@ -561,6 +561,33 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// One private FIFO namespace per store, independent of provider endpoints.
+    pub(crate) fn agent_process_lifeline_path(
+        &self,
+        agent: &LfProcessId,
+    ) -> StoreResult<std::path::PathBuf> {
+        use std::os::unix::fs::DirBuilderExt;
+        let database = self
+            .conn
+            .lock()
+            .expect("store mutex poisoned")
+            .path()
+            .map(str::to_owned)
+            .ok_or_else(|| {
+                StoreError::InvalidData("AgentProcess custody requires a file-backed store".into())
+            })?;
+        let root = Path::new(&database)
+            .canonicalize()
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?
+            .with_extension("agent-lifelines");
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .recursive(true)
+            .create(&root)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+        Ok(root.join(agent.to_string()))
+    }
+
     // Dispatch and attachment changes share a per-Session OS lock, never a SQLite
     // transaction across provider I/O. Do not unlink lock files: another process
     // may already have the inode open. Process exit releases ownership.

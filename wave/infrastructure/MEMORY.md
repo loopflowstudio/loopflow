@@ -235,7 +235,7 @@ Jack's `71741bd4` accepted #1519 as it stands: LOO-447 owns Claude/OpenCode
 takeover and stop; two-second removal, the three orphans and live-provider runs
 are accepted unproven. FIFO is Codex-only; reaping covers noninteractive providers.
 Drafts must `depends_on` unreleased parents; name order broke materialized fixtures.
-Scratch-bearing PRs defer the test matrix, not every job; TESTING.md owns the gate.
+Scratch-bearing PRs defer tests; TESTING.md owns gating.
 
 LOO-450: Jack selected one Claude harness and native schemas. Corrections require
 attachment-fenced native identity selection, not capture alone. Fake-provider Flow

@@ -282,26 +282,25 @@ Earlier cleanup history: `66da3fdf7:wave/infrastructure/MEMORY.md` under
 
 ## Automatic checkout collection (2026-10-09)
 
-Jack Heart authorized the worktree-cleanup keystone after design review. He also
-classified Etude experiment output as disposable; expiry, budgets and explicit
-retention remain proposals. Rotation/compression are in design scope, not consent
-to expire usable conversations. No one-off machine deletion was requested.
+Jack Heart authorized automatic checkout collection and classified Etude output
+as disposable; expiry/budgets remain proposals. Rotation/compression design grants
+no conversation-expiry or one-off deletion authority.
 
-Cleanup authority requires ownership, exact-head settlement, idle execution and
-classified content, not age, remote disappearance, ignored status or planning
-completion. Main #1499 separates completion from delivery: PR-less completed
-Tasks and unresolved follow-through retain their checkout even beside a settled
-landing. The shared collector preserves this at every entry point. Unknown
-process inspection retains work; local refs use compare-and-delete. Cache tags
-classify artifacts, not referenced Session history.
+Cleanup requires ownership, exact-head settlement, idle execution and classified
+content—not age, remote disappearance, ignored status or planning completion.
+Main #1499 separates completion from delivery: PR-less Tasks and unresolved
+follow-through retain checkouts despite settled landings. Unknown execution retains
+work; local refs use compare-and-delete. Cache tags never override Session history.
 
-Reuse repository reconciliation rather than another daemon or agent. Release's
-installed-schedule evidence teaches two boundaries: executable promotion must not
-strand jobs on immutable old binaries, and generated service tests do not prove
-installed operation. Per-data-directory exclusion does not fence another store's
-execution on the same checkout. Source cleanup/retry tests establish no installed
-automatic collection; activation, whole-pass bounds and cross-store/history safety
-remain incomplete. Plan: `scratch/clean-up.md`. Artifact eviction and history rotation are follow-ups.
+Reuse repository reconciliation. Release's incident distinguishes gate-based jobs
+following promotion from immutable paths needing repair. `341615ba8` enables ticks, persists disable and
+fences release checkout admission; promotion-time repair remains open. Admission
+deadlines do not bound started reads or prevent starvation in fixed scan order.
+The scheduled CLI proof uses an unknown Process row, not live execution. Cross-store
+acceptance needs a disposable OS account: `LF_HOME` does not isolate release reads.
+Cache-tag survival proves pre-Git interruption recovery, not historical payload
+protection. Whole-pass bounds, payload coverage and installed operation remain
+unproved. Plan: `scratch/clean-up.md`; artifact eviction/history rotation follow.
 
 ## Project configuration and review direction (2026-10-05)
 

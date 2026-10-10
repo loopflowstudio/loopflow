@@ -199,7 +199,7 @@ preexisting checkout; assume-unchanged/sparse index entries retain the checkout;
 cache tags survive partial content removal and signature reads are bounded to 43 bytes. A removed checkout is still reported
 as removed if its local ref changed and was retained.
 
-### Latest internal slice — 2026-10-09
+### Latest internal slice — reconciled 2026-10-09 at `341615ba8`
 
 Installed releases ensure repository ticks at checkout creation and work-producing
 CLI entry points. Tick installation reuses the installation-gate resolver, repairs
@@ -226,33 +226,53 @@ no Swift/Python consumer; its Rust fixture is `repository_reconciliation.json`.
 The headless installed-declaration test executes the real `lf task reconcile --json`
 command through the cron runner: unknown execution retains a checkout, completing
 that Process allows the next tick to remove it, a further tick is harmless, and an
-unfinished neighboring checkout survives. This is not a login-session/OS scheduler
-loading demonstration.
+unfinished neighboring checkout survives. The fixture seeds a taskless merged
+landing and an unknown Process row, then marks the row complete; it does not launch
+a live checkout user. Its neighbor is dirty, not an unfinished Task. This proves
+scheduled-command retry with simulated execution, not the full Task demo or
+login-session/OS scheduler loading. The integration CLI also reads the account's
+release registry; `LF_HOME` alone does not isolate that boundary. Cross-store
+acceptance belongs in the existing disposable-account installation harness.
+
+The last two slices implement the earlier feedback's automatic activation,
+persisted disable, gate-based executable selection, deferred JSON and shared
+release retention/admission policy. They do not close the timing, historical
+payload or upgrade-repair gaps below. Main remains at the already-integrated
+`906576f39`; no newer local upstream change was observed in this reconciliation.
 
 ### Remaining in this PR
 
-1. **Whole-pass timing and fairness:** the shared admission deadline stops starting
-   candidate observations and removals, but a started Git/SQL observation can still
-   overrun it. Bound individual observations, add hourly full reconciliation and
-   oldest-deferred ordering. Background size
-   estimates remain null; no foreground recursive scan was added. Scheduled
-   reports now preserve deferred reasons in JSON/logs, but cron receipt scan
-   timestamps and dedicated summary fields remain unimplemented.
-2. **Recovery and evidence:** targeted missing-registration repair and full
-   referenced Session-payload coverage remain. `.lf/logs`, `.lf/runs`, `.lf/sessions`,
-   selected/production homes and registered/native provider homes are protected;
-   historical payload references outside those roots still need an exhaustive
-   owner audit. Missing paths retain registration. Published abandoned PRs without
-   exact-head disposition remain retained. Cross-store Task/Process/admission
-   fencing is implemented; acceptance needs concurrent release-admission coverage
-   through an experimental CLI, not just the focused reader/lock test.
-3. **Installation verification and gate/demo:** old immutable service paths are
-   repaired on later work; promotion-time repair without another work command
-   still needs integration with installation. Focused tests cover persisted
-   disable, executable repair, fallback throttling and the installed declaration's
-   busy-to-idle command. Gate still owns the full acceptance matrix. Demo owns OS
-   schedule activation/upgrade behavior and unsupported-host experience. Tests do
-   not claim launchd loaded a service or that a human reviewed the experience.
+1. **Session evidence and recovery:** audit referenced payload owners beyond
+   `.lf/logs`, `.lf/runs`, `.lf/sessions`, selected/production homes and
+   registered/native provider homes. Those roots are protected, but the collector
+   does not enumerate historical payload references; a cache tag must not erase
+   their sole copy. Preserve or relocate them with reader/resume proof. The
+   interruption fixture covers artifact contents removed while the cache tag and
+   checkout registration survive, not interruption during Git removal. Finish
+   targeted missing-registration repair without broad metadata pruning. Missing
+   paths currently retain registration. Published abandoned PRs without exact-head
+   disposition stay retained; no new discard authority is implied.
+2. **Whole-pass timing and fairness:** the admission deadline stops starting
+   candidate observations/removals, but initial registry/Git snapshots and started
+   reads can overrun it. Only external `lsof` inspection has a five-second bound.
+   Bound individual observations, add hourly full reconciliation and cheap
+   settled-owner ticks, then oldest-deferred ordering. Current Git registration
+   order restarts each pass; repeated slow early candidates can starve later ones.
+   Background size estimates remain null. Add bounded size measurement and cron
+   receipt scan timestamps/summary fields; preserve unknown sizes on deadline.
+   Deferred reasons already survive in JSON/logs. No foreground recursive scan.
+3. **Upgrade repair:** existing gate-based declarations follow promotion, but old
+   immutable executable paths are repaired only on later work. Integrate repair
+   with installation, preserving explicit disable and original schedule ownership.
+   Reuse the installation gate and cron owner, not another scheduler.
+4. **Composed acceptance:** cross-store Task/Process/admission fencing exists;
+   prove concurrent release admission through an experimental CLI in a disposable
+   OS account. The unit proof reads a second registry and tests its lock directly;
+   it does not exercise `apply_cleanup` discovering that release registry. Extend
+   scheduled-command coverage to a real live Process exiting, a completed Task
+   with merged delivery, and an unfinished Task neighbor. Keep generated-service,
+   disable, executable-repair and fallback tests. Gate owns the full headless
+   matrix; demo owns loaded OS schedule/upgrade and unsupported-host experience.
 
 ## Done when
 
@@ -305,4 +325,4 @@ allocated bytes by category; observed free-space delta after collection; oldest
 eligible retention age. APFS sharing, hardlinks and concurrent writers mean
 directory sums are estimates, not guaranteed reclaimed bytes.
 
-Check: `cargo test -p loopflow --lib cleanup -- --test-threads=1` (18), `cargo test -p loopflow --lib task_decision_preserves_unknown_history_and_live_process_protection -- --test-threads=1` (1), and `cargo test -p loopflow --test cleanup_schedule --test dto_fixtures cleanup -- --test-threads=1` (3) passed; `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check` passed; full acceptance and OS-schedule experience remain with gate/demo.
+Check: `git diff --check` passed (prose only); prior focused cleanup (18), Task-decision (1), scheduled/DTO (3), fmt and Clippy passes retained at `341615ba8`; full acceptance and OS-schedule experience remain with gate/demo.

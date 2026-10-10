@@ -33,5 +33,7 @@
   they provide an OS scheduler; the fallback reports that limitation. Experiments
   neither install services nor activate fallback work automatically.
 - The 30-second budget currently bounds admission of candidate observations and
-  removals, not a Git/SQL call already in progress. Hard read deadlines, hourly
-  scans, fair ordering and size measurement remain internal work in this PR.
+  removals, not initial snapshots or a Git/SQL call already in progress. Hard read
+  deadlines, hourly scans, fair ordering and size measurement remain internal
+  work in this PR. These are implementation gaps, not a proposed relaxation of
+  bounded maintenance.

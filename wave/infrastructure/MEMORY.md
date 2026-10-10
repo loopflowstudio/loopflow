@@ -640,12 +640,12 @@ Earlier composition proofs:
 completion requests, placements and execution remain local.
 
 `e37099e50` proves same-origin Git/HTTPS recovery: unchanged readback preserves
-later saves; changed facts win. The associated-origin regression now asserts exact
-readback, distinct uncertain captures and old-document replay, but has no execution
-verdict. Historical attempts are seeded. Attachment can race acquisition using one
-UUID: no exactly-once guarantee. Associated private origins, negative-evidence/order
-and native lifetimes remain unproved. Installation is unproved; the design owns
-acceptance.
+later saves; changed facts win. `3c462adb7` adds associated-origin readback and
+old-document replay, without an execution verdict. Seeded attempts prove neither
+original dispatch nor running controls. Attachment can race acquisition with one
+UUID: no exactly-once guarantee. Associated private origins, negative-evidence/order,
+native lifetimes and installation remain unproved. Exchange must not launch engines;
+explicit native resume may. The design owns acceptance.
 
 ## Driver recovery
 

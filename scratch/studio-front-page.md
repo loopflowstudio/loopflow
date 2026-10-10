@@ -454,3 +454,6 @@ GitHub, Linear, Wispr Flow, cmux and herdr. Naming Linear on `/` reverses an
 earlier rule that a homepage test still enforces; the test changes at port.
 Figures 1 and 2 were also reworked: 1 is the rambling idea as said, 2 is the
 Wave and its four Tasks written down, with "Add CSV export" picked to follow.
+Jack Heart on figure 2: "Wave is not a word you already use". The caption now
+says Tasks are in words you already use, and introduces Wave last as "our
+word for a persistent workstream with an objective".

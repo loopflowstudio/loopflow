@@ -48,6 +48,13 @@ native experience. This section supersedes checkout-led presentation below;
 existing execution/location safeguards remain. Admission is independent and
 unresolved, not a prerequisite for these tabs.
 
+**October 10 correction:** Jack Heart selected Split → shell, with no empty-pane
+option (comment `ff61b6bc-f40c-4545-a203-82ced3afd335`). Implemented through the
+existing shell-location owner for CLI, shortcuts and pane menus; missing remote
+location refuses before layout mutation. Work-keyed tabs, per-pane locations,
+outer-layout deletion and inspection/DTO cutover remain unimplemented. This
+checkpoint completes only the split correction, not the Work-tab slice.
+
 ### Experience and boundaries
 
 The sidebar is durable Work organization; the tab strip is the open working set;
@@ -78,30 +85,9 @@ LOO-416, not a second persistence system here.
 
 ### Current owners → minimal cutover
 
-Inspection at `e4a324636` establishes the starting point, not implemented tabs:
-
-- `RepositoryWorkspace.swift:WorkLinkRouter`, `RepositoryWorkspaceView` and
-  `LoopflowApp` already converge repository scenes and fence restored locators.
-  `RepoView` retains `SessionsWorkspaceRegistry` and its `GhosttySurfacePool`.
-  Keep these lifetimes and repository identity/association paths.
-- `Views/SessionsView.swift:SessionsWorkspaceRegistry` currently keys workspaces
-  by `WorkspaceIdentity(machineId, worktree)` and separately owns outer
-  `WorktreeLayoutStore`s. `SessionsWorkspace` owns one `MultiplexerStore`, Files
-  stores and a workspace-wide location. Repo/Wave conversations sharing a checkout
-  therefore cannot become independent Work tabs merely by adding a tab bar.
-- `SessionsContentView.currentIdentity`, `usesWorktreeLayout`, `worktreeChip`
-  and `WorktreeNodeView` choose between Task panes and nested checkout slots.
-  Replace this selection path with the active Work workspace. Keep the inner
-  `MultiplexerView`/`SessionPaneView`, not the outer worktree split tree.
-- `WorkProjection.swift:WorkNodeKey` currently includes a repository path;
-  `WorkNavigation` has global Session/content selection. `WorkModel.select`,
-  sidebar/`WorkNavigator`, palette navigation, `openTask`, `openSession`,
-  `openLinkedSession` and `prepareLinkedFiles` must all enter the same Work-tab
-  operation. Preserve shared Task alias resolution and explicit Session membership.
-- `MultiplexerLayout.swift:PaneState` already distinguishes pane ID from content
-  incarnation. `MultiplexerStore` owns split ratios, focus, collapsed panes, zoom
-  and Close/Undo. Preserve it as the sole pane-layout writer. Files and Changes
-  continue sharing `TaskFilesStore`/`TaskFileDocument`, not separate draft copies.
+Owner inventory: `31ec76b01:scratch/compare-cmux-s-command-line.md`, this heading.
+The registry still keys by checkout. Preserve scene/surface lifetimes, inner
+multiplexer and documents; cut navigation/inspection/opening over together.
 
 **Target values and operations (proposed implementation names):**
 
@@ -189,11 +175,9 @@ key chords including Ctrl-C. Neither is part of this slice.
 3. Demonstrate the rendered Work/tab/pane experience at the existing demo review
    boundary. Native judgment is separate from passing model tests.
 
-Other LOO-427 work remains in §§2–5: exclusive admission, mixed-provider exchange,
-per-Work sharing/recovery presentation, remaining invocation explanations,
-running-Flow/repeat-exchange proof and configured remote/native fidelity. Tab
-completion closes none of these. Neither unavailable arbitration nor rendering
-blocks independent implementation/headless checks of this UI.
+Sections 2–5 retain admission, mixed exchange, sharing/recovery, explanation and
+running-Flow/configured/native proof. Tab completion closes none; unavailable
+arbitration/rendering does not block this UI’s implementation/headless checks.
 
 ### Checks and demo acceptance
 
@@ -592,7 +576,8 @@ then one eligible pane; multiple matches return choices without effects.
 Work/pane owners; validate the captured window/content/surface before acting,
 never retarget by later focus. Unique/ambiguous/explicit selectors and retained lifetime
 refusals have headless proof. Typed Apple events retain synchronous MainActor validation.
-Restore, split, move, resize and zoom preserve selection; focus is explicit.
+CLI arrangement preserves selection; focus is explicit. Split creates a shell
+through the existing execution-location owner; UI splits focus the new shell.
 Move stays within one Machine/checkout. Native proof remains.
 
 Lost replies leave uncertain outcomes. Hide/restore are idempotent; split and Shell

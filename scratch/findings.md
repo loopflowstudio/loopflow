@@ -54,4 +54,16 @@ two tabs. The plan records a single retained presentation occurrence, with expli
 relocation rather than another client or changed membership. Tab closing is hide,
 not process/window shutdown. No code, native demo or new runtime proof is claimed.
 
-Check: `git diff --check` PASS; prose-only, builds skipped; `lf context` checked (generated goal overflow remains outside authored notes).
+## Split correction — October 10
+
+Jack Heart selected shell-by-default splitting. All native Split entry points and
+exact-target CLI dispatch now use the existing shell-location owner before the
+multiplexer mutation. Review caught that a remote refusal on an occupied pane
+would otherwise be invisible: errors now use the pane alert, not an empty-pane
+message. The shell command and leaf publish together; stale requests still refuse.
+Initial checks exposed old empty-split/count assumptions and an unnamed local
+Machine fixture; fixtures now assert retained shells, with the actual local identity.
+This is not the Work-tab cutover: registry rekeying, contents' locations, outer-tree
+deletion, navigation and wire cutover all remain in the plan.
+
+Check: `scripts/test_desktop.sh --filter 'MultiplexerStoreTests|DesktopPaneControlTests|WorkDestinationTests/remote' -Xswiftc -gnone --no-parallel` — 44 passed, one stale empty-pane assertion repaired and its exact test rerun PASS; `cargo fmt`/Clippy PASS; native: demo, broader suites: gate/CI.

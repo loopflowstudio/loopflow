@@ -166,7 +166,9 @@ choices, not native acceptance or a change to first-start admission.
 
 Jack Heart accepted one retained workspace per Work initially, Work-named tabs,
 sidebar organization, conversation-named panes and hide/reopen without ending
-execution. These are accepted direction, not implemented/native acceptance.
+execution. Work tabs remain unimplemented. Jack Heart’s October 10 correction selects a shell
+in each new split, without an empty-pane option; that correction is implemented
+locally, not natively accepted.
 The plan's **Work tabs** section owns the cutover and checks.
 
 Reversible implementation choices: tab selection restores that Work's last pane;

@@ -1,7 +1,10 @@
 # Automatic worktree cleanup
 
-Draft — 2026-10-09. Jack Heart requested investigation and a product design;
-implementation, deletion and retention defaults are not approved.
+Accepted for core implementation — 2026-10-09. Jack Heart requested
+`lf pursue -b` after reviewing the investigation and proposed direction. The
+worktree-cleanup keystone is the selected PR; artifact eviction and history
+rotation remain named follow-ups. Their detailed policies remain draft.
+Implementation authorization does not request one-off deletion on either machine.
 
 > “lf is aggressive about cleaning up worktrees so that we are not causing a bunch of waste on our customers computers”
 

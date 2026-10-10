@@ -221,8 +221,8 @@ unpublished code retained, without deletion or delivery authorization.
 
 ## AgentProcess (LOO-443/447, 2026-10-10)
 
-Jack Heart requested one inventory; #1519 integrated.
-Unknown stays visible; retry retains history. His `71741bd4` accepted #1519:
+Jack Heart accepted the integrated inventory (#1519, `71741bd4`).
+Unknown stays visible; retry retains history.
 LOO-447 owns Claude/OpenCode takeover and stop; two-second removal, three orphans
 and configured-provider runs are accepted unproven.
 

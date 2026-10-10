@@ -367,18 +367,18 @@ or infer that its uncertain effects settled.
 
 ```bash
 lf flow build
-lf flow show DRIVER_PROCESS --processes --json
+lf flow show FLOW_PROCESS --processes --json
 ```
 
-A Flow is one lf process and the step processes it starts; its ID is the driver
-Process's. Starting one compiles its definition, including every router and
-alternative, into a graph the driver holds in memory. One cursor and its return
+A Flow is one lf process and the step processes it starts; its ID is the Flow
+process's. Starting one compiles its definition, including every router and
+alternative, into a graph the Flow process holds in memory. One cursor and its return
 counters identify loop passes. Subflows and passes are display lenses over the
-step processes, with no separate record or driver.
+step processes, with no separate record or process.
 
 Every Flow naming a Task, or run in its checkout, is equally that Task's
 work; none is selected or privileged. Taskless and Task execution share the
-driver. Each `task run` starts a fresh Flow as a child `lf run`, and a fresh
+Flow runner. Each `task run` starts a fresh Flow as a child `lf run`, and a fresh
 one again when that Flow process fails. Flows hold autonomous
 steps only: launching one with a `human: true` step is rejected. Finishing
 retains history and chooses no successor; Flow completion alone does not
@@ -465,19 +465,19 @@ new attempt errors and confirmations. Composed CLI/Desktop reconnect remains unp
 
 Each executed skill or operation runs in its own child lf Process as the plain
 command: `lf -b skill <name> [message]`, or the operation's own command. The
-step is told nothing about its Flow. The driver owns navigation and the Flow's
+step is told nothing about its Flow. The Flow process owns navigation and the Flow's
 record, FlowProcess: the Flow's name and graph as compiled at launch, then one
 appended row per step with its Process, graph node key and per-edge iterations.
 Nothing reads it back to resume. A step's result is how its process exited; a
 deciding or routing step also answers through the final answer of the Session
-turn its Process captured. After an operation the driver stops the Flow when a
+turn its Process captured. After an operation the Flow process stops the Flow when a
 landing of its checkout is still being watched: neither failed.
 
 A deciding step's message asks for a JSON `decision`: `advance` or `iterate`
 with a nonempty `summary`, or `blocked` with a nonempty `reason`; the unused
 field is null. A router's message asks for a JSON object containing `path`, one
 of the branch's path names. The contract travels in the message, not as a
-provider schema, and the driver accepts the value inside prose or a code fence.
+provider schema, and the Flow process accepts the value inside prose or a code fence.
 Session history retains the native output and completion separately. An invalid
 answer is corrected by `lf -b session resume ID MESSAGE` in the same
 conversation, at most twice, then the Flow fails; provider failure remains
@@ -492,14 +492,14 @@ or resumes a stopped Flow.
 
 ```bash
 lf task status INF-124
-lf flow show DRIVER_PROCESS --processes --json
+lf flow show FLOW_PROCESS --processes --json
 lf task interrupt INF-124
 lf task run INF-124 --reason "take the smaller approach"
 ```
 
-A killed driver leaves its Processes and FlowProcess rows as history; the last step
+A killed Flow process leaves its Processes and FlowProcess rows as history; the last step
 row shows where it stood. Nothing restarts or resumes it. A Flow is `current` while its
-driver has no recorded exit, `completed` when the driver succeeded and `stopped`
+Flow process has no recorded exit, `completed` when it succeeded and `stopped`
 when it exited before the last step. Crash recovery
 belongs to the caller, normally the Task conversation: inspect the Session,
 process and effect receipts, then launch fresh work. Observation does not replay

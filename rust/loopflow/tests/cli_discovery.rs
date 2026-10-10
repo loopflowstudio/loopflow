@@ -3,8 +3,10 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 use clap::{CommandFactory, Parser};
-use loopflow::engine::target::{resolve_definition, DefinitionKind, Target};
-use loopflow::engine::{compile_flow, load_flow, ConcreteStep};
+use loopflow::definition::{resolve_definition, DefinitionKind, Target};
+use loopflow::flow::compile_flow;
+use loopflow::flow::load_flow;
+use loopflow::flow::ConcreteStep;
 use loopflow::lf::navigation::normalize_args;
 use loopflow::lf::{Cli, Commands, FlowCommand, SkillCommand};
 use tempfile::TempDir;

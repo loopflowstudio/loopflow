@@ -64,7 +64,7 @@ impl SqliteStore {
              AND NOT EXISTS(SELECT 1 FROM agent_sessions WHERE task_id=?1)
              AND NOT EXISTS(SELECT 1 FROM task_workflows WHERE task_id=?1)
              AND NOT EXISTS(SELECT 1 FROM task_prs WHERE task_id=?1)
-             AND NOT EXISTS({})", super::task_work::process_lfids("?1")),
+             AND NOT EXISTS({})", super::task_work::lf_process_ids("?1")),
             params![id.as_str(), destination.as_str(), now_unix()],
         )?;
         if changed != 1 {

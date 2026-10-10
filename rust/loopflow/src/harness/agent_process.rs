@@ -1,11 +1,11 @@
 //! Launch and settle AgentProcesses in the inventory used by gates and live views.
 //! Unknown identity, duplicate PID/birth and unknown attachment life grant no signal authority.
-use crate::engine::process::terminate_process_group;
-use crate::id::ProcessLfid;
+use crate::id::LfProcessId;
 use crate::journal::{
     process_evidence, process_identity_evidence, process_started_at, OsProcess,
     ProcessIdentityEvidence,
 };
+use crate::os_process::terminate_process_group;
 use crate::process::SessionAttachment;
 use crate::store::sqlite::SqliteStore;
 use crate::store::{StoreError, StoreResult};
@@ -61,11 +61,8 @@ pub(super) fn spawn(
             .into_owned();
         store.with_session_attachment(session, attachment, || {
             store.record_agent_process_launch(session, attachment, command.as_std())?;
-            let spawned = crate::engine::process::spawn_agent_process(
-                command,
-                lifeline,
-                record_identity(owner),
-            );
+            let spawned =
+                crate::os_process::spawn_agent_process(command, lifeline, record_identity(owner));
             if spawned.is_err() {
                 store.record_agent_process_exit(session, attachment, false)?;
             }
@@ -89,7 +86,7 @@ pub(crate) fn spawn_native(
         .with_session_attachment(session, attachment, || {
             store.record_agent_process_launch(session, attachment, &command)?;
             let spawned =
-                crate::engine::process::spawn_native_agent_process(command, record_identity(owner));
+                crate::os_process::spawn_native_agent_process(command, record_identity(owner));
             if spawned.is_err() {
                 store.record_agent_process_exit(session, attachment, false)?;
             }
@@ -150,7 +147,7 @@ fn reap_in(store: &SqliteStore, dry_run: bool) -> StoreResult<AgentProcessReapRe
         }
     }
     let dead_lf =
-        |process: &ProcessLfid| process_evidence(store, process) == ProcessIdentityEvidence::Dead;
+        |process: &LfProcessId| process_evidence(store, process) == ProcessIdentityEvidence::Dead;
     let mut report = AgentProcessReapReport::default();
     for agent in &agents {
         let Some((pid, start)) = agent.process.pid.zip(agent.process.os_started_at) else {
@@ -161,7 +158,7 @@ fn reap_in(store: &SqliteStore, dry_run: bool) -> StoreResult<AgentProcessReapRe
             Err(error) => {
                 report.errors.push(format!(
                     "AgentProcess {}: cannot observe PID {pid}: {error}",
-                    agent.process.lfid
+                    agent.process.id
                 ));
                 continue;
             }
@@ -174,7 +171,7 @@ fn reap_in(store: &SqliteStore, dry_run: bool) -> StoreResult<AgentProcessReapRe
         let dead = evidence == ProcessIdentityEvidence::Dead;
         let orphaned = counts[&(pid, start)] == 1
             && !agent.interactive
-            && agent.attached_process_lfid.as_ref().is_none_or(dead_lf)
+            && agent.attached_lf_process_id.as_ref().is_none_or(dead_lf)
             && observed
                 .as_ref()
                 .is_some_and(|process| is_agent_process(process, start, agent.provider.as_deref()));
@@ -193,7 +190,7 @@ fn reap_in(store: &SqliteStore, dry_run: bool) -> StoreResult<AgentProcessReapRe
                 }
             } else {
                 // Attachment life is sampled again beneath the transfer lock.
-                if !agent.attached_process_lfid.as_ref().is_none_or(dead_lf) {
+                if !agent.attached_lf_process_id.as_ref().is_none_or(dead_lf) {
                     return Err(StoreError::InvalidAuthority(
                         "attached LfProcess death is unresolved".into(),
                     ));
@@ -209,7 +206,7 @@ fn reap_in(store: &SqliteStore, dry_run: bool) -> StoreResult<AgentProcessReapRe
             Err(error) => {
                 report
                     .errors
-                    .push(format!("AgentProcess {}: {error}", agent.process.lfid));
+                    .push(format!("AgentProcess {}: {error}", agent.process.id));
                 continue;
             }
         }
@@ -219,8 +216,8 @@ fn reap_in(store: &SqliteStore, dry_run: bool) -> StoreResult<AgentProcessReapRe
         let Some(attachment) = store.session_attachment(session)? else {
             continue;
         };
-        if attachment.agent_process_lfid != agent.process.lfid
-            || !attachment.process_lfid.as_ref().is_some_and(dead_lf)
+        if attachment.agent_process_id != agent.process.id
+            || !attachment.lf_process_id.as_ref().is_some_and(dead_lf)
         {
             continue;
         }
@@ -316,7 +313,7 @@ fn descendant_group_leaders(pid: u32, processes: &[OsProcess]) -> Vec<(u32, i64)
 
 #[cfg(test)]
 mod tests {
-    use crate::id::ProcessLfid;
+    use crate::id::LfProcessId;
     use crate::store::sqlite::SqliteStore;
     use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
@@ -333,9 +330,9 @@ mod tests {
                 if ended { "ended" } else { "unknown" },
                 &crate::session_record::new_artifact_key(),
             );
-            let parent = ProcessLfid::new();
+            let parent = LfProcessId::new();
             sql.execute(
-                "INSERT INTO processes(lfid,trace_id,started_at,completed_at) VALUES(?1,?1,?2,?3)",
+                "INSERT INTO processes(id,trace_id,started_at,completed_at) VALUES(?1,?1,?2,?3)",
                 rusqlite::params![
                     parent,
                     time::OffsetDateTime::now_utc().unix_timestamp(),
@@ -360,13 +357,13 @@ mod tests {
             assert!(report.orphaned.is_empty());
             assert_eq!(report.reaped, 0);
             let process = store
-                .process(&attachment.agent_process_lfid)
+                .process(&attachment.agent_process_id)
                 .unwrap()
                 .unwrap();
             assert!(process.completed_at.is_some());
             assert!(process.outcome.is_none());
             let current = store.session_attachment(&session.id).unwrap().unwrap();
-            assert_eq!(current.process_lfid.is_none(), ended);
+            assert_eq!(current.lf_process_id.is_none(), ended);
             let history = store.session_history(&session.id, 0, 0).unwrap();
             let exits: Vec<_> = history
                 .iter()
@@ -386,7 +383,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
         let session = store.test_session("cleanup", &crate::session_record::new_artifact_key());
-        let parent = ProcessLfid::new();
+        let parent = LfProcessId::new();
         let first = store
             .claim_session_attachment(&session.id, None, &parent, true)
             .unwrap();
@@ -399,7 +396,7 @@ mod tests {
         let mut child = super::spawn_native(command(), &first_owner).unwrap();
         let pid = child.id();
         super::stop_native(&mut child, Some(&first_owner)).unwrap();
-        let exited = store.process(&first.agent_process_lfid).unwrap().unwrap();
+        let exited = store.process(&first.agent_process_id).unwrap().unwrap();
         assert_eq!(exited.pid, Some(pid));
         assert!(exited.os_started_at.is_some());
         assert!(exited.completed_at.is_some());
@@ -409,13 +406,13 @@ mod tests {
             .unwrap();
         let next_owner = (store.clone(), session.id.clone(), next.clone());
         let mut provider = super::spawn_native(command(), &next_owner).unwrap();
-        let recorded = store.process(&next.agent_process_lfid).unwrap().unwrap();
+        let recorded = store.process(&next.agent_process_id).unwrap().unwrap();
         // Reusing the current attachment is not permission for a second spawn.
         // Reject before fork, without recording failure on the running process.
         let duplicate = super::spawn_native(command(), &next_owner);
         assert!(duplicate.is_err());
         assert_eq!(
-            store.process(&next.agent_process_lfid).unwrap(),
+            store.process(&next.agent_process_id).unwrap(),
             Some(recorded)
         );
         // A delayed cleanup has no authority over a replacement, even if it
@@ -424,13 +421,13 @@ mod tests {
         let provider_alive = provider.try_wait().unwrap().is_none();
         let mut client = command().spawn().unwrap();
         super::stop_native(&mut client, None).unwrap();
-        let remote_unchanged = store.process(&next.agent_process_lfid).unwrap().unwrap();
+        let remote_unchanged = store.process(&next.agent_process_id).unwrap().unwrap();
         let remote_alive = provider.try_wait().unwrap().is_none();
         super::stop_native(&mut provider, Some(&next_owner)).unwrap();
         assert!(provider_alive && remote_alive);
         assert!(remote_unchanged.completed_at.is_none());
         assert_eq!(
-            store.process(&first.agent_process_lfid).unwrap(),
+            store.process(&first.agent_process_id).unwrap(),
             Some(exited)
         );
     }
@@ -441,20 +438,20 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
         let session = store.test_session("takeover", &crate::session_record::new_artifact_key());
         let first = store
-            .claim_session_attachment(&session.id, None, &ProcessLfid::new(), true)
+            .claim_session_attachment(&session.id, None, &LfProcessId::new(), true)
             .unwrap();
         let first_owner = (store.clone(), session.id.clone(), first.clone());
         let mut command = Command::new("/bin/sleep");
         command.env_clear().arg("60");
         let mut child = super::spawn_native(command, &first_owner).unwrap();
         let next = store
-            .claim_session_attachment(&session.id, Some(&first), &ProcessLfid::new(), false)
+            .claim_session_attachment(&session.id, Some(&first), &LfProcessId::new(), false)
             .unwrap();
         let refused = super::stop_native(&mut child, Some(&first_owner)).is_err();
         let alive = child.try_wait().unwrap().is_none();
-        let unchanged = store.process(&first.agent_process_lfid).unwrap().unwrap();
+        let unchanged = store.process(&first.agent_process_id).unwrap().unwrap();
         super::stop_native(&mut child, Some(&(store.clone(), session.id, next.clone()))).unwrap();
-        assert_eq!(first.agent_process_lfid, next.agent_process_lfid);
+        assert_eq!(first.agent_process_id, next.agent_process_id);
         assert!(refused && alive);
         assert!(unchanged.completed_at.is_none());
     }
@@ -465,7 +462,7 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
         let session = store.test_session("failed-wait", &crate::session_record::new_artifact_key());
         let attachment = store
-            .claim_session_attachment(&session.id, None, &ProcessLfid::new(), true)
+            .claim_session_attachment(&session.id, None, &LfProcessId::new(), true)
             .unwrap();
         let owner = (store.clone(), session.id.clone(), attachment.clone());
         let mut command = Command::new("/bin/sh");
@@ -479,7 +476,7 @@ mod tests {
         );
         assert!(super::stop_native(&mut child, Some(&owner)).is_err());
         let retained = store
-            .process(&attachment.agent_process_lfid)
+            .process(&attachment.agent_process_id)
             .unwrap()
             .unwrap();
         assert_eq!(retained.pid, Some(child.id()));
@@ -492,7 +489,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
         let session = store.test_session("spawn", &crate::session_record::new_artifact_key());
-        let parent = ProcessLfid::new();
+        let parent = LfProcessId::new();
         let first = store
             .claim_session_attachment(&session.id, None, &parent, true)
             .unwrap();
@@ -500,7 +497,7 @@ mod tests {
         let mut command = tokio::process::Command::new("/bin/sh");
         command.env_clear().args(["-c", "exit 42"]);
         let mut child = super::spawn(command, None, &owner(first.clone())).unwrap();
-        let recorded = store.process(&first.agent_process_lfid).unwrap().unwrap();
+        let recorded = store.process(&first.agent_process_id).unwrap().unwrap();
         assert_eq!(recorded.pid, child.id());
         assert!(recorded.os_started_at.is_some());
         assert_eq!(child.wait().await.unwrap().code(), Some(42));
@@ -526,7 +523,7 @@ mod tests {
             Some(next.clone())
         );
         assert!(store
-            .process(&next.agent_process_lfid)
+            .process(&next.agent_process_id)
             .unwrap()
             .unwrap()
             .pid
@@ -534,7 +531,7 @@ mod tests {
 
         let missing = tokio::process::Command::new(home.path().join("absent-provider"));
         assert!(super::spawn(missing, None, &owner(next.clone())).is_err());
-        let failed = store.process(&next.agent_process_lfid).unwrap().unwrap();
+        let failed = store.process(&next.agent_process_id).unwrap().unwrap();
         assert!(failed.completed_at.is_some());
         assert!(
             failed.outcome.is_none(),
@@ -543,17 +540,10 @@ mod tests {
         let retry = store
             .prepare_session_agent_process(&session.id, &next)
             .unwrap();
-        assert_ne!(retry.agent_process_lfid, next.agent_process_lfid);
+        assert_ne!(retry.agent_process_id, next.agent_process_id);
+        assert_eq!(store.process(&next.agent_process_id).unwrap(), Some(failed));
         assert_eq!(
-            store.process(&next.agent_process_lfid).unwrap(),
-            Some(failed)
-        );
-        assert_eq!(
-            store
-                .process(&first.agent_process_lfid)
-                .unwrap()
-                .unwrap()
-                .pid,
+            store.process(&first.agent_process_id).unwrap().unwrap().pid,
             recorded.pid
         );
     }
@@ -563,7 +553,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
         let session = store.test_session("native", &crate::session_record::new_artifact_key());
-        let parent = ProcessLfid::new();
+        let parent = LfProcessId::new();
         let first = store
             .claim_session_attachment(&session.id, None, &parent, true)
             .unwrap();
@@ -571,7 +561,7 @@ mod tests {
         let mut command = Command::new("/bin/sh");
         command.env_clear().args(["-c", "exit 42"]);
         let mut child = super::spawn_native(command, &owner).unwrap();
-        let recorded = store.process(&first.agent_process_lfid).unwrap().unwrap();
+        let recorded = store.process(&first.agent_process_id).unwrap().unwrap();
         assert_eq!(recorded.pid, Some(child.id()));
         assert!(recorded.os_started_at.is_some());
         assert_eq!(child.wait().unwrap().code(), Some(42));
@@ -600,15 +590,11 @@ mod tests {
             error.downcast_ref::<std::io::Error>().unwrap().kind(),
             std::io::ErrorKind::NotFound
         );
-        let failed = store.process(&next.agent_process_lfid).unwrap().unwrap();
+        let failed = store.process(&next.agent_process_id).unwrap().unwrap();
         assert!(failed.completed_at.is_some());
         assert!(failed.outcome.is_none());
         assert_eq!(
-            store
-                .process(&first.agent_process_lfid)
-                .unwrap()
-                .unwrap()
-                .pid,
+            store.process(&first.agent_process_id).unwrap().unwrap().pid,
             recorded.pid
         );
     }
@@ -640,7 +626,7 @@ mod tests {
             .unwrap();
         let pid = child.id();
         let start = crate::journal::process_started_at(pid).unwrap().unwrap();
-        let parent = ProcessLfid::new();
+        let parent = LfProcessId::new();
         for name in ["first", "conflict"] {
             let session = store.test_session(name, &crate::session_record::new_artifact_key());
             rusqlite::Connection::open(home.path().join("db"))
@@ -674,7 +660,7 @@ mod tests {
             .unwrap();
         let report = super::reap_in(&store, false).unwrap();
         // Always clean up this fixture's own group before assertions.
-        crate::engine::process::terminate_process_group(pid);
+        crate::os_process::terminate_process_group(pid);
         let _ = child.wait();
         assert!(report.errors.is_empty(), "{provider}: {:?}", report.errors);
         assert_eq!(report.orphaned, [pid], "{provider}");

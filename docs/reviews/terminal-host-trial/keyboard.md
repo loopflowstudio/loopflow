@@ -57,7 +57,7 @@ Jack Heart then tried `lf -m claude run ux-flow` and
 interactive flow?” His third screenshot shows the same streamed step output
 for both commands, rather than the native Claude conversation interface.
 Source inspection explains this: `Cli::step_args` always supplies `--batch`,
-and the Flow driver uses it when launching each skill. The top-level interactive
+and the Flow process uses it when launching each skill. The top-level interactive
 flag does not make those steps interactive. This is a Loopflow execution/UX
 bug, not evidence of a cmux rendering failure. Jack identified it as a bug and
 requested its repair in this branch plus a demo with the fixed binary. The repair

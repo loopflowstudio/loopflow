@@ -6,7 +6,7 @@ description: Operate a repository through loopflow (`lf`) — persistent Wave, P
 # Operating Through Loopflow
 
 <!-- Published form of the injected operating contract at
-     rust/loopflow/src/engine/builtins/LOOPFLOW.md — keep aligned when
+     rust/loopflow/src/builtins/LOOPFLOW.md — keep aligned when
      that file changes. Agents launched BY loopflow receive the contract
      automatically; this skill teaches agents that arrived on their own. -->
 

@@ -43,7 +43,7 @@ assembly captures the selected instructions, exact provider strings, attribution
 explicit documents and launch options. Definitions are not reconstructed from
 current files when continuing historical work.
 
-A Flow's driver compiles its graph and all routing alternatives before the
+A Flow process compiles its graph and all routing alternatives before the
 first step and holds them in memory. A direct conversation captures its selected
 Skill or inline prompt. Reconnect retains that conversation; a new Flow compiles
 current source. Current credentials and checkout contents remain live inputs to execution,
@@ -62,7 +62,7 @@ PID/birth, served Session, original parent and current attachment. Session rows
 retain the current AgentProcess reference and native thread. Detached and replaced
 rows survive until positive terminal evidence; attachment absence never removes
 them from inventory. Shell helpers do not become fake lf invocations. After handoff, new
-commands from the continuing provider name the newly attached lf invocation; delayed commands from
+commands from the continuing provider name the newly attached LfProcess; delayed commands from
 a replaced provider retain their historical origin. A parent exiting never
 rewrites existing descendants. These causal links grant neither signaling nor
 Flow authority.
@@ -79,7 +79,7 @@ capture's attachment; pending operations retain their old snapshots. Owned nativ
 launches record before exec without changing their terminal or process group.
 Focused admission, replacement and cleanup fixtures pass. Top and Task gates
 share unfinished-row selection and identity judgment. Missing lf receipts,
-missing agent birth and unavailable OS samples remain Unknown rows with LFIDs;
+missing agent birth and unavailable OS samples remain Unknown rows with LfProcess IDs;
 active Sessions retain their records while reporting unavailable sampling.
 Zombies, birth mismatch and valid absence count as death. Observations grant no
 signal or settlement authority. Public Task-status/scheduled agreement and
@@ -96,7 +96,7 @@ blockers.
 2. Reserve the conversation, history/capture reference and exact attachment together.
 3. Publish immutable launch input and record publication before spawning.
 4. Start or connect the native provider and retain exact AgentProcess/thread/client
-   evidence, distinct from the attached lf invocation.
+   evidence, distinct from the attached LfProcess.
 5. Append correlated provider outcomes and usage; settle command completion
    under its Process lifetime.
 
@@ -129,7 +129,7 @@ termination covers noninteractive providers only: Codex app-server, OpenCode
 serve and headless Claude groups. Native foreground coverage remains unfinished;
 recording a foreground provider alone does not establish orphan cleanup. Unknown identities and
 duplicate PID/birth records remain non-signallable. Failed OS observation makes
-scheduled reconciliation fail with the affected LFID, without settling that row.
+scheduled reconciliation fail with the affected LfProcess ID, without settling that row.
 The reaper's identity, command and descendant observations use the shared OS
 reader; failed descendant inventory refuses before signaling. Codex close and
 scheduled termination share group-wide observation: unreaped zombies are dead,
@@ -171,7 +171,7 @@ closing or ending the surviving provider; orphan settlement remains independent.
 Composed stand-ins cover launch and pre-launch takeover, not configured Codex or
 a complete native-client relay exchange.
 
-A passive viewer subscribes without claiming the Session. A formerly attached lf invocation can
+A passive viewer subscribes without claiming the Session. A formerly attached LfProcess can
 keep receiving and retaining provider history after transfer but cannot start or
 steer a turn or change current attachment, connection, process evidence or stream
 attention. Retaining history grants no native-write or Flow authority.
@@ -205,17 +205,17 @@ provider can succeed before the command fails later, and a stopped Flow's histor
 outlives its command. Failed or interrupted conversation work remains history;
 continuation appends a new result to the same conversation.
 
-The driver holds the cursor and starts each step as a child `lf` process: the
+The Flow process holds the cursor and starts each step as a child `lf` process: the
 plain command, `lf -b skill <name> [message]` or the operation's own. A step
-knows nothing of its Flow. The driver appends the step's Process, graph node and
+knows nothing of its Flow. The Flow process appends the step's Process, graph node and
 iteration counts to FlowProcess, beside the Flow's name and launched graph. A
 step's result is how its process exited. A deciding or routing step gets its
-answer contract in its message and the driver reads the final answer of the
+answer contract in its message and the Flow process reads the final answer of the
 Session turn that step Process captured; an invalid answer is corrected by
 resuming the same conversation (`lf -b session resume ID MESSAGE`), at most
 twice, then the Flow fails. A mechanical step is its own child Process and invents
-no LfSession. After an operation the driver stops the Flow when a landing of
-its checkout is still being watched; neither failed. A killed driver leaves its Processes
+no LfSession. After an operation the Flow process stops the Flow when a landing of
+its checkout is still being watched; neither failed. A killed Flow process leaves its Processes
 as history; nothing resumes it. The caller inspects them before launching fresh
 work. Unknown liveness stays unknown. Cursor movement cannot prove exactly-once
 external effects.

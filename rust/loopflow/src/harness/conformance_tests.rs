@@ -371,16 +371,16 @@ fn codex_rpc_error_response_maps_to_error_event() {
 // Status/SSE alone supplies neither a native completion nor measured usage.
 #[test]
 fn opencode_native_history_preserves_output_tools_and_usage_missingness() {
-    use crate::id::ProcessLfid;
+    use crate::id::LfProcessId;
     use crate::store::sqlite::SqliteStore;
 
     let home = tempfile::tempdir().unwrap();
     let path = home.path().join("store.db");
     let store = SqliteStore::open_ephemeral(&path).unwrap();
     let sql = rusqlite::Connection::open(&path).unwrap();
-    let process = ProcessLfid::new();
+    let process = LfProcessId::new();
     sql.execute(
-        "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+        "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
         [process.as_str()],
     )
     .unwrap();
@@ -388,10 +388,10 @@ fn opencode_native_history_preserves_output_tools_and_usage_missingness() {
         let input = crate::session_record::new_artifact_key();
         let session = format!("session-{measured:?}");
         store.test_session(&session, &input);
-        let driver = store
+        let attachment = store
             .claim_session_attachment(&session, None, &process, false)
             .unwrap();
-        let mut history = History::new(Some((store.clone(), session.clone(), driver)));
+        let mut history = History::new(Some((store.clone(), session.clone(), attachment)));
         let request = history.request().unwrap();
         let agent_session = AgentSessionId::from(session.as_str());
         let mut display =

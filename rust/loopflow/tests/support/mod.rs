@@ -6,7 +6,7 @@ use std::fs;
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
-use base64::Engine;
+use base64::prelude::*;
 use loopflow::id::WaveId;
 use loopflow::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
 use loopflow::store::{PmSnapshotRow, StorageConfig, Store};
@@ -147,7 +147,7 @@ pub fn register_codex_account(home: &Path) {
     let account_home = home.join("accounts/codex/fixture");
     fs::create_dir_all(&account_home).unwrap();
     let email = "fixture@example.com";
-    let claims = base64::engine::general_purpose::URL_SAFE_NO_PAD
+    let claims = BASE64_URL_SAFE_NO_PAD
         .encode(serde_json::json!({"email": email, "sub": "fixture"}).to_string());
     fs::write(
         account_home.join("auth.json"),
@@ -610,25 +610,25 @@ fn write_executable(dir: &Path, name: &str, content: &str) {
     }
 }
 
-/// Record a Flow the way `lf run` leaves one: a driver Process, its FlowProcess row
-/// and one step Process in `cwd`, both exited. Returns the driver's id, which
+/// Record a Flow the way `lf run` leaves one: a Flow process, its FlowProcess row
+/// and one step Process in `cwd`, both exited. Returns the Flow process's id, which
 /// names the Flow.
 #[allow(dead_code)] // Shared helper compiled into integration tests that record no Flow.
 pub fn record_flow(home: &Path, cwd: &Path, flow: &str, label: &str, outcome: &str) -> String {
-    use loopflow::engine::flow::{ConcreteSkill, ConcreteStep, Skill};
+    use loopflow::flow::{ConcreteSkill, ConcreteStep, Skill};
     let db = rusqlite::Connection::open(home.join("loopflow.db")).expect("open test registry");
-    let driver = loopflow::id::ProcessLfid::new();
-    let step = loopflow::id::ProcessLfid::new();
+    let flow_process = loopflow::id::LfProcessId::new();
+    let step = loopflow::id::LfProcessId::new();
     for (id, parent, argv) in [
-        (driver.clone(), None, vec!["lf", "run", flow]),
+        (flow_process.clone(), None, vec!["lf", "run", flow]),
         (
             step.clone(),
-            Some(driver.clone()),
+            Some(flow_process.clone()),
             vec!["lf", "--batch", "skill", label],
         ),
     ] {
         db.execute(
-            "INSERT INTO processes(lfid,trace_id,parent_process_lfid,command,repo,cwd,started_at,completed_at,outcome)
+            "INSERT INTO processes(id,trace_id,parent_lf_process_id,command,repo,cwd,started_at,completed_at,outcome)
              VALUES(?1,?2,?3,?4,?5,?5,1,2,?6)",
             rusqlite::params![
                 id.as_str(),
@@ -641,7 +641,7 @@ pub fn record_flow(home: &Path, cwd: &Path, flow: &str, label: &str, outcome: &s
         )
         .expect("record Flow Process");
     }
-    let graph = loopflow::engine::flow_graph::FlowGraph::new(
+    let graph = loopflow::flow::graph::FlowGraph::new(
         flow,
         &[ConcreteStep::Skill(ConcreteSkill {
             skill: Skill::named(label),
@@ -652,45 +652,45 @@ pub fn record_flow(home: &Path, cwd: &Path, flow: &str, label: &str, outcome: &s
         })],
     );
     db.execute(
-        "INSERT INTO flow_processes(process_lfid,flow,graph) VALUES(?1,?2,?3)",
+        "INSERT INTO flow_processes(lf_process_id,flow,graph) VALUES(?1,?2,?3)",
         rusqlite::params![
-            driver.as_str(),
+            flow_process.as_str(),
             flow,
             serde_json::to_string(&graph).expect("graph serializes")
         ],
     )
     .expect("record FlowProcess");
     db.execute(
-        "INSERT INTO flow_process_steps(flow_process_lfid,process_lfid,node,iterations) VALUES(?1,?2,0,'[[]]')",
-        rusqlite::params![driver.as_str(), step.as_str()],
+        "INSERT INTO flow_process_steps(flow_lf_process_id,lf_process_id,node,iterations) VALUES(?1,?2,0,'[[]]')",
+        rusqlite::params![flow_process.as_str(), step.as_str()],
     )
     .expect("record Flow step");
-    driver.to_string()
+    flow_process.to_string()
 }
 
-/// Every Flow in launch order: its driver's outcome and each recorded step as
+/// Every Flow in launch order: its process's outcome and each recorded step as
 /// `{flow, label, key, iterations, argv}`, `argv` without the binary path.
 #[allow(dead_code)] // Shared helper compiled into integration tests that read no Flow.
 pub fn recorded_flows(home: &Path) -> Vec<(Option<String>, Vec<serde_json::Value>)> {
     let db = rusqlite::Connection::open(home.join("loopflow.db")).expect("open test registry");
-    let mut drivers = db
+    let mut flow_processes = db
         .prepare(
-            "SELECT d.lfid,d.outcome,f.flow,f.graph FROM flow_processes f JOIN processes d ON d.lfid=f.process_lfid
+            "SELECT d.id,d.outcome,f.flow,f.graph FROM flow_processes f JOIN processes d ON d.id=f.lf_process_id
              ORDER BY d.rowid",
         )
-        .expect("select Flow drivers");
-    let rows = drivers
+        .expect("select Flow processes");
+    let rows = flow_processes
         .query_map([], |row| {
             Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
         })
-        .expect("read Flow drivers")
+        .expect("read Flow processes")
         .collect::<rusqlite::Result<Vec<(String, Option<String>, String, String)>>>()
-        .expect("decode Flow drivers");
+        .expect("decode Flow processes");
     rows.into_iter()
-        .map(|(driver, outcome, flow, graph)| {
-            let graph: loopflow::engine::flow_graph::FlowGraph =
+        .map(|(flow_process, outcome, flow, graph)| {
+            let graph: loopflow::flow::graph::FlowGraph =
                 serde_json::from_str(&graph).expect("a Flow graph");
-            fn label(nodes: &[loopflow::engine::flow_graph::FlowNode], key: u32) -> Option<String> {
+            fn label(nodes: &[loopflow::flow::graph::FlowNode], key: u32) -> Option<String> {
                 nodes.iter().find_map(|node| {
                     if node.key == key {
                         return Some(node.label.clone());
@@ -701,11 +701,11 @@ pub fn recorded_flows(home: &Path) -> Vec<(Option<String>, Vec<serde_json::Value
             let mut steps = db
                 .prepare(
                     "SELECT e.command,s.node,s.iterations FROM flow_process_steps s
-                     JOIN processes e ON e.lfid=s.process_lfid WHERE s.flow_process_lfid=?1 ORDER BY s.seq",
+                     JOIN processes e ON e.id=s.lf_process_id WHERE s.flow_lf_process_id=?1 ORDER BY s.seq",
                 )
                 .expect("select Flow steps");
             let steps = steps
-                .query_map([driver], |row| {
+                .query_map([flow_process], |row| {
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, u32>(1)?,

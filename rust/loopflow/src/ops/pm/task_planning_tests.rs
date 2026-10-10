@@ -602,7 +602,7 @@ fn task_deletion_active_sync_reconnect_retains_execution_and_history() {
             rusqlite::params![task.id.as_str(), repo.to_str().unwrap()],
         )
         .unwrap();
-        conn.execute("INSERT INTO processes(lfid,trace_id,command,cwd,started_at) VALUES('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222','lf run code',?1,2)",[repo.to_str().unwrap()]).unwrap();
+        conn.execute("INSERT INTO processes(id,trace_id,command,cwd,started_at) VALUES('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222','lf run code',?1,2)",[repo.to_str().unwrap()]).unwrap();
         conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,cwd,task_id,wave_id,provider_thread,input_published) VALUES('session-retained','Conversation','human',2,?1,?2,?3,'native-retained',1)",rusqlite::params![repo.to_str().unwrap(),task.id.as_str(),task.wave_id.as_str()]).unwrap();
         fixture
             .store
@@ -610,15 +610,15 @@ fn task_deletion_active_sync_reconnect_retains_execution_and_history() {
             .claim_session_attachment(
                 "session-retained",
                 None,
-                &crate::id::ProcessLfid::parse("11111111-1111-4111-8111-111111111111").unwrap(),
+                &crate::id::LfProcessId::parse("11111111-1111-4111-8111-111111111111").unwrap(),
                 true,
             )
             .unwrap();
         conn.execute("INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,created_at,updated_at) VALUES('pr-retained',?1,1,'task','retain/branch','retained-base',1,7)",[task.id.as_str()]).unwrap();
         let graph = json!({"name":"code", "nodes":[{"name":"review","skill":"review","description":null}],
             "edges":[{"from":"start","to":"review","flow":"implement"},{"from":"review","to":"end","flow":null}]});
-        conn.execute("INSERT INTO task_workflows(task_id,graph,node,edge,process_lfid,updated_at) VALUES(?1,?2,'start',0,'11111111-1111-4111-8111-111111111111',3)",rusqlite::params![task.id.as_str(),graph.to_string()]).unwrap();
-        conn.execute("INSERT INTO task_workflow_moves(task_id,workflow,kind,from_node,to_node,edge,process_lfid,note,at) VALUES(?1,'code','chose','start','review',0,'11111111-1111-4111-8111-111111111111','Original choice',3)",[task.id.as_str()]).unwrap();
+        conn.execute("INSERT INTO task_workflows(task_id,graph,node,edge,lf_process_id,updated_at) VALUES(?1,?2,'start',0,'11111111-1111-4111-8111-111111111111',3)",rusqlite::params![task.id.as_str(),graph.to_string()]).unwrap();
+        conn.execute("INSERT INTO task_workflow_moves(task_id,workflow,kind,from_node,to_node,edge,lf_process_id,note,at) VALUES(?1,'code','chose','start','review',0,'11111111-1111-4111-8111-111111111111','Original choice',3)",[task.id.as_str()]).unwrap();
         let rows = || {
             [
                 "processes",
@@ -1446,13 +1446,13 @@ fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
             kind: crate::process::ProcessKind::Lf,
             agent_session_id: None,
             os_started_at: None,
-            lfid: crate::id::ProcessLfid::new(),
+            id: crate::id::LfProcessId::new(),
             pid: None,
             trace_id: crate::id::TraceId::new(),
-            parent_process_lfid: None,
+            parent_lf_process_id: None,
             via_agent: None,
             caller_session_id: None,
-            caller_agent_process_lfid: None,
+            caller_agent_process_id: None,
             command: Some("task move start".into()),
             repo: None,
             cwd: None,
@@ -1467,7 +1467,7 @@ fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
         fixture
             .store
             .sqlite
-            .set_workflow_node(&task.id, "start", &process.lfid, Some("New scope"))
+            .set_workflow_node(&task.id, "start", &process.id, Some("New scope"))
             .unwrap();
         assert_eq!(
             fixture
@@ -1800,7 +1800,7 @@ exit 0
                 .unwrap();
             let workflow = fixture.store.sqlite.workflow(&task.id).unwrap();
             let other_workflow = fixture.store.sqlite.workflow(&other.id).unwrap();
-            let process = crate::engine::agent::ProcessConfig {
+            let process = crate::agent::ProcessConfig {
                 auto,
                 task_input: Some(crate::ops::task_input::TaskInput::new(
                     fixture.store.clone(),
@@ -1814,7 +1814,7 @@ exit 0
                 )),
                 ..Default::default()
             };
-            let launch = crate::engine::agent::AgentConfig {
+            let launch = crate::agent::AgentConfig {
                 agent: Some(agent.into()),
                 cwd: Some(repo.to_path_buf()),
                 env: std::collections::BTreeMap::from([
@@ -1830,10 +1830,10 @@ exit 0
                 let mut running = tokio::task::spawn_blocking(move || {
                     crate::journal::with_test_ledger(database, || {
                         PM_TEST_CONTEXT.sync_scope(context, || {
-                            crate::engine::agent::run_agent(
+                            crate::agent::run_agent(
                                 &launch,
                                 &process,
-                                &crate::engine::agent::AgentCapabilities::default(),
+                                &crate::agent::AgentCapabilities::default(),
                             )
                         })
                     })
@@ -2476,8 +2476,8 @@ fi
                 project_id: project.id,
                 worktree: Some(repo.clone()),
                 workspace_slug: "completion".into(),
-                branch: crate::engine::git::current_branch(&repo).unwrap().unwrap(),
-                base_commit: crate::engine::git::rev_parse(&repo, "HEAD").unwrap(),
+                branch: crate::git::current_branch(&repo).unwrap().unwrap(),
+                base_commit: crate::git::rev_parse(&repo, "HEAD").unwrap(),
                 parent_pr_id: None,
                 abandon_intent: None,
                 created_at: timestamp,
@@ -2490,8 +2490,8 @@ fi
                 task_id: task.id.clone(),
                 sequence: 1,
                 slug: "completion".into(),
-                branch: crate::engine::git::current_branch(&repo).unwrap().unwrap(),
-                base_commit: crate::engine::git::rev_parse(&repo, "HEAD").unwrap(),
+                branch: crate::git::current_branch(&repo).unwrap().unwrap(),
+                base_commit: crate::git::rev_parse(&repo, "HEAD").unwrap(),
                 parent_pr_id: None,
                 publication: None,
                 merge_commit: None,
@@ -2631,9 +2631,7 @@ fi
             1
         );
         assert_eq!(
-            crate::engine::worktrees::list_worktrees(&repo)
-                .unwrap()
-                .len(),
+            crate::git::worktrees::list_worktrees(&repo).unwrap().len(),
             1
         );
     });

@@ -10,8 +10,8 @@ use crate::id::{AgentSessionId, WaveId};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SessionTurnOrigin {
     pub session_id: String,
-    pub process_lfid: crate::id::ProcessLfid,
-    pub agent_process_lfid: crate::id::ProcessLfid,
+    pub lf_process_id: crate::id::LfProcessId,
+    pub agent_process_id: crate::id::LfProcessId,
     pub captured_event: Option<i64>,
     pub task_id: Option<String>,
     pub wave_id: Option<String>,
@@ -27,8 +27,8 @@ pub struct SessionEvent {
     pub agent_session: Option<AgentSessionId>,
     pub provider_turn: Option<String>,
     pub kind: SessionEventKind,
-    pub agent_process_lfid: Option<String>,
-    pub process_lfid: Option<String>,
+    pub agent_process_id: Option<String>,
+    pub lf_process_id: Option<String>,
     pub task_id: Option<String>,
     pub wave_id: Option<String>,
     pub observed_at: i64,
@@ -78,7 +78,7 @@ pub struct LfSession {
     pub id: String,
     /// Immutable captured input, not a resumable execution identity.
     pub artifact_key: String,
-    /// Causal input reference; grants neither driver nor Flow authority.
+    /// Causal input reference; grants neither attachment nor Flow authority.
     pub caller_artifact_key: Option<String>,
     pub input_published: bool,
     pub cwd: std::path::PathBuf,
@@ -90,7 +90,7 @@ pub struct LfSession {
     pub task_id: Option<TaskId>,
     pub wave_id: Option<WaveId>,
     /// The Flow whose step captured the current input; derived, never stored.
-    pub flow_process_lfid: Option<String>,
+    pub flow_lf_process_id: Option<String>,
     pub work_source: Option<WorkSource>,
     /// Time of a prospective bind; absent for admission or unknown historical timing.
     pub bound_at: Option<i64>,
@@ -120,7 +120,7 @@ pub struct SessionBind {
 /// on a person. A long silent provider step can read as Waiting.
 pub(crate) const WAITING_QUIET_SECONDS: i64 = 120;
 
-/// What a Session's attached invocation last read from its provider's own stream. One row
+/// What a Session's attached LfProcess last read from its provider's own stream. One row
 /// per Session, replaced by whichever attachment currently owns that stream.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionActivity {
@@ -213,7 +213,7 @@ pub(crate) struct SessionSummary {
     pub waiting: bool,
     pub program_status: Option<crate::program_status::Records>,
     /// None for a conversation Loopflow never attached to.
-    pub agent_process_lfid: Option<crate::id::ProcessLfid>,
+    pub agent_process_id: Option<crate::id::LfProcessId>,
     pub task_terminal: bool,
     /// Its Task names it as the Task's primary conversation.
     pub task_primary: bool,
@@ -228,7 +228,7 @@ pub(crate) struct SessionSummary {
     pub interactive: bool,
     pub task_id: Option<TaskId>,
     pub wave_id: Option<WaveId>,
-    pub flow_process_lfid: Option<String>,
+    pub flow_lf_process_id: Option<String>,
     pub cwd: std::path::PathBuf,
     pub skill: Option<String>,
     pub provider: Option<String>,
@@ -243,32 +243,32 @@ pub(crate) struct SessionSummary {
     pub task_identifier: Option<String>,
 }
 
-/// A Flow as its driver Process records it; Current says nothing about a live process.
+/// A Flow as its Flow process records it; Current says nothing about a live process.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FlowProcessSummary {
-    /// The driver Process.
+    /// The Flow process.
     pub id: String,
     pub name: String,
     pub state: FlowProcessSummaryState,
     pub task_id: Option<TaskId>,
     pub wave_id: Option<WaveId>,
-    /// When its latest step started, or its driver exited.
+    /// When its latest step started, or its Flow process exited.
     pub updated_at: i64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FlowProcessSummaryState {
-    /// The driver has no recorded exit.
+    /// The Flow process has no recorded exit.
     Current,
     Completed,
-    /// The driver exited before the Flow's last step.
+    /// The Flow process exited before the Flow's last step.
     Stopped,
 }
 
 impl FlowProcessSummaryState {
-    /// What a driver Process's recorded outcome and exit time say of its Flow.
-    pub(crate) fn of_driver(outcome: Option<&str>, completed_at: Option<i64>) -> Self {
+    /// What a Flow process's recorded outcome and exit time say of its Flow.
+    pub(crate) fn of_process(outcome: Option<&str>, completed_at: Option<i64>) -> Self {
         match (outcome, completed_at) {
             (Some("succeeded"), _) => Self::Completed,
             (None, None) => Self::Current,

@@ -990,7 +990,7 @@ exit 0
                 loopflow::ops::release_tag(&repo_path, "0.9.2", None),
                 Err(loopflow::ops::OpsError::ReleaseDeferred { .. })
             ));
-            assert!(loopflow::engine::git::worktree_remove(&repo_path, &checkout).is_err());
+            assert!(loopflow::git::worktree_remove(&repo_path, &checkout).is_err());
             assert_eq!(git(&checkout, &["rev-parse", "HEAD"]), rejected_commit);
             assert_eq!(caller_state(), before);
             let pending = release_history(

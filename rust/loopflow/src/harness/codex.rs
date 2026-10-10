@@ -29,16 +29,16 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio_tungstenite::{client_async, tungstenite::Message};
 
+use crate::agent::{build_codex_thread_start_params, AgentConfig};
 use crate::chat::types::{ConversationEvent, ConversationItem, TurnUsage};
-use crate::engine::agent::{build_codex_thread_start_params, AgentConfig};
-use crate::engine::process::{
-    agent_process_lifeline_path, hold_agent_process_lifeline, kill_process_group,
-};
 use crate::harness::codex_mapping::ItemPhase;
 use crate::harness::common::spawn_stderr_logger;
 use crate::harness::lf_tag::LfTagParser;
 use crate::harness::{
     codex_mapping, ApprovalPolicy, Harness, HarnessError, RawProviderEvent, SendCurrentOutcome,
+};
+use crate::os_process::{
+    agent_process_lifeline_path, hold_agent_process_lifeline, kill_process_group,
 };
 use crate::provider_account::{resolve_provider_account_exact, ProviderAccountRoute};
 use crate::provider_auth::Provider;
@@ -735,7 +735,7 @@ impl CodexHarness {
 
 #[async_trait]
 impl Harness for CodexHarness {
-    fn process_id(&self) -> Option<u32> {
+    fn pid(&self) -> Option<u32> {
         self.child.as_ref().and_then(Child::id)
     }
 
@@ -1012,7 +1012,7 @@ impl CodexHarness {
                     .as_ref()
                     .expect("new AgentProcess owns a directory")
                     .path()
-                    .join("engine.sock")
+                    .join("agent.sock")
             });
         let mut command = Command::new("codex");
         if let Some(route) = &self.account_route {
@@ -1057,7 +1057,7 @@ impl CodexHarness {
         // The app-server can host another conversation. Only this thread receives
         // its caller/capture provenance; app-server defaults must not lend it to a
         // newly admitted sibling.
-        for name in crate::engine::agent::EXECUTION_IDENTITY_ENV {
+        for name in crate::agent::EXECUTION_IDENTITY_ENV {
             command.env_remove(name);
         }
 
@@ -1420,7 +1420,7 @@ impl CodexHarness {
             "allow_login_shell": false,
             "features.shell_snapshot": false,
         });
-        if let Some(path) = crate::engine::agent::write_system_prompt_file(launch, "session")? {
+        if let Some(path) = crate::agent::write_system_prompt_file(launch, "session")? {
             config["model_instructions_file"] = json!(path.to_string_lossy());
         }
         thread_params.insert("config".into(), config);
@@ -1500,9 +1500,9 @@ mod tests {
                 .unwrap();
         store.test_session("saved", &crate::session_record::new_artifact_key());
         let sql = rusqlite::Connection::open(ledger.home().join("loopflow.db")).unwrap();
-        let process = crate::id::ProcessLfid::new();
+        let process = crate::id::LfProcessId::new();
         sql.execute(
-            "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
             [process.as_str()],
         )
         .unwrap();
@@ -1512,13 +1512,13 @@ mod tests {
         store
             .record_session_connection("saved", &old, "/missing.sock", &"saved-thread".into())
             .unwrap();
-        let driver = store
+        let attachment = store
             .claim_session_attachment("saved", Some(&old), &process, true)
             .unwrap();
         let (tx, _rx) = mpsc::unbounded_channel();
         let mut harness = CodexHarness::new(tx, ApprovalPolicy::AutoApprove);
         let config = AgentConfig {
-            session_attachment: Some(("saved".into(), driver.clone())),
+            session_attachment: Some(("saved".into(), attachment.clone())),
             // Even a mistakenly reached spawn cannot launch a real provider.
             cwd: Some(ledger.home().join("absent")),
             ..Default::default()
@@ -1531,7 +1531,9 @@ mod tests {
         assert!(error
             .to_string()
             .contains("Saved conversation thread differs"));
-        let released = store.release_session_attachment("saved", &driver).unwrap();
+        let released = store
+            .release_session_attachment("saved", &attachment)
+            .unwrap();
         let retry = store
             .claim_session_attachment("saved", Some(&released), &process, true)
             .unwrap();

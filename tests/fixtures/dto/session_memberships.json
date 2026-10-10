@@ -47,7 +47,7 @@
       "iterations": [
         []
       ],
-      "flow_process_lfid": "00000000-0000-0000-0000-00000000f10w"
+      "flow_lf_process_id": "00000000-0000-0000-0000-00000000f10w"
     },
     "workspace": {
       "machine_id": "home_00000000000000000000000000000001",
@@ -60,7 +60,7 @@
     "attention": "waiting",
     "task_primary": false,
     "program_status": null,
-    "agent_process_lfid": "44444444-4444-4444-8444-444444444444"
+    "agent_process_id": "44444444-4444-4444-8444-444444444444"
   },
   {
     "id": "run_00000000000000000000000000000002",
@@ -110,7 +110,7 @@
           1
         ]
       ],
-      "flow_process_lfid": "00000000-0000-0000-0000-0000000000f2"
+      "flow_lf_process_id": "00000000-0000-0000-0000-0000000000f2"
     },
     "workspace": {
       "machine_id": "home_00000000000000000000000000000001",
@@ -123,7 +123,7 @@
     "attention": null,
     "task_primary": false,
     "program_status": null,
-    "agent_process_lfid": "44444444-4444-4444-8444-444444444444"
+    "agent_process_id": "44444444-4444-4444-8444-444444444444"
   },
   {
     "id": "run_00000000000000000000000000000003",
@@ -178,7 +178,7 @@
     "attention": null,
     "task_primary": false,
     "program_status": null,
-    "agent_process_lfid": "44444444-4444-4444-8444-444444444444"
+    "agent_process_id": "44444444-4444-4444-8444-444444444444"
   },
   {
     "id": "run_00000000000000000000000000000004",
@@ -228,7 +228,7 @@
     "attention": null,
     "task_primary": false,
     "program_status": null,
-    "agent_process_lfid": "44444444-4444-4444-8444-444444444444"
+    "agent_process_id": "44444444-4444-4444-8444-444444444444"
   },
   {
     "id": "run_00000000000000000000000000000006",
@@ -275,7 +275,7 @@
           1
         ]
       ],
-      "flow_process_lfid": "00000000-0000-0000-0000-0000000000f1"
+      "flow_lf_process_id": "00000000-0000-0000-0000-0000000000f1"
     },
     "workspace": {
       "machine_id": "home_00000000000000000000000000000001",
@@ -288,7 +288,7 @@
     "attention": null,
     "task_primary": false,
     "program_status": null,
-    "agent_process_lfid": "44444444-4444-4444-8444-444444444444"
+    "agent_process_id": "44444444-4444-4444-8444-444444444444"
   },
   {
     "id": "run_00000000000000000000000000000007",
@@ -330,7 +330,7 @@
       "occurrence": "past",
       "node": null,
       "iterations": null,
-      "flow_process_lfid": "00000000-0000-0000-0000-0000000000f0"
+      "flow_lf_process_id": "00000000-0000-0000-0000-0000000000f0"
     },
     "workspace": {
       "machine_id": "home_00000000000000000000000000000001",
@@ -343,7 +343,7 @@
     "attention": null,
     "task_primary": false,
     "program_status": null,
-    "agent_process_lfid": "44444444-4444-4444-8444-444444444444"
+    "agent_process_id": "44444444-4444-4444-8444-444444444444"
   },
   {
     "id": "task_00000000000000000000000000000001:feature:demo:0",
@@ -392,7 +392,7 @@
           0
         ]
       ],
-      "flow_process_lfid": "00000000-0000-0000-0000-0000000000f2"
+      "flow_lf_process_id": "00000000-0000-0000-0000-0000000000f2"
     },
     "workspace": {
       "machine_id": "home_00000000000000000000000000000001",
@@ -405,6 +405,6 @@
     "attention": "waiting",
     "task_primary": false,
     "program_status": null,
-    "agent_process_lfid": "44444444-4444-4444-8444-444444444444"
+    "agent_process_id": "44444444-4444-4444-8444-444444444444"
   }
 ]

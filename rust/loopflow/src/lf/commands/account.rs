@@ -1661,8 +1661,7 @@ mod account_first_tests {
     use std::path::Path;
     use std::sync::Arc;
 
-    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-    use base64::Engine;
+    use base64::prelude::*;
     use serde_json::json;
 
     use super::{
@@ -1757,7 +1756,7 @@ echo '{"method":"account/login/completed","params":{"loginId":"fixture-login","s
             permissions.set_mode(0o755);
             fs::set_permissions(&codex, permissions).unwrap();
         }
-        let claims = URL_SAFE_NO_PAD.encode(format!(
+        let claims = BASE64_URL_SAFE_NO_PAD.encode(format!(
             r#"{{"email":"{reported_login}","sub":"user-{reported_login}"}}"#
         ));
         let auth_json = temp.join("codex-auth.json");

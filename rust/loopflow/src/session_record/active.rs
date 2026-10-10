@@ -114,7 +114,7 @@ fn observe(store: &SqliteStore, result: &mut ActiveSessionsSnapshot) -> anyhow::
 mod tests {
     use super::{snapshot, DiscoveryState};
     use crate::durable::{TaskId, WorkRef};
-    use crate::id::ProcessLfid;
+    use crate::id::LfProcessId;
     use crate::session::TitleSource;
     use crate::session_record::new_artifact_key;
     use crate::store::sqlite::SqliteStore;
@@ -157,7 +157,7 @@ mod tests {
         let session = store
             .replace_session_input(session.captured, session)
             .unwrap();
-        let parent = ProcessLfid::new();
+        let parent = LfProcessId::new();
         let first = store
             .claim_session_attachment(&session.id, None, &parent, true)
             .unwrap();
@@ -171,10 +171,7 @@ mod tests {
             .release_session_attachment(&session.id, &first)
             .unwrap();
         let read = || snapshot(home.path(), &store, None);
-        assert_eq!(
-            read().sessions[0].processes[0].lfid,
-            first.agent_process_lfid
-        );
+        assert_eq!(read().sessions[0].processes[0].id, first.agent_process_id);
 
         // Next-launch settings and current capture do not reassign the old process.
         let mut next = session.clone();
@@ -202,11 +199,11 @@ mod tests {
         assert!(observed.sessions[0]
             .processes
             .iter()
-            .any(|p| p.lfid == first.agent_process_lfid && p.provider == "codex"));
+            .any(|p| p.id == first.agent_process_id && p.provider == "codex"));
         assert!(observed.sessions[0]
             .processes
             .iter()
-            .any(|p| p.lfid == second.agent_process_lfid && p.provider == "claude"));
+            .any(|p| p.id == second.agent_process_id && p.provider == "claude"));
         assert!(
             snapshot(home.path(), &store, Some(WorkRef::Task(TaskId::new())))
                 .sessions
@@ -236,10 +233,7 @@ mod tests {
             .all(|process| process.state == crate::lf::commands::top::ActivityState::Unknown));
         drop(old);
         assert_eq!(read().sessions[0].processes.len(), 1);
-        assert_eq!(
-            read().sessions[0].processes[0].lfid,
-            second.agent_process_lfid
-        );
+        assert_eq!(read().sessions[0].processes[0].id, second.agent_process_id);
         drop(current);
         assert!(read().sessions.is_empty());
         // Observation never claims an attachment or erases unfinished history.

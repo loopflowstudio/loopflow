@@ -1,8 +1,8 @@
 //! Shared recovery and execution helpers for Project and Task Work.
 
+use crate::config::load_config;
 use crate::durable::WorkRef;
-use crate::engine::config::load_config;
-use crate::engine::context_budget::{bound_message, ContextBudgets};
+use crate::prompt::context_budget::{bound_message, ContextBudgets};
 use crate::store::SharedStore;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -27,7 +27,7 @@ impl WorkControlReceipt {
 
 /// Inject steer comments newer than `*cursor` into the live provider turn. A
 /// comment the provider takes (`Sent`) advances the cursor; one it can't take
-/// right now (`NotSteerable` — no active turn, or a driver without live input)
+/// right now (`NotSteerable` — no active turn, or a harness without live input)
 /// stays for the next skill boundary, whose seed reads unconsumed steers. Steering
 /// is best-effort live and durable at the boundary, so this never fails the run.
 pub(crate) async fn inject_live_steers(

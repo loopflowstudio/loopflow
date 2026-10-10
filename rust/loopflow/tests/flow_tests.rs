@@ -4,8 +4,9 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use loopflow::engine::flow::{ConcreteStep, Skill, Step};
-use loopflow::engine::{compile_flow, load_flow};
+use loopflow::flow::compile_flow;
+use loopflow::flow::load_flow;
+use loopflow::flow::{ConcreteStep, Skill, Step};
 use support::{codex_app_server_script, register_codex_account};
 use tempfile::TempDir;
 
@@ -143,7 +144,7 @@ PYTHON
         let executables: Vec<String> = conn
             .prepare(
                 "SELECT json_extract(e.command,'$[0]') FROM processes e
-                 JOIN flow_process_steps s ON s.process_lfid=e.lfid WHERE e.outcome='succeeded'",
+                 JOIN flow_process_steps s ON s.lf_process_id=e.id WHERE e.outcome='succeeded'",
             )
             .unwrap()
             .query_map([], |row| row.get(0))
@@ -173,15 +174,15 @@ PYTHON
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
-        let driver: String = conn
-            .query_row("SELECT process_lfid FROM flow_processes", [], |row| {
+        let flow_process: String = conn
+            .query_row("SELECT lf_process_id FROM flow_processes", [], |row| {
                 row.get(0)
             })
             .unwrap();
         let inspection = run_lf(
             repo.path(),
             home.path(),
-            &["flow", "show", &driver, "--processes", "--json"],
+            &["flow", "show", &flow_process, "--processes", "--json"],
             None,
         );
         assert!(
@@ -258,7 +259,7 @@ print(json.dumps({"report": {}, "metric_observations": [], "text": "finished"}))
         "survive",
         "- cmd: __telemetry-scorecard\n- cmd: sync --plan\n",
     );
-    let mut driver = lf_command(
+    let mut flow_process = lf_command(
         repo.path(),
         home.path(),
         &["--batch", "flow", "survive"],
@@ -270,20 +271,20 @@ print(json.dumps({"report": {}, "metric_observations": [], "text": "finished"}))
     .unwrap();
     wait_for("effect never started", || {
         assert!(
-            driver.try_wait().unwrap().is_none(),
-            "driver exited before the effect"
+            flow_process.try_wait().unwrap().is_none(),
+            "Flow process exited before the effect"
         );
         repo.path().join("entered").exists()
     });
-    driver.kill().unwrap();
-    driver.wait().unwrap();
+    flow_process.kill().unwrap();
+    flow_process.wait().unwrap();
     let read = || {
         let mut flows = flow_details(repo.path(), home.path());
         assert_eq!(flows.len(), 1);
         flows.remove(0)
     };
     // Reconciliation before and after the surviving effect completes must not
-    // continue the dead driver's Flow or execute its successor.
+    // continue the dead process's Flow or execute its successor.
     for effect_finished in [false, true] {
         if effect_finished {
             fs::write(repo.path().join("release"), "").unwrap();
@@ -314,7 +315,7 @@ print(json.dumps({"report": {}, "metric_observations": [], "text": "finished"}))
         );
         assert_ne!(
             flow["entry"]["state"], "completed",
-            "an effect's exit does not finish its dead driver"
+            "an effect's exit does not finish its dead Flow process"
         );
     }
     let sessions = lf_json(
@@ -769,12 +770,12 @@ fn flow_parsing_parity() {
     assert_eq!(flow.name, "sample");
     assert_eq!(flow.items.len(), 2);
     assert!(
-        matches!(&flow.items[0].target, loopflow::engine::target::Target::Skill(skill) if skill.name == "implement")
+        matches!(&flow.items[0].target, loopflow::definition::Target::Skill(skill) if skill.name == "implement")
     );
     assert_eq!(
         flow.items[1],
         Step {
-            target: loopflow::engine::target::Target::Skill(Skill {
+            target: loopflow::definition::Target::Skill(Skill {
                 source: None,
                 name: "review".to_string(),
                 agent: None,
@@ -1113,7 +1114,7 @@ fn operational_flow_rejects_review_before_launch_or_capture() {
 }
 
 #[test]
-fn killed_driver_leaves_its_agent_step_as_history_without_another_turn() {
+fn killed_flow_process_leaves_its_agent_step_as_history_without_another_turn() {
     let repo = loopflow_test_support::TestRepo::new();
     let home = TempDir::new().unwrap();
     let bin = TempDir::new().unwrap();
@@ -1133,7 +1134,7 @@ fn killed_driver_leaves_its_agent_step_as_history_without_another_turn() {
         bin.path().display(),
         std::env::var("PATH").unwrap()
     );
-    let mut driver = lf_command(
+    let mut flow_process = lf_command(
         repo.path(),
         home.path(),
         &["--batch", "--no-loopflow", "flow", "survive-agent"],
@@ -1145,13 +1146,13 @@ fn killed_driver_leaves_its_agent_step_as_history_without_another_turn() {
     .unwrap();
     wait_for("agent never started", || {
         assert!(
-            driver.try_wait().unwrap().is_none(),
-            "driver exited before provider input"
+            flow_process.try_wait().unwrap().is_none(),
+            "Flow process exited before provider input"
         );
         home.path().join("entered").exists()
     });
-    driver.kill().unwrap();
-    driver.wait().unwrap();
+    flow_process.kill().unwrap();
+    flow_process.wait().unwrap();
     let read = || {
         let mut flows = flow_details(repo.path(), home.path());
         assert_eq!(flows.len(), 1);
@@ -1176,7 +1177,7 @@ fn killed_driver_leaves_its_agent_step_as_history_without_another_turn() {
     assert_eq!(
         step_fields(&flow, "label"),
         ["work"],
-        "the dead driver's successor never launched"
+        "the dead Flow process's successor never launched"
     );
     assert_ne!(flow["entry"]["state"], "completed");
     assert_eq!(
@@ -1766,12 +1767,12 @@ fn flow_names_load_into_targets() {
     assert_eq!(flow.items.len(), 2);
     assert!(matches!(
         &flow.items[0].target,
-        loopflow::engine::target::Target::Flow(_)
+        loopflow::definition::Target::Flow(_)
     ));
     assert!(matches!(
         flow.items[1],
         Step {
-            target: loopflow::engine::target::Target::Skill(_),
+            target: loopflow::definition::Target::Skill(_),
             ..
         }
     ));
@@ -1794,7 +1795,7 @@ fn command_item_parses_and_expands() {
     assert_eq!(flow.items.len(), 2);
     match &flow.items[1] {
         Step {
-            target: loopflow::engine::target::Target::Command(item),
+            target: loopflow::definition::Target::Command(item),
             ..
         } => {
             assert_eq!(item.command, "pr");
@@ -2093,7 +2094,7 @@ fn task_flow_read_keeps_captured_topology_and_counts_both_returns() {
     assert_eq!(sessions.len(), answers.len(), "one conversation per turn");
     assert!(sessions
         .iter()
-        .all(|session| session["flow_process_lfid"] == id));
+        .all(|session| session["flow_lf_process_id"] == id));
     // The failed step is red and stays with the Flow for its caller.
     assert_eq!(execution["execution"]["state"], "blocked");
     assert_eq!(execution["execution"]["step"], "__telemetry-scorecard");
@@ -2342,7 +2343,7 @@ fn a_repeated_node_receives_only_task_direction_newer_than_its_last_run() {
         run(&["--task", "INF-123", "flow", "twice"]),
         [true, true, false, false]
     );
-    // The driver asked for that with an option any run takes.
+    // The Flow process asked for that with an option any run takes.
     steer("Report the first error only.");
     let after = earlier.to_string();
     let given = run(&[
@@ -2407,7 +2408,7 @@ fn the_research_workflow_ends_on_its_edge_that_runs_nothing() {
 
 #[test]
 fn mixed_provider_flow_keeps_launch_accounts_across_steps() {
-    use base64::Engine;
+    use base64::prelude::*;
     use loopflow::store::{
         CredentialState, ProviderAccount, ProviderAccountId, RoutingState, StorageConfig,
     };
@@ -2431,7 +2432,7 @@ fn mixed_provider_flow_keeps_launch_accounts_across_steps() {
             let credential = if provider == "claude" {
                 serde_json::json!({"claudeAiOauth":{"accessToken":format!("fixture-{id}"),"expiresAt":4102444800000i64}}).to_string()
             } else {
-                let claims = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                let claims = BASE64_URL_SAFE_NO_PAD
                     .encode(serde_json::json!({"email":email,"sub":id}).to_string());
                 serde_json::json!({"tokens":{"access_token":"fixture", "id_token":format!("h.{claims}.s")}}).to_string()
             };

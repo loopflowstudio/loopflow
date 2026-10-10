@@ -631,7 +631,7 @@ public struct SessionHistory: Decodable, Sendable, Identifiable, Hashable {
 
 public struct ProviderHistory: Decodable, Sendable, Hashable {
     public let reference: ProviderHistoryReference
-    public let processLfid: String?
+    public let lfProcessId: String?
     public let taskId: String?
     public let waveId: String?
     public let startedAt: Int?
@@ -640,7 +640,7 @@ public struct ProviderHistory: Decodable, Sendable, Hashable {
     public let usage: SessionUsage
     enum CodingKeys: String, CodingKey {
         case reference, outcome, usage
-        case processLfid = "process_lfid", taskId = "task_id", waveId = "wave_id"
+        case lfProcessId = "lf_process_id", taskId = "task_id", waveId = "wave_id"
         case startedAt = "started_at", completedAt = "completed_at"
     }
 }
@@ -833,12 +833,12 @@ public struct ProjectReadiness: Decodable, Sendable, Hashable {
     public let activation: Activation?
 
     public struct Activation: Decodable, Sendable, Hashable {
-        public let processLfid: String
+        public let lfProcessId: String
         public let completedAt: Int64?
         public let outcome: String?
         public let error: String?
         enum CodingKeys: String, CodingKey {
-            case processLfid = "process_lfid", completedAt = "completed_at", outcome, error
+            case lfProcessId = "lf_process_id", completedAt = "completed_at", outcome, error
         }
     }
     enum CodingKeys: String, CodingKey {

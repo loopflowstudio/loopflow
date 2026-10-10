@@ -1,12 +1,10 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::engine::git::{
-    current_branch, get_default_branch, is_clean, land as git_land, LandStrategy,
-};
-use crate::engine::worktrees::{main_repo_root, worktree_path};
+use crate::git::worktrees::{main_repo_root, worktree_path};
+use crate::git::{current_branch, get_default_branch, is_clean, land as git_land, LandStrategy};
 
-use crate::engine::command::run_command;
+use crate::command::run_command;
 use crate::ops::commit::{commit_workflow, CommitOptions};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::pr::{
@@ -61,7 +59,7 @@ fn prepare_pr(
     let (repo_root, main_repo) = resolve_repos(repo, options.worktree.as_deref())?;
     // Establish the Task's commit range before delivery availability checks.
     crate::ops::task::verify_task_pr_range(&repo_root)?;
-    if !options.local && !crate::engine::git::has_origin(&repo_root)? {
+    if !options.local && !crate::git::has_origin(&repo_root)? {
         return Err(OpsError::Message(
             "hosted delivery requires an origin remote".to_string(),
         ));
@@ -95,7 +93,7 @@ fn prepare_pr(
                     }
                 }
             } else if task_context.is_none() && !options.local && is_clean(&repo_root)? {
-                let head = crate::engine::git::rev_parse(&repo_root, "HEAD")?;
+                let head = crate::git::rev_parse(&repo_root, "HEAD")?;
                 if let Some(pr) = crate::ops::pr::current_pr(&repo_root)? {
                     if pr.head_sha.as_deref() == Some(head.as_str())
                         && crate::ops::pr::auto_merge_enabled(&repo_root, pr.number)?
@@ -154,14 +152,14 @@ fn prepare_pr(
             "no open PR found for branch '{feature_branch}'; run lf pr open or use --create-pr"
         )));
     }
-    let copy_head = crate::engine::git::rev_parse(&repo_root, "HEAD")?;
+    let copy_head = crate::git::rev_parse(&repo_root, "HEAD")?;
     let copy_state = read_worktree_state(&repo_root)?;
     let copy = normalize_task_pr_copy(
         resolve_pr_copy(&repo_root, &copy_head, options, progress)?,
         task_context.as_ref(),
         &TaskPrCopyLifecycle::Completes,
     )?;
-    let current_head = crate::engine::git::rev_parse(&repo_root, "HEAD")?;
+    let current_head = crate::git::rev_parse(&repo_root, "HEAD")?;
     if current_head != copy_head || read_worktree_state(&repo_root)? != copy_state {
         return Err(OpsError::Message(
             "PR copy generation changed the worktree; refusing to integrate or finalize unreviewed provider mutations"
@@ -360,7 +358,7 @@ fn prepare_land(
         ));
     }
 
-    if !options.strict && !crate::engine::worktrees::is_persistent_worktree(repo_root)? {
+    if !options.strict && !crate::git::worktrees::is_persistent_worktree(repo_root)? {
         let message = options
             .commit_message
             .clone()
@@ -405,7 +403,7 @@ fn accept_completed_integration(repo_root: &Path, main_repo: &Path) -> OpsResult
     let main_branch = get_default_branch(main_repo)?;
     if let Some(stacked) = crate::ops::task::stack_for_landing(repo_root)? {
         // The merge's second parent is the immutable integration target.
-        let new_base = crate::engine::git::rev_parse(repo_root, "HEAD^2")?;
+        let new_base = crate::git::rev_parse(repo_root, "HEAD^2")?;
         crate::ops::task::record_stack_sync(&stacked, &new_base, true)?;
     }
     Ok(main_branch)
@@ -549,7 +547,7 @@ pub(crate) fn resolve_repos(repo: &Path, worktree: Option<&str>) -> OpsResult<(P
 /// see [`crate::work::task::CiCheck::land_time_precondition`], which keeps the landing
 /// supervisor from launching `ci-fix` against work only this function can do.
 fn clear_scratch(repo: &Path, progress: &impl Progress) -> OpsResult<()> {
-    if crate::engine::worktrees::is_persistent_worktree(repo)? {
+    if crate::git::worktrees::is_persistent_worktree(repo)? {
         return Ok(());
     }
     let scratch = repo.join("scratch");
@@ -587,9 +585,9 @@ fn clear_scratch(repo: &Path, progress: &impl Progress) -> OpsResult<()> {
     }
 
     progress.status("Clearing scratch/...");
-    crate::engine::git::stage_all(repo, &|_| {})?;
+    crate::git::stage_all(repo, &|_| {})?;
     if has_staged_changes(repo)? {
-        crate::engine::git::commit(repo, "lf land: clear scratch/", &|_| {})?;
+        crate::git::commit(repo, "lf land: clear scratch/", &|_| {})?;
     }
 
     Ok(())

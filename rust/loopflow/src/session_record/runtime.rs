@@ -27,7 +27,7 @@ pub(super) fn close_session_agent_process(store: &SqliteStore, session: &str) ->
     let agents = store.agent_processes()?;
     let Some(agent) = agents
         .iter()
-        .find(|agent| agent.process.lfid == attachment.agent_process_lfid)
+        .find(|agent| agent.process.id == attachment.agent_process_id)
     else {
         return Ok(false);
     };
@@ -75,7 +75,7 @@ pub(super) fn close_session_agent_process(store: &SqliteStore, session: &str) ->
 mod tests {
     use std::os::unix::process::CommandExt;
 
-    use crate::id::ProcessLfid;
+    use crate::id::LfProcessId;
     use crate::store::sqlite::SqliteStore;
 
     struct Child(std::process::Child);
@@ -104,7 +104,7 @@ mod tests {
         )
         .unwrap();
         let attached = store
-            .claim_session_attachment("resume", None, &ProcessLfid::new(), true)
+            .claim_session_attachment("resume", None, &LfProcessId::new(), true)
             .unwrap();
         let detached = store
             .release_session_attachment("resume", &attached)
@@ -117,7 +117,7 @@ mod tests {
         let _ambient = crate::test_ambient::EnvGuard::new();
         let (home, store, detached) = resume_fixture();
         let attached = store
-            .claim_session_attachment("resume", Some(&detached), &ProcessLfid::new(), false)
+            .claim_session_attachment("resume", Some(&detached), &LfProcessId::new(), false)
             .unwrap();
         let mut command = std::process::Command::new("/bin/sleep");
         command.env_clear().arg("60").process_group(0);
@@ -148,18 +148,15 @@ mod tests {
         let next = crate::session_record::resume_session_agent_process(
             &store,
             "resume",
-            &ProcessLfid::new(),
+            &LfProcessId::new(),
         )
         .unwrap();
-        assert_ne!(next.agent_process_lfid, attached.agent_process_lfid);
+        assert_ne!(next.agent_process_id, attached.agent_process_id);
         assert_eq!(
             crate::journal::process_identity_evidence(pid, birth),
             crate::journal::ProcessIdentityEvidence::Dead
         );
-        let ended = store
-            .process(&attached.agent_process_lfid)
-            .unwrap()
-            .unwrap();
+        let ended = store.process(&attached.agent_process_id).unwrap().unwrap();
         assert!(ended.completed_at.is_some());
         assert!(ended.outcome.is_none());
         assert_eq!(ended.pid, Some(pid));
@@ -175,7 +172,7 @@ mod tests {
         let _ambient = crate::test_ambient::EnvGuard::new();
         let (_home, store, detached) = resume_fixture();
         let attached = store
-            .claim_session_attachment("resume", Some(&detached), &ProcessLfid::new(), false)
+            .claim_session_attachment("resume", Some(&detached), &LfProcessId::new(), false)
             .unwrap();
         store
             .record_agent_process_launch(
@@ -187,23 +184,23 @@ mod tests {
         let detached = store
             .release_session_attachment("resume", &attached)
             .unwrap();
-        let before = store.process(&detached.agent_process_lfid).unwrap();
+        let before = store.process(&detached.agent_process_id).unwrap();
         let session = store.session("resume").unwrap().unwrap();
         let mut next = session.clone();
         next.artifact_key = crate::session_record::new_artifact_key();
         next.input_published = false;
         assert!(store
-            .claim_session_input(next, Some(&detached), &ProcessLfid::new(), || {
+            .claim_session_input(next, Some(&detached), &LfProcessId::new(), || {
                 super::close_session_agent_process(&store, "resume")
             })
             .is_err());
         assert!(crate::session_record::resume_session_agent_process(
             &store,
             "resume",
-            &ProcessLfid::new()
+            &LfProcessId::new()
         )
         .is_err());
-        assert_eq!(store.process(&detached.agent_process_lfid).unwrap(), before);
+        assert_eq!(store.process(&detached.agent_process_id).unwrap(), before);
         assert_eq!(store.session_attachment("resume").unwrap(), Some(detached));
         assert_eq!(store.session("resume").unwrap(), Some(session));
     }
@@ -213,7 +210,7 @@ mod tests {
         let _ambient = crate::test_ambient::EnvGuard::new();
         let (home, store, detached) = resume_fixture();
         let attached = store
-            .claim_session_attachment("resume", Some(&detached), &ProcessLfid::new(), false)
+            .claim_session_attachment("resume", Some(&detached), &LfProcessId::new(), false)
             .unwrap();
         let mut command = std::process::Command::new("/bin/sleep");
         command.env_clear().arg("60").process_group(0);
@@ -236,7 +233,7 @@ mod tests {
             .unwrap();
         store.test_session("duplicate", &crate::session_record::new_artifact_key());
         let duplicate = store
-            .claim_session_attachment("duplicate", None, &ProcessLfid::new(), true)
+            .claim_session_attachment("duplicate", None, &LfProcessId::new(), true)
             .unwrap();
         store
             .record_agent_process_identity("duplicate", &duplicate, pid, birth)
@@ -244,7 +241,7 @@ mod tests {
         let error = crate::session_record::resume_session_agent_process(
             &store,
             "resume",
-            &ProcessLfid::new(),
+            &LfProcessId::new(),
         )
         .unwrap_err();
         assert!(error.to_string().contains("multiple owners"), "{error}");
@@ -258,7 +255,7 @@ mod tests {
         let _ambient = crate::test_ambient::EnvGuard::new();
         let (_home, store, detached) = resume_fixture();
         let attached = store
-            .claim_session_attachment("resume", Some(&detached), &ProcessLfid::new(), false)
+            .claim_session_attachment("resume", Some(&detached), &LfProcessId::new(), false)
             .unwrap();
         let mut child = Child(
             std::process::Command::new("/bin/sleep")
@@ -290,14 +287,11 @@ mod tests {
         let next = crate::session_record::resume_session_agent_process(
             &store,
             "resume",
-            &ProcessLfid::new(),
+            &LfProcessId::new(),
         )
         .unwrap();
-        assert_ne!(next.agent_process_lfid, attached.agent_process_lfid);
-        let ended = store
-            .process(&attached.agent_process_lfid)
-            .unwrap()
-            .unwrap();
+        assert_ne!(next.agent_process_id, attached.agent_process_id);
+        let ended = store.process(&attached.agent_process_id).unwrap().unwrap();
         assert!(ended.completed_at.is_some());
         assert!(ended.outcome.is_none());
     }
@@ -307,7 +301,7 @@ mod tests {
         let _ambient = crate::test_ambient::EnvGuard::new();
         let (_home, store, detached) = resume_fixture();
         let attached = store
-            .claim_session_attachment("resume", Some(&detached), &ProcessLfid::new(), false)
+            .claim_session_attachment("resume", Some(&detached), &LfProcessId::new(), false)
             .unwrap();
         store
             .record_agent_process_launch(
@@ -323,7 +317,7 @@ mod tests {
         let (finished, finishing) = std::sync::mpsc::channel();
         std::thread::scope(|scope| {
             let next = store
-                .resume_session_attachment("resume", Some(&detached), &ProcessLfid::new(), || {
+                .resume_session_attachment("resume", Some(&detached), &LfProcessId::new(), || {
                     let store = &store;
                     let expected = &detached;
                     scope.spawn(move || {
@@ -331,7 +325,7 @@ mod tests {
                         let result = store.claim_session_attachment(
                             "resume",
                             Some(expected),
-                            &ProcessLfid::new(),
+                            &LfProcessId::new(),
                             false,
                         );
                         finished.send(result).unwrap();
@@ -357,9 +351,9 @@ mod tests {
                 store.session_attachment("resume").unwrap(),
                 Some(next.clone())
             );
-            assert_ne!(next.agent_process_lfid, detached.agent_process_lfid);
+            assert_ne!(next.agent_process_id, detached.agent_process_id);
             assert!(store
-                .process(&detached.agent_process_lfid)
+                .process(&detached.agent_process_id)
                 .unwrap()
                 .unwrap()
                 .completed_at
@@ -380,9 +374,9 @@ mod tests {
             [],
         )
         .unwrap();
-        let parent = ProcessLfid::new();
+        let parent = LfProcessId::new();
         sql.execute(
-            "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,?1,1)",
+            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?1,1)",
             [&parent],
         )
         .unwrap();
@@ -422,19 +416,19 @@ mod tests {
                 || super::close_session_agent_process(&store, "retry"),
             )
             .unwrap();
-        assert_ne!(next.agent_process_lfid, attachment.agent_process_lfid);
+        assert_ne!(next.agent_process_id, attachment.agent_process_id);
         assert_eq!(
             crate::journal::process_identity_evidence(pid, birth),
             crate::journal::ProcessIdentityEvidence::Dead
         );
         assert!(store
-            .process(&attachment.agent_process_lfid)
+            .process(&attachment.agent_process_id)
             .unwrap()
             .unwrap()
             .completed_at
             .is_some());
         assert!(store
-            .process(&next.agent_process_lfid)
+            .process(&next.agent_process_id)
             .unwrap()
             .unwrap()
             .pid

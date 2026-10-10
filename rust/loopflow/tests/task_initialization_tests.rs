@@ -75,7 +75,7 @@ fn stacked_checkout_starts_with_one_scratch_deletion_commit() {
         .unwrap()
         .is_none());
     assert_eq!(
-        loopflow::engine::git::rev_parse(worktree, "HEAD^").unwrap(),
+        loopflow::git::rev_parse(worktree, "HEAD^").unwrap(),
         parent_head
     );
     let subject = Command::new("git")
@@ -88,12 +88,12 @@ fn stacked_checkout_starts_with_one_scratch_deletion_commit() {
         String::from_utf8_lossy(&subject.stdout).trim(),
         "Clear inherited scratch"
     );
-    let child_head = loopflow::engine::git::rev_parse(worktree, "HEAD").unwrap();
+    let child_head = loopflow::git::rev_parse(worktree, "HEAD").unwrap();
     fs::create_dir(worktree.join("scratch")).unwrap();
     fs::write(worktree.join("scratch/design.md"), "child design").unwrap();
     checkout();
     assert_eq!(
-        loopflow::engine::git::rev_parse(worktree, "HEAD").unwrap(),
+        loopflow::git::rev_parse(worktree, "HEAD").unwrap(),
         child_head
     );
     assert_eq!(
@@ -159,7 +159,7 @@ fn checkout_restores_exact_task_history_from_a_dirty_checkout() {
         String::from_utf8_lossy(&first.stderr)
     );
     assert_eq!(
-        loopflow::engine::git::rev_parse(worktree, "HEAD").unwrap(),
+        loopflow::git::rev_parse(worktree, "HEAD").unwrap(),
         fixture.pr.base_commit
     );
     fs::write(worktree.join("work.txt"), "committed Task work").unwrap();
@@ -175,7 +175,7 @@ fn checkout_restores_exact_task_history_from_a_dirty_checkout() {
             .status
             .success());
     }
-    let head = loopflow::engine::git::rev_parse(worktree, "HEAD").unwrap();
+    let head = loopflow::git::rev_parse(worktree, "HEAD").unwrap();
     fs::remove_dir_all(worktree).unwrap();
     let restored = checkout();
     assert!(
@@ -183,10 +183,7 @@ fn checkout_restores_exact_task_history_from_a_dirty_checkout() {
         "{}",
         String::from_utf8_lossy(&restored.stderr)
     );
-    assert_eq!(
-        loopflow::engine::git::rev_parse(worktree, "HEAD").unwrap(),
-        head
-    );
+    assert_eq!(loopflow::git::rev_parse(worktree, "HEAD").unwrap(), head);
     assert_eq!(
         fs::read_to_string(worktree.join("work.txt")).unwrap(),
         "committed Task work"

@@ -186,10 +186,10 @@ impl Machine {
                 repo = self.wave.repo()
             ))
             .unwrap();
-        let parent = loopflow::id::ProcessLfid::new();
+        let parent = loopflow::id::LfProcessId::new();
         self.raw()
             .execute(
-                "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
                 [&parent],
             )
             .unwrap();
@@ -472,7 +472,7 @@ fn transcript_lines_read_nothing_and_do_not_delay_a_task() {
 
     // An Process can change a planning condition, so planning is read; nothing
     // displayed changed, so nothing is sent.
-    conn.execute("INSERT INTO processes(lfid,trace_id,cwd,started_at,completed_at,outcome) VALUES('process_00000000000000000000000000000001','trace_00000000000000000000000000000001','/elsewhere',1,2,'succeeded')", []).unwrap();
+    conn.execute("INSERT INTO processes(id,trace_id,cwd,started_at,completed_at,outcome) VALUES('process_00000000000000000000000000000001','trace_00000000000000000000000000000001','/elsewhere',1,2,'succeeded')", []).unwrap();
     assert!(watch
         .parts(Duration::from_millis(1500))
         .iter()
@@ -542,9 +542,9 @@ fn every_displayed_session_fact_committed_elsewhere_is_shown() {
 
     // A question the stream reported is Waiting; its answer ends that.
     write(
-        "INSERT INTO session_activity(session_id,attachment_token,agent_process_lfid,observed_at,open_tools,pending_input,yielded)
-         SELECT s.id,p.attachment_token,p.lfid,CAST(strftime('%s','now') AS INTEGER),0,1,0
-         FROM agent_sessions s JOIN processes p ON p.lfid=s.agent_process_lfid WHERE s.id='conversation'",
+        "INSERT INTO session_activity(session_id,attachment_token,agent_process_id,observed_at,open_tools,pending_input,yielded)
+         SELECT s.id,p.attachment_token,p.id,CAST(strftime('%s','now') AS INTEGER),0,1,0
+         FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id='conversation'",
     );
     watch.session(|record| record["attention"] == "waiting");
     write("UPDATE session_activity SET pending_input=0 WHERE session_id='conversation'");
@@ -552,11 +552,11 @@ fn every_displayed_session_fact_committed_elsewhere_is_shown() {
 
     event(
         "observed",
-        "driver:0:exit",
+        "attachment:0:exit",
         None,
         serde_json::json!({"outcome": "interrupted"}),
     );
-    write("UPDATE processes SET attachment_exit_seq=(SELECT seq FROM session_events WHERE session_id='conversation' AND receipt_key='driver:0:exit') WHERE agent_session_id='conversation'");
+    write("UPDATE processes SET attachment_exit_seq=(SELECT seq FROM session_events WHERE session_id='conversation' AND receipt_key='attachment:0:exit') WHERE agent_session_id='conversation'");
     watch.session(|record| record["state"] == "interrupted");
 
     // Transcript lines between those facts were never a reason to read.

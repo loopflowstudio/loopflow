@@ -10,8 +10,8 @@ use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
+use crate::agent::{build_claude_stream_session_args, AgentConfig};
 use crate::chat::types::{ConversationEvent, Lifecycle};
-use crate::engine::agent::{build_claude_stream_session_args, AgentConfig};
 use crate::harness::claude_mapping::ReaderState;
 use crate::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
 use crate::harness::{claude_mapping, Harness, HarnessError, RawProviderEvent, SendCurrentOutcome};
@@ -31,7 +31,7 @@ pub struct ClaudeHarness {
     events: mpsc::UnboundedSender<ConversationEvent>,
     raw_provider: Option<mpsc::UnboundedSender<RawProviderEvent>>,
     config: Option<AgentConfig>,
-    capture: Option<crate::engine::agent::AgentCapture>,
+    capture: Option<crate::agent::AgentCapture>,
     should_seed_task_prompt: bool,
     /// Vendor session id captured from the first turn's `system` event; a
     /// respawn (after interrupt/crash) resumes it via `--resume`.
@@ -123,7 +123,7 @@ impl ClaudeHarness {
             .lock()
             .expect("claude provider session id lock poisoned")
             .clone();
-        let context_file = crate::engine::agent::write_system_prompt_file(config, "session")?;
+        let context_file = crate::agent::write_system_prompt_file(config, "session")?;
         let args =
             build_claude_stream_session_args(config, resume_id.as_ref(), context_file.as_deref());
         let mut cmd = Command::new("claude");
@@ -372,10 +372,10 @@ impl ClaudeHarness {
 
 #[async_trait]
 impl Harness for ClaudeHarness {
-    fn set_capture(&mut self, capture: Option<crate::engine::agent::AgentCapture>) {
+    fn set_capture(&mut self, capture: Option<crate::agent::AgentCapture>) {
         self.capture = capture;
     }
-    fn process_id(&self) -> Option<u32> {
+    fn pid(&self) -> Option<u32> {
         self.child.as_ref().and_then(Child::id)
     }
 
@@ -627,7 +627,7 @@ mod activity_tests {
             },
         )
         .unwrap();
-        capture.observe_activity(harness.process_id()).await;
+        capture.observe_activity(harness.pid()).await;
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 if activity::read(home.path(), &capture.artifact_key()).await
@@ -653,7 +653,7 @@ mod tests {
 
     #[tokio::test]
     #[allow(clippy::await_holding_lock)] // Isolate provider and database selection.
-    async fn sequential_managed_sessions_retain_their_exact_claude_engines() {
+    async fn sequential_managed_sessions_retain_their_exact_claude_agent_processes() {
         let _lock = crate::journal::test_env_lock();
         let _ambient = crate::test_ambient::EnvGuard::new();
         let original_path = std::env::var_os("PATH").unwrap_or_default();
@@ -663,9 +663,9 @@ mod tests {
         std::env::set_var("LF_HOME", home.path());
         let store = crate::store::sqlite::SqliteStore::open_ephemeral(&database).unwrap();
         let conn = rusqlite::Connection::open(&database).unwrap();
-        let process = crate::id::ProcessLfid::new();
+        let process = crate::id::LfProcessId::new();
         conn.execute(
-            "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'trace',1)",
+            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'trace',1)",
             [&process],
         )
         .unwrap();
@@ -681,17 +681,17 @@ mod tests {
         let mut recorded = Vec::new();
         for id in ["first", "second"] {
             store.test_session(id, &crate::session_record::new_artifact_key());
-            let driver = store
+            let attachment = store
                 .claim_session_attachment(id, None, &process, true)
                 .unwrap();
             let (tx, _rx) = mpsc::unbounded_channel();
             let mut harness = ClaudeHarness::new(tx);
             let mut config = live_config();
-            config.session_attachment = Some((id.into(), driver.clone()));
+            config.session_attachment = Some((id.into(), attachment.clone()));
             harness.config = Some(config);
             harness.send_input("one turn").await.unwrap();
             recorded.push((
-                harness.process_id().unwrap(),
+                harness.pid().unwrap(),
                 store.agent_process_identity(id).unwrap(),
             ));
             // Retain the first process while the same Process starts the next step.
@@ -702,7 +702,8 @@ mod tests {
         }
         assert_ne!(recorded[0].0, recorded[1].0);
         for (pid, evidence) in recorded {
-            let (saved, start) = evidence.expect("managed Claude publishes exact engine identity");
+            let (saved, start) =
+                evidence.expect("managed Claude publishes exact AgentProcess identity");
             assert_eq!(pid, saved);
             assert!(start > 0);
         }
@@ -771,26 +772,23 @@ mod tests {
                 // Pipe acceptance precedes provider execution. Interrupt only
                 // after this throwaway provider consumed its first request.
                 observed_input(home, "first request").await;
-                let first_pid = harness.process_id().unwrap();
+                let first_pid = harness.pid().unwrap();
                 // The native conversation survives the OS process's interruption.
                 harness.set_agent_session(Some("native-conversation".into()));
                 harness.interrupt().await.unwrap();
-                let ended = store.process(&first.agent_process_lfid).unwrap().unwrap();
+                let ended = store.process(&first.agent_process_id).unwrap().unwrap();
                 assert_eq!(ended.pid, Some(first_pid));
                 assert!(ended.completed_at.is_some());
 
                 harness.send_input("resumed request").await.unwrap();
                 let (_, second) = capture.session_attachment().unwrap();
-                assert_ne!(first.agent_process_lfid, second.agent_process_lfid);
+                assert_ne!(first.agent_process_id, second.agent_process_id);
                 assert_ne!(first.token, second.token);
-                let running = store.process(&second.agent_process_lfid).unwrap().unwrap();
-                assert_eq!(running.pid, harness.process_id());
-                assert_eq!(running.parent_process_lfid, first.process_lfid);
+                let running = store.process(&second.agent_process_id).unwrap().unwrap();
+                assert_eq!(running.pid, harness.pid());
+                assert_eq!(running.parent_lf_process_id, first.lf_process_id);
                 assert!(running.completed_at.is_none());
-                assert_eq!(
-                    store.process(&first.agent_process_lfid).unwrap(),
-                    Some(ended)
-                );
+                assert_eq!(store.process(&first.agent_process_id).unwrap(), Some(ended));
                 assert!(capture.prepare_agent_process(&session, &first).is_err());
                 assert!(store
                     .record_session_connection(&session, &first, "stale", &"stale".into())
@@ -824,8 +822,8 @@ mod tests {
                 harness.stop().await.unwrap();
                 capture.finish("completed").unwrap();
                 let settled = store.session_attachment(&session).unwrap().unwrap();
-                assert_eq!(settled.agent_process_lfid, second.agent_process_lfid);
-                assert_eq!(settled.process_lfid, None);
+                assert_eq!(settled.agent_process_id, second.agent_process_id);
+                assert_eq!(settled.lf_process_id, None);
             });
             Ok(())
         })
@@ -848,7 +846,7 @@ mod tests {
             resume_token: None,
             provider_account_id: None,
             provider_account_authority_home: None,
-            write_scope: crate::engine::agent::AgentWriteScope::Configured,
+            write_scope: crate::agent::AgentWriteScope::Configured,
             execution_boundary: None,
             skip_permissions: false,
             structured_replies: Vec::new(),
@@ -934,11 +932,11 @@ done
         // provider-owned AgentSession.
         let database = home.path().join("loopflow.db");
         let store = crate::store::sqlite::SqliteStore::open_ephemeral(&database).unwrap();
-        let process = crate::id::ProcessLfid::new();
+        let process = crate::id::LfProcessId::new();
         rusqlite::Connection::open(&database)
             .unwrap()
             .execute(
-                "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'trace',1)",
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'trace',1)",
                 [&process],
             )
             .unwrap();
@@ -971,7 +969,7 @@ done
         let (status, answer, _) = tokio::time::timeout(Duration::from_secs(5), drive_turn(&mut rx))
             .await
             .unwrap();
-        let different_process = first.process_id() != resumed.process_id();
+        let different_process = first.pid() != resumed.pid();
         first.stop().await.unwrap();
         resumed.stop().await.unwrap();
         assert!(different_process);
@@ -996,7 +994,7 @@ done
             resume_token: None,
             provider_account_id: None,
             provider_account_authority_home: None,
-            write_scope: crate::engine::agent::AgentWriteScope::Configured,
+            write_scope: crate::agent::AgentWriteScope::Configured,
             execution_boundary: None,
             skip_permissions: false,
             structured_replies: Vec::new(),

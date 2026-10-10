@@ -313,7 +313,7 @@ fn metric_portfolio_fixture_locks_every_tagged_payload() {
 }
 
 #[test]
-fn session_history_retains_receipts_and_unknown_driver() {
+fn session_history_retains_receipts_and_unknown_lf_process() {
     let input = include_str!("../../../tests/fixtures/dto/session_history.json");
     let events: Vec<loopflow::session::SessionEvent> = serde_json::from_str(input).unwrap();
     assert_eq!(
@@ -324,7 +324,7 @@ fn session_history_retains_receipts_and_unknown_driver() {
         events[0].agent_session.as_ref().unwrap().as_str(),
         "thread_fixture"
     );
-    assert!(events[1].process_lfid.is_none());
+    assert!(events[1].lf_process_id.is_none());
     assert_eq!(events[0].payload["total"]["inputTokens"], 40);
     assert_eq!(
         events[2].kind,
@@ -374,11 +374,11 @@ fn process_page_retains_outcomes_unknowns_and_continuation() {
     );
     assert_eq!(page.entries[1].os_started_at, Some(1790640000));
     assert_eq!(
-        page.entries[1].parent_process_lfid.as_ref(),
-        Some(&page.entries[0].lfid)
+        page.entries[1].parent_lf_process_id.as_ref(),
+        Some(&page.entries[0].id)
     );
     assert_eq!(page.entries[1].outcome, None);
-    assert_eq!(page.next.as_ref().unwrap().lfid, page.entries[1].lfid);
+    assert_eq!(page.next.as_ref().unwrap().id, page.entries[1].id);
     assert_eq!(
         serde_json::to_value(page).unwrap(),
         serde_json::from_str::<serde_json::Value>(json).unwrap()
@@ -394,7 +394,7 @@ fn session_input_history_retains_distinct_native_results_and_unknown_process() {
     .unwrap();
     assert_eq!(value.providers.len(), 2);
     assert_eq!(value.providers[0].outcome.as_deref(), Some("failed"));
-    assert!(value.providers[0].process_lfid.is_none());
+    assert!(value.providers[0].lf_process_id.is_none());
     assert_eq!(value.providers[0].usage.input_tokens, None);
     assert_eq!(value.providers[1].usage.input_tokens, Some(0));
     assert_eq!(value.status(), "failed → completed");
@@ -462,7 +462,7 @@ fn task_status_preserves_planning_freshness_without_execution() {
 
 #[test]
 fn flow_compositions_round_trip_distinct_compositions_and_required_children() {
-    use loopflow::engine::flow_graph::FlowCatalogEntry;
+    use loopflow::flow::graph::FlowCatalogEntry;
     let json = include_str!("../../../tests/fixtures/dto/flow_composition.json");
     let entry: FlowCatalogEntry = serde_json::from_str(json).unwrap();
     let value: serde_json::Value = serde_json::from_str(json).unwrap();
@@ -516,7 +516,7 @@ fn task_work_preserves_all_owners() {
         workflow.position,
         loopflow::ops::workflow::WorkflowPosition::Edge {
             edge: 2,
-            process_lfid: work.flow_processes[0].summary.id.clone(),
+            lf_process_id: work.flow_processes[0].summary.id.clone(),
             running: true,
         }
     );
@@ -619,7 +619,7 @@ fn separate_workflow_catalog_preserves_invalid_sources() {
         "../../../tests/fixtures/dto/workflow_catalog.json"
     ))
     .unwrap();
-    let entries: Vec<loopflow::engine::workflow::WorkflowCatalogEntry> =
+    let entries: Vec<loopflow::workflow::WorkflowCatalogEntry> =
         serde_json::from_value(value.clone()).unwrap();
     assert!(entries[0].workflow.is_some());
     assert!(entries[1].workflow.is_none() && entries[1].unavailable.is_some());

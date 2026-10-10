@@ -31,21 +31,21 @@ use anyhow::Result;
 use async_trait::async_trait;
 use tokio::sync::mpsc;
 
+use crate::agent::AgentConfig;
 use crate::chat::types::ConversationEvent;
-use crate::engine::agent::AgentConfig;
 
 pub(crate) fn configure_vendor_std_env(command: &mut std::process::Command) -> Result<()> {
-    let context = crate::engine::process::execution_context()?;
+    let context = crate::os_process::execution_context()?;
     set_vendor_std_env(command, &context.lf_bin, &context.lf_home)
 }
 
 pub(crate) fn configure_agent_env(command: &mut tokio::process::Command, config: &AgentConfig) {
-    for name in crate::engine::agent::EXECUTION_IDENTITY_ENV {
+    for name in crate::agent::EXECUTION_IDENTITY_ENV {
         command.env_remove(name);
     }
     command
         .envs(&config.env)
-        .env_remove(crate::engine::process::DISCORD_TOKEN_ENV)
+        .env_remove(crate::os_process::DISCORD_TOKEN_ENV)
         .env_remove("LOOPFLOW_DIRECTIVE_FILE");
     if let Some(path) = &config.directive_relay {
         command.env("LOOPFLOW_DIRECTIVE_FILE", path);
@@ -87,7 +87,7 @@ fn set_vendor_std_env(
     command
         .env("LF_BIN", control_bin)
         .env("LF_HOME", control_home)
-        .env_remove(crate::engine::process::DISCORD_TOKEN_ENV);
+        .env_remove(crate::os_process::DISCORD_TOKEN_ENV);
     let mut paths = vec![control_bin
         .parent()
         .expect("absolute lf has a parent")
@@ -111,7 +111,7 @@ mod environment_tests {
     use std::path::Path;
 
     use super::{configure_agent_env, set_vendor_std_env};
-    use crate::engine::agent::AgentConfig;
+    use crate::agent::AgentConfig;
 
     #[test]
     fn conversation_tools_observe_sanitized_overrides_and_removals() {
@@ -127,17 +127,17 @@ mod environment_tests {
         config
             .env
             .insert("LF_AGENT_CALLER".into(), "current-fixture".into());
-        let mut engine = tokio::process::Command::new("vendor");
-        configure_agent_env(&mut engine, &config);
+        let mut provider = tokio::process::Command::new("vendor");
+        configure_agent_env(&mut provider, &config);
         set_vendor_std_env(
-            engine.as_std_mut(),
+            provider.as_std_mut(),
             Path::new("/control/lf"),
             Path::new("/private"),
         )
         .unwrap();
         // Provider account environment is not conversation tool authority.
-        engine.env("PROVIDER_ACCOUNT_FIXTURE", "not-for-tools");
-        let tools = super::conversation_environment(engine.as_std(), &config);
+        provider.env("PROVIDER_ACCOUNT_FIXTURE", "not-for-tools");
+        let tools = super::conversation_environment(provider.as_std(), &config);
         let script = "test -z \"${LF_DISCORD_TOKEN+x}${LOOPFLOW_DIRECTIVE_FILE+x}${PROVIDER_ACCOUNT_FIXTURE+x}\" && test \"$LF_AGENT_CALLER\" = current-fixture && test \"$LF_HOME\" = /private && test \"$LF_BIN\" = /control/lf";
         assert!(std::process::Command::new("/bin/sh")
             .env_clear()
@@ -152,10 +152,10 @@ mod environment_tests {
     async fn provider_child_cannot_read_the_bridge_token() {
         let mut command = tokio::process::Command::new("/bin/sh");
         command.args(["-c", "test -z \"${LF_DISCORD_TOKEN+x}\""]);
-        command.env(crate::engine::process::DISCORD_TOKEN_ENV, "fixture-token");
+        command.env(crate::os_process::DISCORD_TOKEN_ENV, "fixture-token");
         let mut config = AgentConfig::default();
         config.env.insert(
-            crate::engine::process::DISCORD_TOKEN_ENV.into(),
+            crate::os_process::DISCORD_TOKEN_ENV.into(),
             "fixture-override".into(),
         );
         configure_agent_env(&mut command, &config);
@@ -168,7 +168,7 @@ mod environment_tests {
         command
             .env(crate::session_record::CAPTURE_KEY_ENV, "run_stale")
             .env("LF_RUN_DIR", "/stale/run");
-        let mut config = crate::engine::agent::AgentConfig::default();
+        let mut config = crate::agent::AgentConfig::default();
         config.env.insert(
             crate::session_record::CAPTURE_KEY_ENV.to_string(),
             "run_fresh".to_string(),
@@ -248,13 +248,13 @@ pub enum ApprovalPolicy {
 pub trait Harness: Send + Sync {
     /// The invocation owner receives replacement attachment snapshots when a
     /// provider must respawn within the same capture.
-    fn set_capture(&mut self, _capture: Option<crate::engine::agent::AgentCapture>) {}
+    fn set_capture(&mut self, _capture: Option<crate::agent::AgentCapture>) {}
     async fn start(&mut self, config: &AgentConfig) -> Result<()>;
     /// Start the next provider Turn from durable seed input.
     async fn send_input(&mut self, content: &str) -> Result<()>;
     /// Try to deliver input to the exact Turn currently active.
     ///
-    /// Drivers without same-Turn input keep the default. A rejection or race
+    /// Harnesses without same-Turn input keep the default. A rejection or race
     /// is not an error in the Work protocol; the controller seeds a later
     /// boundary instead.
     async fn send_current(&mut self, _content: &str) -> SendCurrentOutcome {
@@ -273,7 +273,7 @@ pub trait Harness: Send + Sync {
     fn agent_session(&self) -> Option<AgentSessionId>;
     /// The owned provider child, for read-only activity sampling. This does not
     /// grant process-group signal authority.
-    fn process_id(&self) -> Option<u32> {
+    fn pid(&self) -> Option<u32> {
         None
     }
     /// Independently isolated provider process group, when the harness owns
@@ -291,7 +291,7 @@ pub trait Harness: Send + Sync {
     ) {
     }
     /// Seed a previously persisted vendor session id so the next turn resumes
-    /// it. Drivers that take resume state at `start` instead ignore this.
+    /// it. Harnesses that take resume state at `start` instead ignore this.
     fn set_agent_session(&mut self, _agent_session: Option<AgentSessionId>) {}
     /// Pin this Invocation to the exact managed account already recorded in its
     /// durable route. Accountless providers keep the default no-op.
@@ -367,11 +367,11 @@ pub(crate) fn admit_for_test(config: &mut AgentConfig) -> crate::journal::TestLe
     let ledger = crate::journal::TestLedgerGuard::new();
     let database = ledger.home().join("loopflow.db");
     let store = crate::store::sqlite::SqliteStore::open_ephemeral(&database).unwrap();
-    let process = crate::id::ProcessLfid::new();
+    let process = crate::id::LfProcessId::new();
     rusqlite::Connection::open(&database)
         .unwrap()
         .execute(
-            "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
             [process.as_str()],
         )
         .unwrap();
@@ -422,7 +422,7 @@ mod tests {
                     .contains("AgentProcess requires an admitted invocation"),
                 "{name}: {error}"
             );
-            assert_eq!(harness.process_id(), None, "{name}");
+            assert_eq!(harness.pid(), None, "{name}");
         }
     }
 

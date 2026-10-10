@@ -211,7 +211,7 @@ struct DesktopHeadlessTests {
         let status = try log.inspect().find(viewWithAccessibilityIdentifier: "flow-process-status-\(flow.id)").text().string()
         #expect(status == "Running implement · pass 2")
         for step in detail.steps {
-            _ = try log.inspect().find(viewWithAccessibilityIdentifier: "flow-process-step-\(step.processLfid)")
+            _ = try log.inspect().find(viewWithAccessibilityIdentifier: "flow-process-step-\(step.lfProcessId)")
         }
         #expect(detail.presentation.execution == .running)
         #expect(detail.current == 0)
@@ -376,7 +376,7 @@ struct DesktopHeadlessTests {
         // Stopped, it holds the Task and is offered again with the other edge leaving its node.
         let process = "11111111-1111-4111-8111-111111111111"
         let stopped = try view(
-            position: ["kind": "edge", "edge": 2, "process_lfid": process, "running": false], outgoing: [1, 2])
+            position: ["kind": "edge", "edge": 2, "lf_process_id": process, "running": false], outgoing: [1, 2])
         let again = try stopped.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-process-2")
         #expect(try again.accessibilityValue().string() == "Stopped")
         #expect(try !again.button().isDisabled())

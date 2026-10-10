@@ -817,7 +817,7 @@ mod durable_store_tests {
             iterations: None,
             task_id,
             wave_id,
-            flow_process_lfid: None,
+            flow_lf_process_id: None,
             work_source: Some(WorkSource::Declared),
             bound_at: None,
             interactive: false,
@@ -1064,7 +1064,7 @@ mod durable_store_tests {
     }
 
     fn conversation(
-        flow_process_lfid: Option<String>,
+        flow_lf_process_id: Option<String>,
         task_id: Option<TaskId>,
         wave_id: Option<WaveId>,
     ) -> crate::session::LfSession {
@@ -1082,7 +1082,7 @@ mod durable_store_tests {
             iterations: None,
             task_id,
             wave_id,
-            flow_process_lfid,
+            flow_lf_process_id,
             work_source: Some(WorkSource::Declared),
             bound_at: None,
             interactive: false,
@@ -1743,7 +1743,7 @@ mod durable_store_tests {
                 caller_artifact_key: None,
                 task_id: None,
                 wave_id: wave,
-                flow_process_lfid: None,
+                flow_lf_process_id: None,
                 work_source: None,
                 bound_at: None,
                 id: id.to_string(),
@@ -1845,14 +1845,14 @@ mod durable_store_tests {
                 &serde_json::json!({"input": 30}),
             )
             .unwrap();
-        // Attribution freezes when the attached invocation sends the request.
-        let process = crate::id::ProcessLfid::new();
+        // Attribution freezes when the attached LfProcess sends the request.
+        let process = crate::id::LfProcessId::new();
         store
             .conn
             .lock()
             .unwrap()
             .execute(
-                "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
                 [&process],
             )
             .unwrap();

@@ -1,5 +1,5 @@
 //! What a provider's own stream says about a conversation waiting on a person.
-//! Each attached invocation that owns a stream keeps one tracker and saves its reading; the
+//! Each attached LfProcess that owns a stream keeps one tracker and saves its reading; the
 //! Waiting rule itself is read from that row by the Session inventory.
 
 use std::collections::BTreeSet;
@@ -220,7 +220,7 @@ pub(super) fn codex(rpc: &Value, from_client: bool) -> Vec<Signal> {
 
 /// One OpenCode server event for conversation `thread`; the server reports
 /// every conversation on one stream. A permission request is answered by its
-/// attached invocation and is not a question for a person.
+/// attached LfProcess and is not a question for a person.
 pub(super) fn opencode(event: &Value, thread: &str) -> Vec<Signal> {
     let properties = &event["properties"];
     let id = |value: &Value| value.as_str().map(str::to_owned);
@@ -270,7 +270,7 @@ mod tests {
     use serde_json::{json, Value};
 
     use super::{claude, codex, opencode, Attention, Signal};
-    use crate::id::ProcessLfid;
+    use crate::id::LfProcessId;
     use crate::process::SessionAttachment;
     use crate::store::sqlite::SqliteStore;
 
@@ -308,9 +308,9 @@ mod tests {
             let store = SqliteStore::open_ephemeral(&path).unwrap();
             store.test_session("conversation", "run_00000000000000000000000000000001");
             let conn = rusqlite::Connection::open(&path).unwrap();
-            let process = ProcessLfid::new();
+            let process = LfProcessId::new();
             conn.execute(
-                "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
                 [&process],
             )
             .unwrap();
@@ -478,7 +478,7 @@ mod tests {
                 .map(|(_, now, quiet)| (*now, *quiet))
                 .unwrap()
         };
-        // A permission the attached invocation answers itself is no question, and the tool
+        // A permission the attached LfProcess answers itself is no question, and the tool
         // it guards is still open.
         assert_eq!(at("permission.asked"), (false, false));
         assert_eq!(at("question.asked"), (true, true));

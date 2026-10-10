@@ -32,7 +32,7 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             let store = open_shared_store().await?;
             let agent_process = agent_process
                 .as_deref()
-                .map(crate::id::ProcessLfid::parse)
+                .map(crate::id::LfProcessId::parse)
                 .transpose()?;
             crate::ops::human_session::observe_program_status(
                 &store,

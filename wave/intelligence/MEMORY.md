@@ -322,7 +322,7 @@ Do not restore those paths to satisfy a present evidence gap.
   costs zero LLM spend.
 - **Both arms land in `run_events`** tagged `wave = eval/<task>`, `flow = <arm>`.
   A loopflow arm journals itself; a bare vendor arm is parsed from its own
-  `stream-json` by `engine::stream::StreamParser` and written by the runner.
+  `stream-json` by `agent::stream::StreamParser` and written by the runner.
   Evidence has one home and `lf trace <run-id>` explains either arm. No results
   server, ever.
 

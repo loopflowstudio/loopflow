@@ -40,11 +40,11 @@ impl History {
 
     /// One server event of conversation `thread`, read for attention only.
     pub(super) fn attend(&mut self, thread: &AgentSessionId, event: &Value) {
-        if let Some((store, session, driver)) = &self.owner {
+        if let Some((store, session, attachment)) = &self.owner {
             self.attention.record(
                 store,
                 session,
-                driver,
+                attachment,
                 super::attention::opencode(event, thread.as_str()),
             );
         }
@@ -256,7 +256,7 @@ pub(super) async fn read_messages(
         .await?)
 }
 
-// Native submission is bounded and serialized with attachment transfer. An
+// Native submission is bounded and serialized with attachment handoff. An
 // uncertain HTTP result is retained as uncertain; never submit it twice here.
 pub(super) async fn post(
     (store, session, attachment): super::agent_process::AttachmentOwner,
@@ -287,7 +287,7 @@ pub(super) async fn post(
 mod tests {
     use super::History;
 
-    use crate::id::ProcessLfid;
+    use crate::id::LfProcessId;
     use crate::session::SessionEventKind;
     use crate::store::sqlite::SqliteStore;
     use serde_json::json;
@@ -298,18 +298,18 @@ mod tests {
         let path = home.path().join("store.db");
         let store = SqliteStore::open_ephemeral(&path).unwrap();
         let input = crate::session_record::new_artifact_key();
-        let process = ProcessLfid::new();
+        let process = LfProcessId::new();
         let sql = rusqlite::Connection::open(&path).unwrap();
         sql.execute(
-            "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
             [process.as_str()],
         )
         .unwrap();
         store.test_session("session", &input);
-        let driver = store
+        let attachment = store
             .claim_session_attachment("session", None, &process, false)
             .unwrap();
-        let mut history = History::new(Some((store.clone(), "session".into(), driver.clone())));
+        let mut history = History::new(Some((store.clone(), "session".into(), attachment.clone())));
         let request = history.request().unwrap();
         let message = |id: &str, input: u64, finish: &str| {
             json!({
@@ -324,14 +324,14 @@ mod tests {
         store
             .replace_session_input(session.captured, replacement.clone())
             .unwrap();
-        let second = ProcessLfid::new();
+        let second = LfProcessId::new();
         sql.execute(
-            "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
             [second.as_str()],
         )
         .unwrap();
         store
-            .claim_session_attachment("session", Some(&driver), &second, true)
+            .claim_session_attachment("session", Some(&attachment), &second, true)
             .unwrap();
         assert!(!history.admitted(&request));
         for (index, input) in [20, 40, 30].into_iter().enumerate() {
@@ -410,6 +410,6 @@ mod tests {
                 row.kind,
                 SessionEventKind::Captured | SessionEventKind::Observed
             ))
-            .all(|row| row.process_lfid.as_deref() == Some(process.as_str())));
+            .all(|row| row.lf_process_id.as_deref() == Some(process.as_str())));
     }
 }

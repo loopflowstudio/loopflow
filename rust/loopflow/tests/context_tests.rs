@@ -4,10 +4,13 @@ use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
-use loopflow::engine::{
-    format_prompt, gather_context, DocumentSource, GatherContextOpts, PromptComponents, Surface,
-};
 use loopflow::ops::resolve_work_binding;
+use loopflow::prompt::format_prompt;
+use loopflow::prompt::gather_context;
+use loopflow::prompt::DocumentSource;
+use loopflow::prompt::GatherContextOpts;
+use loopflow::prompt::PromptComponents;
+use loopflow::prompt::Surface;
 use loopflow::store::{open_ephemeral_store, StorageConfig};
 use tempfile::TempDir;
 
@@ -658,7 +661,7 @@ fn nested_wave_reads_stored_ancestor_markdown_in_order() {
         ..Default::default()
     })
     .unwrap();
-    loopflow::engine::drop_duplicate_docs(&mut components, repo);
+    loopflow::prompt::drop_duplicate_docs(&mut components, repo);
     let paths: Vec<_> = components
         .docs
         .iter()
@@ -718,7 +721,7 @@ fn context_delivery_repository_memory_is_included_once_without_a_wave() {
         ..Default::default()
     })
     .unwrap();
-    let decisions = loopflow::engine::drop_duplicate_docs(&mut components, temp.path());
+    let decisions = loopflow::prompt::drop_duplicate_docs(&mut components, temp.path());
     assert_eq!(components.docs.len(), 1);
     assert_eq!(components.docs[0].source, DocumentSource::RepoMemory);
     assert!(decisions.iter().any(|decision| {

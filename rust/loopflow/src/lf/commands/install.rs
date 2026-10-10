@@ -344,21 +344,21 @@ fn _read_executable_references(
     references
 }
 
-fn _validate_executable_skill(skill: &crate::engine::Skill) -> Result<()> {
+fn _validate_executable_skill(skill: &crate::flow::Skill) -> Result<()> {
     if skill.content.is_none() {
         return Err(anyhow!("skill not found: {}", skill.name));
     }
     Ok(())
 }
 
-fn _validate_executable_steps(steps: &[crate::engine::ConcreteStep]) -> Result<()> {
+fn _validate_executable_steps(steps: &[crate::flow::ConcreteStep]) -> Result<()> {
     for step in steps {
         match step {
-            crate::engine::ConcreteStep::Skill(skill) => {
+            crate::flow::ConcreteStep::Skill(skill) => {
                 _validate_executable_skill(&skill.skill)?;
             }
-            crate::engine::ConcreteStep::Command(_) => {}
-            crate::engine::ConcreteStep::Xor(branch) => {
+            crate::flow::ConcreteStep::Command(_) => {}
+            crate::flow::ConcreteStep::Xor(branch) => {
                 _validate_executable_skill(&branch.router)?;
                 for path in branch.paths.values() {
                     _validate_executable_steps(&path.steps)?;
@@ -448,10 +448,10 @@ fn _executable_compatibility(connection: &rusqlite::Connection) -> ExecutableCom
             absent += 1;
             continue;
         }
-        let result = crate::engine::load_flow(flow, catalog_path)
+        let result = crate::flow::load_flow(flow, catalog_path)
             .map_err(anyhow::Error::from)
             .and_then(|loaded| {
-                crate::engine::compile_flow(&loaded, catalog_path)
+                crate::flow::compile_flow(&loaded, catalog_path)
                     .map_err(anyhow::Error::from)
                     .and_then(|steps| _validate_executable_steps(&steps))
             });

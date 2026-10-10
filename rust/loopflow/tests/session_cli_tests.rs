@@ -18,7 +18,7 @@ fn command(home: &std::path::Path, args: &[&str]) -> Command {
         .env_remove("LF_CAPTURE_KEY")
         .env_remove("LF_RUN_DIR")
         .env_remove("LF_TRACE_ID")
-        .env_remove("LF_PROCESS_LFID")
+        .env_remove("LF_PROCESS_ID")
         .env_remove("LF_FLOW_ID")
         .env_remove("LF_HUMAN_SESSION")
         .env_remove("LF_WAVE_ID")
@@ -122,7 +122,7 @@ fn development_session_handoff_keeps_its_binary_and_home() {
             "LF_CAPTURE_KEY",
             "LF_RUN_DIR",
             "LF_TRACE_ID",
-            "LF_PROCESS_LFID",
+            "LF_PROCESS_ID",
             "LF_HUMAN_SESSION",
             "LF_FLOW_ID",
         ] {
@@ -375,18 +375,18 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
             serde_json::from_slice(&std::fs::read(home.path().join("resumed.caller")).unwrap())
                 .unwrap();
         assert_eq!(caller.session_id, id);
-        let recorded: (Option<loopflow::id::ProcessLfid>, String) = rusqlite::Connection::open(home.path().join("loopflow.db"))
+        let recorded: (Option<loopflow::id::LfProcessId>, String) = rusqlite::Connection::open(home.path().join("loopflow.db"))
             .unwrap()
             .query_row(
-                "SELECT p.lfid,p.parent_process_lfid FROM agent_sessions s JOIN processes p ON p.lfid=s.agent_process_lfid WHERE s.id=?1",
+                "SELECT p.id,p.parent_lf_process_id FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1",
                 [id],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
         assert_eq!(
             (
-                caller.agent_process_lfid,
-                caller.origin_process_lfid.to_string()
+                caller.agent_process_id,
+                caller.origin_lf_process_id.to_string()
             ),
             recorded
         );
@@ -504,7 +504,7 @@ fn prepare_conversation(
                 iterations: None,
                 task_id: None,
                 wave_id: None,
-                flow_process_lfid: None,
+                flow_lf_process_id: None,
                 work_source: None,
                 bound_at: None,
                 interactive: true,
@@ -562,15 +562,15 @@ fn headless_resume_preserves_a_held_owners_capture_on_both_harnesses() {
         let manifest = std::fs::read(dir.join("manifest.json")).unwrap();
         let store =
             loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
-        let process = loopflow::id::ProcessLfid::new();
+        let process = loopflow::id::LfProcessId::new();
         rusqlite::Connection::open(home.path().join("loopflow.db"))
             .unwrap()
             .execute(
-                "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
                 [process.as_str()],
             )
             .unwrap();
-        let driver = store
+        let attachment = store
             .claim_session_attachment(&id, None, &process, true)
             .unwrap();
         let before = store.session(&id).unwrap().unwrap();
@@ -603,7 +603,7 @@ fn headless_resume_preserves_a_held_owners_capture_on_both_harnesses() {
         );
         assert!(!error.contains("unexpected-provider-launch"), "{error}");
         assert_eq!(store.session(&id).unwrap().unwrap(), before);
-        assert_eq!(store.session_attachment(&id).unwrap(), Some(driver));
+        assert_eq!(store.session_attachment(&id).unwrap(), Some(attachment));
         assert_eq!(store.session_history(&id, 0, 0).unwrap(), history);
         assert_eq!(std::fs::read(dir.join("manifest.json")).unwrap(), manifest);
         assert!(dir.join("prepared").exists());
@@ -740,7 +740,7 @@ printf '%s\n' '{"type":"result","session_id":"fixture-native","subtype":"success
         serde_json::from_slice(&std::fs::read(home.path().join("proof.caller")).unwrap()).unwrap();
     assert_eq!(agent_caller.session_id, id);
     let process_cwd = store
-        .process(&agent_caller.origin_process_lfid)
+        .process(&agent_caller.origin_lf_process_id)
         .unwrap()
         .unwrap()
         .cwd
@@ -761,9 +761,9 @@ fn waiting_lists_only_conversations_waiting_on_a_person() {
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     let store =
         loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
-    let parent = loopflow::id::ProcessLfid::new();
+    let parent = loopflow::id::LfProcessId::new();
     db.execute(
-        "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+        "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
         [&parent],
     )
     .unwrap();
@@ -772,8 +772,8 @@ fn waiting_lists_only_conversations_waiting_on_a_person() {
             .claim_session_attachment(id, None, &parent, true)
             .unwrap();
         db.execute(
-            "INSERT INTO session_activity(session_id,attachment_token,agent_process_lfid,observed_at,open_tools,pending_input,yielded)
-             SELECT s.id,p.attachment_token,p.lfid,unixepoch(),1,?2,0 FROM agent_sessions s JOIN processes p ON p.lfid=s.agent_process_lfid WHERE s.id=?1",
+            "INSERT INTO session_activity(session_id,attachment_token,agent_process_id,observed_at,open_tools,pending_input,yielded)
+             SELECT s.id,p.attachment_token,p.id,unixepoch(),1,?2,0 FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1",
             rusqlite::params![id, pending],
         )
         .unwrap();
@@ -1321,7 +1321,6 @@ fn terminal_first_launch_and_failed_startup_reopen_the_same_conversation() {
     ));
     let failed = open(&["session", "connect", &id, "--replace"]);
     assert!(!failed.status.success());
-    assert!(!String::from_utf8_lossy(&failed.stderr).contains("no confirmed engine exit"));
     write_provider("#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nprintf '%s\\n' 'message=created id=ses_retained' >&2\n");
     for args in [
         vec!["session", "resume"],
@@ -1578,11 +1577,11 @@ fn program_status_cli_observes_waiting_without_completing_work() {
     .unwrap();
     let store =
         loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
-    let process_lfid = loopflow::id::ProcessLfid::new();
+    let lf_process_id = loopflow::id::LfProcessId::new();
     let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     conn.execute(
-        "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'00000000-0000-0000-0000-000000000001',1)",
-        [&process_lfid],
+        "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'00000000-0000-0000-0000-000000000001',1)",
+        [&lf_process_id],
     )
     .unwrap();
     // A native conversation needs no lf attachment for passive display: the
@@ -1670,7 +1669,7 @@ fn program_status_cli_observes_waiting_without_completing_work() {
     }
     assert!(store.session(&id).unwrap().unwrap().completed_at.is_none());
     assert!(store
-        .process(&process_lfid)
+        .process(&lf_process_id)
         .unwrap()
         .unwrap()
         .completed_at
@@ -1684,9 +1683,9 @@ fn program_status_cli_observes_waiting_without_completing_work() {
         wait_for("done")["program_status"]["records"][0]["state"],
         "done"
     );
-    let driver = store.session_attachment(&id).unwrap();
+    let attachment = store.session_attachment(&id).unwrap();
     store
-        .claim_session_attachment(&id, driver.as_ref(), &process_lfid, true)
+        .claim_session_attachment(&id, attachment.as_ref(), &lf_process_id, true)
         .unwrap();
     let stale = run(
         home.path(),

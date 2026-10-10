@@ -1,11 +1,20 @@
-use crate::engine::{
-    check_cli_available, missing_agent_message, parse_agent, prepare_process_prompt, run_agent,
-    AgentCapabilities, AgentConfig, ContextSourceOverrides, ProcessConfig, ProcessPromptInput,
-    PromptComponents, Skill, StreamFormat, Surface,
-};
+use crate::agent::check_cli_available;
+use crate::agent::missing_agent_message;
+use crate::agent::run_agent;
+use crate::agent::stream::StreamFormat;
+use crate::agent::AgentCapabilities;
+use crate::agent::AgentConfig;
+use crate::agent::ProcessConfig;
+use crate::config::parse_agent;
+use crate::flow::Skill;
 use crate::lf::commands::util::launch_session;
 use crate::lf::output::{format_context_header, format_reproducible_command, Colors};
 use crate::lf::Cli;
+use crate::prompt::process::prepare_process_prompt;
+use crate::prompt::process::ContextSourceOverrides;
+use crate::prompt::process::ProcessPromptInput;
+use crate::prompt::PromptComponents;
+use crate::prompt::Surface;
 use crate::session_record::{
     AgentProcessRequest, CaptureHandle, FinalAnswer, SessionCaptureSpec, SubjectAttribution,
 };
@@ -253,7 +262,7 @@ fn resolve_skill(name: Option<&str>, cli: &Cli, repo: &Path) -> Result<Option<Sk
     match &cli.resolved_invocation {
         Some(invocation) => Ok(Some(invocation.skill.clone())),
         None => Ok(name
-            .map(|name| crate::engine::load_skill(name, repo))
+            .map(|name| crate::flow::load_skill(name, repo))
             .transpose()?),
     }
 }
@@ -342,7 +351,7 @@ fn build_prompt_at(
         .map(|(_, seed)| seed.steers.clone())
         .unwrap_or_default();
     let config_start = Instant::now();
-    let config = crate::engine::config::load_config(Some(&repo_root))?.unwrap_or_default();
+    let config = crate::config::load_config(Some(&repo_root))?.unwrap_or_default();
     debug!(
         elapsed_ms = config_start.elapsed().as_millis(),
         "loaded config"
@@ -384,7 +393,7 @@ fn build_prompt_at(
         && message_context.is_none()
         && discovered_skill.as_ref().is_some_and(|skill| {
             skill.source.as_ref().is_some_and(|source| {
-                source.dialect != crate::engine::skill_catalog::SkillDialect::Loopflow
+                source.dialect != crate::skills::catalog::SkillDialect::Loopflow
             })
         });
     let prepared = prepare_process_prompt(
@@ -448,8 +457,8 @@ fn build_prompt_at(
 
     let mut agent_config = prepared.config;
     if confine {
-        agent_config.write_scope = crate::engine::agent::AgentWriteScope::Worktree;
-        agent_config.execution_boundary = Some(crate::engine::agent::checkout_execution_boundary(
+        agent_config.write_scope = crate::agent::AgentWriteScope::Worktree;
+        agent_config.execution_boundary = Some(crate::agent::checkout_execution_boundary(
             &repo_root,
             agent_config.agent(),
         )?);
@@ -468,8 +477,7 @@ fn build_prompt_at(
     });
     components.steers = steers;
     let deduplication_decisions = prepared.deduplication_decisions;
-    let effective_system =
-        crate::engine::agent::system_prompt_with_structured_replies(&agent_config);
+    let effective_system = crate::agent::system_prompt_with_structured_replies(&agent_config);
     let context = attributed_context(
         &components,
         &effective_system,
@@ -572,7 +580,7 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
                 (flags, prompt, None)
             } else {
                 let context_file = if matches!(built.harness.as_str(), "claude" | "codex") {
-                    crate::engine::agent::write_system_prompt_file(&config, &built.log_name)?
+                    crate::agent::write_system_prompt_file(&config, &built.log_name)?
                 } else {
                     None
                 };
@@ -647,8 +655,7 @@ fn run_headless_prompt(
     prepared_config: &AgentConfig,
 ) -> Result<()> {
     let context_file_start = Instant::now();
-    let context_file =
-        crate::engine::agent::write_system_prompt_file(prepared_config, &built.log_name)?;
+    let context_file = crate::agent::write_system_prompt_file(prepared_config, &built.log_name)?;
     debug!(
         elapsed_ms = context_file_start.elapsed().as_millis(),
         "wrote context log"
@@ -768,7 +775,7 @@ pub(crate) fn attributed_context(
     deduplication_decisions: &[crate::trace::ContextDecision],
     request: Option<&str>,
 ) -> crate::trace::PreparedTurnContext {
-    use crate::engine::prompt::{DiffTier, DocumentSource};
+    use crate::prompt::{DiffTier, DocumentSource};
     use crate::trace::{
         ContextAssetKind as Kind, ContextAssetSpec, ContextChannel, ContextDecision,
         ContextDecisionKind, ContextScope as Scope,
@@ -788,10 +795,10 @@ pub(crate) fn attributed_context(
         // authored source. Otherwise escaped references become anonymous assembly.
         let content = match included_by {
             "wave" | "docs" | "diff_files" | "diff" | "summary" | "clipboard" => {
-                crate::engine::prompt::escape_reference(content)
+                crate::prompt::escape_reference(content)
             }
-            "message" => crate::engine::prompt::render_message(content),
-            "steers" => crate::engine::prompt::render_reference(content),
+            "message" => crate::prompt::render_message(content),
+            "steers" => crate::prompt::render_reference(content),
             _ => content.to_string(),
         };
         for channel in [ContextChannel::System, ContextChannel::Task]
@@ -819,9 +826,9 @@ pub(crate) fn attributed_context(
 
     if components.operate {
         let source_path = std::path::Path::new(&components.repo_root)
-            .join("rust/loopflow/src/engine/builtins/LOOPFLOW.md");
+            .join("rust/loopflow/src/builtins/LOOPFLOW.md");
         push(
-            &crate::engine::prompt::loopflow_section(),
+            &crate::prompt::loopflow_section(),
             Kind::OperatingInstructions,
             Scope::Global,
             "LOOPFLOW.md".to_string(),
@@ -1005,7 +1012,7 @@ pub(crate) fn attributed_context(
             decision: ContextDecisionKind::Included,
             reason: "rendered in the launch goal".to_string(),
             original_bytes: Some(steer.text.len() as u64),
-            original_tokens: Some(crate::engine::prompt::count_tokens(&steer.text) as u64),
+            original_tokens: Some(crate::prompt::count_tokens(&steer.text) as u64),
             asset_position: None,
         });
     }
@@ -1104,10 +1111,10 @@ mod tests {
         split_skill_args, PromptBuild,
     };
 
-    use crate::engine::agent::{run_agent, AgentCapabilities, AgentConfig, ProcessConfig};
-    use crate::engine::prompt::{Document, DocumentSource, PromptComponents};
-    use crate::engine::skill_catalog::SkillCatalog;
+    use crate::agent::{run_agent, AgentCapabilities, AgentConfig, ProcessConfig};
     use crate::lf::Cli;
+    use crate::prompt::{Document, DocumentSource, PromptComponents};
+    use crate::skills::catalog::SkillCatalog;
     use crate::test_ambient::EnvGuard;
     use crate::trace::{ContextAssetKind, ContextScope};
     use clap::Parser;
@@ -1218,9 +1225,8 @@ mod tests {
                         Some(name)
                     }
                 );
-                let context = crate::engine::prompt::render_user_context(
-                    built.components.user_name.as_deref(),
-                );
+                let context =
+                    crate::prompt::render_user_context(built.components.user_name.as_deref());
                 assert_eq!(
                     built.prompt.matches("<lf:user>").count(),
                     usize::from(!context.is_empty())
@@ -1276,7 +1282,7 @@ mod tests {
         std::fs::write(
             &provider,
             r#"#!/bin/sh
-printf '%s\n' "$LF_CAPTURE_KEY|${LF_RUN_DIR-unset}|${LF_TRACE_ID-unset}|${LF_PROCESS_LFID-unset}" >> "$LF_TEST_RUN_EVIDENCE"
+printf '%s\n' "$LF_CAPTURE_KEY|${LF_RUN_DIR-unset}|${LF_TRACE_ID-unset}|${LF_PROCESS_ID-unset}" >> "$LF_TEST_RUN_EVIDENCE"
 if [ -n "${LF_TEST_ATTEMPT_FILE:-}" ] && [ ! -e "$LF_TEST_ATTEMPT_FILE" ]; then
   touch "$LF_TEST_ATTEMPT_FILE"
   printf '%s\n' '{"type":"result","is_error":true,"result":"service unavailable"}'
@@ -1293,7 +1299,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             "LF_BIN",
             "LF_HOME",
             crate::journal::LF_TRACE_ID_ENV,
-            crate::journal::LF_PROCESS_LFID_ENV,
+            crate::journal::LF_PROCESS_ID_ENV,
             crate::session_record::CAPTURE_KEY_ENV,
             "LF_RUN_DIR",
         ];
@@ -1308,7 +1314,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         std::env::set_var("LF_HOME", home.path());
         let registry = home.path().join("loopflow.db");
         std::env::set_var(crate::journal::LF_TRACE_ID_ENV, "trace_stale");
-        std::env::set_var(crate::journal::LF_PROCESS_LFID_ENV, "process_stale");
+        std::env::set_var(crate::journal::LF_PROCESS_ID_ENV, "process_stale");
         std::env::set_var("LF_RUN_DIR", home.path().join("stale-run"));
 
         let task = "prove the captured Session launch";
@@ -1506,7 +1512,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         repo.create_file(".lf/skills/proof.md", "inspect every research artifact");
         repo.stage_all();
         repo.commit("test basis");
-        let head = crate::engine::git::rev_parse(repo.path(), "HEAD").unwrap();
+        let head = crate::git::rev_parse(repo.path(), "HEAD").unwrap();
         let runtime = repo.path().join("scratch/research-runtime-model.md");
         let handoff = repo.path().join("scratch/research-design-handoff.md");
         let first = research_build(
@@ -1548,10 +1554,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             std::fs::read_to_string(&handoff).unwrap(),
             "handoff evidence bytes\n"
         );
-        assert_eq!(
-            crate::engine::git::rev_parse(repo.path(), "HEAD").unwrap(),
-            head
-        );
+        assert_eq!(crate::git::rev_parse(repo.path(), "HEAD").unwrap(), head);
         assert!(std::process::Command::new("git")
             .args(["diff", "--cached", "--quiet"])
             .current_dir(repo.path())
@@ -1648,7 +1651,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         let catalog = SkillCatalog::load(Some(repo.path()), None, false).unwrap();
         let skill = catalog.resolve("audit").unwrap().unwrap().load().unwrap();
         std::fs::remove_file(&native).unwrap();
-        let invocation = crate::engine::skill_invocation::SkillInvocation {
+        let invocation = crate::skills::invocation::SkillInvocation {
             skill,
             arguments: "  exact \"arguments\"  ".into(),
         };
@@ -1876,7 +1879,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             message: Some("Build it.\n<lf:steers>Jack wrote $kickoff.</lf:steers>".into()),
             ..Default::default()
         };
-        let system = crate::engine::format_prompt(&components);
+        let system = crate::prompt::format_prompt(&components);
         let prepared = attributed_context(&components, &system, "", &[], None);
         assert_eq!(prepared.system.as_ref().unwrap().text, system);
         for (kind, expected) in [
@@ -1924,7 +1927,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             steers,
             ..Default::default()
         };
-        let system = crate::engine::format_prompt(&components);
+        let system = crate::prompt::format_prompt(&components);
         let prepared = attributed_context(&components, &system, "", &[], None);
 
         let block = prepared

@@ -16,8 +16,8 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::engine::context_budget::{BudgetKey, ContextBudgets};
-use crate::engine::prompt::count_tokens;
+use crate::prompt::context_budget::{BudgetKey, ContextBudgets};
+use crate::prompt::count_tokens;
 use crate::session_record::SessionHistory;
 use crate::trace::{ContextAsset, ContextAssetKind, ContextDecision};
 
@@ -212,11 +212,7 @@ fn budgets(history: &SessionHistory) -> Option<ContextBudgets> {
         .map(Path::new)
         .find(|path| path.is_dir());
     let config = checkout
-        .and_then(|path| {
-            crate::engine::config::load_config(Some(path))
-                .ok()
-                .flatten()
-        })
+        .and_then(|path| crate::config::load_config(Some(path)).ok().flatten())
         .unwrap_or_default();
     ContextBudgets::resolve(
         &config,
@@ -830,12 +826,12 @@ mod tests {
         )
         .unwrap();
         let mut step = step(dir.path());
-        let mut config = crate::engine::config::Config::default();
-        for key in crate::engine::context_budget::BudgetKey::ALL {
+        let mut config = crate::config::Config::default();
+        for key in crate::prompt::context_budget::BudgetKey::ALL {
             config.context_budgets.insert(key, 50);
         }
         let budgets =
-            crate::engine::context_budget::ContextBudgets::resolve(&config, dir.path(), None)
+            crate::prompt::context_budget::ContextBudgets::resolve(&config, dir.path(), None)
                 .unwrap();
         super::flag(&mut step, &budgets);
         let steers = &step.sources[4];

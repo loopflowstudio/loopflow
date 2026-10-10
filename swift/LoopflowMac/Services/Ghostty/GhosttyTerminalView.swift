@@ -174,7 +174,7 @@ final class GhosttySurfacePool {
             let marker = view.terminalMarker
             if case .session(let id) = view.terminal {
                 if let record = records.first(where: { $0.id == id }) {
-                    view.programStatus.associate(sessionId: id, terminalId: marker, provider: SessionProviderReading(agentProcessLFID: record.agentProcessLFID))
+                    view.programStatus.associate(sessionId: id, terminalId: marker, provider: SessionProviderReading(agentProcessId: record.agentProcessId))
                 }
                 continue
             }
@@ -182,7 +182,7 @@ final class GhosttySurfacePool {
             view.programStatus.associate(
                 sessionId: matches.count == 1 ? matches[0].id : nil,
                 terminalId: matches.count == 1 ? marker : nil,
-                provider: matches.count == 1 ? SessionProviderReading(agentProcessLFID: matches[0].agentProcessLFID) : nil
+                provider: matches.count == 1 ? SessionProviderReading(agentProcessId: matches[0].agentProcessId) : nil
             )
         }
     }

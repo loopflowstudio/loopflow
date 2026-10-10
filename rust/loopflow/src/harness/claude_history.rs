@@ -96,7 +96,7 @@ impl History {
 mod tests {
     use super::History;
 
-    use crate::id::ProcessLfid;
+    use crate::id::LfProcessId;
     use crate::session::SessionEventKind;
     use crate::store::sqlite::SqliteStore;
     use serde_json::json;
@@ -108,18 +108,20 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&path).unwrap();
         let conn = rusqlite::Connection::open(&path).unwrap();
         store.test_session("conversation", "run_00000000000000000000000000000001");
-        let process = ProcessLfid::new();
+        let process = LfProcessId::new();
         conn.execute(
-            "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
             [&process],
         )
         .unwrap();
-        let driver = store
+        let attachment = store
             .claim_session_attachment("conversation", None, &process, false)
             .unwrap();
-        let origin = store.session_turn_origin("conversation", &driver).unwrap();
+        let origin = store
+            .session_turn_origin("conversation", &attachment)
+            .unwrap();
         let mut history = History {
-            owner: (store.clone(), "conversation".into(), driver),
+            owner: (store.clone(), "conversation".into(), attachment),
             requests: std::sync::Arc::new(std::sync::Mutex::new(
                 [("request".to_string(), origin)].into(),
             )),

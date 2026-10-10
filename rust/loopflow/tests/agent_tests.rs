@@ -1,11 +1,11 @@
 mod support;
 
-use base64::Engine;
+use base64::prelude::*;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use loopflow::engine::agent::{run_agent, AgentCapabilities, AgentConfig, ProcessConfig};
-use loopflow::engine::error::CoreError;
+use loopflow::agent::{run_agent, AgentCapabilities, AgentConfig, ProcessConfig};
+use loopflow::error::CoreError;
 use loopflow::profile::{ProviderRoute, RouteScope};
 use loopflow::provider_auth::Provider;
 use loopflow::store::{
@@ -84,7 +84,7 @@ fn library_launch_records_each_provider_under_its_invocation() {
         assert!(agent.os_started_at.is_some());
         assert!(agent.completed_at.is_some());
         let parent = store
-            .process(agent.parent_process_lfid.as_ref().unwrap())
+            .process(agent.parent_lf_process_id.as_ref().unwrap())
             .unwrap()
             .unwrap();
         assert_eq!(parent.kind, loopflow::process::ProcessKind::Lf);
@@ -134,7 +134,7 @@ fn library_launch_reuses_the_enclosing_invocation() {
             .collect::<Vec<_>>();
         assert_eq!(agents.len(), 2);
         for agent in agents {
-            assert_eq!(agent.parent_process_lfid.as_ref(), Some(&parents[0].lfid));
+            assert_eq!(agent.parent_lf_process_id.as_ref(), Some(&parents[0].id));
             assert!(agent.completed_at.is_some());
         }
         Ok(())
@@ -258,7 +258,7 @@ while read -r line; do :; done
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     let account = |account_id: ProviderAccountId, path: std::path::PathBuf| {
         let email = format!("{account_id}@example.com");
-        let claims = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        let claims = BASE64_URL_SAFE_NO_PAD
             .encode(serde_json::json!({"email":email, "sub":account_id.as_str()}).to_string());
         std::fs::write(path.join("auth.json"), serde_json::json!({"tokens":{"access_token":"fixture", "id_token":format!("h.{claims}.s")}}).to_string()).unwrap();
         ProviderAccount {
@@ -326,7 +326,7 @@ while read -r line; do :; done
     );
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     let agents = db.prepare(
-        "SELECT lfid,agent_session_id,parent_process_lfid,completed_at,spawn_state FROM processes WHERE kind='agent' ORDER BY rowid"
+        "SELECT id,agent_session_id,parent_lf_process_id,completed_at,spawn_state FROM processes WHERE kind='agent' ORDER BY rowid"
     ).unwrap().query_map([], |row| Ok((
         row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?,
         row.get::<_, Option<i64>>(3)?, row.get::<_, String>(4)?,

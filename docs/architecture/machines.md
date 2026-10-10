@@ -85,11 +85,11 @@ shell / automation / Loopflow.app
                |
         store + repository
                |
-       Flow driver Process --> step Process --> LfSession <--> AgentProcess
+          Flow process --> step Process --> LfSession <--> AgentProcess
 ```
 
 Wave operations are finite attributed conversations. Each Task Flow
-runs through the common driver. Cron invokes commands on schedule;
+runs through the common Flow runner. Cron invokes commands on schedule;
 local PR supervision watches and repairs delivery in the invoking process.
 
 The process that directly spawns a child owns its child handle. Cross-process
@@ -117,7 +117,7 @@ never killed merely because it resembles a Loopflow child.
 
 Cross-process control requires exact PID/start identity and the applicable
 conversation and AgentProcess record. Revalidate native scope or exclusive process
-group before signaling. An attached lf invocation may disappear while its AgentProcess survives;
+group before signaling. An attached LfProcess may disappear while its AgentProcess survives;
 recorded endpoints alone do not prove liveness.
 
 ## Independent bridges

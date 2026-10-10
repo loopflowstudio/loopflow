@@ -1434,11 +1434,11 @@ impl LinearClient {
                 author_name: node.user.as_ref().and_then(|user| {
                     user.display_name
                         .as_deref()
-                        .and_then(crate::engine::config::normalize_user_name)
+                        .and_then(crate::config::normalize_user_name)
                         .or_else(|| {
                             user.name
                                 .as_deref()
-                                .and_then(crate::engine::config::normalize_user_name)
+                                .and_then(crate::config::normalize_user_name)
                         })
                 }),
                 author_id: node.user.map(|user| user.id),

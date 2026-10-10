@@ -23,9 +23,9 @@ use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
+use crate::agent::stream::{ResultSubtype, StreamEvent};
 use crate::chat::types::{ConversationEvent, ConversationItem, ItemDelta, Lifecycle, TurnUsage};
-use crate::engine::naming::generated_session_title;
-use crate::engine::stream::{ResultSubtype, StreamEvent};
+use crate::naming::generated_session_title;
 use crate::store::{StoreError, StoreResult};
 
 /// An opaque artifact directory key; it grants no conversation or Flow authority.
@@ -59,7 +59,7 @@ pub(crate) struct SessionCaptureSpec {
 }
 
 /// A Flow position older manifests captured. New captures record none: a step
-/// is an ordinary command, and its Flow is read from the driver's record.
+/// is an ordinary command, and its Flow is read from the Flow process record.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionFlowStep {
     pub task_id: Option<crate::work::task::TaskId>,
@@ -69,7 +69,7 @@ pub struct SessionFlowStep {
     pub step: String,
     /// Older manifests omitted the structural path; never infer it from a leaf index.
     pub node: Option<String>,
-    /// The step's node in its driver's graph; absent in older manifests.
+    /// The step's node in its Flow process graph; absent in older manifests.
     #[serde(default)]
     pub key: Option<u32>,
     /// Older captures have no tuple; never derive it from their scalar visit token.
@@ -89,23 +89,23 @@ pub enum SessionFlowMembership {
 pub struct AgentProcessRequest {
     pub system_prompt: String,
     pub task_prompt: String,
-    pub skill_invocation: Option<crate::engine::skill_invocation::SkillInvocation>,
+    pub skill_invocation: Option<crate::skills::invocation::SkillInvocation>,
     pub agent: String,
     pub account_id: Option<crate::store::ProviderAccountId>,
     pub max_turns: Option<u32>,
-    pub write_scope: crate::engine::AgentWriteScope,
-    pub execution_boundary: Option<crate::engine::AgentExecutionBoundary>,
+    pub write_scope: crate::agent::AgentWriteScope,
+    pub execution_boundary: Option<crate::agent::AgentExecutionBoundary>,
     pub skip_permissions: bool,
     pub chrome: bool,
 }
 
 impl AgentProcessRequest {
     pub(crate) fn from_prepared(
-        config: &crate::engine::AgentConfig,
-        capabilities: &crate::engine::AgentCapabilities,
+        config: &crate::agent::AgentConfig,
+        capabilities: &crate::agent::AgentCapabilities,
     ) -> Self {
         Self {
-            system_prompt: crate::engine::agent::system_prompt_with_structured_replies(config),
+            system_prompt: crate::agent::system_prompt_with_structured_replies(config),
             task_prompt: config.task_prompt.clone(),
             skill_invocation: config.skill_invocation.clone(),
             agent: config.agent().to_string(),
@@ -119,7 +119,7 @@ impl AgentProcessRequest {
     }
 
     pub(crate) fn replay_unavailable_reason(&self) -> Option<&'static str> {
-        let (harness, _) = crate::engine::parse_agent(&self.agent);
+        let (harness, _) = crate::config::parse_agent(&self.agent);
         matches!(harness.as_str(), "claude" | "codex")
             .then_some("managed Claude/Codex replay requires a recorded account ID")
             .filter(|_| self.account_id.is_none())
@@ -371,7 +371,7 @@ pub struct SessionHistory {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ProviderHistory {
     pub reference: ProviderHistoryReference,
-    pub process_lfid: Option<crate::id::ProcessLfid>,
+    pub lf_process_id: Option<crate::id::LfProcessId>,
     pub task_id: Option<crate::durable::TaskId>,
     pub wave_id: Option<crate::id::WaveId>,
     pub started_at: Option<i64>,
@@ -1051,9 +1051,9 @@ fn project_provider_history(
                 start_seq: start.map(|event| event.seq),
                 completion_seq: completed.map(|event| event.seq),
             },
-            process_lfid: start
-                .and_then(|event| event.process_lfid.as_deref())
-                .map(crate::id::ProcessLfid::parse)
+            lf_process_id: start
+                .and_then(|event| event.lf_process_id.as_deref())
+                .map(crate::id::LfProcessId::parse)
                 .transpose()
                 .map_err(std::io::Error::other)?,
             task_id: start
@@ -1120,7 +1120,7 @@ fn project_provider_history(
                 })?,
                 attempt_key: attempt.into(),
             },
-            process_lfid: None,
+            lf_process_id: None,
             task_id: origin
                 .and_then(|event| event.task_id.as_deref())
                 .map(crate::durable::TaskId::parse)
@@ -1974,7 +1974,7 @@ pub(crate) fn register_session_attachment_interrupt(
     attachment: crate::process::SessionAttachment,
 ) {
     let store = store.clone();
-    crate::engine::agent::register_interrupt_cleanup(move || {
+    crate::agent::register_interrupt_cleanup(move || {
         match finish_session_attachment(&store, &session, &attachment, "interrupted") {
             Ok(()) | Err(StoreError::InvalidAuthority(_)) => {}
             Err(error) => tracing::warn!(%error, %session, "record interrupted Session connection"),
@@ -2088,7 +2088,7 @@ impl CaptureHandle {
         let store = crate::store::sqlite::SqliteStore::new(
             &crate::store::database_path_from_env().map_err(record_error)?,
         )?;
-        let process_lfid = crate::journal::current_process_lfid().ok_or_else(|| {
+        let lf_process_id = crate::journal::current_lf_process_id().ok_or_else(|| {
             StoreError::InvalidAuthority("Session input requires an admitted Process".into())
         })?;
         let mut next = store.session(session)?.ok_or(StoreError::NotFound)?;
@@ -2101,7 +2101,7 @@ impl CaptureHandle {
         next.artifact_key = new_artifact_key();
         next.input_published = false;
         let (next, attachment) =
-            store.claim_session_input(next, expected.as_ref(), &process_lfid, || {
+            store.claim_session_input(next, expected.as_ref(), &lf_process_id, || {
                 runtime::close_session_agent_process(&store, session)
             })?;
         // Continue the Session's attribution; the manifest still describes the
@@ -2305,7 +2305,7 @@ impl CaptureHandle {
     /// Claim an admitted conversation and retain the exact provider provenance
     /// used by its tools. A later attachment transfer never rewrites this process.
     pub(crate) fn claim_session_attachment(&self) -> StoreResult<()> {
-        let process_lfid = crate::journal::current_process_lfid().ok_or_else(|| {
+        let lf_process_id = crate::journal::current_lf_process_id().ok_or_else(|| {
             StoreError::InvalidAuthority("AgentProcess requires an admitted invocation".into())
         })?;
         let mut capture = self.0.lock().expect("Session capture mutex poisoned");
@@ -2320,7 +2320,7 @@ impl CaptureHandle {
                     "AgentProcess requires an admitted conversation".into(),
                 )
             })?;
-        let attachment = resume_session_agent_process(&store, &session.id, &process_lfid)?;
+        let attachment = resume_session_agent_process(&store, &session.id, &lf_process_id)?;
         capture.attachment = Some((session.id, attachment));
         drop(capture);
         self.register_interrupt();
@@ -2329,7 +2329,7 @@ impl CaptureHandle {
 
     fn register_interrupt(&self) {
         let capture = Arc::downgrade(&self.0);
-        crate::engine::agent::register_interrupt_cleanup(move || {
+        crate::agent::register_interrupt_cleanup(move || {
             if let Some(capture) = capture.upgrade() {
                 let mut capture = capture.lock().expect("Session capture mutex poisoned");
                 if capture.settled_outcome.is_none() {
@@ -2651,7 +2651,7 @@ impl SessionCapture {
                 task_id: work.as_ref().and_then(|work| work.task_id.clone()),
                 wave_id: work.as_ref().and_then(|work| work.wave_id.clone()),
                 work_source: work.as_ref().map(|work| work.source),
-                flow_process_lfid: None,
+                flow_lf_process_id: None,
                 bound_at: None,
                 interactive: manifest.surface != "headless",
                 repo: None,
@@ -2662,7 +2662,7 @@ impl SessionCapture {
                 completed_at: None,
                 created_at: manifest.created_at.unix_timestamp(),
             },
-            crate::journal::current_process_lfid().as_ref(),
+            crate::journal::current_lf_process_id().as_ref(),
         )?;
         Ok(Some(session))
     }
@@ -2948,10 +2948,10 @@ impl SessionCapture {
 pub(crate) fn resume_session_agent_process(
     store: &crate::store::sqlite::SqliteStore,
     session: &str,
-    process_lfid: &crate::id::ProcessLfid,
+    lf_process_id: &crate::id::LfProcessId,
 ) -> StoreResult<crate::process::SessionAttachment> {
     let expected = store.session_attachment(session)?;
-    store.resume_session_attachment(session, expected.as_ref(), process_lfid, || {
+    store.resume_session_attachment(session, expected.as_ref(), lf_process_id, || {
         runtime::close_session_agent_process(store, session)
     })
 }
@@ -3314,9 +3314,10 @@ mod tests {
         write_provider_client, AgentProcessRequest, CaptureHandle, SessionCaptureManifest,
         SessionCaptureSpec, SubjectAttribution, TerminalReceipt,
     };
+    use crate::agent::stream::{ResultSubtype, StreamEvent};
+    use crate::agent::AgentCapabilities;
+    use crate::agent::AgentConfig;
     use crate::chat::types::{ConversationEvent, ConversationItem, TurnUsage};
-    use crate::engine::stream::{ResultSubtype, StreamEvent};
-    use crate::engine::{AgentCapabilities, AgentConfig};
 
     #[test]
     fn terminal_attachment_probe() {
@@ -3435,13 +3436,13 @@ mod tests {
             assert_eq!(child.wait()?.code(), Some(42));
             // Observed wait, not successful spawn or a finished capture, ends it.
             capture.record_native_agent_exit(&first)?;
-            let ended = store.process(&first.agent_process_lfid)?.unwrap();
+            let ended = store.process(&first.agent_process_id)?.unwrap();
             assert_eq!(ended.pid, Some(child.id()));
             assert!(ended.completed_at.is_some());
 
             let (mut child, snapshot) = capture.spawn_native_agent(command())?;
             let second = snapshot;
-            assert_ne!(first.agent_process_lfid, second.agent_process_lfid);
+            assert_ne!(first.agent_process_id, second.agent_process_id);
             assert_eq!(
                 capture.session_attachment(),
                 Some((session.clone(), second.clone()))
@@ -3449,20 +3450,20 @@ mod tests {
             assert_eq!(child.wait()?.code(), Some(42));
             assert!(capture.record_native_agent_exit(&first).is_err());
             assert!(store
-                .process(&second.agent_process_lfid)?
+                .process(&second.agent_process_id)?
                 .unwrap()
                 .completed_at
                 .is_none());
             // The child exited but without its wait receipt another launch is refused.
             assert!(capture.spawn_native_agent(command()).is_err());
             capture.record_native_agent_exit(&second)?;
-            assert_eq!(store.process(&first.agent_process_lfid)?, Some(ended));
+            assert_eq!(store.process(&first.agent_process_id)?, Some(ended));
             capture.finish("completed")?;
             assert!(capture.spawn_native_agent(command()).is_err());
             assert!(store
                 .session_attachment(&session)?
                 .unwrap()
-                .process_lfid
+                .lf_process_id
                 .is_none());
             Ok(())
         })
@@ -4146,7 +4147,7 @@ mod tests {
     }
 
     #[test]
-    fn continuation_resumes_the_saved_thread_on_a_fresh_engine() {
+    fn continuation_resumes_the_saved_thread_on_a_fresh_agent_process() {
         let ledger = crate::journal::TestLedgerGuard::new();
         let _ambient = crate::test_ambient::EnvGuard::new();
         let original = CaptureHandle::begin_at(ledger.home(), spec(ledger.home())).unwrap();
@@ -4158,10 +4159,10 @@ mod tests {
         let command = vec!["lf".into(), "skill".into()];
         crate::journal::with_runtime(ledger.home(), &command, || {
             original.claim_session_attachment()?;
-            let (_, driver) = original.session_attachment().unwrap();
+            let (_, attachment) = original.session_attachment().unwrap();
             store.record_session_connection(
                 &session.id,
-                &driver,
+                &attachment,
                 "/retained.sock",
                 &"native-thread".into(),
             )?;
@@ -4170,17 +4171,17 @@ mod tests {
             let mut provider = std::process::Command::new("/bin/sleep").arg("60").spawn()?;
             store.record_agent_process_identity(
                 &session.id,
-                &driver,
+                &attachment,
                 provider.id(),
                 crate::journal::process_started_at(provider.id())?.unwrap(),
             )?;
             provider.kill()?;
             provider.wait()?;
-            store.release_session_attachment(&session.id, &driver)?;
+            store.release_session_attachment(&session.id, &attachment)?;
             Ok(())
         })
         .unwrap();
-        let driver = store.session_attachment(&session.id).unwrap().unwrap();
+        let attachment = store.session_attachment(&session.id).unwrap().unwrap();
         let manifest = fs::read(original.artifact_dir().join("manifest.json")).unwrap();
         let request = AgentProcessRequest::from_prepared(
             &AgentConfig {
@@ -4197,21 +4198,24 @@ mod tests {
                 &context,
                 request.clone(),
             )?;
-            let (id, next_driver) = next.session_attachment().unwrap();
+            let (id, next_attachment) = next.session_attachment().unwrap();
             assert_eq!(id, session.id);
             assert_eq!(
                 next.conversation_resume_token()?,
                 Some("native-thread".into())
             );
             // The finished attachment's AgentProcess is never adopted.
-            assert_ne!(next_driver.agent_process_lfid, driver.agent_process_lfid);
+            assert_ne!(
+                next_attachment.agent_process_id,
+                attachment.agent_process_id
+            );
             assert_eq!(
-                Some(&next_driver.provider_process_lfid),
-                next_driver.process_lfid.as_ref()
+                Some(&next_attachment.provider_lf_process_id),
+                next_attachment.lf_process_id.as_ref()
             );
             assert!(store.session_connection(&session.id)?.is_none());
             assert!(store.agent_process_identity(&session.id)?.is_none());
-            assert_ne!(next_driver.token, driver.token);
+            assert_ne!(next_attachment.token, attachment.token);
             let saved = super::read_manifest(&next.artifact_dir()).unwrap();
             assert_eq!(
                 serde_json::to_value(saved.process).unwrap(),
@@ -4277,7 +4281,7 @@ mod tests {
             assert!(store
                 .session_attachment(&session.id)?
                 .unwrap()
-                .process_lfid
+                .lf_process_id
                 .is_none());
             assert!(!store
                 .session_history(&session.id, 0, 0)?
@@ -4300,26 +4304,26 @@ mod tests {
         .unwrap();
     }
 
-    /// A Session whose driver is a throwaway child, so a test can kill it.
+    /// A Session whose attached LfProcess is a throwaway child, so a test can kill it.
     #[cfg(unix)]
-    fn driven_session(
+    fn attached_session(
         ledger: &crate::journal::TestLedgerGuard,
     ) -> (
         crate::store::sqlite::SqliteStore,
         crate::process::SessionAttachment,
         std::process::Child,
-        crate::id::ProcessLfid,
+        crate::id::LfProcessId,
     ) {
         let path = ledger.home().join("loopflow.db");
         let store = crate::store::sqlite::SqliteStore::open_ephemeral(&path).unwrap();
         store.test_session("conversation", &super::new_artifact_key());
-        let first = crate::id::ProcessLfid::new();
-        let second = crate::id::ProcessLfid::new();
+        let first = crate::id::LfProcessId::new();
+        let second = crate::id::LfProcessId::new();
         let sql = rusqlite::Connection::open(&path).unwrap();
         let trace = crate::id::TraceId::new();
         for process in [&first, &second] {
             sql.execute(
-                "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,?2,1)",
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?2,1)",
                 rusqlite::params![process, trace],
             )
             .unwrap();
@@ -4340,7 +4344,7 @@ mod tests {
             serde_json::to_vec(&crate::journal::ProcessReceipt {
                 schema_version: 1,
                 trace_id: trace.to_string(),
-                process_lfid: first.to_string(),
+                lf_process_id: first.to_string(),
                 pid: process.id(),
                 started_at: crate::journal::process_started_at(process.id())
                     .unwrap()
@@ -4349,10 +4353,10 @@ mod tests {
             .unwrap(),
         )
         .unwrap();
-        let driver = store
+        let attachment = store
             .claim_session_attachment("conversation", None, &first, true)
             .unwrap();
-        (store, driver, process, second)
+        (store, attachment, process, second)
     }
 
     #[test]
@@ -4361,23 +4365,23 @@ mod tests {
         use std::os::unix::process::CommandExt;
 
         let ledger = crate::journal::TestLedgerGuard::new();
-        let (store, driver, mut process, next) = driven_session(&ledger);
-        let mut engine = std::process::Command::new("sleep")
+        let (store, attachment, mut process, next) = attached_session(&ledger);
+        let mut agent_process = std::process::Command::new("sleep")
             .arg("30")
             .process_group(0)
             .spawn()
             .unwrap();
-        let started = crate::journal::process_started_at(engine.id())
+        let started = crate::journal::process_started_at(agent_process.id())
             .unwrap()
             .unwrap();
         store
-            .record_agent_process_identity("conversation", &driver, engine.id(), started)
+            .record_agent_process_identity("conversation", &attachment, agent_process.id(), started)
             .unwrap();
-        let socket = ledger.home().join("engine.sock");
+        let socket = ledger.home().join("agent.sock");
         store
             .record_session_connection(
                 "conversation",
-                &driver,
+                &attachment,
                 socket.to_str().unwrap(),
                 &"saved-thread".into(),
             )
@@ -4391,20 +4395,20 @@ mod tests {
                 .contains("Conversation already has an attached LfProcess; connect to it"),
             "{error}"
         );
-        assert!(engine.try_wait().unwrap().is_none());
+        assert!(agent_process.try_wait().unwrap().is_none());
 
         process.kill().unwrap();
         process.wait().unwrap();
         let replacement =
             super::resume_session_agent_process(&store, "conversation", &next).unwrap();
         assert_eq!(
-            crate::journal::process_identity_evidence(engine.id(), started),
+            crate::journal::process_identity_evidence(agent_process.id(), started),
             crate::journal::ProcessIdentityEvidence::Dead,
         );
         // Ending the AgentProcess may already have reaped this exact child.
-        let _ = engine.wait();
-        assert_ne!(replacement.agent_process_lfid, driver.agent_process_lfid);
-        assert_eq!(replacement.provider_process_lfid, next);
+        let _ = agent_process.wait();
+        assert_ne!(replacement.agent_process_id, attachment.agent_process_id);
+        assert_eq!(replacement.provider_lf_process_id, next);
         assert!(store.session_connection("conversation").unwrap().is_none());
         assert!(store
             .agent_process_identity("conversation")
@@ -4420,7 +4424,7 @@ mod tests {
     #[cfg(unix)]
     fn resume_refuses_live_agent_that_cannot_be_ended() {
         let ledger = crate::journal::TestLedgerGuard::new();
-        let (store, driver, mut process, next) = driven_session(&ledger);
+        let (store, attachment, mut process, next) = attached_session(&ledger);
         // A provider outside a group of its own is never signalled.
         let mut provider = std::process::Command::new("sleep")
             .arg("30")
@@ -4430,7 +4434,7 @@ mod tests {
             .unwrap()
             .unwrap();
         store
-            .record_agent_process_identity("conversation", &driver, provider.id(), started)
+            .record_agent_process_identity("conversation", &attachment, provider.id(), started)
             .unwrap();
         process.kill().unwrap();
         process.wait().unwrap();
@@ -4443,14 +4447,14 @@ mod tests {
         assert!(provider.try_wait().unwrap().is_none());
         assert_eq!(
             store.session_attachment("conversation").unwrap(),
-            Some(driver.clone())
+            Some(attachment.clone())
         );
 
         provider.kill().unwrap();
         provider.wait().unwrap();
         let replacement =
             super::resume_session_agent_process(&store, "conversation", &next).unwrap();
-        assert_ne!(replacement.agent_process_lfid, driver.agent_process_lfid);
+        assert_ne!(replacement.agent_process_id, attachment.agent_process_id);
     }
 
     #[test]

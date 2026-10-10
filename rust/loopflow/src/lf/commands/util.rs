@@ -7,7 +7,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
 
-use crate::engine::{codex_permission_args, missing_agent_message, workspace_add_dirs};
+use crate::agent::codex_permission_args;
+use crate::agent::missing_agent_message;
+use crate::agent::workspace_add_dirs;
 use crate::id::AgentSessionId;
 use crate::journal::elapsed_seconds;
 use crate::provider_auth::Provider;
@@ -199,7 +201,7 @@ pub(crate) fn resume_session_with_env(
     remote: Option<NativeConnection>,
     attachment: Option<(String, crate::process::SessionAttachment)>,
 ) -> Result<()> {
-    let user_name = crate::engine::config::participant_name()?;
+    let user_name = crate::config::participant_name()?;
     let mut command =
         build_resume_session_command(harness, model, worktree, &provider_session.agent_session)?;
     command.attachment = attachment;
@@ -222,7 +224,7 @@ pub(crate) fn resume_session_with_env(
     )]);
     environment.extend(extra_environment.clone());
     environment.insert(
-        crate::engine::config::USER_NAME_ENV.to_string(),
+        crate::config::USER_NAME_ENV.to_string(),
         user_name.unwrap_or_default(),
     );
     // Fresh launches and native resumes share admission and settlement below.
@@ -542,7 +544,7 @@ fn record_interactive_opened(environment: &BTreeMap<String, String>) -> Result<(
     let Some(input) = environment.get(crate::session_record::CAPTURE_KEY_ENV) else {
         return Ok(());
     };
-    let Some(process) = crate::journal::current_process_lfid() else {
+    let Some(process) = crate::journal::current_lf_process_id() else {
         return Ok(());
     };
     let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
@@ -576,9 +578,9 @@ fn native_provider_attachment(
         .get(crate::process::AGENT_CALLER_ENV)
         .ok_or_else(|| anyhow!("Native launch has no admitted conversation"))?;
     let caller: crate::process::AgentCaller = serde_json::from_str(caller)?;
-    let process = crate::journal::current_process_lfid()
+    let process = crate::journal::current_lf_process_id()
         .ok_or_else(|| anyhow!("Native launch has no admitted invocation"))?;
-    if attachment.process_lfid.as_ref() != Some(&process)
+    if attachment.lf_process_id.as_ref() != Some(&process)
         || attachment.caller(session.clone()) != caller
     {
         bail!("Session attachment differs from native launch provenance");
@@ -596,7 +598,7 @@ fn native_provider_attachment(
                     "Remote client endpoint differs from its AgentProcess".into(),
                 ));
             }
-        } else if attachment.provider_process_lfid != process {
+        } else if attachment.provider_lf_process_id != process {
             return Err(crate::store::StoreError::InvalidAuthority(
                 "Native provider launch does not own the admitted AgentProcess".into(),
             ));
@@ -653,7 +655,7 @@ fn session_command_status_with_env(
             let session = store
                 .session_for_artifact(input)?
                 .ok_or_else(|| anyhow!("Session input {input} is not recorded"))?;
-            let process = crate::journal::current_process_lfid()
+            let process = crate::journal::current_lf_process_id()
                 .ok_or_else(|| anyhow!("Native launch has no admitted invocation"))?;
             let attachment =
                 crate::session_record::resume_session_agent_process(&store, &session.id, &process)?;
@@ -748,11 +750,8 @@ fn run_native_session(
     process
         .env_remove("LOOPFLOW_DIRECTIVE_FILE")
         .envs(environment);
-    let mut title = crate::engine::terminal_title::TerminalTitle::prepare(
-        environment,
-        &command.program,
-        &mut process,
-    );
+    let mut title =
+        crate::terminal_title::TerminalTitle::prepare(environment, &command.program, &mut process);
     if let Some(route) = &account_route {
         process.args(route.provider_args());
     }
@@ -847,7 +846,7 @@ fn run_native_session(
         std::thread::spawn(move || observe_opencode_session(&capture_dir, stderr))
     });
     let status = if let Some(title) = &mut title {
-        crate::engine::process::wait_for_exit(&mut child, None, || title.refresh())?.0
+        crate::os_process::wait_for_exit(&mut child, None, || title.refresh())?.0
     } else {
         child.wait()?
     };
@@ -947,7 +946,7 @@ fn prepare_codex_capture(process: &mut Command) -> Result<tempfile::NamedTempFil
         .map_err(|error| anyhow!("cannot resolve lf for Codex session capture: {error}"))?;
     let command = format!(
         "{} __provider-session",
-        crate::engine::process::shell_escape(&executable.to_string_lossy())
+        crate::os_process::shell_escape(&executable.to_string_lossy())
     );
     let command = serde_json::to_string(&command).expect("shell command serializes as TOML string");
     write!(profile, "hooks={{ SessionStart = [{{ matcher = \"startup\", hooks = [{{ type = \"command\", command = {command}, timeout = 5 }}] }}] }}")?;
@@ -994,7 +993,7 @@ fn codex_supplies_hook_trust(process: &Command) -> Result<bool> {
         probe.process_group(0);
     }
     let mut child = probe.spawn()?;
-    let group = crate::engine::process::ProcessGroupGuard::new(child.id());
+    let group = crate::os_process::ProcessGroupGuard::new(child.id());
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     while child.try_wait()?.is_none() {
         if std::time::Instant::now() >= deadline {
@@ -1664,7 +1663,7 @@ mod tests {
         assert_eq!(launch.args.last().map(String::as_str), Some("fix it"));
         assert_eq!(
             launch.args.contains(&"--sandbox".to_string()),
-            crate::engine::codex_permission_args(Some(&path()), false, false)
+            crate::agent::codex_permission_args(Some(&path()), false, false)
                 .contains(&"--sandbox".to_string())
         );
     }
@@ -1672,7 +1671,7 @@ mod tests {
     #[test]
     fn bare_tui_harnesses_do_not_select_a_model() {
         for agent in ["claude", "codex", "opencode"] {
-            let (harness, model) = crate::engine::parse_agent(agent);
+            let (harness, model) = crate::config::parse_agent(agent);
             let launch =
                 build_session_command(&harness, model.as_deref(), &path(), "test", None, None)
                     .expect("build bare harness launch");
@@ -1874,10 +1873,10 @@ mod tests {
                 index + 1
             );
             let attachment = store.session_attachment(&saved.id).unwrap().unwrap();
-            assert!(attachment.process_lfid.is_none());
+            assert!(attachment.lf_process_id.is_none());
             assert!(rows
                 .iter()
-                .any(|row| row.lfid == attachment.provider_process_lfid
+                .any(|row| row.id == attachment.provider_lf_process_id
                     && row.pid == Some(std::process::id())
                     && row.completed_at.is_some()));
             let received = std::fs::read_to_string(temp.path().join("received")).unwrap();
@@ -2026,7 +2025,7 @@ mod tests {
         assert_eq!(failed, 1);
         for agent in agents {
             let parent = store
-                .process(agent.parent_process_lfid.as_ref().unwrap())
+                .process(agent.parent_lf_process_id.as_ref().unwrap())
                 .unwrap()
                 .unwrap();
             assert_eq!(parent.pid, Some(std::process::id()));
@@ -2046,7 +2045,7 @@ mod tests {
             let original = store.claim_session_attachment(
                 &session.id,
                 None,
-                &crate::id::ProcessLfid::new(),
+                &crate::id::LfProcessId::new(),
                 true,
             )?;
             let mut command = Command::new("/bin/sleep");
@@ -2065,14 +2064,14 @@ mod tests {
             let attached = store.claim_session_attachment(
                 &session.id,
                 Some(&original),
-                &crate::journal::current_process_lfid().unwrap(),
+                &crate::journal::current_lf_process_id().unwrap(),
                 false,
             )?;
             let environment = BTreeMap::from([(
                 crate::process::AGENT_CALLER_ENV.into(),
                 serde_json::to_string(&attached.caller(session.id.clone()))?,
             )]);
-            let before = store.process(&attached.agent_process_lfid)?.unwrap();
+            let before = store.process(&attached.agent_process_id)?.unwrap();
             let mut command = SessionCommand {
                 program: "/usr/bin/true".into(),
                 args: vec![],
@@ -2085,7 +2084,7 @@ mod tests {
             };
             let result = session_command_status_with_env(&command, &environment, None, None, None);
             let alive = provider.try_wait()?.is_none();
-            let unchanged = store.process(&attached.agent_process_lfid)? == Some(before);
+            let unchanged = store.process(&attached.agent_process_id)? == Some(before);
             command.remote = None;
             let local = session_command_status_with_env(&command, &environment, None, None, None);
             command.remote = Some(NativeConnection {
@@ -2143,7 +2142,7 @@ mod tests {
                 let (session, attachment) = capture.session_attachment().unwrap();
                 let store = SqliteStore::new(&home.join("loopflow.db"))?;
                 if opening_error {
-                    let process = crate::journal::current_process_lfid().unwrap();
+                    let process = crate::journal::current_lf_process_id().unwrap();
                     store.retain_session_observation(
                         &store.session(&session)?.unwrap(),
                         &crate::session::SessionObservation {
@@ -2188,7 +2187,7 @@ mod tests {
                         "{error:#}"
                     );
                 }
-                let ended = store.process(&attachment.agent_process_lfid)?.unwrap();
+                let ended = store.process(&attachment.agent_process_id)?.unwrap();
                 assert!(ended.completed_at.is_some());
                 assert_eq!(
                     crate::journal::process_identity_evidence(

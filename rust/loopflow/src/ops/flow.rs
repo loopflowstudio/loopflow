@@ -5,8 +5,8 @@ use std::process::Stdio;
 use serde::Deserialize;
 use time::OffsetDateTime;
 
-use crate::engine::process::ProcessGroupGuard;
 use crate::ops::error::{OpsError, OpsResult};
+use crate::os_process::ProcessGroupGuard;
 
 pub fn run_telemetry_scorecard(repo: &Path, json: bool) -> OpsResult<()> {
     let script = repo.join("scripts/lifecycle_scorecard.py");
@@ -135,7 +135,7 @@ mod tests {
     use time::OffsetDateTime;
 
     use super::{run_telemetry_scorecard, TelemetryScorecardEnvelope};
-    use crate::engine::stream::StreamEvent;
+    use crate::agent::stream::StreamEvent;
     use crate::id::WaveId;
     use crate::session_record::{CaptureHandle, SessionCaptureSpec, SessionFlowMembership};
     use crate::store::{open_store, storage_config_from_env};

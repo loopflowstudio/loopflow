@@ -100,8 +100,8 @@ struct DTOFixtureTests {
         let data = try loadFixtureData("task_work.json")
         let work = try JSONDecoder().decode(TaskWork.self, from: data)
         #expect(work.sessions.count == 2)
-        #expect(work.sessions[0].flowProcessLfid == nil)
-        #expect(work.sessions[1].flowProcessLfid == work.flowProcesses[0].id)
+        #expect(work.sessions[0].flowLfProcessId == nil)
+        #expect(work.sessions[1].flowLfProcessId == work.flowProcesses[0].id)
         #expect(work.flowProcesses[0].name == "pursue")
         #expect(work.flowProcesses[0].state == .current)
         #expect(!work.processes.isEmpty)
@@ -114,12 +114,12 @@ struct DTOFixtureTests {
             .first { $0.name == "research" }?.workflow
         #expect(research?.edges.last?.flow == nil)
         #expect(research?.edges.last?.launchName == "end")
-        #expect(workflow.position == .edge(index: 2, processLfid: work.flowProcesses[0].id, running: true))
+        #expect(workflow.position == .edge(index: 2, lfProcessId: work.flowProcesses[0].id, running: true))
         #expect(workflow.outgoing.isEmpty)
         #expect(workflow.history.map(\.kind) == [.set, .tookUp, .chose, .arrived, .chose])
         #expect(workflow.history.map(\.actor) == [.person, .person, .person, .edge, .conversation])
         // A move no registered process made names no Process.
-        #expect(workflow.history[0].processLfid == nil)
+        #expect(workflow.history[0].lfProcessId == nil)
         #expect(workflow.history.last?.sessionId == work.sessions[0].id)
         #expect(workflow.history.last?.note == "take the smaller approach")
         #expect(try JSONDecoder().decode(TaskWork.self, from: JSONEncoder().encode(work)) == work)
@@ -139,7 +139,7 @@ struct DTOFixtureTests {
         }
     }
 
-    @Test("A Flow whose driver exited early reads as stopped and requires its name")
+    @Test("A Flow whose process exited early reads as stopped and requires its name")
     func flowInventoryFixture() throws {
         struct Page: Decodable { let entries: [FlowProcessInventoryEntry] }
         let data = try loadFixtureData("flow_page.json")
@@ -163,7 +163,7 @@ struct DTOFixtureTests {
         let data = try Data(contentsOf: url)
         let page = try JSONDecoder().decode(SessionPage.self, from: data)
         #expect(page.entries.count == 1)
-        #expect(page.entries[0].agentProcessLFID == "44444444-4444-4444-8444-444444444444")
+        #expect(page.entries[0].agentProcessId == "44444444-4444-4444-8444-444444444444")
         #expect(page.entries[0].programStatus?.summary?.state == .blocked)
         #expect(page.entries[0].programStatus?.summary?.kind == .question)
         #expect(page.entries[0].programStatus?.summary?.msg == "Use **literal** text?")
@@ -184,9 +184,9 @@ struct DTOFixtureTests {
         #expect(page.entries[1].kind == .agent)
         #expect(page.entries[1].agentSessionID == "conversation")
         #expect(page.entries[1].osStartedAt == 1790640000)
-        #expect(page.entries[1].parentProcessLFID == page.entries[0].lfid)
+        #expect(page.entries[1].parentLfProcessId == page.entries[0].id)
         #expect(page.entries[1].outcome == nil)
-        #expect(page.next?.lfid == page.entries[1].lfid)
+        #expect(page.next?.id == page.entries[1].id)
         #expect(try JSONDecoder().decode(LfProcessPage.self, from: JSONEncoder().encode(page)) == page)
         #expect(throws: DecodingError.self) {
             try JSONDecoder().decode(LfProcessPage.self, from: Data("{}".utf8))
@@ -207,13 +207,13 @@ struct DTOFixtureTests {
         #expect(report.totals.count == 9)
     }
 
-    @Test("Conversation history retains native evidence and unknown driver")
+    @Test("Conversation history retains native evidence and unknown LfProcess")
     func sessionHistoryFixture() throws {
         let data = try loadFixtureData("session_history.json")
         let events = try JSONDecoder().decode([SessionEvent].self, from: data)
         #expect(events[0].agentSession == AgentSessionId(rawValue: "thread_fixture"))
         #expect(events[1].kind == .completed)
-        #expect(events[1].processLFID == nil)
+        #expect(events[1].lfProcessId == nil)
         #expect(events[2].kind == .observed)
         #expect(events[2].agentSession == nil)
         #expect(events[2].providerTurn == nil)
@@ -497,17 +497,17 @@ struct DTOFixtureTests {
         let data = try loadFixtureData("session_memberships.json")
         let sessions = try JSONDecoder().decode([SessionRecord].self, from: data)
         #expect(sessions.map(\.flowMembership) == [
-            .step(flow: "task-design", flowProcessLfid: "00000000-0000-0000-0000-00000000f10w",
+            .step(flow: "task-design", flowLfProcessId: "00000000-0000-0000-0000-00000000f10w",
                   step: "review-design", node: 1, iterations: [[]], occurrence: .current),
-            .step(flow: "feature", flowProcessLfid: "00000000-0000-0000-0000-0000000000f2",
+            .step(flow: "feature", flowLfProcessId: "00000000-0000-0000-0000-0000000000f2",
                   step: "implement", node: 6, iterations: [[2, 1], [1]], occurrence: .earlier),
             .independent,
             .unknown(reason: "Run run_00000000000000000000000000000004 predates recorded Flow membership"),
-            .step(flow: "feature", flowProcessLfid: "00000000-0000-0000-0000-0000000000f1",
+            .step(flow: "feature", flowLfProcessId: "00000000-0000-0000-0000-0000000000f1",
                   step: "implement", node: 2, iterations: [[2, 1]], occurrence: .past),
-            .step(flow: "feature", flowProcessLfid: "00000000-0000-0000-0000-0000000000f0",
+            .step(flow: "feature", flowLfProcessId: "00000000-0000-0000-0000-0000000000f0",
                   step: "implement", node: nil, iterations: nil, occurrence: .past),
-            .step(flow: "feature", flowProcessLfid: "00000000-0000-0000-0000-0000000000f2",
+            .step(flow: "feature", flowLfProcessId: "00000000-0000-0000-0000-0000000000f2",
                   step: "demo", node: 9, iterations: [[0, 0]], occurrence: .current),
         ])
         let graphs = try JSONDecoder().decode([String: FlowGraph].self,
@@ -523,7 +523,7 @@ struct DTOFixtureTests {
         #expect(sessions[1].flowMembership.label == "feature / implement · loop 1 pass 3, loop 2 pass 2, loop 3 pass 2 · earlier")
         #expect(sessions[4].flowMembership.label == "feature / implement · loop 1 pass 3, loop 2 pass 2 · past run")
         #expect(sessions[5].flowMembership.label == "feature / implement · pass unavailable · past run")
-        let legacy: SessionFlowMembership = .step(flow: "feature", flowProcessLfid: "old", step: "demo",
+        let legacy: SessionFlowMembership = .step(flow: "feature", flowLfProcessId: "old", step: "demo",
                                                  node: nil, iterations: nil, occurrence: .past)
         #expect(legacy.label == "feature / demo · pass unavailable · past run")
         #expect(try JSONDecoder().decode(SessionFlowMembership.self,
@@ -669,7 +669,7 @@ func sessionInputHistoryFixture() throws {
     let value = try JSONDecoder().decode(SessionHistory.self, from: Data(contentsOf: url))
     #expect(value.providers.count == 2)
     #expect(value.providers[0].outcome == "failed")
-    #expect(value.providers[0].processLfid == nil)
+    #expect(value.providers[0].lfProcessId == nil)
     #expect(value.providers[0].usage.inputTokens == nil)
     #expect(value.providers[1].outcome == "completed")
     #expect(value.providers[1].usage.inputTokens == 0)

@@ -33,7 +33,7 @@ impl Store {
     }
 
     pub async fn create_session(&self, session: LfSession) -> StoreResult<LfSession> {
-        let caller = crate::journal::current_process_lfid();
+        let caller = crate::journal::current_lf_process_id();
         run_sqlite(&self.sqlite, move |store| {
             store.create_session(session, caller.as_ref())
         })
@@ -76,7 +76,7 @@ impl Store {
     ) -> StoreResult<LfSession> {
         let scope = scope.clone();
         let replacing = replacing.map(str::to_string);
-        let caller = crate::journal::current_process_lfid();
+        let caller = crate::journal::current_lf_process_id();
         run_sqlite(&self.sqlite, move |store| {
             store.ensure_primary_session(&scope, replacing.as_deref(), session, caller.as_ref())
         })
@@ -166,7 +166,7 @@ impl Store {
         .await
     }
 
-    /// One Flow by driver Process id or unique prefix, drawn from its Processes.
+    /// One Flow by Flow process id or unique prefix, drawn from its Processes.
     pub async fn flow_detail(
         &self,
         selector: &str,

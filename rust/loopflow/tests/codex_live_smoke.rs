@@ -1,4 +1,4 @@
-//! Live smoke test for the codex app-server driver.
+//! Live smoke test for the codex app-server client.
 //!
 //! Ignored by default: it spawns the real `codex` binary, needs ChatGPT auth
 //! and network, and spends (a trivial number of) tokens. Run manually:
@@ -9,11 +9,11 @@
 
 use std::time::Duration;
 
+use loopflow::agent::AgentConfig;
 use loopflow::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
-use loopflow::engine::agent::AgentConfig;
 use loopflow::harness::codex::CodexHarness;
 use loopflow::harness::{ApprovalPolicy, Harness};
-use loopflow::id::ProcessLfid;
+use loopflow::id::LfProcessId;
 use loopflow::session::{LfSession, TitleSource};
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::{open_ephemeral_store, StorageConfig};
@@ -39,7 +39,7 @@ async fn codex_live_one_turn_smoke() {
                 captured: None,
                 task_id: None,
                 wave_id: None,
-                flow_process_lfid: None,
+                flow_lf_process_id: None,
                 work_source: None,
                 bound_at: None,
                 id: "smoke".into(),
@@ -65,7 +65,7 @@ async fn codex_live_one_turn_smoke() {
         )
         .expect("session");
     let attachment = store
-        .claim_session_attachment("smoke", None, &ProcessLfid::new(), true)
+        .claim_session_attachment("smoke", None, &LfProcessId::new(), true)
         .expect("attachment");
     let config = AgentConfig {
         agent: Some("codex".to_string()),

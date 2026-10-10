@@ -15,7 +15,7 @@ tmux show-environment -g | grep -E '^(LF|LOOPFLOW)_'       # what new tmux sessi
 | Variable | Set by | Read by | Policy |
 |---|---|---|---|
 | `LF_HOME` | A person, for an experiment; every lf launch path for its children; cron and CI-watch launchd plists; test fixtures | `store::lf_home_dir`, Desktop's observation client | Selects the data directory. Unset means `~/.lf`. The database is always `$LF_HOME/loopflow.db`. |
-| `LF_BIN` | lf launch paths, test fixtures | `engine::process::resolve_lf_binary`, only when `LF_HOME` selects an experiment | Names the experiment's binary. Under the main Machine lf ignores it and uses the installed CLI, so a stale value cannot choose the wrong binary for ordinary work. |
+| `LF_BIN` | lf launch paths, test fixtures | `os_process::resolve_lf_binary`, only when `LF_HOME` selects an experiment | Names the experiment's binary. Under the main Machine lf ignores it and uses the installed CLI, so a stale value cannot choose the wrong binary for ordinary work. |
 
 A source build with no explicit `LF_HOME` forwards to the installed CLI and
 main Machine before opening a store. Development builds refuse the main database.
@@ -29,10 +29,10 @@ drops it too, so sessions a person opens by hand inherit none of it.
 | Variable | Set by | Read by | Policy |
 |---|---|---|---|
 | `LF_CAPTURE_KEY` | Session capture and native resume | Capture lookup, provider callbacks, Task comments | Selects subordinate captured history in the resolved Machine. SQLite must record its owning Session; a present manifest must agree. It grants neither Task nor Flow authority. |
-| `LF_TRACE_ID`, `LF_PROCESS_LFID` | Journal, agent and session launch | Journal, git operations | Joins a child's events to its caller's trace. |
+| `LF_TRACE_ID`, `LF_PROCESS_ID` | Journal, agent and session launch | Journal, git operations | Joins a child's events to its caller's trace. |
 | `LF_AGENT_CALLER` | Session capture and native resume | Journal, once, then resolved process context | Carries Session identity, AgentProcess identity and origin Process for nested command ancestry and checkpoint composition. |
 | `LF_AS` | `--as` | Run and Task commands | Declares the Work a command contributes to; resolved against the registry. |
-| `LF_FLOW_ID` | Flow driver, for each agent step | The step's agent and skills | Names the Flow a step serves: its Flow process's id. Steps of one Flow share notes under it; `lf` reads nothing from it. |
+| `LF_FLOW_ID` | Flow process, for each agent step | The step's agent and skills | Names the Flow a step serves: its Flow process's id. Steps of one Flow share notes under it; `lf` reads nothing from it. |
 | `LF_WAVE_ID` | Wave and Task launches | Wave resolution | Default Wave for a child command. |
 | `LF_HUMAN_SESSION`, `LF_PREPARED_CAPTURE` | Conversation launch | `ops::human_session`, removed on use | Identify the prepared conversation a new terminal opens. |
 | `LF_GIT_OPERATION_ID` | `ops::git_operation` | Nested lf commands inside an owned git operation | Lets recovery continue its own operation; checked against the worktree's record. |
@@ -40,9 +40,9 @@ drops it too, so sessions a person opens by hand inherit none of it.
 | `LF_INSTALL_SWITCH` | Published install | `installation` | One-shot capability; must equal the id of the switch receipt in progress. |
 | `LF_EXPECTED_MACHINE_ID` | `lf --machine` | `lf machine`, the remote preamble | Refuses a Machine-addressed command that reached a different Machine. |
 | `LF_TERMINAL_ID`, `LF_TERMINAL_TTY` | Desktop's terminal | Session capture | Attach a Session to the terminal showing it. |
-| `LF_USER_NAME` | lf launch paths | `engine::config::participant_name` | The participant's display name. Presentation only. |
+| `LF_USER_NAME` | lf launch paths | `config::participant_name` | The participant's display name. Presentation only. |
 | `LOOPFLOW_DIRECTIVE_FILE` | Shell integration, agent launch with a relay | `lf` commands that ask the parent shell to act | Removed for agents unless a scoped relay is supplied. |
-| `LOOPFLOW_FLOW_NAME` | Flow driver | Skill prose | Names the running Flow for the agent. |
+| `LOOPFLOW_FLOW_NAME` | Flow process | Skill prose | Names the running Flow for the agent. |
 
 ## Account selection and credentials
 

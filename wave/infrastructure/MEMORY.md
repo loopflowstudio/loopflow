@@ -204,7 +204,7 @@ but cannot veto an authorized completion or cancellation. Per-Exec acceptance is
 Installed 0.13.9 reproduces LOO-353's five pending turns, one reserved input and
 two unknown processes despite its merged PR's completion intent. Source fixtures
 prove preservation. PR #1488 merged as `cead4c952`, including PR #1483's
-Process/LFID vocabulary and migration without another draft. Installed acceptance
+Process vocabulary and migration without another draft. Installed acceptance
 awaits the first published release containing #1488 and preservation readback.
 LOO-285's unattended settlement and LOO-390's storage-prevention evidence remain
 distinct from merge. Legacy keep-open requests need scope reconciliation.
@@ -238,20 +238,21 @@ A draft must `depends_on` main's unreleased drafts: name order broke their
 frontier fixtures in the materialized run only. PR CI defers every job while
 `scratch/` holds files: no hosted proof before landing.
 
-## Execution ownership names (LOO-441, 2026-10-09)
+## Execution vocabulary (LOO-441/442/446, 2026-10-10)
 
-Jack Heart selected LfSession/LfProcess; #1516 merged. The rename preserves
-wire/storage/fixtures, ProcessLfid, variants and product Session/Process;
-SQL/profiling retain historical names. Installation unproved.
-LFID durable; PID reusable. Gate detail, LOO-400 history, mapping and proofs:
-`8b18110cf:wave/infrastructure/MEMORY.md`, this heading and “Process vocabulary” reference.
-
-## Provider conversations (LOO-442, 2026-10-09)
-
-Jack approved #1517 landing October 9; it merged. AgentSessionId has no table;
-retain history/account attribution, SQL/JSON bytes and Swift ids. LOO-443 owns
-engine/driver. Gate failures (copied-shell retention -9, checkout-watch timeout)
-stay unexplained; canonical TMPDIR resolved three fixtures. Installation unproved.
+Jack Heart selected LfSession/LfProcess (#1516) and AgentSession (#1517), both
+landed; AgentSessionId has no table. LOO-446 (PR #1520) is the cleanup he
+requested; after #1519 merged he asked for it to land (`dc87102b`). LfProcess
+identity is `id`, references `<role>_lf_process_id`, AgentProcess references
+`agent_process_id`; the two retired words name nothing. The lf attached to a
+Session is the attached LfProcess; the lf running a Flow is the Flow process;
+FlowRunner executes it. Main's unreleased `agent_process` draft is edited in
+place; LOO-446's draft renames released columns and exit receipt keys
+(`attachment:`). Without old-name readers an earlier build's live Codex lifeline
+and journal receipts are not adopted. `processes` holds both kinds: filter `kind`.
+Five Python gate cases await CI. Installation unproved. Plan: `scratch/loo-446.md`. Prior proofs,
+LOO-442's unexplained gate failures and LOO-400 history:
+`585cf52cd:wave/infrastructure/MEMORY.md`, LOO-441 and LOO-442 headings.
 
 ## Terminal conversation recovery (LOO-409, 2026-10-07)
 
@@ -263,13 +264,13 @@ path discarded its temporary client receipt without retaining a provider process
 This contradicts the proposed initial-generation mismatch.
 
 Record native provider identity at spawn and observed exit at wait; failed spawn
-is positive non-start evidence, not an engine exit. Commit reservation with the
-driver claim. Native fallback must use the same ownership checks as first launch;
-remote clients cannot stand in for their surviving engine. Fast terminal exit
+is positive non-start evidence, not a provider exit. Commit reservation with the
+attachment claim. Native fallback must use the same ownership checks as first launch;
+remote clients cannot stand in for their surviving provider. Fast terminal exit
 must preserve successfully published native history between opener probes.
 LOO-408 owns completion, LOO-324 native/account discovery, LOO-400 terminology.
 CLI/PTY proofs pass; installed reconnect still fails. No migration. The legacy
-Session lacks exact process evidence; driver success proves no provider exit.
+Session lacks exact process evidence; lf success proves no provider exit.
 
 ## Storage footprint (LOO-390, 2026-10-07)
 
@@ -342,9 +343,9 @@ under the opaque-root decision above.
 Installed acceptance remains unproved;
 LOO-373 owns the retained landing-placement reconciliation error.
 
-A review's service, Session driver and provider are distinct process owners.
+A review's service, attached lf and provider are distinct process owners.
 Record the service's exact Exec before child launch. Acquire the existing launch
-lock before the driver fence: reservation/spawn must settle before collecting
+lock before the attachment fence: reservation/spawn must settle before collecting
 owners, and reobserve the same Flow afterward. Retirement must fence review
 writers and retain captures/native history without recording successful review.
 Save exact process identities before signaling: native stop removes client receipts,
@@ -621,8 +622,6 @@ Jack Heart's audit lives in [Environment](../../docs/architecture/environment.md
 `LF_HOME` selects the machine's data directory and `loopflow.db`; shared Exec
 names drive shell/tmux clearing. Earlier branch evidence remains at
 `c31279995a4ea0eec09c053e39c2f71a81d26034:wave/infrastructure/MEMORY.md`.
-LOO-370's October 6 completion above supersedes this section's pending-delivery
-claim; it establishes no physical capture conversion.
 
 ## Task worktree membership (LOO-358)
 
@@ -634,11 +633,6 @@ retains conservative cleanup. Earlier details:
 `6448e3c9e7e519585378feaffe04606bc1b55d3e:wave/infrastructure/MEMORY.md`
 Current contracts: architecture reference.
 
-## Synced planning integration (LOO-334, 2026-09-30)
-
-The landed cutover supersedes the bridge; planning preserves Task/PR identity,
-not execution progress. Detail: `57ac8b09fbbff3f3b7c82c00ecf9032f0cb792b1:wave/infrastructure/MEMORY.md`.
-
 ## Planning and launch preservation (curated 2026-10-02)
 
 The September 28–29 details remain at
@@ -649,7 +643,7 @@ intermediate migration, Run owners and provider-authority selection. Records pro
 preservation obligations below remain; no-remote policy/outward definition sync
 were unresolved, not authorization to restore old writers.
 
-LOO-334's durable constraints survive: presence, freshness and execution eligibility
+LOO-334's durable constraints survive (`57ac8b09f:wave/infrastructure/MEMORY.md`): presence, freshness and execution eligibility
 are separate; omission is not deletion; acquisition time is not provider revision.
 Partial/unknown-revision webhooks invalidate rather than invent complete facts.
 Preserve removal evidence across lookup races. Project revisions cannot order
@@ -752,7 +746,7 @@ continuity. Before conversion, quiesce writers and launches, preserve a consiste
 SQLite/filesystem backup and matching executable, rehearse the exact candidate,
 and verify before reopening. The private-copy converter's live sidecar reads
 plus SQLite backup are not atomic. Preserve native IDs, pending reviews, selected
-captures and manually transferred Tasks; import neither old turns nor driver authority.
+captures and manually transferred Tasks; import neither old turns nor attachment authority.
 
 September 29–30's detailed owner/compilation decisions and superseded schema
 proofs remain at `fe07245a3614334aea71dc40e802b54b47ccaf17:wave/infrastructure/MEMORY.md`
@@ -833,7 +827,7 @@ acceptance or authorize deleting execution history.
   successful completion evidence under the exact claim. Cursor settlement does
   not prove external effects happened once. Serialize feedback/reopen writers,
   persist completion before teardown and preserve published native identity.
-  A finished Flow does not complete its Task. Prove driver and native handoff,
+  A finished Flow does not complete its Task. Prove attachment and native handoff,
   not only reducers, including another executable first on PATH.
 - Unknown custom/queued/nested history stays unresolved with bytes/order intact.
   Inspection does not recompile or launch it. Causal ancestry, age, a missing
@@ -944,7 +938,7 @@ runs prove no firing, and old gaps do not keep later telemetry red.
   at `migrations/drafts/` passes locally and fails the release tree at compile
   time.
 - **Installation tests need OS-account isolation.** Jack Heart’s October 5 steer forbids the three LOO-370 host checks named in TESTING.md: getpwuid bypasses HOME/LF_HOME. PR #1444 supplies disposable-account proofs; until integrated, isolated CI owns them. Ordinary fixtures also scrub inherited LF_* authority.
-- **Concurrent editing corrupts a file; concurrent rebasing corrupts history.** Two drivers sharing one worktree shared its `rebase-merge` state dir: conflicts resolved themselves between commands and `done` advanced 6→22 with no `--continue` from the losing session. Check for a live agent before working — or rebasing — a wave worktree; the driver that owns the worktree owns its `.git` sequencer.
+- **Concurrent editing corrupts a file; concurrent rebasing corrupts history.** Two agents sharing one worktree shared its `rebase-merge` state dir: conflicts resolved themselves between commands and `done` advanced 6→22 with no `--continue` from the losing session. Check for a live agent before working — or rebasing — a wave worktree; the agent that owns the worktree owns its `.git` sequencer.
 - **Linear Project UUIDs survive renames; derived slugs do not.** Project content
   lives in Linear and the local SQLite snapshot, with no `projects/*.md` cache.
   Use stable IDs when reconciling current names with captured historical plans.
@@ -1038,12 +1032,12 @@ and `76407cd0-b271-45e7-8953-62abe7f9df2b` correct the overexpanded scope:
 ordinary installed-skill invocation through `lf audit` / `lf audit -a codex`,
 matching help/list, native same-harness execution, translated ports, exact arguments,
 assets and declarations. Builtins stay inline; `--agent/-a` remains. Busy-terminal
-injection, competing writers, queues and generic engine recovery are not
+injection, competing writers, queues and generic provider recovery are not
 prerequisites. Jack requested radical compression through review. His October 8 comment
 `c4741d38-a84a-4cfc-b3a1-b72ea685ab59` then authorized gate and landing with
 completion after verified merge, superseding the review-only boundary.
 
-One engine catalog replaces external/npx/rams and Flow resolvers. Retain source,
+One skill catalog replaces external/npx/rams and Flow resolvers. Retain source,
 declarations and arguments together; export preserves third-party files. Claude
 subagent names do not select lf's harness. Independent fixes preserve saved Session
 placement, active captures on refused continuation and unpublished reservations on

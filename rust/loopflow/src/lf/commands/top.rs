@@ -87,7 +87,7 @@ pub struct ProcessPruneReport {
 /// Read-local OS evidence for a recorded AgentProcess; no inferred ownership.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AgentProcessObservation {
-    pub lfid: crate::id::ProcessLfid,
+    pub id: crate::id::LfProcessId,
     pub pid: Option<u32>,
     pub provider: String,
     pub state: ActivityState,
@@ -98,7 +98,7 @@ pub(crate) fn observe_agent_process(
     agent: &crate::process::AgentProcess,
 ) -> Option<AgentProcessObservation> {
     Some(AgentProcessObservation {
-        lfid: agent.process.lfid.clone(),
+        id: agent.process.id.clone(),
         pid: agent.process.pid,
         provider: agent.provider.clone().unwrap_or_else(|| "unknown".into()),
         state: activity_state(&agent.process, None, processes)?,
@@ -156,7 +156,8 @@ pub fn run_prune(json: bool, dry_run: bool) -> Result<()> {
     let processes = OsProcess::sample(now)?;
     let receipts =
         read_process_receipts_at(&lf_home).context("failed to read live Process receipts")?;
-    // Driver death is proven from Process receipts, so reap before pruning them.
+    // Attached LfProcess death is proven from Process receipts, so reap before
+    // pruning them.
     let agents = crate::harness::agent_process::reap_agent_processes(dry_run)?;
     for error in &agents.errors {
         tracing::warn!(%error, "failed to reap orphaned AgentProcess");
@@ -270,16 +271,16 @@ fn collect_activity(
     let mut nodes = Vec::new();
     for record in records {
         let agent = record.kind == crate::process::ProcessKind::Agent;
-        if Some(&record.lfid) == crate::journal::current_process_lfid().as_ref() {
+        if Some(&record.id) == crate::journal::current_lf_process_id().as_ref() {
             continue;
         }
         let Some(state) = activity_state(&record, receipts, processes) else {
             continue;
         };
         nodes.push(ActivityNode {
-            id: process_node_id(record.lfid.as_str()),
+            id: process_node_id(record.id.as_str()),
             parent_id: record
-                .parent_process_lfid
+                .parent_lf_process_id
                 .as_ref()
                 .map(|id| process_node_id(id.as_str())),
             kind: if agent {
@@ -460,7 +461,7 @@ fn render_snapshot(snapshot: &ActivitySnapshot) -> String {
         "{} live or unresolved recorded process(es)\n\n",
         snapshot.nodes.len(),
     ));
-    output.push_str("  ELAPSED       PID  STATE      LFID                                  CALL\n");
+    output.push_str("  ELAPSED       PID  STATE      ID                                    CALL\n");
     if snapshot.nodes.is_empty() {
         output.push_str("  no live or unresolved processes recorded in this Machine\n");
     } else {
@@ -593,7 +594,7 @@ fn format_duration(seconds: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::{collect_activity, ActivityNodeKind, OsProcess};
-    use crate::id::{ProcessLfid, TraceId};
+    use crate::id::{LfProcessId, TraceId};
     use crate::process::{LfProcess, ProcessKind};
 
     #[test]
@@ -663,15 +664,15 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&path).unwrap();
         let sql = rusqlite::Connection::open(path).unwrap();
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
-        let parent = ProcessLfid::new();
-        let agent = ProcessLfid::new();
+        let parent = LfProcessId::new();
+        let agent = LfProcessId::new();
         sql.execute(
-            "INSERT INTO processes(lfid,trace_id,started_at,pid) VALUES(?1,?1,?2,?3)",
+            "INSERT INTO processes(id,trace_id,started_at,pid) VALUES(?1,?1,?2,?3)",
             rusqlite::params![parent, now, std::process::id()],
         )
         .unwrap();
         sql.execute(
-            "INSERT INTO processes(lfid,trace_id,kind,parent_process_lfid,started_at)
+            "INSERT INTO processes(id,trace_id,kind,parent_lf_process_id,started_at)
              VALUES(?1,?1,'agent',?2,?3)",
             rusqlite::params![agent, parent, now],
         )
@@ -760,7 +761,7 @@ mod tests {
         let lf = store.process(&parent).unwrap().unwrap();
         let receipt = crate::journal::ProcessReceipt {
             schema_version: 1,
-            process_lfid: parent.to_string(),
+            lf_process_id: parent.to_string(),
             trace_id: lf.trace_id.to_string(),
             pid: 4242,
             started_at: now,
@@ -783,19 +784,19 @@ mod tests {
 
     #[test]
     fn detached_agent_is_a_recorded_node_without_its_parent_or_a_client_receipt() {
-        let id = ProcessLfid::new();
-        let parent = ProcessLfid::new();
+        let id = LfProcessId::new();
+        let parent = LfProcessId::new();
         let record = LfProcess {
-            lfid: id.clone(),
+            id: id.clone(),
             kind: ProcessKind::Agent,
             agent_session_id: Some("conversation".into()),
             pid: Some(4242),
             os_started_at: Some(100),
             trace_id: TraceId::new(),
-            parent_process_lfid: Some(parent.clone()),
+            parent_lf_process_id: Some(parent.clone()),
             via_agent: None,
             caller_session_id: None,
-            caller_agent_process_lfid: None,
+            caller_agent_process_id: None,
             command: Some(r#"["codex","app-server"]"#.into()),
             repo: Some("/repo".into()),
             cwd: Some("/repo/task".into()),

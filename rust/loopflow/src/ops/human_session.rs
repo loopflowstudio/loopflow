@@ -177,7 +177,7 @@ pub struct SessionRecord {
     pub attention: Option<SessionAttention>,
     pub program_status: Option<crate::program_status::Records>,
     /// The provider's current AgentProcess; absent when Loopflow never launched one.
-    pub agent_process_lfid: Option<crate::id::ProcessLfid>,
+    pub agent_process_id: Option<crate::id::LfProcessId>,
     /// Its Task names it as the Task's primary conversation.
     pub task_primary: bool,
     pub task_ids: Vec<crate::durable::TaskId>,
@@ -232,7 +232,7 @@ fn session_attention(session: &crate::session::SessionSummary) -> Option<Session
 pub enum SessionFlowMembership {
     Step {
         flow: String,
-        flow_process_lfid: String,
+        flow_lf_process_id: String,
         step: String,
         /// Exact graph occurrence, unavailable for older capture manifests.
         node: Option<u32>,
@@ -341,8 +341,8 @@ pub(crate) async fn list(
     Ok(sessions)
 }
 
-/// Where a Session's step stands in its Flow: the last one a still-open driver
-/// launched, an earlier one, or part of a Flow whose driver has exited.
+/// Where a Session's step stands in its Flow: the last one a still-open Flow
+/// process launched, an earlier one, or part of a Flow whose process has exited.
 fn flow_occurrence(
     state: crate::session::FlowProcessSummaryState,
     latest_step: bool,
@@ -375,14 +375,14 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
             },
         }
     });
-    let flow_membership = match (&session.flow_process_lfid, &session.flow) {
+    let flow_membership = match (&session.flow_lf_process_id, &session.flow) {
         (None, _) if session.independent => SessionFlowMembership::Independent,
         (None, _) => SessionFlowMembership::Unknown {
             reason: "Flow membership was not recorded".into(),
         },
         (Some(id), Some(flow)) => SessionFlowMembership::Step {
             flow: flow.name.clone(),
-            flow_process_lfid: id.clone(),
+            flow_lf_process_id: id.clone(),
             step: session.skill.clone().unwrap_or_default(),
             node: session.node,
             iterations: session.iterations.clone(),
@@ -435,7 +435,7 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
         primary_scope: session.primary_scope.clone(),
         attention: session_attention(session),
         program_status: session.program_status.clone(),
-        agent_process_lfid: session.agent_process_lfid.clone(),
+        agent_process_id: session.agent_process_id.clone(),
         task_primary: session.task_primary,
         task_ids: session.task_ids.clone(),
         id: session.id.clone(),
@@ -549,7 +549,7 @@ fn session_token(session: &LfSession) -> HumanSessionToken {
 
 /// Launch the prepared input of a conversation or of a saved Flow's review.
 async fn serve_locked(store: &SharedStore, session: &LfSession, launch_lock: File) -> Result<()> {
-    let lf = crate::engine::process::resolve_pinned_lf_binary()?;
+    let lf = crate::os_process::resolve_pinned_lf_binary()?;
     let mut command = tokio::process::Command::new(lf);
     let token = session_token(session);
     command
@@ -732,7 +732,7 @@ async fn connect_live_codex(
     if thread != provider.agent_session {
         bail!("Recorded conversation differs from the live provider thread");
     }
-    let process = crate::journal::current_process_lfid()
+    let process = crate::journal::current_lf_process_id()
         .ok_or_else(|| anyhow!("Connecting requires the current lf Process"))?;
     let attachment =
         match store
@@ -751,7 +751,7 @@ async fn connect_live_codex(
     let interrupted_store = store.sqlite.clone();
     let interrupted_session = session.id.clone();
     let interrupted_attachment = attachment.clone();
-    crate::engine::agent::register_interrupt_cleanup(move || {
+    crate::agent::register_interrupt_cleanup(move || {
         // A native client owns its attachment, never the surviving provider's exit.
         match interrupted_store.finish_session_attachment(
             &interrupted_session,
@@ -765,8 +765,8 @@ async fn connect_live_codex(
     });
     let connected = async {
         // Retain the AgentProcess while this lf invocation is attached.
-        crate::engine::process::hold_agent_process_lifeline(
-            &crate::engine::process::agent_process_lifeline_path(Path::new(&endpoint)),
+        crate::os_process::hold_agent_process_lifeline(
+            &crate::os_process::agent_process_lifeline_path(Path::new(&endpoint)),
         )
         .context("Codex AgentProcess is stopping after its attached lf exited")?;
         if replace_clients {
@@ -911,14 +911,14 @@ async fn surface(store: &SharedStore, session: &LfSession) -> Result<SessionReco
         .ok_or_else(|| session_not_found(&session.id))?;
     let state = session_state(&metadata, !clients.is_empty());
     let actions = session_actions(state);
-    let flow_membership = match (&session.flow_process_lfid, &metadata.flow) {
+    let flow_membership = match (&session.flow_lf_process_id, &metadata.flow) {
         (None, _) if metadata.independent => SessionFlowMembership::Independent,
         (None, _) => SessionFlowMembership::Unknown {
             reason: "Flow membership was not recorded".into(),
         },
         (Some(id), Some(flow)) => SessionFlowMembership::Step {
             flow: flow.name.clone(),
-            flow_process_lfid: id.clone(),
+            flow_lf_process_id: id.clone(),
             step: session.skill.clone().unwrap_or_default(),
             node: session.node,
             iterations: session.iterations.clone(),
@@ -932,7 +932,7 @@ async fn surface(store: &SharedStore, session: &LfSession) -> Result<SessionReco
         primary_scope: metadata.primary_scope.clone(),
         attention: session_attention(&metadata),
         program_status: metadata.program_status.clone(),
-        agent_process_lfid: metadata.agent_process_lfid.clone(),
+        agent_process_id: metadata.agent_process_id.clone(),
         task_primary: metadata.task_primary,
         task_ids: store.sqlite.session_task_ids(&session.id)?,
         id: session.id.clone(),
@@ -1009,7 +1009,7 @@ pub(crate) async fn rename(
     let session = find_session(store, session_id, false)
         .await?
         .ok_or_else(|| session_not_found(session_id))?;
-    let title = crate::engine::naming::validate_session_title(title)
+    let title = crate::naming::validate_session_title(title)
         .map_err(|error| anyhow!("cannot rename Session {session_id}: {error}"))?;
     let title_source = match source {
         SessionTitleSource::Human => crate::session::TitleSource::Human,
@@ -1201,7 +1201,7 @@ pub(crate) fn human_open_argv(
     remote_machine: Option<&crate::durable::MachineId>,
     id: &str,
 ) -> Result<Vec<String>> {
-    let context = crate::engine::process::execution_context()?;
+    let context = crate::os_process::execution_context()?;
     // A fresh terminal does not inherit the listing process's data selection.
     // Carry the executable and its data together, including when a different
     // installation becomes current between listing and opening.
@@ -1251,7 +1251,7 @@ async fn conversation_process_is_running(id: &str) -> Result<bool> {
 
 #[cfg(not(test))]
 async fn start_durable_session(name: &str, cwd: &Path, argv: &[String]) -> Result<()> {
-    crate::engine::process::start_home_session(name, cwd, argv).await
+    crate::os_process::start_home_session(name, cwd, argv).await
 }
 
 #[cfg(test)]
@@ -1320,7 +1320,7 @@ pub(crate) async fn observe_program_status(
     store: &SharedStore,
     id: &str,
     terminal: &str,
-    agent_process: Option<&crate::id::ProcessLfid>,
+    agent_process: Option<&crate::id::LfProcessId>,
 ) -> Result<()> {
     let session = find_session(store, id, false)
         .await?
@@ -1333,7 +1333,7 @@ pub(crate) async fn observe_program_status(
         )?
         .context("Session disappeared")?;
     anyhow::ensure!(
-        current.agent_process_lfid.as_ref() == agent_process,
+        current.agent_process_id.as_ref() == agent_process,
         "Session provider changed"
     );
     // Re-read capture after the AgentProcess witness. A replacement before or
@@ -1523,7 +1523,7 @@ mod tests {
                     let original = store.sqlite.claim_session_attachment(
                         &session.id,
                         None,
-                        &crate::id::ProcessLfid::new(),
+                        &crate::id::LfProcessId::new(),
                         true,
                     )?;
                     let mut command = std::process::Command::new("/bin/sleep");
@@ -1569,14 +1569,14 @@ mod tests {
                                     let second = sqlite.claim_session_attachment(
                                         &session_id,
                                         Some(&first),
-                                        &crate::id::ProcessLfid::new(),
+                                        &crate::id::LfProcessId::new(),
                                         false,
                                     )?;
                                     if transfer == "reattach" {
                                         let third = sqlite.claim_session_attachment(
                                             &session_id,
                                             Some(&second),
-                                            first.process_lfid.as_ref().unwrap(),
+                                            first.lf_process_id.as_ref().unwrap(),
                                             false,
                                         )?;
                                         assert_eq!(
@@ -1613,7 +1613,7 @@ mod tests {
                     let result = super::connect_live_codex(&store, &session, &native, false).await;
                     let history = server.await;
                     let alive = provider.try_wait()?.is_none();
-                    let row = store.sqlite.process(&original.agent_process_lfid)?.unwrap();
+                    let row = store.sqlite.process(&original.agent_process_id)?.unwrap();
                     let attachment = store.sqlite.session_attachment(&session.id)?.unwrap();
                     let retained = store.sqlite.session_connection(&session.id)?;
                     // Only the test's throwaway child is stopped, after observing client effects.
@@ -1632,12 +1632,12 @@ mod tests {
                         assert!(args.contains("--remote\nunix:///tmp/lf-connect-"), "{args}");
                         assert!(args.contains("client.sock") && args.contains("saved-thread"));
                         assert!(!args.contains(endpoint.to_str().unwrap()));
-                        assert!(attachment.process_lfid.is_none());
+                        assert!(attachment.lf_process_id.is_none());
                         std::fs::remove_file(args_path)?;
                     } else {
                         assert!(result.is_err(), "stale {transfer} connection launched");
                         assert!(!args_path.exists());
-                        assert!(attachment.process_lfid.is_some());
+                        assert!(attachment.lf_process_id.is_some());
                     }
                 }
                 Ok(())
@@ -1676,7 +1676,7 @@ mod tests {
         let wave = crate::id::WaveId::new();
         let mut summary = crate::session::SessionSummary {
             program_status: None,
-            agent_process_lfid: None,
+            agent_process_id: None,
             primary_scope: None,
             attachment_outcome: None,
             waiting: false,
@@ -1693,7 +1693,7 @@ mod tests {
             interactive: true,
             task_id: Some(task.clone()),
             wave_id: Some(wave.clone()),
-            flow_process_lfid: Some("flow".into()),
+            flow_lf_process_id: Some("flow".into()),
             cwd: "/unavailable".into(),
             skill: Some("review".into()),
             provider: None,
@@ -1749,7 +1749,7 @@ mod tests {
             super::SessionState::Unknown,
             "Flow completion is not Session/process completion"
         );
-        summary.flow_process_lfid = None;
+        summary.flow_lf_process_id = None;
         assert!(matches!(
             super::summary_surface(&summary).flow_membership,
             super::SessionFlowMembership::Unknown { .. }
@@ -1988,7 +1988,7 @@ mod tests {
             iterations: None,
             task_id,
             wave_id: Some(wave.id().clone()),
-            flow_process_lfid: None,
+            flow_lf_process_id: None,
             work_source: None,
             bound_at: None,
             interactive: true,
@@ -2094,8 +2094,8 @@ mod tests {
 
     #[test]
     fn membership_wire_ids_are_derived_from_their_captures() {
-        use crate::engine::flow::{ConcretePath, ConcreteSkill, ConcreteStep, ConcreteXor, Skill};
-        use crate::engine::flow_graph::FlowGraph;
+        use crate::flow::graph::FlowGraph;
+        use crate::flow::{ConcretePath, ConcreteSkill, ConcreteStep, ConcreteXor, Skill};
         fn skill(name: &str, human: bool) -> ConcreteStep {
             ConcreteStep::Skill(ConcreteSkill {
                 skill: Skill::named(name),
@@ -2161,14 +2161,14 @@ mod tests {
         .unwrap();
         for session in sessions {
             if let super::SessionFlowMembership::Step {
-                flow_process_lfid,
+                flow_lf_process_id,
                 step,
                 node: Some(node),
                 ..
             } = session.flow_membership
             {
                 assert_eq!(
-                    graphs[&flow_process_lfid].node_at(node).unwrap().label,
+                    graphs[&flow_lf_process_id].node_at(node).unwrap().label,
                     step
                 );
             }

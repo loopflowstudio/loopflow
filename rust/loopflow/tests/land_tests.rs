@@ -4,7 +4,7 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::process::{Command, Stdio};
 
-use loopflow::engine::worktrees::create_named_worktree;
+use loopflow::git::worktrees::create_named_worktree;
 use loopflow::ops::{
     arm as land, create_or_update_pr, submit, LandOptions, NullProgress, OpsError, PrOptions,
 };
@@ -540,9 +540,7 @@ fn final_preparation_keeps_published_history_when_the_base_changes() {
         }
         if advance_base {
             assert_ne!(repo.head_sha(), published_head);
-            assert!(
-                loopflow::engine::git::is_ancestor(repo.path(), &published_head, "HEAD").unwrap()
-            );
+            assert!(loopflow::git::is_ancestor(repo.path(), &published_head, "HEAD").unwrap());
             assert_eq!(
                 fs::read_to_string(repo.path().join("upstream.txt")).unwrap(),
                 "new upstream work"
@@ -1638,7 +1636,7 @@ fn pr_arm_publishes_without_create_flag_and_leaves_worktree_in_place() {
         .current_dir(&worktree)
         .env_remove("LF_GIT_OPERATION_ID")
         .env_remove("LF_TRACE_ID")
-        .env_remove("LF_PROCESS_LFID")
+        .env_remove("LF_PROCESS_ID")
         .env("LOOPFLOW_DIRECTIVE_FILE", &directive_path)
         .status()
         .expect("run lf pr arm");
@@ -1766,7 +1764,7 @@ fi"#;
                 .current_dir(&worktree)
                 .env_remove("LF_GIT_OPERATION_ID")
                 .env_remove("LF_TRACE_ID")
-                .env_remove("LF_PROCESS_LFID")
+                .env_remove("LF_PROCESS_ID")
                 .env("LF_HOME", &lf_home)
                 .env("LF_TEST_BIN", env!("CARGO_BIN_EXE_lf"))
                 .env("LF_TEST_SYNC_LOG", &sync_log)
@@ -1815,7 +1813,7 @@ fi"#;
         let conn = rusqlite::Connection::open(&database).unwrap();
         let initial: (String, i64) = conn
             .query_row(
-                "SELECT lfid,exit_code FROM processes WHERE parent_process_lfid IS NULL",
+                "SELECT id,exit_code FROM processes WHERE parent_lf_process_id IS NULL",
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
@@ -1841,7 +1839,7 @@ fi"#;
             );
             let repairs: i64 = conn
                 .query_row(
-                    "SELECT COUNT(*) FROM ci_incidents WHERE repair_process_lfid IS NOT NULL",
+                    "SELECT COUNT(*) FROM ci_incidents WHERE repair_lf_process_id IS NOT NULL",
                     [],
                     |row| row.get(0),
                 )
@@ -1882,7 +1880,7 @@ fi"#;
                 "{}",
                 String::from_utf8_lossy(&output.stderr)
             );
-            let finished: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM ci_incidents c JOIN processes e ON e.lfid=c.repair_process_lfid WHERE c.repair_finished_at IS NOT NULL AND e.exit_code IS NOT NULL)",[],|row|row.get(0)).unwrap();
+            let finished: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM ci_incidents c JOIN processes e ON e.id=c.repair_lf_process_id WHERE c.repair_finished_at IS NOT NULL AND e.exit_code IS NOT NULL)",[],|row|row.get(0)).unwrap();
             assert!(
                 !finished,
                 "check must return before the provider turn finishes"
@@ -1896,7 +1894,7 @@ fi"#;
             fs::write(format!("{}.release", repair_launches.display()), "").unwrap();
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
             loop {
-                let done: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM ci_incidents c JOIN processes e ON e.lfid=c.repair_process_lfid WHERE c.repair_finished_at IS NOT NULL AND e.exit_code IS NOT NULL)",[],|row|row.get(0)).unwrap();
+                let done: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM ci_incidents c JOIN processes e ON e.id=c.repair_lf_process_id WHERE c.repair_finished_at IS NOT NULL AND e.exit_code IS NOT NULL)",[],|row|row.get(0)).unwrap();
                 if done {
                     break;
                 }
@@ -1917,7 +1915,7 @@ fi"#;
             assert!(detected, "the watcher records when the provider finished");
             let owner: String = conn
                 .query_row(
-                    "SELECT DISTINCT process_lfid FROM session_events WHERE kind='started'",
+                    "SELECT DISTINCT lf_process_id FROM session_events WHERE kind='started'",
                     [],
                     |row| row.get(0),
                 )
@@ -1938,7 +1936,7 @@ fi"#;
             );
             let parent: (Option<String>, i64) = conn
                 .query_row(
-                    "SELECT parent_process_lfid,exit_code FROM processes WHERE lfid=?1",
+                    "SELECT parent_lf_process_id,exit_code FROM processes WHERE id=?1",
                     [&owner],
                     |row| Ok((row.get(0)?, row.get(1)?)),
                 )
@@ -1953,7 +1951,7 @@ fi"#;
             let via_agent: bool = conn
                 .query_row(
                     // The repair agent's own AgentProcess shares this parent.
-                    "SELECT via_agent FROM processes WHERE parent_process_lfid=?1 AND kind='lf'",
+                    "SELECT via_agent FROM processes WHERE parent_lf_process_id=?1 AND kind='lf'",
                     [&owner],
                     |row| row.get(0),
                 )
@@ -1965,7 +1963,7 @@ fi"#;
             assert_ne!(check, owner);
             let exit: i64 = conn
                 .query_row(
-                    "SELECT exit_code FROM processes WHERE lfid=?1",
+                    "SELECT exit_code FROM processes WHERE id=?1",
                     [&check],
                     |row| row.get(0),
                 )
@@ -2025,18 +2023,18 @@ fi"#;
         assert_eq!(state, "merged");
         if flow {
             // The Flow stopped at its watched landing: the step's command
-            // handed off and returned, and its driver exited without running
+            // handed off and returned, and its Flow process exited without running
             // further steps. The merge resumes nothing.
-            let (step, driver): (i64, String) = conn
+            let (step, flow_process): (i64, String) = conn
                 .query_row(
-                    "SELECT step.exit_code,driver.outcome FROM processes step
-                     JOIN flow_process_steps recorded ON recorded.process_lfid=step.lfid
-                     JOIN processes driver ON driver.lfid=recorded.flow_process_lfid",
+                    "SELECT step.exit_code,flow_process.outcome FROM processes step
+                     JOIN flow_process_steps recorded ON recorded.lf_process_id=step.id
+                     JOIN processes flow_process ON flow_process.id=recorded.flow_lf_process_id",
                     [],
                     |row| Ok((row.get(0)?, row.get(1)?)),
                 )
                 .unwrap();
-            assert_eq!((step, driver.as_str()), (0, "failed"));
+            assert_eq!((step, flow_process.as_str()), (0, "failed"));
         }
         assert!(!worktree.exists());
         assert!(!local_branch_exists(&repo, "watched-land"));
@@ -2058,9 +2056,9 @@ fn persistent_submit_keeps_scratch_and_post_commit_edits() {
     let gh = gh_no_pr_script();
     let _env = EnvGuard::new(&[("gh", &gh)]);
     let repo = TestRepo::new();
-    let persistent = loopflow::engine::worktrees::ensure_agent_worktree(
+    let persistent = loopflow::git::worktrees::ensure_agent_worktree(
         repo.path(),
-        loopflow::engine::worktrees::WorktreeSegment::parse("repo").unwrap(),
+        loopflow::git::worktrees::WorktreeSegment::parse("repo").unwrap(),
     )
     .unwrap();
     fs::write(persistent.path.join("memory.md"), "accepted\n").unwrap();
@@ -2169,8 +2167,8 @@ fn waited_task_landing_repairs_without_a_watcher_and_preserves_other_work() {
     ], home.path());
     let fixture = register_task_with_pr(home.path(), &worktree, "waited-repair", &base);
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-    let unrelated = loopflow::id::ProcessLfid::new();
-    db.execute("INSERT INTO processes(lfid,trace_id,pid,cwd,command,started_at) VALUES(?1,?2,?3,?4,'independent-edit',?5)",
+    let unrelated = loopflow::id::LfProcessId::new();
+    db.execute("INSERT INTO processes(id,trace_id,pid,cwd,command,started_at) VALUES(?1,?2,?3,?4,'independent-edit',?5)",
         rusqlite::params![unrelated, loopflow::id::TraceId::new(), std::process::id(), worktree.to_str().unwrap(), time::OffsetDateTime::now_utc().unix_timestamp()]).unwrap();
     let command = || {
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_lf"));
@@ -2238,7 +2236,7 @@ fn waited_task_landing_repairs_without_a_watcher_and_preserves_other_work() {
         .query_row("SELECT state FROM pr_landings", [], |row| row.get(0))
         .unwrap();
     assert_eq!(landing_state, "watching");
-    db.execute("UPDATE processes SET completed_at=started_at+1,outcome='succeeded',exit_code=0 WHERE lfid=?1", [&unrelated]).unwrap();
+    db.execute("UPDATE processes SET completed_at=started_at+1,outcome='succeeded',exit_code=0 WHERE id=?1", [&unrelated]).unwrap();
     // Even a later observation of this old request cannot turn the next
     // Flow's read-only first command into a landing handoff.
     db.execute(
@@ -2658,7 +2656,7 @@ esac
     );
     // Check the interruption contract after recovery, so a bad exit code does
     // not hide lost intent, a removed checkout, or duplicate remote requests.
-    // SIGINT uses the process-wide handler; the Flow driver treats 130 as stopped.
+    // SIGINT uses the process-wide handler; the Flow process treats 130 as stopped.
     if interrupted.code() != Some(130) {
         failures.push(format!(
             "SIGINT exited {:?}, expected stopped (130): {interrupted_stderr}",

@@ -39,7 +39,10 @@ impl ContextDelivery {
         let repo = fs::canonicalize(&components.repo_root)?;
         let mut references = Vec::new();
         for doc in components.docs.iter().chain(&components.summaries) {
-            if matches!(doc.source, DocumentSource::Scratch | DocumentSource::Wave) {
+            if matches!(
+                doc.source,
+                DocumentSource::RepoMemory | DocumentSource::Scratch | DocumentSource::Wave
+            ) {
                 continue;
             }
             // Explicit documents remain paths. Generated summaries have no source file.

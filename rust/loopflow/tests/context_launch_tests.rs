@@ -20,6 +20,7 @@ fn terminal_context_refreshes_without_replacing_instructions_or_losing_failed_se
     let large = "UNCHANGED_LARGE_FILE".repeat(12_000);
     repo.create_file("scratch/large.md", &large);
     repo.create_file("scratch/small.md", "CURRENT_SCRATCH");
+    let codex_command = regex::Regex::new(r#""command" = ("(?:[^"\\]|\\.)*")"#).unwrap();
     for harness in ["claude", "codex"] {
         let home = tempfile::tempdir().unwrap();
         let bin = home.path().join("bin");
@@ -76,34 +77,26 @@ exit 23
         assert!(!raw.contains("model_instructions_file"));
         assert!(!raw.contains("dangerously-bypass-hook-trust"));
         assert_eq!(raw.matches("<lf:skill:probe>\nSaved active skill.\n</lf:skill:probe>\n\n<lf:message>\nFind the bug.\n</lf:message>").count(), 1);
-        let hooks = if harness == "claude" {
+        let callbacks: Vec<String> = if harness == "claude" {
             let index = args.iter().position(|arg| *arg == "--settings").unwrap();
-            serde_json::from_slice::<serde_json::Value>(&fs::read(args[index + 1]).unwrap())
-                .unwrap()["hooks"]
-                .clone()
+            let settings: serde_json::Value =
+                serde_json::from_slice(&fs::read(args[index + 1]).unwrap()).unwrap();
+            settings["hooks"]["SessionStart"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|group| group["hooks"][0]["command"].as_str().unwrap().to_owned())
+                .collect()
         } else {
-            // The same declarations are saved in the capture for native resume.
-            // Read the explicit --delivery files from the actual terminal flags.
             let flags = args.iter().find(|arg| arg.starts_with("hooks=")).unwrap();
             assert!(flags.contains("trusted_hash"));
-            let delivery = fs::read_dir(repo.path().join(".lf/prompts"))
-                .unwrap()
-                .map(|entry| entry.unwrap().path())
-                .filter(|path| path.to_string_lossy().ends_with("-context-delivery.md"))
-                .max_by_key(|path| fs::metadata(path).unwrap().modified().unwrap())
-                .unwrap();
-            let callback = |moment| {
-                format!(
-                    "env LF_HOME={} {} __context-block --delivery {} --moment {moment}",
-                    home.path().join("machine").display(),
-                    env!("CARGO_BIN_EXE_lf"),
-                    delivery.display()
-                )
-            };
-            // Assert the launch installed exactly these callback arguments, then
-            // exercise the callback just as the native provider would.
-            assert!(flags.contains(&delivery.display().to_string()));
-            serde_json::json!({"SessionStart":[{"hooks":[{"command":callback("start")}]},{"hooks":[{"command":callback("compact")}]}]})
+            // Exercise the emitted commands, not a reconstructed callback or
+            // whichever saved delivery happens to have the newest timestamp.
+            // The owned TOML encoder emits command values as JSON strings.
+            codex_command
+                .captures_iter(flags)
+                .map(|capture| serde_json::from_str(&capture[1]).unwrap())
+                .collect()
         };
         let invoke = |index: usize| {
             let output = Command::new("/bin/sh")
@@ -111,12 +104,7 @@ exit 23
                 .env("PATH", "/usr/bin:/bin")
                 .env("HOME", home.path())
                 .current_dir(repo.path())
-                .args([
-                    "-c",
-                    hooks["SessionStart"][index]["hooks"][0]["command"]
-                        .as_str()
-                        .unwrap(),
-                ])
+                .args(["-c", &callbacks[index]])
                 .output()
                 .unwrap();
             assert!(

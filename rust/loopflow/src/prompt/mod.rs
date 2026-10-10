@@ -599,7 +599,8 @@ fn gather_doc_targets(
                     &mut related_docs,
                 )?;
                 for mut doc in related_docs {
-                    doc.path = format!("[{}] {}", related.repo_id, doc.path);
+                    // References must remain readable from the launch checkout.
+                    doc.path = related.path.join(&doc.path).to_string_lossy().into_owned();
                     docs.push(doc);
                 }
             }
@@ -2771,14 +2772,15 @@ mod tests {
             .all(|d| d.path != "AGENTS.md" && d.content != "source instructions"));
 
         // Related repo root docs are not loaded for a directory docs target.
-        assert!(!docs
-            .iter()
-            .any(|d| d.path == "[acme/widgets] AGENTS.md" && d.content == "related instructions"));
+        assert!(!docs.iter().any(
+            |d| Path::new(&d.path) == related_repo.path().join("AGENTS.md")
+                && d.content == "related instructions"
+        ));
 
         // Related repo docs target.
-        assert!(docs
-            .iter()
-            .any(|d| d.path.contains("[acme/widgets]") && d.content == "src area doc"));
+        assert!(docs.iter().any(|d| Path::new(&d.path)
+            == related_repo.path().join("src/README.md")
+            && d.content == "src area doc"));
     }
 
     #[test]
@@ -2811,7 +2813,7 @@ mod tests {
             .any(|d| d.path == "AGENTS.md" && d.content == "source instructions"));
 
         // Related repo docs are not loaded without an explicit docs target for that repo.
-        assert!(!docs.iter().any(|d| d.path.contains("[acme/widgets]")));
+        assert!(docs.is_empty());
     }
 
     #[test]
@@ -2829,8 +2831,6 @@ mod tests {
             .filter(|d| d.source == DocumentSource::Docs)
             .collect();
         assert!(!explicit_docs.iter().any(|d| d.path == "README.md"));
-        // No prefixed docs
-        assert!(!explicit_docs.iter().any(|d| d.path.starts_with('[')));
     }
 
     #[test]
@@ -2851,7 +2851,7 @@ mod tests {
         };
         // Should not error, just warn and skip
         let docs = gather_documents(&spec).unwrap();
-        assert!(!docs.iter().any(|d| d.path.contains("[acme/gone]")));
+        assert!(docs.is_empty());
     }
 
     #[test]
@@ -2877,10 +2877,29 @@ mod tests {
         let docs = gather_documents(&spec).unwrap();
 
         assert!(
-            docs.iter()
-                .any(|d| d.path.contains("[acme/studio]") && d.content == "swift docs"),
+            docs.iter().any(
+                |d| Path::new(&d.path) == related_repo.path().join("swift/README.md")
+                    && d.content == "swift docs"
+            ),
             "expected cross-repo docs, got: {:?}",
             docs.iter().map(|d| &d.path).collect::<Vec<_>>()
+        );
+        let delivery = crate::context_block::ContextDelivery::prepare(&PromptComponents {
+            repo_root: repo.path().display().to_string(),
+            docs,
+            ..Default::default()
+        })
+        .unwrap();
+        let block = delivery
+            .block(crate::context_block::ContextMoment::Start)
+            .unwrap();
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(block.manifest_path).unwrap()).unwrap();
+        let files = manifest["files"].as_array().unwrap();
+        assert_eq!(files.len(), 1);
+        assert_eq!(
+            std::fs::read_to_string(files[0]["path"].as_str().unwrap()).unwrap(),
+            "swift docs"
         );
     }
 
@@ -2906,9 +2925,10 @@ mod tests {
         let docs = gather_documents(&spec).unwrap();
 
         // Top-level docs loaded (README.md is a descendant of ".")
-        assert!(docs
-            .iter()
-            .any(|d| d.path.contains("[acme/studio]") && d.content == "studio readme"));
+        assert!(docs.iter().any(
+            |d| Path::new(&d.path) == related_repo.path().join("README.md")
+                && d.content == "studio readme"
+        ));
     }
 
     #[test]
@@ -2924,8 +2944,6 @@ mod tests {
         };
         let docs = gather_documents(&spec).unwrap();
         assert!(docs.iter().any(|d| d.content == "local docs"));
-        // No prefixed docs
-        assert!(!docs.iter().any(|d| d.path.starts_with('[')));
     }
 
     #[test]

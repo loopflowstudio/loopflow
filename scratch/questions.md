@@ -85,4 +85,7 @@
   in read-only workers, including path normalization. Remaining inline admission
   preparation and final evidence are named in the design. A stalled-gitdir fixture
   proves setup isolation and recovery, not Git removal through a stalled sibling.
+  The isolated settled-path worker still normalizes the registry-wide result as one
+  request; an unrelated stalled path can repeatedly defer all candidate admission.
+  Item 1 retains failure-local discovery as well as remaining inline I/O isolation.
   Item 2's final-history mechanism remains unselected.

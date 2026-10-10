@@ -228,7 +228,10 @@ Previous count-window, scheduling-model and stalled-setup evidence remains at
 stalls publication for the first candidate of each 32-entry group past candidate
 admission, interrupts after durable candidate consumption, then introduces three
 arrivals per tick beside a one-removal cap. It checks both healthy neighbors collect,
-every original candidate is retried, and continuation stays at most 32 entries.
+every original candidate appears in the accumulated attempt set (including the
+interrupted candidate on a later pass), and continuation stays at most 32 entries.
+The set does not count repeat attempts of each failed publisher; it proves coverage,
+not a per-candidate retry frequency.
 
 ### Preparatory reads
 
@@ -321,10 +324,13 @@ fixture passes with that shared key.
 
 ### Remaining in this PR
 
-Reconciled 2026-10-09 against `cf571fbe7`: bounded receipt continuation replaces
-shared-cursor scheduling; the cross-window counterexample is repaired. Exact-head
-settlement and fail-closed history checks are unchanged. Item 2 remains a
-mechanism-review boundary.
+Reconciled 2026-10-09 against `9ca8c3c5f`: `54e59469a` replaces shared-cursor
+scheduling with bounded receipt continuation; the cross-window counterexample has
+a composed regression. `9ca8c3c5f` removes rediscovery from continuation and validates
+registration backlinks locally. Preparatory isolation remains incomplete; the
+new settled-path worker also retains a repository-wide progress failure below.
+Exact-head settlement and fail-closed history checks are unchanged. Item 2 remains
+a mechanism-review boundary.
 
 1. **Finish preparatory I/O isolation.** Candidate continuation, finite-tail sweep
    resumption, registration-local setup and isolated settled-path discovery are
@@ -333,13 +339,23 @@ mechanism-review boundary.
    evidence, not an arbitrary-arrival-rate or whole-pass timing guarantee.
 
    Machine lock-file creation, registry opens/normalization during candidate
-   planning and locked observation, checkout/Git lease discovery, missing-checkout
-   repair lookup and aggregate final evidence still run inline. Registry receipt
+   planning and locked observation, external-cwd normalization, cache-tag reads,
+   checkout/Git lease discovery, missing-checkout repair lookup and aggregate final
+   evidence still run inline. Registry receipt
    setup and history backfill also retain their existing inline store access.
    Administrative-name enumeration remains repository-wide, although cancellable;
    failure defers the repository. Worker descriptor enumeration and process launch
    precede the child deadline; timeout permits up to one additional second of
    synchronous reaping. These are not end-to-end two-second guarantees.
+
+   **Source-derived progress gap:** `Read::Settled` reads all settled paths across
+   the registry and normalizes them in one two-second worker. `collect_pass`
+   propagates any worker failure before candidate admission, even during an hourly
+   scan. A stalled unrelated path can therefore defer every healthy candidate on
+   every tick. Isolation bounds the request, not the failure's scope or eventual
+   progress. Candidate-local discovery or a bounded resumable alternative remains
+   to be implemented and proved with healthy collection beside a stalled settled
+   path; treating an incomplete set as complete is not an acceptable repair.
 
    Isolate the remaining preparatory I/O without giving canceled workers checkout
    locks or a continuation into deletion. In particular, moving lock discovery alone
@@ -456,4 +472,4 @@ allocated bytes by category; observed free-space delta after collection; oldest
 eligible retention age. APFS sharing, hardlinks and concurrent writers mean
 directory sums are estimates, not guaranteed reclaimed bytes.
 
-Check: `cargo test -p loopflow --lib` with focused setup, apply, interrupted-registration, failed-hint, oldest-deferral and hourly filters — 21 passed (12 setup tests plus the new resume test); `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` — passed; full acceptance/provider resume: gate; installed scheduler/upgrade: demo.
+Check: `git diff --check` — passed (realign, prose only); recorded focused 21-test/fmt/Clippy passes at `9ca8c3c5f` not rerun; full acceptance/provider resume: gate; installed scheduler/upgrade: demo.

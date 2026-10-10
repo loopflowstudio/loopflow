@@ -288,14 +288,18 @@ never settle source. History overrides cache tags; compare-and-delete refs.
 Repair schedules before pruning binaries; preserve disable. Release's lesson:
 generated schedules/manual recovery prove no unattended firing.
 
-`9af401578` bounds hint setup with durable windows. Workers inherit
-no locks/removal authority; lost write acknowledgments end that receipt's writer.
-Never cancel admitted removal. FIFO proofs cover hint admission/retries, not
-initial listing/normalization, lock discovery or aggregate observation.
+`54e59469a` replaces the shared cursor's cross-window starvation with at most 32
+pending registrations in the existing receipt. Consume candidates durably before
+publication; drain continuation before rediscovery. `9ca8c3c5f` resumes without an
+aggregate Git listing and validates reciprocal registration paths under admission.
+The 65-registration proof composes deadline-exhausting failed writes, interruption
+and arrivals; it proves original-candidate coverage and healthy collection, not
+arbitrary arrival rates or repeated attempts of every failed publisher.
 
-Two windows can alternate first failed writers when writes exhaust admission; the
-global cursor loses position. Existing count/time fixtures miss their intersection.
-Source-derived trace only; repair/composed proof remain, even without arrivals.
+Workers inherit no locks/removal authority; lost acknowledgments end the writer.
+Never cancel admitted removal. Admission preparation/final evidence remain unbounded.
+Source inspection finds one settled-path failure aborts the entire pass despite
+worker isolation; no new fixture. Localize failures without treating unknown as empty.
 
 Previews defer history; removal needs complete coverage and fresh destinations.
 The final read timed out at 65,536 projected synthetic rows; unchanged retries
@@ -547,15 +551,10 @@ The archived file-binding design is superseded by SQLite selection below.
 Its output-handle leak remains unresolved; seeded ensure recovery proves no crash
 recovery. Exact evidence remains in the preserved October 5 notes above.
 
-October 5 rotation retains exact-ID input, selected issue membership and settled
-history. Whole-input preflight includes accepted facts and legacy conversion;
-all pairs reserve before provider writes. Creation intent survives retry; unfinished KRs stay editable.
-Before switching, reclassify new work; afterward reconcile only saved selections,
-preserving later starts and external moves. Planning updates preserve names,
-summaries and unrelated text. Queued membership/conversion writers retain guards.
-Operation fixtures cover partial settlement and both sides of the switch;
-CLI crashes, Desktop and configured Intelligence acceptance remain open.
-Earlier counterexamples: `fc6df439424bd341ec3cd8182c19b13ed45cffd7:wave/infrastructure/MEMORY.md`.
+Rotation preserves exact selections, creation intent, later starts/external moves
+and unrelated planning text. Queued writers retain guards. Historical preflight,
+partial-settlement fixtures and counterexamples: `9ca8c3c5f:wave/infrastructure/MEMORY.md`,
+this heading. They prove no CLI-crash, Desktop or configured Intelligence acceptance.
 
 October 6: Jack Heart authorized SQLite selection and LOO-382's stream, deleting
 the YAML selector and `ProjectPreparation`. Dependency `e887a21c1` entered through

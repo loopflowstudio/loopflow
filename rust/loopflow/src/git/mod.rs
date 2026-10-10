@@ -1,4 +1,3 @@
-pub mod worktree;
 pub mod worktree_name;
 pub mod worktrees;
 
@@ -718,11 +717,6 @@ pub fn pr_create_draft(repo: &Path) -> Result<String, GitError> {
     Ok(url.trim().to_string())
 }
 
-pub fn pr_merge_squash_auto(repo: &Path) -> Result<(), GitError> {
-    gh_stdout(repo, &["pr", "merge", "--squash", "--auto"])?;
-    Ok(())
-}
-
 /// Fetch origin/main_branch and reset the local branch to that exact commit.
 ///
 /// This release/relocation helper discards unpublished branch history. Ordinary
@@ -1096,37 +1090,6 @@ pub(crate) fn worktree_add_inheriting(
     Ok(())
 }
 
-/// Read a file's contents at a given revision.
-/// Returns `None` if the path does not exist at that revision.
-pub fn show_file(repo: &Path, rev: &str, path: &str) -> Result<Option<String>, GitError> {
-    let output = run_git(repo, &["show", &format!("{rev}:{path}")])?;
-    if output.status.success() {
-        Ok(Some(String::from_utf8_lossy(&output.stdout).into_owned()))
-    } else {
-        Ok(None)
-    }
-}
-
-/// List files in a directory at a given revision.
-/// Returns file names (not full paths) for blobs directly under the tree.
-pub fn list_tree(repo: &Path, rev: &str, dir: &str) -> Result<Vec<String>, GitError> {
-    let tree_path = if dir.is_empty() {
-        rev.to_string()
-    } else {
-        format!("{rev}:{dir}")
-    };
-    let output = run_git(repo, &["ls-tree", "--name-only", &tree_path])?;
-    if !output.status.success() {
-        return Ok(Vec::new());
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    Ok(stdout
-        .lines()
-        .filter(|line| !line.is_empty())
-        .map(String::from)
-        .collect())
-}
-
 /// Get the SHA for a ref (branch, tag, HEAD, etc.).
 pub fn rev_parse(repo: &Path, refspec: &str) -> Result<String, GitError> {
     let sha = git_stdout(repo, &["rev-parse", refspec])?
@@ -1140,34 +1103,6 @@ pub fn has_commits_beyond(repo: &Path, branch: &str, target: &str) -> Result<boo
     let branch_sha = rev_parse(repo, branch)?;
     let base_sha = merge_base(repo, branch, target)?;
     Ok(branch_sha != base_sha)
-}
-
-/// Check if a branch has been squash-merged into target.
-///
-/// Simulates merging branch into target and checks if the resulting tree
-/// is identical to target's tree (meaning branch adds nothing new).
-pub fn is_squash_merged(repo: &Path, branch: &str, target: &str) -> Result<bool, GitError> {
-    let output = run_git(repo, &["merge-tree", "--write-tree", target, branch])?;
-    if !output.status.success() {
-        // Conflicts mean it's not cleanly merged
-        return Ok(false);
-    }
-    let result_tree = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    let target_tree = rev_parse(repo, &format!("{target}^{{tree}}"))?;
-    Ok(result_tree == target_tree)
-}
-
-/// Return true if `branch` is already merged into `target`.
-///
-/// Covers both shapes a merge can take: a fast-forwardable ancestor (its
-/// commits live in `target`) and a squash-merge (its *changes* live in
-/// `target` even though its commits do not). A stacked child must re-parent
-/// onto the default branch once its parent is merged either way.
-pub fn is_merged_into(repo: &Path, branch: &str, target: &str) -> Result<bool, GitError> {
-    if is_ancestor(repo, branch, target)? {
-        return Ok(true);
-    }
-    is_squash_merged(repo, branch, target)
 }
 
 /// Merge one target tree, retaining branch history. A squash-landed stack uses
@@ -1520,39 +1455,6 @@ pub fn diff_names(repo: &Path, old: &str, new: &str) -> Result<Vec<PathBuf>, Git
         .filter(|l| !l.trim().is_empty())
         .map(PathBuf::from)
         .collect())
-}
-
-/// Like `diff_names` but scoped to paths under `prefix`.
-pub fn diff_names_under(
-    repo: &Path,
-    old: &str,
-    new: &str,
-    prefix: &str,
-) -> Result<Vec<PathBuf>, GitError> {
-    let output = git_stdout(repo, &["diff", "--name-only", old, new, "--", prefix])?;
-    Ok(output
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .map(PathBuf::from)
-        .collect())
-}
-
-/// Find the most recent commit on the current branch whose message contains `pattern`.
-/// Returns the commit SHA, or `None` if no match.
-pub fn log_grep(repo: &Path, pattern: &str) -> Result<Option<String>, GitError> {
-    let output = run_git(
-        repo,
-        &["log", "--grep", pattern, "--format=%H", "-1", "HEAD"],
-    )?;
-    if !output.status.success() {
-        return Ok(None);
-    }
-    let sha = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if sha.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(sha))
-    }
 }
 
 /// Hash the contents of areas in a repo using git ls-tree.

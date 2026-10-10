@@ -432,16 +432,6 @@ pub fn load_config(repo_root: Option<&Path>) -> Result<Option<Config>, LoadError
     Ok(Some(config))
 }
 
-/// Load only Machine-local user configuration.
-pub fn load_global_config() -> Result<Option<Config>, LoadError> {
-    let Some(value) = load_yaml_file(&global_config_path())? else {
-        return Ok(None);
-    };
-    serde_yaml_ng::from_value(value)
-        .map(Some)
-        .map_err(|error| LoadError::InvalidFlow(format!("Config validation error: {error}")))
-}
-
 fn global_config_path() -> PathBuf {
     crate::store::lf_home_dir().join("config.yaml")
 }

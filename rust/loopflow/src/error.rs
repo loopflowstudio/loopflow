@@ -30,8 +30,6 @@ pub enum CoreError {
     InvalidFlow(String),
     #[error("execution failed: {0}")]
     ExecutionFailed(String),
-    #[error("worktree error: {0}")]
-    WorktreeError(String),
     #[error("io error: {0}")]
     IoError(String),
 }

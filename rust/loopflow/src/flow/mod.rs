@@ -207,14 +207,6 @@ pub struct ConcreteSkill {
     pub sources: Vec<String>,
 }
 
-impl ConcreteSkill {
-    pub fn display_path(&self) -> String {
-        let mut parts = self.sources.clone();
-        parts.push(self.skill.name.clone());
-        parts.join(" ")
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ConcreteXor {
     pub router: Skill,

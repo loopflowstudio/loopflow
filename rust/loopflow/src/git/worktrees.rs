@@ -1363,29 +1363,6 @@ pub fn prune_branch_worktree(
     targeted_prune(repo, current_path, &path, branch, reason, protected_paths)
 }
 
-/// Remove one clean worktree whose durable owner is terminal.
-pub fn prune_terminal_worktree(
-    repo: &Path,
-    current_path: &Path,
-    path: &Path,
-    protected_paths: &HashSet<PathBuf>,
-) -> Result<TargetedPruneOutcome, GitError> {
-    let Some((path, branch)) = list_porcelain(repo)?
-        .into_iter()
-        .find(|(candidate, _)| candidate == path)
-    else {
-        return Ok(TargetedPruneOutcome::NotFound);
-    };
-    targeted_prune(
-        repo,
-        current_path,
-        &path,
-        branch,
-        WorktreePruneReason::Terminal,
-        protected_paths,
-    )
-}
-
 /// Delete abandoned atomic-write directories without touching durable logs.
 pub fn prune_abandoned_prompt_logs(
     lf_home: &Path,

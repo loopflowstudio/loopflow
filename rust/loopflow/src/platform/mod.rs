@@ -21,11 +21,6 @@ pub fn open_url_checked(url: &str) -> std::io::Result<()> {
     }
 }
 
-/// Open a URL in the default browser.
-pub fn open_url(url: &str) {
-    let _ = open_url_checked(url);
-}
-
 /// Send SIGTERM to a process by PID.
 pub fn kill_process(pid: u32) {
     let _ = Command::new("kill")

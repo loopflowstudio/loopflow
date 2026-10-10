@@ -1130,19 +1130,6 @@ pub fn opencode_worktree_config() -> String {
         .expect("worktree scope always produces OpenCode configuration")
 }
 
-pub fn build_agent_env(launch: &AgentConfig, process: &ProcessConfig) -> BTreeMap<String, String> {
-    let mut env = launch.env.clone();
-    let agent = launch.agent();
-    let (harness, _) = parse_agent(agent);
-    if harness == "opencode" {
-        if let Some(env_val) = build_opencode_env_for_scope(process, launch.write_scope) {
-            env.insert("OPENCODE_CONFIG_CONTENT".to_string(), env_val);
-        }
-    }
-
-    env
-}
-
 /// Apply harness-specific environment variables to a command.
 fn apply_harness_env(
     harness: &str,

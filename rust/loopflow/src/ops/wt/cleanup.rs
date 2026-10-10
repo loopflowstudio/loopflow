@@ -13,7 +13,7 @@ use crate::engine::git::{
     acquire_worktree_lease, current_branch, get_default_branch, rev_parse, worktree_remove_owned,
     WorktreeRemoval,
 };
-use crate::engine::worktrees::{is_persistent_worktree, list_porcelain, main_repo_root};
+use crate::engine::worktrees::{list_porcelain, main_repo_root};
 use crate::journal::{process_evidence_at, ProcessIdentityEvidence};
 use crate::ops::{OpsError, OpsResult};
 use crate::store::{sqlite::SqliteStore, SharedStore};
@@ -370,13 +370,9 @@ fn observe_with_snapshot(
         retain(decision, "default branch");
         return Ok(());
     }
-    let persistent = if missing {
-        let branch = decision
-            .branch
-            .as_deref()
-            .expect("recovery requires a branch");
-        read_git(
-            repo,
+    if let Some(branch) = &decision.branch {
+        let persistent = read_git(
+            if missing { repo } else { path },
             &[
                 "config",
                 "--default",
@@ -385,13 +381,11 @@ fn observe_with_snapshot(
                 "--get",
                 &format!("branch.{branch}.loopflow-persistent"),
             ],
-        )? == "true"
-    } else {
-        is_persistent_worktree(path)?
-    };
-    if persistent {
-        retain(decision, "persistent checkout");
-        return Ok(());
+        )?;
+        if persistent.trim() == "true" {
+            retain(decision, "persistent checkout");
+            return Ok(());
+        }
     }
     let mut owned = admin.join("lf-created").is_file();
     if let Some(reason) = snapshot.local.blocker(path)? {
@@ -416,7 +410,8 @@ fn observe_with_snapshot(
             }
         }
     }
-    if let Some(release) = snapshot.release.as_ref().map_err(error)? {
+    let release = snapshot.release.as_ref().map_err(error)?.as_ref();
+    if let Some(release) = release {
         // Release facts can veto removal, never settle experimental source.
         if let Some(reason) = release.blocker(path)? {
             retain(decision, format!("{reason} in release registry"));
@@ -457,18 +452,11 @@ fn observe_with_snapshot(
     }
     // History can be much larger than the checkout registry. Read it only for
     // settled candidates; an incomplete scan still never authorizes removal.
-    if snapshot.local.evidence_blocker(path)?
-        || snapshot
-            .release
-            .as_ref()
-            .map_err(error)?
-            .as_ref()
-            .map(|registry| registry.evidence_blocker(path))
-            .transpose()?
-            .unwrap_or(false)
-    {
-        retain(decision, "local Session evidence");
-        return Ok(());
+    for registry in std::iter::once(&snapshot.local).chain(release) {
+        if registry.evidence_blocker(path)? {
+            retain(decision, "local Session evidence");
+            return Ok(());
+        }
     }
     if missing {
         decision
@@ -552,9 +540,9 @@ fn read_git(path: &Path, args: &[&str]) -> OpsResult<String> {
             .env("GIT_OPTIONAL_LOCKS", "0"),
         Duration::from_secs(2),
     )?;
-    String::from_utf8(output.stdout)
-        .map(|text| text.trim().to_owned())
-        .map_err(error)
+    // NUL-delimited filenames may start with whitespace. Only scalar readers
+    // may trim their output; artifact classification must preserve exact paths.
+    String::from_utf8(output.stdout).map_err(error)
 }
 
 /// A cache tag is an explicit tool contract, not a guess from a directory name.
@@ -670,26 +658,34 @@ fn plan_selected(
         if selected.as_ref().is_some_and(|selected| *selected != path) {
             continue;
         }
-        let mut decision = CleanupDecision {
-            path,
-            branch,
-            observed_head: None,
-            action: CleanupAction::Retain("not observed".into()),
-            evidence: Vec::new(),
-            estimated_bytes: None,
-        };
-        match &snapshot {
-            Ok(snapshot) => {
-                if let Err(error) = observe_with_snapshot(&repo, &mut decision, &external, snapshot)
-                {
-                    retain(&mut decision, format!("observation unavailable: {error}"));
-                }
-            }
-            Err(error) => retain(&mut decision, format!("observation unavailable: {error}")),
-        }
-        plan.push(decision);
+        plan.push(plan_checkout(&repo, path, branch, &external, &snapshot));
     }
     Ok(plan)
+}
+
+fn plan_checkout(
+    repo: &Path,
+    path: PathBuf,
+    branch: Option<String>,
+    external: &OpsResult<HashSet<PathBuf>>,
+    snapshot: &OpsResult<Observations>,
+) -> CleanupDecision {
+    let mut decision = CleanupDecision {
+        path,
+        branch,
+        observed_head: None,
+        action: CleanupAction::Retain("not observed".into()),
+        evidence: Vec::new(),
+        estimated_bytes: None,
+    };
+    let result = snapshot
+        .as_ref()
+        .map_err(error)
+        .and_then(|snapshot| observe_with_snapshot(repo, &mut decision, external, snapshot));
+    if let Err(error) = result {
+        retain(&mut decision, format!("observation unavailable: {error}"));
+    }
+    decision
 }
 
 pub fn apply_cleanup(
@@ -707,79 +703,91 @@ pub fn apply_cleanup(
     };
     let started = Instant::now();
     for mut decision in plan {
-        if decision.action != CleanupAction::RemoveCheckout {
-            report.deferred.push(decision);
-            continue;
-        }
-        if report.removed.len() >= budget.removals || started.elapsed() >= budget.admission_time {
+        if decision.action == CleanupAction::RemoveCheckout
+            && (report.removed.len() >= budget.removals
+                || started.elapsed() >= budget.admission_time)
+        {
             retain(&mut decision, "pass budget exhausted");
-            report.deferred.push(decision);
-            continue;
         }
-        let admission = (|| {
-            let local = store.sqlite.lock_checkout(&decision.path).map_err(error)?;
-            let release = release_registry()?;
-            let release = release
-                .as_ref()
-                .map(|release| release.lock_checkout(&decision.path))
-                .transpose()
-                .map_err(error)?;
-            let lease = acquire_worktree_lease(&repo, &decision.path, "checkout cleanup")?;
-            Ok::<_, OpsError>((local, release, lease))
-        })();
-        let (_admission, _release_admission, lease) = match admission {
-            Ok(locks) => locks,
-            Err(error) => {
-                retain(
-                    &mut decision,
-                    format!("cleanup admission unavailable: {error}"),
-                );
-                report.deferred.push(decision);
-                continue;
-            }
-        };
-        let result = (|| {
-            let expected_head = decision.observed_head.clone();
-            let expected_branch = decision.branch.clone();
-            // Refresh all authority and filesystem facts under both locks.
-            observe(store, &repo, &mut decision, &running_paths())?;
-            if decision.observed_head != expected_head || decision.branch != expected_branch {
-                retain(&mut decision, "checkout changed after planning");
-            }
-            if decision.action != CleanupAction::RemoveCheckout {
-                return Ok(false);
-            }
-            if decision.path.try_exists()? {
-                record_removal(&decision)?;
-                for root in disposable_artifacts(&decision.path)? {
-                    remove_artifact(&root)?;
-                }
-            }
-            worktree_remove_owned(&repo, &lease, WorktreeRemoval::Clean, &|_| {})?;
-            if let (Some(branch), Some(head)) = (&decision.branch, &decision.observed_head) {
-                // Compare-and-delete cannot erase commits added since observation.
-                if let Err(error) = super::git(
-                    &repo,
-                    &["update-ref", "-d", &format!("refs/heads/{branch}"), head],
-                ) {
-                    report.failed.push(CleanupFailure {
-                        path: decision.path.clone(),
-                        error: format!("checkout removed; local ref retained: {error}"),
-                    });
-                }
-            }
-            Ok::<_, OpsError>(true)
-        })();
-        match result {
-            Ok(true) => report.removed.push(decision.path),
-            Ok(false) => report.deferred.push(decision),
-            Err(error) => report.failed.push(CleanupFailure {
-                path: decision.path,
-                error: error.to_string(),
-            }),
-        }
+        apply_checkout(store, &repo, decision, &mut report);
     }
     Ok(report)
+}
+
+/// Admission budgets belong to the caller. Once admitted, finish this attempt
+/// and its locked recheck before observing another checkout.
+fn apply_checkout(
+    store: &SharedStore,
+    repo: &Path,
+    mut decision: CleanupDecision,
+    report: &mut CleanupReport,
+) {
+    if decision.action != CleanupAction::RemoveCheckout {
+        report.deferred.push(decision);
+        return;
+    }
+    let admission = (|| {
+        let local = store.sqlite.lock_checkout(&decision.path).map_err(error)?;
+        let release = release_registry()?;
+        let release = release
+            .as_ref()
+            .map(|release| release.lock_checkout(&decision.path))
+            .transpose()
+            .map_err(error)?;
+        let lease = acquire_worktree_lease(repo, &decision.path, "checkout cleanup")?;
+        Ok::<_, OpsError>((local, release, lease))
+    })();
+    let (_admission, _release_admission, lease) = match admission {
+        Ok(locks) => locks,
+        Err(error) => {
+            retain(
+                &mut decision,
+                format!("cleanup admission unavailable: {error}"),
+            );
+            report.deferred.push(decision);
+            return;
+        }
+    };
+    let result = (|| {
+        let expected_head = decision.observed_head.clone();
+        let expected_branch = decision.branch.clone();
+        // Refresh all authority and filesystem facts under both locks.
+        observe(store, repo, &mut decision, &running_paths())?;
+        if decision.observed_head != expected_head || decision.branch != expected_branch {
+            retain(&mut decision, "checkout changed after planning");
+        }
+        if decision.action != CleanupAction::RemoveCheckout {
+            return Ok(false);
+        }
+        if decision.path.try_exists()? {
+            record_removal(&decision)?;
+            for root in disposable_artifacts(&decision.path)? {
+                remove_artifact(&root)?;
+            }
+        }
+        worktree_remove_owned(repo, &lease, WorktreeRemoval::Clean, &|_| {})?;
+        if let (Some(branch), Some(head)) = (&decision.branch, &decision.observed_head) {
+            // Compare-and-delete cannot erase commits added since observation.
+            if let Err(error) = super::git(
+                repo,
+                &["update-ref", "-d", &format!("refs/heads/{branch}"), head],
+            ) {
+                report.failed.push(CleanupFailure {
+                    path: decision.path.clone(),
+                    error: format!("checkout removed; local ref retained: {error}"),
+                });
+            }
+        }
+        Ok::<_, OpsError>(true)
+    })();
+    match result {
+        Ok(true) => report.removed.push(decision.path),
+        Ok(false) => report.deferred.push(decision),
+        Err(error) => report.failed.push(CleanupFailure {
+            path: decision.path,
+            error: error.to_string(),
+        }),
+    }
 }
 
 /// Nonblocking machine-wide exclusion; a missed pass is retried by the next tick.
@@ -886,67 +894,41 @@ fn collect_pass(
     progress.removed = 0;
     progress.deferred = 0;
     progress.failed = 0;
-    // Empty cheap ticks never inspect Processes, Session history or filesystems.
-    if !registered.is_empty() {
-        let external = std::cell::OnceCell::new();
-        let snapshot = std::cell::OnceCell::new();
-        for (path, branch) in &registered {
-            if Instant::now() >= deadline
-                || report.removed.len() >= budget.removals
-                || progress.observed >= 32
-            {
-                save(progress)?;
-                return Ok(report);
-            }
-            progress.retry_after = Some(path.clone());
-            if full {
-                progress.full_scan_after = Some(path.clone());
-            }
-            progress.observed += 1;
-            // Save before observation: even a killed/stalled read relinquishes
-            // its position on the next pass. This never records eligibility.
+    // Empty cheap ticks need no execution or Session history observations.
+    let external = std::cell::OnceCell::new();
+    let snapshot = std::cell::OnceCell::new();
+    for (path, branch) in &registered {
+        if Instant::now() >= deadline
+            || report.removed.len() >= budget.removals
+            || progress.observed >= 32
+        {
             save(progress)?;
-            let mut decision = CleanupDecision {
-                path: normalized(path),
-                branch: branch.clone(),
-                observed_head: None,
-                action: CleanupAction::Retain("not observed".into()),
-                evidence: Vec::new(),
-                estimated_bytes: None,
-            };
-            let external = external.get_or_init(running_paths);
-            let snapshot = snapshot.get_or_init(|| Observations::read(store, repo, paths.clone()));
-            match snapshot {
-                Ok(snapshot) => {
-                    if let Err(error) =
-                        observe_with_snapshot(repo, &mut decision, external, snapshot)
-                    {
-                        retain(&mut decision, format!("observation unavailable: {error}"));
-                    }
-                }
-                Err(error) => retain(&mut decision, format!("observation unavailable: {error}")),
-            }
-            if decision.action == CleanupAction::RemoveCheckout {
-                // Size is optional; it cannot prevent this admitted removal.
-                decision.estimated_bytes = estimate_bytes(&decision.path, deadline);
-            }
-            let applied = apply_cleanup(
-                store,
-                repo,
-                vec![decision],
-                CleanupBudget {
-                    removals: 1,
-                    admission_time: budget.admission_time,
-                },
-            )?;
-            report.planned.extend(applied.planned);
-            report.removed.extend(applied.removed);
-            report.deferred.extend(applied.deferred);
-            report.failed.extend(applied.failed);
-            progress.removed = report.removed.len();
-            progress.deferred = report.deferred.len();
-            progress.failed = report.failed.len();
+            return Ok(report);
         }
+        progress.retry_after = Some(path.clone());
+        if full {
+            progress.full_scan_after = Some(path.clone());
+        }
+        progress.observed += 1;
+        // Save before observation: even a killed/stalled read relinquishes
+        // its position on the next pass. This never records eligibility.
+        save(progress)?;
+        let mut decision = plan_checkout(
+            repo,
+            normalized(path),
+            branch.clone(),
+            external.get_or_init(running_paths),
+            snapshot.get_or_init(|| Observations::read(store, repo, paths.clone())),
+        );
+        if decision.action == CleanupAction::RemoveCheckout {
+            // Size is optional; it cannot prevent this admitted removal.
+            decision.estimated_bytes = estimate_bytes(&decision.path, deadline);
+        }
+        report.planned.push(decision.clone());
+        apply_checkout(store, repo, decision, &mut report);
+        progress.removed = report.removed.len();
+        progress.deferred = report.deferred.len();
+        progress.failed = report.failed.len();
     }
     if full {
         progress.full_scan_at = Some(now);
@@ -1004,7 +986,7 @@ mod tests {
         );
         let path = repo.create_named_worktree("landed").canonicalize().unwrap();
         // The ignore rule is source; ignored customer data is deliberately not source.
-        std::fs::write(path.join(".gitignore"), "target/\nprivate/\n").unwrap();
+        std::fs::write(path.join(".gitignore"), "target/\n target/\nprivate/\n").unwrap();
         git(&path, &["add", ".gitignore"]).unwrap();
         git(&path, &["commit", "-m", "ignore generated files"]).unwrap();
         let head = rev_parse(&path, "HEAD").unwrap();
@@ -1131,14 +1113,14 @@ mod tests {
             .create_named_worktree("unowned")
             .canonicalize()
             .unwrap();
-        // A real slow Git read in the first candidate exhausts admission. The
-        // next invocation must not start there again while later work waits.
+        // Both a blocked and an eligible candidate outlast admission. The former
+        // must yield its place; the latter must finish its admitted removal.
         let real_git = std::env::split_paths(&external.previous_path)
             .map(|path| path.join("git"))
             .find(|path| path.is_file())
             .unwrap();
         let script = external._directory.path().join("git");
-        std::fs::write(&script, format!("#!/bin/sh\nif [ \"$PWD\" = '{}' ] && [ \"$1\" = status ]; then sleep 0.3; fi\nexec '{}' \"$@\"\n", slow.display(), real_git.display())).unwrap();
+        std::fs::write(&script, format!("#!/bin/sh\nif {{ [ \"$PWD\" = '{}' ] || [ \"$PWD\" = '{}' ]; }} && [ \"$1\" = status ]; then sleep 0.3; fi\nexec '{}' \"$@\"\n", slow.display(), eligible[1].display(), real_git.display())).unwrap();
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
         let budget = CleanupBudget {
             removals: 1,
@@ -1400,6 +1382,37 @@ mod tests {
         std::fs::write(path.join("notes"), "uncommitted").unwrap();
         retained(&decision(&store, &repo, &path), "uncommitted");
         assert!(path.join("notes").exists());
+    }
+
+    #[tokio::test]
+    async fn cleanup_never_trims_ignored_paths_into_declared_caches() {
+        let _guard = crate::journal::TestLedgerGuard::new();
+        let _external = ExternalInspection::idle();
+        let (repo, _directory, store, path) = fixture().await;
+        std::fs::create_dir(path.join("target")).unwrap();
+        std::fs::write(
+            path.join("target/CACHEDIR.TAG"),
+            "Signature: 8a477f597d28d172789f06886806bc55",
+        )
+        .unwrap();
+        std::fs::create_dir(path.join(" target")).unwrap();
+        std::fs::write(path.join(" target/results"), "irreplaceable").unwrap();
+
+        let plan = plan_cleanup(&store, repo.path()).unwrap();
+        let report = apply_cleanup(&store, repo.path(), plan, CleanupBudget::default()).unwrap();
+        assert!(report.removed.is_empty());
+        retained(
+            report
+                .deferred
+                .iter()
+                .find(|item| item.path == path)
+                .unwrap(),
+            "unclassified ignored content:  target/",
+        );
+        assert_eq!(
+            std::fs::read_to_string(path.join(" target/results")).unwrap(),
+            "irreplaceable"
+        );
     }
 
     #[tokio::test]
@@ -1712,6 +1725,35 @@ mod tests {
         assert!(progress.full_scan_after.is_none());
         assert!(progress.retry_after.is_none());
         assert!(path.exists());
+    }
+
+    #[tokio::test]
+    async fn cleanup_apply_budget_preserves_the_plan_and_defers_remaining_checkouts() {
+        let _guard = crate::journal::TestLedgerGuard::new();
+        let _external = ExternalInspection::idle();
+        let (repo, directory, store, path) = fixture().await;
+        let next = add_settled(&repo, &directory, "next");
+        let plan = vec![
+            decision(&store, &repo, &path),
+            decision(&store, &repo, &next),
+        ];
+        let report = apply_cleanup(
+            &store,
+            repo.path(),
+            plan.clone(),
+            CleanupBudget {
+                removals: 1,
+                ..CleanupBudget::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(report.planned, plan);
+        assert_eq!(report.removed, [path]);
+        assert!(report.failed.is_empty());
+        assert_eq!(report.deferred.len(), 1);
+        assert_eq!(report.deferred[0].path, next);
+        retained(&report.deferred[0], "pass budget exhausted");
+        assert!(next.exists());
     }
 
     #[tokio::test]

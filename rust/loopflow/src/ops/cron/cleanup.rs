@@ -1,5 +1,5 @@
 //! Cleanup scheduling is a receipt projection, never deletion authority.
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::{
     new_receipt, parse_schedule, prune_minute_receipts, read_receipts, receipt_root, write_receipt,
@@ -11,7 +11,7 @@ use crate::store::sqlite::SqliteStore;
 
 #[derive(Debug)]
 pub(crate) struct CleanupReceipt {
-    spec: CronSpec,
+    root: PathBuf,
     receipt: CronReceipt,
 }
 
@@ -47,7 +47,7 @@ impl CleanupReceipt {
         receipt.cleanup = Some(progress);
         write_receipt(&root, &receipt)?;
         prune_minute_receipts(&root, &spec, &receipt.id)?;
-        Ok(Self { spec, receipt })
+        Ok(Self { root, receipt })
     }
 
     pub(crate) fn progress(&self) -> CleanupProgress {
@@ -59,7 +59,7 @@ impl CleanupReceipt {
 
     pub(crate) fn save(&mut self, progress: CleanupProgress) -> OpsResult<()> {
         self.receipt.cleanup = Some(progress);
-        write_receipt(&receipt_root(&self.spec.host.lf_home), &self.receipt)
+        write_receipt(&self.root, &self.receipt)
     }
 
     pub(crate) fn finish(

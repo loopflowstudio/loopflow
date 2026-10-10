@@ -41,7 +41,9 @@ remove only the retired assembled-budget fields. The fixed-slot/conversation-blo
 cut remains incomplete and cannot ship on these reductions alone.
 
 Refresh operation (2026-10-09): metadata/skill reservation takes priority over
-file bodies. When paths alone are unusually large, the complete manifest has a
-repository-relative pointer; no context-size refusal is added. The hidden callback
+file bodies. One complete manifest owns inline and overflow metadata, always
+with a repository-relative pointer; no context-size refusal is added. The hidden callback
 reads SQLite-owned Wave/ancestor bytes and fresh scratch, but launch settings,
-trust, source-file lifetime and OpenCode delivery are still unconnected.
+trust, source-file lifetime and OpenCode delivery are still unconnected. Main
+#1511 already uses `--no-daemon` for lf Codex terminals: context hooks must follow
+the launched process and selected provider home, not its shared daemon.

@@ -10,9 +10,10 @@ participant name and reply guidance stay in it. A launch profile is the surface,
 the reply settings and the participant; two launches sharing all three send the
 same bytes. First-turn preparation and the whole-file refresh operation are implemented; the
 fixed slot and provider delivery remain unfinished. Jack's later `e1fdb81b-75ff-4cca-b789-243ad84bad14` steer authorizes
-that production cut. Implementation inspection found a native-terminal transport
-boundary below; no fixed-slot decision remains open.
-Reconciled 2026-10-09 against main `906576f39`, including `3e1e6245c` (#1512).
+that production cut. Option A below resolves first-turn transport; no fixed-slot
+or transport decision remains open.
+Reconciled 2026-10-09 at `d8cf40d54` against main `906576f39`, including
+`3e1e6245c` (#1512) and `e69d5103f` (#1511).
 Local main and origin/main both name `906576f39`; no remote fetch or newer
 upstream inspection is claimed.
 
@@ -177,24 +178,35 @@ and this also avoids the observed Claude Unicode spill. JSON metadata, reference
 all count. If reserved metadata does not fit alongside the skill, a complete
 private manifest replaces the inline listing; an oversized skill stays whole at
 its saved path with an explicit read instruction. This includes combined overflow,
-not only a listing that individually exceeds the cap. An unusually long path
-uses a repository-relative manifest pointer rather than refusing for size.
-These remain proposed defaults to demonstrate, not accepted UX. Unreadable scratch
+not only a listing that individually exceeds the cap. The manifest is now the
+single metadata representation, either included whole or read through an always
+repository-relative pointer. This removes the separate long-path fallback and
+repeated path/listing assembly. One rendered-byte check selects every complete
+section; saved skill precedes the listing, then document bodies. These remain
+proposed defaults to demonstrate, not accepted UX. Unreadable scratch
 now reports the exact failed file instead of silently claiming a complete listing.
 This repairs the review finding in the shared scratch reader; no alternate reader
 or filesystem Wave fallback was added.
 
-Remaining production work:
+Remaining production work (one combined cut, not separate deliveries):
+
+Source inspection at `d8cf40d54` finds the callback's only production caller in
+`commands/context.rs::emit_block`; no launch path invokes it.
+
 1. Connect this operation to saved native hook settings/trust on Claude and Codex
-   terminal/app-server, plus proven OpenCode terminal/compaction delivery. Retain
+   terminal/app-server, plus proven OpenCode terminal/compaction delivery. Callback
+   arguments explicitly name the repository, Wave, saved skill and references;
+   they must not depend on ambient LF_* surviving a native launch. Retain
    capture/naming hooks, native resume and engine replacement without replaying
    the launch request. No launch flag may select old versus new delivery.
-2. Replace `format_content_sections` / `format_wave_sections` and their consumers
-   with the block, then delete their old inlining. Diagnostic formatting must use
+2. Replace `format_content_sections` / `format_wave_sections` in
+   `prepare_process_prompt` and diagnostic formatting with the block, then delete their old inlining. Diagnostic formatting must use
    the final channels too. The operation alone does not remove old assembly.
 3. Make additions byte-identical per accepted profile, move participant context into
-   that slot for native skills too, replace the two remaining Codex terminal writers,
-   and remove the installed-skill context split. Preserve assets and exact arguments.
+   that slot for native skills too, and replace `build_codex_command` plus
+   `build_session_command` with additive instructions. App-server already uses
+   `developerInstructions`, but its supplied text still includes gathered files.
+   Remove the installed-skill context split; preserve assets and exact arguments.
 4. Save Task briefs/steers, clipboard and summaries as complete private files and
    pass their paths to the callback (`--reference`); pass the captured active skill
    as `--skill-file`. Diff/docs become commands/paths. Preserve attribution and usage.
@@ -208,7 +220,7 @@ translation test retained on the surviving path. Review previously found a maske
 instead of the provider's turn. Their stand-in now records both actual thread
 and turn requests. That is source coverage, not an executed pass.
 
-Checks: `cargo test --offline -p loopflow --lib context_block` (7), `cargo test --offline -p loopflow --test context_block_tests` (1), fmt, Clippy, `git diff --check` and installed `lf context` pass; provider delivery/affected suites remain with gate and cmux/pointer-read judgment with demo.
+Checks: `d8cf40d54` retains network-isolated `cargo test --offline -p loopflow --lib context_block` (8) and `--test context_block_tests` (1) passes; realign reran `cargo fmt --all -- --check`, `cargo clippy --offline --all-targets -- -D warnings`, `git diff --check` and `lf context` successfully; behavior tests unchanged, provider integration/affected suites remain with gate and cmux/pointer-read judgment with demo.
 
 ### Integrated upstream boundary
 
@@ -224,6 +236,13 @@ These are preservation requirements for the production cut, not outcomes proved
 by the provider-only probes. #1512's source and throwaway-child tests establish
 no installed or real-provider lifeline acceptance.
 
+Main #1511 launches lf Codex terminals with `--no-daemon` in
+`spawn_session_command_with_env`, after command construction. Hook configuration
+must reach that launched process and its selected provider home; configuring only
+Codex's shared background daemon cannot satisfy this entry point. Preserve that
+account isolation. Earlier native app-server probes do not establish terminal
+hook delivery through this path.
+
 Release is the only immediate child directory with memory in this checkout;
 its goal and full memory were read. Its operation-entry lesson still applies:
 all three Codex instruction writers and actual lf launch/resume paths need
@@ -238,6 +257,8 @@ archived at `d81f12c42:scripts/benchmarks/skill-invocation/`; stdin/paste code i
 `d008a9761`. No transport probe remains to maintain or rerun. Shared native Codex
 settings in `launch.py` remain used by context-delivery and skill-fidelity probes.
 
+- Removed: duplicate context listing/header metadata and the separate long-root
+  fallback. The complete manifest now owns both inline and pointed metadata.
 - Removed: `INITIAL_TURN_PROMPT`, its naming special cases and exclusive tests.
   Attributed request selection and existing-name protection remain.
 - The `<lf:scratch>` block and file bodies in `format_wave_sections`.
@@ -248,7 +269,7 @@ settings in `launch.py` remain used by context-delivery and skill-fidelity probe
   ceilings and launch-time measurement. `measure_context` owns size-target reporting
   from documents only; no second submitted-source count or skill preview remains.
 - Codex terminal `model_instructions_file` in `engine/agent.rs` and
-  `lf/commands/util.rs::build_session_command`, including its incorrect comment.
+  `lf/commands/util.rs::build_session_command`, whose comment now correctly distinguishes the native base from AGENTS.md.
   App-server replacement in `harness/codex.rs` is removed.
 - The separate context split for installed skills in `prepare_process_prompt`,
   retaining native invocation, declarations, argument fidelity and captured assets.
@@ -269,32 +290,6 @@ prompt logs under `.lf/prompts/`, source-boundary escaping.
   the same profile: Task, Wave, branch, paths, time, skill text, request.
 - Surface instructions, participant name or reply guidance moved into the
   context block.
-
-## Internal slices
-
-One PR; the split is unusable without the block. `This slice` is the production
-cut in Rust; further probe work happens only where the cut needs a fact it lacks.
-
-0. Fixed-slot metadata is resolved by option B; implement its accepted profile
-   rule. Interpret native-guide wording as no Loopflow-added repository text,
-   retaining harness guide loading; name that proposed default at demo.
-1. First turn is skill then message, passed as an argument (Jack, option A).
-   The constant turn and launch bounding are removed; only an oversized first
-   turn may refuse. Native skills retain their accepted invocation path.
-   Supported resume without launch-input replay still needs the complete cut.
-2. Whole-file byte budgeting, overflow pointers and the callback now exist.
-   Connect native hooks/trust and complete OpenCode terminal/compaction proofs. A passing marker can survive native middle truncation.
-   Codex app-server hook trust needs production
-   integration that preserves saved settings and existing capture hooks, on both
-   thread start and supported resume after engine replacement.
-3. Build the whole cut: fixed additive slot on every harness surface, real first
-   turn with bounded transport, refreshed conversation block from existing owners.
-   Preserve installed-skill fidelity and captured Flow skills. Remove old
-   inlining, bounding, constant turn and provider overrides in the same change.
-4. Make `lf context` measure size targets without launch refusal; retain usage
-   reporting, prompt logs and source escaping. Exercise lf entry points against
-   fake APIs, then the cmux/native-resume demo. Release's entry-point lesson
-   applies: provider-only passes cannot establish Loopflow integration.
 
 ## Follow-ups (intent only; each gets its own design)
 
@@ -365,18 +360,14 @@ now use the current `-i` selector, not removed `--tui`; gate owns lf entry check
 
 ### Rejected transport evidence (archived)
 
-Jack's option A supersedes the transport investigation, not its observations.
-Codex 0.161.0 exec accepted 225,023-byte stdin; TUI rejected stdin before a request.
-Paste preserved 285,023 Unicode bytes but normalized CRLF and consumed literal
-paste terminators. The external editor preserved Unicode/CRLF/terminators but
-trimmed trailing whitespace (285,027 → 285,023 bytes), despite exact file copying
-and clean exit. Neither a successful exit nor a marker proves exact delivery.
-No production transport or lf/resume/cmux acceptance follows from these probes.
-Code, examples and historical results: `d81f12c42:scripts/benchmarks/skill-invocation/README.md`
-and its archived transport runner; earlier stdin/paste runner: `d008a9761`.
-Full prior scratch and evidence paths remain in
-`/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo444-compress-notes-re16ye_8/`.
-No further transport probes are authorized.
+Jack's option A supersedes the investigation, not its counterexamples. Codex
+0.161.0 exec accepted 225,023-byte stdin; TUI rejected it. Paste changed CRLF and
+consumed literal paste terminators; the editor preserved Unicode/CRLF/terminators
+but trimmed trailing whitespace (285,027 → 285,023 bytes). No lossless transport
+or lf/resume/cmux acceptance follows. No further transport probes are authorized.
+Code and complete evidence: `d81f12c42:scripts/benchmarks/skill-invocation/`;
+earlier stdin/paste runner: `d008a9761`; all retained result paths and prior
+reconciliation notes: `ebdfd89cd:scratch/what-goes-in-system-prompt.md`, Evidence.
 
 ### Hook-size counterexamples
 
@@ -393,20 +384,7 @@ The callback implements complete-list/skill overflow with readable pointers;
 provider pointer-read behavior, OpenCode and launch integration remain unfinished.
 The old assembly deletion list is unchanged.
 
-Historical probe/check results predate the Rust cut; they are not production verification.
-
-Retained result JSON read during reconciliation confirms 10,000-byte ASCII
-refresh on both providers, Codex's Unicode middle truncation, and 285,023-byte
-exec delivery with TUI stdin rejection. The successful Unicode paste and clean-exit
-CRLF/terminator failures remain distinct from the earlier timeout; none establishes
-a lossless production transport. No provider probes were rerun.
-Latest evidence: `/tmp/loo444-compress-shared-context/` and
-`/tmp/loo444-compress-shared-transport/`; prior compressed-probe results remain
-under `/tmp/loo444-compress-context-proof/` and `/tmp/loo444-compress-transport-proof/`.
-
-Earlier probe checkpoint: `87ae76eaf`. Complete pre-reconciliation scratch,
-including original evidence paths and archived transcript, is preserved at
-`/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo444-realign-saved-40zhwtws/`.
-Those snapshots preserve the earlier local scratch. Pre-compression notes are also preserved at
-`/tmp/loo444-compress-notes-SaPexN/`; pre-reconciliation notes at
-`/tmp/loo444-realign-notes-8VzCoo/`.
+Historical probe/check results predate the Rust cut, not production verification.
+Exact retained JSON paths, earlier scratch copies and compressed-probe receipts:
+`ebdfd89cd:scratch/what-goes-in-system-prompt.md`, Evidence. No provider probes
+were rerun during compression.

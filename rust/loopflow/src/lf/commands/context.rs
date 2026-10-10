@@ -1,11 +1,11 @@
-//! Inspect the same budgets and local source snapshot used at launch.
+//! Inspect memory and scratch size targets without restricting launch input.
 
 use anyhow::{anyhow, Result};
 use serde::Serialize;
 
 use crate::engine::config::load_config;
 use crate::engine::context_budget::ContextBudgetReport;
-use crate::engine::process_prompt::{preview_process_prompt, ProcessPromptInput};
+use crate::engine::process_prompt::{prepare_process_prompt, ProcessPromptInput};
 use crate::engine::prompt::Surface;
 
 #[derive(Debug, Serialize)]
@@ -71,7 +71,7 @@ pub fn run(json: bool, wave: Option<&str>, task: Option<&str>, skill: &str) -> R
     }
     .to_string();
     let config = load_config(Some(&repo))?.unwrap_or_default();
-    let prepared = preview_process_prompt(
+    let prepared = prepare_process_prompt(
         &config,
         ProcessPromptInput {
             repo_root: repo.clone(),

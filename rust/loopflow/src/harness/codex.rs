@@ -1462,14 +1462,11 @@ impl CodexHarness {
 
         let (thread_method, mut thread_params) =
             build_thread_request(launch, self.resume_provider_session_id.as_deref());
-        let mut config = json!({
+        let config = json!({
             "shell_environment_policy.set": tool_environment,
             "allow_login_shell": false,
             "features.shell_snapshot": false,
         });
-        if let Some(path) = crate::engine::agent::write_system_prompt_file(launch, "session")? {
-            config["model_instructions_file"] = json!(path.to_string_lossy());
-        }
         thread_params.insert("config".into(), config);
         // The thread params include Loopflow's conservative defaults only when
         // Codex config is missing or less permissive. More permissive user or
@@ -1657,6 +1654,20 @@ mod tests {
         assert_eq!(usage.input_tokens, Some(1_000));
         assert_eq!(usage.output_tokens, Some(50));
         assert_eq!(usage.reasoning_tokens, Some(10));
+    }
+
+    #[test]
+    fn start_and_resume_add_instructions_without_replacing_native_base() {
+        let config = AgentConfig {
+            system_prompt: "Fixed additions.".into(),
+            ..Default::default()
+        };
+        for session in [None, Some("saved-native-thread")] {
+            let (_, params) = build_thread_request(&config, session);
+            assert_eq!(params["developerInstructions"], "Fixed additions.");
+            assert!(!params.contains_key("baseInstructions"));
+            assert!(!params.contains_key("model_instructions_file"));
+        }
     }
 
     #[test]

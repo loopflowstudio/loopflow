@@ -96,8 +96,6 @@ impl ContextSource {
         match self {
             Self::Memory => Some(BudgetKey::MemoryTokens),
             Self::Scratch => Some(BudgetKey::ScratchTokens),
-            // Steers ride inside the goal message and share its budget.
-            Self::Goal | Self::Steers => Some(BudgetKey::GoalTokens),
             _ => None,
         }
     }
@@ -234,9 +232,6 @@ fn flag(step: &mut StepContext, budgets: &ContextBudgets) {
             usage.over_budget = usage.tokens.is_some_and(|tokens| tokens > limit);
         }
     }
-    let limit = budgets.limit(BudgetKey::InputTokens) as u64;
-    step.assembled_budget_tokens = Some(limit);
-    step.over_assembled_budget = step.assembled_tokens.is_some_and(|tokens| tokens > limit);
 }
 
 // -- Capture reading -----------------------------------------------------------
@@ -839,14 +834,14 @@ mod tests {
                 .unwrap();
         super::flag(&mut step, &budgets);
         let steers = &step.sources[4];
-        assert!(steers.over_budget);
-        assert_eq!(steers.budget_tokens, Some(50));
-        assert!(step.over_assembled_budget);
+        assert!(!steers.over_budget);
+        assert_eq!(steers.budget_tokens, None);
+        assert!(!step.over_assembled_budget);
         assert!(!step.sources[1].over_budget);
         assert!(step
             .gaps
             .iter()
             .any(|gap| gap.contains("without recorded count")));
-        assert!(super::render_step(&step).contains("OVER budget 50"));
+        assert!(!super::render_step(&step).contains("OVER budget"));
     }
 }

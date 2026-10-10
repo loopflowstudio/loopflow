@@ -79,7 +79,7 @@ config files.
 ## Context budgets
 
 ```bash
-lf context                         # limits, sources, original and submitted usage
+lf context                         # size targets, sources and current usage
 lf context --wave intelligence     # local Wave memory and scratch
 lf context --task LOO-303 --json    # Task checkout and locally stored goal
 lf context --skill implement       # preview this skill instead of realign
@@ -104,31 +104,19 @@ context_budgets:
 
 Each field resolves from Wave frontmatter, repo config, personal config, then
 the compiled default. `lf context` shows the winning source for every value.
-The same block supports `memory_bytes`, `scratch_bytes`, `goal_tokens`,
-`goal_bytes`, `input_tokens`, and `input_bytes`. Values must be positive integers.
-Run `lf context` to see defaults; no settings file is needed to use them.
-Scratch defaults to 12,000 tokens and 96 KiB, enough for a Task's own notes;
-the [ablation study](../performance/context-ablation.md) records why each
-default stands.
+The same block supports `memory_bytes` and `scratch_bytes`. Values must be positive
+integers. These are authoring targets, not launch limits: sources are never excerpted
+or refused for exceeding them. The retired `goal_*` and `input_*` keys are removed.
 
-Usage covers gathered Wave memory (including applicable ancestors), recursive
-scratch Markdown, the selected Work's launch message, and total assembled input.
-Memory and Wave overrides are read from the execution checkout. Without a Task
-or Work seed, goal usage is reported as absent; arbitrary future messages cannot
-be measured. The query uses local stored Task direction without contacting Linear
-or launching a provider, and never reads the clipboard. Total usage is a headless
-preview of the selected skill, including budget feedback; a different skill,
-message, client, or launch source can change it.
+`lf context` measures recursive scratch Markdown and stored Wave/ancestor memory,
+without contacting a provider or reading the clipboard. Defaults are 16,000 tokens /
+128 KiB for memory and 12,000 tokens / 96 KiB for scratch. Curate stale notes gradually,
+preserving live decisions and evidence; re-query after writing.
 
-Original usage remains visible when launch substitutes an excerpt. Complete
-sources stay on disk at the named pointer. Prompts show the overage and require
-the next memory- or scratch-writing step to curate it. `realign`, `compress`,
-`kickoff`, and `implement` preserve live decisions while consolidating notes and
-retiring historical or stacked-parent material, then re-query usage. The query
-still reports a total-input overage when an actual launch would reject it.
-Memory curation is gradual: retire the largest stale sections to git history
-until it fits just under the effective limits. Keep live decisions and evidence
-limits; memory already within budget needs no reduction merely for size.
+The first conversation turn contains the skill followed by the request. Terminal
+launches pass it as an argument; if its UTF-8 size reaches the 122,880-byte argument
+cap, launch fails before starting the provider and reports the size and cap. Headless
+message streams have no terminal-argument cap.
 
 ## Context Assembly
 

@@ -83,6 +83,7 @@ pub(crate) fn build_session_command(
     provider_session_id: Option<&str>,
     context_file: Option<&Path>,
 ) -> Result<SessionCommand> {
+    crate::engine::agent::validate_terminal_turn(prompt)?;
     let worktree_arg = worktree.to_string_lossy().to_string();
 
     let args = match harness {

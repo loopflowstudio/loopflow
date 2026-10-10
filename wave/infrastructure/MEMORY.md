@@ -607,14 +607,11 @@ PR #1456 shipped in v0.13.6. Installed measurements, batching and limits:
 - Task decisions no longer depend on historical execution; checkout cleanup
   still retains live or unknown providers. LOO-408 owns the installed proof.
 
-## Environment variables (LOO-341, reconciled 2026-10-07)
+## Environment variables (LOO-341)
 
-Jack Heart's audit lives in [Environment](../../docs/architecture/environment.md).
-`LF_HOME` selects the machine's data directory and `loopflow.db`; shared Exec
-names drive shell/tmux clearing. Earlier branch evidence remains at
-`c31279995a4ea0eec09c053e39c2f71a81d26034:wave/infrastructure/MEMORY.md`.
-LOO-370's October 6 completion above supersedes this section's pending-delivery
-claim; it establishes no physical capture conversion.
+[Environment](../../docs/architecture/environment.md) owns the contract.
+Audit: `77ec4d000:wave/infrastructure/MEMORY.md`, this heading. LOO-370's
+completion above proves no physical conversion.
 
 ## Task worktree membership (LOO-358)
 
@@ -1006,7 +1003,7 @@ tuning policy; the synthetic harness remains unbuilt. Jack Heart's July 6
 
 Jack Heart's LOO-444: native prompts/guides, skill/request first, whole-file
 start/compact context. Option B fixes additions per surface/reply/participant.
-Production authorized, unchanged; native-guide wording proposed. Wave bytes stay
+Production authorized; native-guide wording proposed. Wave bytes stay
 SQLite-owned. Preserve request attribution, custom titles and native/lf naming.
 
 Fake APIs: Claude 2.1.295/Codex 0.161.0 preserve 10 KB ASCII hooks; truncate
@@ -1014,9 +1011,13 @@ Fake APIs: Claude 2.1.295/Codex 0.161.0 preserve 10 KB ASCII hooks; truncate
 provider units. SessionStart injects, PostCompact not; native base/guides/additions
 survive; scoped trust.
 Codex editor: exact 285 KB Unicode/CRLF/paste terminators, trailing whitespace lost.
-Exact copy/clean exit prove no exact submission. Rejected stdin/paste:
-`d008a9761`; tests remain. Production, resume, automatic compact, OpenCode and cmux
-are open. Normalization/envelopes need review.
+Exact copy/clean exit prove no exact submission. Jack's October 9 option A
+supersedes the transport blocker: terminal argv, no editor/paste/stdin/envelopes
+or further transport probes; only an oversized first turn may refuse with size/cap.
+Rust removes the trigger and bounding; builtin skill precedes request.
+App-server Codex is additive; fixed-slot/context refresh and terminal Codex remain
+unfinished. Unbuilt; unverified. Resume, compaction, OpenCode and cmux
+remain open. Rejected transport detail: `77ec4d000`, this heading;
 [Evidence](../../scripts/benchmarks/skill-invocation/README.md).
 
 Main `3e1e6245c` (#1512): driver lifelines own engines. Replacement resumes native

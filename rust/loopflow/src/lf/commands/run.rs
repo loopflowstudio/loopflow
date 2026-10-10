@@ -1022,16 +1022,6 @@ pub(crate) fn attributed_context(
         });
     }
 
-    for mut decision in components.budget_decisions.clone() {
-        decision.position = decisions.len() as u32;
-        if decision.kind == Kind::UserMessage {
-            if let Some((kind, scope)) = components.message_context {
-                decision.kind = kind;
-                decision.scope = scope;
-            }
-        }
-        decisions.push(decision);
-    }
     crate::trace::PreparedTurnContext::from_attributed_prompts(
         system_prompt,
         task_prompt,
@@ -1708,9 +1698,9 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             .contains("evidence published after launch"));
         assert!(built
             .agent_config
-            .system_prompt
+            .task_prompt
             .contains("inspect the complete basis"));
-        assert!(built.agent_config.system_prompt.contains("Task seed"));
+        assert!(built.agent_config.task_prompt.contains("Task seed"));
         assert!(built
             .context
             .system

@@ -1621,7 +1621,7 @@ fn bound_flows_keep_task_context_and_leave_other_flows_and_shared_edits_alone() 
     let bin = TempDir::new().unwrap();
     let provider = codex_app_server_script("done", "if [ \"$1\" = --version ]; then exit 0; fi").replace(
         "read -r turn_start",
-        "read -r turn_start\npwd >> \"$LF_HOME/cwds\"\nprintf '%s\\n' \"$thread_start\" >> \"$LF_HOME/prompts\"\nprintf '%s\\n' 'Evidence from preceding step.' > scratch/step.md",
+        "read -r turn_start\npwd >> \"$LF_HOME/cwds\"\nprintf '[%s,%s]\\n' \"$thread_start\" \"$turn_start\" >> \"$LF_HOME/prompts\"\nprintf '%s\\n' 'Evidence from preceding step.' > scratch/step.md",
     );
     write_executable(&bin.path().join("codex"), &provider);
     let path = format!(
@@ -1971,11 +1971,12 @@ fn received_contexts(home: &Path) -> Vec<String> {
         .unwrap()
         .lines()
         .map(|line| {
-            let thread: serde_json::Value = serde_json::from_str(line).unwrap();
-            let path = thread["params"]["config"]["model_instructions_file"]
+            let requests: serde_json::Value = serde_json::from_str(line).unwrap();
+            let instructions = requests[0]["params"]["developerInstructions"]
                 .as_str()
-                .unwrap();
-            fs::read_to_string(path).unwrap()
+                .unwrap_or_default();
+            let turn = requests[1]["params"]["input"][0]["text"].as_str().unwrap();
+            format!("{instructions}\n\n{turn}")
         })
         .collect()
 }
@@ -1998,7 +1999,7 @@ fn scripted_provider(home: &Path, answers: &[&str]) -> (TempDir, String) {
     let provider = codex_app_server_script("@answer@", "if [ \"$1\" = --version ]; then exit 0; fi")
         .replace(
             "read -r turn_start",
-            "read -r turn_start\nprintf '%s\\n' \"$thread_start\" >> \"$LF_HOME/prompts\"\necho turn >> \"$LF_HOME/turns\"\nanswer=$(sed -n \"$(grep -c turn \"$LF_HOME/turns\")p\" \"$LF_HOME/answers\")",
+            "read -r turn_start\nprintf '[%s,%s]\\n' \"$thread_start\" \"$turn_start\" >> \"$LF_HOME/prompts\"\necho turn >> \"$LF_HOME/turns\"\nanswer=$(sed -n \"$(grep -c turn \"$LF_HOME/turns\")p\" \"$LF_HOME/answers\")",
         )
         .replace("\"@answer@\"", "'\"$answer\"'");
     assert!(

@@ -48,7 +48,7 @@ fn context_budget_preview_reads_saved_wave_and_refreshes_local_edits() {
     .unwrap();
     fs::write(
         repo.path().join(".lf/config.yaml"),
-        "context_budgets:\n  memory_tokens: 700\n  input_tokens: 100\n",
+        "context_budgets:\n  memory_tokens: 700\n  scratch_bytes: 10000\n",
     )
     .unwrap();
     fs::write(
@@ -89,7 +89,7 @@ fn context_budget_preview_reads_saved_wave_and_refreshes_local_edits() {
     for (key, value, source) in [
         ("memory_tokens", 400, repo.path().join("wave/local/GOAL.md")),
         ("scratch_tokens", 600, home.path().join(".lf/config.yaml")),
-        ("input_tokens", 100, repo.path().join(".lf/config.yaml")),
+        ("scratch_bytes", 10000, repo.path().join(".lf/config.yaml")),
     ] {
         assert_eq!(budgets[key]["value"], value);
         assert_eq!(
@@ -103,9 +103,9 @@ fn context_budget_preview_reads_saved_wave_and_refreshes_local_edits() {
     for source in &usage[..2] {
         let limit = source["token_limit"].as_u64().unwrap();
         assert!(source["original_tokens"].as_u64().unwrap() > limit);
-        assert!(source["submitted_tokens"].as_u64().unwrap() <= limit);
+        assert_eq!(source["submitted_tokens"], source["original_tokens"]);
     }
-    assert!(usage.last().unwrap()["submitted_tokens"].as_u64().unwrap() > 100);
+    assert!(budgets.get("input_tokens").is_none());
     store
         .update_wave_document(&wave, "MEMORY.md", "Live decision retained.")
         .unwrap();

@@ -1,8 +1,6 @@
 //! Shared recovery and execution helpers for Project and Task Work.
 
 use crate::durable::WorkRef;
-use crate::engine::config::load_config;
-use crate::engine::context_budget::{bound_message, ContextBudgets};
 use crate::store::SharedStore;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -48,34 +46,7 @@ pub(crate) async fn inject_live_steers(
     if steers.is_empty() {
         return delivered;
     }
-    let context = async {
-        let task = store
-            .get_task(task_id)
-            .await?
-            .ok_or(crate::store::StoreError::NotFound)?;
-        let wave = store.get_wave(&task.wave_id).await?;
-        let worktree = task.worktree()?;
-        let config = load_config(Some(worktree))?.unwrap_or_default();
-        let budgets =
-            ContextBudgets::resolve(&config, worktree, wave.as_ref().map(|wave| wave.name()))?;
-        Ok::<_, anyhow::Error>((worktree.clone(), budgets))
-    }
-    .await;
-    let (worktree, budgets) = match context {
-        Ok(context) => context,
-        Err(error) => {
-            tracing::warn!(%error, "failed to resolve live direction budgets; deferring delivery");
-            return delivered;
-        }
-    };
-    for mut steer in steers {
-        match bound_message(&steer.text, &worktree, &budgets) {
-            Ok(text) => steer.text = text,
-            Err(error) => {
-                tracing::warn!(%error, "failed to preserve oversized live direction; deferring delivery");
-                break;
-            }
-        }
+    for steer in steers {
         match harness.send_current(&steer.text).await {
             crate::harness::SendCurrentOutcome::Sent { .. } => {
                 *cursor = steer.id;

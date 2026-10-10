@@ -167,7 +167,6 @@ impl std::str::FromStr for Surface {
 /// All components of a prompt before assembly.
 #[derive(Debug, Clone, Default)]
 pub struct PromptComponents {
-    pub budget_notice: Option<String>,
     pub surface: Surface,
     pub user_name: Option<String>,
     pub docs: Vec<Document>,
@@ -191,8 +190,6 @@ pub struct PromptComponents {
     pub diff_tier: DiffTier,
     /// Number of files changed on branch (for display)
     pub diff_file_count: usize,
-    /// Source reductions carried into the existing Run context evidence.
-    pub budget_decisions: Vec<crate::trace::ContextDecision>,
 }
 
 impl PromptComponents {
@@ -405,8 +402,6 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
         steers: Vec::new(),
         diff_tier,
         diff_file_count,
-        budget_decisions: Vec::new(),
-        budget_notice: None,
     })
 }
 
@@ -1581,12 +1576,6 @@ pub fn format_content_sections(components: &PromptComponents) -> Vec<String> {
 
     parts.extend(format_wave_sections(components));
 
-    if let Some(notice) = &components.budget_notice {
-        parts.push(format!(
-            "<lf:context-budget>\n{notice}\n</lf:context-budget>"
-        ));
-    }
-
     let scratch_body: Vec<String> = components
         .docs
         .iter()
@@ -1701,28 +1690,28 @@ fn format_skill_tag(skill: &Skill) -> String {
     }
 }
 
-/// Render the complete context, skill and current request in source order.
+/// Render a diagnostic view of both launch channels, not a provider input.
 pub fn format_prompt(components: &PromptComponents) -> String {
     let mut parts = format_system_sections(components);
     parts.extend(format_content_sections(components));
-
-    if let Some(ref skill) = components.skill {
-        parts.push(format!("The skill.\n\n{}", format_skill_tag(skill)));
-    }
-
-    if let Some(ref message) = components.message {
-        parts.push(format!(
-            "Additional instructions from user.\n\n\
-             <lf:message>\n{}\n</lf:message>",
-            render_message(message)
-        ));
-    }
-
+    parts.push(format_first_turn(components));
     parts.join("\n\n")
 }
 
-/// Starts the turn after the assembled instructions have loaded from the system file.
-pub const INITIAL_TURN_PROMPT: &str = "Follow the instructions in the supplied context.";
+/// The active skill precedes the request; reference text never becomes new work.
+pub fn format_first_turn(components: &PromptComponents) -> String {
+    let mut parts = Vec::new();
+    if let Some(skill) = &components.skill {
+        parts.push(format_skill_tag(skill));
+    }
+    if let Some(message) = &components.message {
+        parts.push(format!(
+            "<lf:message>\n{}\n</lf:message>",
+            render_message(message)
+        ));
+    }
+    parts.join("\n\n")
+}
 
 /// Write a runtime prompt file and return its path.
 ///
@@ -2211,7 +2200,6 @@ mod tests {
         assert!(prompt.contains("<lf:skill:implement>"));
         assert!(prompt.contains("Implement the feature described."));
         assert!(prompt.contains("</lf:skill:implement>"));
-        assert!(prompt.contains("The skill."));
     }
 
     #[test]

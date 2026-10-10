@@ -482,7 +482,7 @@ impl Harness for OpenCodeHarness {
             .clone()
             .ok_or_else(|| anyhow!("opencode provider session id is not available"))?;
 
-        let mut payload = build_turn_payload(&turn_content, config, first_turn);
+        let mut payload = build_turn_payload(&turn_content, config);
         let (request, owner) = {
             let mut history = self.history.lock().expect("OpenCode history lock poisoned");
             (history.request(), history.owner.clone())
@@ -523,7 +523,7 @@ impl Harness for OpenCodeHarness {
             return SendCurrentOutcome::NotSteerable;
         };
 
-        let mut payload = build_turn_payload(text, &config, false);
+        let mut payload = build_turn_payload(text, &config);
         let (provider_turn_id, owner) = {
             let mut history = self.history.lock().expect("OpenCode history lock poisoned");
             (history.request(), history.owner.clone())
@@ -854,14 +854,14 @@ fn build_turn_content(content: &str, config: &AgentConfig, first_turn: bool) -> 
     }
 }
 
-fn build_turn_payload(content: &str, config: &AgentConfig, first_turn: bool) -> Value {
+fn build_turn_payload(content: &str, config: &AgentConfig) -> Value {
     let mut payload = json!({
         "parts": [
             { "type": "text", "text": content }
         ]
     });
 
-    if first_turn && !config.system_prompt.trim().is_empty() {
+    if !config.system_prompt.trim().is_empty() {
         payload["system"] = Value::String(config.system_prompt.trim().to_string());
     }
 
@@ -1004,6 +1004,19 @@ mod tests {
     }
 
     #[test]
+    fn every_owned_turn_keeps_the_same_additive_instructions() {
+        let config = AgentConfig {
+            system_prompt: "Fixed additions.".into(),
+            ..Default::default()
+        };
+        let first = build_turn_payload("initial request", &config);
+        let next = build_turn_payload("follow-up after compaction", &config);
+        assert_eq!(first["system"], "Fixed additions.");
+        assert_eq!(next["system"], first["system"]);
+        assert_eq!(next["parts"][0]["text"], "follow-up after compaction");
+    }
+
+    #[test]
     fn build_turn_payload_includes_explicit_opencode_model() {
         let payload = build_turn_payload(
             "hello",
@@ -1011,7 +1024,6 @@ mod tests {
                 agent: Some("opencode:moonshotai/kimi-k2".to_string()),
                 ..Default::default()
             },
-            false,
         );
         assert_eq!(
             payload.get("model"),
@@ -1030,7 +1042,6 @@ mod tests {
                 agent: Some("claude:sonnet".to_string()),
                 ..Default::default()
             },
-            false,
         );
         assert!(payload.get("model").is_none());
     }
@@ -1043,7 +1054,6 @@ mod tests {
                 agent: Some("opencode".to_string()),
                 ..Default::default()
             },
-            false,
         );
         assert!(payload.get("model").is_none());
     }

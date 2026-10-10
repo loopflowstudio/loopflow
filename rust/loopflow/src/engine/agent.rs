@@ -172,7 +172,7 @@ pub struct AgentConfig {
     pub system_prompt: String,
     /// Task prompt content sent as the turn input.
     pub task_prompt: String,
-    /// Native skill selection, kept separate from bounded user context.
+    /// Native skill selection, kept separate from gathered reference context.
     pub skill_invocation: Option<crate::engine::skill_invocation::SkillInvocation>,
     /// Agent string (for example: "claude:opus" or "codex").
     pub agent: Option<String>,
@@ -208,19 +208,6 @@ pub struct AgentConfig {
 }
 
 impl AgentConfig {
-    /// Declared input bytes; native expansion is measured in provider receipts.
-    pub(crate) fn task_input_for_budget(&self) -> String {
-        match &self.skill_invocation {
-            Some(invocation) => format!(
-                "{}\n\n{}\n\n{}",
-                self.task_prompt,
-                invocation.instruction_text(&parse_agent(self.agent()).0),
-                invocation.arguments
-            ),
-            None => self.task_prompt.clone(),
-        }
-    }
-
     /// Return the selected agent or Loopflow's compiled default.
     pub fn agent(&self) -> &str {
         match self.agent.as_deref() {
@@ -857,6 +844,13 @@ pub fn build_codex_thread_start_params(
     launch: &AgentConfig,
 ) -> serde_json::Map<String, serde_json::Value> {
     let mut params = serde_json::Map::new();
+    let instructions = system_prompt_with_structured_replies(launch);
+    if !instructions.is_empty() {
+        params.insert(
+            "developerInstructions".into(),
+            serde_json::Value::String(instructions),
+        );
+    }
 
     params.insert(
         "serviceTier".to_string(),
@@ -1160,6 +1154,18 @@ pub fn build_model_command(
         // Unknown harness: fall back to Claude with the full model string as variant.
         _ => build_claude_command(launch, process, capabilities, Some(agent)),
     }
+}
+
+/// Native terminal launch arguments must fit cmux's per-argument transport limit.
+pub(crate) fn validate_terminal_turn(prompt: &str) -> Result<(), CoreError> {
+    const CAP: usize = 122_880;
+    if prompt.len() >= CAP {
+        return Err(CoreError::ExecutionFailed(format!(
+            "first turn is {} bytes; terminal argument cap is {CAP} bytes (including the terminating NUL)",
+            prompt.len()
+        )));
+    }
+    Ok(())
 }
 
 /// Build a full CLI command (including prompt) for a model.
@@ -1821,6 +1827,9 @@ fn _run_agent_once(
     let (harness, model) = parse_agent(launch.agent());
     if matches!(harness.as_str(), "codex" | "opencode") && process.auto {
         return _run_harness_once(launch, process, model, retry);
+    }
+    if !process.auto {
+        validate_terminal_turn(&launch.task_prompt)?;
     }
     let cmd_args = build_model_command(launch, process, capabilities);
     if cmd_args.is_empty() {
@@ -2605,6 +2614,16 @@ trust_level = "trusted"
 
         let cmd = build_claude_command(&launch, &process, &AgentCapabilities::default(), None);
         assert!(!cmd.contains(&"--add-dir".to_string()));
+    }
+
+    #[test]
+    fn terminal_turn_cap_counts_utf8_bytes_without_changing_the_request() {
+        let at_limit = "😀".repeat(30_720);
+        let error = validate_terminal_turn(&at_limit).unwrap_err().to_string();
+        assert!(error.contains("122880 bytes"));
+        assert!(validate_terminal_turn(&"x".repeat(122_879)).is_ok());
+        assert!(validate_terminal_turn(&"x".repeat(122_880)).is_err());
+        assert!(validate_terminal_turn("").is_ok());
     }
 
     #[test]

@@ -7,7 +7,6 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
 
-use loopflow::engine::prompt::INITIAL_TURN_PROMPT;
 use loopflow_test_support::TestRepo;
 
 #[test]
@@ -96,10 +95,11 @@ exit 23
         assert!(context.contains(&memory));
         assert!(context.contains(&scratch));
         assert!(context.contains("A fixture goal."));
-        assert!(context.contains("<lf:skill:probe>"));
-        assert!(context.contains("Find the fixture goal."));
+        assert!(!context.contains("<lf:skill:probe>"));
+        assert!(!context.contains("Find the fixture goal."));
         let argv = fs::read_to_string(home.path().join("argv")).unwrap();
-        assert_eq!(argv.matches(INITIAL_TURN_PROMPT).count(), 1, "no retry");
+        let first_turn = "<lf:skill:probe>\nRead the supplied context.\n</lf:skill:probe>\n\n<lf:message>\nFind the fixture goal.\n</lf:message>";
+        assert_eq!(argv.matches(first_turn).count(), 1, "no retry");
         assert!(!argv.contains("--dangerously-skip-permissions"));
         assert!(
             !argv.contains("--permission-mode"),
@@ -115,7 +115,7 @@ exit 23
 }
 
 #[test]
-fn headless_codex_reads_context_file_and_keeps_it_for_native_resume() {
+fn headless_codex_keeps_large_first_turn_separate_from_additive_instructions() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let bin = home.path().join("bin");
@@ -135,8 +135,6 @@ echo '{"jsonrpc":"2.0","id":1,"result":{}}'
 read -r initialized
 read -r thread_start
 printf '%s' "$thread_start" > "$HOME/thread-request"
-context=$(printf '%s' "$thread_start" | sed -n 's/.*"model_instructions_file":"\([^"]*\)".*/\1/p')
-cp "$context" "$HOME/received-context" || exit 98
 echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thread-fixture"}}}'
 read -r turn_start
 printf '%s' "$turn_start" > "$HOME/turn-request"
@@ -172,16 +170,67 @@ while read -r line; do :; done
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(fs::read_to_string(home.path().join("received-context"))
-        .unwrap()
-        .contains(&content));
     let thread: serde_json::Value =
         serde_json::from_slice(&fs::read(home.path().join("thread-request")).unwrap()).unwrap();
-    let path = thread["params"]["config"]["model_instructions_file"]
+    assert!(thread["params"]["developerInstructions"]
         .as_str()
-        .unwrap();
-    assert!(fs::read_to_string(path).unwrap().contains(&content));
+        .unwrap()
+        .contains("<lf:loopflow>"));
+    assert!(thread["params"]["baseInstructions"].is_null());
+    assert!(thread["params"]["config"]["model_instructions_file"].is_null());
+    assert!(!thread["params"]["developerInstructions"]
+        .as_str()
+        .unwrap()
+        .contains(&content));
     let turn: serde_json::Value =
         serde_json::from_slice(&fs::read(home.path().join("turn-request")).unwrap()).unwrap();
-    assert_eq!(turn["params"]["input"][0]["text"], INITIAL_TURN_PROMPT);
+    assert!(turn["params"]["input"][0]["text"]
+        .as_str()
+        .unwrap()
+        .contains(&content));
+}
+
+#[test]
+fn terminal_rejects_only_the_oversized_first_turn_before_provider_spawn() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    repo.create_file(".lf/skills/large.md", &"x".repeat(122_880));
+    repo.create_file(
+        ".lf/config.yaml",
+        "diff: false\ndiff_files: false\npaste: false\n",
+    );
+    let bin = home.path().join("bin");
+    fs::create_dir(&bin).unwrap();
+    let provider = bin.join("claude");
+    fs::write(
+        &provider,
+        "#!/bin/sh\ntouch \"$HOME/provider-started\"\nexit 91\n",
+    )
+    .unwrap();
+    fs::set_permissions(&provider, fs::Permissions::from_mode(0o755)).unwrap();
+    let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+    for (key, _) in std::env::vars_os() {
+        let name = key.to_string_lossy();
+        if name.starts_with("LF_") || name.starts_with("LOOPFLOW_") {
+            command.env_remove(key);
+        }
+    }
+    let output = command
+        .current_dir(repo.path())
+        .args(["-i", "-a", "claude", "large"])
+        .env("HOME", home.path())
+        .env("LF_HOME", home.path().join("machine"))
+        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+        .env("CLAUDE_CONFIG_DIR", home.path().join(".claude"))
+        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("first turn is"), "{stderr}");
+    assert!(
+        stderr.contains("terminal argument cap is 122880 bytes"),
+        "{stderr}"
+    );
+    assert!(!home.path().join("provider-started").exists());
 }

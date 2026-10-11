@@ -3,10 +3,8 @@ use super::{
     planning_write::{self, PlanningEdit, WriteOrigin},
     SqliteStore,
 };
-use crate::engine::planning_exchange::{
-    PlanningKind, PlanningMutation, PlanningObject, PlanningSnapshot,
-};
-use crate::engine::planning_git::PlanningDestination;
+use crate::planning_exchange::{PlanningKind, PlanningMutation, PlanningObject, PlanningSnapshot};
+use crate::planning_git::PlanningDestination;
 use crate::store::{
     PeerPlanningRecord, PeerPlanningStatus, PeerPlanningValue, PeerProjectionConflict, StoreError,
     StoreResult,

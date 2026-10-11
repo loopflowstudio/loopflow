@@ -8,7 +8,7 @@ use crate::lf::PlanningCommand;
 use crate::store::{RegistryUnavailable, Store};
 
 pub fn run(cmd: &PlanningCommand) -> Result<()> {
-    let repo = crate::engine::worktrees::main_repo_root(&super::util::find_repo_root()?)?;
+    let repo = crate::git::worktrees::main_repo_root(&super::util::find_repo_root()?)?;
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(run_async(&repo, cmd))
 }
@@ -52,10 +52,10 @@ async fn run_async(repo: &Path, cmd: &PlanningCommand) -> Result<()> {
 }
 
 async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
-    let config = crate::engine::config::load_config(Some(Path::new(repo)))?.unwrap_or_default();
+    let config = crate::config::load_config(Some(Path::new(repo)))?.unwrap_or_default();
     if matches!(
         config.planning_transport(),
-        crate::engine::config::PlanningConfig::Linear {}
+        crate::config::PlanningConfig::Linear {}
     ) {
         if json {
             println!(

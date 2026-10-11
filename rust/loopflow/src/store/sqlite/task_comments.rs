@@ -1,7 +1,7 @@
 //! One saved Task thread and its delivery evidence, with or without Linear.
 
 use super::planning_write::{self, PlanningEdit as Edit};
-use crate::engine::planning_exchange::PlanningKind;
+use crate::planning_exchange::PlanningKind;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
 use crate::durable::TaskId;

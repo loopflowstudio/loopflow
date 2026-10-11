@@ -248,12 +248,12 @@ pub(super) fn read_initiative(repo: &Path, wave: &str) -> Option<String> {
 }
 
 fn read_repository_team(repo: &Path) -> OpsResult<Option<String>> {
-    let config = crate::engine::config::load_config(Some(repo))
+    let config = crate::config::load_config(Some(repo))
         .map_err(|error| OpsError::Message(format!("failed to read .lf/config.yaml: {error}")))?
         .unwrap_or_default();
     if !matches!(
         config.planning_transport(),
-        crate::engine::config::PlanningConfig::Linear {}
+        crate::config::PlanningConfig::Linear {}
     ) {
         return Ok(None);
     }

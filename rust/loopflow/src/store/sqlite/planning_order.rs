@@ -2,7 +2,7 @@
 //! before/after lists so acquisition can recognize our own partial progress.
 
 use super::planning_write::{self, PlanningEdit as Edit};
-use crate::engine::planning_exchange::PlanningKind;
+use crate::planning_exchange::PlanningKind;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};

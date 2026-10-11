@@ -4,8 +4,8 @@
 
 use std::path::Path;
 
-use crate::engine::planning_exchange::PlanningSnapshot;
-use crate::engine::planning_git::{PlanningGit, PlanningPublication, PlanningRevision};
+use crate::planning_exchange::PlanningSnapshot;
+use crate::planning_git::{PlanningGit, PlanningPublication, PlanningRevision};
 use crate::store::{sqlite::SqliteStore, Store};
 
 use super::{OpsError, OpsResult};
@@ -44,14 +44,12 @@ pub(crate) async fn publish_repository(store: &Store, repo: &str) -> OpsResult<(
 /// Failure leaves its successful local mutation and durable pending state intact.
 pub(crate) async fn sync_after_save(store: &Store, repo: &str) {
     let attempt = async {
-        let config = crate::engine::config::load_config(Some(Path::new(repo)))
+        let config = crate::config::load_config(Some(Path::new(repo)))
             .map_err(message)?
             .unwrap_or_default();
         match config.planning_transport() {
-            crate::engine::config::PlanningConfig::Git { .. } => {
-                publish_repository(store, repo).await
-            }
-            crate::engine::config::PlanningConfig::Linear {} => {
+            crate::config::PlanningConfig::Git { .. } => publish_repository(store, repo).await,
+            crate::config::PlanningConfig::Linear {} => {
                 tokio::time::timeout(std::time::Duration::from_secs(5), async {
                     super::planning_export::sync_repository_exports(store, repo).await?;
                     let (fields, comments, state) = tokio::join!(
@@ -78,7 +76,7 @@ pub(crate) async fn sync_after_save(store: &Store, repo: &str) {
 /// Resolve the repository configuration before touching a planning remote.
 /// A Linear outage cannot select Git: routing is configuration, not availability.
 pub(crate) async fn configured_destination(store: &Store, repo: &str) -> OpsResult<Option<String>> {
-    use crate::engine::config::{load_config, PlanningConfig};
+    use crate::config::{load_config, PlanningConfig};
     let config = load_config(Some(Path::new(repo)))
         .map_err(message)?
         .unwrap_or_default();
@@ -105,12 +103,9 @@ pub(crate) async fn configured_destination(store: &Store, repo: &str) -> OpsResu
             format!("refs/loopflow/planning/users/{key}")
         }
     };
-    let destination = crate::engine::planning_git::PlanningDestination::resolve(
-        Path::new(repo),
-        &remote,
-        &reference,
-    )
-    .map_err(message)?;
+    let destination =
+        crate::planning_git::PlanningDestination::resolve(Path::new(repo), &remote, &reference)
+            .map_err(message)?;
     let id = store
         .bind_peer_planning(repo, &destination)
         .await

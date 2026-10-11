@@ -1,7 +1,7 @@
 //! Field receipts share one protocol; each object's table retains its foreign key.
 
 use super::planning_write::{self, PlanningEdit as Edit};
-use crate::engine::planning_exchange::PlanningKind;
+use crate::planning_exchange::PlanningKind;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;

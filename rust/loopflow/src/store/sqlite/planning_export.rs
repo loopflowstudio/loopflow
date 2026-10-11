@@ -251,12 +251,12 @@ pub(super) fn attach_in(
     }
     let (kind, edit) = if project {
         (
-            crate::engine::planning_exchange::PlanningKind::Project,
+            crate::planning_exchange::PlanningKind::Project,
             super::planning_write::PlanningEdit::ProjectLinearId(Some(export.id.clone())),
         )
     } else {
         (
-            crate::engine::planning_exchange::PlanningKind::Task,
+            crate::planning_exchange::PlanningKind::Task,
             super::planning_write::PlanningEdit::TaskLinearId(Some(export.id.clone())),
         )
     };

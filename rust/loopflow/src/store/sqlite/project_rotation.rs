@@ -4,7 +4,7 @@ use super::planning_changes::PlanningChanges;
 use super::planning_write::{self, PlanningEdit as Edit};
 use super::{durable, SqliteStore};
 use crate::durable::{ProjectId, TaskId};
-use crate::engine::planning_exchange::PlanningKind;
+use crate::planning_exchange::PlanningKind;
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
 use rusqlite::{params, OptionalExtension, TransactionBehavior};

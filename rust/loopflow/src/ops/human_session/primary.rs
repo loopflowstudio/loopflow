@@ -194,8 +194,7 @@ fn task_session(
         .sqlite
         .task(task)?
         .ok_or_else(|| anyhow!("Task {task} is unavailable"))?;
-    let title =
-        crate::naming::generated_session_title(None, None, Some(&plan.title), &binding.cwd);
+    let title = crate::naming::generated_session_title(None, None, Some(&plan.title), &binding.cwd);
     Ok(LfSession {
         task_id: Some(task.clone()),
         wave_id: Some(binding.wave_id.clone()),

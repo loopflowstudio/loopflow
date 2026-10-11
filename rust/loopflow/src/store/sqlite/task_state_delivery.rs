@@ -1,7 +1,7 @@
 //! Delivery evidence for local Task decisions; never another lifecycle owner.
 
 use super::planning_write::{self, PlanningEdit as Edit};
-use crate::engine::planning_exchange::PlanningKind;
+use crate::planning_exchange::PlanningKind;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::durable::TaskId;

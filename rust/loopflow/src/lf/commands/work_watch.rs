@@ -595,11 +595,11 @@ impl Reader {
                 Part::PeerPlanning => {
                     let repo = self.scope.repo.clone().context("no repository in scope")?;
                     let root = CanonicalRepo::discover(Path::new(&repo))?;
-                    let config = crate::engine::config::load_config(Some(root.as_path()))?
-                        .unwrap_or_default();
+                    let config =
+                        crate::config::load_config(Some(root.as_path()))?.unwrap_or_default();
                     let destinations = if matches!(
                         config.planning_transport(),
-                        crate::engine::config::PlanningConfig::Linear {}
+                        crate::config::PlanningConfig::Linear {}
                     ) {
                         Vec::new()
                     } else {

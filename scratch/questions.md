@@ -23,3 +23,8 @@ The [design](work-on-another-machine-name.md) owns current remaining work.
 Earlier choices/evidence remain at
 `ae96102580e442fe582dd17ce5e6fef9b8cee69d:scratch/questions.md` and the design's
 historical references. They do not reinstate superseded mechanisms.
+
+Sync resolution (2026-10-10): retain main’s checkout-owned Wave Markdown and
+new AgentProcess/module paths, while preserving the typed planning writer and
+optional placement. Wave registration now captures through that writer; Workflow
+definitions remain stored separately. No transport or delivery authority changes.

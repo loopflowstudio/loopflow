@@ -1,7 +1,7 @@
 //! SQLite persistence for Project and Tasks.
 
 use super::planning_write::{self, PlanningEdit as Edit};
-use crate::engine::planning_exchange::PlanningKind;
+use crate::planning_exchange::PlanningKind;
 use std::path::PathBuf;
 
 // Product writes read before they write (for example, validating parent Work),

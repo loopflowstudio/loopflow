@@ -718,7 +718,7 @@ impl SqliteStore {
         planning_write::create(
             &tx,
             wave.repo(),
-            crate::engine::planning_exchange::PlanningKind::Wave,
+            crate::planning_exchange::PlanningKind::Wave,
             wave.id().as_str(),
             &edits,
         )?;
@@ -1927,7 +1927,7 @@ impl SqliteStore {
             )?;
             planning_write::local(
                 &tx,
-                crate::engine::planning_exchange::PlanningKind::Wave,
+                crate::planning_exchange::PlanningKind::Wave,
                 update.wave_id.as_str(),
                 &[
                     planning_write::PlanningEdit::WaveName(name.into()),

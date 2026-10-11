@@ -4,7 +4,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::engine::git::{is_ancestor, is_clean, ref_exists, rev_parse};
+use crate::git::{is_ancestor, is_clean, ref_exists, rev_parse};
 use crate::ops::{OpsError, OpsResult};
 use crate::store::Store;
 use crate::work::task::Task;
@@ -52,7 +52,7 @@ impl TaskSource {
 
     pub fn require_checkout(&self, task: &Task) -> OpsResult<()> {
         let worktree = task.worktree()?;
-        let branch = crate::engine::git::current_branch(worktree)?;
+        let branch = crate::git::current_branch(worktree)?;
         if branch.as_deref() != Some(&self.branch) || !is_ancestor(worktree, &self.commit, "HEAD")?
         {
             return Err(task_error(format!("Task {} needs branch {} at commit {}; run `lf sync` in {} before continuing; existing work is preserved", self.identifier, self.branch, self.commit, worktree.display())));
@@ -82,7 +82,7 @@ fn require_pushed_code(repo: &Path, issue: &str, branch: &str, commit: &str) -> 
             issue, branch
         )));
     }
-    if !crate::engine::git::commit_exists(repo, commit)? || !is_ancestor(repo, commit, &remote)? {
+    if !crate::git::commit_exists(repo, commit)? || !is_ancestor(repo, commit, &remote)? {
         return Err(task_error(format!(
             "Task {} commit {} is missing from origin/{}; push it from the source machine first",
             issue, commit, branch

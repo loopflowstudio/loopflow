@@ -1,7 +1,7 @@
 //! The planning write boundary shared by local operations and imports.
 //! Callers own their transaction and local delivery evidence; this writer changes
 //! only planning columns and captures local mutations in that same transaction.
-use crate::engine::planning_exchange::{PlanningKind, PlanningMutation, PlanningObject};
+use crate::planning_exchange::{PlanningKind, PlanningMutation, PlanningObject};
 use crate::store::{StoreError, StoreResult};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -501,10 +501,10 @@ pub(crate) fn create(
 mod tests {
     use super::{create, local, PlanningEdit as Edit};
     use crate::durable::{ProjectId, TaskId};
-    use crate::engine::planning_exchange::PlanningKind;
-    use crate::engine::planning_git::PlanningDestination;
     use crate::id::WaveId;
     use crate::planning::NewTask;
+    use crate::planning_exchange::PlanningKind;
+    use crate::planning_git::PlanningDestination;
     use crate::pm::PmItemUpdate;
     use crate::store::sqlite::SqliteStore;
     use crate::work::task::comment::{TaskComment, TaskCommentAuthor};
@@ -677,7 +677,7 @@ mod tests {
 
     #[test]
     fn rejected_selection_retains_history_without_becoming_an_observed_parent() {
-        use crate::engine::planning_exchange::{PlanningMutation, PlanningObject};
+        use crate::planning_exchange::{PlanningMutation, PlanningObject};
         use serde_json::json;
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();

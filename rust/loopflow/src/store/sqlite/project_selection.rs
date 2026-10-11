@@ -4,8 +4,8 @@ use rusqlite::{params, Connection, OptionalExtension};
 use super::planning_write::{self, PlanningEdit as Edit};
 use super::SqliteStore;
 use crate::durable::ProjectId;
-use crate::engine::planning_exchange::PlanningKind;
 use crate::id::WaveId;
+use crate::planning_exchange::PlanningKind;
 use crate::pm::PmProject;
 use crate::store::{PlanningLocks, StoreError, StoreResult};
 

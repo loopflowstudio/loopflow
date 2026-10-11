@@ -8,7 +8,7 @@ use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-use loopflow::engine::planning_git::{PlanningDestination, PlanningGit, PlanningPublication};
+use loopflow::planning_git::{PlanningDestination, PlanningGit, PlanningPublication};
 use loopflow::store::{open_ephemeral_store, PeerPlanningStatus, StorageConfig, Store};
 use loopflow_test_support::TestRepo;
 use rusqlite::{params, Connection};

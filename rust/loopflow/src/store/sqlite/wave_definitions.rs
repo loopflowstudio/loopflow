@@ -10,7 +10,12 @@ use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
 use crate::work::project::Project;
 
-use super::{durable, SqliteStore};
+use super::{
+    durable,
+    planning_write::{self, PlanningEdit as Edit},
+    SqliteStore,
+};
+use crate::planning_exchange::PlanningKind;
 
 impl SqliteStore {
     /// Provision a Wave hierarchy without a provider, preserving existing authored files.
@@ -59,7 +64,16 @@ impl SqliteStore {
                 None => {
                     let wave = authored_id.unwrap_or_default();
                     let now = now_unix();
-                    tx.execute("INSERT INTO waves(id,name,repo,created_at,parent_wave_id) VALUES(?1,?2,?3,?4,?5)", params![wave, part, repo, now, parent])?;
+                    planning_write::create(
+                        &tx,
+                        &repo,
+                        PlanningKind::Wave,
+                        wave.as_str(),
+                        &[
+                            Edit::WaveName(part.into()),
+                            Edit::WaveParent(parent.as_ref().map(ToString::to_string)),
+                        ],
+                    )?;
                     durable::create_wave_work(&tx, &wave, now)?;
                     wave
                 }

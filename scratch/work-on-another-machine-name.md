@@ -114,3 +114,5 @@ Mixed receipt recovery: `e37099e50`/`231e75898`. Native Codex exchange used synt
 Responses and retained a live Session plus a subsequent turn; its Workflow was
 seeded, not a running edge. It proves neither configured accounts nor the new route.
 Release's operation-entry lesson still applies: a helper-only pass is not dispatch.
+
+Sync check: `cargo test -p loopflow --lib edits_imports_and_failed_saves_share_atomic_planning_without_execution` passed (1 test; LF_* cleared, stdin closed); broader verification remains with gate/CI.

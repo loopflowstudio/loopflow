@@ -223,7 +223,7 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"inspected"
         "Remote placement must not invent publication"
     );
     assert_eq!(
-        loopflow::engine::worktrees::list_worktrees(&target.path().join("repo"))
+        loopflow::git::worktrees::list_worktrees(&target.path().join("repo"))
             .unwrap()
             .len(),
         2
@@ -233,7 +233,7 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"inspected"
         .lines()
         .all(|path| Path::new(path) == task.worktree().unwrap()));
     assert_eq!(
-        loopflow::engine::git::current_branch(task.worktree().unwrap())
+        loopflow::git::current_branch(task.worktree().unwrap())
             .unwrap()
             .as_deref(),
         Some(branch)
@@ -245,7 +245,7 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"inspected"
         "keep local work",
     )
     .unwrap();
-    let retained_head = loopflow::engine::git::rev_parse(task.worktree().unwrap(), "HEAD").unwrap();
+    let retained_head = loopflow::git::rev_parse(task.worktree().unwrap(), "HEAD").unwrap();
     repo.create_file("implementation.txt", "new pushed implementation\n");
     repo.stage_all();
     repo.commit("Further source work");
@@ -258,7 +258,7 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"inspected"
         "{error}"
     );
     assert_eq!(
-        loopflow::engine::git::rev_parse(task.worktree().unwrap(), "HEAD").unwrap(),
+        loopflow::git::rev_parse(task.worktree().unwrap(), "HEAD").unwrap(),
         retained_head
     );
     assert_eq!(
@@ -309,14 +309,14 @@ fn missing_remote_branch_or_commit_is_named_without_creating_a_task() {
     );
     assert!(runtime.block_on(store.list_tasks(None)).unwrap().is_empty());
     assert_eq!(
-        loopflow::engine::worktrees::list_worktrees(repo.path())
+        loopflow::git::worktrees::list_worktrees(repo.path())
             .unwrap()
             .len(),
         1
     );
     assert_eq!(repo.head_sha(), unpublished);
     assert_eq!(
-        loopflow::engine::git::rev_parse(repo.path(), &format!("origin/{branch}")).unwrap(),
+        loopflow::git::rev_parse(repo.path(), &format!("origin/{branch}")).unwrap(),
         initial
     );
     assert_eq!(

@@ -1,6 +1,6 @@
-use crate::engine::planning_exchange::PlanningObject;
+use crate::planning_exchange::PlanningObject;
 
-use crate::engine::planning_git::PlanningDestination;
+use crate::planning_git::PlanningDestination;
 
 use super::{run_sqlite, Store, StoreResult};
 

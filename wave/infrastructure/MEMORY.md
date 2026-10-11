@@ -633,9 +633,8 @@ losers and uncertainty. Gate/installation remain unproved.
 
 Jack accepted the full One Work audit; partial work is not review-ready.
 Canonical Projects retain IDs, bindings and rank. Typed acquisition and one Markdown
-parser replace model patching, not provider projections. Prose still lacks acquisition,
-ordinary saves and Linear delivery; an inbound field alone leaves missing receipt
-baselines. Omission is not empty content or settlement. Git recovery reads the journal;
+parser replace model patching, not provider projections. Prose replacement preserves managed fields; acquisition,
+saves and receipts remain unfinished. Omission is not empty content or settlement. Git recovery reads the journal;
 candidates prove no application/publication, and read errors retain cached content.
 
 Cron retains installed ownership and failure exits ([evidence](release/MEMORY.md)).

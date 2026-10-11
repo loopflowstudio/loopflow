@@ -203,7 +203,8 @@ Source reconciliation at `ba8dc94830` (2026-10-10) confirms that Linear's
 `ProjectNode::into_pm_project` still drops that prose, `PmProject` cannot retain
 it, and `project_accepted_planning` emits no `ProjectDescription`. The shared
 `ProjectDocument` now supplies both parsed fields and source ranges; migration
-already extracts prose with `rewrite(None, "")`. No second parser is needed.
+extracts prose with `ProjectDocument::description()`. The former optional-field
+`rewrite(None, "")` overload is removed; managed-field rewrites require a field.
 
 The missing behavior crosses more than the adapter:
 
@@ -215,10 +216,24 @@ The missing behavior crosses more than the adapter:
   unobserved field need distinct evidence, including retained pre-cut observations.
 - `edit_project` currently saves name/summary; `update_project_content` saves
   workflow/KRs/targets. Neither creates a prose receipt, and
-  `LinearClient::project_field_input` rejects `description`. Typed local/Git prose
-  persistence therefore does not establish an ordinary local-save/Linear round
-  trip. The accepted common-writer reduction includes the save, baseline, delivery
+  the adapter alone now accepts `description` for content replacement. Typed local/Git
+  persistence and that adapter therefore do not establish an ordinary local-save/Linear
+  round trip. The accepted common-writer reduction includes the save, baseline, delivery
   and readback paths, without overwriting the independently owned managed fields.
+
+The outbound Markdown boundary now replaces prose through the existing parsed
+field ranges, retaining workflow/KR/target source spans. Its focused test covers
+empty replacement and fenced examples; declarations or unclosed fences that would
+change managed fields refuse before delivery. This is an internal checkpoint,
+not the requested coherent save/acquisition/receipt/readback cut. Do not extend the
+retiring PmProject domain view merely to carry prose: the concrete observation and
+canonical-reader reduction must own the missing evidence.
+
+Review found one remaining composition requirement: Markdown separators contribute
+whitespace to extracted prose. Save, acquisition and receipts must agree on a
+canonical boundary-whitespace policy before wiring this replacement into ordinary
+writes; otherwise readback can manufacture a conflict with the saved value. Existing
+migration extraction preserves original bytes. No normalization migration is claimed.
 
 `ProjectNode` requires the content/description JSON keys through explicit
 `Option::deserialize`; null becomes empty and omission currently fails decoding.
@@ -299,16 +314,14 @@ Earlier baseline detail: `c8fe4628a:scratch/work-on-another-machine-name.md`.
   cut. Regenerate them after the entire accepted reduction, before review-only
   republication. No readiness or landing follows from this persistence checkpoint.
 
-Checks: `cargo build -p loopflow --bin lf`, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, and LF-scrubbed `cargo test -p loopflow --lib` filters `project_document`, `project_markdown`, `project_content`, `structured_project_conversion_refuses_unreadable_criteria_without_losing_original` pass; gate owns the affected/materialized matrix. Earlier typed-field checks: `9b6fe15676:scratch/work-on-another-machine-name.md`.
+Checks: `cargo build -p loopflow --bin lf`, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, LF-scrubbed `cargo test -p loopflow --lib project_markdown` (5 tests) and `git diff --check` pass; gate owns composed/materialized acceptance. Earlier parser/conversion checks: `939deb7073:scratch/work-on-another-machine-name.md`.
 
-Context: authored memory/scratch fit. `lf context --skill realign` reports the
-generated Task seed/steers and workspace manifest at 19,387 tokens (3,387 over
-16,000). Complete source:
-`.lf/tmp/context/c8f47cdc1e02c0a7387237774905a917015268c210ff8d254e2b159a05234531.md`.
-Retained steers and the generated file manifest own that excess; authored-note
+Context: authored memory/scratch fit. `lf context --skill implement` reports the
+generated Task seed/steers and workspace manifest at 19,394 tokens (3,394 over
+16,000); full source `.lf/tmp/context/31f41f1e920e351177aa6506584315bc7a40aad3665bbda3b973441a8167e281.md`.
+Retained Task history and the generated manifest own the excess; authored-note
 curation cannot remove it. No history or limits changed.
 
-Realign check: `git diff --check` passes; source inspection confirms the missing prose save/baseline/delivery paths; no code changed, broader verification remains with gate.
 
 ## Delete — do not maintain
 

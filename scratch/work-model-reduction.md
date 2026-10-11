@@ -62,7 +62,8 @@ At `41378adacf`, `PmProject` also lacks authored description and accepted acquis
 emits no `ProjectDescription` edit. Local persistence/Git fidelity and Linear
 in-place Markdown preservation are separate proofs, not end-to-end prose acquisition.
 At `ba8dc94830`, ordinary Project edits also lack a prose receipt and Linear field
-delivery rejects `description`. The pursuit design now traces the complete
+delivery rejected `description`. The adapter now supports prose replacement;
+saves, baselines, acquisition and composed readback remain open. The pursuit design traces the complete
 save/baseline/acquisition/delivery cut; adding an inbound field alone cannot finish it.
 
 ## 2. Delete the second local reading stack

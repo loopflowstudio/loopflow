@@ -22,12 +22,46 @@ pub(crate) struct ProjectDocument<'a> {
 }
 
 impl ProjectDocument<'_> {
-    pub fn rewrite(&self, field: Option<ProjectField>, replacement: &str) -> String {
+    pub fn description(&self) -> String {
+        let mut prose = String::new();
+        let mut start = 0;
+        for (range, _) in &self.fields {
+            prose.push_str(&self.source[start..range.start]);
+            start = range.end;
+        }
+        prose.push_str(&self.source[start..]);
+        prose
+    }
+
+    pub fn replace_description(&self, description: &str) -> PmResult<String> {
+        // Prose and managed fields share Markdown syntax. Fenced examples are
+        // prose; an unclosed fence or live managed declaration cannot silently
+        // change the independently saved fields.
+        let mut result = description.trim_end().to_owned();
+        result.push_str("\n\n");
+        for (range, _) in &self.fields {
+            result.push_str(&self.source[range.clone()]);
+        }
+        let parsed = parse_project_document(&result)?;
+        if parsed.workflow != self.workflow
+            || parsed.krs != self.krs
+            || parsed.metric_targets != self.metric_targets
+            || parsed.description().trim() != description.trim()
+        {
+            return Err(PmError::Message(
+                "Project prose changes managed fields; put Markdown examples in closed fences"
+                    .into(),
+            ));
+        }
+        Ok(result)
+    }
+
+    pub fn rewrite(&self, field: ProjectField, replacement: &str) -> String {
         let mut result = String::new();
         let mut start = 0;
         let mut pending = Some(replacement);
         for (range, owner) in &self.fields {
-            if field.is_none_or(|field| field == *owner) {
+            if field == *owner {
                 result.push_str(&self.source[start..range.start]);
                 if let Some(replacement) = pending.take() {
                     result.push_str(replacement);

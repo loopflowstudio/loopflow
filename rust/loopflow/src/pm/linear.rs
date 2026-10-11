@@ -1120,7 +1120,7 @@ impl LinearClient {
                     .map_err(|e| PmError::Message(format!("invalid Project status: {e}")))?;
                 Ok(json!({"statusId": self.project_status_id(status).await?}))
             }
-            "workflow" | "krs" | "metric_targets" => {
+            "description" | "workflow" | "krs" | "metric_targets" => {
                 Ok(json!({"content": patch_project_field(content, field, value)?}))
             }
             _ => Err(PmError::Message(format!(
@@ -1975,6 +1975,11 @@ struct ProjectNode {
 fn patch_project_field(content: &str, field: &str, value: &Value) -> PmResult<String> {
     use project_document::ProjectField::{Krs, Targets, Workflow};
     let document = parse_project_document(content)?;
+    if field == "description" {
+        let description: String =
+            serde_json::from_value(value.clone()).map_err(|e| PmError::Message(e.to_string()))?;
+        return document.replace_description(&description);
+    }
     let (owner, replacement) = match field {
         "workflow" => {
             let workflow: String = serde_json::from_value(value.clone())
@@ -2000,7 +2005,7 @@ fn patch_project_field(content: &str, field: &str, value: &Value) -> PmResult<St
             )))
         }
     };
-    Ok(document.rewrite(Some(owner), &format!("{replacement}\n\n")))
+    Ok(document.rewrite(owner, &format!("{replacement}\n\n")))
 }
 
 fn convert_legacy_project_content(content: &str) -> PmResult<String> {
@@ -2242,6 +2247,43 @@ fn first_meaningful_paragraph(description: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn project_markdown_prose_replacement_preserves_managed_fields() {
+        let client =
+            super::LinearClient::with_base_url("fixture".into(), None, "http://127.0.0.1:1".into());
+        let source = "Old introduction.\nworkflow: code\n## Metric targets\nTarget rationale.\n```json\n[{\"metric_id\":\"proof\",\"target\":{\"kind\":\"at_least\",\"value\":1.0}}]\n```\n## KRs\nPreamble.\n- [ ] Keep this criterion\n  across lines.\n\nOld closing.\n";
+        let before = super::parse_project_document(source).unwrap();
+        for description in ["", "New authored prose.", "## Examples\n````markdown\n```yaml\nworkflow: example\n```\n## KRs\n- [x] Example only\n````\nClosing prose.\n"] {
+            let input = client.project_field_input("description", &serde_json::json!(description), source).await.unwrap();
+            let after = input["content"].as_str().unwrap();
+            let parsed = super::parse_project_document(after).unwrap();
+            assert_eq!(parsed.description().trim(), description.trim());
+            assert_eq!(parsed.workflow, before.workflow);
+            assert_eq!(parsed.krs, before.krs);
+            assert_eq!(parsed.metric_targets, before.metric_targets);
+            assert!(!after.contains("Old introduction"));
+            assert!(!after.contains("Target rationale"));
+            assert!(!after.contains("Old closing"));
+        }
+        for description in [
+            "workflow: replacement",
+            "## KRs\n- [x] Replacement",
+            "```markdown\nUnclosed example",
+        ] {
+            assert!(
+                client
+                    .project_field_input("description", &serde_json::json!(description), source)
+                    .await
+                    .is_err(),
+                "{description}"
+            );
+        }
+        assert!(client
+            .project_field_input("description", &serde_json::Value::Null, source)
+            .await
+            .is_err());
+    }
+
     #[test]
     fn project_markdown_edits_preserve_examples_and_unknown_prose() {
         for example in [

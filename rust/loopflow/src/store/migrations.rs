@@ -779,7 +779,7 @@ fn convert_project_content(conn: &rusqlite::Connection) -> StoreResult<()> {
             "UPDATE projects SET description=?2,krs=?3,metric_targets=?4 WHERE id=?1",
             rusqlite::params![
                 id,
-                document.rewrite(None, ""),
+                document.description(),
                 serde_json::to_string(&document.krs)?,
                 serde_json::to_string(&document.metric_targets)?
             ],

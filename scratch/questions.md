@@ -28,3 +28,10 @@ Sync resolution (2026-10-10): retain main’s checkout-owned Wave Markdown and
 new AgentProcess/module paths, while preserving the typed planning writer and
 optional placement. Wave registration now captures through that writer; Workflow
 definitions remain stored separately. No transport or delivery authority changes.
+
+Prose boundary (2026-10-10): an outbound prose replacement refuses live managed
+Markdown declarations and unclosed fences rather than changing saved workflow,
+KRs or targets. Closed fenced examples remain supported. This is a reversible
+implementation choice, not Jack Heart's UX approval. Before composing ordinary
+saves and readback, use one whitespace policy for prose values and receipt
+baselines; preserve released migration bytes independently.

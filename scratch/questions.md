@@ -37,7 +37,7 @@ The typed local writer/journal now shares WorkEdit. Linear receipt/creation base
 historical follow-through effects and cron conversion remain before gate/republication. Earlier acquisition/fixture review findings:
 `1930805f40:scratch/questions.md`; no installation or stopped-Flow replay occurred.
 
-## Unresolved operator review — October 11
+## Resolved store-owner review and remaining cut — October 11
 
 The moved `ops/task.rs::resolve_saved_task` now uses the shared fallible
 `planning_sync::planning_store`. This restores the previous store-opening semantics;

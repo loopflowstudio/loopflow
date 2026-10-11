@@ -182,7 +182,9 @@ Linear, and Linear refresh skips unmapped local Projects without changing them.
 Existing credential fencing, receipt recovery, lock names and refresh ages remain.
 
 `dac4cb1ba6` completed the public acquisition API cut; `06e95d98fe` removed the
-PM facade. Supplied feedback based on `b6df256d0f` predates both. Remaining:
+PM facade. `5a8ae4cdb6` and `c7bb8a58e0` then completed the typed journal and
+concrete observation/projection owners; feedback based on `6b7015d056` predates
+those cuts. Remaining:
 Linear receipt/creation baseline reduction, ordinary follow-ups and one cron list;
 materialized/headless affected gate and fresh +/- HTML review before review-only
 republication. Populated Session/attachment preservation is covered below. Concrete adapter naming alone does not
@@ -293,7 +295,8 @@ indexes support lookup; private writer-derived table routing preserves destinati
 history. Parent-first creation, observed-versus-applied heads and losing values
 remain. `store/sqlite/planning.rs` is deleted: Linear acceptance owns projection,
 Linear observations own invalidation/evidence, and field delivery owns accepted
-revision eligibility. Receipt translation and creation's generic baseline remain,
+revision eligibility. Receipt translation and generic creation baselines remain
+(Project still serializes its whole record; Task captures only creation fields),
 followed by ordinary follow-ups and cron; this is not audit completion.
 
 Cron conversion must retain the installed owner independently of file location.
@@ -331,8 +334,9 @@ precede republication.
 Prior checks and fixture limits: `6b7015d056` at this path. The earlier nextest
 leaky-test report for `unreviewed_backlog_remains_while_started_work_moves` remains
 unexplained and belongs to gate; no retry or timeout adjustment was added.
-Current check: `cargo fmt`, LF-cleared `cargo clippy --all-targets -- -D warnings`, CLI build, focused nextest writer/migration/Linear acceptance/exchange/Git/DTO/foreground cases and Swift DTO tests (30) pass across targeted runs; stale migration-frontier, Process-column and streaming-provider fixtures were repaired without weakening assertions. Full materialized/headless gate remains after the audit.
+Reused source checks at `c7bb8a58e0`: `cargo fmt`, LF-cleared `cargo clippy --all-targets -- -D warnings`, CLI build, focused nextest writer/migration/Linear acceptance/exchange/Git/DTO/foreground cases and Swift DTO tests (30) pass across targeted runs; stale migration-frontier, Process-column and streaming-provider fixtures were repaired without weakening assertions. Full materialized/headless gate remains after the audit.
 Additional intermittent nextest leaks: `flow_compositions_round_trip_distinct_compositions_and_required_children` and `due_dates_enrich_absent_history_but_preserve_observed_null_at_equal_revision`; causes unresolved, retained for gate.
 
+Reconciliation check: `git diff --check` and `lf context` pass; source checks reused, full affected materialized/headless gate deferred until the audit is complete.
 
 Transport evidence: `0181133849` at this path; earlier simulated adoption: `5960415b3:scratch/remote-task-demo.md` (not real SSH or integrated acceptance).

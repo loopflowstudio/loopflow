@@ -9,7 +9,7 @@ approval from Jack. This is accepted scope, with conditional deletions identifie
 
 This audit and [design](work-on-another-machine-name.md) share one delivery scope.
 Canonical readers, concrete observation columns and private acquisition exist.
-Remaining: Linear receipt/projection reduction, ordinary follow-ups and one cron list. Concrete
+Remaining: Linear receipt/creation-baseline reduction, ordinary follow-ups and one cron list. Concrete
 bindings are implemented (§14). All precede Jack Heart's next
 review of PR #1491. Publication is review-only; landing, installation and export
 of actual Work to the public repository remain unauthorized.
@@ -174,8 +174,9 @@ round trips; parent-first creation and per-record import savepoints remain.
 Causal parents, competing values, uncertain effects and routing evidence survive.
 Only the Task draft changed; released SQL remains immutable.
 
-**Still delete:** receipt string-field translation/normalization and creation's
-whole-model baseline. `WorkValue::with_value` remains solely for pending Linear
+**Still delete:** receipt string-field translation/normalization and generic
+creation baselines. Project creation serializes the whole Project; Task creation
+already restricts its baseline to creation fields, excluding execution. `WorkValue::with_value` remains solely for pending Linear
 receipt decoding; remove it with that cut. Team/Initiative lists and comment
 authors remain typed. Populated conversion and repeated import fixtures retain
 Session turns, claims, activity, capture reservations and cancellation uncertainty.
@@ -287,6 +288,17 @@ to `linear/acceptance.rs`; invalidation, evidence and revision parsing to
 `linear/observations.rs`; accepted-revision delivery eligibility to
 `sqlite/planning_changes.rs`. Receipt translation and creation baseline reduction
 remain; deleting the module does not finish the audit.
+
+October 11 source reconciliation at `c7bb8a58e0`: `PlanningChanges::record`,
+`baseline`, `normalize` and `reconcile_edits` still address receipt values by
+strings/JSON; `linear_field` maps the typed values back to those names.
+`PlanningExport.model` and `attach_in` iterate a generic creation map. The next
+cut replaces these translations with typed retained values while preserving the
+captured provider input, sequence boundary, baselines and readback semantics.
+An attempted creation's original values must survive later local saves and
+provider changes; reconstructing its baseline from current Work would lose that
+boundary. Released receipts require populated conversion, not a compatibility
+reader for an unshipped Git format.
 
 Do not unify creation, comments, ordering, deletion and disposition into a new
 universal effect lifecycle merely for symmetry. Their existing receipts,

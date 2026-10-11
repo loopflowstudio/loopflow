@@ -616,9 +616,8 @@ acceptance remain at
 
 Jack Heart selected Linear, shared or default user-keyed Git per repository.
 One typed writer owns local/imported Work; outages buffer without fallback/election.
-Execution/attempts stay local; retain causal losers and uncertainty. Before review:
-finish Linear receipts, ordinary follow-ups and cron. The generic PM facade is removed;
-Task edits/comments and planning exchange now have domain/planning owners.
+Execution/attempts stay local; retain causal losers and uncertainty. The generic
+PM facade is removed; Task edits/comments and exchange have concrete owners.
 
 Canonical readers use Work and narrow retained claims. Delivery needs accepted
 revision plus archive/membership eligibility; foreign facts grant no ownership.
@@ -632,7 +631,8 @@ membership must retain its dispute marker even when Work acceptance rolls back.
 Concrete Linear bindings are separate from repository transport selection.
 Populated fixtures prove stored Session/control preservation, not provider control.
 SQLite/Git share typed mutations; duplicate fields and object/kind types are gone.
-Linear owns observation/projection; receipt translation remains.
+Linear owns observation/projection. Creation baselines retain captured values,
+never current Work: later saves and changed readbacks must not rewrite an attempt.
 Jack Heart excludes old-version support; an unshipped Git encoding needs no dual
 decoder. Released SQLite preservation and selected-format causal history remain
 separate obligations. No configured old-ref conversion need was established.
@@ -645,7 +645,6 @@ planning draft; shared Work conversion preserves local liveness/placement.
 [Plan](../../scratch/work-on-another-machine-name.md) owns remaining work.
 Release requires cron conversion to preserve installed owner, child-held locks,
 dues and nonzero operation failures. Files grant no activation/export authority.
-Prior: `41378adacf:wave/infrastructure/MEMORY.md`.
 
 ## Planning and launch preservation (curated 2026-10-02)
 

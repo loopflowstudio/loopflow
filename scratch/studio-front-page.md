@@ -620,3 +620,5 @@ strip links to its own site in a new tab.
 - Jack Heart: "Cut All telem..." → "All telemetry is local." removed from the `x11` closing text, which now reads "`lf` has no servers. Private, secure remote jobs and telemetry made easy through `ssh`."
 
 - Jack Heart: "reverse the 2 sentences" → the `x11` closing text reads "Private, secure remote jobs and telemetry made easy through `ssh`. `lf` has no servers."
+
+- Jack Heart: "cut the lf has no servers" → the `x11` closing paragraph is one sentence: "Private, secure remote jobs and telemetry made easy through `ssh`."

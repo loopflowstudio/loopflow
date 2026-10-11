@@ -180,7 +180,7 @@ Markdown parsing stays private in `pm/project_document.rs`. One `ProjectDocument
 now supplies parsed fields and source ranges to both Linear and migration;
 `LinearProjectFields`, its parser/validation forwarding and test-only serialization
 are deleted. Field replacement renders only the selected typed value rather than
-mutating a second content model. Prose acquisition is still incomplete.
+mutating a second content model. The composed prose path is described below.
 Rotation compares
 retained JSON values without rewriting original receipt bytes; changed requests
 still refuse. The public edit fixture exposed a raw-SQL selection inconsistent
@@ -200,79 +200,51 @@ Project save compression removes `write_content` and the parallel hand-built
 receipt values. Name/summary, workflow selection, content edits and rotation use
 one typed edit slice for receipts and the common writer, sharing acquisition's
 Linear field mapping. Rotation no longer reconstructs PM Project/Task records:
-its membership check supplies the exact previous Project. No schema or receipt
-format changes; prose acquisition and ordinary prose saves remain unfinished.
+its membership check supplies the exact previous Project. The later prose cut below extends receipts in this Task’s single draft;
+canonical observation ownership remains unfinished.
 
-### Next coherent cut: Project prose acquisition and receipts
+### Project prose: composed behavior and remaining ownership cut
 
-Source reconciliation at `ba8dc94830` (2026-10-10) confirms that Linear's
-`description` is the short summary; authored prose comes from `content`.
-`ProjectNode::into_pm_project` still drops that prose, `PmProject` cannot retain
-it, and `project_accepted_planning` emits no `ProjectDescription`. The shared
-`ProjectDocument` now supplies both parsed fields and source ranges; migration
-extracts prose with `ProjectDocument::description()`. The former optional-field
-`rewrite(None, "")` overload is removed; managed-field rewrites require a field.
+October 10 implementation adds ordinary `lf project edit --description` saves,
+selected Linear delivery and acquired receipt settlement through the typed writer.
+Boundary whitespace is trimmed; prose segments separated by managed Markdown are
+joined with one blank line. Migration still preserves original prose bytes.
+Managed Workflow/KR/target spans and fenced examples survive outbound replacement.
+Full content and explicit null/empty values are observed; omitted full-response
+content fails decoding without settling a receipt or replacing canonical Work.
 
-The missing behavior crosses more than the adapter:
+The common save, baseline, delivery and readback path now has focused composed
+proof: unchanged baselines preserve saves, an older acknowledgment rebases but
+never clears its successor, and conflicting Linear values retire delivery while
+retaining both values. Stale and foreign observations cannot write prose or settle
+receipts. The fixture also retains a populated Workflow, unknown Process and Task
+placement. Public offline CLI proof covers both transport configurations and mapping
+states. These source fixtures establish no installation or real two-machine proof.
 
-- Acquisition must retain the observed prose with its revision and apply it through
-  the common writer, under the canonical Project ID and existing ownership checks.
-- `PlanningChanges::observation` still reads the serialized provider record.
-  `record` indexes `body[field]`, so adding only an inbound edit would leave a
-  missing prose baseline represented as JSON null. A supplied empty value and an
-  unobserved field need distinct evidence, including retained pre-cut observations.
-- `edit_project` currently saves name/summary; `update_project_content` saves
-  workflow/KRs/targets. Neither creates a prose receipt, and
-  the adapter alone now accepts `description` for content replacement. Typed local/Git
-  persistence and that adapter therefore do not establish an ordinary local-save/Linear
-  round trip. The accepted common-writer reduction includes the save, baseline, delivery
-  and readback paths, without overwriting the independently owned managed fields.
+Review exposed a separate retained-evidence gap: full observation → newer partial
+observation → local save lost the prose baseline. `pm_projects.prose_json` now owns
+its value, original provider revision and acquisition age. Partial Project facts
+advance independently without refreshing that evidence. A later full observation
+at the partial revision can complete the field knowledge. Receipt baselines use the
+field's revision; the attempt fence still uses the current entity revision. The
+single `planning_peers` draft adds that evidence and prose receipts, preserving
+receipt bytes, identities, attempts and sequence high-water marks. Released SQL and
+LOO-406's draft remain unchanged.
 
-Source reconciliation at `71bafc5ada` adds the delivery boundary to this cut:
-`ops/planning_delivery.rs::observe` already fetches raw content alongside
-`PmProject`, then accepts only the latter through `put_pm_project`. Raw content
-currently serves outbound patching, not retained prose evidence. The replacement
-acquisition must commit prose, its observed revision and receipt reconciliation
-with the existing ownership/staleness judgment; attaching raw prose afterward
-would let rejected or foreign observations bypass that judgment.
-`attempt_planning_field` also compares the retained provider revision before
-marking an attempt. Replacing cache-backed baselines must preserve that fence,
-not substitute the canonical Project's local write revision. Include stale and
-foreign content in the composed acquisition proof. This is remaining implementation,
-not another missing adapter fetch or permission to extend `PmProject`.
+**The structural acquisition prerequisite is not complete.** `PmProject` moved to
+concrete `pm::linear::LinearProject`, but ordinary `plan_read::project_in`,
+`PmSnapshot.projects` and `ResolvedTask.project` still use that representation.
+The local projection still substitutes provider/local IDs and cannot represent
+saved prose. Moving its name did not delete this second domain view. Complete
+canonical Project consumers and confine the observation before calling audit
+sections 1–3 complete; do not defer these dependencies to a post-review follow-up.
+Project export now reads canonical Project directly. No replaced type alias remains.
 
-The outbound Markdown boundary now replaces prose through the existing parsed
-field ranges, retaining workflow/KR/target source spans. Its focused test covers
-empty replacement and fenced examples; declarations or unclosed fences that would
-change managed fields refuse before delivery. This is an internal checkpoint,
-not the requested coherent save/acquisition/receipt/readback cut. Do not extend the
-retiring PmProject domain view merely to carry prose: the concrete observation and
-canonical-reader reduction must own the missing evidence.
-
-Review found one remaining composition requirement: Markdown separators contribute
-whitespace to extracted prose. Save, acquisition and receipts must agree on a
-canonical boundary-whitespace policy before wiring this replacement into ordinary
-writes; otherwise readback can manufacture a conflict with the saved value. Existing
-migration extraction preserves original bytes. No normalization migration is claimed.
-
-`ProjectNode` requires the content/description JSON keys through explicit
-`Option::deserialize`; null becomes empty and omission currently fails decoding.
-Keep omitted content unavailable, never an empty observation or settlement. A
-partial representation introduced during cache reduction must retain that distinction.
-No requirement to accept malformed full responses follows from partial-read safety.
-
-`9b6fe15676` already removed whole-model `PlanningChanges::reconcile<T>`.
-Acquisition now reconciles supplied typed edits; unchanged baselines preserve local
-saves, matching attempted observations rebase successors, and conflicts retain both
-values under Linear-wins. These mechanics and their focused tests are reusable,
-not proof of prose integration. String receipt addresses and provider caches remain.
-
-Acceptance for this cut reads canonical Projects and retained receipts after full,
-empty/null and omitted content; covers an unchanged baseline, an older acknowledgment
-with a newer save, and an observed Linear conflict. It also covers local save through
-outbound content replacement and readback, preserving workflow, KRs, targets and
-unrelated prose when those fields are edited. Existing local/Git fidelity and parser
-checks alone do not prove any composed Linear outcome.
+The original acquisition tracing and adapter-only proof limits are preserved at
+`a849341234:scratch/work-on-another-machine-name.md`; the in-flight review lives in
+`project-acquisition-dependency.md`. The remaining private-observation/ordinary-reader
+cut belongs here, before bindings, ordinary follow-ups, cron and the rest of the
+audit. No partial publication or readiness follows from composed prose proof.
 
 The public canonical Project reader cut is already implemented (`52e7da7f35`);
 it is not another pending wrapper replacement. Remaining `plan_read.rs` projections
@@ -334,19 +306,19 @@ Earlier baseline detail: `c8fe4628a:scratch/work-on-another-machine-name.md`.
   cut. Regenerate them after the entire accepted reduction, before review-only
   republication. No readiness or landing follows from this persistence checkpoint.
 
-Checks: `git diff --check` passes (prose-only realignment); source checks from `71bafc5ada` remain applicable, and gate owns composed/materialized acceptance.
+Checks: CLI build, seven `project_prose_` tests, public offline Project-edit fixture, fmt and all-target Clippy pass; tests are network-isolated; gate owns affected/materialized/Desktop verification.
 
-Context: authored memory/scratch fit. `lf context --skill realign` reports the
-generated Task seed/steers and workspace manifest at 19,390 tokens (3,390 over
-16,000); complete source `.lf/tmp/context/a33908f9c89493a42ac9091fe3ed3166e12d9eb0df18813ede6a46230b39604a.md`.
-Retained Task history/generated metadata owns that excess; authored-note curation
-cannot remove it. No history or limit changed.
+Context: authored memory/scratch fit. The generated Task seed/steers and workspace
+manifest reported 19,573 tokens (3,573 over 16,000), inspected at
+`.lf/tmp/context/c94fd11853cc1c1163aaf73ff366876b9ccc9decbd3eaf0135de5dc2d0abe782.md`.
+Authored-note curation cannot remove retained Task history or generated metadata;
+neither history nor a limit changed.
 
 
 
 ## Delete — do not maintain
 
-- Shared `PmProject`/`PmItem` and the second local reader: use canonical Work;
+- Ordinary `LinearProject` (formerly `PmProject`)/`PmItem` reads: use canonical Work;
   preserve prose, bindings and historical events. Public ProjectContent, plan
   wrappers, live iteration and public Issue comment/observation models are removed.
 - FollowThrough models, completion gates and dedicated UI: ordinary Tasks/comments;

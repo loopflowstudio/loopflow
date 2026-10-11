@@ -32,6 +32,8 @@ definitions remain stored separately. No transport or delivery authority changes
 Prose boundary (2026-10-10): an outbound prose replacement refuses live managed
 Markdown declarations and unclosed fences rather than changing saved workflow,
 KRs or targets. Closed fenced examples remain supported. This is a reversible
-implementation choice, not Jack Heart's UX approval. Before composing ordinary
-saves and readback, use one whitespace policy for prose values and receipt
-baselines; preserve released migration bytes independently.
+implementation choice, not Jack Heart's UX approval. Ordinary saves/readback trim boundary whitespace and join prose segments across
+managed spans with a blank line. Migration preserves original bytes. Partial
+observations retain prose value/revision/age separately from newer entity facts;
+this field evidence is not a second Work writer. These are reversible implementation
+choices, not additional UX approval.

@@ -58,22 +58,24 @@ representation before deleting the old views. Domain ProjectStatus now belongs t
 `work/project.rs`. Optional Linear IDs remain bindings, never replacement domain IDs. Keep
 optimistic revisions, timestamps, historical iteration events and legacy mappings.
 The whole Task struct remains unsuitable for exchange because it contains local data.
-At `41378adacf`, `PmProject` also lacks authored description and accepted acquisition
-emits no `ProjectDescription` edit. Local persistence/Git fidelity and Linear
-in-place Markdown preservation are separate proofs, not end-to-end prose acquisition.
-At `ba8dc94830`, ordinary Project edits also lack a prose receipt and Linear field
-delivery rejected `description`. The adapter now supports prose replacement;
-saves, baselines, acquisition and composed readback remain open. The pursuit design traces the complete
-save/baseline/acquisition/delivery cut; adding an inbound field alone cannot finish it.
+The composed prose save/delivery/acquisition path now has focused proof and explicit
+field-revision/age retention across newer partial observations. The `PmProject`
+symbol is removed, but moving it to `pm::linear::LinearProject` did not finish this
+cut: `plan_read::project_in`, `PmSnapshot.projects` and `ResolvedTask.project` still
+expose or fabricate the second Project view. Their canonical conversion and private
+observation boundary remain required here, not after review. The current pursuit
+design owns the proof and remaining cut; earlier missing-field tracing remains at
+`a849341234:scratch/work-model-reduction.md`.
 
 ## 2. Delete the second local reading stack
 
 **Removed:** `ops/project.rs::ProjectPlanning`, public `planning_project(s)` reads,
 and the Wave/roadmap Project inventory join. Selection, edit/workflow, rotation and
 CLI/Desktop Project summaries use canonical Work and explicit Linear bindings.
-The canonical list preserves shared rank rather than edit-time order.
+The canonical list preserves shared rank rather than edit-time order. Project export
+now reads that canonical owner too.
 
-**Remaining:** `store/sqlite/plan_read.rs` reconstructs `PmProject`/`PmItem` for
+**Remaining:** `store/sqlite/plan_read.rs` reconstructs `LinearProject` (formerly `PmProject`)/`PmItem` for
 Task observations and `planning_wave`. Delete these with their surviving consumers. `PmTaskRecord` / `PmTaskObservation` must cease being alternate Task
 read results, including the embedded Project clone inside a Task observation.
 
@@ -180,7 +182,8 @@ ranges. Whole-model `reconcile<T>` is deleted: Project and Task acquisition now
 reconcile the typed edits passed to the common writer. An explicit Linear field
 mapping limits receipt settlement to supplied fields; provider models are no longer
 serialized, patched and reconstructed. Task membership uses canonical Project IDs.
-This prerequisite does not complete prose acquisition or remove provider caches.
+Composed prose proof is now recorded above; the private-observation boundary and
+provider-cache reduction remain incomplete.
 
 Remaining: remove parallel edit structures that only rename the same values
 (`name`, `issue_title`, `TaskTitle`, for example), receipt string-field addressing

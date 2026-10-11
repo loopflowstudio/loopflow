@@ -1,6 +1,6 @@
 # Share Work across machines — LOO-412
 
-## Next pursuit — Jack Heart, 2026-10-10
+## Accepted scope — Jack Heart, 2026-10-10; reconciled October 11
 
 The current goal includes implementation of both this existing pass and the accepted
 [deletion audit](work-model-reduction.md), in that order, then verification and a
@@ -12,7 +12,7 @@ Jack Heart requested implementation of the model review and another published
 version for review in the ongoing conversation. Continue this Task and PR #1491;
 do not land, install, start a later remote-work slice or export real Work records
 to the public repository. The [model inventory and review](work-model.md) supplies
-source references; this section is the current implementation instruction and
+source references; this section records the accepted scope and
 supersedes its earlier “proposed / not yet selected” labels for the scope below.
 The current HTML review is [work-model.html](work-model.html).
 
@@ -160,8 +160,9 @@ retains pending work; reconnect acquires before publishing. No agent turn is rep
 ## Implementation boundary — 2026-10-10
 
 TaskPlan/ProjectPlan and live Project iteration are removed. TaskComment is domain
-owned; comment observations are adapter-internal, but Project/Task observations
-still escape through ordinary readers. Project now stores description,
+owned; comment observations are adapter-internal. Public content reads return Work;
+internal acquisition/status and admission still reconstruct provider records.
+Project now stores description,
 workflow, KRs and metric targets directly. The shared local/import writer and local
 readers no longer parse/render stored Markdown; prompt assembly renders on demand.
 The one Task draft converts released content before seeding causal history, retaining
@@ -187,18 +188,15 @@ Canonical Project readers retain local IDs, optional Linear bindings, sync evide
 and shared rank. Selection, rotation and CLI/Desktop no longer join inventories.
 Exact reader-cut evidence: `b4e54f7d44:scratch/work-on-another-machine-name.md`.
 
-`7e63c994d0` derives Task/Project save and rotation receipts from the writer's
-typed edits, deleting parallel JSON construction and writer-side PM reads.
-Ordering/disposition retain distinct receipt owners. Raw-SQL selection conflicted
-with the Git journal; fixtures now bind through the writer. Full evidence:
-`7e63c994d0:scratch/work-on-another-machine-name.md`.
+`7e63c994d0` in this plan records typed save/rotation receipts, distinct ordering/
+disposition owners and the repaired fixture that bypassed the writer.
 
 ### Canonical readers and remaining acquisition cut — October 10
 
 `18520565d6`, `96607a9a46` and `eda4a98097` establish canonical Task
 creation/status/acquisition and Wave/roadmap/Work-frame summaries. Local IDs,
-explicit Linear bindings and separate acquisition validity/age survive; saved
-content and local execution no longer depend on fabricated PM views.
+explicit Linear bindings and separate acquisition validity/age survive. Saved
+content uses Work; acquisition validity and admission still depend on provider evidence.
 `planning_task`, `plan_read`, `ResolvedTask`, `ops/task_pm.rs`, `planning_wave`,
 `PmTaskSummary` and `task_planning_item` are deleted. CLI creation reloads after
 foreground exchange. Cold placement, comments, PR ownership and sweep use saved
@@ -244,14 +242,15 @@ archival, membership removal and confirmed deletion retain their meaning. Malfor
 Wave observations do not hide readable siblings or refresh ages. Scoped roadmap
 reads follow the repaired Wave address. Evidence: `f9f9da7d3a` in this plan.
 
-This pass removes the public `pm_snapshot` reader and its fixture reconstructions.
+`e3a3479df7` removed the public `pm_snapshot` reader and its fixture reconstructions.
 Tests read canonical Work and concrete observation/refresh evidence; stale-response
 fixtures retain fetched input. The empty snapshot round-trip test is deleted.
-Acquisition still carries `PmSnapshot`/`PmTaskRecord` and duplicate provider content.
-Finish its private boundary and populated conversion before deleting persistent
-owners. Same-revision archive/unresolved-membership refusal in
-`accepted_project_revision` remains required. Bindings, ordinary follow-ups, cron,
-typed journal/provider hierarchy and the exhaustive audit still precede review.
+`sqlite/children.rs::{task_acquisition,require_task_planning_identity}` still
+decode issue/Project bodies through `pm_task_observation_in` for status and
+admission. Narrow retained evidence must replace those reads alongside acquisition's
+`PmSnapshot`/`PmTaskRecord` and duplicate provider content. Populated conversion,
+same-revision archive/membership refusal, bindings, follow-ups, cron and the typed
+journal remain required before review.
 
 ### Released migration frontier — October 10
 
@@ -263,6 +262,13 @@ Populated conversion must start at this actual frontier; pre-merge fixture passe
 do not establish that boundary. The focused receipt fixture now passes, preserving
 uncertain input and sequence high-water marks, not proving full Work conversion.
 Source materialization proves no installation.
+
+Main #1523 entered at `c77e72b6b7` after the recorded checks. Its separate
+`process_terminal.sql` draft adds local Process terminal placement; it is not a
+second LOO-412 draft. AgentProcess liveness and latest-turn completion now own
+Session activity. Planning conversion must preserve these local facts; historical
+turn outcomes cannot substitute for process liveness. No new product check was
+run for this conflict-free merge; final gate includes its affected Work-watch/DTO paths.
 
 ### LOO-427 integration coordination — October 10
 
@@ -303,10 +309,11 @@ Preserve Work-keyed Desktop tabs, content-owned Machine locations, nearest-ances
 delegation for unstarted Tasks, recorded-owner admission before checkout preparation,
 started Tasks pinned to their Machine, exact pane targeting and bounded terminal I/O.
 Shared first-start admission remains LOO-414. TaskSource carries code, not relocation.
-427's `task_checkout_machine.sql` triggers reference the old planning journal;
-integration must adapt to the surviving writer, retain null inheritance, uncertain
-legacy assignments, checkout_machine_id and repository locators, and migrate from
-the actual released frontier. Never edit SQL already released by either delivery.
+427 reports its old `task_checkout_machine.sql` capture triggers replaced by
+`planning_write` integration. That reported cut must survive composition with the
+final journal: retain null inheritance, uncertain legacy assignments,
+checkout_machine_id and repository locators at the actual released frontier.
+Released SQL remains immutable.
 
 After the existing writer cut, absorb 427's `ops/task/{explain,planning_explain,
 checkout_explain}.rs` duplication: share concrete read-only decisions with execution
@@ -324,13 +331,10 @@ Managed Workflow/KR/target spans and fenced examples survive outbound replacemen
 Full content and explicit null/empty values are observed; omitted full-response
 content fails decoding without settling a receipt or replacing canonical Work.
 
-The common save, baseline, delivery and readback path now has focused composed
-proof: unchanged baselines preserve saves, an older acknowledgment rebases but
-never clears its successor, and conflicting Linear values retire delivery while
-retaining both values. Stale and foreign observations cannot write prose or settle
-receipts. The fixture also retains a populated Workflow, unknown Process and Task
-placement. Public offline CLI proof covers both transport configurations and mapping
-states. These source fixtures establish no installation or real two-machine proof.
+Composed save/readback proofs at `075f04a580` in this plan retain newer saves,
+conflict values, stale/foreign rejection, Workflow, unknown Process and placement.
+Offline CLI proof covers both transports and mapping states, not installation or
+real two-machine use.
 
 Review exposed a separate retained-evidence gap: full observation → newer partial
 observation → local save lost the prose baseline. `pm_projects.prose_json` now owns
@@ -343,8 +347,8 @@ receipt bytes, identities, attempts and sequence high-water marks. Released
 `0.13.11.001_release.sql` remains unchanged; LOO-406 has no draft after `db36f20ba8`.
 
 Private acquisition and retained provider hierarchy conversion remain prerequisites
-for audit sections 1–3. Canonical exports/readers are complete; snapshot ingestion
-still exposes Linear observations. Tracing: `a849341234` in this plan and
+for audit sections 1–3. Canonical content/export reads are implemented; internal
+acquisition and admission still reconstruct Linear observations. Tracing: `a849341234` in this plan and
 `f2ca2063b5:scratch/project-acquisition-dependency.md`. Prose proof does not satisfy
 that structural boundary or authorize partial publication.
 
@@ -391,9 +395,6 @@ Writer transport/causal proofs: `eda4a98097` in this plan.
   cut. Regenerate them after the entire accepted reduction, before review-only
   republication. No readiness or landing follows from this persistence checkpoint.
 
-Checks: LF-cleared `cargo build -p loopflow --bin lf`, `cargo clippy --all-targets -- -D warnings`, `cargo test -p loopflow --lib ops::pm:: -- --test-threads=1` (108 pass; one subprocess entry ignored), affected store/CLI/integration suites with repaired failures rerun, fmt, architecture and diff/context checks pass. Full gate/HTML/republication remain after the audit; earlier ownership checks are retained at `f9f9da7d3a` in this plan.
-
-Context: authored budgets fit. Generated Task context exceeds its 16,000-token
-limit; no authored content or limit change can resolve that overage.
+Checks: `git diff --check` and `lf context` pass (prose reconciliation only); prior build/Clippy and focused results remain at `075f04a580` in this plan, ownership proofs at `f9f9da7d3a`; full gate/HTML/republication remain after the audit.
 
 Earlier transport evidence: `0181133849` in this plan.

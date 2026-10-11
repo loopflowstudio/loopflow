@@ -1,9 +1,10 @@
 # Work model — reviewed direction
 
 2026-10-10 · LOO-412 · Jack Heart accepted the structural reduction in
-[One Work model](work-sync-redesign.html). The [deletion audit and queued pass](work-model-reduction.md)
-now supplies the exhaustive implementation map. Finish the existing passes in
-[the pursuit design](work-on-another-machine-name.md) before taking that pass.
+[One Work model](work-sync-redesign.html). The [deletion audit](work-model-reduction.md)
+supplies the exhaustive implementation map alongside
+[the pursuit design](work-on-another-machine-name.md). Both belong to this delivery
+before the next review; completed cuts remain deleted.
 Implementation owns the exact `WorkEdit` shape; no further shape approval is needed.
 
 ## One model, explicit boundaries
@@ -73,5 +74,3 @@ The original full inventory and review sequence remain in
 Its earlier “proposal” labels and TaskBrief suggestion are superseded by the
 accepted direction above. This concise account replaces duplicated historical
 inventory in launch context; the HTML retains the original detailed type map.
-The initial Markdown also survives in `/tmp/loo412-review-before-pursuit/work-model.md`
-as a local recovery copy, not the ongoing design owner.

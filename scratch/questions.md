@@ -17,8 +17,9 @@ The [design](work-on-another-machine-name.md) owns current remaining work.
   values remain. No initiating host has blanket preference over another writer.
 - Import preserves local execution. Missing placement proves nothing about work
   on another Machine; this Task builds no distributed first-start authority.
-- Only `planning_peers.sql` remains a draft after `db36f20ba8`; LOO-406/optional-PR
-  schema is released in `0.13.11.001_release.sql`. Experiments use fresh disposable
+- `planning_peers.sql` is the only LOO-412 draft; LOO-406/optional-PR schema is
+  released in `0.13.11.001_release.sql`. Main #1523 adds the separate local
+  `process_terminal.sql` draft at `c77e72b6b7`. Experiments use fresh disposable
   stores; no branch CLI writes the installed Home.
 
 Earlier choices/evidence remain at

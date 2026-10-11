@@ -626,27 +626,27 @@ execution and retains conservative cleanup. Proofs and unresolved Desktop
 acceptance remain at
 `e50dbd749e3207599f9937ce45653f4c6f33a5cd:wave/infrastructure/MEMORY.md`.
 
-## Tasks across machines (LOO-412, 2026-10-10)
+## Tasks across machines (LOO-412, 2026-10-11)
 
 Jack Heart selected Linear, shared or default user-keyed Git per repository.
 One typed writer owns local/imported Work; outages buffer without fallback/election.
 Execution/attempts stay local; retain causal losers and uncertainty. Before review:
-finish Work, private observations, typed journal, bindings, ordinary follow-ups
-and one cron list. Installation unproved.
+finish private observations, typed journal, bindings, ordinary follow-ups and cron.
 
-`94cb65b569` deletes `pm_show`; `1d97aa98b2` removes refiling/rotation's
-local-placement restriction, preserving execution admission. Portfolio reads check
-retained ownership claims in SQLite, without provider inventories. Snapshot APIs
-and acquisition hierarchy still need deletion and preservation proof. Delivery
-needs accepted revision plus archive/membership
-eligibility; foreign facts grant no ownership. Installation remains unproved.
+`e3a3479df7` removes public snapshot reads; portfolio ownership reads use
+SQLite claims. Task acquisition/admission still reconstruct provider
+records. Canonical content proves no acquisition cut. Delivery needs
+accepted revision plus archive/membership eligibility; foreign facts grant no ownership.
 
-Jack's `19116a1b`: prepare 427 on committed 412; land 427 after 412.
-No 412 landing. Preserve admission/tabs and released frontier.
+Jack's `19116a1b`: stack 427 on 412; land afterward. No 412 landing authority.
+Default-Git enrollment conflicts with 427's conservative first-start
+admission; LOO-414's authority decision remains open. Missing local placement proves
+no peer absence. Main #1523's Process terminal draft stays separate from 412's
+planning draft; shared Work conversion preserves local liveness/placement.
 [Plan](../../scratch/work-on-another-machine-name.md) owns remaining work.
-Release's inspected memory requires cron conversion to preserve installed owner,
-lock/child-descriptor identity, dues and nonzero operation failures—not infer
-authority from files. No activation/export. Prior: `41378adacf:wave/infrastructure/MEMORY.md`.
+Release requires cron conversion to preserve installed owner, child-held locks,
+dues and nonzero operation failures. Files grant no activation/export authority.
+Prior: `41378adacf:wave/infrastructure/MEMORY.md`.
 
 ## Planning and launch preservation (curated 2026-10-02)
 

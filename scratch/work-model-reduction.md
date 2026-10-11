@@ -1,19 +1,18 @@
-# One Work model — queued reduction
+# One Work model — accepted deletion audit
 
 2026-10-10 · LOO-412 · Jack Heart accepted the structural redesign in
 [work-sync-redesign.html](work-sync-redesign.html) and requested this deletion audit.
 The exact `WorkEdit` shape belongs to implementation; it requires no further design
 approval from Jack. This is accepted scope, with conditional deletions identified below.
 
-## Queue and outcome
+## Scope and outcome
 
-Continue the existing passes in [the pursuit design](work-on-another-machine-name.md)
-first, including their incomplete Project, follow-up and cron reductions. Then take
-this pass in the same Task/PR, subtracting anything those passes already deleted.
-Do not expand an in-flight implementation step, launch another writer, or restart
-its Flow merely because this document exists. This is the next scope in the design,
-not a claim that a runtime job was scheduled. Publish for Jack's next review; do not
-land, install or export actual Work into the public repository.
+This audit and [the pursuit design](work-on-another-machine-name.md) are one
+accepted delivery scope. Canonical readers are implemented; acquisition and
+provider-hierarchy reduction comes next, followed by typed edits/journal, concrete
+bindings, ordinary follow-ups and one cron list. All precede Jack Heart's next
+review of PR #1491. Publication is review-only; landing, installation and export
+of actual Work to the public repository remain unauthorized.
 
 Jack Heart requires this audit implemented before review. Earlier scratch recovery
 is preserved at `c516c61b4f` here. The later pursuit
@@ -72,8 +71,11 @@ dependencies. Task delivery reads accepted revision evidence directly from Work,
 not observed provider revision. Canonical status and summaries retain separate
 acquisition state/age. No local/provider-ID substitution remains in that reader.
 
-**Remaining:** confine `PmTaskRecord` / `PmTaskObservation` to acquisition, including
-the embedded Project observation. The public snapshot inventory reader is deleted.
+**Remaining:** `sqlite/children.rs::{task_acquisition,require_task_planning_identity}`
+still call `pm_task_observation_in`, decoding a full issue and embedded Project
+for status and admission. Replace that reconstruction with the specific retained
+membership, Team, invalidation, removal and age evidence each uses. The public
+snapshot inventory reader is deleted; these internal readers are not yet reduced.
 
 **Keep:** explicit missing, invalid, removed and unavailable evidence. A failed
 provider read must not erase cached Work or convert unknown state into absence.
@@ -246,7 +248,7 @@ are deleted. Status sync refreshes before its canonical read; acquisition return
 no inventory. `plan_snapshot_read` still governs Task acquisition.
 `PmPortfolioValidator` and ordinary portfolio reconstruction are deleted. The
 store checks narrow retained ownership claims directly; no inventory leaves it.
-The public `pm_snapshot` reader and all callers are removed in this pass. Fixtures
+`e3a3479df7` removed the public `pm_snapshot` reader and all callers. Fixtures
 read canonical Work or concrete retained evidence and replay fetched inputs;
 private acquisition inventory and persistent provider hierarchy remain required cuts.
 
@@ -382,7 +384,9 @@ starting a competing pursuit. Each cut deletes its replaced paths in the same di
 Before dropping persistent state, inventory the released frontier and current
 Task-owned draft. Main merged at `db36f20ba8` materialized LOO-406 and optional
 Task PR into `0.13.11.001_release.sql`; `planning_peers.sql` is the sole remaining
-draft. Preserve released SQL and edit that draft, with
+Task-owned draft. Main #1523, merged at `c77e72b6b7`, also supplies
+`process_terminal.sql`; it owns local terminal placement and stays separate.
+Preserve released SQL and edit only the Task-owned draft, with
 populated conversion fixtures for Work IDs, legacy external mappings, prose,
 criteria, selection, order, uncertain delivery and historical events.
 

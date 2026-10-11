@@ -590,3 +590,5 @@ strip links to its own site in a new tab.
 - Jack Heart: "put the paragraph at the very top, more in the style of super logical's thesis?" → in `x10`, the three paragraphs sit directly under the header and above the video slot, set as large serif prose in one narrow column. "Stay in flow…" stays as the heading over the two columns and the three flows. Claude read "the paragraph" as all three.
 
 - Jack Heart: "instead of \", use bold or italics?" → in the `x10` thesis, Waves and Tasks are italic, not quoted.
+
+- Jack Heart, on the thesis: "sans-serif" → the three paragraphs at the top of `x10` are set in the site's sans face.

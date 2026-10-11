@@ -159,7 +159,7 @@ main = f'''
 </section>
 '''
 extra = '''
-.home-page .thesis{padding:34px 0 8px;max-width:800px}.home-page .thesis p{font:400 clamp(21px,1.9vw,26px)/1.42 var(--font-serif);letter-spacing:.005em;color:#2a2523;margin:0 0 20px}.home-page .thesis p:last-child{margin-bottom:0}
+.home-page .thesis{padding:34px 0 8px;max-width:800px}.home-page .thesis p{font:400 clamp(18px,1.5vw,21px)/1.6 var(--font-sans);color:#2a2523;margin:0 0 20px}.home-page .thesis p:last-child{margin-bottom:0}
 .home-page .pair .say:has(+ .say){margin-bottom:16px}
 .home-page .cli-part{padding-top:72px}.home-page .cli-part h2{font-size:clamp(30px,3.2vw,42px);margin:0 0 26px}.home-page .cli-part h2 code{font-size:.9em}
 .walk .turn{margin-top:12px!important;padding:10px 14px;border-radius:8px;background:#fff;border:1px solid var(--border);font-size:14px;line-height:1.55;color:#333}

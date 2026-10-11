@@ -634,17 +634,15 @@ remote-edit race. LOO-414 owns exclusive first-start authority: missing local
 placement proves no peer absence. Jack's `19116a1b` stacks 427 on 412 for later
 landing; this approval does not settle that separate authority.
 
-FollowThrough and its completion ritual, CLI/DTO/UI and finish-delivery Flow are
-removed. Ordinary Tasks/comments replace them; private recovery preserves filing
-IDs and uncertain effects, committing Tasks before linking comments. One config
+Ordinary Tasks/comments replace FollowThrough and its ritual/CLI/DTO/UI/Flow.
+Private recovery retains filing IDs/uncertainty, committing Tasks before comments. One config
 cron list replaces WaveCronDef/GOAL declarations. Conversion retains labels,
 Machine, activation, dues, receipt classifications and child-held locks. Release
-remains Infrastructure-owned. Main #1523's Process terminal draft stays separate
-from 412's draft; Work conversion preserves local liveness and placement.
+remains Infrastructure-owned. Main #1523's terminal draft stays separate; conversion retains local liveness/placement.
 
-The materialized gate initially failed 30/2,416 Rust tests. Repairs and affected
-rechecks pass, including populated conversion, public simulated remote dispatch,
-Session preservation and headless Desktop; the full matrix was not rerun.
+Materialized gate: 30/2,416 Rust failures; repaired affected checks pass, including
+conversion, simulated remote dispatch, Session preservation and headless Desktop.
+No full rerun.
 Unchanged website overflow keeps the aggregate gate red. Source-built offline
 Task/comment saves and readback pass. Browser rendering was unavailable. Real SSH, live Linear continuity, installation
 and schedule activation remain unproved and unauthorized. Hosted checks remain required.

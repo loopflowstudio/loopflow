@@ -8,7 +8,8 @@ use crate::agent::{run_agent, AgentCapabilities, AgentConfig, ProcessConfig};
 use crate::config::load_config_or_default;
 use crate::flow::load_skill;
 use crate::git::{
-    commit, current_branch, git_stdout, is_clean, push, push_with_upstream, stage_all,
+    commit, current_branch, git_stdout, git_stdout_inheriting, is_clean, push, push_with_upstream,
+    stage_all,
 };
 
 use crate::ops::error::{OpsError, OpsResult};
@@ -62,19 +63,10 @@ pub fn commit_selected(repo: &Path, paths: &[String], message: Option<&str>) -> 
     let persistent = crate::git::worktrees::is_persistent_worktree(repo)?;
     let directory = tempfile::tempdir()?;
     let index = directory.path().join("index");
-    let run = |args: &[&str]| -> OpsResult<()> {
-        let output = std::process::Command::new("git")
-            .current_dir(repo)
-            .env("GIT_INDEX_FILE", &index)
-            .args(args)
-            .output()?;
-        if !output.status.success() {
-            return Err(OpsError::Message(
-                String::from_utf8_lossy(&output.stderr).into_owned(),
-            ));
-        }
-        Ok(())
+    let inherit_index = |command: &mut Command| {
+        command.env("GIT_INDEX_FILE", &index);
     };
+    let run = |args: &[&str]| git_stdout_inheriting(repo, args, &inherit_index);
     run(&["read-tree", "HEAD"])?;
     let selected = paths
         .iter()
@@ -83,13 +75,24 @@ pub fn commit_selected(repo: &Path, paths: &[String], message: Option<&str>) -> 
     if !paths.is_empty() {
         let mut args = vec!["add", "-A", "--"];
         args.extend(selected.iter().map(String::as_str));
-        args.push(":(top,exclude)scratch");
+        if persistent {
+            args.push(":(top,exclude)scratch");
+        }
         run(&args)?;
     }
     if persistent {
         run(UNTRACK_SCRATCH)?;
     }
-    run(&["commit", "-m", message])?;
+    if run(&["diff", "--cached", "--name-only"])?.trim().is_empty() {
+        return Err(OpsError::Message(if persistent {
+            "Nothing selected to commit. scratch/ stays local in persistent workspaces; \
+             move durable notes outside scratch/ and select those files."
+                .into()
+        } else {
+            "Nothing selected to commit; edit the selected files or select changed paths.".into()
+        }));
+    }
+    commit(repo, message, &inherit_index)?;
     let mut reset = vec!["reset", "-q", "HEAD", "--"];
     reset.extend(selected.iter().map(String::as_str));
     if persistent {

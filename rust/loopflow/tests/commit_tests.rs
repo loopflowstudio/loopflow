@@ -1,10 +1,25 @@
 mod support;
 
+use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
 
-use loopflow::ops::{commit_workflow, CommitOptions, NullProgress};
+use loopflow::ops::{commit_selected, commit_workflow, CommitOptions, NullProgress};
 use loopflow_test_support::TestRepo;
 use support::EnvGuard;
+
+fn git_output(repo: &TestRepo, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).unwrap().trim().to_string()
+}
 
 fn last_commit_message(repo: &TestRepo) -> String {
     let output = Command::new("git")
@@ -61,6 +76,92 @@ fn commit_skips_empty() {
     let committed = commit_workflow(repo.path(), &options, &NullProgress, &|_| {}).expect("commit");
     assert!(!committed);
     assert_eq!(before, repo.head_sha());
+}
+
+#[test]
+fn selected_commit_saves_untracked_scratch_without_unrelated_staged_work() {
+    let _env = EnvGuard::new(&[]);
+    let repo = TestRepo::new();
+    repo.create_file("other.md", "staged\n");
+    repo.stage_all();
+    repo.create_file("other.md", "later edit\n");
+    repo.create_file("scratch/design.md", "design\n");
+    repo.create_file("scratch/questions.md", "questions\n");
+
+    commit_selected(
+        repo.path(),
+        &["scratch/design.md".into(), "scratch/questions.md".into()],
+        Some("Save design"),
+    )
+    .unwrap();
+
+    assert_eq!(
+        git_output(&repo, &["show", "HEAD:scratch/design.md"]),
+        "design"
+    );
+    assert_eq!(
+        git_output(&repo, &["show", "HEAD:scratch/questions.md"]),
+        "questions"
+    );
+    assert_eq!(
+        git_output(&repo, &["diff", "--cached", "--name-only"]),
+        "other.md"
+    );
+    assert_eq!(git_output(&repo, &["show", ":other.md"]), "staged");
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("other.md")).unwrap(),
+        "later edit\n"
+    );
+}
+
+#[test]
+fn selected_commit_with_no_changes_explains_what_to_do() {
+    let _env = EnvGuard::new(&[]);
+    let repo = TestRepo::new();
+    let before = repo.head_sha();
+
+    let error = commit_selected(repo.path(), &["README.md".into()], Some("No changes"))
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("Nothing selected to commit"), "{error}");
+    assert!(error.contains("select changed paths"), "{error}");
+    assert_eq!(repo.head_sha(), before);
+}
+
+#[test]
+fn commit_failures_report_hook_output_or_exit_status() {
+    let _env = EnvGuard::new(&[]);
+    let repo = TestRepo::new();
+    let before = repo.head_sha();
+    repo.create_file("notes.md", "save me\n");
+    let hook = repo.path().join(".git/hooks/pre-commit");
+
+    for (body, diagnostic) in [
+        ("echo hook-stdout", "hook-stdout"),
+        ("echo hook-stderr >&2", "hook-stderr"),
+        ("", "exit status: 1 (no output)"),
+    ] {
+        std::fs::write(&hook, format!("#!/bin/sh\n{body}\nexit 1\n")).unwrap();
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+        for selected in [true, false] {
+            let error = if selected {
+                commit_selected(repo.path(), &["notes.md".into()], Some("Save notes")).unwrap_err()
+            } else {
+                commit_workflow(
+                    repo.path(),
+                    &commit_options("Save notes"),
+                    &NullProgress,
+                    &|_| {},
+                )
+                .unwrap_err()
+            }
+            .to_string();
+            assert!(error.contains("git commit"), "{error}");
+            assert!(error.contains(diagnostic), "{error}");
+            assert_eq!(repo.head_sha(), before);
+        }
+    }
 }
 
 #[test]
@@ -158,6 +259,21 @@ fn persistent_selection_preserves_scratch_and_unrelated_index() {
         std::fs::read_to_string(persistent.path.join("scratch/design.md")).unwrap(),
         "latest private plan\n"
     );
+    let before = git(&["rev-parse", "HEAD"]);
+    let error = commit_selected(
+        &persistent.path,
+        &["scratch/design.md".into()],
+        Some("Save local scratch"),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains("scratch/ stays local"), "{error}");
+    assert!(
+        error.contains("move durable notes outside scratch/"),
+        "{error}"
+    );
+    assert_eq!(git(&["rev-parse", "HEAD"]), before);
+    assert_eq!(git(&["show", ":other.md"]), "staged\n");
     commit_workflow(
         &persistent.path,
         &commit_options("Checkpoint durable changes"),

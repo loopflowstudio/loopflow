@@ -682,3 +682,5 @@ strip links to its own site in a new tab.
 - Jack Heart: "Skills and Graphs it should say. Just write to the future. Be the ligt that pulls us forward." → the `x11` CLI link reads "Skills and Graphs ↗", and `graph pursue` stays on the card. Decision recorded: this page is written for the rename of Flow to Graph and of `lf run` to `lf graph`, ahead of the code. The rename itself is not made in `lf`.
 
 - Jack Heart: "No one is looking at this you dont have to worry so much about accuracy, just inspiration" → for the prototypes, Claude stops flagging and holding back on things that are not built or not checked. Accuracy gets settled when a prototype is ported to the real site.
+
+- Jack Heart, for the second picture's label: "LOOPFLOW IN YOUR TERMINAL" → set in `x11`. The first picture's label is changed to match, "Loopflow for Mac" (Claude's choice).

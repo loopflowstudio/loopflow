@@ -68,7 +68,7 @@ main = f'''
   <p class="cost">Free and open source (MIT). Use the Mac app, or run <code>lf</code> in the terminal you already have. It is the same work in both.</p>
 </section>
 <section id="mac" class="x5 x6">
-  <p class="slot"><span>In the Mac app</span><span>Video goes here · a mock stands in</span></p>
+  <p class="slot"><span>Loopflow for Mac</span><span>Video goes here · a mock stands in</span></p>
   <div class="win">
     <aside class="side">
       <h4>Your App</h4>
@@ -125,7 +125,7 @@ main = f'''
     </article>
   </div>
   <div class="mux">
-    <p class="slot"><span>The same work, in your terminal</span><span>Screenshot of cmux goes here · a sketch stands in</span></p>
+    <p class="slot"><span>Loopflow in your terminal</span><span>Screenshot of cmux goes here · a sketch stands in</span></p>
     <div class="muxwin">
       <aside>
         <h5>Exports <small>wave</small></h5>

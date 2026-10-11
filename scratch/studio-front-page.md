@@ -733,3 +733,5 @@ strip links to its own site in a new tab.
 - Jack Heart: "Nah i think the words have to be the software words" → the `x12` header cycles design, implement, demo, ship again. The cycling words stay the software ones.
 
 - Jack Heart: "release was a good one though, and study would have worked" → the `x12` header cycles five software words: study, design, implement, demo, release. "Release" replaces "ship"; "study" is added first.
+
+- Jack Heart: "cut" the whole "From soloist to maestro." section with Scale, Play and Craft → removed from `x12`. What remains of the musical image: "Conduct an orchestra of coding agents and hear every part clearly." and "waves that sustain and tasks that resolve".

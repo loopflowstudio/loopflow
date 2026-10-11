@@ -2370,7 +2370,7 @@ mod tests {
             assert_eq!(detail.task.state, item.state);
             assert_eq!(detail.task.completed_at, item.completed_at);
             assert_eq!(detail.task.completed, item.completed);
-            let terminal = item.terminal_reason();
+            let terminal = crate::pm::terminal_reason(item.state.as_deref(), item.completed);
             assert_eq!(
                 matches!(super::task_section(detail), super::RoadmapSection::Later),
                 terminal.is_some()
@@ -2511,7 +2511,7 @@ mod tests {
             directory.path().display().to_string(),
         );
         store.create_wave(&wave).await.unwrap();
-        let mut item = crate::pm::PmItem {
+        let mut item = crate::pm::linear::LinearIssue {
             branch_name: None,
             revision: None,
             id: "removed".into(),
@@ -2724,7 +2724,7 @@ mod tests {
             initiative_ids: vec!["initiative".into()],
             team_ids: vec!["team".into()],
         };
-        let item = crate::pm::PmItem {
+        let item = crate::pm::linear::LinearIssue {
             id: "issue".into(),
             identifier: "FIX-1".into(),
             name: "Unreviewed backlog".into(),

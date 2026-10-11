@@ -26,6 +26,18 @@ the token before expiry. The built-in `GITHUB_TOKEN` cannot enqueue PRs into
 the required merge queue. Successful PR CI explicitly enqueues the unchanged
 Dependabot head when it is not already queued; queue CI still gates merging.
 
+Linear acquisition fixtures live under `rust/loopflow/tests/linear/` and compile
+inside the library, where fetched response types stay private. Build the CLI first:
+
+```sh
+cargo build -p loopflow --bin lf
+cargo test -p loopflow --lib local_planning
+cargo test -p loopflow --lib pm::linear::acceptance
+```
+
+These fixtures still invoke the built CLI with disposable Homes. Shared execution
+fixtures seed fixed admission evidence; they do not expose acquisition APIs.
+
 CI Rust cache keys include the root workspace's build profiles, which the cache
 action's member-manifest discovery omits. Profile changes get fresh dependency
 caches; version-only releases retain them. Main publishes the shared caches;
@@ -518,7 +530,8 @@ For shared repository discovery or CLI dispatch changes, include the PM and
 Wave consumers in the focused check:
 
 ```bash
-cargo test -p loopflow --test wave_resolution_tests --test wave_resolution_matrix --test global_commands
+cargo test -p loopflow --lib wave_resolution
+cargo test -p loopflow --test global_commands
 ```
 
 When adding a command with `--wave`, classify its selection in
@@ -535,7 +548,7 @@ ownership tests. Empty registrations can be forgotten from their registered
 directory without Git metadata; Work operations still enforce repository ownership.
 
 ```bash
-cargo nextest run -p loopflow --test status_tests --test wave_repository_ownership --no-fail-fast
+cargo nextest run -p loopflow --lib -E 'test(status_tests::) | test(wave_repository_ownership::)' --no-fail-fast
 ```
 
 Task decision feedback has a focused store-and-Flow-runner check:
@@ -891,7 +904,7 @@ a simulated installed executable. It runs in this disposable account because
 `pr_tests` suite covers changed-head auto-merge revocation and review
 continuity in an explicit experimental Machine.
 
-The separate planning CLI proof (`cargo test -p loopflow --test planning_lookup_tests`) runs planning-only `task status` by identifier and UUID against
+The separate planning CLI proof (`cargo test -p loopflow --lib planning_lookup_tests`) runs planning-only `task status` by identifier and UUID against
 normalized local planning, proving that inspection creates no execution or worktree.
 That CLI case exercises cached planning; `ops::pm::planning_lookup_tests` covers
 acquisition with simulated Linear responses, including missing Projects, partial

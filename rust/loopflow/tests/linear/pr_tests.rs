@@ -1,6 +1,5 @@
-use crate::linear_input::SeedLinear;
-use support::linear_input;
-mod support;
+use crate::test_linear_input::SeedLinear;
+use crate::test_support as support;
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -82,7 +81,7 @@ fn task_delivery_works_on_an_ordinary_branch_without_registration() {
     repo.create_file("feature.txt", "local work");
     let before = repo.head_sha();
     let run = |args: &[&str]| {
-        let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+        let output = Command::new(crate::test_cli_binary())
             .env_clear()
             .env("HOME", home.path())
             .env("LF_HOME", home.path())
@@ -181,7 +180,7 @@ fn draft_open_stays_draft_until_publish() {
                 "Current work.",
             ];
             {
-                let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+                let output = Command::new(crate::test_cli_binary())
                     .args(["pr"])
                     .args(args)
                     .current_dir(repo.path())
@@ -493,7 +492,7 @@ fn task_snapshot_reads_its_current_parent_project() {
     repo.create_branch(branch);
     let task = register_task_with_pr(home.path(), repo.path(), branch, &base);
     let runtime = tokio::runtime::Runtime::new().expect("task runtime");
-    let mut observation: crate::linear_input::IssueFixture =
+    let mut observation: crate::test_linear_input::IssueFixture =
         loopflow_test_support::retained_task_input(
             &task.database,
             &repo.path().to_string_lossy(),
@@ -918,7 +917,7 @@ fn task_pr_missing_cached_linear_url_refuses_before_remote_mutation() {
     push_branch(&repo, branch);
     let task = register_task_with_pr(home.path(), repo.path(), branch, &base);
     let runtime = tokio::runtime::Runtime::new().expect("task runtime");
-    let mut observation: crate::linear_input::IssueFixture =
+    let mut observation: crate::test_linear_input::IssueFixture =
         loopflow_test_support::retained_task_input(
             &task.database,
             &repo.path().to_string_lossy(),

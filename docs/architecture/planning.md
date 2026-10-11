@@ -367,8 +367,11 @@ carry `revision`; a newer Project observation updates independently of the issue
 revision. Older observations cannot overwrite it. Project responses must include
 nullable content fields and relationship sets.
 
-Snapshot and detail ingestion project accepted entities into durable Project and
-Task rows in the same SQLite transaction. Projection uses each stored entity's
+Private Linear inventory/detail acquisition commits retained observations and
+Projects/Tasks in the same SQLite transaction. Public Store APIs expose canonical
+Work and narrow acquisition evidence, never fetched response models. Ordering
+receipts receive accepted local Task IDs; new disposition conflict receipts retain
+revision/state/completion evidence. Historical receipts keep their original bytes. Projection uses each stored entity's
 acquisition time, never the Wave's aggregate sync time. A projection failure rolls
 back observation acceptance. It preserves execution fields and retained identity;
 an unknown destination does not authorize a Task transfer. Restart changes

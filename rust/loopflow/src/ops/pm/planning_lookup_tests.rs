@@ -1046,15 +1046,10 @@ async fn project_revisions_order_shared_facts_and_unordered_membership_stays_unr
                     .state,
                 crate::store::PlanningState::Available
             );
-            fixture
-                .store
-                .confirm_linear_project_archival(
-                    &repo.to_string_lossy(),
-                    newer.project.unwrap(),
-                    original.observed_at,
-                )
-                .await
-                .unwrap();
+            fixture.store.sqlite.conn.lock().unwrap().execute(
+                "UPDATE pm_projects SET archived=1 WHERE repo=?1 AND provider='linear' AND id=?2",
+                rusqlite::params![repo.to_string_lossy(), newer.project.unwrap().id],
+            ).unwrap();
             list.snapshot.projects.clear();
             list.snapshot.items.clear();
             fixture.store.seed_inventory(list, None).await.unwrap();

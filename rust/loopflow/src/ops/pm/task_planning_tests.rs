@@ -26,11 +26,14 @@ async fn planning_repo(fixture: &Fixture) -> (PathBuf, crate::work::wave::Wave) 
         "initiative_ids": ["initiative-1"], "team_ids": ["team-1"]
     }))
     .unwrap();
-    fixture
-        .store
-        .sqlite
-        .accept_linear_project(wave.id(), "initiative-1", &project, now())
-        .unwrap();
+    crate::pm::linear::acceptance::accept_linear_project_in(
+        &fixture.store.sqlite,
+        wave.id(),
+        "initiative-1",
+        &project,
+        now(),
+    )
+    .unwrap();
     crate::store::sqlite::project_selection::write_project_binding(
         &fixture.store.sqlite,
         wave.id(),
@@ -552,7 +555,7 @@ fn seed_provider_task(
     repo: &Path,
     title: &str,
     description: &str,
-) -> crate::ops::OpsResult<crate::pm::PmItem> {
+) -> crate::ops::OpsResult<crate::pm::linear::LinearIssue> {
     runtime.block_on(async {
         let mut state = state.lock().await;
         let project = state
@@ -1410,11 +1413,12 @@ fn task_completion_ingestion_preserves_baseline_and_atomically_adopts_linear() {
         let mut late = remote.item.clone();
         late.state = Some("completed".into());
         late.completed = true;
-        assert!(!fixture
-            .store
-            .sqlite
-            .observe_task_state(&delivery, &late)
-            .unwrap());
+        assert!(!crate::pm::linear::acceptance::observe_task_state(
+            &fixture.store.sqlite,
+            &delivery,
+            &late
+        )
+        .unwrap());
         fixture
             .store
             .sqlite
@@ -1544,11 +1548,12 @@ fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
             .item;
         late.state = Some("canceled".into());
         late.revision = Some("2026-10-08T03:00:00Z".into());
-        assert!(!fixture
-            .store
-            .sqlite
-            .observe_task_state(&completed, &late)
-            .unwrap());
+        assert!(!crate::pm::linear::acceptance::observe_task_state(
+            &fixture.store.sqlite,
+            &completed,
+            &late
+        )
+        .unwrap());
         assert_eq!(
             fixture
                 .store
@@ -2135,8 +2140,12 @@ fn assert_completion_adopts_reopening(during_delivery: bool) {
             (receipt.0, receipt.1, receipt.2.as_str()),
             (during_delivery, true, "completed")
         );
-        let conflict: crate::pm::PmItem = serde_json::from_str(&receipt.3).unwrap();
-        assert_eq!(conflict.state.as_deref(), Some("unstarted"));
+        let conflict: serde_json::Value = serde_json::from_str(&receipt.3).unwrap();
+        assert_eq!(conflict["state"], "unstarted");
+        assert!(conflict["revision"].is_string());
+        assert_eq!(conflict["completed"], false);
+        assert_eq!(conflict.as_object().unwrap().len(), 4);
+        assert!(conflict.get("completed_at").is_some());
     });
 }
 
@@ -2261,11 +2270,12 @@ fn task_completion_lost_reply_adopts_linear_reopening() {
             .item;
         late.state = Some("completed".into());
         late.completed = true;
-        assert!(!fixture
-            .store
-            .sqlite
-            .observe_task_state(&original, &late)
-            .unwrap());
+        assert!(!crate::pm::linear::acceptance::observe_task_state(
+            &fixture.store.sqlite,
+            &original,
+            &late
+        )
+        .unwrap());
         assert!(fixture
             .store
             .sqlite
@@ -3752,10 +3762,9 @@ fn planning_fields_deliver_project_activation_and_task_membership_without_execut
                 .await
                 .extra_projects
                 .push(planning_project("project-2", "project-2"));
-            fixture
+            crate::pm::linear::acceptance::accept_linear_project_in(&fixture
                 .store
-                .sqlite
-                .accept_linear_project(&task.wave_id, "initiative-1", &destination, now())
+                .sqlite, &task.wave_id, "initiative-1", &destination, now())
                 .unwrap();
             let destination = fixture
                 .store
@@ -4682,15 +4691,10 @@ fn project_field_delivery_requires_revision_accepted_into_work() {
                             .project_content_observation("project-1")
                             .await
                             .unwrap();
-                        fixture
-                            .store
-                            .sqlite
-                            .confirm_linear_project_archival(
-                                &repo.to_string_lossy(),
-                                &observed,
-                                now(),
-                            )
-                            .unwrap();
+                        fixture.store.sqlite.conn.lock().unwrap().execute(
+                            "UPDATE pm_projects SET archived=1 WHERE repo=?1 AND provider='linear' AND id=?2",
+                            rusqlite::params![repo.to_string_lossy(), observed.id],
+                        ).unwrap();
                     }
                     "unresolved" => {
                         let client = super::linear_client(repo).await.unwrap();
@@ -4699,11 +4703,14 @@ fn project_field_delivery_requires_revision_accepted_into_work() {
                             .await
                             .unwrap();
                         observed.team_ids = vec!["another-team".into()];
-                        assert!(fixture
-                            .store
-                            .sqlite
-                            .accept_linear_project(&task.wave_id, "initiative-1", &observed, now(),)
-                            .is_err());
+                        assert!(crate::pm::linear::acceptance::accept_linear_project_in(
+                            &fixture.store.sqlite,
+                            &task.wave_id,
+                            "initiative-1",
+                            &observed,
+                            now(),
+                        )
+                        .is_err());
                         // Re-reading the original entity revision cannot order the
                         // disputed Team relation or authorize delivery.
                     }

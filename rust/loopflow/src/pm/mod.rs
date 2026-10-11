@@ -56,48 +56,6 @@ pub struct TeamBinding {
     pub created: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PmItem {
-    /// Provider revision; absent only in historical planning.
-    pub revision: Option<String>,
-    pub id: String,
-    pub identifier: String,
-    /// Provider branch name used to find existing Git work.
-    pub branch_name: Option<String>,
-    /// Provider-owned issue URL captured during PM sync. `None` stays explicit
-    /// when the provider did not return one; status and roadmap reads never
-    /// fetch it on demand.
-    pub url: Option<String>,
-    pub name: String,
-    pub description: String,
-    pub rank: u32,
-    pub completed: bool,
-    pub completed_at: Option<String>,
-    pub due_date: Option<String>,
-    /// Provider workflow category; absent in historical snapshots.
-    pub state: Option<String>,
-    /// Stable owning Project id. Task-to-Wave resolution follows this edge.
-    pub project_id: Option<String>,
-    /// Stable owning repository Team id.
-    pub team_id: Option<String>,
-    /// Provider user ID of the assignee, if any.
-    pub assignee: Option<String>,
-}
-
-impl PmItem {
-    pub fn terminal_reason(&self) -> Option<&'static str> {
-        terminal_reason(self.state.as_deref(), self.completed)
-    }
-
-    /// Linear calls the item complete, not canceled or duplicate.
-    pub fn is_complete(&self) -> bool {
-        match self.state.as_deref() {
-            Some(state) => state == "completed",
-            None => self.completed,
-        }
-    }
-}
-
 pub fn terminal_reason(state: Option<&str>, completed: bool) -> Option<&'static str> {
     match state {
         Some("canceled") => Some("Linear Task is canceled"),

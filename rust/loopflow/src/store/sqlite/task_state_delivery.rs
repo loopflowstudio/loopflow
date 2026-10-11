@@ -60,7 +60,7 @@ pub(super) fn queue_in(conn: &Connection, task: &TaskId, target: &str) -> StoreR
 }
 
 /// Acquisition and delivery use the same transaction rule. No execution rows change.
-pub(super) fn reconcile_in(
+pub(crate) fn reconcile_in(
     conn: &Connection,
     task: &TaskId,
     observed_revision: Option<&str>,
@@ -149,45 +149,6 @@ impl SqliteStore {
                 super::children::task_on(&conn, &TaskId::from_raw(id))?.ok_or(StoreError::NotFound)
             })
             .collect()
-    }
-
-    /// Reconcile a delivery's read; true means its saved intention remains pending.
-    pub(crate) fn observe_task_state(
-        &self,
-        delivery: &TaskStateDelivery,
-        observed: &crate::pm::PmItem,
-    ) -> StoreResult<bool> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        // Retain the provider baseline for the next local save. A response for an
-        // older delivery cannot ingest over the current decision.
-        let repo: Option<String> = tx
-            .query_row(
-                "SELECT w.repo FROM task_state_deliveries d JOIN tasks t ON t.id=d.task_id
-             JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id
-             WHERE d.id=?1 AND d.task_id=?2 AND d.settled=0 AND t.external_issue_id=?3
-             AND d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=t.id)",
-                params![delivery.id, delivery.task_id.as_str(), observed.id],
-                |row| row.get(0),
-            )
-            .optional()?;
-        let Some(repo) = repo else { return Ok(false) };
-        if !super::planning::put_item(&tx, &repo, super::super::rows::now_unix(), observed)? {
-            return Ok(false);
-        }
-        let pending = reconcile_in(
-            &tx,
-            &delivery.task_id,
-            observed.revision.as_deref(),
-            &super::planning_write::Disposition {
-                planning_state: observed.state.clone(),
-                planning_completed: i64::from(observed.completed),
-                planning_completed_at: observed.completed_at.clone(),
-            },
-            &serde_json::to_string(observed)?,
-        )?;
-        tx.commit()?;
-        Ok(pending)
     }
 
     pub(crate) fn pending_task_state(

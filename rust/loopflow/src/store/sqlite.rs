@@ -84,7 +84,7 @@ fn configure_write_connection(conn: &Connection, path: &Path) -> StoreResult<()>
 
 #[derive(Debug, Clone)]
 pub struct SqliteStore {
-    conn: Arc<Mutex<Connection>>,
+    pub(crate) conn: Arc<Mutex<Connection>>,
 }
 
 impl SqliteStore {

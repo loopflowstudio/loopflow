@@ -6,9 +6,7 @@
 //! then proves the shared Wave status projection honors the original reproduction
 //! end to end from a Wave agent's environment.
 
-#[path = "support/linear_input.rs"]
-mod linear_input;
-use crate::linear_input::{InventoryFixture, SeedLinearSqlite};
+use crate::test_linear_input::{InventoryFixture, SeedLinearSqlite};
 use std::path::Path;
 use std::process::Command;
 
@@ -169,7 +167,7 @@ fn seed(home: &Path, repo: &Path, wave_name: &str) -> Wave {
             provider: "linear".to_string(),
             initiative: "initiative-1".to_string(),
             synced_at: chrono::Utc::now().timestamp(),
-            snapshot: crate::linear_input::Inventory {
+            snapshot: crate::test_linear_input::Inventory {
                 projects: vec![],
                 items: vec![],
             },
@@ -179,7 +177,7 @@ fn seed(home: &Path, repo: &Path, wave_name: &str) -> Wave {
 }
 
 fn lf(home: &Path, repo: &Path, args: &[&str], wave_id: Option<&str>) -> std::process::Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+    let mut command = Command::new(crate::test_cli_binary());
     command
         .args(args)
         .current_dir(repo)

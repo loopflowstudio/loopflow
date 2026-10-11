@@ -5,9 +5,7 @@
 //! environment classify the same way. A completeness guard walks the clap tree
 //! and fails CI when a new `--wave`-bearing command is not registered.
 
-#[path = "support/linear_input.rs"]
-mod linear_input;
-use crate::linear_input::{InventoryFixture, SeedLinearSqlite};
+use crate::test_linear_input::{InventoryFixture, SeedLinearSqlite};
 use std::collections::HashSet;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
@@ -329,7 +327,7 @@ fn seed(home: &Path, repo: &Path) -> Wave {
             provider: "linear".to_string(),
             initiative: "initiative-1".to_string(),
             synced_at: chrono::Utc::now().timestamp(),
-            snapshot: crate::linear_input::Inventory {
+            snapshot: crate::test_linear_input::Inventory {
                 projects: vec![],
                 items: vec![],
             },
@@ -383,7 +381,7 @@ fn build_args(cmd: &Cmd, env: &Env) -> Vec<String> {
 fn run_lf(home: &Path, repo: &Path, cmd: &Cmd, env: &Env) -> std::process::Output {
     let args = build_args(cmd, env);
 
-    let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+    let mut command = Command::new(crate::test_cli_binary());
     command
         .args(&args)
         .current_dir(repo)
@@ -669,7 +667,7 @@ fn cron_add_rejects_a_development_binary_before_mutation() {
 
     let alpha_uuid = alpha.id().as_str();
 
-    let cron = Command::new(env!("CARGO_BIN_EXE_lf"))
+    let cron = Command::new(crate::test_cli_binary())
         .args([
             "wave",
             "cron",

@@ -1,13 +1,10 @@
-#[path = "linear_input.rs"]
-pub mod linear_input;
-use self::linear_input::{InventoryFixture, SeedLinear};
 pub mod planning;
 
+use loopflow_test_support::env_lock;
 use std::env;
 use std::ffi::OsString;
 use std::fs;
 use std::path::Path;
-use std::sync::{Mutex, OnceLock};
 
 use base64::prelude::*;
 use loopflow::id::WaveId;
@@ -20,7 +17,7 @@ use loopflow_test_support::TestRepo;
 use tempfile::TempDir;
 use time::OffsetDateTime;
 
-mod ambient;
+pub mod ambient;
 
 #[allow(dead_code)] // Shared GitHub fixture compiled into multiple test crates.
 pub fn github_checks_page(head: &str, checks: &[(&str, &str, bool)]) -> String {
@@ -60,11 +57,6 @@ pub fn github_merge_response(
         "autoMergeRequest":request.map(|_| serde_json::json!({"enabledAt":"2026-09-29T00:00:00Z"})),
         "mergeQueueEntry":queued.map(|_| serde_json::json!({"id":"queue-entry"}))
     }}}}).to_string()
-}
-
-fn env_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
 }
 
 struct HomeOverride {
@@ -240,7 +232,7 @@ impl EnvGuard {
         let previous_lf_home = env::var_os("LF_HOME");
         let ambient = ambient::EnvGuard::new();
         let previous_lf_bin = env::var_os("LF_BIN");
-        env::set_var("LF_BIN", env!("CARGO_BIN_EXE_lf"));
+        env::set_var("LF_BIN", cli_binary());
         let lf_home = TempDir::new().expect("temp lf machine dir");
         env::remove_var("LF_HOME");
         if let Some(home) = home {
@@ -392,7 +384,7 @@ fn register_task_fixture(
         created_at: now,
         updated_at: now,
     };
-    let mut task = Task {
+    let task = Task {
         id: TaskId::new(),
 
         revision: 0,
@@ -454,52 +446,8 @@ fn register_task_fixture(
                 rusqlite::params![wave.id(), project.id.as_str()],
             )
             .expect("select fixture Project");
-        let pm_payload = serde_json::json!({
-            "projects": [{
-                "id": project.linear_id.as_ref().unwrap().as_str(),
-                "slug": project.slug.as_str(),
-                "name": project.name.as_str(),
-                "summary": "",
-                "metric_targets": [],
-                "workflow": project.workflow,
-                "status": project.status,
-                "krs": [],
-                "initiative_ids": ["initiative-task-pr-tests"],
-                "team_ids": ["team-task-pr-tests"]
-            }],
-            "items": [{
-                "id": task.linear_id.as_ref().unwrap().as_str(),
-                "identifier": task.identifier.as_str(),
-                "url": "https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions",
-                "name": task.title.as_str(),
-                "description": task.description.as_str(),
-                "rank": 1,
-                "completed": false,
-                "project_id": project.linear_id.as_ref().unwrap().as_str(),
-                "project": project.slug.as_str(),
-                "team_id": "team-task-pr-tests",
-                "assignee": null
-            }]
-        });
-        store
-            .seed_inventory(
-                InventoryFixture {
-                    wave_id: wave.id().clone(),
-                    provider: "linear".to_string(),
-                    initiative: "initiative-task-pr-tests".to_string(),
-                    synced_at: now.unix_timestamp(),
-                    snapshot: serde_json::from_value(pm_payload).unwrap(),
-                },
-                None,
-            )
-            .await
-            .expect("cache Task PR context");
-        task.id = store
-            .get_task_by_issue(task.linear_id.as_ref().unwrap().as_str())
-            .await
-            .unwrap()
-            .unwrap()
-            .id;
+        planning::seed_unplaced_task(&home.join("loopflow.db"), &task);
+        planning::seed_linear_admission(&home.join("loopflow.db"), &wave, &project, &task);
         pr.task_id = task.id.clone();
         store
             .place_task(
@@ -735,4 +683,14 @@ pub fn recorded_flows(home: &Path) -> Vec<(Option<String>, Vec<serde_json::Value
             (outcome, steps)
         })
         .collect()
+}
+
+fn cli_binary() -> std::path::PathBuf {
+    std::env::current_exe()
+        .expect("test executable")
+        .parent()
+        .expect("deps directory")
+        .parent()
+        .expect("target profile")
+        .join("lf")
 }

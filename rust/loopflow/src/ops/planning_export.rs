@@ -189,15 +189,14 @@ async fn observe(
                     "Created Project has conflicting Initiative membership; receipt retained",
                 ));
             }
-            store
-                .sqlite
-                .accept_linear_project(
-                    wave,
-                    &export.initiative,
-                    &project,
-                    time::OffsetDateTime::now_utc().unix_timestamp(),
-                )
-                .map_err(message)?;
+            crate::pm::linear::acceptance::accept_linear_project_in(
+                &store.sqlite,
+                wave,
+                &export.initiative,
+                &project,
+                time::OffsetDateTime::now_utc().unix_timestamp(),
+            )
+            .map_err(message)?;
         }
         PlanningChanges::Task(_) => {
             let Some((item, project)) = client

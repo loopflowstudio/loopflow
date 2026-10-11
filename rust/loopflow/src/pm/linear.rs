@@ -1,3 +1,5 @@
+pub(crate) mod acceptance;
+
 use crate::work::project::{ProjectKR, ProjectStatus};
 use crate::work::wave::metrics::MetricTarget;
 
@@ -9,9 +11,47 @@ use serde_json::{json, Value};
 use tokio::time::sleep;
 use tracing::warn;
 
-use crate::pm::{project_slug, PmError, PmItem, PmResult, TeamBinding, RATE_LIMIT_RETRIES};
+use crate::pm::{project_slug, PmError, PmResult, TeamBinding, RATE_LIMIT_RETRIES};
 
 use crate::work::task::comment::{TaskComment, TaskCommentAuthor};
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct LinearIssue {
+    /// Provider revision; absent only in historical planning.
+    pub revision: Option<String>,
+    pub id: String,
+    pub identifier: String,
+    /// Provider branch name used to find existing Git work.
+    pub branch_name: Option<String>,
+    /// Provider-owned issue URL captured during PM sync. `None` stays explicit
+    /// when the provider did not return one; status and roadmap reads never
+    /// fetch it on demand.
+    pub url: Option<String>,
+    pub name: String,
+    pub description: String,
+    pub rank: u32,
+    pub completed: bool,
+    pub completed_at: Option<String>,
+    pub due_date: Option<String>,
+    /// Provider workflow category; absent in historical snapshots.
+    pub state: Option<String>,
+    /// Stable owning Project id. Task-to-Wave resolution follows this edge.
+    pub project_id: Option<String>,
+    /// Stable owning repository Team id.
+    pub team_id: Option<String>,
+    /// Provider user ID of the assignee, if any.
+    pub assignee: Option<String>,
+}
+
+impl LinearIssue {
+    /// Linear calls the item complete, not canceled or duplicate.
+    pub fn is_complete(&self) -> bool {
+        match self.state.as_deref() {
+            Some(state) => state == "completed",
+            None => self.completed,
+        }
+    }
+}
 
 /// A read of one issue's editable content plus its comments, taken to
 /// stream Linear edits into a Task. `revision` is the provider's
@@ -783,7 +823,7 @@ impl LinearClient {
         }
     }
 
-    pub async fn list_projects(&self, initiative_id: &str) -> PmResult<Vec<LinearProject>> {
+    pub(crate) async fn list_projects(&self, initiative_id: &str) -> PmResult<Vec<LinearProject>> {
         self.list_projects_including_archived(initiative_id, false)
             .await
     }
@@ -830,7 +870,7 @@ impl LinearClient {
                 let priority_sort_order = issue.fields.priority_sort_order;
                 let sort_order = issue.fields.sort_order;
                 Ok(OrderedIssue {
-                    item: issue.into_pm_item(rank as u32)?,
+                    item: issue.into_issue(rank as u32)?,
                     priority_sort_order,
                     sort_order,
                 })
@@ -841,7 +881,7 @@ impl LinearClient {
     pub(crate) async fn list_project_issues(
         &self,
         projects: &[LinearProject],
-    ) -> PmResult<Vec<PmItem>> {
+    ) -> PmResult<Vec<LinearIssue>> {
         let lists = futures_util::future::try_join_all(
             projects.iter().map(|project| self.list_items(&project.id)),
         )
@@ -849,7 +889,7 @@ impl LinearClient {
         Ok(lists.into_iter().flatten().collect())
     }
 
-    pub async fn list_items(&self, project_id: &str) -> PmResult<Vec<PmItem>> {
+    pub(crate) async fn list_items(&self, project_id: &str) -> PmResult<Vec<LinearIssue>> {
         self.list_items_including_archived(project_id, false).await
     }
 
@@ -857,12 +897,12 @@ impl LinearClient {
         &self,
         project_id: &str,
         include_archived: bool,
-    ) -> PmResult<Vec<PmItem>> {
+    ) -> PmResult<Vec<LinearIssue>> {
         self.list_issue_nodes(project_id, include_archived)
             .await?
             .into_iter()
             .enumerate()
-            .map(|(rank, issue)| issue.into_pm_item(rank as u32))
+            .map(|(rank, issue)| issue.into_issue(rank as u32))
             .collect()
     }
 
@@ -994,10 +1034,10 @@ impl LinearClient {
 
     /// Resolve one Issue directly by UUID or identifier, including its owning
     /// Project and Team. This is the online Task-to-Wave ownership edge.
-    pub async fn issue_ownership(
+    pub(crate) async fn issue_ownership(
         &self,
         issue_id: &str,
-    ) -> PmResult<Option<(PmItem, Option<LinearProject>)>> {
+    ) -> PmResult<Option<(LinearIssue, Option<LinearProject>)>> {
         let response: IssueOwnershipData = self
             .graphql(ISSUE_OWNERSHIP_QUERY, json!({ "id": issue_id }))
             .await?;
@@ -1064,7 +1104,7 @@ impl LinearClient {
         Ok(())
     }
 
-    pub async fn find_project(&self, project_id: &str) -> PmResult<Option<LinearProject>> {
+    pub(crate) async fn find_project(&self, project_id: &str) -> PmResult<Option<LinearProject>> {
         // A filtered collection has an explicit empty result. The singular Project
         // endpoint can return NOT_FOUND as a GraphQL error, indistinguishable from
         // inaccessible evidence without provider-specific error guessing.
@@ -1098,7 +1138,7 @@ impl LinearClient {
             .transpose()
     }
 
-    pub async fn project_ownership(&self, project_id: &str) -> PmResult<LinearProject> {
+    pub(crate) async fn project_ownership(&self, project_id: &str) -> PmResult<LinearProject> {
         self.project_node(project_id).await?.into_observation()
     }
 
@@ -1137,7 +1177,7 @@ impl LinearClient {
     pub(crate) async fn find_export_issue(
         &self,
         id: &str,
-    ) -> PmResult<Option<(PmItem, Option<LinearProject>)>> {
+    ) -> PmResult<Option<(LinearIssue, Option<LinearProject>)>> {
         let response: Value = self
             .graphql(
                 r#"query FindExportIssue($id: ID!) {
@@ -1729,7 +1769,7 @@ struct IssueNode<P = IdNode> {
 // Nullable fields must be present; omission is not a value to store.
 #[derive(Debug)]
 pub(crate) struct OrderedIssue {
-    pub item: PmItem,
+    pub item: LinearIssue,
     pub priority_sort_order: f64,
     pub sort_order: f64,
 }
@@ -1764,14 +1804,14 @@ struct IssueFields {
 }
 
 impl IssueNode {
-    fn into_pm_item(self, rank: u32) -> PmResult<PmItem> {
+    fn into_issue(self, rank: u32) -> PmResult<LinearIssue> {
         self.fields
-            .into_pm_item(rank, self.project.map(|project| project.id))
+            .into_issue(rank, self.project.map(|project| project.id))
     }
 }
 
 impl IssueFields {
-    fn into_pm_item(self, rank: u32, project_id: Option<String>) -> PmResult<PmItem> {
+    fn into_issue(self, rank: u32, project_id: Option<String>) -> PmResult<LinearIssue> {
         if let Some(date) = &self.completed_at {
             time::OffsetDateTime::parse(date, &time::format_description::well_known::Rfc3339)
                 .map_err(|error| {
@@ -1803,7 +1843,7 @@ impl IssueFields {
             &time::format_description::well_known::Rfc3339,
         )
         .map_err(|error| PmError::Message(format!("invalid Linear issue revision: {error}")))?;
-        Ok(PmItem {
+        Ok(LinearIssue {
             revision: Some(self.updated_at),
             id: self.id,
             identifier,
@@ -1830,10 +1870,10 @@ struct IssueOwnershipData {
 }
 
 impl IssueNode<ProjectNode> {
-    fn into_ownership(self) -> PmResult<(PmItem, Option<LinearProject>)> {
+    fn into_ownership(self) -> PmResult<(LinearIssue, Option<LinearProject>)> {
         let item = self
             .fields
-            .into_pm_item(0, self.project.as_ref().map(|project| project.id.clone()))?;
+            .into_issue(0, self.project.as_ref().map(|project| project.id.clone()))?;
         Ok((
             item,
             self.project
@@ -2437,14 +2477,14 @@ mod tests {
                 "completedAt":item.completed_at, "dueDate":item.due_date
             });
             let fields: super::IssueFields = serde_json::from_value(wire.clone()).unwrap();
-            let observed = fields.into_pm_item(item.rank, None).unwrap();
+            let observed = fields.into_issue(item.rank, None).unwrap();
             assert_eq!(observed.completed, item.completed);
             assert_eq!(observed.state, item.state);
             assert_eq!(observed.completed_at, item.completed_at);
             wire["completedAt"] = json!("not a timestamp");
             assert!(serde_json::from_value::<super::IssueFields>(wire.clone())
                 .unwrap()
-                .into_pm_item(0, None)
+                .into_issue(0, None)
                 .is_err());
             wire.as_object_mut().unwrap().remove("completedAt");
             assert!(serde_json::from_value::<super::IssueFields>(wire).is_err());
@@ -2467,20 +2507,20 @@ mod tests {
         });
         let item = serde_json::from_value::<super::IssueFields>(wire.clone())
             .unwrap()
-            .into_pm_item(0, None)
+            .into_issue(0, None)
             .unwrap();
         assert_eq!(item.due_date.as_deref(), Some("2026-10-08"));
         assert!(!item.completed);
         wire["dueDate"] = json!("2026-02-30");
         assert!(serde_json::from_value::<super::IssueFields>(wire.clone())
             .unwrap()
-            .into_pm_item(0, None)
+            .into_issue(0, None)
             .is_err());
         wire["dueDate"] = serde_json::Value::Null;
         assert_eq!(
             serde_json::from_value::<super::IssueFields>(wire.clone())
                 .unwrap()
-                .into_pm_item(0, None)
+                .into_issue(0, None)
                 .unwrap()
                 .due_date,
             None
@@ -3196,7 +3236,7 @@ mod follow_through_tests;
 
 /// Retained Linear facts, including foreign and not-yet-associated Projects.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct LinearProject {
+pub(crate) struct LinearProject {
     pub id: String,
     pub revision: Option<String>,
     pub slug: String,

@@ -1,6 +1,5 @@
-use crate::linear_input::{InventoryFixture, SeedLinear};
-use support::linear_input;
-mod support;
+use crate::test_linear_input::{InventoryFixture, SeedLinear};
+use crate::test_support as support;
 
 use support::planning;
 
@@ -141,7 +140,7 @@ fn task(wave: &Wave, project: &Project, repo: &Path) -> (Task, TaskPr) {
 }
 
 fn lf_command(home: &Path, repo: &Path, args: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_lf"))
+    Command::new(crate::test_cli_binary())
         .args(args)
         .current_dir(repo)
         .env("LF_HOME", home)
@@ -205,8 +204,8 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         store.create_wave(&legacy).await.unwrap();
         let sibling = Wave::new(WaveId::new(), "sibling".into(), alias.display().to_string());
         store.create_wave(&sibling).await.unwrap();
-        let snapshot: crate::linear_input::Inventory =
-            serde_json::from_str(include_str!("fixtures/linear_snapshot.json")).unwrap();
+        let snapshot: crate::test_linear_input::Inventory =
+            serde_json::from_str(include_str!("../fixtures/linear_snapshot.json")).unwrap();
         store
             .seed_inventory(
                 InventoryFixture {
@@ -245,7 +244,7 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
             .await
             .unwrap();
         assert_eq!(observation.state, loopflow::store::PlanningState::Available);
-        let detail: crate::linear_input::IssueFixture =
+        let detail: crate::test_linear_input::IssueFixture =
             loopflow_test_support::retained_task_input(&database, resolved.repo(), "LOO-2");
         assert_eq!(detail.item, snapshot.items[0]);
         assert_eq!(detail.project.as_ref(), Some(&snapshot.projects[0]));
@@ -368,7 +367,7 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
                 provider: "linear".to_string(),
                 initiative: "initiative-alpha".to_string(),
                 synced_at: 1,
-                snapshot: crate::linear_input::Inventory {
+                snapshot: crate::test_linear_input::Inventory {
                     projects: vec![],
                     items: vec![],
                 },
@@ -444,7 +443,7 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
                 provider: "linear".to_string(),
                 initiative: "initiative-occupied".to_string(),
                 synced_at: 1,
-                snapshot: crate::linear_input::Inventory {
+                snapshot: crate::test_linear_input::Inventory {
                     projects: vec![],
                     items: vec![],
                 },
@@ -836,7 +835,7 @@ async fn relocation_refuses_meaningful_destination_history() {
                 provider: "linear".to_string(),
                 initiative: "initiative-pm".to_string(),
                 synced_at: 1,
-                snapshot: crate::linear_input::Inventory {
+                snapshot: crate::test_linear_input::Inventory {
                     projects: vec![],
                     items: vec![],
                 },

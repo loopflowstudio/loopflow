@@ -1,6 +1,5 @@
-use crate::linear_input::SeedLinear;
-use support::linear_input;
-mod support;
+use crate::test_linear_input::SeedLinear;
+use crate::test_support as support;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -11,7 +10,7 @@ use loopflow::work::task::{GithubPr, PrPublication};
 use loopflow_test_support::TestRepo;
 
 fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+    let mut command = Command::new(crate::test_cli_binary());
     for (name, _) in
         std::env::vars_os().filter(|(name, _)| name.to_string_lossy().starts_with("LF_"))
     {
@@ -21,7 +20,7 @@ fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
         .args(args)
         .current_dir(repo)
         .env("LF_HOME", home)
-        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+        .env("LF_BIN", crate::test_cli_binary())
         .env("HTTPS_PROXY", "http://127.0.0.1:1")
         .env("HTTP_PROXY", "http://127.0.0.1:1");
     command
@@ -71,7 +70,7 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
         }
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let scope = repo.path().canonicalize().unwrap().display().to_string();
-        let mut record: crate::linear_input::IssueFixture =
+        let mut record: crate::test_linear_input::IssueFixture =
             loopflow_test_support::retained_task_input(&registered.database, &scope, "INF-123");
         record.project.as_mut().unwrap().workflow = "proof".into();
         record.project.as_mut().unwrap().revision = Some("2026-10-07T12:00:00Z".into());
@@ -587,7 +586,7 @@ impl WorkflowTask {
             .display()
             .to_string();
         let store = &self.registered.store;
-        let mut record: crate::linear_input::IssueFixture =
+        let mut record: crate::test_linear_input::IssueFixture =
             loopflow_test_support::retained_task_input(
                 &self.registered.database,
                 &scope,
@@ -672,7 +671,7 @@ fn checkout_leaves_workflow_selection_to_the_first_run() {
     let sqlite =
         loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
             .unwrap();
-    let mut observation: crate::linear_input::IssueFixture =
+    let mut observation: crate::test_linear_input::IssueFixture =
         loopflow_test_support::retained_task_input(
             &fixture.registered.database,
             &scope,
@@ -994,7 +993,7 @@ fn one_task_run_starts_its_flow_again_until_an_attempt_succeeds_or_attempts_run_
             "#!/bin/sh\ncase \"$*\" in *'flow show late'*)\n  echo asked >> '{count}'\n  [ \"$(wc -l < '{count}')\" -ge 3 ] && printf -- '- cmd: task sync --plan\\n' > '{late}';;\nesac\nexec '{real}' \"$@\"\n",
             count = bin.path().join("asked").display(),
             late = task.repo.path().join(".lf/flows/late.yaml").display(),
-            real = env!("CARGO_BIN_EXE_lf"),
+            real = crate::test_cli_binary(),
         ),
     )
     .unwrap();
@@ -1039,7 +1038,7 @@ fn a_held_command_stops_the_task_run_without_repeating_the_flow() {
         &lf,
         format!(
             "#!/bin/sh\ncase \"$*\" in *'flow show late'*) exit 3;; esac\nexec '{}' \"$@\"\n",
-            env!("CARGO_BIN_EXE_lf")
+            crate::test_cli_binary()
         ),
     )
     .unwrap();
@@ -1204,7 +1203,7 @@ fn linear_completion_and_reopening_preserve_workflow_and_supersede_old_end() {
         .display()
         .to_string();
     let store = &task.registered.store;
-    let mut record: crate::linear_input::IssueFixture =
+    let mut record: crate::test_linear_input::IssueFixture =
         loopflow_test_support::retained_task_input(&task.registered.database, &scope, "INF-123");
     let stale = record.clone();
     record.item.revision = Some("2026-10-07T12:00:00Z".into());

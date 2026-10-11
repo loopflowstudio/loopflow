@@ -1,6 +1,4 @@
-#[path = "support/linear_input.rs"]
-mod linear_input;
-use crate::linear_input::{IssueFixture, SeedLinear};
+use crate::test_linear_input::{IssueFixture, SeedLinear};
 use std::process::Command;
 
 use loopflow::ops::task::TaskStatus;
@@ -106,7 +104,7 @@ fn task_status_reads_projectless_planning_without_allocating_execution() {
         ("uncached-removal", None, PlanningState::Removed, false),
         ("UNKNOWN", None, PlanningState::Unavailable, true),
     ] {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+        let mut command = Command::new(crate::test_cli_binary());
         for (name, _) in std::env::vars_os() {
             if name.to_string_lossy().starts_with("LF_") {
                 command.env_remove(name);

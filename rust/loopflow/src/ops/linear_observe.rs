@@ -322,9 +322,7 @@ pub(crate) async fn sync_task_state(store: &Store, task: &Task) -> OpsResult<()>
                 "Linear state is unknown; saved decision retained".into(),
             ));
         }
-        if !store
-            .sqlite
-            .observe_task_state(&delivery, &observed)
+        if !crate::pm::linear::acceptance::observe_task_state(&store.sqlite, &delivery, &observed)
             .map_err(|e| message(&e))?
         {
             return Ok(());
@@ -357,9 +355,7 @@ pub(crate) async fn sync_task_state(store: &Store, task: &Task) -> OpsResult<()>
             .await
             .map_err(|e| message(&e))?
             .ok_or_else(|| OpsError::Message("Linear state write has no readback".into()))?;
-        if store
-            .sqlite
-            .observe_task_state(&delivery, &confirmed)
+        if crate::pm::linear::acceptance::observe_task_state(&store.sqlite, &delivery, &confirmed)
             .map_err(|e| message(&e))?
         {
             return Err(OpsError::Message(

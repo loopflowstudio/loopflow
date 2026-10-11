@@ -32,10 +32,13 @@ pub(super) async fn sync_order(
     loop {
         let issues = client.ordered_items(external).await.map_err(message)?;
         let items = issues.iter().map(|i| i.item.clone()).collect::<Vec<_>>();
-        if !store
-            .sqlite
-            .accept_linear_project_order(&repo.to_string_lossy(), external, &items)
-            .map_err(message)?
+        if !crate::pm::linear::acceptance::accept_linear_project_order_in(
+            &store.sqlite,
+            &repo.to_string_lossy(),
+            external,
+            &items,
+        )
+        .map_err(message)?
         {
             return Err(message(
                 "Incomplete or older Project order; saved reorder retained",

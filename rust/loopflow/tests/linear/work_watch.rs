@@ -1,9 +1,7 @@
 //! `lf monitor work --watch` shows another process's commits. Each test
 //! drives the real binary against a seeded `LF_HOME` and writes from here.
 
-#[path = "support/linear_input.rs"]
-mod linear_input;
-use crate::linear_input::{InventoryFixture, SeedLinearSqlite};
+use crate::test_linear_input::{InventoryFixture, SeedLinearSqlite};
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
@@ -43,7 +41,7 @@ struct Machine {
 }
 
 fn lf(home: &Path, args: &[&str]) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+    let mut command = Command::new(crate::test_cli_binary());
     for (key, _) in std::env::vars_os() {
         let key = key.to_string_lossy().into_owned();
         if key.starts_with("LF_") || key.starts_with("LOOPFLOW_") || key.starts_with("LINEAR_") {
@@ -54,7 +52,7 @@ fn lf(home: &Path, args: &[&str]) -> Command {
         .args(args)
         .current_dir(home)
         .env("LF_HOME", home)
-        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+        .env("LF_BIN", crate::test_cli_binary())
         .env("HOME", home)
         .stderr(Stdio::inherit());
     command

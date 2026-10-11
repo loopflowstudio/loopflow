@@ -1,8 +1,6 @@
 //! Repository Team bindings preserve independent Wave and Project ownership.
 
-#[path = "support/linear_input.rs"]
-mod linear_input;
-use crate::linear_input::{Inventory, InventoryFixture, SeedLinearSqlite};
+use crate::test_linear_input::{Inventory, InventoryFixture, SeedLinearSqlite};
 use std::path::Path;
 use std::process::{Command, Output};
 
@@ -102,7 +100,7 @@ fn put_snapshot(
 }
 
 fn lf_command(home: &Path, repo: &Path, args: &[&str]) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+    let mut command = Command::new(crate::test_cli_binary());
     command
         .args(args)
         .current_dir(repo)

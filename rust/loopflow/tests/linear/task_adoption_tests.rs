@@ -1,6 +1,5 @@
-use crate::linear_input::{InventoryFixture, SeedLinear};
-use support::linear_input;
-mod support;
+use crate::test_linear_input::{InventoryFixture, SeedLinear};
+use crate::test_support as support;
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -113,7 +112,7 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
             created_at: now,
             updated_at: now,
         };
-        let snapshot: crate::linear_input::Inventory = serde_json::from_value(json!({
+        let snapshot: crate::test_linear_input::Inventory = serde_json::from_value(json!({
             "projects": [{"id":"project-1", "slug":"chapter", "name":"Chapter",
                 "summary":"", "metric_targets":[], "workflow":"adoption", "status":"started",
                 "krs":[], "initiative_ids":["initiative-1"], "team_ids":["team-1"]}],
@@ -183,7 +182,7 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
         fs::write(&gh, format!("#!/bin/sh\n[ \"$1\" = --version ] && exit 0\nif [ \"$1 $2\" = 'pr list' ]; then\n  printf '%s\\n' '[{{\"url\":\"https://example.test/pull/42\",\"number\":42,\"state\":\"OPEN\",\"isDraft\":true,\"mergeCommit\":null,\"headRefOid\":\"{head}\"}}]'\nelse\n  exit 1\nfi\n")).unwrap();
         fs::set_permissions(&gh, fs::Permissions::from_mode(0o755)).unwrap();
         let command = |cwd: &Path, args: &[&str]| {
-            let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+            let mut command = Command::new(crate::test_cli_binary());
             for (key, _) in std::env::vars_os() {
                 if key.to_string_lossy().starts_with("LF_") {
                     command.env_remove(key);
@@ -193,7 +192,7 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
                 .current_dir(cwd)
                 .args(args)
                 .env("LF_HOME", home.path())
-                .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+                .env("LF_BIN", crate::test_cli_binary())
                 .env(
                     "PATH",
                     format!("{}:{}", bin.display(), std::env::var("PATH").unwrap()),
@@ -315,7 +314,7 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
             assert!(saved.iter().all(|flow| current.contains(flow)));
             let saved = current;
             let scope = repo.path().canonicalize().unwrap().display().to_string();
-            let original: crate::linear_input::IssueFixture =
+            let original: crate::test_linear_input::IssueFixture =
                 loopflow_test_support::retained_task_input(
                     &home.path().join("loopflow.db"),
                     &scope,

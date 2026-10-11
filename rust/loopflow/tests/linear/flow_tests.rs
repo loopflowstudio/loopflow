@@ -1,6 +1,5 @@
-use crate::linear_input::SeedLinear;
-use support::linear_input;
-mod support;
+use crate::test_linear_input::SeedLinear;
+use crate::test_support as support;
 
 use std::fs;
 use std::path::Path;
@@ -118,7 +117,7 @@ PYTHON
             &format!(
                 "#!/bin/sh\nset -eu\necho selected >> '{}'\n'{}' \"$@\"\n{migration}",
                 home.path().join("selected").display(),
-                env!("CARGO_BIN_EXE_lf")
+                crate::test_cli_binary()
             ),
         );
         let output = lf_command(
@@ -155,7 +154,7 @@ PYTHON
             .unwrap();
         assert_eq!(
             executables,
-            vec![env!("CARGO_BIN_EXE_lf"); steps.len()],
+            vec![crate::test_cli_binary(); steps.len()],
             "the wrapper delegated each step to these actual bytes"
         );
         assert_eq!(
@@ -365,7 +364,7 @@ fn run_lf(repo: &Path, home: &Path, args: &[&str], path: Option<&str>) -> std::p
 }
 
 fn lf_command(repo: &Path, home: &Path, args: &[&str], path: Option<&str>) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+    let mut command = Command::new(crate::test_cli_binary());
     for (key, _) in std::env::vars_os() {
         if key.to_string_lossy().starts_with("LF_") {
             command.env_remove(key);
@@ -377,9 +376,9 @@ fn lf_command(repo: &Path, home: &Path, args: &[&str], path: Option<&str>) -> Co
         .env("HOME", home)
         .env("CODEX_HOME", home.join(".codex"))
         .env("LF_HOME", home)
-        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+        .env("LF_BIN", crate::test_cli_binary())
         .env("NO_COLOR", "1");
-    let binary_dir = Path::new(env!("CARGO_BIN_EXE_lf")).parent().unwrap();
+    let binary_dir = Path::new(crate::test_cli_binary()).parent().unwrap();
     command.env(
         "PATH",
         format!(
@@ -396,7 +395,7 @@ fn lf_command(repo: &Path, home: &Path, args: &[&str], path: Option<&str>) -> Co
 fn observe_planning(task: &support::RegisteredTask, checkout: &Path) {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let scope = checkout.display().to_string();
-    let mut record: crate::linear_input::IssueFixture =
+    let mut record: crate::test_linear_input::IssueFixture =
         loopflow_test_support::retained_task_input(&task.database, &scope, "INF-123");
     record.item.revision = Some("2026-10-04T12:00:00Z".into());
     runtime
@@ -1823,7 +1822,7 @@ fn scheduled_release_flow_propagates_the_operation_failure() {
     write_flow(
         repo.path(),
         "release-run",
-        include_str!("../../../.lf/flows/release-run.yaml"),
+        include_str!("../../../../.lf/flows/release-run.yaml"),
     );
     fs::write(
         repo.path().join(".lf/config.yaml"),

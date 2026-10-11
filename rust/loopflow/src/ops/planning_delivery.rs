@@ -303,15 +303,14 @@ async fn observe(
                 .ok_or_else(|| message("Project Wave is missing"))?;
             let initiative = super::pm::read_initiative(repo, wave.slug())
                 .ok_or_else(|| message("Wave has no Linear Initiative"))?;
-            store
-                .sqlite
-                .accept_linear_project(
-                    &project.wave_id,
-                    &initiative,
-                    &observed,
-                    time::OffsetDateTime::now_utc().unix_timestamp(),
-                )
-                .map_err(message)?;
+            crate::pm::linear::acceptance::accept_linear_project_in(
+                &store.sqlite,
+                &project.wave_id,
+                &initiative,
+                &observed,
+                time::OffsetDateTime::now_utc().unix_timestamp(),
+            )
+            .map_err(message)?;
             if !store
                 .sqlite
                 .accepted_project_revision(id, &external, observed.revision.as_deref())
@@ -358,7 +357,7 @@ fn task_input(store: &Store, change: &PlanningChange) -> OpsResult<Value> {
 pub(super) async fn ingest_task(
     store: &Store,
     repo: &Path,
-    issue: &crate::pm::PmItem,
+    issue: &crate::pm::linear::LinearIssue,
     project: Option<&crate::pm::linear::LinearProject>,
     observed_at: i64,
 ) -> OpsResult<()> {
@@ -384,16 +383,15 @@ pub(super) async fn ingest_task(
             }
         }
     }
-    store
-        .sqlite
-        .accept_linear_issue(
-            &repo.to_string_lossy(),
-            issue,
-            project,
-            observed_at,
-            confirmed
-                .as_ref()
-                .map(|(wave, initiative)| (wave, initiative.as_str())),
-        )
-        .map_err(message)
+    crate::pm::linear::acceptance::accept_linear_issue_in(
+        &store.sqlite,
+        &repo.to_string_lossy(),
+        issue,
+        project,
+        observed_at,
+        confirmed
+            .as_ref()
+            .map(|(wave, initiative)| (wave, initiative.as_str())),
+    )
+    .map_err(message)
 }

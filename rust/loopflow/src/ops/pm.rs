@@ -3,6 +3,7 @@
 //! Work owns authored Project content and Tasks. Linear refresh accepts provider
 //! facts through the shared writer; ordinary readers consume saved Work.
 
+use crate::pm::linear::LinearIssue;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::OpenOptions;
 use std::future::Future;
@@ -15,7 +16,7 @@ use crate::ops::progress::Progress;
 use crate::ops::util::normalize_wave_name;
 use crate::pm::linear::LinearClient;
 use crate::pm::linear::LinearProject;
-use crate::pm::{PmError, PmItem};
+use crate::pm::PmError;
 use crate::provider_auth::{
     provider_token_refresh_due, refresh_stored_provider_token, Provider, TokenRefreshError,
 };
@@ -566,17 +567,17 @@ pub(crate) async fn refresh_pm_snapshot_locked(
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?;
     items.retain(|item| !removed.contains(&item.id));
-    store
-        .accept_linear_inventory(
-            wave.id().clone(),
-            ctx.initiative.clone(),
-            projects,
-            items,
-            observed_at,
-            Some(acquisition),
-        )
-        .await
-        .map_err(|err| OpsError::Message(format!("failed to accept Linear inventory: {err}")))?;
+    crate::pm::linear::acceptance::accept_linear_inventory(
+        store,
+        wave.id().clone(),
+        ctx.initiative.clone(),
+        projects,
+        items,
+        observed_at,
+        Some(acquisition),
+    )
+    .await
+    .map_err(|err| OpsError::Message(format!("failed to accept Linear inventory: {err}")))?;
     Ok(())
 }
 
@@ -1042,17 +1043,17 @@ pub(crate) async fn inspect_task_planning_async(
                 repository.team_id
             )));
         }
-        store
-            .accept_linear_issue(
-                &scope,
-                item,
-                project,
-                observed_at,
-                confirmed_wave,
-                acquisition,
-            )
-            .await
-            .map_err(|error| OpsError::Message(error.to_string()))?;
+        crate::pm::linear::acceptance::accept_linear_issue(
+            &store,
+            &scope,
+            item,
+            project,
+            observed_at,
+            confirmed_wave,
+            acquisition,
+        )
+        .await
+        .map_err(|error| OpsError::Message(error.to_string()))?;
         Ok(true)
     };
     let result = match tokio::time::timeout(PM_REFRESH_TIMEOUT, fetch).await {
@@ -1279,17 +1280,16 @@ async fn accept_reteam_project(
             project.id
         )));
     }
-    resolved
-        .store
-        .reconcile_linear_project_teams(
-            wave.id(),
-            &project.initiative_ids[0],
-            confirmed,
-            observed_at,
-            acquisition,
-        )
-        .await
-        .map_err(|error| OpsError::Message(error.to_string()))
+    crate::pm::linear::acceptance::reconcile_linear_project_teams(
+        &resolved.store,
+        wave.id(),
+        &project.initiative_ids[0],
+        confirmed,
+        observed_at,
+        acquisition,
+    )
+    .await
+    .map_err(|error| OpsError::Message(error.to_string()))
 }
 
 async fn accept_reteam_task(
@@ -1325,18 +1325,17 @@ async fn accept_reteam_task(
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?
         .is_some_and(|previous| previous != identifier);
-    resolved
-        .store
-        .accept_linear_issue(
-            wave.repo(),
-            item,
-            Some(project),
-            observed_at,
-            Some((wave.id().clone(), initiative)),
-            Some(acquisition),
-        )
-        .await
-        .map_err(|error| OpsError::Message(error.to_string()))?;
+    crate::pm::linear::acceptance::accept_linear_issue(
+        &resolved.store,
+        wave.repo(),
+        item,
+        Some(project),
+        observed_at,
+        Some((wave.id().clone(), initiative)),
+        Some(acquisition),
+    )
+    .await
+    .map_err(|error| OpsError::Message(error.to_string()))?;
     Ok((identifier, changed))
 }
 
@@ -2249,7 +2248,7 @@ fn pm_to_ops(err: PmError) -> OpsError {
 
 #[derive(Debug)]
 pub(crate) struct ChapterSweep {
-    pub candidates: Vec<(String, String, PmItem)>,
+    pub candidates: Vec<(String, String, LinearIssue)>,
     pub skipped_projects: Vec<(String, LinearProject)>,
 }
 

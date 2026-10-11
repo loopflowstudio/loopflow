@@ -1301,9 +1301,12 @@ async fn monitor_does_not_treat_historical_feedback_as_live_readiness() {
         .await
         .unwrap();
     let store = SqliteStore::new(&database).unwrap();
-    for id in ["waiting", "finished", "unobserved"] {
+    for id in ["waiting", "finished", "legacy_finished", "unobserved"] {
         reserve_session(&store, id, home.path());
     }
+    let finished = store
+        .claim_session_attachment("finished", None, &LfProcessId::new(), true)
+        .unwrap();
     let connection = rusqlite::Connection::open(&database).unwrap();
     connection
         .execute(
@@ -1313,8 +1316,14 @@ async fn monitor_does_not_treat_historical_feedback_as_live_readiness() {
         .unwrap();
     connection
         .execute(
-            "UPDATE agent_sessions SET completed_at=2 WHERE id='finished'",
+            "UPDATE agent_sessions SET completed_at=2 WHERE id='legacy_finished'",
             [],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "UPDATE processes SET completed_at=2 WHERE id=?1",
+            [&finished.agent_process_id],
         )
         .unwrap();
     let output = command(home.path(), home.path(), &["monitor", "--all", "--json"])
@@ -1335,6 +1344,12 @@ async fn monitor_does_not_treat_historical_feedback_as_live_readiness() {
             "finished",
             "completion is recorded",
             "lf session history finished",
+        ),
+        (
+            "legacy_finished",
+            "unknown",
+            "No current provider observation",
+            "lf session history legacy_finished",
         ),
         (
             "unobserved",

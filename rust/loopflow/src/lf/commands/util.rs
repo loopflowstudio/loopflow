@@ -1,7 +1,6 @@
-use anyhow::{anyhow, bail, Context, Result};
-use fs2::FileExt;
+use anyhow::{anyhow, bail, Result};
 use std::collections::BTreeMap;
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -11,9 +10,7 @@ use crate::agent::codex_permission_args;
 use crate::agent::missing_agent_message;
 use crate::agent::workspace_add_dirs;
 use crate::id::AgentSessionId;
-use crate::journal::elapsed_seconds;
 use crate::provider_auth::Provider;
-use crate::session_record::{ProviderClientRef, ProviderClientStopReason};
 use crate::store::sqlite::SqliteStore;
 
 pub fn find_repo_root() -> Result<PathBuf> {
@@ -306,40 +303,6 @@ pub(crate) fn resume_session_with_env(
     )
 }
 
-pub(crate) fn active_provider_clients(dir: &Path, harness: &str) -> Result<Vec<ProviderClientRef>> {
-    let clients = crate::session_record::read_provider_clients(dir)
-        .map_err(|error| anyhow!("cannot read provider clients: {error}"))?;
-    clients
-        .into_iter()
-        .filter_map(|client| match provider_client_is_live(&client, harness) {
-            Ok(true) => Some(Ok(client)),
-            Ok(false) => None,
-            Err(error) => Some(Err(error)),
-        })
-        .collect()
-}
-
-pub(crate) fn replace_provider_clients(
-    dir: &Path,
-    harness: &str,
-    clients: &[ProviderClientRef],
-    reason: ProviderClientStopReason,
-) -> Result<()> {
-    let _launch = lock_provider_clients(dir)?;
-    replace_provider_clients_locked(dir, harness, clients, reason)
-}
-
-fn lock_provider_clients(dir: &Path) -> Result<File> {
-    let file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(dir.join("provider-clients.lock"))?;
-    FileExt::lock_exclusive(&file).context("lock native Session launch")?;
-    Ok(file)
-}
-
 pub(crate) fn require_provider_session_process(dir: &Path) -> Result<()> {
     let input = crate::session_record::input_id_from_dir(dir)?;
     let store = SqliteStore::open_processes_read_only(&crate::store::database_path_from_env()?)?;
@@ -359,147 +322,6 @@ pub(crate) fn require_provider_session_process(dir: &Path) -> Result<()> {
         );
     }
     Ok(())
-}
-
-fn replace_provider_clients_locked(
-    dir: &Path,
-    harness: &str,
-    clients: &[ProviderClientRef],
-    reason: ProviderClientStopReason,
-) -> Result<()> {
-    require_unchanged_provider_clients(dir, clients)?;
-    for client in clients {
-        // The PID may have been reused since the caller collected its clients.
-        if !provider_client_is_live(client, harness)? {
-            continue;
-        }
-        crate::session_record::write_provider_client_stop(dir, client.pid, reason)
-            .context("record why the provider client is stopping")?;
-        if let Err(error) = signal_provider_client(client.pid, libc::SIGTERM) {
-            let _ = crate::session_record::remove_provider_client_stop(dir, client.pid);
-            return Err(error);
-        }
-    }
-    for _ in 0..20 {
-        if provider_clients_have_exited(clients, harness)? {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }
-    for client in clients {
-        if provider_client_is_live(client, harness)? {
-            signal_provider_client(client.pid, libc::SIGKILL)?;
-        }
-    }
-    for _ in 0..20 {
-        if provider_clients_have_exited(clients, harness)? {
-            require_unchanged_provider_clients(dir, clients)?;
-            if !active_provider_clients(dir, harness)?.is_empty() {
-                bail!("a provider client started while stopping; retry with its current identity");
-            }
-            for client in clients {
-                crate::session_record::remove_provider_client(dir, client.pid)?;
-            }
-            return Ok(());
-        }
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }
-    bail!("the existing provider client did not exit; resume was not started")
-}
-
-fn require_unchanged_provider_clients(dir: &Path, clients: &[ProviderClientRef]) -> Result<()> {
-    let current = crate::session_record::read_provider_clients(dir)?;
-    for client in clients {
-        if current
-            .iter()
-            .any(|saved| saved.pid == client.pid && saved != client)
-        {
-            bail!(
-                "provider client {} changed while stopping; retry with its current identity",
-                client.pid
-            );
-        }
-    }
-    Ok(())
-}
-
-fn provider_clients_have_exited(clients: &[ProviderClientRef], harness: &str) -> Result<bool> {
-    for client in clients {
-        if provider_client_is_live(client, harness)? {
-            return Ok(false);
-        }
-    }
-    Ok(true)
-}
-
-fn provider_client_is_live(client: &ProviderClientRef, harness: &str) -> Result<bool> {
-    let output = Command::new("ps")
-        .args([
-            "-p",
-            &client.pid.to_string(),
-            "-o",
-            "etime=",
-            "-o",
-            "command=",
-        ])
-        .output()
-        .with_context(|| format!("cannot inspect provider client {}", client.pid))?;
-    if !output.status.success() {
-        if output.status.code() == Some(1) && output.stdout.is_empty() && output.stderr.is_empty() {
-            return Ok(false);
-        }
-        bail!(
-            "cannot inspect provider client {}: process query failed",
-            client.pid
-        );
-    }
-    let line = String::from_utf8_lossy(&output.stdout);
-    let mut fields = line.split_whitespace();
-    let elapsed = fields.next().and_then(elapsed_seconds).ok_or_else(|| {
-        anyhow!(
-            "cannot inspect provider client {}: invalid process age",
-            client.pid
-        )
-    })?;
-    let command = fields.collect::<Vec<_>>().join(" ");
-    if command.is_empty() {
-        bail!(
-            "cannot inspect provider client {}: missing process command",
-            client.pid
-        );
-    }
-    let elapsed = i64::try_from(elapsed).context("provider client process age exceeds i64")?;
-    let expected_start = OffsetDateTime::now_utc()
-        .unix_timestamp()
-        .saturating_sub(elapsed);
-    Ok(crate::session_record::provider_client_matches(
-        client,
-        harness,
-        client.pid,
-        expected_start,
-        &command,
-    ))
-}
-
-#[cfg(unix)]
-fn signal_provider_client(pid: u32, signal: libc::c_int) -> Result<()> {
-    let pid = libc::pid_t::try_from(pid).context("provider pid does not fit this platform")?;
-    // SAFETY: a positive, receipt-verified pid targets exactly one provider process.
-    let result = unsafe { libc::kill(pid, signal) };
-    if result == 0 {
-        return Ok(());
-    }
-    let error = std::io::Error::last_os_error();
-    if error.raw_os_error() == Some(libc::ESRCH) {
-        Ok(())
-    } else {
-        Err(error).context("stop the existing provider client")
-    }
-}
-
-#[cfg(not(unix))]
-fn signal_provider_client(_pid: u32, _signal: libc::c_int) -> Result<()> {
-    bail!("--replace is not supported on this platform")
 }
 
 fn build_resume_session_command(
@@ -576,10 +398,7 @@ fn spawn_session_command_with_env(
         exact_account_id,
         launch_lock,
     )?;
-    if let Some(reason) = outcome.stop_reason {
-        eprintln!("{}", provider_client_stop_message(reason));
-        Ok(())
-    } else if outcome.status.success() {
+    if outcome.status.success() || outcome.interrupted {
         Ok(())
     } else if agent_session.is_some() {
         Err(anyhow!(
@@ -595,18 +414,10 @@ fn spawn_session_command_with_env(
     }
 }
 
-fn provider_client_stop_message(reason: ProviderClientStopReason) -> &'static str {
-    match reason {
-        ProviderClientStopReason::Retired => "Review retired by Task restart.",
-        ProviderClientStopReason::Moved => "Session moved to another terminal.",
-        ProviderClientStopReason::Completed => "Session completed elsewhere.",
-    }
-}
-
 #[derive(Debug)]
 struct SessionCommandOutcome {
     status: std::process::ExitStatus,
-    stop_reason: Option<ProviderClientStopReason>,
+    interrupted: bool,
 }
 
 fn record_interactive_opened(environment: &BTreeMap<String, String>) -> Result<()> {
@@ -751,7 +562,7 @@ fn session_command_status_with_env(
         );
         let outcome = if result
             .as_ref()
-            .is_ok_and(|outcome| outcome.stop_reason.is_some() || outcome.status.success())
+            .is_ok_and(|outcome| outcome.interrupted || outcome.status.success())
         {
             "completed"
         } else {
@@ -784,20 +595,18 @@ fn run_native_session(
 ) -> Result<SessionCommandOutcome> {
     let started = std::time::Instant::now();
     let attachment = native_provider_attachment(command, environment)?;
-    // Keep admission and client publication on the same side of Session stop.
-    // Release before waiting for the child, so stop can settle that client.
     let capture_dir = environment
         .get(crate::session_record::CAPTURE_KEY_ENV)
         .map(|key| crate::session_record::capture_dir(key))
         .transpose()?;
-    let launch = capture_dir
-        .as_deref()
-        .map(|dir| -> Result<File> {
-            let launch = lock_provider_clients(dir)?;
-            require_provider_session_process(dir)?;
-            Ok(launch)
-        })
-        .transpose()?;
+    if let Some(dir) = &capture_dir {
+        require_provider_session_process(dir)?;
+    }
+    attachment.0.record_session_terminal(
+        &attachment.1,
+        &attachment.2,
+        crate::session_record::current_terminal_id().as_deref(),
+    )?;
     let provider = match command.program.as_str() {
         "claude" => Some(Provider::Claude),
         "codex" => Some(Provider::Codex),
@@ -893,21 +702,15 @@ fn run_native_session(
     })?;
 
     drop(activation);
-    // Retain a published client through cleanup if recording the opening fails.
-    let mut client = None;
-    let setup = (|| {
-        client = ProviderClientGuard::publish(capture_dir.as_deref(), child.id())?;
-        record_interactive_opened(environment)
-    })();
+    let setup = record_interactive_opened(environment);
     if let Err(error) = setup {
         if let Err(cleanup) = crate::harness::agent_process::stop_native(&mut child, owned) {
             tracing::warn!(%cleanup, "native setup cleanup remains unresolved");
         }
         return Err(error);
     }
-    // Completion and another Open can proceed once exact client ownership is visible.
+    // The process record now owns the launch identity.
     drop(launch_lock);
-    drop(launch);
     let observer = observed_capture.map(|capture_dir| {
         let stderr = child
             .stderr
@@ -920,9 +723,21 @@ fn run_native_session(
     } else {
         child.wait()?
     };
-    if let Some((store, session, attachment)) = owned {
-        store.record_agent_process_exit(session, attachment, true)?;
-    }
+    let interrupted = if let Some((store, session, attachment)) = owned {
+        match store.with_session_attachment(session, attachment, || {
+            store.record_agent_process_exit(session, attachment, true)
+        }) {
+            Ok(()) | Err(crate::store::StoreError::InvalidAuthority(_)) => {}
+            Err(error) => return Err(error.into()),
+        }
+        store
+            .process(&attachment.agent_process_id)?
+            .is_some_and(|process| {
+                process.completed_at.is_some() && process.outcome.as_deref() == Some("interrupted")
+            })
+    } else {
+        false
+    };
     if let Some(observer) = observer {
         observer
             .join()
@@ -936,12 +751,7 @@ fn run_native_session(
             }
         }
     }
-    let stop_reason = client
-        .as_ref()
-        .map(ProviderClientGuard::take_stop_reason)
-        .transpose()?
-        .flatten();
-    if status.success() && stop_reason.is_none() && capture_codex {
+    if status.success() && capture_codex {
         let capture_dir = capture_dir
             .as_deref()
             .expect("Codex capture has a directory");
@@ -951,49 +761,8 @@ fn run_native_session(
     }
     Ok(SessionCommandOutcome {
         status,
-        stop_reason,
+        interrupted,
     })
-}
-
-#[derive(Debug)]
-struct ProviderClientGuard {
-    capture_dir: PathBuf,
-    pid: u32,
-}
-
-impl ProviderClientGuard {
-    fn publish(capture_dir: Option<&Path>, pid: u32) -> Result<Option<Self>> {
-        let Some(capture_dir) = capture_dir else {
-            return Ok(None);
-        };
-        let capture_dir = capture_dir.to_path_buf();
-        crate::session_record::write_provider_client(&capture_dir, pid)
-            .map_err(|error| anyhow!("cannot record active provider client: {error}"))?;
-        Ok(Some(Self { capture_dir, pid }))
-    }
-
-    fn take_stop_reason(&self) -> Result<Option<ProviderClientStopReason>> {
-        let reason = crate::session_record::read_provider_client_stop(&self.capture_dir, self.pid)?;
-        if reason.is_some() {
-            crate::session_record::remove_provider_client_stop(&self.capture_dir, self.pid)?;
-        }
-        Ok(reason)
-    }
-}
-
-impl Drop for ProviderClientGuard {
-    fn drop(&mut self) {
-        if let Err(error) =
-            crate::session_record::remove_provider_client(&self.capture_dir, self.pid)
-        {
-            tracing::warn!(pid = self.pid, %error, "failed to clear provider client receipt");
-        }
-        if let Err(error) =
-            crate::session_record::remove_provider_client_stop(&self.capture_dir, self.pid)
-        {
-            tracing::warn!(pid = self.pid, %error, "failed to clear provider client stop");
-        }
-    }
 }
 
 fn observe_opencode_session(capture_dir: &Path, stderr: impl Read) -> std::io::Result<()> {
@@ -1063,7 +832,6 @@ mod tests {
     use crate::store::{CredentialType, ProviderAccountId, ProviderToken, StorageConfig};
     use std::ffi::OsString;
     use std::os::unix::fs::PermissionsExt;
-    use std::process::{Child, Stdio};
 
     struct EnvRestore(Vec<(&'static str, Option<OsString>)>);
 
@@ -1153,432 +921,6 @@ mod tests {
         provider
     }
 
-    struct NativeClient {
-        child: Child,
-        capture: crate::session_record::CaptureHandle,
-        temp: tempfile::TempDir,
-        _environment: EnvRestore,
-    }
-
-    impl NativeClient {
-        fn new() -> Self {
-            let temp = tempfile::tempdir().unwrap();
-            let names = [
-                "LF_HOME",
-                "LF_RUN_ID",
-                "LF_RUN_DIR",
-                "LF_WAVE_ID",
-                "LF_HUMAN_SESSION",
-            ];
-            let environment = EnvRestore::capture(&names);
-            for name in names {
-                std::env::remove_var(name);
-            }
-            std::env::set_var("LF_HOME", temp.path());
-            let provider = fake_provider(
-                &temp,
-                "trap '' TERM\nprintf ready > \"$1\"\nwhile :; do /bin/sleep 0.05; done",
-            );
-            let capture = crate::session_record::CaptureHandle::begin_at(
-                temp.path(),
-                crate::session_record::SessionCaptureSpec {
-                    harness: "fake-provider".into(),
-                    model: None,
-                    surface: "tui".into(),
-                    cwd: temp.path().to_path_buf(),
-                    repo: None,
-                    worktree: None,
-                    skill: None,
-                    subjects: Vec::new(),
-                    work: None,
-                    flow: crate::session_record::SessionFlowMembership::Independent,
-                },
-            )
-            .unwrap();
-            let ready = temp.path().join("ready");
-            let child = Command::new(provider)
-                .arg(&ready)
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-                .unwrap();
-            let fixture = Self {
-                child,
-                capture,
-                temp,
-                _environment: environment,
-            };
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-            while !ready.exists() {
-                assert!(
-                    std::time::Instant::now() < deadline,
-                    "provider did not start"
-                );
-                std::thread::sleep(std::time::Duration::from_millis(10));
-            }
-            crate::session_record::write_provider_client(
-                &fixture.capture.artifact_dir(),
-                fixture.child.id(),
-            )
-            .unwrap();
-            fixture
-        }
-
-        fn mock_ps(&self, body: &str) {
-            let bin = self.temp.path().join("bin");
-            std::fs::create_dir_all(&bin).unwrap();
-            let ps = bin.join("ps");
-            std::fs::write(&ps, format!("#!/bin/sh\n{body}\n")).unwrap();
-            std::fs::set_permissions(&ps, std::fs::Permissions::from_mode(0o755)).unwrap();
-            std::env::set_var("PATH", bin);
-        }
-    }
-
-    impl Drop for NativeClient {
-        fn drop(&mut self) {
-            let _ = self.child.kill();
-            let _ = self.child.wait();
-        }
-    }
-
-    #[test]
-    fn provider_client_stop_preserves_unknown_process_evidence() {
-        let _lock = crate::journal::test_env_lock();
-        let _env = EnvRestore::capture(&["PATH"]);
-        let mut fixture = NativeClient::new();
-        let dir = fixture.capture.artifact_dir();
-        let clients = active_provider_clients(&dir, "fake-provider").unwrap();
-        assert_eq!(clients.len(), 1);
-        for query in ["exit 2", "echo invalid-age fake-provider", "echo 00:00"] {
-            fixture.mock_ps(query);
-            assert!(active_provider_clients(&dir, "fake-provider").is_err());
-            assert!(replace_provider_clients(
-                &dir,
-                "fake-provider",
-                &clients,
-                ProviderClientStopReason::Moved,
-            )
-            .is_err());
-            assert!(fixture.child.try_wait().unwrap().is_none());
-            assert_eq!(
-                crate::session_record::read_provider_clients(&dir).unwrap(),
-                clients
-            );
-            assert!(
-                crate::session_record::read_provider_client_stop(&dir, fixture.child.id())
-                    .unwrap()
-                    .is_none()
-            );
-        }
-        std::env::set_var("PATH", fixture.temp.path().join("missing"));
-        assert!(active_provider_clients(&dir, "fake-provider").is_err());
-        assert!(replace_provider_clients(
-            &dir,
-            "fake-provider",
-            &clients,
-            ProviderClientStopReason::Moved,
-        )
-        .is_err());
-        assert!(fixture.child.try_wait().unwrap().is_none());
-    }
-
-    #[test]
-    fn provider_client_stop_rechecks_identity_before_signaling() {
-        let _lock = crate::journal::test_env_lock();
-        let mut fixture = NativeClient::new();
-        let dir = fixture.capture.artifact_dir();
-        let mut clients = active_provider_clients(&dir, "fake-provider").unwrap();
-        // Simulate a caller retaining an older process at this now-reused PID.
-        clients[0].started_at -= time::Duration::hours(1);
-        let current = crate::session_record::read_provider_clients(&dir).unwrap();
-        let receipt = dir
-            .join("provider-clients")
-            .join(format!("{}.json", fixture.child.id()));
-        std::fs::write(&receipt, serde_json::to_vec(&clients[0]).unwrap()).unwrap();
-        replace_provider_clients(
-            &dir,
-            "fake-provider",
-            &clients,
-            ProviderClientStopReason::Moved,
-        )
-        .unwrap();
-        assert!(fixture.child.try_wait().unwrap().is_none());
-        // A newly published receipt also survives an older caller's cleanup.
-        std::fs::write(&receipt, serde_json::to_vec(&current[0]).unwrap()).unwrap();
-        assert!(replace_provider_clients(
-            &dir,
-            "fake-provider",
-            &clients,
-            ProviderClientStopReason::Moved,
-        )
-        .is_err());
-        assert!(fixture.child.try_wait().unwrap().is_none());
-        assert_eq!(
-            crate::session_record::read_provider_clients(&dir)
-                .unwrap()
-                .len(),
-            1
-        );
-        assert!(
-            crate::session_record::read_provider_client_stop(&dir, fixture.child.id())
-                .unwrap()
-                .is_none()
-        );
-    }
-
-    #[test]
-    fn provider_client_stop_keeps_a_new_client_outside_the_observed_set() {
-        let _lock = crate::journal::test_env_lock();
-        let mut fixture = NativeClient::new();
-        let dir = fixture.capture.artifact_dir();
-        assert!(replace_provider_clients(
-            &dir,
-            "fake-provider",
-            &[],
-            ProviderClientStopReason::Moved,
-        )
-        .is_err());
-        assert!(fixture.child.try_wait().unwrap().is_none());
-        assert_eq!(
-            active_provider_clients(&dir, "fake-provider")
-                .unwrap()
-                .len(),
-            1
-        );
-    }
-
-    #[test]
-    fn provider_client_move_preserves_unknown_exit_and_native_history() {
-        let _lock = crate::journal::test_env_lock();
-        let _env = EnvRestore::capture(&["PATH", "LF_HOME"]);
-        let original_path = std::env::var_os("PATH").unwrap();
-        let mut fixture = NativeClient::new();
-        std::env::set_var("LF_HOME", fixture.temp.path());
-        let dir = fixture.capture.artifact_dir();
-        crate::session_record::write_provider_session(&dir, &"native-history".into(), None)
-            .unwrap();
-        let clients = active_provider_clients(&dir, "fake-provider").unwrap();
-        fixture.mock_ps("echo unreadable fake-provider");
-        assert!(replace_provider_clients(
-            &dir,
-            "fake-provider",
-            &clients,
-            ProviderClientStopReason::Moved
-        )
-        .is_err());
-        assert!(fixture.child.try_wait().unwrap().is_none());
-        assert!(!crate::session_record::read_provider_clients(&dir)
-            .unwrap()
-            .is_empty());
-        assert_eq!(
-            crate::session_record::read_provider_clients(&dir)
-                .unwrap()
-                .len(),
-            1
-        );
-
-        // Losing inspection after SIGTERM must not resolve this still-live client.
-        fixture.mock_ps(&format!(
-            "if [ -e '{}' ]; then exit 2; fi\nexec /bin/ps \"$@\"",
-            dir.join("provider-client-stops")
-                .join(format!("{}.json", fixture.child.id()))
-                .display(),
-        ));
-        assert!(replace_provider_clients(
-            &dir,
-            "fake-provider",
-            &clients,
-            ProviderClientStopReason::Moved
-        )
-        .is_err());
-        assert!(fixture.child.try_wait().unwrap().is_none());
-        assert!(!crate::session_record::read_provider_clients(&dir)
-            .unwrap()
-            .is_empty());
-        assert_eq!(
-            crate::session_record::read_provider_clients(&dir)
-                .unwrap()
-                .len(),
-            1
-        );
-
-        std::env::set_var("PATH", original_path);
-        replace_provider_clients(
-            &dir,
-            "fake-provider",
-            &clients,
-            ProviderClientStopReason::Moved,
-        )
-        .unwrap();
-        assert!(!fixture.child.wait().unwrap().success());
-        assert!(crate::session_record::read_provider_clients(&dir)
-            .unwrap()
-            .is_empty());
-        assert_eq!(
-            crate::session_record::read_provider_session(&dir)
-                .unwrap()
-                .unwrap()
-                .agent_session,
-            "native-history".into()
-        );
-    }
-
-    #[test]
-    fn provider_client_stop_confirms_exit_after_ignored_termination() {
-        let _lock = crate::journal::test_env_lock();
-        let mut fixture = NativeClient::new();
-        let dir = fixture.capture.artifact_dir();
-        let clients = active_provider_clients(&dir, "fake-provider").unwrap();
-        replace_provider_clients(
-            &dir,
-            "fake-provider",
-            &clients,
-            ProviderClientStopReason::Moved,
-        )
-        .unwrap();
-        assert!(!fixture.child.wait().unwrap().success());
-        assert!(active_provider_clients(&dir, "fake-provider")
-            .unwrap()
-            .is_empty());
-        assert!(crate::session_record::read_provider_clients(&dir)
-            .unwrap()
-            .is_empty());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn provider_client_move_retains_history_published_after_client_exit() {
-        let _environment = crate::journal::test_env_lock();
-        let mut fixture = NativeClient::new();
-        let dir = fixture.capture.artifact_dir();
-        assert!(crate::session_record::read_provider_session(&dir)
-            .unwrap()
-            .is_none());
-
-        let clients = active_provider_clients(&dir, "fake-provider").unwrap();
-        replace_provider_clients(
-            &dir,
-            "fake-provider",
-            &clients,
-            ProviderClientStopReason::Moved,
-        )
-        .unwrap();
-        assert!(!fixture.child.wait().unwrap().success());
-        // The startup observer may drain buffered logs after stop has returned.
-        observe_opencode_session(
-            &dir,
-            &b"level=INFO message=created id=ses_delayed directory=/tmp/repo\n"[..],
-        )
-        .unwrap();
-
-        assert_eq!(
-            crate::session_record::read_provider_session(&dir)
-                .unwrap()
-                .unwrap()
-                .agent_session,
-            "ses_delayed".into()
-        );
-        assert!(crate::session_record::read_provider_clients(&dir)
-            .unwrap()
-            .is_empty());
-        assert!(!dir.join("session-resolution.json").exists());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn intentional_session_move_exits_cleanly() {
-        let ledger = crate::journal::TestLedgerGuard::new();
-        let temp = tempfile::tempdir().unwrap();
-        ledger.set_db_path(temp.path().join("loopflow.db"));
-        let _home = EnvRestore::capture(&["LF_HOME"]);
-        std::env::set_var("LF_HOME", temp.path());
-        let provider = fake_provider(&temp, "trap 'exit 143' TERM\ni=0; while [ \"$i\" -lt 100 ]; do sleep 0.05; i=$((i + 1)); done");
-        let capture = crate::session_record::CaptureHandle::begin_at(
-            temp.path(),
-            crate::session_record::SessionCaptureSpec {
-                harness: "fake-provider".to_string(),
-                model: None,
-                surface: "tui".to_string(),
-                cwd: temp.path().to_path_buf(),
-                repo: None,
-                worktree: None,
-                skill: None,
-                subjects: Vec::new(),
-                flow: crate::session_record::SessionFlowMembership::Independent,
-                work: None,
-            },
-        )
-        .unwrap();
-        let capture_dir = capture.artifact_dir();
-        let stop_dir = capture_dir.clone();
-        let lock_path = temp.path().join("launch.lock");
-        let launch_lock = File::create(&lock_path).unwrap();
-        fs2::FileExt::lock_exclusive(&launch_lock).unwrap();
-        let stop = std::thread::spawn(move || {
-            let lock = File::open(lock_path).unwrap();
-            fs2::FileExt::lock_exclusive(&lock).unwrap();
-            // Release must follow receipt publication but precede provider exit.
-            let clients = crate::session_record::read_provider_clients(&stop_dir).unwrap();
-            assert_eq!(
-                clients.len(),
-                1,
-                "launch exclusion ended without a live receipt"
-            );
-            let pid = clients[0].pid;
-            replace_provider_clients(
-                &stop_dir,
-                "fake-provider",
-                &clients,
-                ProviderClientStopReason::Moved,
-            )
-            .unwrap();
-            pid
-        });
-        let command = SessionCommand {
-            context: None,
-            attachment: None,
-            remote: None,
-            program: provider.display().to_string(),
-            args: Vec::new(),
-            cwd: temp.path().to_path_buf(),
-        };
-
-        let result = spawn_session_command_with_env(
-            &command,
-            &capture.environment(),
-            None,
-            None,
-            Some(launch_lock),
-        );
-        let pid = stop.join().unwrap();
-
-        assert!(result.is_ok());
-        let store = SqliteStore::new(&temp.path().join("loopflow.db")).unwrap();
-        let session = store
-            .session_for_artifact(&capture.artifact_key())
-            .unwrap()
-            .unwrap();
-        let history = store.session_history(&session.id, 0, 0).unwrap();
-        let exit = history
-            .iter()
-            .find(|event| event.payload["type"] == "attachment_exit")
-            .unwrap();
-        assert_eq!(exit.payload["outcome"], "completed");
-        assert_eq!(
-            provider_client_stop_message(ProviderClientStopReason::Moved),
-            "Session moved to another terminal."
-        );
-        assert_eq!(
-            provider_client_stop_message(ProviderClientStopReason::Completed),
-            "Session completed elsewhere."
-        );
-        assert_eq!(
-            crate::session_record::read_provider_client_stop(&capture_dir, pid).unwrap(),
-            None
-        );
-    }
-
     #[cfg(unix)]
     #[test]
     fn provider_sigterm_without_stop_intent_remains_an_error() {
@@ -1618,11 +960,6 @@ mod tests {
                 .expect_err("unexplained SIGTERM must remain an error");
 
         assert!(error.to_string().contains("signal: 15"));
-        assert!(
-            crate::session_record::read_provider_clients(&capture.artifact_dir())
-                .unwrap()
-                .is_empty()
-        );
     }
 
     #[test]
@@ -1952,6 +1289,47 @@ mod tests {
     }
 
     #[test]
+    fn recorded_native_move_returns_cleanly_without_stop_receipts() {
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let home = ledger.home();
+        let store = SqliteStore::new(&home.join("loopflow.db")).unwrap();
+        let stop = std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            loop {
+                if let Some(agent) = store
+                    .agent_processes()
+                    .unwrap()
+                    .into_iter()
+                    .find(|agent| agent.process.pid.is_some())
+                {
+                    return crate::harness::agent_process::stop_session_agent(
+                        &store,
+                        agent.process.agent_session_id.as_deref().unwrap(),
+                    );
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "native launch was not recorded"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        });
+        let command = SessionCommand {
+            context: None,
+            program: "/bin/sleep".into(),
+            args: vec!["10".into()],
+            cwd: home.into(),
+            attachment: None,
+            remote: None,
+        };
+        let result = spawn_session_command_with_env(&command, &BTreeMap::new(), None, None, None);
+        stop.join().unwrap().unwrap();
+        result.unwrap();
+        assert!(!home.join("provider-client-stops").exists());
+    }
+
+    #[test]
     fn native_helper_admits_its_invocation_and_records_spawn_failure() {
         let ledger = crate::journal::TestLedgerGuard::new();
         let _ambient = crate::test_ambient::EnvGuard::new();
@@ -2101,82 +1479,62 @@ mod tests {
         let _ambient = crate::test_ambient::EnvGuard::new();
         let home = ledger.home();
         crate::journal::with_runtime(home, &["lf".into(), "skill".into()], || {
-            for opening_error in [false, true] {
-                let capture = crate::session_record::CaptureHandle::begin_at(
-                    home,
-                    crate::session_record::SessionCaptureSpec {
-                        harness: "fixture".into(),
-                        model: None,
-                        surface: "tui".into(),
-                        cwd: home.into(),
-                        repo: None,
-                        worktree: None,
-                        skill: None,
-                        subjects: Vec::new(),
-                        flow: crate::session_record::SessionFlowMembership::Independent,
-                        work: None,
-                    },
-                )?;
-                capture.claim_session_attachment()?;
-                let (session, attachment) = capture.session_attachment().unwrap();
-                let store = SqliteStore::new(&home.join("loopflow.db"))?;
-                if opening_error {
-                    let process = crate::journal::current_lf_process_id().unwrap();
-                    store.retain_session_observation(
-                        &store.session(&session)?.unwrap(),
-                        &crate::session::SessionObservation {
-                            artifact_key: crate::session_record::parse_artifact_key(
-                                &capture.artifact_key(),
-                            )?,
-                            source: format!("interactive_opened:{process}:{session}"),
-                            observed_at: 1,
-                            task_id: None,
-                            wave_id: None,
-                            payload: serde_json::json!({"type": "fixture conflict"}),
-                        },
-                    )?;
-                } else {
-                    std::fs::write(capture.artifact_dir().join("provider-clients"), "occupied")?;
-                }
-                let command = SessionCommand {
-                    context: None,
-                    attachment: capture.session_attachment(),
-                    remote: None,
-                    program: "/bin/sleep".into(),
-                    args: vec!["60".into()],
+            let capture = crate::session_record::CaptureHandle::begin_at(
+                home,
+                crate::session_record::SessionCaptureSpec {
+                    harness: "fixture".into(),
+                    model: None,
+                    surface: "tui".into(),
                     cwd: home.into(),
-                };
-                let error = session_command_status_with_env(
-                    &command,
-                    &capture.environment(),
-                    None,
-                    None,
-                    None,
-                )
-                .unwrap_err();
-                if opening_error {
-                    assert!(
-                        error.to_string().contains("conflicting interactive_opened"),
-                        "{error:#}"
-                    );
-                } else {
-                    assert!(
-                        error
-                            .to_string()
-                            .contains("cannot record active provider client"),
-                        "{error:#}"
-                    );
-                }
-                let ended = store.process(&attachment.agent_process_id)?.unwrap();
-                assert!(ended.completed_at.is_some());
-                assert_eq!(
-                    crate::journal::process_identity_evidence(
-                        ended.pid.unwrap(),
-                        ended.os_started_at.unwrap()
-                    ),
-                    crate::journal::ProcessIdentityEvidence::Dead,
-                );
-            }
+                    repo: None,
+                    worktree: None,
+                    skill: None,
+                    subjects: Vec::new(),
+                    flow: crate::session_record::SessionFlowMembership::Independent,
+                    work: None,
+                },
+            )?;
+            capture.claim_session_attachment()?;
+            let (session, attachment) = capture.session_attachment().unwrap();
+            let store = SqliteStore::new(&home.join("loopflow.db"))?;
+            let process = crate::journal::current_lf_process_id().unwrap();
+            store.retain_session_observation(
+                &store.session(&session)?.unwrap(),
+                &crate::session::SessionObservation {
+                    artifact_key: crate::session_record::parse_artifact_key(
+                        &capture.artifact_key(),
+                    )?,
+                    source: format!("interactive_opened:{process}:{session}"),
+                    observed_at: 1,
+                    task_id: None,
+                    wave_id: None,
+                    payload: serde_json::json!({"type": "fixture conflict"}),
+                },
+            )?;
+            let command = SessionCommand {
+                context: None,
+                attachment: capture.session_attachment(),
+                remote: None,
+                program: "/bin/sleep".into(),
+                args: vec!["60".into()],
+                cwd: home.into(),
+            };
+            let error =
+                session_command_status_with_env(&command, &capture.environment(), None, None, None)
+                    .unwrap_err();
+            assert!(
+                error.to_string().contains("conflicting interactive_opened"),
+                "{error:#}"
+            );
+            let ended = store.process(&attachment.agent_process_id)?.unwrap();
+            assert!(ended.completed_at.is_some());
+            assert_eq!(
+                crate::journal::process_identity_evidence(
+                    ended.pid.unwrap(),
+                    ended.os_started_at.unwrap()
+                ),
+                crate::journal::ProcessIdentityEvidence::Dead,
+            );
             Ok(())
         })
         .unwrap();

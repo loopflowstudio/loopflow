@@ -3598,14 +3598,9 @@ fn planning_fields_project_content_preserves_prose_and_task_assignee_can_be_clea
                 .sqlite
                 .update_project_content(
                     &task.project_id,
-                    &crate::pm::ProjectContent {
-                        workflow: "code".into(),
-                        metric_targets: Vec::new(),
-                        krs: vec![crate::work::project::ProjectKR {
-                            text: "Keep working offline".into(),
-                            holds: true,
-                        }],
-                    },
+                    "code",
+                    &[crate::work::project::ProjectKR { text: "Keep working offline".into(), holds: true }],
+                    &[],
                 )
                 .unwrap();
             crate::ops::planning_delivery::sync_fields(
@@ -3628,7 +3623,7 @@ fn planning_fields_project_content_preserves_prose_and_task_assignee_can_be_clea
             assert!(content.contains(example));
             assert!(content.contains("Keep the introduction."));
             assert!(content.contains("## Notes\nKeep these notes."));
-            let parsed = crate::pm::parse_project_content(&content).unwrap();
+            let parsed = crate::pm::project_document::parse_project_content(&content).unwrap();
             assert_eq!(parsed.workflow, "code");
             assert!(parsed.krs[0].holds);
             assert_eq!(parsed.krs[0].text, "Keep working offline");
@@ -3757,14 +3752,12 @@ fn planning_fields_deliver_project_activation_and_task_membership_without_execut
                         successor_id: destination.id.to_string(),
                         create: false,
                         project_name: "Next chapter".into(),
-                        content: crate::pm::ProjectContent {
-                            workflow: "feature".into(),
-                            metric_targets: Vec::new(),
-                            krs: vec![crate::work::project::ProjectKR {
-                                text: "Retain Task identity".into(),
-                                holds: false,
-                            }],
-                        },
+                        workflow: "feature".into(),
+                        metric_targets: Vec::new(),
+                        krs: vec![crate::work::project::ProjectKR {
+                            text: "Retain Task identity".into(),
+                            holds: false,
+                        }],
                     }],
                 },
                 None,

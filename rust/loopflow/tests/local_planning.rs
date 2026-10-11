@@ -250,7 +250,7 @@ fn stored_rotation_commits_all_waves_and_serializes_new_work() {
                 .unwrap()
                 .clone(),
         );
-        entries.push(serde_json::json!({"wave_id":wave["wave"]["id"],"successor_id":successor,"create":true,"project_name":"Next","content":{"workflow":"","metric_targets":[],"krs":[{"text":"Keep private work","holds":false}]}}));
+        entries.push(serde_json::json!({"wave_id":wave["wave"]["id"],"successor_id":successor,"create":true,"project_name":"Next","workflow":"","metric_targets":[],"krs":[{"text":"Keep private work","holds":false}]}));
     }
     let path = home.path().join("rotation.json");
     let args = [
@@ -979,7 +979,7 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
     );
     let successor = uuid::Uuid::new_v4();
     let plan_file = home.path().join("rotation.json");
-    std::fs::write(&plan_file,serde_json::to_vec(&serde_json::json!({"name":"Next", "waves":[{"wave_id":wave["wave"]["id"],"successor_id":successor.to_string(),"create":true,"project_name":"Next","content":{"workflow":"proof","metric_targets":[],"krs":[{"text":"Retain active work","holds":false}]}}]})).unwrap()).unwrap();
+    std::fs::write(&plan_file,serde_json::to_vec(&serde_json::json!({"name":"Next", "waves":[{"wave_id":wave["wave"]["id"],"successor_id":successor.to_string(),"create":true,"project_name":"Next","workflow":"proof","metric_targets":[],"krs":[{"text":"Retain active work","holds":false}]}]})).unwrap()).unwrap();
     let rotate = [
         "wave",
         "new-chapter",
@@ -1147,7 +1147,7 @@ fn project_creation_binding_and_activation_save_offline() {
             assert_eq!(store.pending_project_changes(&id).unwrap(), changes);
             if mapped {
                 let mut incoming: loopflow::pm::PmProject = serde_json::from_value(active).unwrap();
-                incoming.status = loopflow::pm::ProjectStatus::Completed;
+                incoming.status = loopflow::work::project::ProjectStatus::Completed;
                 incoming.revision = Some("2026-10-08T11:00:00Z".into());
                 incoming.initiative_ids = vec!["initiative".into()];
                 incoming.team_ids = vec!["fixture-team".into()];
@@ -1259,7 +1259,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             name: "Original".into(),
             summary: "Original summary".into(),
             workflow: "feature".into(),
-            status: loopflow::pm::ProjectStatus::Started,
+            status: loopflow::work::project::ProjectStatus::Started,
             krs: vec![loopflow::work::project::ProjectKR {
                 text: "Retain the proof".into(),
                 holds: false,
@@ -1272,13 +1272,13 @@ fn project_edits_save_offline_in_both_connection_modes() {
             .put_pm_project(wave.id(), "linear", "initiative", &project, 17)
             .unwrap();
         let id = store.list_projects(Some(wave.id())).unwrap()[0].id.clone();
-        rusqlite::Connection::open(home.path().join("loopflow.db"))
-            .unwrap()
-            .execute(
-                "UPDATE waves SET current_project_id=?2 WHERE id=?1",
-                rusqlite::params![wave.id(), id.as_str()],
-            )
-            .unwrap();
+        // Selection is shared planning too: seed it through the typed writer,
+        // not raw SQL that disagrees with the retained Git journal.
+        lf(
+            repo.path(),
+            home.path(),
+            &["wave", "bind-project", "product", id.as_str(), "--json"],
+        );
         if !mapped {
             rusqlite::Connection::open(home.path().join("loopflow.db"))
                 .unwrap()
@@ -1538,7 +1538,7 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             name: "Product".into(),
             summary: "".into(),
             workflow: "".into(),
-            status: loopflow::pm::ProjectStatus::Started,
+            status: loopflow::work::project::ProjectStatus::Started,
             krs: vec![],
             metric_targets: vec![],
             initiative_ids: vec!["initiative".into()],
@@ -1918,7 +1918,7 @@ fn rotation_saves_membership_and_pending_effects_offline() {
         }
         let successor = loopflow::durable::ProjectId::new();
         let file = home.path().join("rotation.json");
-        let plan = serde_json::json!({"name":"Next", "waves":[{"wave_id":wave.id(),"successor_id":successor,"create":true,"project_name":"Next", "content":{"workflow":"","metric_targets":[],"krs":[{"text":"Preserve work","holds":false}]}}]});
+        let plan = serde_json::json!({"name":"Next", "waves":[{"wave_id":wave.id(),"successor_id":successor,"create":true,"project_name":"Next", "workflow":"","metric_targets":[],"krs":[{"text":"Preserve work","holds":false}]}]});
         std::fs::write(&file, serde_json::to_vec(&plan).unwrap()).unwrap();
         let args = [
             "wave",
@@ -1993,8 +1993,28 @@ fn rotation_saves_membership_and_pending_effects_offline() {
         assert_eq!(changes[0].value, successor.as_str());
         let status = store.pending_project_changes(&project.id).unwrap();
         assert_eq!(status[0].value, "completed");
+        // Released receipts nest content and preserve their original JSON bytes/order.
+        let retained = format!(
+            r#"{{"wave_id":"{}","successor_id":"{}","create":true,"project_name":"Next","content":{{"metric_targets":[],"workflow":"","krs":[{{"text":"Preserve work","holds":false}}]}}}}"#,
+            wave.id(),
+            successor,
+        );
+        db.execute("UPDATE project_transitions SET local_plan_json=?1 WHERE wave_id=?2 AND successor_id=?3",
+            rusqlite::params![retained, wave.id(), successor.as_str()]).unwrap();
         let settled_revision = revision();
         lf(repo.path(), home.path(), &args);
+        let saved: String = db.query_row("SELECT local_plan_json FROM project_transitions WHERE wave_id=?1 AND successor_id=?2",
+            rusqlite::params![wave.id(), successor.as_str()], |row| row.get(0)).unwrap();
+        assert_eq!(saved, retained);
+        let mut conflicting = plan.clone();
+        conflicting["waves"][0]["krs"][0]["text"] = serde_json::json!("Changed request");
+        std::fs::write(&file, serde_json::to_vec(&conflicting).unwrap()).unwrap();
+        let rejected = command(repo.path(), home.path(), &args).output().unwrap();
+        assert!(!rejected.status.success());
+        assert!(
+            String::from_utf8_lossy(&rejected.stderr).contains("original rotation request changed")
+        );
+        std::fs::write(&file, serde_json::to_vec(&plan).unwrap()).unwrap();
         assert_eq!(revision(), settled_revision);
         assert_eq!(store.pending_task_changes(&active.id).unwrap(), changes);
         assert_eq!(store.pending_project_changes(&project.id).unwrap(), status);
@@ -2016,7 +2036,7 @@ fn rotation_saves_membership_and_pending_effects_offline() {
             assert_eq!(store.pending_task_changes(&active.id).unwrap(), changes);
             assert_eq!(
                 store.project(&project.id).unwrap().unwrap().status,
-                loopflow::pm::ProjectStatus::Completed
+                loopflow::work::project::ProjectStatus::Completed
             );
         }
         let reopened = loopflow::store::sqlite::SqliteStore::new(&path).unwrap();
@@ -2053,7 +2073,7 @@ fn rotation_saves_membership_and_pending_effects_offline() {
         existing.id = loopflow::durable::ProjectId::new();
         existing.name = "Future".into();
         existing.slug = "future".into();
-        existing.status = loopflow::pm::ProjectStatus::Planned;
+        existing.status = loopflow::work::project::ProjectStatus::Planned;
         existing.linear_id =
             mapped.then(|| loopflow::planning::LinearProjectId::new("future-provider").unwrap());
         store.insert_project(&existing).unwrap();

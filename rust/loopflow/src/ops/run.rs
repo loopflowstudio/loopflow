@@ -327,7 +327,7 @@ mod tests {
 
             summary: String::new(),
             workflow: "feature".into(),
-            status: crate::pm::ProjectStatus::Started,
+            status: crate::work::project::ProjectStatus::Started,
             linear_id: Some(LinearProjectId::new(planning_id).unwrap()),
             slug: slug.to_string(),
             name: slug.to_string(),
@@ -1025,7 +1025,7 @@ mod tests {
 
                 metric_targets: Vec::new(),
                 workflow: "feature".into(),
-                status: crate::pm::ProjectStatus::Started,
+                status: crate::work::project::ProjectStatus::Started,
                 krs: vec![ProjectKR {
                     text: "One model everywhere".to_string(),
                     holds: false,

@@ -3492,7 +3492,7 @@ mod tests {
 
             metric_targets: Vec::new(),
             workflow: "feature".into(),
-            status: crate::pm::ProjectStatus::Started,
+            status: crate::work::project::ProjectStatus::Started,
             krs: Vec::new(),
             initiative_ids: vec!["initiative-1".to_string()],
             team_ids: vec!["team-loo".to_string()],

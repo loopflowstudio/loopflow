@@ -375,7 +375,7 @@ fn register_task_fixture(
 
         summary: String::new(),
         workflow: "feature".into(),
-        status: loopflow::pm::ProjectStatus::Started,
+        status: loopflow::work::project::ProjectStatus::Started,
         linear_id: Some(
             LinearProjectId::new(format!("project-{}", WaveId::new())).expect("project id"),
         ),

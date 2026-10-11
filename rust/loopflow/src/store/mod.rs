@@ -1521,7 +1521,7 @@ mod tests {
 
             summary: String::new(),
             workflow: "feature".into(),
-            status: crate::pm::ProjectStatus::Started,
+            status: crate::work::project::ProjectStatus::Started,
             linear_id: Some(LinearProjectId::new("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3").unwrap()),
             slug: "developer-efficiency".to_string(),
             name: "Developer Efficiency".to_string(),
@@ -1785,21 +1785,17 @@ mod tests {
             let mut snapshot = task_planning_snapshot(&wave, &project, &task);
             snapshot.synced_at = 17;
             store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
-            let content = crate::pm::ProjectContent {
-                workflow: "saved-workflow".into(),
-                krs: vec![crate::work::project::ProjectKR {
-                    text: "Saved plan survives an outage".into(),
-                    holds: false,
-                }],
-                metric_targets: Vec::new(),
-            };
+            let krs = vec![crate::work::project::ProjectKR {
+                text: "Saved plan survives an outage".into(),
+                holds: false,
+            }];
             store
                 .sqlite
-                .update_project_content(&project.id, &content)
+                .update_project_content(&project.id, "saved-workflow", &krs, &[])
                 .unwrap();
             let mut expected = snapshot.snapshot.projects[0].clone();
-            expected.workflow = content.workflow;
-            expected.krs = content.krs;
+            expected.workflow = "saved-workflow".into();
+            expected.krs = krs;
             // The provider body still contains the previous content.
             assert_eq!(
                 crate::ops::project::current_project(&store, &wave).unwrap(),
@@ -1817,15 +1813,15 @@ mod tests {
             }
             for (status, readiness) in [
                 (
-                    crate::pm::ProjectStatus::Started,
+                    crate::work::project::ProjectStatus::Started,
                     crate::store::sqlite::ProjectReadinessState::Ready,
                 ),
                 (
-                    crate::pm::ProjectStatus::Paused,
+                    crate::work::project::ProjectStatus::Paused,
                     crate::store::sqlite::ProjectReadinessState::Inactive,
                 ),
                 (
-                    crate::pm::ProjectStatus::Completed,
+                    crate::work::project::ProjectStatus::Completed,
                     crate::store::sqlite::ProjectReadinessState::Terminal,
                 ),
             ] {
@@ -1845,7 +1841,7 @@ mod tests {
                 assert_eq!(observed.observed_at, Some(17));
                 assert_eq!(
                     crate::ops::project::current_project(&store, &wave).is_err(),
-                    status == crate::pm::ProjectStatus::Completed
+                    status == crate::work::project::ProjectStatus::Completed
                 );
             }
         }
@@ -3296,7 +3292,7 @@ mod tests {
         let mut snapshot = task_planning_snapshot(&wave, &project, &task);
         let mut observed = snapshot.snapshot.projects.remove(0);
         observed.workflow = "incident".into();
-        observed.status = crate::pm::ProjectStatus::Completed;
+        observed.status = crate::work::project::ProjectStatus::Completed;
         store
             .put_pm_project(
                 wave.id(),

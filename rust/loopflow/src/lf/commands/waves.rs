@@ -400,7 +400,7 @@ pub struct ProjectSummary {
     pub slug: String,
     pub name: String,
     pub workflow: String,
-    pub status: crate::pm::ProjectStatus,
+    pub status: crate::work::project::ProjectStatus,
     pub metric_targets: Vec<crate::work::wave::metrics::MetricTarget>,
     pub krs: Vec<crate::work::project::ProjectKR>,
 }
@@ -2671,7 +2671,7 @@ mod tests {
                 successor.id = "next".into();
                 successor.slug = "next".into();
                 successor.name = "Next chapter".into();
-                stale.snapshot.projects[0].status = crate::pm::ProjectStatus::Completed;
+                stale.snapshot.projects[0].status = crate::work::project::ProjectStatus::Completed;
                 stale.snapshot.projects[0].revision = Some("2026-09-30T00:00:01Z".into());
                 stale.snapshot.projects.push(successor);
                 for item in &mut stale.snapshot.items {
@@ -2753,7 +2753,10 @@ mod tests {
         };
         assert!(items[0].current);
         assert_eq!(items[0].krs[0].text, "Edited proof");
-        assert_eq!(items[0].status, crate::pm::ProjectStatus::Started);
+        assert_eq!(
+            items[0].status,
+            crate::work::project::ProjectStatus::Started
+        );
         let mut unreadable = store.pm_snapshot(wave.id()).await.unwrap().unwrap();
         unreadable.snapshot.projects.clear();
         unreadable.snapshot.items.clear();
@@ -2777,7 +2780,10 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert!(items[0].current);
         assert_eq!(items[0].krs[0].text, "Edited proof");
-        assert_eq!(items[0].status, crate::pm::ProjectStatus::Started);
+        assert_eq!(
+            items[0].status,
+            crate::work::project::ProjectStatus::Started
+        );
         let missing =
             crate::ops::metrics::wave_metric_portfolio(&store, &wave, OffsetDateTime::now_utc())
                 .await
@@ -2813,7 +2819,7 @@ mod tests {
             summary: String::new(),
             revision: None,
             workflow: String::new(),
-            status: crate::pm::ProjectStatus::Started,
+            status: crate::work::project::ProjectStatus::Started,
             metric_targets: Vec::new(),
             krs: Vec::new(),
             initiative_ids: vec!["initiative".into()],

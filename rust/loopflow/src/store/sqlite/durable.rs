@@ -871,7 +871,7 @@ mod durable_store_tests {
 
             summary: String::new(),
             workflow: "feature".into(),
-            status: crate::pm::ProjectStatus::Started,
+            status: crate::work::project::ProjectStatus::Started,
             linear_id: Some(LinearProjectId::new("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3").unwrap()),
             slug: "probe".to_string(),
             name: "Probe".to_string(),

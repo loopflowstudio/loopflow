@@ -859,10 +859,20 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             loopflow::lf::commands::placement::wave(repo, command)
         }
         WaveCommand::UpdatePlan { wave, plan } => {
+            #[derive(serde::Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Input {
+                workflow: String,
+                krs: Vec<loopflow::work::project::ProjectKR>,
+                metric_targets: Vec<loopflow::work::wave::metrics::MetricTarget>,
+            }
+            let input: Input = serde_json::from_slice(&std::fs::read(plan)?)?;
             let saved = tokio::runtime::Runtime::new()?.block_on(update_plan(
                 repo,
                 wave.as_deref(),
-                serde_json::from_slice(&std::fs::read(plan)?)?,
+                &input.workflow,
+                &input.krs,
+                &input.metric_targets,
             ))?;
             print_planning_sync(&saved.sync);
             Ok(())

@@ -8,8 +8,9 @@ use serde_json::Value;
 use crate::durable::ProjectId;
 use crate::id::WaveId;
 use crate::planning::PlanningChange;
-use crate::pm::ProjectContent;
 use crate::store::{StoreError, StoreResult};
+use crate::work::project::ProjectKR;
+use crate::work::wave::metrics::MetricTarget;
 
 use super::planning_changes::PlanningChanges;
 use super::SqliteStore;
@@ -101,15 +102,7 @@ impl SqliteStore {
         )?;
         crate::workflow::parse_workflow(name, definition, std::path::Path::new(&repo))
             .map_err(StoreError::InvalidData)?;
-        write_content(
-            &tx,
-            project,
-            &ProjectContent {
-                workflow: name.into(),
-                krs: current.krs.clone(),
-                metric_targets: current.metric_targets.clone(),
-            },
-        )?;
+        write_content(&tx, project, name, &current.krs, &current.metric_targets)?;
         tx.execute(
             "INSERT INTO wave_workflows(wave_id,name,content)
                 SELECT wave_id,?2,?3 FROM projects WHERE id=?1
@@ -124,11 +117,13 @@ impl SqliteStore {
     pub fn update_project_content(
         &self,
         project: &ProjectId,
-        content: &ProjectContent,
+        workflow: &str,
+        krs: &[ProjectKR],
+        metric_targets: &[MetricTarget],
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        write_content(&tx, project, content)?;
+        write_content(&tx, project, workflow, krs, metric_targets)?;
         tx.commit()?;
         Ok(())
     }
@@ -137,46 +132,38 @@ impl SqliteStore {
 pub(super) fn write_content(
     conn: &Connection,
     project: &ProjectId,
-    content: &ProjectContent,
+    workflow: &str,
+    krs: &[ProjectKR],
+    metric_targets: &[MetricTarget],
 ) -> StoreResult<()> {
     let current = super::children::project_in(conn, project)?;
     for (field, previous, value) in [
         (
             "workflow",
             serde_json::to_value(&current.workflow)?,
-            serde_json::to_value(&content.workflow)?,
+            serde_json::to_value(workflow)?,
         ),
         (
             "krs",
             serde_json::to_value(&current.krs)?,
-            serde_json::to_value(&content.krs)?,
+            serde_json::to_value(krs)?,
         ),
         (
             "metric_targets",
             serde_json::to_value(&current.metric_targets)?,
-            serde_json::to_value(&content.metric_targets)?,
+            serde_json::to_value(metric_targets)?,
         ),
     ] {
         PlanningChanges::Project(project).record(conn, field, previous, value)?;
     }
-    save_content(conn, project, content)
-}
-
-/// Persist the combined semantic winners without minting another delivery receipt.
-/// Local edits and peer projection use the same content representation.
-pub(super) fn save_content(
-    conn: &Connection,
-    project: &ProjectId,
-    content: &ProjectContent,
-) -> StoreResult<()> {
     planning_write::local(
         conn,
         PlanningKind::Project,
         project.as_str(),
         &[
-            Edit::Workflow(content.workflow.clone()),
-            Edit::Krs(content.krs.clone()),
-            Edit::MetricTargets(content.metric_targets.clone()),
+            Edit::Workflow(workflow.into()),
+            Edit::Krs(krs.to_vec()),
+            Edit::MetricTargets(metric_targets.to_vec()),
         ],
     )?;
     Ok(())
@@ -229,11 +216,6 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let database = home.path().join("store.db");
         let store = SqliteStore::open_ephemeral(&database).unwrap();
-        let content = crate::pm::ProjectContent {
-            workflow: "review".into(),
-            krs: Vec::new(),
-            metric_targets: Vec::new(),
-        };
         let definition = "nodes: {}\nedges: [{from: start, to: end}]\n";
         let mut owners = Vec::new();
         for (name, mapping) in [("offline", None), ("connected", Some("linear-project"))] {
@@ -251,14 +233,16 @@ mod tests {
                 )
                 .unwrap();
             store
-                .select_project_workflow(&project, &content.workflow, definition)
+                .select_project_workflow(&project, "review", definition)
                 .unwrap();
             let before = store.revisions().unwrap();
             let changes = store.pending_project_changes(&project).unwrap();
             store
-                .select_project_workflow(&project, &content.workflow, definition)
+                .select_project_workflow(&project, "review", definition)
                 .unwrap();
-            store.update_project_content(&project, &content).unwrap();
+            store
+                .update_project_content(&project, "review", &[], &[])
+                .unwrap();
             store.edit_project(&project, Some(name), Some("")).unwrap();
             assert_eq!(store.revisions().unwrap(), before);
             assert_eq!(store.pending_project_changes(&project).unwrap(), changes);
@@ -292,7 +276,7 @@ mod tests {
             assert_eq!(store.project(&project).unwrap().unwrap().workflow, "review");
         }
         assert!(store
-            .update_project_content(&crate::durable::ProjectId::new(), &content)
+            .update_project_content(&crate::durable::ProjectId::new(), "review", &[], &[])
             .is_err());
     }
 }

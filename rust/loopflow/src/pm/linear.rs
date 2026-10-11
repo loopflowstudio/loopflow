@@ -1,3 +1,4 @@
+use super::project_document::{self, parse_project_content};
 use reqwest::StatusCode;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -6,8 +7,7 @@ use tokio::time::sleep;
 use tracing::warn;
 
 use crate::pm::{
-    parse_project_content, project_slug, PmError, PmItem, PmProject, PmResult, PmWave, TeamBinding,
-    RATE_LIMIT_RETRIES,
+    project_slug, PmError, PmItem, PmProject, PmResult, PmWave, TeamBinding, RATE_LIMIT_RETRIES,
 };
 
 use crate::work::task::comment::{TaskComment, TaskCommentAuthor};
@@ -734,7 +734,10 @@ impl LinearClient {
         }
     }
 
-    async fn project_status_id(&self, status: crate::pm::ProjectStatus) -> PmResult<String> {
+    async fn project_status_id(
+        &self,
+        status: crate::work::project::ProjectStatus,
+    ) -> PmResult<String> {
         let team = self.require_team_id()?;
         self.project_statuses()
             .await?
@@ -1253,11 +1256,12 @@ impl LinearClient {
             && node.archived_at.is_none()
             && matches!(
                 node.status.type_,
-                crate::pm::ProjectStatus::Backlog | crate::pm::ProjectStatus::Planned
+                crate::work::project::ProjectStatus::Backlog
+                    | crate::work::project::ProjectStatus::Planned
             );
         node.content = Some(converted.clone());
         if promote {
-            node.status.type_ = crate::pm::ProjectStatus::Started;
+            node.status.type_ = crate::work::project::ProjectStatus::Started;
         }
         let mut project = node.into_pm_project()?;
         crate::pm::validate_project_ownership("adoption", initiative, Some(team), &project)?;
@@ -1265,7 +1269,7 @@ impl LinearClient {
             let mut input = json!({"content":converted});
             if promote {
                 input["statusId"] = json!(
-                    self.project_status_id(crate::pm::ProjectStatus::Started)
+                    self.project_status_id(crate::work::project::ProjectStatus::Started)
                         .await?
                 );
             }
@@ -1924,14 +1928,14 @@ struct TeamCreatePayload {
 #[derive(Deserialize)]
 struct ProjectStatusNode {
     #[serde(rename = "type")]
-    type_: crate::pm::ProjectStatus,
+    type_: crate::work::project::ProjectStatus,
 }
 
 #[derive(Deserialize)]
 struct ProjectStatusChoice {
     id: String,
     #[serde(rename = "type")]
-    type_: crate::pm::ProjectStatus,
+    type_: crate::work::project::ProjectStatus,
     position: f64,
     #[serde(rename = "teamId")]
     team_id: Option<String>,
@@ -1969,8 +1973,8 @@ struct ProjectNode {
 
 // Replace only the selected planning field, retaining unrelated provider prose.
 fn patch_project_field(content: &str, field: &str, value: &Value) -> PmResult<String> {
-    use super::ProjectContentField::{Krs, Targets, Workflow};
-    let mut document = super::parse_project_document(content)?;
+    use project_document::ProjectField::{Krs, Targets, Workflow};
+    let mut document = project_document::parse_project_document(content)?;
     let owner = match field {
         "workflow" => {
             document.content.workflow = serde_json::from_value(value.clone())
@@ -1996,8 +2000,8 @@ fn patch_project_field(content: &str, field: &str, value: &Value) -> PmResult<St
     document.content.validate()?;
     let replacement = match owner {
         Workflow => format!("workflow: {}", document.content.workflow),
-        Krs => super::render_krs(&document.content),
-        Targets => super::render_metric_targets(&document.content),
+        Krs => project_document::render_krs(&document.content.krs),
+        Targets => project_document::render_metric_targets(&document.content.metric_targets),
     };
     Ok(document.rewrite(Some(owner), &format!("{replacement}\n\n")))
 }
@@ -2048,9 +2052,9 @@ impl ProjectNode {
             // Older rotation archived its predecessor without changing status.
             // Retain that history without presenting it as a current plan.
             status: if self.archived_at.is_some()
-                && self.status.type_ != crate::pm::ProjectStatus::Canceled
+                && self.status.type_ != crate::work::project::ProjectStatus::Canceled
             {
-                crate::pm::ProjectStatus::Completed
+                crate::work::project::ProjectStatus::Completed
             } else {
                 self.status.type_
             },
@@ -2333,7 +2337,7 @@ mod tests {
         assert_eq!(adopted.name, "Summer work — customer requests");
         assert!(adopted.workflow.is_empty());
         assert_eq!(adopted.krs[0].text, "Preserve this proof");
-        assert_eq!(adopted.status, crate::pm::ProjectStatus::Started);
+        assert_eq!(adopted.status, crate::work::project::ProjectStatus::Started);
     }
 
     #[test]
@@ -2704,7 +2708,7 @@ mod tests {
             let client = LinearClient::with_base_url("fixture".into(), Some(team.into()), base_url);
             assert_eq!(
                 client
-                    .project_status_id(crate::pm::ProjectStatus::Completed)
+                    .project_status_id(crate::work::project::ProjectStatus::Completed)
                     .await
                     .unwrap(),
                 preferred
@@ -2729,7 +2733,7 @@ mod tests {
             let client =
                 LinearClient::with_base_url("fixture".into(), Some("selected".into()), base_url);
             let error = client
-                .project_status_id(crate::pm::ProjectStatus::Completed)
+                .project_status_id(crate::work::project::ProjectStatus::Completed)
                 .await
                 .unwrap_err();
             assert!(error.to_string().contains("cursor"));

@@ -183,7 +183,7 @@ impl SqliteStore {
                         Edit::ProjectWave(wave.to_string()),
                         Edit::ProjectSlug(Some(name.into())),
                         Edit::ProjectName(Some(name.into())),
-                        Edit::ProjectStatus(crate::pm::ProjectStatus::Started),
+                        Edit::ProjectStatus(crate::work::project::ProjectStatus::Started),
                     ],
                 )?;
                 super::durable::inherit_project_placement(&tx, &id)?;
@@ -198,9 +198,9 @@ impl SqliteStore {
         let project = super::plan_read::project_in(&tx, &id)?;
         if !matches!(
             project.status,
-            crate::pm::ProjectStatus::Backlog
-                | crate::pm::ProjectStatus::Planned
-                | crate::pm::ProjectStatus::Started
+            crate::work::project::ProjectStatus::Backlog
+                | crate::work::project::ProjectStatus::Planned
+                | crate::work::project::ProjectStatus::Started
         ) {
             return Err(StoreError::InvalidAuthority(
                 "terminal or paused Project history cannot be activated".into(),
@@ -216,7 +216,9 @@ impl SqliteStore {
             &tx,
             PlanningKind::Project,
             id.as_str(),
-            &[Edit::ProjectStatus(crate::pm::ProjectStatus::Started)],
+            &[Edit::ProjectStatus(
+                crate::work::project::ProjectStatus::Started,
+            )],
         )?;
         write_in(&tx, wave, selected.as_deref(), id.as_str())?;
         if readiness_in(&tx, wave)?.state == ProjectReadinessState::Unavailable {

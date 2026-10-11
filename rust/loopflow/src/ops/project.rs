@@ -2,9 +2,10 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use crate::ops::{OpsError, OpsResult};
-use crate::pm::{PmProject, ProjectContent, ProjectStatus};
+use crate::pm::PmProject;
 use crate::store::{PlanningLocks, Store};
 use crate::work::project::Project;
+use crate::work::project::ProjectStatus;
 use crate::work::wave::Wave;
 
 fn project_error(message: impl ToString) -> OpsError {
@@ -71,7 +72,9 @@ pub async fn ensure(repo: &Path, name: &str) -> OpsResult<PmProject> {
 pub async fn update_plan(
     repo: &Path,
     wave: Option<&str>,
-    content: ProjectContent,
+    workflow: &str,
+    krs: &[crate::work::project::ProjectKR],
+    metric_targets: &[crate::work::wave::metrics::MetricTarget],
 ) -> OpsResult<ProjectPlanning> {
     let store = super::pm::pm_store().await?;
     let ambient = std::env::var(crate::work::wave::context::WAVE_ID_ENV).ok();
@@ -86,11 +89,10 @@ pub async fn update_plan(
     let _acquisition = super::pm::lock_wave_planning(&wave).await?;
     let selected = current_project(&store, &wave)?;
     let project = resolve_project(&store, repo, &selected.id).await?;
-    super::metrics::validate_chapter_targets(&wave, &content.metric_targets)
-        .map_err(project_error)?;
+    super::metrics::validate_chapter_targets(&wave, metric_targets).map_err(project_error)?;
     store
         .sqlite
-        .update_project_content(&project.id, &content)
+        .update_project_content(&project.id, workflow, krs, metric_targets)
         .map_err(project_error)?;
     drop(_acquisition);
     super::planning_sync::sync_after_save(&store, wave.repo()).await;

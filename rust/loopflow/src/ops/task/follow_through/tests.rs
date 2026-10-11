@@ -455,7 +455,7 @@ fn fixture(
         slug: "chapter".into(),
         name: "Chapter".into(),
         workflow: "feature".into(),
-        status: crate::pm::ProjectStatus::Started,
+        status: crate::work::project::ProjectStatus::Started,
         description: String::new(),
         krs: Vec::new(),
         metric_targets: Vec::new(),

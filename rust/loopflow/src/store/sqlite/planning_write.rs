@@ -98,7 +98,7 @@ planning_fields! {
     (Project, ProjectName, "project_name", Option<String>),
     (Project, ProjectSummary, "project_summary", String),
     (Project, ProjectDescription, "description", Option<String>),
-    (Project, ProjectStatus, "status", crate::pm::ProjectStatus),
+    (Project, ProjectStatus, "status", crate::work::project::ProjectStatus),
     (Project, ProjectRank, "planning_rank", u32),
     (Project, ProjectInitiatives, "planning_initiatives", String),
     (Project, ProjectTeams, "planning_teams", String),

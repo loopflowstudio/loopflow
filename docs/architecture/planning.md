@@ -246,7 +246,7 @@ lf wave new-chapter product 2026-10 --plan scratch/chapter.json --json
 ```
 
 Retain one JSON input with `name` and `waves`. Each entry supplies `wave_id`,
-`successor_id`, `create`, `project_name` and `content`:
+`successor_id`, `create`, `project_name`, `workflow`, `metric_targets` and `krs`:
 
 ```json
 {
@@ -256,11 +256,9 @@ Retain one JSON input with `name` and `waves`. Each entry supplies `wave_id`,
     "successor_id": "<new-or-existing-project-uuid>",
     "create": true,
     "project_name": "Autumn customer work",
-    "content": {
-      "workflow": "",
-      "metric_targets": [],
-      "krs": [{"text": "Customers can resume unfinished work", "holds": false}]
-    }
+    "workflow": "",
+    "metric_targets": [],
+    "krs": [{"text": "Customers can resume unfinished work", "holds": false}]
   }]
 }
 ```

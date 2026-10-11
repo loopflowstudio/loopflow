@@ -4460,7 +4460,7 @@ mod tests {
             snapshot.projects.truncate(1);
             snapshot.items.truncate(1);
             snapshot.projects[0].id = "999bdbdd-c045-41a6-8ffc-a97c4a40b0b3".into();
-            snapshot.projects[0].status = crate::pm::ProjectStatus::Started;
+            snapshot.projects[0].status = crate::work::project::ProjectStatus::Started;
             snapshot.items[0].id = "new-issue".into();
             snapshot.items[0].completed = false;
             snapshot.items[0].completed_at = None;
@@ -4783,7 +4783,7 @@ mod tests {
 
             summary: String::new(),
             workflow: "feature".into(),
-            status: crate::pm::ProjectStatus::Started,
+            status: crate::work::project::ProjectStatus::Started,
             linear_id: Some(LinearProjectId::new("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3").unwrap()),
             slug: "task-recovery".to_string(),
             name: "Task recovery".to_string(),

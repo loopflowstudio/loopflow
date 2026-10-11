@@ -174,7 +174,15 @@ Tests cover multiline KR fidelity across restart
 and Git import, transactional failure, released content conversion and retained local
 Workflow/checkout/effect evidence. These are source proofs, not installed acceptance.
 
-Still required: remove public ProjectContent and ordinary PmProject/PmItem readers,
+Public ProjectContent is removed: ordinary operations take direct typed fields,
+Chapter input is flat, and ProjectStatus belongs to the domain. Linear/migration
+Markdown parsing stays private in `pm/project_document.rs`. Rotation compares
+retained JSON values without rewriting original receipt bytes; changed requests
+still refuse. The public edit fixture exposed a raw-SQL selection inconsistent
+with its journal; fixture setup now uses ordinary binding, not a production bypass.
+This is only the Project input boundary, not the full reader cut.
+
+Still required: remove ordinary PmProject/PmItem readers,
 complete provider acquisition/prose ownership and integration bindings, remove
 whole-model JSON patching and duplicate edit/journal vocabularies, then finish
 CLI/Desktop/config projections. The existing FollowThrough and cron reductions and
@@ -202,17 +210,17 @@ Earlier baseline detail: `c8fe4628a:scratch/work-on-another-machine-name.md`.
   cut. Regenerate them after the entire accepted reduction, before review-only
   republication. No readiness or landing follows from this persistence checkpoint.
 
-Checks: `cargo test -p loopflow --lib` filters `project_markdown_`, `structured_project_`, and `project_content` pass, including Linear delivery; `cargo fmt`, `cargo build -p loopflow --bin lf`, and `cargo clippy --all-targets -- -D warnings` pass; gate owns affected/materialized/Swift verification.
+Checks: `cargo test -p loopflow --lib {project_content,project_markdown_,stored_workflows_use_the_same_owner}` and `--test local_planning {rotation,project_edits_save_offline_in_both_connection_modes}` pass (filters run separately); `cargo fmt --check`, `cargo build -p loopflow --bin lf`, and `cargo clippy --all-targets -- -D warnings` pass. Gate owns affected/materialized/Swift verification.
 
 Context: authored memory/scratch fit. The generated Task launch seed and retained
-steers exceed the 16,000-token goal budget by 2,491 tokens in the latest inspected manifest. The generated
+steers exceed the 16,000-token goal budget by 2,896 tokens at the pre-checkpoint inspection. The generated
 seed is not an authored source to trim. The complete manifest was inspected. Direction remains preserved.
 
 ## Delete — do not maintain
 
-- `ProjectContent` and shared `PmProject`: one Project with structured criteria;
-  preserve prose, bindings and historical events. TaskPlan/ProjectPlan, live iteration,
-  PmKr/ChapterMetricTarget and public Issue comment/observation models are removed.
+- Shared `PmProject`/`PmItem` and the second local reader: use canonical Work;
+  preserve prose, bindings and historical events. Public ProjectContent, plan
+  wrappers, live iteration and public Issue comment/observation models are removed.
 - FollowThrough models, completion gates and dedicated UI: ordinary Tasks/comments;
   preserve unfinished effects and history with their existing recovery owners.
 - WaveCronDef and duplicate cron command vocabulary: repository command list;

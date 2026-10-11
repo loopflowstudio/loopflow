@@ -171,7 +171,10 @@ fn wave_detail_preserves_flow_and_machine() {
     };
     assert_eq!(items[0].workflow, "task-design");
     assert!(items[0].current);
-    assert_eq!(items[0].status, loopflow::pm::ProjectStatus::Started);
+    assert_eq!(
+        items[0].status,
+        loopflow::work::project::ProjectStatus::Started
+    );
 
     let encoded = serde_json::to_string(&snapshot).unwrap();
     let decoded: WaveDetailSnapshot = serde_json::from_str(&encoded).unwrap();

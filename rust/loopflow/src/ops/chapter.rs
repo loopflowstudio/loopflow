@@ -9,9 +9,10 @@ use serde::{Deserialize, Serialize};
 use crate::git::{is_clean, rev_parse};
 use crate::id::WaveId;
 use crate::ops::{OpsError, OpsResult};
-use crate::pm::{PmItem, PmProject, ProjectContent, ProjectStatus};
+use crate::pm::{PmItem, PmProject};
 use crate::store::sqlite::project_selection::read_project_binding;
 use crate::store::Store;
+use crate::work::project::ProjectStatus;
 use crate::work::wave::{Wave, WaveLocator};
 
 use super::pm::{lock_wave_planning, pm_store, project_is_foreign, PmContext};
@@ -47,7 +48,9 @@ pub struct WaveChapterPlan {
     pub successor_id: String,
     pub create: bool,
     pub project_name: String,
-    pub content: ProjectContent,
+    pub workflow: String,
+    pub krs: Vec<crate::work::project::ProjectKR>,
+    pub metric_targets: Vec<crate::work::wave::metrics::MetricTarget>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -150,14 +153,12 @@ pub(crate) async fn rotate(
                 ));
             }
         }
-        if input.content.krs.is_empty()
-            || input.content.krs.iter().any(|kr| kr.text.trim().is_empty())
-        {
+        if input.krs.is_empty() || input.krs.iter().any(|kr| kr.text.trim().is_empty()) {
             return Err(error(
                 "each chapter destination requires nonempty authored KRs",
             ));
         }
-        input.content.validate().map_err(error)?;
+        crate::work::project::validate_metric_targets(&input.metric_targets).map_err(error)?;
         if input.project_name.trim().is_empty() {
             return Err(error("Project name is empty"));
         }
@@ -182,8 +183,7 @@ pub(crate) async fn rotate(
             return Err(error("planned Wave belongs to another repository"));
         }
         super::pm::require_planning_home(&store, &wave).await?;
-        super::metrics::validate_chapter_targets(&wave, &input.content.metric_targets)
-            .map_err(error)?;
+        super::metrics::validate_chapter_targets(&wave, &input.metric_targets).map_err(error)?;
         let acquisition = lock_wave_planning(&wave).await?;
         contexts.push((input, wave, acquisition));
     }

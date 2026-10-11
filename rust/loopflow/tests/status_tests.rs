@@ -50,7 +50,7 @@ fn test_project(wave: &Wave, slug: &str, updated_at: OffsetDateTime) -> Project 
 
         summary: String::new(),
         workflow: "feature".into(),
-        status: loopflow::pm::ProjectStatus::Started,
+        status: loopflow::work::project::ProjectStatus::Started,
         linear_id: Some(
             LinearProjectId::new(uuid::Uuid::new_v4().to_string()).expect("Linear Project id"),
         ),
@@ -218,7 +218,7 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool, current_tas
 
         summary: String::new(),
         workflow: "feature".into(),
-        status: loopflow::pm::ProjectStatus::Started,
+        status: loopflow::work::project::ProjectStatus::Started,
         linear_id: Some(LinearProjectId::new(STALE_PROJECT_ID).expect("recorded PM Project id")),
         slug: "technical-architecture".to_string(),
         name: "Technical Architecture".to_string(),
@@ -310,7 +310,7 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool, current_tas
 
         summary: String::new(),
         workflow: "feature".into(),
-        status: loopflow::pm::ProjectStatus::Started,
+        status: loopflow::work::project::ProjectStatus::Started,
         linear_id: Some(
             LinearProjectId::new("95159066-9098-4d0b-8903-01459dc7ec14")
                 .expect("current PM Project id"),

@@ -29,7 +29,14 @@ impl SqliteStore {
                 [&input.wave_id],
                 |row| row.get(0),
             )?;
-            let original = serde_json::to_string(input)?;
+            // Keep the released receipt shape; input fields no longer need a domain wrapper.
+            // Compare JSON values so the original bytes need not be rewritten on retry.
+            let original = serde_json::json!({
+                "wave_id": input.wave_id, "successor_id": input.successor_id,
+                "create": input.create, "project_name": input.project_name,
+                "content": {"workflow": input.workflow, "krs": input.krs,
+                            "metric_targets": input.metric_targets}
+            });
             let settled: Option<(Option<String>, bool, Option<String>)> = tx
                 .query_row(
                     "SELECT reset_name, settled_at IS NOT NULL, local_plan_json
@@ -41,7 +48,12 @@ impl SqliteStore {
             if let Some((ref reset, true, ref intent)) = settled {
                 if reset.as_deref() != Some(name)
                     || selected.as_deref() != Some(&input.successor_id)
-                    || intent.as_deref() != Some(&original)
+                    || intent
+                        .as_deref()
+                        .map(serde_json::from_str::<serde_json::Value>)
+                        .transpose()?
+                        .as_ref()
+                        != Some(&original)
                 {
                     return Err(StoreError::InvalidAuthority(
                         "Project selection or original rotation request changed".into(),
@@ -75,10 +87,10 @@ impl SqliteStore {
                         Edit::ProjectWave(input.wave_id.to_string()),
                         Edit::ProjectSlug(Some(input.project_name.clone())),
                         Edit::ProjectName(Some(input.project_name.clone())),
-                        Edit::ProjectStatus(crate::pm::ProjectStatus::Started),
-                        Edit::Workflow(input.content.workflow.clone()),
-                        Edit::Krs(input.content.krs.clone()),
-                        Edit::MetricTargets(input.content.metric_targets.clone()),
+                        Edit::ProjectStatus(crate::work::project::ProjectStatus::Started),
+                        Edit::Workflow(input.workflow.clone()),
+                        Edit::Krs(input.krs.clone()),
+                        Edit::MetricTargets(input.metric_targets.clone()),
                         Edit::ProjectTeams(teams),
                         Edit::ProjectInitiatives(initiatives),
                     ],
@@ -98,7 +110,13 @@ impl SqliteStore {
                     serde_json::to_value(previous.status)?,
                     serde_json::json!("started"),
                 )?;
-                super::project_content::write_content(&tx, &successor, &input.content)?;
+                super::project_content::write_content(
+                    &tx,
+                    &successor,
+                    &input.workflow,
+                    &input.krs,
+                    &input.metric_targets,
+                )?;
                 let available:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM projects WHERE id=?1 AND wave_id=?2 AND status IN ('backlog','planned','started'))",params![successor.as_str(),input.wave_id],|r|r.get(0))?;
                 if !available {
                     return Err(StoreError::InvalidAuthority(
@@ -111,7 +129,7 @@ impl SqliteStore {
                     successor.as_str(),
                     &[
                         Edit::ProjectName(Some(input.project_name.clone())),
-                        Edit::ProjectStatus(crate::pm::ProjectStatus::Started),
+                        Edit::ProjectStatus(crate::work::project::ProjectStatus::Started),
                     ],
                 )?;
             }
@@ -126,7 +144,7 @@ impl SqliteStore {
                     name,
                     input.create,
                     now,
-                    original
+                    original.to_string()
                 ],
             )?;
             for task in rotation
@@ -187,7 +205,9 @@ impl SqliteStore {
                     &tx,
                     PlanningKind::Project,
                     predecessor,
-                    &[Edit::ProjectStatus(crate::pm::ProjectStatus::Completed)],
+                    &[Edit::ProjectStatus(
+                        crate::work::project::ProjectStatus::Completed,
+                    )],
                 )?;
             }
         }

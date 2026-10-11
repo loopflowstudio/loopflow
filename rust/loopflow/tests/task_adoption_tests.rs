@@ -102,7 +102,7 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
             slug: "chapter".into(),
             name: "Chapter".into(),
             workflow: "adoption".into(),
-            status: loopflow::pm::ProjectStatus::Started,
+            status: loopflow::work::project::ProjectStatus::Started,
             description: "Adopt existing work".into(),
             krs: Vec::new(),
             metric_targets: Vec::new(),

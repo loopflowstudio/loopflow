@@ -629,14 +629,13 @@ acceptance remain at
 Jack Heart selected repository-configured Linear, shared Git or default user-keyed
 Git. Outages buffer locally without fallback or publisher election. One typed
 writer owns local/imported fields; execution and attempts stay local. Preserve Git
-causality, losers and uncertain effects. Gate and installation remain unproved.
+causality, losers and uncertain effects. Gate/installation remain unproved.
 
-Jack accepted the entire One Work deletion audit: one
-Project, direct Task fields, explicit Linear integration, typed criteria/comments,
-ordinary Tasks/comments instead of FollowThrough, one repository cron command list,
-and deletion of duplicate readers, writers and provider hierarchies. Preserve
-historical evidence, schedule identity/timing and Machine ownership. Typed Project
-persistence replaces internal Markdown. The [design](../../scratch/work-on-another-machine-name.md)
+Jack accepted the full One Work audit: one Project, direct Task fields, explicit
+Linear integration, typed criteria/comments, Tasks/comments replacing FollowThrough,
+one repository cron list, no duplicate readers/writers/provider hierarchies. Preserve
+historical evidence, schedule identity/timing and Machine ownership. Project fields/status are domain-owned; only Linear/migration decode Markdown.
+The [design](../../scratch/work-on-another-machine-name.md)
 owns remaining work. Republish #1491 only after the full reduction, for review;
 no landing, installation, live schedule activation or real Work export.
 

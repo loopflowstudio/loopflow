@@ -12,6 +12,31 @@ use crate::id::WaveId;
 use crate::planning::{LinearProjectId, PlanningError};
 use crate::work::task::{TaskEventKind, TaskId};
 
+/// Shared Project status, independent of a provider’s display label.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ProjectStatus {
+    Backlog,
+    Planned,
+    Started,
+    Paused,
+    Completed,
+    Canceled,
+}
+
+impl ProjectStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Backlog => "backlog",
+            Self::Planned => "planned",
+            Self::Started => "started",
+            Self::Paused => "paused",
+            Self::Completed => "completed",
+            Self::Canceled => "canceled",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectKR {
     pub text: String,
@@ -28,7 +53,7 @@ pub struct Project {
     pub krs: Vec<ProjectKR>,
     pub metric_targets: Vec<crate::work::wave::metrics::MetricTarget>,
     pub workflow: String,
-    pub status: crate::pm::ProjectStatus,
+    pub status: ProjectStatus,
     /// Optional Linear binding, not a second owner of this record.
     pub linear_id: Option<LinearProjectId>,
     /// Acquisition time of the retained Linear observation, never a write clock.

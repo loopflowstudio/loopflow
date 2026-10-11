@@ -43,21 +43,19 @@ line counts would double-count moved code and already-completed cuts.
 
 ## 1. Domain wrappers and the missing fields
 
-**Remove:** `ProjectPlan`, `TaskPlan`, live Project `iteration`, public
-`ProjectContent`, and `PmWave` / `PmProject` / `PmItem` as ordinary domain records.
-The first two wrappers and live iteration have already been removed by the existing
-pass; do not implement them again. `ProjectKR`, `MetricTarget` and domain
-`TaskComment` are also partially delivered.
+**Remove:** `PmWave` / `PmProject` / `PmItem` as ordinary domain records.
+ProjectPlan, TaskPlan, live Project iteration and public ProjectContent are removed.
+ProjectKR, MetricTarget and domain TaskComment are implemented.
 
 **Locations:** `work/project.rs`, `work/task/mod.rs`, `work/task/comment.rs`,
 `pm/mod.rs`, `planning.rs`, and their SQL serialization in `store/sqlite/`.
 
-Project persistence now has direct description, KRs and targets; its internal
-Markdown read/write round trip is removed. Public ProjectContent and PM-shaped
-readers remain. Task's direct title/description do not yet absorb the shared fields read through
+Project persistence has direct description, KRs and targets; the internal
+Markdown round trip and public ProjectContent are removed. PM-shaped readers remain.
+Task's direct title/description do not yet absorb the shared fields read through
 `PmItem` (disposition, assignee, due date and ordering). Complete their actual domain
-representation before deleting the old views. Move domain `ProjectStatus` out of
-`pm`. Optional Linear IDs remain bindings, never replacement domain IDs. Keep
+representation before deleting the old views. Domain ProjectStatus now belongs to
+`work/project.rs`. Optional Linear IDs remain bindings, never replacement domain IDs. Keep
 optimistic revisions, timestamps, historical iteration events and legacy mappings.
 The whole Task struct remains unsuitable for exchange because it contains local data.
 
@@ -127,15 +125,15 @@ An old observation remains old after conversion.
 
 **Locations:** `sqlite/project_content.rs::{write_content,update_project_content,
 select_project_workflow}`, `sqlite/planning_write.rs`'s
-special Project reads/writes, `pm/mod.rs::{parse_project_content,
-render_project_content,render_metric_targets,render_krs}`, and `ops/chapter.rs`.
+special Project reads/writes and `ops/chapter.rs`. The former `pm/mod.rs` Markdown
+functions now live privately in `pm/project_document.rs` for Linear and migration.
 
 Structured persistence and removal of `read_content`/writer Markdown assembly
-are implemented. Finish removing the ProjectContent argument threaded through
-ordinary operations. The migration alone parses released Markdown before journal
-seeding; malformed content refuses without losing original bytes. Conversion and
+are implemented. Ordinary operations now take typed fields directly; Chapter input
+is flat. The redundant `save_content` forwarding layer is deleted. Migration parses
+released Markdown before journal seeding; malformed content refuses without losing original bytes. Conversion and
 Linear edits share recognized field ranges, preserving fenced examples and unknown
-prose. Public ProjectContent and its ordinary-operation arguments remain to delete. A private Linear parser/renderer still owns managed description
+prose. The private `pm/project_document.rs` parser/renderer owns managed description
 sections; prompt assembly renders its own output. Preserve unrelated authored prose
 and partial-response omissions. Wave workflow definitions and a Task's captured
 Workflow are different responsibilities and remain separate.

@@ -174,7 +174,7 @@ same-owner transports, refusing changed owners without redirecting drafts
 (`d10d5e9a69`/`d86e32d466`). Hide retains observation (`b295ffba2f`); missing
 planning retains local Files/Split location. CLI reads still resolve placement.
 `5727532b1d`/`5af9451cf8` delete outer layout/inspection and Session rows,
-retaining conversation menus/diagnostics. Tabs remain unbuilt; registry/targets are checkout-keyed; Flow logs ignore location.
+retaining conversation menus/diagnostics. Tabs remain unbuilt; targets are checkout-keyed; logs ignore location.
 No native acceptance.
 
 **Confirmation cannot elect execution.** `4c43550c2`: divergent revisions and
